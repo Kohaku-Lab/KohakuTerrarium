@@ -44,29 +44,52 @@ async def _make_agent(tmp_path, llm_holder):
 
 
 class TestRichCliCancelOnSecondInput:
-    """Low-level guard for why Rich CLI must not cancel plain follow-ups.
+    """Guard for the Rich CLI cancel-on-second-input flow under the
+    queue-first engine.
 
-    Cancelling the wrapper task around ``agent.inject_input(...)`` still
-    propagates into the active controller loop and emits an ``interrupt``
-    activity. The production fix below is therefore to avoid that cancel
-    path for normal mid-turn text submits; slash/control commands keep it.
+    The turn now runs on the engine's event consumer, DECOUPLED from the
+    CLI's inject wrapper — so cancelling the wrapper alone no longer stops
+    the turn (that decoupling is deliberate: a viewer going away must not
+    kill the engine's work). Two user-facing behaviors must still hold:
+
+    - a PRECEDENCE submit (slash / @name) issued mid-stream interrupts the
+      streaming turn — ``_handle_submit`` now calls ``agent.interrupt()``
+      explicitly, emitting an ``interrupt`` activity;
+    - a plain-text mid-stream submit does NOT interrupt — it folds into the
+      running turn (routed through ``_mid_turn_inject``), no ``interrupt``.
     """
 
-    async def test_cancel_of_inject_task_emits_interrupt_activity(
-        self, tmp_path, monkeypatch
-    ):
-        """Mimic Rich CLI's _handle_submit:
-        - Task 1 wraps ``await agent.inject_input("A")`` — first turn
-        - User submits "B" → CLI cancels Task 1 (the wrapper) BEFORE
-          spawning Task 2.
-        - Agent emits ``interrupt`` activity instead of buffering B.
-        """
-        # Use a ScriptedLLM that streams slowly so we can interrupt mid-turn.
+    def _wire_cli(self, agent):
+        """Build a RichCLIApp over ``agent`` with terminal-free stubs."""
+        from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
+
+        cli_app = RichCLIApp(agent)
+
+        class _FakeCommitter:
+            def text(self, *_a, **_kw):
+                pass
+
+            def user_message(self, text: str) -> None:
+                pass
+
+            def flush_block_close(self) -> None:
+                pass
+
+            def blank_line(self) -> None:
+                pass
+
+        cli_app.committer = _FakeCommitter()
+        cli_app._invalidate = lambda: None
+        cli_app._handle_slash = lambda text: asyncio.sleep(0)  # type: ignore[assignment]
+        return cli_app
+
+    async def _stream_agent(self, tmp_path, monkeypatch):
+        """A real agent whose LLM streams slowly so a turn can be caught
+        mid-stream."""
         from kohakuterrarium.bootstrap import agent_init as _ainit
         from kohakuterrarium.bootstrap import llm as _bllm
         from kohakuterrarium.testing.llm import ScriptEntry
 
-        # 3 chunks * 0.1s ≈ 0.3s window during which we can cancel.
         scripted = ScriptedLLM(
             [
                 ScriptEntry(
@@ -80,53 +103,92 @@ class TestRichCliCancelOnSecondInput:
 
         monkeypatch.setattr(_bllm, "create_llm_provider", _fake_create)
         monkeypatch.setattr(_ainit, "create_llm_provider", _fake_create)
+        return await _make_agent(tmp_path, scripted)
 
-        agent, recorder = await _make_agent(tmp_path, scripted)
+    async def test_mid_turn_slash_submit_interrupts_streaming_turn(
+        self, tmp_path, monkeypatch
+    ):
+        """A slash command issued while a turn streams must interrupt it —
+        the user invoked a control command and shouldn't wait for the LLM.
+        Under the queue-first engine the wrapper cancel no longer stops the
+        turn, so ``_handle_submit`` interrupts the engine explicitly."""
+        agent, recorder = await self._stream_agent(tmp_path, monkeypatch)
         await agent.start()
+        cli_app = self._wire_cli(agent)
+        wrapper = None
         try:
-            # Task 1: first user input, awaited by a wrapper task — the
-            # exact shape ``cli_rich/app.py:_send()`` creates.
-            wrapper_task = asyncio.create_task(agent.inject_input("A", source="cli"))
-
-            # Wait until processing has actually started (LLM streaming).
+            # A real streaming turn wired as the CLI's in-flight _pending_task.
+            wrapper = asyncio.create_task(agent.inject_input("A", source="cli"))
             for _ in range(50):
                 if agent._processing_task is not None:
                     break
                 await asyncio.sleep(0.01)
             assert agent._processing_task is not None, "first turn never started"
+            cli_app._pending_task = wrapper
+            cli_app._processing = True
 
-            # Simulate Rich CLI's "user typed a second message" — the
-            # CLI's _handle_submit calls _pending_task.cancel() on the
-            # wrapper, NOT agent.inject_input("B"). The second inject
-            # would happen AFTER, but the cancel comes FIRST.
-            wrapper_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await wrapper_task
+            # Slash mid-stream → precedence path.
+            cli_app._handle_submit("/help")
 
-            # Wait for the agent to finish its cancellation handling.
             for _ in range(50):
                 if agent._processing_task is None:
                     break
                 await asyncio.sleep(0.01)
 
-            # Guard: wrapper cancellation still emits ``interrupt``. The
-            # Rich CLI fix is to avoid this path for plain mid-turn text
-            # submits, not to mask the lower-level cancellation signal.
-            interrupts = recorder.activities_of_type("interrupt")
-            assert len(interrupts) >= 1, (
-                "Cancelling the inject_input wrapper task still propagates "
-                "into the agent's controller loop and emits 'interrupt'; "
-                "plain mid-turn text submits must avoid cancelling it."
+            assert recorder.activities_of_type("interrupt"), (
+                "a mid-turn slash submit must interrupt the streaming turn; "
+                "cancelling the wrapper alone no longer stops the engine's "
+                "decoupled turn, so the CLI interrupts it explicitly"
             )
+            # No queued work stranded on the inbox.
+            assert agent._event_inbox.empty()
+        finally:
+            if wrapper and not wrapper.done():
+                wrapper.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await wrapper
+            if cli_app._pending_task and not cli_app._pending_task.done():
+                cli_app._pending_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, BaseException):
+                    await cli_app._pending_task
+            await agent.stop()
 
-            # AND the agent's mid-turn buffer was never engaged — the
-            # cancel happened at the wrapper level before any second
-            # ``inject_input`` call could observe the processing lock.
-            assert agent._pending_mid_turn_inputs == [], (
-                "Buffer never engaged — confirms the cancellation path "
-                "skips the buffering logic entirely."
+    async def test_mid_turn_plain_text_submit_does_not_interrupt(
+        self, tmp_path, monkeypatch
+    ):
+        """The complement: a plain-text follow-up mid-stream folds into the
+        turn and must NOT interrupt it (the production bug was that it used
+        to cancel → ``⚠ interrupted``)."""
+        agent, recorder = await self._stream_agent(tmp_path, monkeypatch)
+        await agent.start()
+        cli_app = self._wire_cli(agent)
+        wrapper = None
+        try:
+            wrapper = asyncio.create_task(agent.inject_input("A", source="cli"))
+            for _ in range(50):
+                if agent._processing_task is not None:
+                    break
+                await asyncio.sleep(0.01)
+            assert agent._processing_task is not None, "first turn never started"
+            cli_app._pending_task = wrapper
+            cli_app._processing = True
+
+            # Plain text mid-stream → folds via _mid_turn_inject, no cancel,
+            # no interrupt.
+            cli_app._handle_submit("follow up question")
+            await asyncio.sleep(0.05)
+
+            # The in-flight turn's wrapper is UNTOUCHED and NOT interrupted.
+            assert cli_app._pending_task is wrapper
+            assert not recorder.activities_of_type("interrupt"), (
+                "a plain-text mid-turn submit must fold into the turn, "
+                "never interrupt it"
             )
         finally:
+            if wrapper and not wrapper.done():
+                wrapper.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await wrapper
             await agent.stop()
 
 
@@ -393,6 +455,7 @@ class TestDrainYieldsToEventLoop:
     async def test_drain_yields_after_each_notify_activity(self, tmp_path, monkeypatch):
         from kohakuterrarium.bootstrap import agent_init as _ainit
         from kohakuterrarium.bootstrap import llm as _bllm
+        from kohakuterrarium.core.event_inbox import EventEnvelope
         from kohakuterrarium.core.events import TriggerEvent
 
         scripted = ScriptedLLM(["ok"])
@@ -406,10 +469,10 @@ class TestDrainYieldsToEventLoop:
         agent, _ = await _make_agent(tmp_path, scripted)
         await agent.start()
         try:
-            # Buffer 5 events into the mid-turn queue.
+            # Queue 5 fire-and-forget events for the mid-turn re-claim.
             for i in range(5):
-                agent._pending_mid_turn_inputs.append(
-                    TriggerEvent(type="user_input", content=f"msg-{i}")
+                agent._event_inbox.put(
+                    EventEnvelope(TriggerEvent(type="user_input", content=f"msg-{i}"))
                 )
 
             # Spy on notify_activity to track call order, AND inject a

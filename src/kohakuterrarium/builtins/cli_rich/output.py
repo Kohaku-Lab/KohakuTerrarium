@@ -359,9 +359,15 @@ class RichCLIOutput(BaseOutputModule):
             return
 
         if activity_type == "background_result":
-            label = metadata.get("label") or metadata.get("job_id", "")
+            labels = metadata.get("labels")
+            label = (
+                ", ".join(labels)
+                if labels
+                else (metadata.get("label") or metadata.get("job_id", ""))
+            )
             kind = metadata.get("kind", "tool")
-            self.app.on_background_result(kind, label)
+            count = metadata.get("count", 1)
+            self.app.on_background_result(kind, label, count)
             return
 
         if activity_type == "session_info":

@@ -541,6 +541,13 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
 
         if self._pending_task and not self._pending_task.done():
             self._pending_task.cancel()
+            # The turn now runs on the engine's event consumer, decoupled
+            # from this inject wrapper — cancelling the wrapper no longer
+            # stops the turn. A precedence submit (slash / @name) issued
+            # mid-stream must interrupt the active turn EXPLICITLY so it
+            # takes precedence over the still-streaming LLM.
+            if self._processing:
+                self.agent.interrupt()
 
         # @name retargets (runs before slash so @bob /help routes to bob).
         if self.multi_creature_enabled:

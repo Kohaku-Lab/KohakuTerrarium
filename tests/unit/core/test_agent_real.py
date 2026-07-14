@@ -23,6 +23,7 @@ import pytest
 from kohakuterrarium.bootstrap import llm as bootstrap_llm
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.event_inbox import EventEnvelope
 from kohakuterrarium.core.config_types import (
     AgentConfig,
     InputConfig,
@@ -572,15 +573,320 @@ class TestAgentAccessors:
         assert out == getattr(agent.llm, "model", "")
 
     async def test_has_pending_mid_turn_inputs_probe(self, make_agent):
-        # The public read-only probe over ``_pending_mid_turn_inputs`` that
-        # the Terrarium Drive fairness check reads instead of the private
-        # buffer field.
+        # The public read-only probe over the event inbox that the
+        # Terrarium Drive fairness check reads instead of the private queue.
+        from kohakuterrarium.core.event_inbox import EventEnvelope
+
         agent = make_agent()
         assert agent.has_pending_mid_turn_inputs is False
-        agent._pending_mid_turn_inputs.append(create_user_input_event("buffered"))
+        agent._event_inbox.put(EventEnvelope(create_user_input_event("buffered")))
         assert agent.has_pending_mid_turn_inputs is True
-        agent._pending_mid_turn_inputs.clear()
+        agent._event_inbox.drain_all()
         assert agent.has_pending_mid_turn_inputs is False
+
+
+# ── queued-message edit / cancel (UXI-08a) ───────────────────────
+
+
+class TestPendingInputEditCancel:
+    async def test_edit_before_claim_wins(self, make_agent):
+        from kohakuterrarium.core.event_inbox import EventEnvelope
+        from kohakuterrarium.core.pending_input import stamp_pending_id
+
+        agent = make_agent(script=["ack"])
+        await agent.start()
+        try:
+            evt = create_user_input_event("original")
+            pid = stamp_pending_id(evt)
+            agent._event_inbox.put(EventEnvelope(evt))
+            # Edit while still queued → commits onto the queued event.
+            assert agent.edit_pending(pid, "corrected") is True
+            # Cancel a different id → plain no-op.
+            assert agent.cancel_pending("nope") is False
+            claimed = agent._event_inbox.drain_all()
+            assert len(claimed) == 1
+            assert claimed[0].event.content == "corrected"
+        finally:
+            await agent.stop()
+
+    async def test_edit_after_claim_is_noop(self, make_agent):
+        from kohakuterrarium.core.event_inbox import EventEnvelope
+        from kohakuterrarium.core.pending_input import stamp_pending_id
+
+        agent = make_agent(script=["ack"])
+        await agent.start()
+        try:
+            evt = create_user_input_event("original")
+            pid = stamp_pending_id(evt)
+            agent._event_inbox.put(EventEnvelope(evt))
+            # The mid-turn re-claim claims the whole foldable prefix.
+            drained = await agent._drain_mid_turn_pending_inputs(agent.controller)
+            assert drained == 1
+            assert agent._event_inbox.empty()
+            # Now the message is already sent — edit / cancel are no-ops.
+            assert agent.edit_pending(pid, "too late") is False
+            assert agent.cancel_pending(pid) is False
+            # The corrected text never reached the conversation.
+            user_texts = [
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "user"
+            ]
+            assert any("original" in t for t in user_texts)
+            assert all("too late" not in t for t in user_texts)
+        finally:
+            await agent.stop()
+
+    async def test_cancel_before_claim_drops_message(self, make_agent):
+        from kohakuterrarium.core.event_inbox import EventEnvelope
+        from kohakuterrarium.core.pending_input import stamp_pending_id
+
+        agent = make_agent(script=["ack"])
+        await agent.start()
+        try:
+            evt = create_user_input_event("cancel me")
+            pid = stamp_pending_id(evt)
+            agent._event_inbox.put(EventEnvelope(evt))
+            assert agent.cancel_pending(pid) is True
+            # The re-claim now finds an empty inbox.
+            assert await agent._drain_mid_turn_pending_inputs(agent.controller) == 0
+        finally:
+            await agent.stop()
+
+    async def test_buffered_event_gets_stable_id_stamped(self, make_agent):
+        # A mid-turn event folded because a turn holds the mutex gets a
+        # stable pending id stamped so a shell can target it by id.
+        from kohakuterrarium.core.pending_input import pending_id_of
+
+        started = asyncio.Event()
+        agent = make_agent(script=["[/hangdirect]x[hangdirect/]", "done"])
+        tool = _HangingDirectTool(started)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await agent.start()
+        turn = asyncio.create_task(agent._process_event(create_user_input_event("go")))
+        try:
+            await asyncio.wait_for(started.wait(), timeout=5)
+            # A turn holds the mutex → this folds (fire-and-forget) → False.
+            ran = await agent._process_event(create_user_input_event("queued"))
+            assert ran is False
+            assert len(agent._event_inbox) == 1
+            claimed = agent._event_inbox.drain_all()
+            assert pending_id_of(claimed[0].event)
+        finally:
+            await agent.stop()
+            if not turn.done():
+                turn.cancel()
+                await asyncio.gather(turn, return_exceptions=True)
+
+
+# ── channel-backlog drains in one turn (UXI-08b) ─────────────────
+
+
+class TestChannelBacklogOneTurn:
+    async def test_burst_drains_in_single_turn_queue_empty(self, make_agent):
+        from kohakuterrarium.core.events import TriggerEvent
+        from kohakuterrarium.modules.trigger.base import BaseTrigger
+
+        class _BurstTrigger(BaseTrigger):
+            """Fires once with a primary event and reports the rest of its
+            ready backlog via drain_ready — the ChannelTrigger contract."""
+
+            def __init__(self, events):
+                super().__init__()
+                self._events = list(events)
+                self._fired = False
+
+            async def wait_for_trigger(self):
+                if self._fired:
+                    await asyncio.sleep(60)
+                    return None
+                self._fired = True
+                return self._events[0]
+
+            def drain_ready(self):
+                return self._events[1:]
+
+        # round1 serves the primary; round2 serves the round after the
+        # drain injects the backlog — one TURN, two rounds.
+        agent = make_agent(script=["round1", "round2"])
+        await agent.start()
+        turns: list = []
+        orig = agent._process_batch_with_controller
+
+        async def spy(events, controller):
+            turns.append(events)
+            return await orig(events, controller)
+
+        agent._process_batch_with_controller = spy
+        try:
+            events = [
+                TriggerEvent(
+                    type="channel_message", content=f"m{i}", prompt_override=f"m{i}"
+                )
+                for i in range(3)
+            ]
+            await agent.add_trigger(_BurstTrigger(events))
+            # Wait for the trigger loop to fire + the turn to settle.
+            for _ in range(200):
+                await asyncio.sleep(0.01)
+                if turns and agent._event_inbox.empty():
+                    if agent._processing_task is None:
+                        break
+            # The whole 3-message burst was one turn, not three.
+            assert len(turns) == 1
+            # Queue empty at turn end.
+            assert agent._event_inbox.empty()
+            # All three messages reached the conversation.
+            user_text = "\n".join(
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "user"
+            )
+            assert "m0" in user_text and "m1" in user_text and "m2" in user_text
+        finally:
+            await agent.stop()
+
+    async def test_single_message_is_one_turn(self, make_agent):
+        from kohakuterrarium.core.events import TriggerEvent
+        from kohakuterrarium.modules.trigger.base import BaseTrigger
+
+        class _OneShotTrigger(BaseTrigger):
+            def __init__(self, event):
+                super().__init__()
+                self._event = event
+                self._fired = False
+
+            async def wait_for_trigger(self):
+                if self._fired:
+                    await asyncio.sleep(60)
+                    return None
+                self._fired = True
+                return self._event
+
+            def drain_ready(self):
+                return []
+
+        agent = make_agent(script=["only"])
+        await agent.start()
+        turns: list = []
+        orig = agent._process_batch_with_controller
+
+        async def spy(events, controller):
+            turns.append(events)
+            return await orig(events, controller)
+
+        agent._process_batch_with_controller = spy
+        try:
+            evt = TriggerEvent(
+                type="channel_message", content="solo", prompt_override="solo"
+            )
+            await agent.add_trigger(_OneShotTrigger(evt))
+            for _ in range(200):
+                await asyncio.sleep(0.01)
+                if turns and agent._processing_task is None:
+                    break
+            assert len(turns) == 1
+            assert agent._event_inbox.empty()
+        finally:
+            await agent.stop()
+
+
+# ── warm pause / resume (UXI-11) ─────────────────────────────────
+
+
+class TestPauseResume:
+    async def test_pause_blocks_new_turns_and_resume_drains(self, make_agent):
+        agent = make_agent(script=["ack"])
+        await agent.start()
+        try:
+            agent.pause()
+            assert agent.paused is True
+            # A new input while paused queues instead of running.
+            ran = await agent._process_event(create_user_input_event("while paused"))
+            assert ran is False
+            assert len(agent._event_inbox) == 1
+            # No turn happened — the runtime stayed warm but admitted nothing.
+            assert agent.controller.conversation.get_last_assistant_message() is None
+            # Resume re-admits and drains what queued while paused.
+            agent.resume()
+            assert agent.paused is False
+            last = None
+            for _ in range(200):
+                await asyncio.sleep(0.01)
+                last = agent.controller.conversation.get_last_assistant_message()
+                if last is not None and agent._processing_task is None:
+                    break
+            assert last is not None and "ack" in last.get_text_content()
+            assert agent._event_inbox.empty()
+        finally:
+            await agent.stop()
+
+    async def test_run_event_rejected_while_paused_no_turn(self, make_agent):
+        # Critic MAJOR: Drive/programmatic ingress (run_event → await_turn,
+        # non-stackable) must NOT start a turn while paused. It rejects
+        # (status="rejected", which Drive treats as a transient retry) and
+        # does NOT buffer (buffering + Drive retry = double delivery).
+        from kohakuterrarium.core.events import TriggerEvent
+
+        agent = make_agent(script=["should not run"])
+        await agent.start()
+        try:
+            agent.pause()
+            evt = TriggerEvent(
+                type="drive_ready",
+                content="goal",
+                context={"correlation_id": "d1"},
+                stackable=False,
+            )
+            result = await agent.run_event(evt)
+            assert result.status == "rejected"
+            # No turn ran, and the event was NOT queued.
+            assert agent.controller.conversation.get_last_assistant_message() is None
+            assert agent._event_inbox.empty()
+        finally:
+            await agent.stop()
+
+    async def test_run_rejected_while_paused(self, make_agent):
+        # The programmatic single-turn driver run() (await_turn) is rejected
+        # too — no turn starts on a paused agent.
+        agent = make_agent(script=["should not run"])
+        await agent.start()
+        try:
+            agent.pause()
+            result = await agent.run("hi", raise_on_error=False)
+            assert result.status == "rejected"
+            assert agent.controller.conversation.get_last_assistant_message() is None
+        finally:
+            await agent.stop()
+
+    async def test_leftover_queue_gated_while_paused(self, make_agent):
+        # A paused agent's consumer parks on the resume gate — events queued
+        # while paused stay in order and nothing runs until resume.
+        from kohakuterrarium.core.event_inbox import EventEnvelope
+        from kohakuterrarium.core.pending_input import (
+            pending_id_of,
+            stamp_pending_id,
+        )
+
+        agent = make_agent(script=["ack"])
+        await agent.start()
+        try:
+            agent.pause()
+            e1 = create_user_input_event("first")
+            e2 = create_user_input_event("second")
+            stamp_pending_id(e1)
+            stamp_pending_id(e2)
+            agent._event_inbox.put(EventEnvelope(e1))
+            agent._event_inbox.put(EventEnvelope(e2))
+            ids_before = [pending_id_of(env.event) for env in agent._event_inbox._dq]
+            await asyncio.sleep(0.05)
+            ids_after = [pending_id_of(env.event) for env in agent._event_inbox._dq]
+            # Order + membership unchanged — nothing ran while paused.
+            assert ids_after == ids_before
+            assert agent.controller.conversation.get_last_assistant_message() is None
+        finally:
+            await agent.stop()
 
 
 # ── trigger_manager + on_trigger_fired callback ──────────────────
@@ -1497,9 +1803,10 @@ class TestDriveInput:
                 self.fired = True
                 return create_user_input_event("hi")
 
+        # Start first so the single event consumer is running (it drives
+        # every turn now), then swap in the one-shot input.
+        await agent.start()
         agent.input = _OneShotInput()
-        # Don't call start (since it would start the original none-input).
-        agent._running = True
         try:
             await agent._drive_input()
             assert agent.controller.conversation.get_last_assistant_message()
@@ -1648,6 +1955,240 @@ class TestOutputWiringEmit:
         try:
             evt = create_user_input_event("hi")
             await agent._emit_output_wiring(evt)
+        finally:
+            await agent.stop()
+
+    async def test_emit_deferred_while_background_job_runs_then_fires(self, make_agent):
+        # UXI-10 busy-guard: a turn that leaves background work running
+        # must NOT emit its output wire (the creator would read it as the
+        # child having finished / "turned off"); the emit fires only once
+        # the last background job is done.
+        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.output_wiring import OutputWiringEntry
+
+        agent = make_agent(script=["text"])
+        agent.config.output_wiring = [OutputWiringEntry(to="other")]
+        calls: list = []
+
+        class _Resolver:
+            async def emit(self, **kwargs):
+                calls.append(kwargs)
+
+        agent._wiring_resolver = _Resolver()
+        agent._last_turn_text = ["working on it in the background"]
+        await agent.start()
+        try:
+            agent.executor.job_store.register(
+                JobStatus(
+                    job_id="bash_bg",
+                    job_type=JobType.TOOL,
+                    type_name="bash",
+                    state=JobState.RUNNING,
+                )
+            )
+            # This turn dispatched bash_bg as deliverable background work.
+            agent._turn_dispatched_bg = {"bash_bg"}
+            # Busy → the wire is deferred, not fired.
+            await agent._emit_output_wiring(create_user_input_event("hi"))
+            assert calls == []
+            # The background job completes; the follow-up turn (which
+            # dispatched nothing new → empty _turn_dispatched_bg) re-emits.
+            agent.executor.job_store.update_status("bash_bg", state=JobState.DONE)
+            agent._turn_dispatched_bg = set()
+            agent._last_turn_text = ["all done, here is the result"]
+            from kohakuterrarium.core.events import create_tool_complete_event
+
+            await agent._emit_output_wiring(
+                create_tool_complete_event(job_id="bash_bg", content="", exit_code=0)
+            )
+            assert len(calls) == 1
+            assert calls[0]["content"] == "all done, here is the result"
+        finally:
+            await agent.stop()
+
+    async def test_emit_not_stranded_by_unrelated_or_persistent_job(self, make_agent):
+        # Critic Failure A: a running job that THIS turn did NOT dispatch as
+        # deliverable background work (a persistent stateful tool, an
+        # interactive sub-agent, or work from a prior turn) must NOT strand
+        # the wire — otherwise the creator gets NO output at all.
+        from kohakuterrarium.core.job import JobState, JobStatus, JobType
+        from kohakuterrarium.core.output_wiring import OutputWiringEntry
+
+        agent = make_agent(script=["text"])
+        agent.config.output_wiring = [OutputWiringEntry(to="other")]
+        calls: list = []
+
+        class _Resolver:
+            async def emit(self, **kwargs):
+                calls.append(kwargs)
+
+        agent._wiring_resolver = _Resolver()
+        agent._last_turn_text = ["my real output"]
+        await agent.start()
+        try:
+            agent.executor.job_store.register(
+                JobStatus(
+                    job_id="monitor_persistent",
+                    job_type=JobType.TOOL,
+                    type_name="monitor",
+                    state=JobState.RUNNING,
+                )
+            )
+            # This turn dispatched NOTHING to the background (the running
+            # monitor is unrelated / persistent).
+            agent._turn_dispatched_bg = set()
+            await agent._emit_output_wiring(create_user_input_event("hi"))
+            # Wire fires despite the running job — not stranded.
+            assert len(calls) == 1
+            assert calls[0]["content"] == "my real output"
+        finally:
+            await agent.stop()
+
+    async def test_notify_false_bg_tool_does_not_defer_wire(self, make_agent):
+        # Critic Failure B: a promoted background tool with
+        # notify_controller_on_background_complete=False completes WITHOUT
+        # scheduling a follow-up turn — so it must NOT be tracked as
+        # deliverable, or the deferred wire would never re-fire.
+        from kohakuterrarium.modules.tool.base import (
+            BaseTool,
+            ExecutionMode,
+            ToolConfig,
+            ToolResult,
+        )
+
+        class _FireForgetBg(BaseTool):
+            def __init__(self):
+                super().__init__(
+                    ToolConfig(notify_controller_on_background_complete=False)
+                )
+
+            @property
+            def tool_name(self):
+                return "fnf"
+
+            @property
+            def description(self):
+                return "fire and forget bg"
+
+            @property
+            def execution_mode(self):
+                return ExecutionMode.BACKGROUND
+
+            async def _execute(self, args, **kwargs):
+                return ToolResult(output="ok")
+
+        agent = make_agent(script=["[/fnf][fnf/]", "after"])
+        tool = _FireForgetBg()
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await _start_and_run(agent, create_user_input_event("go"))
+        # The fire-and-forget background job was NOT recorded as deliverable,
+        # so the output-wire guard would not have deferred on it.
+        assert agent._turn_dispatched_bg == set()
+
+    async def test_deliverable_bg_tool_is_tracked(self, make_agent):
+        # The positive counterpart: a normal notify=True background tool IS
+        # tracked so the wire defers until it reports back. A hanging bg tool
+        # keeps the job running so we can inspect the tracking mid-flight.
+        release = asyncio.Event()
+        agent = make_agent(script=["[/hangbg]msg=x[hangbg/]", "after"])
+        tool = _HangingBgTool(release)
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        await agent.start()
+        try:
+            await agent._process_event(create_user_input_event("go"))
+            running = agent.executor.get_running_jobs()
+            assert running, "hanging bg tool should still be running"
+            assert running[0].job_id in agent._turn_dispatched_bg
+            # The guard would therefore defer the output wire.
+            assert agent._has_unfinished_turn_bg_jobs() is True
+        finally:
+            release.set()
+            await agent.stop()
+
+    async def test_no_double_wire_when_owed_bg_completes_before_finalize(
+        self, make_agent
+    ):
+        # UXI-10 double-emit race: a deliverable bg job THIS turn dispatched
+        # completes in the window between the turn's final handle-wait and
+        # _finalize_processing. It is no longer "running" when the turn-end
+        # emit checks the guard, but its queued completion still drives a
+        # follow-up turn that emits the real result. The guard must defer on
+        # set MEMBERSHIP (not on "still running"), or the wired target gets
+        # TWO creature_output deliveries for one logical result.
+        from kohakuterrarium.core.events import create_tool_complete_event
+        from kohakuterrarium.core.output_wiring import OutputWiringEntry
+
+        agent = make_agent(script=["text"])
+        agent.config.output_wiring = [OutputWiringEntry(to="other")]
+        calls: list = []
+
+        class _Resolver:
+            async def emit(self, **kwargs):
+                calls.append(kwargs)
+
+        agent._wiring_resolver = _Resolver()
+        await agent.start()
+        try:
+            # Turn T owes bash_bg, but it already completed (never registered
+            # as a running job) — the race window. The turn-end emit must
+            # defer: the queued completion still owns the emit.
+            agent._turn_dispatched_bg = {"bash_bg"}
+            agent._last_turn_text = ["working on it in the background"]
+            await agent._emit_output_wiring(create_user_input_event("hi"))
+            # The queued completion drives a follow-up turn (fresh cycle
+            # reset the owed set) that emits the real post-completion result.
+            agent._turn_dispatched_bg = set()
+            agent._last_turn_text = ["all done, here is the result"]
+            await agent._emit_output_wiring(
+                create_tool_complete_event(job_id="bash_bg", content="", exit_code=0)
+            )
+            # Exactly ONE delivery, carrying the real result — not the
+            # mid-flight "working on it" text from the deferred turn.
+            assert len(calls) == 1
+            assert calls[0]["content"] == "all done, here is the result"
+        finally:
+            await agent.stop()
+
+    async def test_drained_bg_completion_releases_owed_wire_defer(self, make_agent):
+        # Regression guard for membership-based deferral: a deliverable bg
+        # job whose completion is DRAINED into the current turn (folded
+        # mid-turn) drives NO follow-up turn. The drain must release its
+        # owed-emit defer, or the output wire strands forever waiting on a
+        # follow-up that never comes.
+        from kohakuterrarium.core.event_inbox import EventEnvelope
+        from kohakuterrarium.core.events import create_tool_complete_event
+        from kohakuterrarium.core.output_wiring import OutputWiringEntry
+
+        agent = make_agent(script=["text"])
+        agent.config.output_wiring = [OutputWiringEntry(to="other")]
+        calls: list = []
+
+        class _Resolver:
+            async def emit(self, **kwargs):
+                calls.append(kwargs)
+
+        agent._wiring_resolver = _Resolver()
+        await agent.start()
+        try:
+            agent._turn_dispatched_bg = {"bash_bg"}
+            agent._event_inbox.put(
+                EventEnvelope(
+                    create_tool_complete_event(
+                        job_id="bash_bg", content="raw result", exit_code=0
+                    )
+                )
+            )
+            drained = await agent._drain_mid_turn_pending_inputs(agent.controller)
+            assert drained == 1
+            # Folded into this turn → the owed job is released.
+            assert "bash_bg" not in agent._turn_dispatched_bg
+            # So the turn-end emit fires (not stranded on a phantom follow-up).
+            agent._last_turn_text = ["all done, here is the result"]
+            await agent._emit_output_wiring(create_user_input_event("hi"))
+            assert len(calls) == 1
+            assert calls[0]["content"] == "all done, here is the result"
         finally:
             await agent.stop()
 
@@ -2282,6 +2823,9 @@ class TestDriveInputMultimodal:
 
         agent.input = _MultimodalInput()
         agent._running = True
+        # _drive_input drives turns through the single consumer — spawn it.
+        agent._consumer_resume.set()
+        agent._consumer_task = asyncio.create_task(agent._run_event_consumer())
         await agent._drive_input()
         await agent.stop()
 
@@ -3359,8 +3903,8 @@ class TestProcessEventCancelledLoop:
                 raise asyncio.CancelledError()
 
             agent._run_controller_loop = cancel_loop
-            await agent._process_event_with_controller(
-                create_user_input_event("hi"), agent.controller
+            await agent._process_batch_with_controller(
+                [create_user_input_event("hi")], agent.controller
             )
         finally:
             await agent.stop()
@@ -3503,10 +4047,10 @@ class TestOpportunisticInputInjection:
             # short-circuits to the normal _process_event flow.
             async with agent._processing_lock:
                 await agent.inject_input("hi", source="web")
-                # Lock was held → event landed in the buffer, NOT
-                # blocked on the lock and NOT processed yet.
-                assert len(agent._pending_mid_turn_inputs) == 1
-                buffered = agent._pending_mid_turn_inputs[0]
+                # Mutex held → event folds onto the inbox (fire-and-forget),
+                # NOT blocked on the lock and NOT processed yet.
+                assert len(agent._event_inbox) == 1
+                buffered = agent._event_inbox._dq[0].event
                 assert buffered.type == "user_input"
                 assert isinstance(buffered, TriggerEvent)
         finally:
@@ -3518,19 +4062,19 @@ class TestOpportunisticInputInjection:
         agent = make_agent()
         await agent.start()
         try:
-            # Buffer two events directly — the drain coalesces them
+            # Queue two events directly — the re-claim coalesces them
             # into one user message joined by a blank line so the
             # LLM sees them as one contiguous turn.
-            agent._pending_mid_turn_inputs.append(
-                TriggerEvent(type="user_input", content="line one")
+            agent._event_inbox.put(
+                EventEnvelope(TriggerEvent(type="user_input", content="line one"))
             )
-            agent._pending_mid_turn_inputs.append(
-                TriggerEvent(type="user_input", content="line two")
+            agent._event_inbox.put(
+                EventEnvelope(TriggerEvent(type="user_input", content="line two"))
             )
             count = await agent._drain_mid_turn_pending_inputs(agent.controller)
             assert count == 2
-            # Buffer cleared.
-            assert agent._pending_mid_turn_inputs == []
+            # Inbox cleared.
+            assert agent._event_inbox.empty()
             user_msgs = [
                 m
                 for m in agent.controller.conversation.get_messages()
@@ -3555,11 +4099,11 @@ class TestOpportunisticInputInjection:
                 return original(activity_type, detail, metadata)
 
             agent.output_router.notify_activity = spy  # type: ignore[assignment]
-            agent._pending_mid_turn_inputs.append(
-                TriggerEvent(type="user_input", content="A")
+            agent._event_inbox.put(
+                EventEnvelope(TriggerEvent(type="user_input", content="A"))
             )
-            agent._pending_mid_turn_inputs.append(
-                TriggerEvent(type="user_input", content="B")
+            agent._event_inbox.put(
+                EventEnvelope(TriggerEvent(type="user_input", content="B"))
             )
             await agent._drain_mid_turn_pending_inputs(agent.controller)
             injected = [c for c in captured if c[0] == "user_input_injected"]
@@ -3600,8 +4144,8 @@ class TestOpportunisticInputInjection:
             )
             async with agent._processing_lock:
                 await agent._process_event(evt)
-                # Trigger fired mid-turn: buffered, NOT blocked.
-                assert agent._pending_mid_turn_inputs == [evt]
+                # Trigger fired mid-turn: folded onto the inbox, NOT blocked.
+                assert [env.event for env in agent._event_inbox._dq] == [evt]
             # Drain folds the trigger's ``prompt_override`` into the
             # conversation as a user message.
             await agent._drain_mid_turn_pending_inputs(agent.controller)
@@ -3615,10 +4159,10 @@ class TestOpportunisticInputInjection:
             await agent.stop()
 
     async def test_rerun_events_bypass_buffer(self, make_agent):
-        # Regen / edit-rerun pre-increment the branch_id and MUST run
-        # against the original lock-held turn — they cannot be
-        # buffered for next round. The buffer path explicitly skips
-        # ``context["rerun"]=True`` events.
+        # Regen / edit-rerun pre-increment the branch_id and MUST run as
+        # their OWN turn — they cannot fold into another. The fold path
+        # explicitly skips ``context["rerun"]=True`` events; they enqueue
+        # as a primary (future-bearing) instead.
         from kohakuterrarium.core.events import TriggerEvent
 
         agent = make_agent()
@@ -3629,23 +4173,19 @@ class TestOpportunisticInputInjection:
                 content="re-run",
                 context={"rerun": True},
             )
-            # Hold the lock and check that the buffer path is NOT
-            # taken — the call would normally block on the lock,
-            # so we run it in a task we cancel immediately to verify
-            # it didn't return early via the buffer shortcut.
             async with agent._processing_lock:
-                # The buffer-skip check is what we want to assert,
-                # so we drive _process_event in a way that lets us
-                # observe state without actually blocking the test.
-                # Run with a short timeout; expect TimeoutError
-                # because the rerun was waiting on the lock (which
-                # we still hold).
+                # The mutex is held, so a foldable event would fold. Run
+                # with a short timeout; expect TimeoutError because the
+                # rerun took the PRIMARY path and awaits its own turn (the
+                # consumer is blocked on the mutex we hold).
                 try:
                     await asyncio.wait_for(agent._process_event(rerun), timeout=0.05)
                 except asyncio.TimeoutError:
                     pass
-                # Critical: the buffer was NOT used.
-                assert agent._pending_mid_turn_inputs == []
+                # Critical: the rerun did NOT fold — the only queued
+                # envelope is a primary (future-bearing), not a fold-in.
+                folds = [e for e in agent._event_inbox._dq if e.future is None]
+                assert folds == []
         finally:
             await agent.stop()
 
@@ -3663,11 +4203,11 @@ class TestOpportunisticInputInjection:
             async with agent._processing_lock:
                 result = await agent.inject_input("queued msg", source="web")
                 assert result is False, (
-                    "inject_input must return False when the event was "
-                    "buffered for mid-turn injection — caller must NOT "
-                    "emit an ``idle`` WS frame in this case"
+                    "inject_input must return False when the event folded "
+                    "for mid-turn injection — caller must NOT emit an "
+                    "``idle`` WS frame in this case"
                 )
-                assert len(agent._pending_mid_turn_inputs) == 1
+                assert len(agent._event_inbox) == 1
         finally:
             await agent.stop()
 
@@ -3706,8 +4246,8 @@ class TestOpportunisticInputInjection:
             # parts (NOT a bare string) so the signature path is
             # exercised the way the real WS layer drives it.
             content = [{"type": "text", "text": "Hello"}]
-            agent._pending_mid_turn_inputs.append(
-                TriggerEvent(type="user_input", content=content)
+            agent._event_inbox.put(
+                EventEnvelope(TriggerEvent(type="user_input", content=content))
             )
             await agent._drain_mid_turn_pending_inputs(agent.controller)
             # Pull frames off the queue.
@@ -3762,8 +4302,10 @@ class TestOpportunisticInputInjection:
             try:
                 agent._turn_index = 1
                 agent._branch_id = 1
-                agent._pending_mid_turn_inputs.append(
-                    TriggerEvent(type="user_input", content="mid-turn typed")
+                agent._event_inbox.put(
+                    EventEnvelope(
+                        TriggerEvent(type="user_input", content="mid-turn typed")
+                    )
                 )
                 await agent._drain_mid_turn_pending_inputs(agent.controller)
                 events = list(store.get_events(agent.config.name))
@@ -3913,60 +4455,40 @@ class TestOpportunisticInputInjection:
                 await agent.stop()
                 store.close()
 
-    async def test_interrupt_drains_buffered_inputs_as_new_turn(self, make_agent):
-        # Bug 3: when the user interrupts mid-turn, buffered messages
-        # stay stranded in ``_pending_mid_turn_inputs`` — never
-        # processed unless something else kicks a new turn off. The
-        # fix: ``agent.interrupt()`` schedules a follow-up task that
-        # waits for the cancellation to settle, then re-fires
-        # buffered events as fresh turns.
-        from kohakuterrarium.core.events import TriggerEvent
-
-        # Two scripted LLM responses: the first is what the
-        # interrupted turn was working on (we'll cancel before it
-        # finishes); the second is what the drained event triggers.
+    async def test_interrupt_leaves_queued_inputs_for_consumer(self, make_agent):
+        # After an interrupt, events still queued on the inbox are NOT
+        # stranded — the single consumer claims and runs them as the next
+        # turn (no explicit re-fire needed).
         agent = make_agent(script=["after-interrupt reply"])
         await agent.start()
         try:
-            evt = TriggerEvent(type="user_input", content="user msg after interrupt")
-            # Simulate the lock being held by another (in-flight)
-            # turn — buffer the event the same way ``send()`` →
-            # ``inject_input`` does.
+            # Fold an input while the mutex is held (simulating an
+            # in-flight turn), then interrupt while still folded.
             async with agent._processing_lock:
-                await agent.inject_input("queued during turn", source="web")
-                assert len(agent._pending_mid_turn_inputs) == 1
-            # Lock released — but the buffered event is still
-            # stranded because no other turn has fired. The
-            # ``interrupt()`` flush should pick it up. Simulate
-            # interrupt-after-buffer by calling interrupt then
-            # giving the event loop time to run the follow-up task.
-            agent.interrupt()
-            # Yield enough times for the scheduled flush task to
-            # acquire the lock, process the buffered event, and
-            # complete a full turn against the scripted LLM.
-            for _ in range(50):
+                ran = await agent.inject_input("queued during turn", source="web")
+                assert ran is False
+                assert len(agent._event_inbox) == 1
+                agent.interrupt()
+            # Lock released — the consumer claims and runs the queued event.
+            for _ in range(200):
                 await asyncio.sleep(0.01)
                 if (
-                    not agent._pending_mid_turn_inputs
-                    and not agent._processing_lock.locked()
+                    agent._event_inbox.empty()
+                    and agent._processing_task is None
+                    and agent.controller.conversation.get_last_assistant_message()
+                    is not None
                 ):
                     break
-            assert agent._pending_mid_turn_inputs == [], (
-                "buffered events must be drained after interrupt — they "
-                "represent the user's next intent, not the cancelled turn"
+            assert agent._event_inbox.empty(), (
+                "queued events must run after interrupt — they represent "
+                "the user's next intent, not the cancelled turn"
             )
-            # The scripted LLM ran once with the drained content, so
-            # the conversation now carries the user message that was
-            # originally queued.
             user_msgs = [
                 m
                 for m in agent.controller.conversation.get_messages()
                 if getattr(m, "role", None) == "user"
             ]
-            queued_contents = [m.content for m in user_msgs]
-            assert "queued during turn" in queued_contents
-            # Silence the unused-import warning — evt is documentation.
-            _ = evt
+            assert "queued during turn" in [m.content for m in user_msgs]
         finally:
             await agent.stop()
 
@@ -3976,28 +4498,21 @@ class TestOpportunisticInputInjection:
         agent = make_agent(script=[])
         await agent.start()
         try:
-            agent._pending_mid_turn_inputs.extend(
-                [
-                    TriggerEvent(type="drive_ready", content="goal"),
-                    TriggerEvent(type="user_input", content="keep me"),
-                ]
+            agent._event_inbox.put(
+                EventEnvelope(TriggerEvent(type="drive_ready", content="goal"))
+            )
+            agent._event_inbox.put(
+                EventEnvelope(TriggerEvent(type="user_input", content="keep me"))
             )
             agent.interrupt()
-            assert [event.type for event in agent._pending_mid_turn_inputs] == [
-                "user_input"
-            ]
+            assert [env.event.type for env in agent._event_inbox._dq] == ["user_input"]
         finally:
             await agent.stop()
 
-    async def test_interrupt_flush_waits_out_slow_lock_release(self, make_agent):
-        # Regression (livelock): interrupt() with a buffered event while
-        # the cancelled turn still holds the processing lock BEYOND the
-        # flush task's grace window. The flush loop then popped the
-        # event, ``_process_event`` re-buffered it on a synchronous path
-        # (no await), and the pop/re-append cycle never yielded — the
-        # event loop starved, the lock holder could never resume to
-        # release it, and the "Event buffered for mid-turn injection"
-        # log flooded at 100% CPU until the process was killed.
+    async def test_interrupt_does_not_livelock_on_slow_lock(self, make_agent):
+        # Regression: interrupt() with a queued event while the lock is
+        # held elsewhere must not spin. The consumer simply waits out the
+        # lock and runs the event once released — no busy loop, no strand.
         agent = make_agent(script=["after-slow-interrupt reply"])
         await agent.start()
         try:
@@ -4010,25 +4525,27 @@ class TestOpportunisticInputInjection:
             holder = asyncio.create_task(hold_lock())
             await asyncio.sleep(0)
             assert agent._processing_lock.locked()
-            await agent.inject_input("queued while held", source="web")
-            assert len(agent._pending_mid_turn_inputs) == 1
+            ran = await agent.inject_input("queued while held", source="web")
+            assert ran is False
+            assert len(agent._event_inbox) == 1
 
             agent.interrupt()
-            # Keep the lock held well past any fixed grace window. Under
-            # the buggy code this sleep never returns (the spin blocks
-            # the loop) and the test times out instead of failing fast.
+            # Keep the lock held past any grace window — the consumer just
+            # waits (no spin); the test does not time out.
             await asyncio.sleep(0.1)
             release.set()
             await holder
 
-            for _ in range(100):
+            for _ in range(200):
                 await asyncio.sleep(0.01)
                 if (
-                    not agent._pending_mid_turn_inputs
-                    and not agent._processing_lock.locked()
+                    agent._event_inbox.empty()
+                    and agent._processing_task is None
+                    and agent.controller.conversation.get_last_assistant_message()
+                    is not None
                 ):
                     break
-            assert agent._pending_mid_turn_inputs == []
+            assert agent._event_inbox.empty()
             user_msgs = [
                 m
                 for m in agent.controller.conversation.get_messages()
@@ -4480,6 +4997,9 @@ class TestDriveInputIdleLog:
 
         agent.input = _OnceInput()
         agent._running = True
+        # _drive_input drives turns through the single consumer — spawn it.
+        agent._consumer_resume.set()
+        agent._consumer_task = asyncio.create_task(agent._run_event_consumer())
         await agent._drive_input()
         await agent.stop()
 
@@ -4686,8 +5206,8 @@ class TestAttachSessionStoreCompactCountBadValue:
 
 class TestMidTurnBatchDrain:
     async def test_all_event_types_buffer_while_lock_held(self, make_agent):
-        # Every event type except startup/shutdown must buffer instead
-        # of queueing on the lock — a queued-on-lock event runs its own
+        # Every stackable event type folds onto the inbox instead of
+        # blocking on the mutex — a mutex-blocked event would run its own
         # serial turn afterwards, each needing its own interrupt.
         from kohakuterrarium.core.events import (
             TriggerEvent,
@@ -4711,27 +5231,30 @@ class TestMidTurnBatchDrain:
             async with agent._processing_lock:
                 for evt in events:
                     accepted = await agent._process_event(evt)
-                    assert accepted is False, f"{evt.type} must buffer, not block"
-                assert agent._pending_mid_turn_inputs == events
+                    assert accepted is False, f"{evt.type} must fold, not block"
+                assert [env.event for env in agent._event_inbox._dq] == events
         finally:
             await agent.stop()
 
     async def test_nonstackable_active_turn_rejects_fold_ins(self, make_agent):
         # A non-stackable ACTIVE turn (startup, error) must not absorb
-        # buffered events — the incoming-event stackable check alone
-        # can't see the active turn's flag.
+        # fold-in events — the incoming-event stackable check alone can't
+        # see the active turn's flag, so ``_active_turn_stackable`` gates it.
         agent = make_agent()
         await agent.start()
         try:
             agent._active_turn_stackable = False
             async with agent._processing_lock:
+                task = asyncio.ensure_future(agent.inject_input("queued", source="web"))
                 try:
-                    await asyncio.wait_for(
-                        agent.inject_input("queued", source="web"), timeout=0.05
-                    )
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.05)
                 except asyncio.TimeoutError:
                     pass
-                assert agent._pending_mid_turn_inputs == []
+                # Did NOT fold — enqueued as a primary (future-bearing) so
+                # it runs its own turn after the lock releases.
+                folds = [e for e in agent._event_inbox._dq if e.future is None]
+                assert folds == []
+                task.cancel()
         finally:
             agent._active_turn_stackable = True
             await agent.stop()
@@ -4745,14 +5268,16 @@ class TestMidTurnBatchDrain:
         agent = make_agent()
         await agent.start()
         try:
-            agent._pending_mid_turn_inputs.append(
-                TriggerEvent(
-                    type="tool_complete",
-                    content=[
-                        TextPart(text="rendered chart"),
-                        ImagePart(url="data:image/png;base64,xyz"),
-                    ],
-                    job_id="plot_1",
+            agent._event_inbox.put(
+                EventEnvelope(
+                    TriggerEvent(
+                        type="tool_complete",
+                        content=[
+                            TextPart(text="rendered chart"),
+                            ImagePart(url="data:image/png;base64,xyz"),
+                        ],
+                        job_id="plot_1",
+                    )
                 )
             )
             await agent._drain_mid_turn_pending_inputs(agent.controller)
@@ -4804,11 +5329,15 @@ class TestMidTurnBatchDrain:
         try:
             err = create_error_event("RuntimeError", "boom")
             async with agent._processing_lock:
+                task = asyncio.ensure_future(agent._process_event(err))
                 try:
-                    await asyncio.wait_for(agent._process_event(err), timeout=0.05)
+                    await asyncio.wait_for(asyncio.shield(task), timeout=0.05)
                 except asyncio.TimeoutError:
                     pass
-                assert agent._pending_mid_turn_inputs == []
+                # Non-stackable → not folded; enqueued as a primary.
+                folds = [e for e in agent._event_inbox._dq if e.future is None]
+                assert folds == []
+                task.cancel()
         finally:
             await agent.stop()
 
@@ -4831,15 +5360,14 @@ class TestMidTurnBatchDrain:
                 return original(activity_type, detail, metadata)
 
             agent.output_router.notify_activity = spy  # type: ignore[assignment]
-            agent._pending_mid_turn_inputs.extend(
-                [
-                    TriggerEvent(type="user_input", content="hello"),
-                    create_tool_complete_event(job_id="bash_1", content="tool out"),
-                    TriggerEvent(
-                        type="subagent_output", content="sub out", job_id="agent_x"
-                    ),
-                ]
-            )
+            for evt in [
+                TriggerEvent(type="user_input", content="hello"),
+                create_tool_complete_event(job_id="bash_1", content="tool out"),
+                TriggerEvent(
+                    type="subagent_output", content="sub out", job_id="agent_x"
+                ),
+            ]:
+                agent._event_inbox.put(EventEnvelope(evt))
             count = await agent._drain_mid_turn_pending_inputs(agent.controller)
             assert count == 3
             user_msgs = [
@@ -4878,8 +5406,10 @@ class TestMidTurnBatchDrain:
                     state=JobState.RUNNING,
                 )
             )
-            agent._pending_mid_turn_inputs.append(
-                create_tool_complete_event(job_id="grep_done", content="42 hits")
+            agent._event_inbox.put(
+                EventEnvelope(
+                    create_tool_complete_event(job_id="grep_done", content="42 hits")
+                )
             )
             await agent._drain_mid_turn_pending_inputs(agent.controller)
             user_msgs = [
@@ -4922,8 +5452,10 @@ class TestMidTurnBatchDrain:
                 return orig(kind, message, metadata=metadata, **kwargs)
 
             agent.output_router.notify_activity = spy
-            agent._pending_mid_turn_inputs.append(
-                create_tool_complete_event(job_id="grep_abc123", content="done")
+            agent._event_inbox.put(
+                EventEnvelope(
+                    create_tool_complete_event(job_id="grep_abc123", content="done")
+                )
             )
             await agent._drain_mid_turn_pending_inputs(agent.controller)
             banners = [m for k, m in emitted if k == "background_result"]
@@ -4967,8 +5499,10 @@ class TestMidTurnBatchDrain:
         agent = make_agent()
         await agent.start()
         try:
-            agent._pending_mid_turn_inputs.append(
-                create_tool_complete_event(job_id="grep_done", content="42 hits")
+            agent._event_inbox.put(
+                EventEnvelope(
+                    create_tool_complete_event(job_id="grep_done", content="42 hits")
+                )
             )
             await agent._drain_mid_turn_pending_inputs(agent.controller)
             user_msgs = [
@@ -5044,9 +5578,9 @@ class TestMidTurnBatchDrain:
             await agent.stop()
 
     async def test_leftover_buffer_flushes_after_turn_ends(self, make_agent):
-        # An event that buffers AFTER the turn's last mid-turn drain
-        # must not sit in the buffer until the next unrelated turn —
-        # the ending turn kicks a leftover flush.
+        # An event that folds AFTER the turn's last mid-turn re-claim must
+        # not sit in the inbox until the next unrelated turn — the consumer
+        # loops back and claims it as the next turn.
         started = asyncio.Event()
         release = asyncio.Event()
         agent = make_agent(
@@ -5079,15 +5613,11 @@ class TestMidTurnBatchDrain:
             )
             agent._drain_mid_turn_pending_inputs = real_drain  # type: ignore[assignment]
             for _ in range(200):
-                if (
-                    not agent._pending_mid_turn_inputs
-                    and not agent._processing_lock.locked()
-                ):
+                if agent._event_inbox.empty() and not agent._processing_lock.locked():
                     break
                 await asyncio.sleep(0.02)
-            assert agent._pending_mid_turn_inputs == [], (
-                "leftover buffered event must be flushed when the turn "
-                "that outran it ends"
+            assert agent._event_inbox.empty(), (
+                "leftover folded event must run when the turn that outran " "it ends"
             )
             user_texts = [
                 str(m.content)
@@ -5119,13 +5649,13 @@ class TestMidTurnBatchDrain:
         agent.executor.register_tool(tool)
         await agent.start()
         turns: list[str] = []
-        original_pewc = agent._process_event_with_controller
+        original_pbwc = agent._process_batch_with_controller
 
-        async def counting_pewc(event, controller):
-            turns.append(event.type)
-            return await original_pewc(event, controller)
+        async def counting_pbwc(events, controller):
+            turns.append(events[0].type)
+            return await original_pbwc(events, controller)
 
-        agent._process_event_with_controller = counting_pewc  # type: ignore[assignment]
+        agent._process_batch_with_controller = counting_pbwc  # type: ignore[assignment]
         turn = asyncio.create_task(
             agent._process_event(create_user_input_event("kick off"))
         )
@@ -5134,24 +5664,21 @@ class TestMidTurnBatchDrain:
             for text in ("one", "two", "three"):
                 accepted = await agent.inject_input(text, source="web")
                 assert accepted is False
-            assert len(agent._pending_mid_turn_inputs) == 3
+            assert len(agent._event_inbox) == 3
 
             agent.interrupt()
             await asyncio.wait_for(
                 asyncio.gather(turn, return_exceptions=True), timeout=5
             )
             for _ in range(200):
-                if (
-                    not agent._pending_mid_turn_inputs
-                    and not agent._processing_lock.locked()
-                ):
+                if agent._event_inbox.empty() and not agent._processing_lock.locked():
                     break
                 await asyncio.sleep(0.02)
 
-            assert agent._pending_mid_turn_inputs == []
-            # kick-off turn + exactly ONE flush turn.
+            assert agent._event_inbox.empty()
+            # kick-off turn + exactly ONE batched turn for one/two/three.
             assert len(turns) == 2, (
-                "flush must batch all buffered events into one turn; "
+                "the consumer must batch all queued events into one turn; "
                 f"saw turn starters: {turns}"
             )
             all_user_text = "\n".join(

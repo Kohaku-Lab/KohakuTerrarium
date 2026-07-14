@@ -124,10 +124,19 @@
            Capped to QUEUE_VISIBLE items; overflow collapses into a "+N more"
            toggle so the input doesn't get pushed off-screen. -->
       <div v-if="!readOnly && activeQueue.length" class="px-4 pt-2 flex flex-col gap-1.5">
-        <div v-for="qm in visibleQueued" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm">
+        <div v-for="qm in visibleQueued" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm" :class="{ 'opacity-50': qm.cancelling }">
           <span class="i-carbon-time text-amber/60 text-xs flex-shrink-0" />
-          <span class="text-warm-500 dark:text-warm-400 truncate">{{ qm.content }}</span>
-          <span class="text-warm-300 dark:text-warm-600 text-xs flex-shrink-0 ml-auto">{{ t("chat.queued") }}</span>
+          <template v-if="editingQueueId === qm.eventId">
+            <input v-model="editQueueText" class="flex-1 min-w-0 bg-transparent border border-amber/30 rounded px-2 py-0.5 text-sm focus:outline-none focus:border-amber" @keydown.enter.prevent="saveEditQueue(qm)" @keydown.esc="cancelEditQueue" />
+            <button class="text-xs text-iolite hover:underline flex-shrink-0" @click="saveEditQueue(qm)">{{ t("common.save") }}</button>
+            <button class="text-xs text-warm-400 hover:underline flex-shrink-0" @click="cancelEditQueue">{{ t("common.cancel") }}</button>
+          </template>
+          <template v-else>
+            <span class="text-warm-500 dark:text-warm-400 truncate flex-1">{{ qm.content }}</span>
+            <span class="text-warm-300 dark:text-warm-600 text-xs flex-shrink-0">{{ t("chat.queued") }}</span>
+            <button class="i-carbon-edit text-warm-400 hover:text-iolite text-sm flex-shrink-0" :title="t('chat.queueEdit')" :disabled="qm.cancelling" @click="startEditQueue(qm)" />
+            <button class="i-carbon-close text-warm-400 hover:text-coral text-sm flex-shrink-0" :title="t('chat.queueCancel')" :disabled="qm.cancelling" @click="chat.cancelQueuedMessage(viewActiveTab, qm.eventId)" />
+          </template>
         </div>
         <button v-if="hiddenQueuedCount > 0" class="self-start text-xs text-amber-shadow dark:text-amber-light hover:underline" @click="queueExpanded = !queueExpanded">
           {{ queueExpanded ? t("chat.queueCollapse") : t("chat.queueShowMore", { count: hiddenQueuedCount }) }}
@@ -408,6 +417,25 @@ const visibleQueued = computed(() => {
   return queue.slice(0, QUEUE_VISIBLE)
 })
 const hiddenQueuedCount = computed(() => Math.max(0, activeQueue.value.length - QUEUE_VISIBLE))
+
+// Inline edit of a still-queued message (UXI-08a). Text-only: editing a
+// queued multimodal message keeps just its text.
+const editingQueueId = ref(null)
+const editQueueText = ref("")
+function startEditQueue(qm) {
+  editingQueueId.value = qm.eventId
+  editQueueText.value = qm.content || ""
+}
+function cancelEditQueue() {
+  editingQueueId.value = null
+  editQueueText.value = ""
+}
+function saveEditQueue(qm) {
+  if (editQueueText.value.trim()) {
+    chat.editQueuedMessage(viewActiveTab.value, qm.eventId, editQueueText.value)
+  }
+  cancelEditQueue()
+}
 
 function draftKey() {
   const instanceId = props.instance?.id || chat._instanceId || ""

@@ -54,6 +54,20 @@ class _ResumableTrigger(_StubTrigger):
         return {"saved": True}
 
 
+class _DrainTrigger(_StubTrigger):
+    """Reports a backlog via drain_ready — the ChannelTrigger contract."""
+
+    def __init__(self, backlog):
+        super().__init__()
+        self._backlog = list(backlog)
+        self.drained = False
+
+    def drain_ready(self):
+        self.drained = True
+        out, self._backlog = self._backlog, []
+        return out
+
+
 class _StubStore:
     def __init__(self):
         self.state_calls: list[dict] = []
@@ -76,6 +90,76 @@ def mgr():
     m = TriggerManager(process)
     m._collected = events  # accessible to tests
     yield m
+
+
+# ── UXI-08b: drain a trigger's backlog into one turn ──────────────
+
+
+class TestAdmitExtraReady:
+    def test_drains_and_admits_when_hook_wired(self):
+        m = TriggerManager(lambda e: None)
+        admitted: list = []
+        m.admit_ready = lambda evs: (admitted.extend(evs) or len(evs))
+        e1, e2 = TriggerEvent(type="channel_message", content="a"), TriggerEvent(
+            type="channel_message", content="b"
+        )
+        t = _DrainTrigger([e1, e2])
+        m._admit_extra_ready("tid", t)
+        assert t.drained is True
+        assert admitted == [e1, e2]
+
+    def test_does_not_drain_without_admit_hook(self):
+        # Without an admit hook the backlog must NOT be consumed —
+        # drain_ready removes events from the source, so losing them is a
+        # data-loss bug.
+        m = TriggerManager(lambda e: None)
+        m.admit_ready = None
+        t = _DrainTrigger([TriggerEvent(type="channel_message", content="a")])
+        m._admit_extra_ready("tid", t)
+        assert t.drained is False
+
+    def test_empty_backlog_is_noop(self):
+        m = TriggerManager(lambda e: None)
+        admitted: list = []
+        m.admit_ready = lambda evs: admitted.extend(evs)
+        m._admit_extra_ready("tid", _DrainTrigger([]))
+        assert admitted == []
+
+    def test_trigger_without_drain_ready_is_ignored(self):
+        m = TriggerManager(lambda e: None)
+        m.admit_ready = lambda evs: None
+        # A plain trigger with no drain_ready must not crash the admit path.
+        m._admit_extra_ready("tid", _StubTrigger())
+
+
+class TestSuspendResumeGate:
+    def test_suspend_clears_resume_gate(self):
+        m = TriggerManager(lambda e: None)
+        assert m._resume_gate.is_set() is True
+        m.suspend_all()
+        assert m._resume_gate.is_set() is False
+        m.resume_all()
+        assert m._resume_gate.is_set() is True
+
+    async def test_suspended_loop_stops_consuming_until_resumed(self):
+        collected: list = []
+
+        async def process(e):
+            collected.append(e)
+
+        m = TriggerManager(process)
+        t = _StubTrigger()
+        m.suspend_all()
+        await m.add(t)
+        # Even with an event ready, the suspended loop does not consume it.
+        await t.queue.put(TriggerEvent(type="tick", content="x"))
+        await asyncio.sleep(0.05)
+        assert collected == []
+        # Resuming releases the loop; the event flows.
+        m.resume_all()
+        await asyncio.sleep(0.05)
+        assert [e.content for e in collected] == ["x"]
+        await m.remove(next(iter(m._triggers)))
 
 
 # ── basic add / remove / list ─────────────────────────────────────

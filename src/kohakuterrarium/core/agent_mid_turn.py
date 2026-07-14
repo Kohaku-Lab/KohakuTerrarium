@@ -1,27 +1,27 @@
-"""Mid-turn user-input injection + interrupt-buffer drain.
+"""Mid-turn fold-in of events re-claimed from the event inbox.
 
 Extracted from ``agent_handlers.py`` to keep that file under the 1000-
-line hard cap (``tests/unit/test_file_sizes.py``). Same surface — the
-four methods are mixed back into ``AgentHandlersMixin`` via
-:class:`AgentMidTurnMixin`. The two module-level helpers
+line hard cap (``tests/unit/test_file_sizes.py``). Mixed into ``Agent``
+via :class:`AgentMidTurnMixin`. The two module-level helpers
 (``_to_serializable_content``, ``_coalesce_user_contents``) move with
 them since they have no other callers.
 
-Why this cohesive cluster: mid-turn injection is the path where any
-event (typed input, trigger, background completion, channel traffic)
-arrives while the agent is mid-stream. The agent buffers it, drains
-the WHOLE buffer AFTER the in-flight tool calls land (so the native
-``tool_calls``/``role=tool`` pairing stays valid), records a session
-event per user-facing entry, and notifies the FE so the queued banner
-clears. The interrupt-buffer drain is the sibling case: when the user
-interrupts mid-turn, the buffered events are re-fired as ONE fresh
-turn (first event starts it, the rest drain into it).
+Why this cohesive cluster: mid-turn fold-in is the path where any
+fire-and-forget event (typed input, trigger, background completion,
+channel traffic) that arrived WHILE the agent is mid-stream gets
+re-claimed from the inbox (``drain_foldable``) and folded into the
+running turn AFTER the in-flight tool calls land — so the native
+``tool_calls`` / ``role=tool`` pairing stays valid. Each user-facing
+entry gets a session record + queued-banner-clear frame; every
+background completion shares ONE combined delivery banner.
 
-All four methods share the same state surface on the host ``Agent``:
-``_pending_mid_turn_inputs``, ``_turn_index``, ``_branch_id``,
+Shared state surface on the host ``Agent``: ``_event_inbox``,
+``_trigger_backlog_stash``, ``_turn_index``, ``_branch_id``,
 ``_parent_branch_path``, ``output_router``, ``session_store``,
-``_processing_lock``, ``_interrupt_requested``, ``_running``,
-``controller`` (set lazily by the handlers loop), and ``config``.
+``_running``, ``controller`` (set lazily by the handlers loop), and
+``config``. The combined delivery banner
+(``_emit_batch_background_banner``) lives in
+:mod:`core.agent_event_loop`.
 """
 
 import asyncio
@@ -29,7 +29,6 @@ from typing import Any
 
 from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import TriggerEvent
-from kohakuterrarium.core.agent_runtime_tools import _make_job_label
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.utils.logging import get_logger
 
@@ -96,34 +95,71 @@ class AgentMidTurnMixin:
 
     @property
     def has_pending_mid_turn_inputs(self) -> bool:
-        """Whether any event is buffered awaiting the mid-turn drain.
+        """Whether any event is queued on the inbox awaiting a turn.
 
-        Public read-only probe over the private
-        ``_pending_mid_turn_inputs`` buffer. The Terrarium Drive fairness
-        check reads this rather than the private field so a rename breaks
-        loudly here instead of silently degrading its probe."""
-        return bool(self._pending_mid_turn_inputs)
+        Public read-only probe the Terrarium Drive fairness check reads
+        rather than the private inbox, so a rename breaks loudly here
+        instead of silently degrading its probe."""
+        return bool(self._event_inbox)
+
+    def admit_ready_events(self, events: list[TriggerEvent]) -> int:
+        """Stash a trigger's drained backlog so the immediately-following
+        primary ``_process_event`` enqueues it right after the primary, in
+        order, as fire-and-forget fold-ins (UXI-08b). Wired onto
+        ``trigger_manager.admit_ready``; flushed synchronously by
+        ``_flush_trigger_backlog_stash`` before the primary awaits. Returns
+        the count stashed."""
+        stash = getattr(self, "_trigger_backlog_stash", None)
+        if stash is None or not events:
+            return 0
+        stash.extend(events)
+        return len(events)
+
+    def edit_pending(self, pending_id: str, content: Any) -> bool:
+        """Rewrite a still-queued message's content by id (UXI-08a).
+
+        Wins iff it commits before the consumer claims the envelope; a
+        plain ``False`` "already sent" no-op otherwise."""
+        return self._event_inbox.edit(pending_id, content)
+
+    def cancel_pending(self, pending_id: str) -> bool:
+        """Drop a still-queued message before it is sent (UXI-08a).
+        ``False`` when it was already claimed by the consumer."""
+        return self._event_inbox.cancel(pending_id)
 
     async def _drain_mid_turn_pending_inputs(self, controller: Controller) -> int:
-        """Drain ``Agent._pending_mid_turn_inputs`` into the CURRENT
-        turn. Called from ``_collect_and_push_feedback`` AFTER tool
-        results land so the native ``tool_calls`` → ``role=tool``
-        pairing stays valid before a fresh ``role=user`` slot. Buffered
-        events get concatenated into ONE combined ``role=user`` message
-        for provider alternation; each still produces its own session
-        record + ``user_input_injected`` frame so the FE clears
-        entry-by-entry. Returns count drained."""
-        buffer = getattr(self, "_pending_mid_turn_inputs", None)
-        if not buffer:
+        """Re-claim fire-and-forget stackable events that arrived DURING
+        this turn and fold them in. Called from
+        ``_collect_and_push_feedback`` AFTER tool results land so the
+        native ``tool_calls`` → ``role=tool`` pairing stays valid before a
+        fresh ``role=user`` slot. Drained events concatenate into ONE
+        combined ``role=user`` message; each user-facing entry still
+        produces its own session record + ``user_input_injected`` frame,
+        and every background completion shares ONE combined delivery
+        banner. Returns count drained.
+
+        ``drain_foldable`` leaves any non-stackable or awaiting
+        (future-bearing) envelope in the inbox so it keeps its own turn."""
+        claimed = self._event_inbox.drain_foldable()
+        if not claimed:
             return 0
-        drained: list[TriggerEvent] = list(buffer)
-        buffer.clear()
+        drained: list[TriggerEvent] = [env.event for env in claimed]
 
         pairs = [(evt, self._resolve_injected_content(evt)) for evt in drained]
         # Filter out anything that resolved to empty (unlikely but
         # defensive — a trigger with no prompt and no fallback would
         # produce ``None``).
         pairs = [(evt, c) for evt, c in pairs if c is not None and c != ""]
+        # ONE combined delivery banner for every background completion in
+        # this re-claim, plus release each one's output-wire defer: it
+        # folded into THIS turn, so no follow-up turn re-emits for it and
+        # the membership guard must not strand the wire.
+        self._emit_batch_background_banner(drained)
+        owed = getattr(self, "_turn_dispatched_bg", None)
+        if owed is not None:
+            for evt in drained:
+                if evt.type in ("tool_complete", "subagent_output"):
+                    owed.discard(getattr(evt, "job_id", "") or "")
         if not pairs:
             return 0
 
@@ -146,38 +182,26 @@ class AgentMidTurnMixin:
             )
             return 0
 
-        # One session record + one WS frame PER drained event so the
-        # FE can pop the corresponding queued banner and history
+        # One session record + one WS frame PER user-facing drained event
+        # so the FE can pop the corresponding queued banner and history
         # replay shows each typed message as its own user bubble.
         #
         # Yield after each notify_activity so Textual / other renderers
         # whose output handlers schedule widget mutations via
         # ``call_later`` actually get a render slot between iterations.
-        # Without this, a multi-entry drain fires N synchronous
-        # dispatch calls in a tight loop without yielding to the event
-        # loop — Textual's call_later queue backs up and the TUI render
-        # loop starves, freezing input. (TUI freeze investigation, 3
-        # parallel agent reports, ./temp/tui-freeze-investigation.md)
         for evt, content in pairs:
-            # Only user-facing entries (typed input / fired triggers)
-            # get a session record + queued-banner frame. Background
-            # completions get a delivery banner instead — recording
-            # them as injected input would double-render them as user
-            # bubbles on replay.
+            # Only user-facing entries (typed input / fired triggers) get a
+            # session record + queued-banner frame; background completions
+            # already got the combined delivery banner above.
             if evt.type not in ("user_input", "trigger"):
-                if evt.type in ("tool_complete", "subagent_output"):
-                    self._notify_background_result(evt)
                 continue
             # ``create_user_input_event`` runs ``normalize_content_parts``
             # which converts WS dict lists into typed ``[TextPart, ...]``
-            # dataclass instances. Conversation/LLM consumers handle
-            # those fine, but the WS sink (``ws.send_json``) and the
-            # SQLite event store (msgpack) both need plain JSON-safe
-            # dicts — passing TextPart raises ``TypeError: Object of
-            # type TextPart is not JSON serializable``, which used to
-            # kill ``_forward_queue`` silently at DEBUG-level (8-hour
-            # debugging session, 2026-05-28). Round-trip through
-            # ``content_parts_to_dicts`` so both sinks get safe payload.
+            # dataclass instances. Conversation/LLM consumers handle those
+            # fine, but the WS sink (``ws.send_json``) and the SQLite event
+            # store (msgpack) both need plain JSON-safe dicts — a TextPart
+            # raises ``TypeError: not JSON serializable``. Round-trip through
+            # ``content_parts_to_dicts`` so both sinks get a safe payload.
             serializable_content = _to_serializable_content(content)
             self._record_injected_input_event(serializable_content)
             self.output_router.notify_activity(
@@ -191,7 +215,7 @@ class AgentMidTurnMixin:
             )
             await asyncio.sleep(0)
         logger.info(
-            "Drained %d mid-turn buffered event(s)",
+            "Drained %d mid-turn folded event(s)",
             len(drained),
             turn_index=self._turn_index,
         )
@@ -236,30 +260,6 @@ class AgentMidTurnMixin:
         if evt.type == "trigger":
             return f"[trigger fired: {trigger_id}]"
         return f"[{evt.type} event: {trigger_id}]"
-
-    def _notify_background_result(self, evt: TriggerEvent) -> None:
-        """Banner marking the moment a background result reaches the
-        controller — the visible cause for the agent speaking again."""
-        job_id = getattr(evt, "job_id", "") or ""
-        if not job_id:
-            return
-        kind = (
-            "subagent"
-            if evt.type == "subagent_output" or job_id.startswith("agent_")
-            else "tool"
-        )
-        _, label = _make_job_label(job_id)
-        self.output_router.notify_activity(
-            "background_result",
-            f"[{label}] background result delivered",
-            metadata={
-                "job_id": job_id,
-                "kind": kind,
-                "label": label,
-                "turn_index": self._turn_index,
-                "branch_id": self._branch_id,
-            },
-        )
 
     def _background_status_hint(self) -> str:
         """Status line for still-running background jobs plus a
@@ -315,64 +315,4 @@ class AgentMidTurnMixin:
                 "Mid-turn input session record failed",
                 error=str(exc),
                 exc_info=True,
-            )
-
-    def _schedule_leftover_buffer_flush(self) -> None:
-        """Kick events left in the buffer by a turn that just ended
-        (they arrived after its last mid-turn drain) into a fresh
-        batched turn. No-op while another turn holds the lock — that
-        turn's own drain owns the buffer."""
-        if not (self._pending_mid_turn_inputs and self._running):
-            return
-        if self._processing_lock.locked():
-            return
-        asyncio.create_task(self._flush_leftover_buffer())
-
-    async def _flush_leftover_buffer(self) -> None:
-        if self._processing_lock.locked() or not (
-            self._pending_mid_turn_inputs and self._running
-        ):
-            return
-        event = self._pending_mid_turn_inputs.pop(0)
-        try:
-            # If a racing turn grabbed the lock first this re-buffers
-            # (returns False) and that turn's drain takes over.
-            await self._process_event(event)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                "Leftover buffered event flush failed",
-                event_type=event.type,
-                error=str(exc),
-            )
-
-    async def _flush_buffer_after_interrupt(self) -> None:
-        """Re-fire buffered mid-turn events as ONE fresh turn after an
-        interrupt cancels the original turn. The first event starts the
-        turn through the normal ``_process_event`` path; the rest stay
-        in the buffer so that turn's first feedback round drains them
-        all as a batch — a single follow-up interrupt clears the whole
-        queue, never one interrupt per event.
-
-        Must acquire (and release) the processing lock before draining:
-        draining while the cancelled turn still holds it re-buffers each
-        event without yielding, starving the lock holder.
-        """
-        async with self._processing_lock:
-            pass
-        self._interrupt_requested = False
-        if hasattr(self, "controller"):
-            self.controller._interrupted = False
-        if not (self._pending_mid_turn_inputs and self._running):
-            return
-        event = self._pending_mid_turn_inputs.pop(0)
-        try:
-            # A False return means a racing turn grabbed the lock first
-            # and the event went back into the buffer — that turn's own
-            # drain now owns the whole batch.
-            await self._process_event(event)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.warning(
-                "Buffered event re-process failed after interrupt",
-                event_type=event.type,
-                error=str(exc),
             )

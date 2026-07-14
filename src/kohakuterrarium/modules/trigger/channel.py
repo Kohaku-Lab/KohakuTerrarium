@@ -197,56 +197,87 @@ class ChannelTrigger(BaseTrigger):
             except asyncio.TimeoutError:
                 continue
 
-            # Filter by sender if configured
-            if self.filter_sender and msg.sender != self.filter_sender:
+            if self._should_skip(msg):
                 continue
-            # Skip messages from self (prevent self-triggering).
-            # Prefer the stable creature_id check — ``ignore_sender`` (display
-            # name) collides when two creatures share a config name.
-            if (
-                self.ignore_sender_id
-                and getattr(msg, "sender_id", None) == self.ignore_sender_id
-            ):
-                continue
-            if self.ignore_sender and msg.sender == self.ignore_sender:
-                continue
-
-            # Build content string
-            content = msg.content if isinstance(msg.content, str) else str(msg.content)
-
-            # Build prompt with metadata substitution.  Terrarium channel
-            # injection uses the default template
-            # ``[Channel '{channel}' from {sender}]: {content}``, so all
-            # three placeholders must be rendered before the event reaches
-            # the controller.  Use ``format_map`` with a permissive mapping
-            # so custom prompts can reference message metadata while unknown
-            # placeholders remain visible instead of raising.
-            event_prompt = self._render_prompt(msg, content)
-
-            event = self._create_event(
-                EventType.CHANNEL_MESSAGE,
-                content=event_prompt or content,
-                context={
-                    "sender": msg.sender,
-                    "channel": self.channel_name,
-                    "message_id": msg.message_id,
-                    "raw_content": msg.content,
-                    **msg.metadata,
-                },
-            )
-            # ``BaseTrigger._create_event`` defaults ``prompt_override`` to
-            # ``self.prompt`` — the *raw* template with literal ``{channel}``
-            # / ``{sender}`` / ``{content}``.  The controller (controller.py
-            # ~line 394) prefers ``event.prompt_override`` over
-            # ``event.content`` when assembling the LLM input, so without
-            # this override the receiver sees the unfilled template even
-            # though ``_render_prompt`` substituted the values into
-            # ``event.content``.  Pin the override to the rendered string.
-            if event_prompt is not None:
-                event.prompt_override = event_prompt
-            return event
+            return self._message_to_event(msg)
 
         return None
+
+    def drain_ready(self) -> list[TriggerEvent]:
+        """Non-blocking drain of every message already queued for this
+        trigger's subscription — the events left behind after
+        :meth:`wait_for_trigger` returned the first one.
+
+        The trigger manager admits these into the receiver's mid-turn
+        buffer so a channel backlog costs ONE turn instead of one round
+        per message (UXI-08). Self / filtered senders are dropped the
+        same way :meth:`wait_for_trigger` drops them; each surviving
+        message keeps its own sender / metadata in the built event.
+        """
+        if not self._running or self._registry is None:
+            return []
+        channel = self._registry.get_or_create(self.channel_name)
+        if isinstance(channel, AgentChannel):
+            source: Any = self._subscription
+        else:
+            source = channel
+        if source is None:
+            return []
+        events: list[TriggerEvent] = []
+        while True:
+            msg = source.try_receive()
+            if msg is None:
+                break
+            if self._should_skip(msg):
+                continue
+            events.append(self._message_to_event(msg))
+        return events
+
+    def _should_skip(self, msg: Any) -> bool:
+        """Whether a delivered message is filtered out (sender whitelist
+        or self-ignore). Prefer the stable ``sender_id`` check —
+        ``ignore_sender`` (display name) collides when two creatures
+        share a config name."""
+        if self.filter_sender and msg.sender != self.filter_sender:
+            return True
+        if (
+            self.ignore_sender_id
+            and getattr(msg, "sender_id", None) == self.ignore_sender_id
+        ):
+            return True
+        if self.ignore_sender and msg.sender == self.ignore_sender:
+            return True
+        return False
+
+    def _message_to_event(self, msg: Any) -> TriggerEvent:
+        """Build the CHANNEL_MESSAGE event for a delivered message.
+
+        Terrarium channel injection uses the default template
+        ``[Channel '{channel}' from {sender}]: {content}``, so all
+        placeholders are rendered before the event reaches the
+        controller. ``BaseTrigger._create_event`` defaults
+        ``prompt_override`` to ``self.prompt`` (the raw template); the
+        controller prefers ``prompt_override`` over ``content`` when
+        assembling the LLM input, so the rendered string is pinned onto
+        the override too — otherwise the receiver sees unfilled
+        ``{placeholders}``.
+        """
+        content = msg.content if isinstance(msg.content, str) else str(msg.content)
+        event_prompt = self._render_prompt(msg, content)
+        event = self._create_event(
+            EventType.CHANNEL_MESSAGE,
+            content=event_prompt or content,
+            context={
+                "sender": msg.sender,
+                "channel": self.channel_name,
+                "message_id": msg.message_id,
+                "raw_content": msg.content,
+                **msg.metadata,
+            },
+        )
+        if event_prompt is not None:
+            event.prompt_override = event_prompt
+        return event
 
     def _render_prompt(self, msg: Any, content: str) -> str | None:
         """Render the prompt template against channel message metadata."""

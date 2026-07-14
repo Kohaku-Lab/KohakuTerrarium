@@ -5,6 +5,7 @@ import importlib
 
 from kohakuterrarium.errors import AgentNotRunningError
 from kohakuterrarium.core.agent_mid_turn import AgentMidTurnMixin
+from kohakuterrarium.core.agent_output_wiring import AgentOutputWiringMixin
 from kohakuterrarium.core.agent_pre_dispatch import (
     run_pre_subagent_dispatch,
     run_pre_tool_dispatch,
@@ -17,21 +18,21 @@ from kohakuterrarium.core.agent_tools import (
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle, backgroundify
 from kohakuterrarium.core.budget import BudgetExhausted
 from kohakuterrarium.core.controller import Controller
+from kohakuterrarium.core.event_inbox import EventEnvelope
 from kohakuterrarium.core.events import (
     EventType,
     TriggerEvent,
     create_tool_complete_event,
 )
-from kohakuterrarium.core.metrics_hook import metrics
-from kohakuterrarium.llm.message import content_parts_to_dicts
+from kohakuterrarium.core.pending_input import stamp_pending_id
 from kohakuterrarium.modules.output.event import OutputEvent
+from kohakuterrarium.modules.tool.base import ExecutionMode
 from kohakuterrarium.parsing import (
     CommandResultEvent,
     SubAgentCallEvent,
     TextEvent,
     ToolCallEvent,
 )
-from kohakuterrarium.skills.hints import inject_skill_path_hint
 from kohakuterrarium.utils.logging import get_logger
 
 _BG_PLACEHOLDER = (
@@ -45,7 +46,7 @@ _BG_PLACEHOLDER = (
 logger = get_logger(__name__)
 
 
-class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
+class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMixin):
     """Mixin providing event handling and tool execution for the Agent class.
 
     Contains the core event processing loop, tool startup, result collection,
@@ -110,242 +111,84 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         await self._process_event(event)
 
     async def _process_event(self, event: TriggerEvent) -> bool:
-        """Process event using the primary controller.
+        """Ingress: enqueue ``event`` on the single infinite inbox and,
+        for a turn PRIMARY, await the turn that consumes it.
 
-        Uses a lock to prevent concurrent processing. When multiple
-        triggers fire simultaneously, events are serialized so only
-        one LLM call runs at a time.
+        The queue-first model (see :mod:`core.event_inbox` +
+        :mod:`core.agent_event_loop`): one consumer drains the whole inbox
+        each wake, so simultaneous events batch into ONE turn instead of
+        each racing the processing lock for its own turn. This method only
+        stages the event and reports whether it ran as a primary.
 
-        The lock covers the ENTIRE event-handling pipeline — including
-        pre-controller side effects like ``output_router.on_user_input``,
-        plugin ``on_event`` notifications, and ``session_store`` event
-        appends. If those ran concurrently (two trigger tasks calling
-        ``_process_event`` at once) the TUI would see overlapping
-        renders and the session log would interleave events from two
-        turns. Holding the lock around them serializes everything.
-
-        **Opportunistic mid-turn buffering (Feat 3)**: events that
-        arrive while the lock is held by another turn DON'T block on
-        the lock — ALL types except ``startup``/``shutdown`` (and the
-        rerun / await_turn bypasses below). They're appended to
-        ``_pending_mid_turn_inputs`` and drained *as one batch* from
-        inside the current turn's ``_collect_and_push_feedback`` after
-        tool results land. This keeps user follow-ups, live triggers,
-        background completions, and channel traffic visible to the LLM
-        on the next round inside the same turn — instead of each
-        queued event running its own serial turn afterwards (which
-        would take one interrupt per event to clear).
-
-        Rerun events (regenerate / edit-and-rerun) BYPASS the buffer
-        — they must run against the original lock-held turn because
-        the agent's branch-id was pre-incremented for them.
-
-        Returns ``True`` when the call actually ran the event (lock
-        acquired, turn processed) and ``False`` when it was buffered.
-        The WS attach path (``studio/attach/io.py:_process_input``)
-        uses this to suppress the ``idle`` frame on buffered events —
-        otherwise ``idle`` fires immediately, the FE clears the
-        ``processingByTab`` flag, and KohakUwUing blinks off until
-        the next chunk arrives (Bug 1).
+        Returns ``True`` when the event started (or was the primary of) a
+        turn, ``False`` when it folded into a running turn or was queued
+        while warm-paused. The WS attach path
+        (``studio/attach/io.py:_process_input``) uses ``False`` to suppress
+        the ``idle`` frame — the running turn owns the terminal frames.
         """
         is_rerun = bool(event.context.get("rerun")) if event.context else False
         awaits_turn = bool(event.context.get("await_turn")) if event.context else False
+        paused = getattr(self, "_paused", False)
+
+        if not self._running:
+            # A stopped agent must not report a dropped event as accepted.
+            # Strict (programmatic default) raises for user input; internal
+            # kinds and lenient agents get an honest False.
+            if event.type == "user_input" and getattr(self, "_strict", True):
+                raise AgentNotRunningError(
+                    f"Agent {self.config.name!r} is not running — "
+                    "start() it before injecting input"
+                )
+            logger.debug("Dropping event, agent stopped", event_type=event.type)
+            return False
+
+        # Fold: a stackable event arriving while a STACKABLE turn holds the
+        # mutex folds into that turn (fire-and-forget, returns False fast) —
+        # the consumer's mid-turn re-claim drains it. Rerun / await_turn /
+        # non-stackable events never fold, nor into a non-stackable turn.
         if (
-            self._running
-            and not is_rerun
+            not is_rerun
             and not awaits_turn
             and event.stackable
-            and getattr(self, "_active_turn_stackable", True)
             and event.type not in ("startup", "shutdown")
+            and not paused
             and self._processing_lock.locked()
+            and getattr(self, "_active_turn_stackable", True)
         ):
-            buffer = getattr(self, "_pending_mid_turn_inputs", None)
-            if buffer is not None:
-                buffer.append(event)
-                logger.info(
-                    "Event buffered for mid-turn injection",
-                    event_type=event.type,
-                    pending=len(buffer),
-                )
+            stamp_pending_id(event)
+            self._event_inbox.put(EventEnvelope(event))
+            self._flush_trigger_backlog_stash()
+            logger.info(
+                "Event folded into running turn",
+                event_type=event.type,
+                queued=len(self._event_inbox),
+            )
+            return False
+
+        # Warm pause: an awaiting caller (run / run_event) or a rerun
+        # rejects WITHOUT enqueue — their contract is retry-later, and a
+        # future held across the pause would stall the Drive dispatcher.
+        # Fire-and-forget events enqueue and drain on resume (the consumer
+        # parks on the resume gate).
+        if paused:
+            if awaits_turn or is_rerun:
+                logger.info("Rejecting ingress while paused", event_type=event.type)
                 return False
-        async with self._processing_lock:
-            self._turn_lock_holder = asyncio.current_task()
-            # A non-stackable turn (startup, error) prohibits folding
-            # buffered events into it — the incoming-event check alone
-            # can't see the ACTIVE turn's flag.
-            self._active_turn_stackable = event.stackable
-            if not self._running:
-                # E4: dropping an event used to return ``True`` — the
-                # same value as success — so a script injecting into a
-                # stopped agent saw "accepted" and waited forever.
-                # Strict (programmatic default) raises for user input;
-                # internal event kinds (trigger / tool_complete racing
-                # a shutdown) and lenient agents get an honest False.
-                if event.type == "user_input" and getattr(self, "_strict", True):
-                    raise AgentNotRunningError(
-                        f"Agent {self.config.name!r} is not running — "
-                        "start() it before injecting input"
-                    )
-                logger.debug("Dropping event, agent stopped", event_type=event.type)
-                return False
+            stamp_pending_id(event)
+            self._event_inbox.put(EventEnvelope(event))
+            self._flush_trigger_backlog_stash()
+            return False
 
-            is_rerun = bool(event.context.get("rerun"))
-            is_edited = bool(event.context.get("edited"))
-            is_pure_rerun = is_rerun and not is_edited
-            # Turn / branch bookkeeping for v2 session events.
-            # - New user input → bump turn_index, reset branch_id to 1.
-            # - Pure regen / edit+rerun keep turn_index, ``_branch_id`` was
-            #   pre-incremented by ``regenerate_last_response`` /
-            #   ``edit_and_rerun`` before this trigger fired.
-            if event.type == "user_input" and not is_rerun:
-                # The previous turn's (turn_index, branch_id) becomes part
-                # of the new turn's parent_branch_path so a future branch
-                # switch on that earlier turn can hide this turn's events
-                # if they don't belong to the chosen subtree.
-                if self._turn_index > 0 and self._branch_id > 0:
-                    self._parent_branch_path = list(self._parent_branch_path)
-                    self._parent_branch_path.append((self._turn_index, self._branch_id))
-                self._turn_index += 1
-                # Collision-safe branch allocation. After the user has
-                # switched onto a non-latest branch and submits a fresh
-                # input, the event log may already carry events at this
-                # turn_index (the prior subtree's children). Resetting
-                # branch_id to 1 would collide on (turn, branch); the
-                # replay resolver in ``session/history.py`` dedupes
-                # turns by (turn, branch) and keeps the first occurrence
-                # — the orphaned events — which it then filters out as
-                # path-incompatible, dropping the whole new turn. Bump
-                # past anything existing to keep (turn, branch) globally
-                # unique. ``_max_branch_id_for_turn`` comes from the
-                # ``AgentMessagesMixin``; in narrow unit tests that mock
-                # ``Agent`` without the mixin we fall back to 1.
-                helper = getattr(self, "_max_branch_id_for_turn", None)
-                existing_max = helper(self._turn_index) if helper else 0
-                self._branch_id = existing_max + 1 if existing_max > 0 else 1
-            # Record user input to session store — fresh inputs only.
-            # Both pure regen and edit+rerun ride a TriggerEvent with
-            # ``rerun=True``; their event-log writes are owned by the
-            # ``AgentMessagesMixin`` callers
-            # (``regenerate_last_response``/``edit_and_rerun``) which
-            # have the correct branch_id + parent_branch_path already
-            # computed. Letting this block also run would DOUBLE-append
-            # the user_input/user_message events at the new branch — a
-            # subtle bug that bloated ``_live_user_turns`` with
-            # duplicates and shifted every subsequent edit's
-            # ``_resolve_edit_message_index`` to the wrong turn (matched
-            # the "edit drops huge swathes of context" symptom).
-            if (
-                self.session_store is not None
-                and event.type == "user_input"
-                and not is_rerun
-            ):
-                content = (
-                    content_parts_to_dicts(event.content)
-                    if hasattr(event, "is_multimodal") and event.is_multimodal()
-                    else (event.content or "")
-                )
-                ppath = [tuple(p) for p in self._parent_branch_path]
-                self.session_store.append_event(
-                    self.config.name,
-                    "user_input",
-                    {"content": content},
-                    turn_index=self._turn_index,
-                    branch_id=self._branch_id,
-                    parent_branch_path=ppath,
-                )
-                self.session_store.append_event(
-                    self.config.name,
-                    "user_message",
-                    {"content": content},
-                    turn_index=self._turn_index,
-                    branch_id=self._branch_id,
-                    parent_branch_path=ppath,
-                )
-
-            # Notify output of user input (for inline panel rendering).
-            # Pure regen has no new user input — skip the notification so
-            # output modules don't render an empty user bubble.
-            if (
-                event.type == "user_input"
-                and self.output_router is not None
-                and not is_pure_rerun
-            ):
-                content = (
-                    event.get_text_content()
-                    if hasattr(event, "is_multimodal") and event.is_multimodal()
-                    else (event.content or "")
-                )
-                await self.output_router.emit(
-                    OutputEvent(type="user_input", content=content)
-                )
-
-            if self.plugins is not None:
-                await self.plugins.notify("on_event", event=event)
-            # Procedural-skill ``paths:`` auto-activate (D.6 + Qd).
-            if event.type == "user_input":
-                inject_skill_path_hint(self)
-            # Background completion starting its own turn — banner the
-            # delivery so the UI shows why the agent speaks again.
-            if event.type in ("tool_complete", "subagent_output"):
-                self._notify_background_result(event)
-
-            try:
-                await self._process_event_with_controller(event, self.controller)
-            finally:
-                self._turn_lock_holder = None
-                self._active_turn_stackable = True
-        # Lock released — events that buffered AFTER this turn's last
-        # mid-turn drain would otherwise sit until the next turn starts.
-        self._schedule_leftover_buffer_flush()
-        return True
+        # Primary: enqueue with a future and await the turn that consumes it.
+        fut = asyncio.get_running_loop().create_future()
+        self._event_inbox.put(EventEnvelope(event, future=fut))
+        self._flush_trigger_backlog_stash()
+        outcome = await fut
+        return bool(getattr(outcome, "was_primary", True))
 
     # ------------------------------------------------------------------
     # Main processing loop (split into phases)
     # ------------------------------------------------------------------
-
-    async def _process_event_with_controller(
-        self, event: TriggerEvent, controller: Controller
-    ) -> None:
-        """Process event through controller. Cancellable via interrupt()."""
-        self._prepare_processing_cycle(event, controller)
-        await controller.push_event(event)
-        await self.output_router.emit(OutputEvent(type="processing_start"))
-
-        all_round_text: list[str] = []
-        loop_task = asyncio.create_task(
-            self._run_controller_loop(controller, all_round_text)
-        )
-        self._processing_task = loop_task
-        try:
-            await loop_task
-        except asyncio.CancelledError:
-            logger.info("Processing cancelled by interrupt")
-            self.output_router.notify_activity(
-                "interrupt", "[system] Processing interrupted"
-            )
-        except Exception as e:
-            error_type = type(e).__name__
-            error_msg = str(e)
-            logger.error(
-                "Processing error",
-                error_type=error_type,
-                error=error_msg,
-            )
-            # Emit as structured error activity (TUI/frontend render distinctively)
-            self.output_router.notify_activity(
-                "processing_error",
-                f"[{error_type}] {error_msg}",
-                metadata={
-                    "error_type": error_type,
-                    "error": error_msg,
-                },
-            )
-            metrics.observe_error("controller")
-        finally:
-            self._processing_task = None
-        if self._interrupt_requested:
-            event.context["interrupted_by_user"] = True
-        await self._finalize_processing(event, controller, all_round_text)
 
     def _prepare_processing_cycle(
         self, event: TriggerEvent, controller: Controller
@@ -353,6 +196,9 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         """Reset state at the start of a new processing cycle."""
         self._interrupt_requested = False
         controller._interrupted = False
+        # Fresh turn — forget the previous turn's backgrounded jobs so the
+        # output-wiring guard only defers on work THIS turn spawns.
+        self._turn_dispatched_bg = set()
         # Text-mode background-dispatch acknowledgments, delivered via
         # the next feedback round (native mode uses role=tool instead).
         self._bg_dispatch_acks: list[str] = []
@@ -534,6 +380,14 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
             native_tool_call_ids[job_id] = tool_call_id
 
         if handle.promoted:
+            # A deliverable background tool defers this turn's output wire
+            # until it reports back. STATEFUL (persistent, multi-turn) tools
+            # and notify=False (fire-and-forget) tools do NOT — they would
+            # strand the wire (they never drive a completion turn).
+            if notify_controller_on_background_complete and (
+                tool is None or tool.execution_mode != ExecutionMode.STATEFUL
+            ):
+                self._turn_dispatched_bg.add(job_id)
             # Already background — add placeholder
             if tool_call_id:
                 controller.conversation.append(
@@ -609,6 +463,14 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         )
 
         if handle and handle.promoted:
+            # A deliverable background sub-agent defers this turn's output
+            # wire until it reports. INTERACTIVE sub-agents (persistent,
+            # receive context updates, may never "complete") and notify=False
+            # ones do NOT — deferring on them would strand the wire.
+            if notify_controller_on_background_complete and not (
+                cfg is not None and getattr(cfg, "interactive", False)
+            ):
+                self._turn_dispatched_bg.add(job_id)
             if sa_tool_call_id:
                 controller.conversation.append(
                     "tool",
@@ -737,6 +599,16 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
                     if text:
                         feedback_parts.append(text)
 
+        # A direct job promoted to background mid-wait also defers this
+        # turn's output wire (deliverable — promoted directs are ordinary
+        # tools/sub-agents that report back). Record it so the guard sees it.
+        if had_promotions:
+            for jid, promoted_handle in handles.items():
+                if getattr(
+                    promoted_handle, "promoted", False
+                ) and self._bg_controller_notify.get(jid, True):
+                    self._turn_dispatched_bg.add(jid)
+
         # If promotions happened, the controller must continue so the model
         # sees the placeholder and can proceed working on other tasks.
         if had_promotions:
@@ -750,10 +622,10 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
                     "Continue with other work.]"
                 )
 
-        # Feat 3 — drain mid-turn buffered user_input/trigger events
-        # AFTER tool results are appended (so the native
-        # assistant.tool_calls → role=tool pairing stays intact) and
-        # BEFORE the next LLM round so the model sees the new input.
+        # Drain mid-turn buffered user_input/trigger events AFTER tool
+        # results are appended (so the native assistant.tool_calls →
+        # role=tool pairing stays intact) and BEFORE the next LLM round
+        # so the model sees the new input.
         injected_count = await self._drain_mid_turn_pending_inputs(controller)
         if injected_count:
             native_results_added = True
@@ -866,35 +738,3 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin):
         prompt_tokens = last_usage.get("prompt_tokens", 0)
         if self.compact_manager.should_compact(prompt_tokens):
             self.compact_manager.trigger_compact()
-
-    async def _emit_output_wiring(self, trigger_event: TriggerEvent) -> None:
-        """Emit a ``creature_output`` event for each configured wiring entry.
-
-        Called at the end of ``_finalize_processing``. No-op when the
-        creature has no wiring configured or no resolver is attached
-        (standalone mode).
-        """
-        entries = getattr(self.config, "output_wiring", None) or []
-        resolver = getattr(self, "_wiring_resolver", None)
-        if not entries or resolver is None:
-            return
-
-        content = "".join(self._last_turn_text).strip()
-        # ``_turn_index`` is now bumped at user-input arrival inside
-        # ``_process_event``; output wiring just reads the current
-        # value rather than bumping again here.
-        try:
-            await resolver.emit(
-                source=getattr(self, "_creature_id", self.config.name),
-                content=content,
-                source_event_type=trigger_event.type,
-                turn_index=self._turn_index,
-                entries=entries,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Output wiring resolver raised - dropping emission",
-                source=self.config.name,
-                error=str(exc),
-                exc_info=True,
-            )

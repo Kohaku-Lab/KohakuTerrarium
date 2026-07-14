@@ -26,6 +26,7 @@ from collections.abc import AsyncIterator
 from typing import Any
 
 from kohakuterrarium.errors import AgentNotRunningError, TurnError, TurnTimeoutError
+from kohakuterrarium.core.event_inbox import EventEnvelope, TurnOutcome
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.core.turn import TurnCapture, TurnEnded, TurnEvent, TurnResult
 from kohakuterrarium.utils.logging import get_logger
@@ -188,6 +189,32 @@ class AgentTurnMixin:
         event.context["await_turn"] = True
         return await self._drive_turn_event(event, capture, timeout=timeout)
 
+    async def _submit_awaiting(
+        self, event: TriggerEvent, capture: TurnCapture
+    ) -> TurnOutcome:
+        """Enqueue an ``await_turn`` event carrying its capture and await the
+        turn that consumes it.
+
+        The consumer attaches the capture at THIS event's turn start (so it
+        records exactly that turn, not a mid-turn tail) and detaches it at
+        turn end. Stopped / warm-paused rejects WITHOUT enqueue — the
+        retry-later contract; a future held across the pause would stall the
+        Drive dispatcher. A strict programmatic ``run()`` on a stopped agent
+        is caller misuse — surfaced as :class:`AgentNotRunningError`."""
+        if not self._running:
+            if event.type == "user_input" and getattr(self, "_strict", True):
+                raise AgentNotRunningError(
+                    f"Agent {self.config.name!r} is not running — "
+                    "start() it before injecting input"
+                )
+            return TurnOutcome(status="rejected", was_primary=False)
+        if getattr(self, "_paused", False):
+            return TurnOutcome(status="rejected", was_primary=False)
+        fut = asyncio.get_running_loop().create_future()
+        self._event_inbox.put(EventEnvelope(event, future=fut, capture=capture))
+        self._flush_trigger_backlog_stash()
+        return await fut
+
     async def _drive_turn_event(
         self,
         event: TriggerEvent,
@@ -195,47 +222,51 @@ class AgentTurnMixin:
         *,
         timeout: float | None,
     ) -> TurnResult:
-        """Shared body: attach capture, process the event, build result."""
-        self.output_router.add_secondary(capture)
+        """Shared body: submit the event with its capture, build the result.
+
+        The capture is attached/detached by the consumer around the actual
+        turn (not here), so a turn driven while another turn is in flight
+        records only its own turn."""
         t0 = time.monotonic()
         status = "ok"
-        ran: bool | None = None
+        outcome: TurnOutcome | None = None
+        task = asyncio.ensure_future(self._submit_awaiting(event, capture))
         try:
-            task = asyncio.ensure_future(self._process_event(event))
-            try:
-                if timeout is not None:
-                    await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
-                    ran = task.result()
-                else:
-                    ran = await task
-            except asyncio.TimeoutError:
-                status = "timeout"
-                # CANCEL the turn, don't abandon it: interrupt stops the
-                # controller loop; the grace await lets it unwind.
-                self.interrupt()
+            if timeout is not None:
                 try:
-                    await asyncio.wait_for(task, timeout=_INTERRUPT_GRACE_S)
+                    outcome = await asyncio.wait_for(
+                        asyncio.shield(task), timeout=timeout
+                    )
                 except asyncio.TimeoutError:
-                    task.cancel()
+                    status = "timeout"
+                    # CANCEL the turn, don't abandon it: interrupt stops the
+                    # controller loop; the grace await lets it unwind.
+                    self.interrupt()
                     try:
-                        await task
-                    except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                        pass
-                except Exception as exc:  # noqa: BLE001 - capture as error
-                    logger.warning("turn unwind raised", error=str(exc))
-            except AgentNotRunningError:
-                # Caller misuse, not a turn failure — keep the type.
-                raise
-            except Exception as exc:
-                status = "error"
-                if capture.error is None:
-                    capture.error = str(exc)
-        finally:
-            self.output_router.remove_secondary(capture)
+                        outcome = await asyncio.wait_for(
+                            task, timeout=_INTERRUPT_GRACE_S
+                        )
+                    except asyncio.TimeoutError:
+                        task.cancel()
+                        try:
+                            await task
+                        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                            pass
+                    except Exception as exc:  # noqa: BLE001 - capture as error
+                        logger.warning("turn unwind raised", error=str(exc))
+            else:
+                outcome = await task
+        except AgentNotRunningError:
+            # Caller misuse, not a turn failure — keep the type.
+            raise
+        except Exception as exc:
+            status = "error"
+            if capture.error is None:
+                capture.error = str(exc)
 
-        # ``_process_event`` returns False when the event was dropped
-        # because the agent stopped after the running pre-check — surface
-        # that as a rejection rather than a hollow ``ok`` with empty text.
-        if ran is False and status == "ok":
+        # A rejected outcome means the consumer never ran the event (agent
+        # stopped / warm-paused) — surface a rejection rather than a hollow
+        # ``ok`` with empty text.
+        if outcome is not None and outcome.status == "rejected" and status == "ok":
             status = "rejected"
         return capture.build_result(status, duration_s=time.monotonic() - t0)

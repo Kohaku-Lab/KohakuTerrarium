@@ -60,6 +60,62 @@ class TestFireOnMessage:
         assert await t.wait_for_trigger() is None
 
 
+class TestDrainReady:
+    """UXI-08b: on fire, a trigger drains its whole ready backlog so a
+    burst is absorbed in one turn instead of one round per message."""
+
+    async def _primed(self, reg, **kwargs):
+        """A started trigger whose broadcast subscription already exists
+        (created by consuming one delivered message via wait_for_trigger)."""
+        reg.get_or_create("inbox", channel_type="broadcast")
+        t = ChannelTrigger(channel_name="inbox", registry=reg, **kwargs)
+        await t.start()
+        ev = await _wait_with_delivery(
+            t, reg, "inbox", {"sender": "peer", "content": "first"}
+        )
+        assert ev.content == "first"
+        return t
+
+    async def test_drains_the_whole_backlog(self):
+        reg = _broadcast_registry()
+        t = await self._primed(reg)
+        ch = reg.get_or_create("inbox", channel_type="broadcast")
+        await ch.send(ChannelMessage(sender="peer", content="second"))
+        await ch.send(ChannelMessage(sender="peer", content="third"))
+        extras = t.drain_ready()
+        assert [e.content for e in extras] == ["second", "third"]
+        # Each drained event keeps its own sender/metadata.
+        assert all(e.context["sender"] == "peer" for e in extras)
+        # The backlog is consumed — a second drain finds nothing.
+        assert t.drain_ready() == []
+        # Channel history keeps a row per send regardless of the drain.
+        assert [m.content for m in ch.history] == ["first", "second", "third"]
+
+    async def test_drain_applies_ignore_sender(self):
+        reg = _broadcast_registry()
+        t = await self._primed(reg, ignore_sender="me")
+        ch = reg.get_or_create("inbox", channel_type="broadcast")
+        await ch.send(ChannelMessage(sender="me", content="self-talk"))
+        await ch.send(ChannelMessage(sender="peer", content="real"))
+        extras = t.drain_ready()
+        assert [e.content for e in extras] == ["real"]
+
+    async def test_drain_empty_when_not_running(self):
+        reg = _broadcast_registry()
+        t = await self._primed(reg)
+        await t.stop()
+        assert t.drain_ready() == []
+
+    async def test_drain_empty_before_any_subscription(self):
+        # No subscription created yet (wait_for_trigger never ran) → nothing
+        # to drain, and no crash.
+        reg = _broadcast_registry()
+        reg.get_or_create("inbox", channel_type="broadcast")
+        t = ChannelTrigger(channel_name="inbox", registry=reg)
+        await t.start()
+        assert t.drain_ready() == []
+
+
 class TestFiltering:
     async def test_filter_sender_whitelists(self):
         reg = _broadcast_registry()
