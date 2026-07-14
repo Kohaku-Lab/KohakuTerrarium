@@ -6,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from kohakuterrarium.studio.attach import input_ops as input_ops_mod
 from kohakuterrarium.studio.attach import io as io_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -51,21 +52,30 @@ class TestNormalizeInputContent:
 # ── _handle_ui_reply ────────────────────────────────────────
 
 
+class _UiCreature:
+    def __init__(self, name, *, status=(True, "ok"), graph_id="g"):
+        self.name = name
+        self.graph_id = graph_id
+        agent = MagicMock()
+        if isinstance(status, Exception):
+            agent.output_router.submit_reply_with_status = MagicMock(side_effect=status)
+        else:
+            agent.output_router.submit_reply_with_status = MagicMock(
+                return_value=status
+            )
+        self.agent = agent
+
+
 class TestHandleUiReply:
     def test_missing_event_id_silent(self):
-        agent = MagicMock()
-        agent.output_router.submit_reply_with_status = MagicMock(
-            return_value=(True, "ok")
-        )
+        creature = _UiCreature("alice")
         q = asyncio.Queue()
-        io_mod._handle_ui_reply({}, agent, MagicMock(), q, "src")
+        io_mod._handle_ui_reply({}, MagicMock(), creature, "s", q)
         assert q.empty()
+        creature.agent.output_router.submit_reply_with_status.assert_not_called()
 
-    def test_full_reply_enqueues_ack(self):
-        agent = MagicMock()
-        agent.output_router.submit_reply_with_status = MagicMock(
-            return_value=(True, "applied")
-        )
+    def test_full_reply_enqueues_ack_on_bound_creature(self):
+        creature = _UiCreature("alice", status=(True, "applied"))
         q = asyncio.Queue()
         io_mod._handle_ui_reply(
             {
@@ -75,46 +85,73 @@ class TestHandleUiReply:
                 "user": "u",
                 "ts": 1.5,
             },
-            agent,
             MagicMock(),
+            creature,
+            "s",
             q,
-            "src",
         )
-        # The router received a UIReply built from the frame fields.
-        (reply,), _ = agent.output_router.submit_reply_with_status.call_args
+        (reply,), _ = creature.agent.output_router.submit_reply_with_status.call_args
         assert reply.event_id == "e1"
         assert reply.action_id == "act"
         assert reply.values == {"k": "v"}
         assert reply.user == "u"
         assert reply.timestamp == 1.5
-        # The ack frame echoes the router's status + the event id.
         ack = q.get_nowait()
         assert ack["status"] == "applied"
         assert ack["event_id"] == "e1"
         assert ack["type"] == "ui_reply_ack"
-        assert ack["source"] == "src"
+        assert ack["source"] == "alice"
+
+    def test_reply_routes_to_target_sibling(self, monkeypatch):
+        # UXI-09: a reply for a prompt raised by a non-bound SIBLING must go
+        # to the SIBLING's router, not the bound creature's — else no pending
+        # Future resolves and the sibling's interactive tool hangs.
+        bound = _UiCreature("alice")
+        sibling = _UiCreature("bob", status=(True, "applied"))
+
+        def _resolve(engine, creature, sid, data):
+            if (data.get("target") or "") == "bob":
+                return sibling
+            return bound
+
+        monkeypatch.setattr(io_mod, "_resolve_target", _resolve)
+        q = asyncio.Queue()
+        io_mod._handle_ui_reply(
+            {"event_id": "e1", "target": "bob"}, MagicMock(), bound, "s", q
+        )
+        # The reply reached bob, not the bound alice.
+        sibling.agent.output_router.submit_reply_with_status.assert_called_once()
+        bound.agent.output_router.submit_reply_with_status.assert_not_called()
+        # And the ack is tagged with the resolved creature so it lands in bob's tab.
+        assert q.get_nowait()["source"] == "bob"
+
+    def test_unknown_target_falls_back_to_bound(self, monkeypatch):
+        bound = _UiCreature("alice", status=(True, "applied"))
+
+        def _resolve(engine, creature, sid, data):
+            raise KeyError("ghost")
+
+        monkeypatch.setattr(io_mod, "_resolve_target", _resolve)
+        q = asyncio.Queue()
+        io_mod._handle_ui_reply(
+            {"event_id": "e1", "target": "ghost"}, MagicMock(), bound, "s", q
+        )
+        bound.agent.output_router.submit_reply_with_status.assert_called_once()
+        assert q.get_nowait()["source"] == "alice"
 
     def test_submit_reply_raises_swallowed(self):
-        agent = MagicMock()
-
-        def _boom(r):
-            raise RuntimeError("bad")
-
-        agent.output_router.submit_reply_with_status = _boom
+        creature = _UiCreature("alice", status=RuntimeError("bad"))
         q = asyncio.Queue()
-        io_mod._handle_ui_reply({"event_id": "e1"}, agent, MagicMock(), q, "src")
+        io_mod._handle_ui_reply({"event_id": "e1"}, MagicMock(), creature, "s", q)
         ack = q.get_nowait()
         assert ack["status"] == "unknown"
 
     def test_queue_full_dropped(self):
-        agent = MagicMock()
-        agent.output_router.submit_reply_with_status = MagicMock(
-            return_value=(True, "ok")
-        )
+        creature = _UiCreature("alice")
         q = asyncio.Queue(maxsize=1)
         q.put_nowait({"existing": True})
         # Should not raise on full queue.
-        io_mod._handle_ui_reply({"event_id": "e1"}, agent, MagicMock(), q, "src")
+        io_mod._handle_ui_reply({"event_id": "e1"}, MagicMock(), creature, "s", q)
 
 
 # ── _process_input ──────────────────────────────────────────
@@ -123,17 +160,31 @@ class TestHandleUiReply:
 class TestProcessInput:
     async def test_success_emits_idle(self):
         agent = MagicMock()
-        agent.inject_input = AsyncMock()
+        agent.inject_input = AsyncMock(return_value=True)
         q = asyncio.Queue()
-        await io_mod._process_input(agent, "hi", q, "src")
+        await io_mod._process_input(agent, "hi", q, "src", "pending_1")
         frame = q.get_nowait()
         assert frame["type"] == "idle"
+
+    async def test_buffered_emits_input_queued_with_id(self):
+        # inject_input returning False means the input was buffered for a
+        # mid-turn drain — the ack carries the id so a shell can edit it.
+        agent = MagicMock()
+        agent.inject_input = AsyncMock(return_value=False)
+        q = asyncio.Queue()
+        await io_mod._process_input(agent, "hi", q, "src", "pending_1")
+        frame = q.get_nowait()
+        assert frame["type"] == "input_queued"
+        assert frame["event_id"] == "pending_1"
+        # The minted id is threaded into inject_input so the buffered
+        # event carries the SAME id the ack advertises.
+        assert agent.inject_input.await_args.kwargs["pending_id"] == "pending_1"
 
     async def test_inject_failure_emits_error(self):
         agent = MagicMock()
         agent.inject_input = AsyncMock(side_effect=RuntimeError("bad"))
         q = asyncio.Queue()
-        await io_mod._process_input(agent, "hi", q, "src")
+        await io_mod._process_input(agent, "hi", q, "src", "pending_1")
         frame = q.get_nowait()
         assert frame["type"] == "error"
 
@@ -142,15 +193,15 @@ class TestProcessInput:
         agent.inject_input = AsyncMock(side_effect=asyncio.CancelledError())
         q = asyncio.Queue()
         with pytest.raises(asyncio.CancelledError):
-            await io_mod._process_input(agent, "hi", q, "src")
+            await io_mod._process_input(agent, "hi", q, "src", "pending_1")
 
     async def test_queue_full_dropped_on_idle(self):
         agent = MagicMock()
-        agent.inject_input = AsyncMock()
+        agent.inject_input = AsyncMock(return_value=True)
         q = asyncio.Queue(maxsize=1)
         q.put_nowait({"x": 1})
         # Should not raise.
-        await io_mod._process_input(agent, "hi", q, "src")
+        await io_mod._process_input(agent, "hi", q, "src", "pending_1")
 
     async def test_queue_full_dropped_on_error(self):
         agent = MagicMock()
@@ -158,7 +209,101 @@ class TestProcessInput:
         q = asyncio.Queue(maxsize=1)
         q.put_nowait({"x": 1})
         # Should not raise.
-        await io_mod._process_input(agent, "hi", q, "src")
+        await io_mod._process_input(agent, "hi", q, "src", "pending_1")
+
+
+# ── _handle_pending_op (input_edit / input_cancel) ──────────────
+
+
+class _PendingCreature:
+    def __init__(self, name, *, edit_ok=True, cancel_ok=True):
+        self.name = name
+        self.graph_id = "g"
+        agent = MagicMock()
+        agent.edit_pending = MagicMock(return_value=edit_ok)
+        agent.cancel_pending = MagicMock(return_value=cancel_ok)
+        self.agent = agent
+
+
+class TestHandlePendingOp:
+    def test_edit_commits_and_acks(self):
+        creature = _PendingCreature("alice", edit_ok=True)
+        q = asyncio.Queue()
+        io_mod._handle_pending_op(
+            {"event_id": "p1", "content": "corrected"},
+            "input_edit",
+            engine=MagicMock(),
+            creature=creature,
+            session_id="s",
+            queue=q,
+        )
+        creature.agent.edit_pending.assert_called_once_with("p1", "corrected")
+        ack = q.get_nowait()
+        assert ack["type"] == "input_edit_ack"
+        assert ack["status"] == "edited"
+        assert ack["event_id"] == "p1"
+
+    def test_edit_after_claim_reports_already_sent(self):
+        creature = _PendingCreature("alice", edit_ok=False)
+        q = asyncio.Queue()
+        io_mod._handle_pending_op(
+            {"event_id": "p1", "content": "x"},
+            "input_edit",
+            engine=MagicMock(),
+            creature=creature,
+            session_id="s",
+            queue=q,
+        )
+        assert q.get_nowait()["status"] == "already_sent"
+
+    def test_cancel_commits_and_acks(self):
+        creature = _PendingCreature("alice", cancel_ok=True)
+        q = asyncio.Queue()
+        io_mod._handle_pending_op(
+            {"event_id": "p1"},
+            "input_cancel",
+            engine=MagicMock(),
+            creature=creature,
+            session_id="s",
+            queue=q,
+        )
+        creature.agent.cancel_pending.assert_called_once_with("p1")
+        ack = q.get_nowait()
+        assert ack["type"] == "input_cancel_ack"
+        assert ack["status"] == "cancelled"
+
+    def test_missing_event_id_silent(self):
+        creature = _PendingCreature("alice")
+        q = asyncio.Queue()
+        io_mod._handle_pending_op(
+            {},
+            "input_cancel",
+            engine=MagicMock(),
+            creature=creature,
+            session_id="s",
+            queue=q,
+        )
+        assert q.empty()
+        creature.agent.cancel_pending.assert_not_called()
+
+    def test_unknown_target_emits_error(self, monkeypatch):
+        creature = _PendingCreature("alice")
+
+        def _no_creature(engine, sid, name):
+            raise KeyError(name)
+
+        # ``_handle_pending_op`` resolves ``find_creature`` in input_ops.
+        monkeypatch.setattr(input_ops_mod, "find_creature", _no_creature)
+        q = asyncio.Queue()
+        io_mod._handle_pending_op(
+            {"event_id": "p1", "target": "ghost"},
+            "input_cancel",
+            engine=MagicMock(),
+            creature=creature,
+            session_id="s",
+            queue=q,
+        )
+        assert q.get_nowait()["type"] == "error"
 
 
 # ── _forward_queue ──────────────────────────────────────────

@@ -53,6 +53,15 @@ class TriggerManager:
         self._process_event = process_event
         # Optional callback: (trigger_id, event) -> None
         self.on_trigger_fired: Callable[[str, Any], None] | None = None
+        # Optional hook: admit extra ready trigger events into the agent's
+        # mid-turn buffer so a burst drains in ONE turn (UXI-08b). Set by
+        # the owning agent to ``Agent.admit_ready_events``; None when the
+        # host doesn't support mid-turn buffering (bare test fakes).
+        self.admit_ready: Callable[[list[Any]], int] | None = None
+        # Warm-pause gate (UXI-11): cleared to hold every trigger run-loop
+        # at the top of its next iteration; set to release. Starts open.
+        self._resume_gate = asyncio.Event()
+        self._resume_gate.set()
         # Session store ref for saving resumable triggers (set by agent)
         self._session_store: Any = None
         self._agent_name: str = ""
@@ -220,10 +229,27 @@ class TriggerManager:
                     error=str(e),
                 )
 
+    def suspend_all(self) -> None:
+        """Hold every trigger run-loop at its next iteration (warm pause).
+
+        Triggers stop consuming their sources; queued channel messages
+        accumulate and are drained when :meth:`resume_all` releases the
+        loops. Idempotent."""
+        self._resume_gate.clear()
+
+    def resume_all(self) -> None:
+        """Release trigger run-loops suspended by :meth:`suspend_all`."""
+        self._resume_gate.set()
+
     async def _run_loop(self, trigger_id: str, trigger: BaseTrigger) -> None:
         """Run a single trigger's event loop."""
         while trigger.is_running:
             try:
+                # Warm-pause gate — blocks here while suspended so the
+                # trigger stops consuming its source until resumed.
+                await self._resume_gate.wait()
+                if not trigger.is_running:
+                    break
                 event = await trigger.wait_for_trigger()
                 if event:
                     logger.info(
@@ -235,15 +261,12 @@ class TriggerManager:
                     # scheduled timestamp (if set) against now. Only
                     # emits when drift crosses the threshold.
                     self._maybe_emit_schedule_drift(trigger_id, trigger, event)
-                    if self.on_trigger_fired:
-                        try:
-                            self.on_trigger_fired(trigger_id, event)
-                        except Exception as e:
-                            logger.warning(
-                                "on_trigger_fired callback error",
-                                error=str(e),
-                                exc_info=True,
-                            )
+                    self._fire_notification(trigger_id, event)
+                    # Drain the rest of this trigger's ready backlog and
+                    # admit it into the agent's mid-turn buffer BEFORE the
+                    # primary turn starts, so the whole burst is absorbed
+                    # in one turn (UXI-08b) instead of one round per event.
+                    self._admit_extra_ready(trigger_id, trigger)
                     await self._process_event(event)
             except asyncio.CancelledError:
                 break
@@ -254,6 +277,56 @@ class TriggerManager:
                     error=str(e),
                 )
                 await asyncio.sleep(1.0)
+
+    def _fire_notification(self, trigger_id: str, event: Any) -> None:
+        """Fire the ``on_trigger_fired`` callback for one event."""
+        if not self.on_trigger_fired:
+            return
+        try:
+            self.on_trigger_fired(trigger_id, event)
+        except Exception as e:
+            logger.warning(
+                "on_trigger_fired callback error",
+                error=str(e),
+                exc_info=True,
+            )
+
+    def _admit_extra_ready(self, trigger_id: str, trigger: BaseTrigger) -> None:
+        """Drain every message already queued for ``trigger`` beyond the
+        one that started the turn and admit them into the agent's
+        mid-turn buffer (UXI-08b).
+
+        Only consumes from the channel when an ``admit_ready`` hook is
+        wired — otherwise the drained events would be lost, since
+        ``drain_ready`` removes them from the subscription queue. Each
+        admitted event fires the same drift + notification bookkeeping
+        the primary event got so per-message observability is preserved.
+        """
+        admit = self.admit_ready
+        drain = getattr(trigger, "drain_ready", None)
+        if admit is None or not callable(drain):
+            return
+        try:
+            extra = drain()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning(
+                "trigger drain_ready failed",
+                trigger_id=trigger_id,
+                error=str(e),
+                exc_info=True,
+            )
+            return
+        if not extra:
+            return
+        for ev in extra:
+            self._maybe_emit_schedule_drift(trigger_id, trigger, ev)
+            self._fire_notification(trigger_id, ev)
+        admitted = admit(extra)
+        logger.info(
+            "Admitted channel backlog into one turn",
+            trigger_id=trigger_id,
+            count=admitted,
+        )
 
     def _maybe_emit_schedule_drift(
         self, trigger_id: str, trigger: BaseTrigger, event: Any

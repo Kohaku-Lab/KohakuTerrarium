@@ -181,11 +181,16 @@ class AppOutputMixin:
         self.committer.text("[yellow]⚠ interrupted[/yellow]")
         self._invalidate()
 
-    def on_background_result(self, kind: str, label: str) -> None:
-        """Commit a background-result delivery banner to scrollback."""
+    def on_background_result(self, kind: str, label: str, count: int = 1) -> None:
+        """Commit a background-result delivery banner to scrollback.
+
+        ``label`` is one label or a comma-joined list; ``count`` drives the
+        singular/plural noun so a batch reads ``results delivered: a, b, c``."""
         self._flush_assistant_message()
+        noun = "result" if count == 1 else "results"
+        prefix = f"{kind} " if kind and kind != "mixed" else ""
         self.committer.text(
-            f"[cyan]⟲ background {kind} result delivered: {label}[/cyan]"
+            f"[cyan]⟲ background {prefix}{noun} delivered: {label}[/cyan]"
         )
         self._invalidate()
 

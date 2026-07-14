@@ -14,7 +14,7 @@ logger = get_logger(__name__)
 
 
 class AgentLifecycleMixin:
-    """Mixin providing agent shutdown behavior."""
+    """Mixin providing agent shutdown + warm-pause behavior."""
 
     plugins: Any
     compact_manager: Any
@@ -25,7 +25,40 @@ class AgentLifecycleMixin:
     input: Any
     config: Any
     _running: bool
+    _paused: bool
     _shutdown_event: Any
+
+    @property
+    def paused(self) -> bool:
+        """Whether the agent is warm-paused (admitting no new turns)."""
+        return getattr(self, "_paused", False)
+
+    def pause(self) -> None:
+        """Warm-pause the agent (UXI-11): stop admitting new turns and
+        suspend triggers while the runtime (LLM, providers, session)
+        stays live so :meth:`resume` reopens instantly. Events arriving
+        while paused queue on the inbox and drain on resume; the consumer
+        parks on the resume gate so nothing is processed. Idempotent."""
+        if getattr(self, "_paused", False):
+            return
+        self._paused = True
+        self._consumer_resume.clear()
+        self.trigger_manager.suspend_all()
+        logger.info("Agent paused", agent_name=self.config.name)
+
+    def resume(self) -> None:
+        """Undo :meth:`pause`: re-admit turns, resume triggers, and let the
+        consumer drain everything queued while paused in one wake.
+        Idempotent."""
+        if not getattr(self, "_paused", False):
+            return
+        self._paused = False
+        self.trigger_manager.resume_all()
+        # Release the consumer's resume gate; it wakes and claims the whole
+        # inbox (everything queued while paused drains together).
+        self._consumer_resume.set()
+        self._event_inbox.wake()
+        logger.info("Agent resumed", agent_name=self.config.name)
 
     async def stop(self) -> None:
         """Stop all agent modules. Safe to call concurrently / twice —
@@ -52,6 +85,15 @@ class AgentLifecycleMixin:
 
         self._running = False
         self._shutdown_event.set()
+
+        # Wake the single event consumer so it observes ``_running`` False
+        # and exits instead of parking forever on the inbox / resume gate.
+        consumer_resume = getattr(self, "_consumer_resume", None)
+        if consumer_resume is not None:
+            consumer_resume.set()
+        inbox = getattr(self, "_event_inbox", None)
+        if inbox is not None:
+            inbox.wake()
 
         # A live turn must be fully unwound BEFORE the router stops and
         # the providers close — otherwise processing continues against
@@ -82,6 +124,18 @@ class AgentLifecycleMixin:
                     "Timed out waiting for turn finalization during stop",
                     agent_name=self.config.name,
                 )
+
+        # The turn is unwound; stop the single event consumer. Its
+        # ``finally`` rejects every leftover awaiting future so no
+        # ``run`` / ``run_event`` caller hangs after shutdown.
+        consumer = getattr(self, "_consumer_task", None)
+        if (
+            consumer is not None
+            and not consumer.done()
+            and consumer is not asyncio.current_task()
+        ):
+            consumer.cancel()
+            await asyncio.gather(consumer, return_exceptions=True)
 
         if hasattr(self, "_mcp_manager") and self._mcp_manager:
             await self._mcp_manager.shutdown()

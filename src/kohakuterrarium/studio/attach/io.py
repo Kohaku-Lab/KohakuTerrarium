@@ -21,14 +21,17 @@ from typing import Any
 
 from fastapi import WebSocket
 
+from kohakuterrarium.core.pending_input import new_pending_id
 from kohakuterrarium.laboratory.ws_proxy import proxy_ws_to_lab
-from kohakuterrarium.llm.message import (
-    content_parts_to_dicts,
-    normalize_content_parts,
-)
 from kohakuterrarium.modules.output.event import UIReply
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.attach._event_stream import StreamOutput, get_event_log
+from kohakuterrarium.studio.attach.input_ops import (
+    _handle_pending_op,
+    _normalize_input_content,
+    _process_input,
+    _resolve_target,
+)
 from kohakuterrarium.studio.attach.io_cluster import attach_io_cluster
 from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
@@ -75,39 +78,36 @@ def _session_info_frame(creature: Any) -> dict[str, Any]:
     }
 
 
-def _normalize_input_content(data: dict[str, Any]) -> str | list[dict[str, Any]]:
-    """Normalize incoming WS input payload."""
-    content = data.get("content")
-    if isinstance(content, list):
-        parts = normalize_content_parts(content) or []
-        return content_parts_to_dicts(parts)
-    if isinstance(content, str):
-        return content
-    message = data.get("message", "")
-    return message if isinstance(message, str) else ""
-
-
 def _handle_ui_reply(
     data: dict[str, Any],
-    agent: Any,
-    ws: WebSocket,
+    engine: Any,
+    creature: Any,
+    session_id: str,
     queue: asyncio.Queue,
-    source_name: str,
 ) -> None:
-    """Route an inbound ``ui_reply`` WS frame to the agent's bus.
+    """Route an inbound ``ui_reply`` WS frame to the RIGHT creature's bus.
 
-    Sync helper invoked from the receive loop. Submits the reply to
-    the agent's output router; the router resolves any pending Future
-    and broadcasts a supersede to other secondary outputs (which the
-    frontend translates back into an ``ack`` frame via StreamOutput).
+    Sync helper invoked from the receive loop. The prompt may have been
+    raised by a non-bound SIBLING creature, so the reply is submitted to
+    the router of the creature the frame's ``target`` names (resolved the
+    same way input frames are), falling back to the bound creature when
+    ``target`` is absent / matches. Submitting to the bound router only
+    dropped a sibling's reply onto the wrong bus → no pending Future → the
+    sibling's interactive tool hung forever (UXI-09 critic fix).
 
-    The ack frame itself is enqueued for the WS forward task so the
-    submitting client gets ``{type: "ui_reply_ack", event_id, status}``
-    even when the reply was rejected (unknown id / superseded).
+    The router resolves any pending Future and broadcasts a supersede to
+    other secondary outputs. The ack frame (with the RESOLVED creature's
+    name as ``source`` so it lands in the right tab) is enqueued for the
+    WS forward task even when the reply is rejected (unknown id / superseded).
     """
     event_id = data.get("event_id")
     if not isinstance(event_id, str) or not event_id:
         return
+    try:
+        target = _resolve_target(engine, creature, session_id, data)
+    except KeyError:
+        # Unknown target — fall back to the bound creature rather than drop.
+        target = creature
     action_id = data.get("action_id", "")
     values = data.get("values") or {}
     user = data.get("user")
@@ -122,7 +122,9 @@ def _handle_ui_reply(
     )
 
     try:
-        _accepted, ack_status = agent.output_router.submit_reply_with_status(reply)
+        _accepted, ack_status = target.agent.output_router.submit_reply_with_status(
+            reply
+        )
     except Exception as e:
         logger.warning("submit_reply failed", error=str(e), exc_info=True)
         ack_status = "unknown"
@@ -131,63 +133,13 @@ def _handle_ui_reply(
         "type": "ui_reply_ack",
         "event_id": event_id,
         "status": ack_status,
-        "source": source_name,
+        "source": target.name,
         "ts": time.time(),
     }
     try:
         queue.put_nowait(ack)
     except asyncio.QueueFull:
         logger.debug("ui_reply_ack dropped — queue full")
-
-
-async def _process_input(
-    agent: Any,
-    content: str | list[dict[str, Any]],
-    queue: asyncio.Queue,
-    source_name: str,
-) -> None:
-    """Run ``agent.inject_input`` in its own task so the WS receive
-    loop can keep processing inbound frames (notably ``ui_reply``)
-    while the agent is mid-turn.
-
-    Errors and the post-turn ``idle`` notice are pushed via the same
-    outbound queue that ``_forward_queue`` drains, so the caller
-    doesn't need to share the websocket reference.
-
-    ``idle`` is suppressed when ``inject_input`` returned ``False`` —
-    the event was buffered for opportunistic mid-turn drain
-    (``Agent._pending_mid_turn_inputs``) and the OTHER turn that's
-    still running owns the next ``idle`` / ``processing_end`` frame.
-    Emitting our own here would race the FE's ``processingByTab``
-    flag off and the KohakUwUing indicator would blink off until
-    the next streaming chunk arrived (Bug 1).
-    """
-    try:
-        processed = await agent.inject_input(content, source="web")
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
-        try:
-            queue.put_nowait(
-                {
-                    "type": "error",
-                    "source": source_name,
-                    "content": str(e),
-                    "ts": time.time(),
-                }
-            )
-        except asyncio.QueueFull:
-            logger.debug("input error frame dropped — queue full")
-        return
-    if not processed:
-        # Buffered for mid-turn drain — do NOT emit ``idle``; the
-        # turn that's actually running will fire its own terminal
-        # frames when it ends.
-        return
-    try:
-        queue.put_nowait({"type": "idle", "source": source_name, "ts": time.time()})
-    except asyncio.QueueFull:
-        logger.debug("idle frame dropped — queue full")
 
 
 async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
@@ -484,13 +436,18 @@ async def attach_io(
 
             if msg_type == "ui_reply":
                 # Phase B: inbound reply to an interactive OutputEvent.
-                # Route into the agent's output_router; it dispatches to
-                # the awaiting Future and broadcasts supersede to peers.
-                _handle_ui_reply(data, agent, websocket, queue, creature.name)
+                # Route into the TARGET creature's output_router (a sibling
+                # may have raised the prompt); it dispatches to the awaiting
+                # Future and broadcasts supersede to peers.
+                _handle_ui_reply(data, engine, creature, session_id, queue)
                 continue
             if msg_type == "ui_dismiss":
                 # Display-only event was dismissed by the user. Nothing
                 # to await; informational so audit / observers can log.
+                continue
+            if msg_type in ("input_edit", "input_cancel"):
+                # Edit / cancel a still-queued mid-turn message by id.
+                _handle_pending_op(data, msg_type, engine, creature, session_id, queue)
                 continue
             if msg_type != "input":
                 continue
@@ -523,10 +480,16 @@ async def attach_io(
                         }
                     )
                     continue
+            # Mint a stable queued-message id up front so a buffered
+            # input can be edited / cancelled by id (UXI-08a). The
+            # client learns it from the client-echoed field below and
+            # the ``input_queued`` ack when the input is buffered.
+            pending_id = (data.get("event_id") or "").strip() or new_pending_id()
             user_evt = {
                 "type": "user_input",
                 "source": target_creature.name,
                 "content": content,
+                "event_id": pending_id,
                 "ts": time.time(),
             }
             log.append(user_evt)
@@ -537,7 +500,9 @@ async def attach_io(
             # awaits a UIReply while this loop sits inside
             # ``inject_input`` unable to deliver it.
             task = asyncio.create_task(
-                _process_input(target_agent, content, queue, target_creature.name)
+                _process_input(
+                    target_agent, content, queue, target_creature.name, pending_id
+                )
             )
             input_tasks.append(task)
             # Drop completed tasks so the list doesn't grow forever.

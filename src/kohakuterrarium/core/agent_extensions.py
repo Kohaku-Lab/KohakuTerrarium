@@ -14,6 +14,7 @@ initial system prompt with zero extra calls.
 
 from typing import Any
 
+from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.utils.logging import get_logger
@@ -139,3 +140,40 @@ class AgentExtensionsMixin:
             if t is trigger_id_or_trigger:
                 return await self.trigger_manager.remove(tid)
         return False
+
+    def set_output_handler(self, handler: Any, replace_default: bool = False) -> None:
+        """Set a custom output handler callback for text chunks."""
+
+        class CallbackOutput(OutputModule):
+            def __init__(self, callback: Any):
+                self._callback = callback
+
+            async def start(self) -> None:
+                pass
+
+            async def stop(self) -> None:
+                pass
+
+            async def write(self, text: str) -> None:
+                self._callback(text)
+
+            async def write_stream(self, chunk: str) -> None:
+                self._callback(chunk)
+
+            async def flush(self) -> None:
+                pass
+
+            async def on_processing_start(self) -> None:
+                pass
+
+            async def on_processing_end(self) -> None:
+                pass
+
+            def on_activity(self, activity_type: str, detail: str) -> None:
+                pass
+
+        callback_output = CallbackOutput(handler)
+        if replace_default:
+            self.output_router.default_output = callback_output
+        else:
+            self.output_router.add_secondary(callback_output)

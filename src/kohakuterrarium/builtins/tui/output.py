@@ -394,6 +394,7 @@ class TUIOutput(BaseOutputModule):
             case "compact_start" | "compact_complete" | "compact_skipped":
                 self._handle_compact_activity(activity_type, t, metadata)
             case "background_result":
+                # ``label`` is comma-joined for a combined delivery banner.
                 label = metadata.get("label") or metadata.get("job_id", "")
                 kind = metadata.get("kind", "tool")
                 self._tui.add_trigger_message(

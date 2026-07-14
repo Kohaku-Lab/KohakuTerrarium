@@ -144,6 +144,59 @@ class TestAgentLifecycle:
         assert t.cancelled() or t.done()
 
 
+# ── agent_lifecycle warm pause/resume ────────────────────────────
+
+
+class TestPauseResumeMixin:
+    def _agent(self):
+        class _Agent(AgentLifecycleMixin):
+            pass
+
+        a = _Agent()
+        a.config = types.SimpleNamespace(name="alice")
+        a._paused = False
+        a._running = True
+        a._suspended = []
+        a._resumed = []
+        a._gate_calls = []
+        a._woke = []
+        a.trigger_manager = types.SimpleNamespace(
+            suspend_all=lambda: a._suspended.append(True),
+            resume_all=lambda: a._resumed.append(True),
+        )
+        a._consumer_resume = types.SimpleNamespace(
+            clear=lambda: a._gate_calls.append("clear"),
+            set=lambda: a._gate_calls.append("set"),
+        )
+        a._event_inbox = types.SimpleNamespace(wake=lambda: a._woke.append(True))
+        return a
+
+    def test_pause_sets_flag_and_suspends_triggers(self):
+        a = self._agent()
+        a.pause()
+        assert a.paused is True
+        assert a._suspended == [True]
+        # Consumer gate cleared so the consumer parks.
+        assert a._gate_calls == ["clear"]
+        # Idempotent — a second pause does not re-suspend.
+        a.pause()
+        assert a._suspended == [True]
+
+    def test_resume_clears_flag_resumes_and_drains(self):
+        a = self._agent()
+        a.pause()
+        a.resume()
+        assert a.paused is False
+        assert a._resumed == [True]
+        # Resume releases the consumer gate and wakes the inbox so the
+        # consumer drains everything queued while paused.
+        assert a._gate_calls == ["clear", "set"]
+        assert a._woke == [True]
+        # Idempotent — resume when not paused is a no-op.
+        a.resume()
+        assert a._resumed == [True]
+
+
 # ── agent_budget_recovery ────────────────────────────────────────
 
 
