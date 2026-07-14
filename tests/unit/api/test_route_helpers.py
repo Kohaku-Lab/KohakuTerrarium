@@ -8,9 +8,13 @@ from kohakuterrarium.terrarium.service import CreatureInfo
 
 
 class _FakeService:
-    def __init__(self, creatures=None, raise_exc=None):
+    def __init__(self, creatures=None, raise_exc=None, cluster_links=None):
         self._creatures = creatures or []
         self._raise = raise_exc
+        # ``cluster_groups`` reads this to fold worker-local graphs into
+        # one cluster; absent/None means standalone (single-host).
+        if cluster_links is not None:
+            self._cluster_links = cluster_links
 
     async def list_creatures(self):
         if self._raise is not None:
@@ -117,3 +121,75 @@ class TestResolveCreatureId:
         out = await resolve_creature_id(svc, "alice")
         # First match wins under global search (historical semantics).
         assert out == "cid-a"
+
+
+class TestResolveCreatureIdClusterScope:
+    """Bug #145: in a multi-node cluster the UI addresses a member
+    creature via the cluster PRIMARY sid, but the creature physically
+    lives on a peer worker under that worker's LOCAL graph_id.  The
+    resolver must widen the session filter to the whole cluster so the
+    member resolves; it must NOT leak creatures outside the cluster.
+    """
+
+    # Two worker graphs linked into one cluster; primary = lex-smallest.
+    _LINKS = {frozenset({("w1", "graph_a"), ("w2", "graph_b")})}
+
+    def _clustered_service(self, extra=None):
+        creatures = [
+            _info("cid-a", "alpha", graph_id="graph_a"),
+            _info("cid-b", "bravo", graph_id="graph_b"),
+        ]
+        if extra:
+            creatures.extend(extra)
+        return _FakeService(creatures, cluster_links=self._LINKS)
+
+    async def test_member_id_resolves_via_cluster_primary(self):
+        # THE bug: bravo (graph_b, w2) addressed via the cluster primary
+        # graph_a. Pre-fix this 404'd because graph_b != graph_a.
+        svc = self._clustered_service()
+        assert await resolve_creature_id(svc, "cid-b", "graph_a") == "cid-b"
+
+    async def test_member_name_resolves_via_cluster_primary(self):
+        svc = self._clustered_service()
+        assert await resolve_creature_id(svc, "bravo", "graph_a") == "cid-b"
+
+    async def test_member_still_resolves_via_own_graph(self):
+        # The creature's own worker-local sid must keep working too.
+        svc = self._clustered_service()
+        assert await resolve_creature_id(svc, "cid-b", "graph_b") == "cid-b"
+
+    async def test_primary_own_creature_still_resolves(self):
+        svc = self._clustered_service()
+        assert await resolve_creature_id(svc, "cid-a", "graph_a") == "cid-a"
+
+    async def test_non_cluster_creature_stays_404_via_primary(self):
+        # A creature on an UNLINKED graph must NOT leak into the cluster
+        # scope — addressing it via the cluster primary still 404s.
+        svc = self._clustered_service(
+            extra=[_info("cid-c", "charlie", graph_id="graph_c")]
+        )
+        with pytest.raises(HTTPException) as exc:
+            await resolve_creature_id(svc, "cid-c", "graph_a")
+        assert exc.value.status_code == 404
+
+    async def test_cross_cluster_member_stays_404(self):
+        # CF-7: a member of a DIFFERENT cluster must not resolve through
+        # this cluster's primary. graph_x/graph_y form a second cluster;
+        # its member is invisible from graph_a's scope.
+        links = {
+            frozenset({("w1", "graph_a"), ("w2", "graph_b")}),
+            frozenset({("w3", "graph_x"), ("w4", "graph_y")}),
+        }
+        svc = _FakeService(
+            [
+                _info("cid-a", "alpha", graph_id="graph_a"),
+                _info("cid-b", "bravo", graph_id="graph_b"),
+                _info("cid-y", "yankee", graph_id="graph_y"),
+            ],
+            cluster_links=links,
+        )
+        with pytest.raises(HTTPException) as exc:
+            await resolve_creature_id(svc, "cid-y", "graph_a")
+        assert exc.value.status_code == 404
+        # But yankee resolves through its OWN cluster's primary graph_x.
+        assert await resolve_creature_id(svc, "cid-y", "graph_x") == "cid-y"

@@ -8,11 +8,11 @@ from kohakuterrarium.api.routes.sessions_v2 import wiring as wiring_mod
 from kohakuterrarium.terrarium.service import CreatureInfo
 
 
-def _info(cid="cid-1", name="alice"):
+def _info(cid="cid-1", name="alice", graph_id="g1"):
     return CreatureInfo(
         creature_id=cid,
         name=name,
-        graph_id="g1",
+        graph_id=graph_id,
         is_running=True,
         is_privileged=False,
         parent_creature_id=None,
@@ -31,6 +31,7 @@ class _FakeService:
         unwire_returns=True,
         unwire_sink_returns=True,
         raise_on=None,
+        cluster_links=None,
     ):
         self._creatures = creatures or [_info()]
         self._list = list_returns or [{"edge_id": "e1"}]
@@ -38,6 +39,11 @@ class _FakeService:
         self._unwire = unwire_returns
         self._unwire_sink = unwire_sink_returns
         self._raise = raise_on or {}
+        # Records the cid each op was routed to — lets a cluster test
+        # assert the wire landed on the member creature, not the primary.
+        self.wired_cid = None
+        if cluster_links is not None:
+            self._cluster_links = cluster_links
 
     async def list_creatures(self):
         return tuple(self._creatures)
@@ -60,6 +66,7 @@ class _FakeService:
     async def wire_output(self, cid, target):
         if "wire_output" in self._raise:
             raise self._raise["wire_output"]
+        self.wired_cid = cid
         return self._wire
 
     async def unwire_output(self, cid, edge_id):
@@ -133,6 +140,30 @@ class TestWireOutput:
             json={"to": "bob"},
         )
         assert resp.status_code == 404
+
+    def test_cross_node_member_via_cluster_primary(self):
+        # Bug #145: bravo lives on graph_b (a peer worker), but the UI
+        # posts the wire via the cluster PRIMARY graph_a. Pre-fix the
+        # route 404'd (graph_b != graph_a); now it resolves the member
+        # and installs the wire on bravo, not the primary's own creature.
+        # alpha lives on the primary graph_a; bravo on peer graph_b.
+        svc = _FakeService(
+            creatures=[
+                _info(cid="cid-a", name="alpha", graph_id="graph_a"),
+                _info(cid="cid-b", name="bravo", graph_id="graph_b"),
+            ],
+            cluster_links={frozenset({("w1", "graph_a"), ("w2", "graph_b")})},
+        )
+        client = _client(svc)
+        resp = client.post(
+            "/wiring/graph_a/creatures/cid-b/outputs",
+            json={"to": "cid-a"},
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "wired"
+        # The wire must have been routed to bravo (the member), not the
+        # primary graph's creature.
+        assert svc.wired_cid == "cid-b"
 
 
 # ── unwire_creature_output ─────────────────────────────────────
