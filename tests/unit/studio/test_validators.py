@@ -101,6 +101,15 @@ class TestNestedModuleCoercion:
         assert sub.type == "builtin"
         assert sub.can_modify is False
         assert sub.tools == []
+        # Model selector defaults to empty (inherit the parent creature).
+        assert sub.model == ""
+
+    def test_subagent_model_selector_is_a_first_class_field(self):
+        cfg = AgentConfigIn(
+            name="alice",
+            subagents=[{"name": "explore", "model": "codex/gpt-5.5"}],
+        )
+        assert cfg.subagents[0].model == "codex/gpt-5.5"
 
     def test_named_outputs_coerce_recursively(self):
         cfg = AgentConfigIn(

@@ -101,6 +101,28 @@ class TestCreateSubAgentConfigCustomModule:
         assert cfg is not None
         assert cfg.name == "my_sa"
 
+    def test_module_config_honours_option_overrides(self, tmp_path):
+        # A module-loaded config must still pick up creature-level inline
+        # overrides (notably ``model``) — previously dropped on this path.
+        custom = tmp_path / "custom"
+        custom.mkdir()
+        (custom / "sa.py").write_text(textwrap.dedent("""
+                from kohakuterrarium.modules.subagent.config import SubAgentConfig
+
+                MY_CFG = SubAgentConfig(name="my_sa", description="d", tools=["bash"])
+                """))
+        loader = ModuleLoader(agent_path=tmp_path)
+        item = SubAgentConfigItem(
+            name="my_sa",
+            type="custom",
+            module="custom/sa.py",
+            config_name="MY_CFG",
+            options={"model": "codex/gpt-5.5"},
+        )
+        cfg = create_subagent_config(item, loader=loader)
+        assert cfg is not None
+        assert cfg.model == "codex/gpt-5.5"
+
 
 # ── create_subagent_config: inline custom config from options ───
 
@@ -123,6 +145,19 @@ class TestCreateSubAgentConfigInline:
         assert cfg.system_prompt == "You are inline."
         assert cfg.max_turns == 5
         assert cfg.tools == ["read", "write"]
+
+    def test_inline_model_selector_threads_through(self):
+        # A per-sub-agent ``model`` (config-loading folds a top-level key
+        # into options) reaches the SubAgentConfig for both custom-inline
+        # and builtin paths.
+        item = SubAgentConfigItem(
+            name="inline_sa",
+            type="custom",
+            options={"system_prompt": "x", "model": "codex/gpt-5.5"},
+        )
+        cfg = create_subagent_config(item, loader=None)
+        assert cfg is not None
+        assert cfg.model == "codex/gpt-5.5"
 
 
 # ── create_subagent_config: unknown type ────────────────────────

@@ -10,46 +10,12 @@ from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.modules.plugin.base import PluginContext
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
+from kohakuterrarium.modules.subagent.model_resolve import (  # noqa: F401 — re-export
+    resolve_subagent_llm as resolve_llm,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-# Sentinel model values that mean "use the parent's LLM, don't switch
-# to a different model". These never reach the provider's ``with_model``
-# (which would treat them as literal model ids and trip provider-side
-# validation — e.g. Codex/ChatGPT rejects unknown model names).
-_INHERIT_PARENT_SENTINELS: frozenset[str] = frozenset(
-    {"subagent-default", "subagent_default", "default", "inherit", "parent"}
-)
-
-
-def resolve_llm(parent_llm: LLMProvider, config: SubAgentConfig) -> LLMProvider:
-    """Return a sub-agent-specific provider, falling back to the parent.
-
-    Resolution order:
-
-    * Empty / sentinel ``model`` (``"subagent-default"`` etc.) — inherit
-      parent's LLM unchanged. The sentinels exist so a sub-agent config
-      can record intent ("this is meant to run on a sub-agent default
-      model") even when no separate profile has been configured.
-    * Otherwise — call ``parent_llm.with_model(name)``. On exception
-      (unknown model id, provider rejects), log and fall back to
-      parent so the sub-agent still runs.
-    """
-    name = (config.model or "").strip()
-    if not name or name.lower() in _INHERIT_PARENT_SENTINELS:
-        return parent_llm
-    try:
-        return parent_llm.with_model(name)
-    except Exception as exc:
-        logger.warning(
-            "Sub-agent model override failed; inheriting parent LLM",
-            subagent_name=config.name,
-            model=name,
-            error=str(exc),
-        )
-        return parent_llm
 
 
 def build_plugin_manager(
