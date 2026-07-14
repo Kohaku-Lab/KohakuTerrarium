@@ -271,7 +271,7 @@ class TestHandleUiReply:
                 submit_reply_with_status=lambda r: called.append(r) or (True, "ok"),
             )
             sink = _make_sink(node)
-            adapter._handle_ui_reply(sink, alice.agent, "alice", {})
+            adapter._handle_ui_reply(sink, alice, {})
             # No event_id → early return: the router is never invoked and
             # no ack frame is queued.
             assert called == []
@@ -293,8 +293,7 @@ class TestHandleUiReply:
             sink = _make_sink(node)
             adapter._handle_ui_reply(
                 sink,
-                alice.agent,
-                "alice",
+                alice,
                 {
                     "event_id": "e1",
                     "action_id": "act",
@@ -334,7 +333,7 @@ class TestHandleUiReply:
                 submit_reply_with_status=_boom,
             )
             sink = _make_sink(node)
-            adapter._handle_ui_reply(sink, alice.agent, "alice", {"event_id": "e1"})
+            adapter._handle_ui_reply(sink, alice, {"event_id": "e1"})
             # The router raised, but the failure is swallowed: an ack frame
             # is still emitted with status "unknown" so the UI isn't stuck.
             frames = _drain(sink)

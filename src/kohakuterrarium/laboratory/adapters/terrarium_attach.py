@@ -185,7 +185,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                 frame = await sink.receive_json()
                 frame_type = frame.get("type")
                 if frame_type == "ui_reply":
-                    self._handle_ui_reply(sink, agent, creature.name, frame)
+                    self._handle_ui_reply(sink, creature, frame)
                     continue
                 if frame_type == "ui_dismiss":
                     continue
@@ -310,13 +310,23 @@ class TerrariumAttachAdapter(WSProxyAdapter):
     def _handle_ui_reply(
         self,
         sink: WSFrameSink,
-        agent: Any,
-        creature_name: str,
+        creature: Any,
         frame: dict,
     ) -> None:
         event_id = frame.get("event_id")
         if not isinstance(event_id, str) or not event_id:
             return
+        # Resolve the target creature the SAME way an input frame does — a
+        # non-bound SIBLING may have raised the prompt, so submitting to the
+        # bound agent's router only would leave the sibling's pending Future
+        # unresolved and hang its interactive tool forever (UXI-09 lab-path
+        # fix). Fall back to the bound creature when target is absent/unknown.
+        target = creature
+        target_name = (frame.get("target") or "").strip()
+        if target_name and target_name != creature.name:
+            sibling = self._find_sibling_by_name(creature, target_name)
+            if sibling is not None:
+                target = sibling
         reply = UIReply(
             event_id=event_id,
             action_id=frame.get("action_id", ""),
@@ -329,7 +339,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
             ),
         )
         try:
-            _ok, ack_status = agent.output_router.submit_reply_with_status(reply)
+            _ok, ack_status = target.agent.output_router.submit_reply_with_status(reply)
         except Exception:
             logger.warning("submit_reply failed", exc_info=True)
             ack_status = "unknown"
@@ -338,7 +348,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                 "type": "ui_reply_ack",
                 "event_id": event_id,
                 "status": ack_status,
-                "source": creature_name,
+                "source": target.name,
                 "ts": time.time(),
             }
         )
