@@ -1,10 +1,16 @@
-"""``group_add_node`` / ``group_remove_node`` / ``group_start_node`` /
-``group_stop_node`` — lifecycle tools for non-privileged workers."""
+"""Lifecycle tools for non-privileged workers.
 
+``group_add_node`` / ``group_spawn_child`` (spawn), ``group_remove_node``
+(destroy), ``group_start_node`` / ``group_stop_node`` (start / force-stop),
+``group_pause_node`` / ``group_resume_node`` (warm pause), and
+``group_kill_node`` (force-stop + killed marker)."""
+
+import asyncio
 from typing import Any
 
 import kohakuterrarium.terrarium.group_hooks as group_hooks
 from kohakuterrarium.builtins.tool_catalog import register_builtin
+from kohakuterrarium.core.events import create_creature_output_event
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -18,6 +24,9 @@ from kohakuterrarium.terrarium.group_tool_context import (
     resolve_group_target,
 )
 from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 def _caller_pwd(gctx: GroupContext) -> str:
@@ -27,6 +36,25 @@ def _caller_pwd(gctx: GroupContext) -> str:
         if wd is not None:
             return str(wd)
     return ""
+
+
+def _resolve_worker_target(
+    gctx: GroupContext, ident: str, verb: str
+) -> tuple[Any, ToolResult | None]:
+    """Resolve a NON-privileged target in the caller's group, or an error.
+
+    Privileged targets are refused for every lifecycle verb — only the
+    user (Studio) may drive their lifecycle. Shared by the pause / resume
+    / kill tools."""
+    target = resolve_group_target(gctx, ident)
+    if target is None:
+        return None, err(cross_cluster_target_error(gctx.engine, ident))
+    if target.is_privileged:
+        return None, err(
+            f"cannot {verb} privileged creature {target.name!r}; "
+            "only the user can do that via Studio"
+        )
+    return target, None
 
 
 @register_builtin("group_add_node")
@@ -242,8 +270,9 @@ class GroupStopNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Stop a running non-privileged creature in your group "
-            "(does not remove it)"
+            "Force-stop a running non-privileged creature: full teardown "
+            "(NOT a warm pause — use group_pause_node for that). Session "
+            "preserved; restart with group_start_node"
         )
 
     @property
@@ -279,3 +308,290 @@ class GroupStopNodeTool(BaseTool):
         except Exception as exc:
             return err(f"stop failed: {exc}")
         return ok({"stopped": target.creature_id})
+
+
+def _default_link_channel(caller: Any, child: Any) -> str:
+    """Stable name for the default creator<->child channel."""
+    return f"link-{caller.creature_id}-{child.creature_id}"
+
+
+def _log_spawn_task_error(task: asyncio.Task, child_name: str) -> None:
+    """Surface a spawn-task delivery failure at warning level so it does
+    not vanish into the asyncio 'never retrieved' stream."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    logger.warning(
+        "group_spawn_child initial task delivery failed inside child",
+        child=child_name,
+        error=str(exc),
+    )
+
+
+def _deliver_initial_task(caller: Any, child: Any, task: str) -> bool:
+    """Deliver the spawn task directly to the child (immediate, no
+    channel-subscription race — the default channel carries ongoing
+    two-way traffic once the child's listen trigger is live)."""
+    prompt = f"[direct from {caller.name}] {task}"
+    event = create_creature_output_event(
+        source=caller.name,
+        target=child.name,
+        content=task,
+        with_content=True,
+        source_event_type="group_spawn_child",
+        turn_index=0,
+        prompt_override=prompt,
+    )
+    handle = asyncio.create_task(
+        child.agent._process_event(event),
+        name=f"spawn_task_{child.creature_id}",
+    )
+    handle.add_done_callback(lambda t, name=child.name: _log_spawn_task_error(t, name))
+    return True
+
+
+@register_builtin("group_spawn_child")
+class GroupSpawnChildTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_spawn_child"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Spawn a child creature, auto-wire a default two-way channel "
+            "back to you, and optionally hand it a first task — one call "
+            "to use a graph creature as an unbounded sub-agent"
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        # Native schema lives here on the tool class (build_tool_schemas
+        # falls back to get_parameters_schema); NOT in llm/tool_schemas.py.
+        return {
+            "type": "object",
+            "properties": {
+                "config_ref": {
+                    "type": "string",
+                    "description": "Creature config path or @pkg/creatures/<name>",
+                },
+                "task": {
+                    "type": "string",
+                    "description": "Optional first task, delivered immediately.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Optional display name for the child.",
+                },
+                "llm": {"type": "string"},
+                "pwd": {"type": "string"},
+            },
+            "required": ["config_ref"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        config_ref = (args.get("config_ref") or "").strip()
+        if not config_ref:
+            return err("config_ref is required")
+
+        pwd = args.get("pwd") or _caller_pwd(gctx)
+        try:
+            child = await gctx.engine.add_creature(
+                config_ref,
+                graph=gctx.caller.graph_id,
+                llm=args.get("llm"),
+                pwd=pwd,
+                is_privileged=False,
+                parent_creature_id=gctx.caller.creature_id,
+            )
+        except Exception as exc:
+            return err(f"failed to spawn creature from {config_ref!r}: {exc}")
+
+        if name := (args.get("name") or "").strip():
+            group_hooks.apply_creature_name(child, name)
+        group_hooks.attach_session_store(
+            gctx.engine, child, config_path=config_ref, config_type="agent"
+        )
+
+        # Default creator<->child channel. Two connects on one broadcast
+        # channel wire BOTH directions (caller sends + listens, child sends
+        # + listens) so the pair can talk without further wiring.
+        channel = _default_link_channel(gctx.caller, child)
+        try:
+            await gctx.engine.connect(
+                gctx.caller.creature_id, child.creature_id, channel=channel
+            )
+            await gctx.engine.connect(
+                child.creature_id, gctx.caller.creature_id, channel=channel
+            )
+        except Exception as exc:
+            return err(
+                f"spawned {child.creature_id} but default channel wiring "
+                f"failed: {exc}"
+            )
+
+        gctx.engine._emit(
+            EngineEvent(
+                kind=EventKind.PARENT_LINK_CHANGED,
+                creature_id=child.creature_id,
+                graph_id=child.graph_id,
+                payload={"parent": gctx.caller.creature_id, "change": "added"},
+            )
+        )
+
+        task = (args.get("task") or "").strip()
+        delivered = _deliver_initial_task(gctx.caller, child, task) if task else False
+
+        return ok(
+            {
+                "creature_id": child.creature_id,
+                "name": child.name,
+                "graph_id": child.graph_id,
+                "channel": channel,
+                "task_delivered": delivered,
+                "caller_graph_id": gctx.caller.graph_id,
+            }
+        )
+
+
+@register_builtin("group_pause_node")
+class GroupPauseNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_pause_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Warm-pause a non-privileged creature: it stops admitting new "
+            "turns but stays live (resume with group_resume_node). Not a "
+            "teardown — use group_stop_node to force-stop"
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        target, terr = _resolve_worker_target(gctx, ident, "pause")
+        if terr is not None:
+            return terr
+        if not target.is_running:
+            return err(f"creature {target.name!r} is not running")
+        if target.paused:
+            return err(f"creature {target.name!r} is already paused")
+        target.pause()
+        return ok({"paused": target.creature_id})
+
+
+@register_builtin("group_resume_node")
+class GroupResumeNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_resume_node"
+
+    @property
+    def description(self) -> str:
+        return "Resume a warm-paused non-privileged creature (undoes group_pause_node)"
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        target, terr = _resolve_worker_target(gctx, ident, "resume")
+        if terr is not None:
+            return terr
+        if not target.paused:
+            return err(f"creature {target.name!r} is not paused")
+        target.resume()
+        return ok({"resumed": target.creature_id})
+
+
+@register_builtin("group_kill_node")
+class GroupKillNodeTool(BaseTool):
+    needs_context = True
+
+    @property
+    def tool_name(self) -> str:
+        return "group_kill_node"
+
+    @property
+    def description(self) -> str:
+        return (
+            "Force-stop a non-privileged creature and mark it killed. Hard "
+            "kill is NOT supported in a shared process — this is an honest "
+            "force-stop, not a fake SIGKILL"
+        )
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    def get_parameters_schema(self) -> dict:
+        return {
+            "type": "object",
+            "properties": {"creature_id": {"type": "string"}},
+            "required": ["creature_id"],
+        }
+
+    async def _execute(
+        self, args: dict[str, Any], context: ToolContext | None = None
+    ) -> ToolResult:
+        gctx, err_result = resolve_or_error(context)
+        if err_result is not None:
+            return err_result
+        ident = (args.get("creature_id") or "").strip()
+        target, terr = _resolve_worker_target(gctx, ident, "kill")
+        if terr is not None:
+            return terr
+        if not target.is_running:
+            return err(f"creature {target.name!r} is not running")
+        try:
+            await gctx.engine.stop(target.creature_id)
+        except Exception as exc:
+            return err(f"kill failed: {exc}")
+        target._killed = True
+        return ok({"killed": target.creature_id, "hard_kill_supported": False})

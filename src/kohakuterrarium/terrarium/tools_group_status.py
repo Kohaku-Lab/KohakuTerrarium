@@ -55,66 +55,84 @@ class GroupStatusTool(BaseTool):
         # the tool itself is not registered for them.
         return (
             "The `group_*` tools let you build and run a **team of "
-            "creatures** for heavy or parallel work that benefits from "
-            "more than one independent agent context. Reach for a team "
-            "(over a sub-agent) when workers need their own toolset / "
-            "cwd / model, when they should react to each other "
-            "asynchronously through channels rather than as nested "
-            "calls, or when the work fans out into many sub-tasks you "
-            "want to dispatch in parallel and recombine. Sub-agents "
-            "stay better for one-shot delegated computations — "
-            "spawning a creature has higher fixed cost.\n\n"
-            "**Team-building workflow** (call in order):\n\n"
+            "creatures**. Treat a graph creature as an **unbounded "
+            "sub-agent**: unlike a private sub-agent (bounded — one "
+            "delegated call that returns once), a graph creature runs "
+            "its own persistent loop with its own toolset / cwd / model, "
+            "reacts asynchronously to messages, and stays alive for "
+            "follow-ups. Reach for a graph creature when work is "
+            "open-ended, fans out into many parallel sub-tasks, or needs "
+            "back-and-forth; reach for a private sub-agent when the work "
+            "is a single bounded computation (lower fixed cost).\n\n"
+            "**Shortcut — one call to get a worker running:** "
+            "`group_spawn_child(config_ref, task?, name?)` spawns a "
+            "child into your graph, auto-wires a default two-way channel "
+            "between you and it, and (if `task` is given) hands it that "
+            "first task immediately. This is the fast path for "
+            '"spin up a worker and put it to work"; the manual steps '
+            "below are for finer control (custom channel topologies, "
+            "output-wire pipelines, wiring existing nodes).\n\n"
+            "**Manual team-building workflow** (call in order):\n\n"
             "  1. `group_status` — snapshot the current group. Pass "
             "`include_spawnable=true` to see which creature configs "
             "you can spawn (e.g. `@<pkg>/creatures/<name>`). Run this "
             "before dispatching so you know who is already wired and "
             "what is available.\n"
             "  2. `group_add_node(config_path, name?, pwd?)` — spawn a "
-            "worker into your graph. Pass `pwd=` to give the worker "
-            "its own working directory (sandbox, per-task subdir, …); "
-            "omit to inherit yours. The worker starts isolated — "
-            "nothing reaches it until you wire it.\n"
+            "worker into your graph WITHOUT wiring it. Pass `pwd=` to "
+            "give the worker its own working directory; omit to inherit "
+            "yours. The worker starts isolated — nothing reaches it "
+            "until you wire it (use `group_spawn_child` instead to spawn "
+            "AND wire in one call).\n"
             '  3. `group_channel(action="create", channel, '
             "description)` — declare a channel for routing messages. "
             "Channels are broadcast: every listener receives every "
             "send. A creature's own messages are filtered out, so do "
             "not rely on self-loops to drive iteration.\n"
             '  4. `group_channel(action="wire", channel, '
-            "creature_id, direction)` — attach each creature as "
-            '`"listen"`, `"send"`, or `"both"`. Typical '
+            'creature_id, direction)` — `direction` is `"listen"` OR '
+            '`"send"` (one edge per call; call twice for both). Typical '
             "dispatch pattern: you `send` and workers `listen` on a "
             "task channel; workers `send` and you `listen` on a "
             "results channel.\n"
-            '  5. `group_wire(action="add", from_id, to_id, '
-            "with_content?)` — optional output-wire when you want a "
-            "worker's final turn text auto-delivered to another "
-            "creature without an explicit send. Use channels for "
-            "dispatch, wires for pipeline hand-off.\n"
+            '  5. `group_wire(action="add", from, to, with_content?)` '
+            "— optional output-wire when you want a worker's final turn "
+            "text auto-delivered to another creature (`from`/`to` are "
+            "creature ids or names) without an explicit send. Use "
+            "channels for dispatch, wires for pipeline hand-off.\n"
             "  6. `send_channel(channel, message)` to broadcast, or "
             "`group_send(to, message)` for a one-shot direct delivery "
             "to a single creature. From this point workers wake up "
             "and run their own loops in parallel; you stay free to "
             "plan, dispatch more work, or read replies on your listen "
             "channels.\n\n"
-            "**Lifecycle and teardown.** When a worker is no longer "
-            "needed: `group_stop_node(creature_id)` pauses it without "
-            "removing (session preserved; resume with "
-            '`group_start_node`). `group_channel(action="unwire", '
-            "…)` drops a creature's edge on a channel, and "
-            '`group_channel(action="delete", channel)` drops the '
-            'channel entirely. `group_wire(action="remove", …)` '
-            "undoes an output-wire. `group_remove_node(creature_id)` "
-            "destroys a non-privileged worker outright. Tear down "
-            "channels and wires touching a creature **before** "
-            "removing it for a clean snapshot.\n\n"
+            "**Lifecycle — four distinct verbs, keep them straight:**\n"
+            "  - `group_pause_node(creature_id)` / "
+            "`group_resume_node(creature_id)` — **warm pause**: the "
+            "worker stops admitting new turns but stays live and warm; "
+            "resume re-admits and drains anything that queued while "
+            "paused. Use this to hold a worker briefly.\n"
+            "  - `group_stop_node(creature_id)` — **force-stop**: a full "
+            "teardown (NOT a pause). The worker stops servicing events; "
+            "its session is preserved and `group_start_node(creature_id)` "
+            "restarts it cold.\n"
+            "  - `group_kill_node(creature_id)` — force-stop **plus** a "
+            "`killed` marker. Hard kill is not supported in a shared "
+            "process, so this is an honest force-stop, not a fake "
+            "SIGKILL.\n"
+            "  - `group_remove_node(creature_id)` — destroy a "
+            "non-privileged worker outright. Tear down channels / wires "
+            'touching it first (`group_channel(action="unwire"|'
+            '"delete", …)`, `group_wire(action="remove", …)`) for a '
+            "clean snapshot.\n\n"
             "**Reading the snapshot.** Each creature carries a "
             "`status` field — one of `not_started`, `idle`, `busy`, "
-            "`stopped`, `error`. `busy` means a controller turn is in "
-            "flight (your dispatch queues rather than preempts); "
-            "`idle` means the worker is ready for the next message; "
-            "`error` means its input loop crashed and it needs a "
-            "restart."
+            "`stopped`, `error` — plus `paused` / `killed` flags. "
+            "`busy` means a controller turn is in flight (your dispatch "
+            "queues rather than preempts); `idle` means the worker is "
+            "ready for the next message; `paused` means it is warm but "
+            "admitting no turns; `error` means its input loop crashed "
+            "and it needs a restart."
         )
 
     def get_parameters_schema(self) -> dict:
@@ -150,6 +168,8 @@ class GroupStatusTool(BaseTool):
                     "creature_id": cid,
                     "name": c.name,
                     "status": c.status,
+                    "paused": getattr(c, "paused", False),
+                    "killed": getattr(c, "killed", False),
                     "is_privileged": c.is_privileged,
                     "in_my_graph": cid in graph.creature_ids,
                     "is_my_child": (

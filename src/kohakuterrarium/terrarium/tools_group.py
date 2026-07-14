@@ -51,9 +51,13 @@ ENGINE_BASIC_TOOL_NAMES: tuple[str, ...] = (
 PRIVILEGED_TOOL_NAMES: tuple[str, ...] = (
     "group_status",
     "group_add_node",
+    "group_spawn_child",
     "group_remove_node",
     "group_start_node",
     "group_stop_node",
+    "group_pause_node",
+    "group_resume_node",
+    "group_kill_node",
     "group_channel",
     "group_wire",
 )
@@ -65,7 +69,14 @@ GROUP_TOOL_NAMES: tuple[str, ...] = ENGINE_BASIC_TOOL_NAMES + PRIVILEGED_TOOL_NA
 def _register_named(agent: Any, names: tuple[str, ...]) -> None:
     """Register every tool in ``names`` on ``agent``. Idempotent —
     tools already present are skipped. Silently no-ops when the
-    agent's registry doesn't support ``register_tool`` (test fakes)."""
+    agent's registry doesn't support ``register_tool`` (test fakes).
+
+    Rebuilds the system prompt after any NEW registration so the group_*
+    tools (and ``group_status``'s "graph creature as unbounded sub-agent"
+    guidance) actually reach the model. Without this the prompt stays
+    frozen at build time and the tools are invisible in bracket/text mode
+    unless the Drive plugin install happens to rebuild it — so a
+    Drive-disabled creature could never see them (UXI-10 critic fix)."""
     registry = getattr(agent, "registry", None)
     executor = getattr(agent, "executor", None)
     if registry is None:
@@ -74,6 +85,7 @@ def _register_named(agent: Any, names: tuple[str, ...]) -> None:
     get_tool = getattr(registry, "get_tool", None)
     if not callable(register):
         return
+    registered_any = False
     for name in names:
         if callable(get_tool) and get_tool(name) is not None:
             continue
@@ -84,9 +96,17 @@ def _register_named(agent: Any, names: tuple[str, ...]) -> None:
             register(tool)
         except Exception:
             continue
+        registered_any = True
         if executor is not None:
             try:
                 executor.register_tool(tool)
+            except Exception:
+                pass
+    if registered_any:
+        refresh = getattr(agent, "refresh_system_prompt", None)
+        if callable(refresh):
+            try:
+                refresh()
             except Exception:
                 pass
 

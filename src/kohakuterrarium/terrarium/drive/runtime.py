@@ -125,11 +125,11 @@ class _EngineDriveSink:
     """:class:`DriveDeliverySink` over ``Creature.inject_event`` (design §5.2).
 
     ``deliver`` rejects-because-stopped when the target creature is absent, not
-    running, or has not yet crossed its restoration barrier (§6.5: no Drive is
-    delivered before restoration-ready); otherwise it admits the event by
-    starting its turn and returns a settlement source that resolves when the
-    turn settles. One sink serves every per-graph manager — it resolves the
-    target creature by id engine-wide.
+    running, warm-paused (UXI-11), or has not yet crossed its restoration
+    barrier (§6.5: no Drive is delivered before restoration-ready); otherwise
+    it admits the event by starting its turn and returns a settlement source
+    that resolves when the turn settles. One sink serves every per-graph
+    manager — it resolves the target creature by id engine-wide.
     """
 
     def __init__(self, engine: Any) -> None:
@@ -139,7 +139,16 @@ class _EngineDriveSink:
         self, creature_id: str, event: Any, *, delivery_id: str
     ) -> DeliveryOutcome:
         creature = self._engine._creatures.get(creature_id)
-        if creature is None or not creature.is_running:
+        # A warm-paused creature stays ``is_running`` but admits no turns —
+        # deliver would be rejected mid-turn and (rejected→transient→retry)
+        # burn the retry budget into a dead-letter, flipping the Drive to
+        # BLOCKED. Defer it like the stopped case (no failure count) so it
+        # redelivers on resume (UXI-11 critic fix).
+        if (
+            creature is None
+            or not creature.is_running
+            or getattr(creature, "paused", False)
+        ):
             return DeliveryOutcome.rejected_stopped()
         # Restoration barrier (§6.5): defer — with no failure count, same as a
         # stopped assignee — until the creature's startup trigger has settled.

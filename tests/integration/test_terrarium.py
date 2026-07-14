@@ -1490,6 +1490,48 @@ class TestTerrariumIntegration:
 
         await service.shutdown()
 
+    @pytest.mark.timeout(60)
+    async def test_group_tools_visible_in_prompt_with_drive_off(
+        self, patched_llm, tmp_path
+    ):
+        """UXI-10 blocker: the group_* tools + ``group_status`` guidance must
+        reach the model even when Drive is OFF.
+
+        Registration happens AFTER the agent is built, so without a prompt
+        rebuild the tools are frozen out of ``## Available Functions`` in
+        bracket/text mode. It only ever worked because the Drive plugin
+        install rebuilt the prompt — so a Drive-DISABLED privileged creature
+        could not spawn/wire graph creatures at all. ``_register_named`` now
+        refreshes the prompt; this pins that it holds with Drive off.
+        """
+        engine = Terrarium(
+            pwd=str(tmp_path), drive_config=DriveRuntimeConfig(enabled=False)
+        )
+        # Prove Drive is genuinely off (so the prompt refresh is NOT coming
+        # from the Drive plugin install).
+        assert engine.drives is None
+        async with engine:
+            root = await engine.add_creature(
+                _agent_config("root", tmp_path),
+                creature_id="root",
+                is_privileged=True,
+            )
+            prompt = root.agent.get_system_prompt()
+            # The privileged surface AND the paradigm guidance are live.
+            assert "group_spawn_child" in prompt
+            assert "send_channel" in prompt
+            assert "unbounded sub-agent" in prompt
+            # A non-privileged creature gets the comm tools but not the
+            # graph-mutating surface.
+            worker = await engine.add_creature(
+                _agent_config("worker", tmp_path),
+                graph=root.graph_id,
+                creature_id="worker",
+            )
+            wprompt = worker.agent.get_system_prompt()
+            assert "send_channel" in wprompt
+            assert "group_spawn_child" not in wprompt
+
     @pytest.mark.timeout(120)
     async def test_drive_runtime_local_mvp(self, patched_llm, tmp_path):
         """M1 Drive workflow through explicit constructor args.
