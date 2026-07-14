@@ -46,6 +46,45 @@ class TestBuildCreatureLLMInjection:
         )
 
 
+# ── warm pause + kill markers (UXI-11) ─────────────────────────
+
+
+class TestCreatureLifecycleMarkers:
+    def test_pause_resume_delegate_to_agent(self):
+        agent = _FakeAgent(name="w")
+        agent._paused = False
+        agent.pause = lambda: setattr(agent, "_paused", True)
+        agent.resume = lambda: setattr(agent, "_paused", False)
+        c = _creature(name="w", agent=agent)
+        assert c.paused is False
+        c.pause()
+        assert c.paused is True
+        c.resume()
+        assert c.paused is False
+
+    async def test_killed_marker_reset_on_start(self):
+        agent = _FakeAgent(name="w")
+        c = _creature(name="w", agent=agent)
+        assert c.killed is False
+        c._killed = True
+        assert c.killed is True
+        # A fresh start clears the killed marker.
+        await c.start()
+        try:
+            assert c.killed is False
+        finally:
+            await c.stop()
+
+    def test_get_status_reports_paused_and_killed(self):
+        agent = _FakeAgent(name="w")
+        agent._paused = True
+        c = _creature(name="w", agent=agent)
+        c._killed = True
+        status = c.get_status()
+        assert status["paused"] is True
+        assert status["killed"] is True
+
+
 # ── typed turn drivers on Creature (E3) ────────────────────────
 
 

@@ -104,6 +104,9 @@ class Creature:
     # is captured here so :attr:`status` can report ``"error"`` until
     # the next ``start()`` clears it.
     _input_loop_error: BaseException | None = None
+    # Force-stop-with-marker (UXI-11 kill): distinguishes a creature that
+    # was killed from one plainly stopped. Cleared on the next start().
+    _killed: bool = False
     # Restoration barrier (design §6.5) — runtime-only readiness state the
     # engine's Drive runtime gates reconciliation on. Transitions:
     # added -> restoring -> started -> startup_settled -> restoration_ready.
@@ -139,6 +142,7 @@ class Creature:
         self._running = True
         self._ever_started = True
         self._input_loop_error = None
+        self._killed = False
         self._restoration_state = RESTORATION_STARTED
         drive_input = getattr(self.agent, "_drive_input", None)
         if callable(drive_input):
@@ -324,6 +328,29 @@ class Creature:
         if proc is not None and not proc.done():
             return "busy"
         return "idle"
+
+    @property
+    def paused(self) -> bool:
+        """Whether the creature is warm-paused (UXI-11). Orthogonal to
+        :attr:`status`/:attr:`is_running` — a paused creature stays alive
+        and warm, it just admits no new turns until resumed."""
+        return bool(getattr(self.agent, "_paused", False))
+
+    @property
+    def killed(self) -> bool:
+        """Whether this creature was force-stopped via a kill op (UXI-11).
+        Cleared on the next :meth:`start`."""
+        return self._killed
+
+    def pause(self) -> None:
+        """Warm-pause the underlying agent (thin delegate — see
+        :meth:`Agent.pause`)."""
+        self.agent.pause()
+
+    def resume(self) -> None:
+        """Resume the underlying agent from a warm pause (thin delegate —
+        see :meth:`Agent.resume`)."""
+        self.agent.resume()
 
     # ------------------------------------------------------------------
     # typed turn drivers (E3) — the programmatic chat surface
@@ -522,6 +549,8 @@ class Creature:
             "max_context": max_context,
             "compact_threshold": compact_threshold,
             "running": self.is_running,
+            "paused": self.paused,
+            "killed": self._killed,
             "is_processing": bool(getattr(agent, "_processing_task", None)),
             "tools": agent.tools,
             "subagents": agent.subagents,

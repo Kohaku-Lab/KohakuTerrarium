@@ -539,10 +539,13 @@ async def _reconcile_graph(engine: Any, registry: Any, gid: str) -> None:
     if graph is None:
         return
     # Reconcile per running, restoration-ready creature so redelivery still
-    # respects the §6.5 barrier.
+    # respects the §6.5 barrier. A warm-paused creature (UXI-11) is skipped
+    # too — redelivering to it would only re-hit the paused admission gate.
     for cid in graph.creature_ids:
         creature = engine._creatures.get(cid)
         if creature is None or not creature.is_running:
+            continue
+        if getattr(creature, "paused", False):
             continue
         if not getattr(creature, "restoration_ready", True):
             continue

@@ -5,6 +5,8 @@ creature exists, that it belongs to the named graph, or that the named graph is
 the Drive's canonical graph. The service boundary (which owns the engine) does.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from kohakuterrarium.terrarium.creature_host import Creature
@@ -15,6 +17,7 @@ from kohakuterrarium.terrarium.drive.config import (
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
+from kohakuterrarium.terrarium.drive.topology import _reconcile_graph
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent
@@ -22,6 +25,35 @@ from kohakuterrarium.testing.terrarium import _FakeAgent
 pytestmark = pytest.mark.timeout(30)
 
 ADMIN = ActorRef("service", "ops")
+
+
+async def test_reconcile_skips_paused_and_stopped_creatures():
+    # UXI-11: Drive redelivery reconcile must skip a warm-paused creature
+    # (it stays is_running but admits no turns) exactly like a stopped one —
+    # otherwise redelivery re-hits the paused gate and burns the retry budget.
+    reconciled: list[str] = []
+
+    class _Mgr:
+        async def reconcile(self, *, creature_id):
+            reconciled.append(creature_id)
+
+    creatures = {
+        "run": SimpleNamespace(is_running=True, paused=False, restoration_ready=True),
+        "paused": SimpleNamespace(is_running=True, paused=True, restoration_ready=True),
+        "stopped": SimpleNamespace(
+            is_running=False, paused=False, restoration_ready=True
+        ),
+    }
+    engine = SimpleNamespace(
+        _topology=SimpleNamespace(
+            graphs={"g": SimpleNamespace(creature_ids=list(creatures))}
+        ),
+        _creatures=creatures,
+    )
+    registry = SimpleNamespace(peek=lambda gid: _Mgr())
+    await _reconcile_graph(engine, registry, "g")
+    # Only the running, non-paused creature is reconciled.
+    assert reconciled == ["run"]
 
 
 async def _two_graphs():

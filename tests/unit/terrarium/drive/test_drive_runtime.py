@@ -63,9 +63,10 @@ class _FakeAgentState:
 
 
 class _FakeCreature:
-    def __init__(self, cid, *, running=True, result=None):
+    def __init__(self, cid, *, running=True, result=None, paused=False):
         self.creature_id = cid
         self._running = running
+        self.paused = paused
         self.agent = _FakeAgentState()
         self.result = result if result is not None else TurnResult(status="ok")
         self.injected: list = []
@@ -165,6 +166,20 @@ class TestEngineSink:
         sink = _EngineDriveSink(engine)
         out = await sink.deliver("worker", object(), delivery_id="d1")
         assert out.admitted is False
+
+    async def test_rejected_when_creature_paused(self):
+        # UXI-11: a warm-paused creature stays is_running but admits no turns.
+        # deliver must defer (rejected-because-stopped, NO failure count) so
+        # the delivery redelivers on resume — NOT admit → run_event rejects →
+        # transient retry → dead-letter → Drive BLOCKED.
+        engine = _FakeEngine()
+        creature = _FakeCreature("worker", paused=True)
+        engine._creatures["worker"] = creature
+        sink = _EngineDriveSink(engine)
+        out = await sink.deliver("worker", object(), delivery_id="d1")
+        assert out.admitted is False
+        # The event never entered the paused creature.
+        assert creature.injected == []
 
     async def test_deferred_when_not_restoration_ready(self):
         # Barrier not crossed (§6.5): a running creature still defers — the

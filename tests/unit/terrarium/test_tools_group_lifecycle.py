@@ -6,6 +6,7 @@ the test focused on the lifecycle decisions (privilege checks, error
 formatting, engine method dispatch) without spinning a full engine.
 """
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -34,6 +35,18 @@ class _FakeCreature:
         self.is_running = is_running
         self.parent_creature_id = parent_creature_id
         self.agent = SimpleNamespace(executor=None)
+        self._paused = False
+        self._killed = False
+
+    @property
+    def paused(self):
+        return self._paused
+
+    def pause(self):
+        self._paused = True
+
+    def resume(self):
+        self._paused = False
 
 
 class _FakeEngine:
@@ -42,6 +55,7 @@ class _FakeEngine:
         self.remove_creature = AsyncMock()
         self.start = AsyncMock()
         self.stop = AsyncMock()
+        self.connect = AsyncMock()
         self.emitted = []
 
     def _emit(self, event):
@@ -268,6 +282,204 @@ class TestGroupStartStop:
         assert body["stopped"] == "cid-target"
 
 
+# ── group_spawn_child ─────────────────────────────────────────
+
+
+class TestGroupSpawnChild:
+    def _child(self, **kw):
+        child = _FakeCreature(**kw)
+        child.agent = SimpleNamespace(executor=None, _process_event=AsyncMock())
+        return child
+
+    async def test_missing_config_ref(self, monkeypatch):
+        _patch_resolve(monkeypatch, _gctx())
+        tool = lifecycle_mod.GroupSpawnChildTool()
+        r = await tool._execute({"config_ref": ""})
+        assert "config_ref is required" in r.error
+
+    async def test_add_creature_failure(self, monkeypatch):
+        gctx = _gctx()
+        gctx.engine.add_creature.side_effect = RuntimeError("boom")
+        _patch_resolve(monkeypatch, gctx)
+        tool = lifecycle_mod.GroupSpawnChildTool()
+        r = await tool._execute({"config_ref": "./c"})
+        assert "failed to spawn" in r.error
+
+    async def test_spawn_wires_default_channel_both_ways_and_delivers_task(
+        self, monkeypatch
+    ):
+        gctx = _gctx()
+        child = self._child(cid="cid-child", name="worker", parent_creature_id="caller")
+        gctx.engine.add_creature.return_value = child
+        _patch_resolve(monkeypatch, gctx)
+        monkeypatch.setattr(
+            lifecycle_mod.group_hooks, "attach_session_store", lambda e, c, **kw: None
+        )
+        tool = lifecycle_mod.GroupSpawnChildTool()
+        r = await tool._execute(
+            {"config_ref": "@pkg/creatures/worker", "task": "do the thing"}
+        )
+        body = _parse(r)
+        assert body["creature_id"] == "cid-child"
+        assert body["channel"] == "link-caller-cid-child"
+        assert body["task_delivered"] is True
+        # The default channel is wired BOTH ways: two connects on the same
+        # channel (caller<->child).
+        assert gctx.engine.connect.await_count == 2
+        channels = {
+            call.kwargs.get("channel") for call in gctx.engine.connect.await_args_list
+        }
+        assert channels == {"link-caller-cid-child"}
+        # The task reached the child.
+        await asyncio.sleep(0.01)
+        child.agent._process_event.assert_awaited()
+
+    async def test_spawn_without_task_delivers_nothing(self, monkeypatch):
+        gctx = _gctx()
+        child = self._child(cid="cid-child", name="worker")
+        gctx.engine.add_creature.return_value = child
+        _patch_resolve(monkeypatch, gctx)
+        monkeypatch.setattr(
+            lifecycle_mod.group_hooks, "attach_session_store", lambda e, c, **kw: None
+        )
+        tool = lifecycle_mod.GroupSpawnChildTool()
+        r = await tool._execute({"config_ref": "./c"})
+        body = _parse(r)
+        assert body["task_delivered"] is False
+        await asyncio.sleep(0.01)
+        child.agent._process_event.assert_not_awaited()
+
+    async def test_channel_wire_failure_surfaced(self, monkeypatch):
+        gctx = _gctx()
+        child = self._child(cid="cid-child", name="worker")
+        gctx.engine.add_creature.return_value = child
+        gctx.engine.connect.side_effect = RuntimeError("wire boom")
+        _patch_resolve(monkeypatch, gctx)
+        monkeypatch.setattr(
+            lifecycle_mod.group_hooks, "attach_session_store", lambda e, c, **kw: None
+        )
+        tool = lifecycle_mod.GroupSpawnChildTool()
+        r = await tool._execute({"config_ref": "./c"})
+        assert "default channel wiring failed" in r.error
+
+
+# ── group_pause_node / group_resume_node ──────────────────────
+
+
+class TestGroupPauseResume:
+    async def test_pause_missing_target(self, monkeypatch):
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, None)
+        r = await lifecycle_mod.GroupPauseNodeTool()._execute({"creature_id": "ghost"})
+        assert "not in your group" in r.error
+
+    async def test_pause_rejects_privileged(self, monkeypatch):
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, _FakeCreature(is_privileged=True, is_running=True))
+        r = await lifecycle_mod.GroupPauseNodeTool()._execute({"creature_id": "p"})
+        assert "cannot pause privileged" in r.error
+
+    async def test_pause_not_running(self, monkeypatch):
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, _FakeCreature(is_running=False))
+        r = await lifecycle_mod.GroupPauseNodeTool()._execute({"creature_id": "c"})
+        assert "is not running" in r.error
+
+    async def test_pause_success(self, monkeypatch):
+        target = _FakeCreature(is_running=True)
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, target)
+        r = await lifecycle_mod.GroupPauseNodeTool()._execute({"creature_id": "c"})
+        assert _parse(r)["paused"] == "cid-target"
+        assert target.paused is True
+
+    async def test_pause_already_paused(self, monkeypatch):
+        target = _FakeCreature(is_running=True)
+        target.pause()
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, target)
+        r = await lifecycle_mod.GroupPauseNodeTool()._execute({"creature_id": "c"})
+        assert "already paused" in r.error
+
+    async def test_resume_success(self, monkeypatch):
+        target = _FakeCreature(is_running=True)
+        target.pause()
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, target)
+        r = await lifecycle_mod.GroupResumeNodeTool()._execute({"creature_id": "c"})
+        assert _parse(r)["resumed"] == "cid-target"
+        assert target.paused is False
+
+    async def test_resume_not_paused(self, monkeypatch):
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, _FakeCreature(is_running=True))
+        r = await lifecycle_mod.GroupResumeNodeTool()._execute({"creature_id": "c"})
+        assert "is not paused" in r.error
+
+
+# ── group_kill_node ───────────────────────────────────────────
+
+
+class TestGroupKill:
+    async def test_kill_rejects_privileged(self, monkeypatch):
+        _patch_resolve(monkeypatch, _gctx())
+        _patch_target(monkeypatch, _FakeCreature(is_privileged=True, is_running=True))
+        r = await lifecycle_mod.GroupKillNodeTool()._execute({"creature_id": "p"})
+        assert "cannot kill privileged" in r.error
+
+    async def test_kill_force_stops_and_marks_no_hard_kill(self, monkeypatch):
+        gctx = _gctx()
+        target = _FakeCreature(is_running=True)
+        _patch_resolve(monkeypatch, gctx)
+        _patch_target(monkeypatch, target)
+        r = await lifecycle_mod.GroupKillNodeTool()._execute({"creature_id": "c"})
+        body = _parse(r)
+        assert body["killed"] == "cid-target"
+        # Honest about the shared-process limitation.
+        assert body["hard_kill_supported"] is False
+        # Force-stop went through engine.stop; killed marker set.
+        gctx.engine.stop.assert_awaited_once_with("cid-target")
+        assert target._killed is True
+
+    async def test_kill_stop_failure(self, monkeypatch):
+        gctx = _gctx()
+        gctx.engine.stop.side_effect = RuntimeError("nope")
+        _patch_resolve(monkeypatch, gctx)
+        _patch_target(monkeypatch, _FakeCreature(is_running=True))
+        r = await lifecycle_mod.GroupKillNodeTool()._execute({"creature_id": "c"})
+        assert "kill failed" in r.error
+
+    async def test_kill_not_running_rejected(self, monkeypatch):
+        # Parity with group_stop_node: killing an already-stopped worker is a
+        # clean error, not a no-op force-stop.
+        gctx = _gctx()
+        _patch_resolve(monkeypatch, gctx)
+        _patch_target(monkeypatch, _FakeCreature(is_running=False))
+        r = await lifecycle_mod.GroupKillNodeTool()._execute({"creature_id": "c"})
+        assert "is not running" in r.error
+        gctx.engine.stop.assert_not_awaited()
+
+
+# ── group_status prompt contribution (UXI-10) ─────────────────
+
+
+class TestStatusPromptContribution:
+    def test_teaches_spawn_and_distinct_lifecycle_verbs(self):
+        from kohakuterrarium.terrarium.tools_group_status import GroupStatusTool
+
+        prompt = GroupStatusTool().prompt_contribution()
+        # Mental model: graph creature as an unbounded sub-agent.
+        assert "unbounded sub-agent" in prompt
+        # The one-call shortcut is taught.
+        assert "group_spawn_child" in prompt
+        # Distinct lifecycle verbs, and the false "stop == pause" claim is gone.
+        assert "group_pause_node" in prompt
+        assert "group_kill_node" in prompt
+        assert "pauses it without removing" not in prompt
+        # Prompt drift fixed: no stale from_id/to_id; direction is send|listen only.
+        assert "from_id" not in prompt and "to_id" not in prompt
+
+
 # ── _caller_pwd ──────────────────────────────────────────────
 
 
@@ -296,9 +508,13 @@ class TestCallerPwd:
     "tool_cls",
     [
         lifecycle_mod.GroupAddNodeTool,
+        lifecycle_mod.GroupSpawnChildTool,
         lifecycle_mod.GroupRemoveNodeTool,
         lifecycle_mod.GroupStartNodeTool,
         lifecycle_mod.GroupStopNodeTool,
+        lifecycle_mod.GroupPauseNodeTool,
+        lifecycle_mod.GroupResumeNodeTool,
+        lifecycle_mod.GroupKillNodeTool,
     ],
 )
 def test_tool_metadata(tool_cls):
