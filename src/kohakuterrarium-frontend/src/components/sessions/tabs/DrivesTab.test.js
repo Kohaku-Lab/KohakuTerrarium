@@ -81,4 +81,24 @@ describe("DrivesTab — saved-session viewer", () => {
     expect(drivesAPI.get).not.toHaveBeenCalled()
     expect(drivesAPI.deliveries).not.toHaveBeenCalled()
   })
+
+  it("reads the LIVE drives route when the bound session is live (item 17)", async () => {
+    // The inspector binds the viewer live; the saved sidecar read returns
+    // [] under the writer lock, so the tab must use the live list to show
+    // real running rows.
+    const detail = useSessionDetailStore()
+    detail.name = "live_graph_7"
+    detail.live = true
+    drivesAPI.list.mockResolvedValue({ drives: [_row("d1")] })
+
+    const w = mount(DrivesTab, { global: { plugins: [ElementPlus] } })
+    await flushPromises()
+
+    expect(drivesAPI.list).toHaveBeenCalledWith("live_graph_7", expect.anything())
+    expect(drivesAPI.savedList).not.toHaveBeenCalled()
+    const store = useDrivesStore("live:live_graph_7")
+    expect(store.saved).toBe(false)
+    expect(store.list).toHaveLength(1)
+    expect(w.text()).toContain("Live Drives")
+  })
 })

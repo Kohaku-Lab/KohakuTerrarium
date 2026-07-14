@@ -1,28 +1,28 @@
 <template>
   <div class="h-full flex flex-col overflow-hidden">
-    <InspectorHeader :target="target" :instance="instance" />
+    <!-- Compact live-status header — folds the live-only data (running
+         jobs, live token counts, scratchpad, ctx%) onto the viewer frame. -->
+    <InspectorHeader :target="target" :instance="instance" :session-name="sessionName" />
 
-    <!-- Inner-tab strip -->
-    <div class="h-9 flex items-center px-2 border-b border-warm-200 dark:border-warm-700 bg-warm-100 dark:bg-warm-900">
-      <button v-for="entry in innerTabsList" :key="entry.id" class="h-9 px-3 text-xs" :class="activeInner === entry.id ? 'border-b-2 border-iolite text-warm-800 dark:text-warm-200 -mb-px' : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300'" @click="setInner(entry.id)">
-        {{ entry.label }}
-      </button>
+    <!-- The Inspect surface IS the session-history-viewer, bound to the
+         LIVE session id: same Overview / Trace / Conversation / Cost tabs
+         a saved session gets, for the running session (UXI-01). -->
+    <div class="flex-1 min-h-0 overflow-hidden">
+      <SessionViewerPage v-if="sessionName" :key="sessionName" :session-name-prop="sessionName" :live="true" />
+      <div v-else class="p-4 text-warm-400 italic text-sm">No active session.</div>
     </div>
-
-    <!-- Active inner -->
-    <component :is="ActiveInner" v-if="ActiveInner" :target="target" :instance="instance" class="flex-1 overflow-hidden" />
-    <div v-else class="flex-1 p-4 text-warm-400 italic">No inner tab selected.</div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, watch } from "vue"
 
 import InspectorHeader from "@/components/shell/tabs/InspectorHeader.vue"
+import SessionViewerPage from "@/components/sessions/pages/SessionViewerPage.vue"
 import { provideScope } from "@/composables/useScope"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
-import { inspectorInnerTabs } from "@/stores/tabKindRegistry"
+import { useSessionDetailStore } from "@/stores/sessionDetail"
 
 const props = defineProps({ tab: { type: Object, required: true } })
 
@@ -30,55 +30,50 @@ const target = computed(() => props.tab.target)
 const instances = useInstancesStore()
 const instance = computed(() => instances.list.find((i) => i.id === target.value) ?? null)
 
-// Provide the scope so every descendant inner tab (Header, Overview,
-// Activity, Trace, Log) resolves the per-attach status / messages /
-// chat stores rather than the default singletons. Without this, the
-// inner tabs read empty state regardless of whether the WS is open.
+// Scope so the header + embedded viewer resolve this target's stores.
 provideScope(target.value)
 
-// Open the data feed for this target. ``initForInstance`` opens the
-// chat WS and routes its activity events into the scoped status store
-// — which is what every inner tab reads. Pass the scope explicitly
-// here because Vue's ``inject()`` does not see the caller's own
-// ``provide()`` (same-component caveat in ``useScope.js``).
-//
-// If an attach tab for the same target is already open, AttachTab has
-// already inited the same scoped chat store; ``initForInstance``
-// short-circuits when ``_instanceId === id`` and reuses the live WS.
-// So the cost of inspecting alone vs. inspecting alongside chat is at
-// most one extra ``/history`` round-trip.
+// Open the live feed so the header's jobs / tokens / scratchpad update.
+// Pass the scope explicitly (Vue's inject doesn't see a same-component
+// provide). initForInstance short-circuits when already bound, so an
+// inspector alongside a chat tab reuses the live WS.
 const chat = useChatStore(target.value)
 
-const STORAGE_KEY = computed(() => `kt.inspect.${target.value}.inner`)
+// An active session already persists a store the history-viewer reads by
+// name; ``instance.id`` (= session_id) IS that name.
+const sessionName = computed(() => instance.value?.session_id || target.value)
 
-const activeInner = ref(loadInner())
+// Same scoped session-detail store the embedded SessionViewerPage uses —
+// bumping ``requestReload`` on it drives every viewer tab to refetch.
+const detail = useSessionDetailStore(sessionName.value)
 
-function loadInner() {
-  try {
-    return localStorage.getItem(STORAGE_KEY.value) ?? "overview"
-  } catch {
-    return "overview"
-  }
+// The embedded viewer fetches once; drive it to refetch as the LIVE
+// session advances. ``SessionViewerPage`` is display-only history — the
+// WS feed lands in the chat store, so watch a coarse "a round changed"
+// signal (top-level message count + processing edge; text chunks don't
+// bump the count), debounce a burst into one refetch, and skip while the
+// browser tab is hidden. This inspector is mounted only while its macro
+// tab is the visible one (TabContent uses v-if), so no extra tab gating.
+const roundSignal = computed(() => {
+  let count = 0
+  for (const arr of Object.values(chat.messagesByTab || {})) count += arr?.length || 0
+  return `${count}|${chat.anyProcessing}`
+})
+
+let _reloadTimer = null
+function scheduleReload() {
+  if (_reloadTimer) clearTimeout(_reloadTimer)
+  _reloadTimer = setTimeout(() => {
+    _reloadTimer = null
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return
+    detail.requestReload()
+  }, 1200)
 }
+watch(roundSignal, scheduleReload)
+onUnmounted(() => {
+  if (_reloadTimer) clearTimeout(_reloadTimer)
+})
 
-function setInner(id) {
-  activeInner.value = id
-  try {
-    localStorage.setItem(STORAGE_KEY.value, id)
-  } catch {
-    /* swallow */
-  }
-}
-
-const innerTabsList = computed(() => [...inspectorInnerTabs.entries()].map(([id, def]) => ({ id, ...def })).sort((a, b) => a.order - b.order))
-
-const ActiveInner = computed(() => inspectorInnerTabs.get(activeInner.value)?.component ?? null)
-
-// Lazy fetch the instance if not yet in the list (the rail's polling
-// fills it in for running targets, but a freshly-mounted inspector
-// may beat the poll). Once we have an instance, kick off the chat
-// store's WS — that's what feeds the scoped status / messages stores
-// the inner tabs read.
 async function ensureFeed() {
   let inst = instance.value
   if (!inst && typeof instances.fetchOne === "function") {
@@ -94,10 +89,4 @@ async function ensureFeed() {
 }
 onMounted(ensureFeed)
 watch(target, ensureFeed)
-
-// If the user ever navigates to a different target, reset inner-tab to
-// the persisted value for that target.
-watch(target, () => {
-  activeInner.value = loadInner()
-})
 </script>

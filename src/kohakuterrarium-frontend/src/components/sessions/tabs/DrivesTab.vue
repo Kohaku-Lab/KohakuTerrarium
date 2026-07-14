@@ -2,7 +2,7 @@
   <div class="h-full min-h-0 flex flex-col overflow-hidden">
     <div class="px-4 py-2 shrink-0 flex items-center gap-2 text-[12px] text-warm-500">
       <span class="i-carbon-flow" />
-      <span>Persisted Drives</span>
+      <span>{{ detail.live ? "Live Drives" : "Persisted Drives" }}</span>
       <DriveCountBadges :counts="store.counts" />
       <span class="ml-auto text-[11px] text-warm-400">read-only</span>
     </div>
@@ -30,15 +30,20 @@ import DriveSummaryRow from "@/components/drives/DriveSummaryRow.vue"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { useDrivesStore } from "@/stores/drives"
 
-// Saved-session viewer is read-only: no live store, no polling/WS. A distinct
+// Read-only viewer: no polling/WS, selection stays read-only. A live
+// session (inspector) reads the live ``/sessions/{sid}/drives`` route so
+// running rows actually show — its saved sidecar read returns [] under
+// the writer lock; a saved session reads the persisted sidecar. A distinct
 // scope keeps it isolated from any live workspace showing the same name.
 const detail = useSessionDetailStore()
-const store = useDrivesStore(`saved:${detail.name || "session"}`)
+const store = useDrivesStore(`${detail.live ? "live" : "saved"}:${detail.name || "session"}`)
 
 watch(
   () => detail.name,
   (name) => {
-    if (name) store.loadSaved(name)
+    if (!name) return
+    if (detail.live) store.load(name)
+    else store.loadSaved(name)
   },
   { immediate: true },
 )
