@@ -159,6 +159,50 @@ class TestLiveSessionResolution:
         finally:
             store.close()
 
+    def test_live_viewer_reuses_the_attached_store(self, monkeypatch, tmp_path):
+        # THE CI bug (POSIX): a second SessionStore open of the live,
+        # actively-written file fails with SQLITE_IOERR. While the
+        # session is live, every viewer read — addressed by graph_id OR
+        # by the store's file stem — must reuse the engine's open store,
+        # so constructing a new store (and on-disk name resolution) is
+        # bombed.
+        import types
+
+        from kohakuterrarium.api.deps import get_service
+        from kohakuterrarium.session.store import SessionStore
+        from kohakuterrarium.studio.persistence.viewer import diff as diff_mod
+
+        store_path = tmp_path / "alice_3f2a9c11.kohakutr"
+        store = SessionStore(str(store_path))
+        store.init_meta("alice", "agent", "/p", "/w", ["alice"])
+        store.checkpoint()
+        engine = types.SimpleNamespace(_session_stores={"graph_live": store})
+
+        def _bomb(*a, **k):
+            raise AssertionError("live viewer read must not reopen the session file")
+
+        monkeypatch.setattr(viewer_mod, "SessionStore", _bomb)
+        monkeypatch.setattr(viewer_mod, "resolve_session_path_default", _bomb)
+        monkeypatch.setattr(diff_mod, "SessionStore", _bomb)
+
+        app = FastAPI()
+        app.include_router(viewer_mod.router, prefix="/sessions")
+        app.dependency_overrides[get_service] = lambda: engine
+        client = TestClient(app)
+        try:
+            for name in ("graph_live", "alice_3f2a9c11"):
+                for noun in ("summary", "tree", "turns", "events"):
+                    resp = client.get(f"/sessions/{name}/{noun}")
+                    assert resp.status_code == 200, (name, noun, resp.text)
+                export = client.get(f"/sessions/{name}/export")
+                assert export.status_code == 200, (name, export.text)
+                # Self-diff while live: both sides reuse the open store.
+                diff = client.get(f"/sessions/{name}/diff", params={"other": name})
+                assert diff.status_code == 200, (name, diff.text)
+                assert diff.json()["identical"] is True
+        finally:
+            store.close()
+
 
 # ── turns ──────────────────────────────────────────────────────
 

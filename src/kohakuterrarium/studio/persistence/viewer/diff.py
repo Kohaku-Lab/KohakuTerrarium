@@ -95,22 +95,36 @@ def _summarize_msg(msg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _load_messages(path: Path, agent_arg: str | None) -> tuple[list[dict], str, str]:
+def _replay_messages(
+    store: SessionStore, fallback_name: str, agent_arg: str | None
+) -> tuple[list[dict], str, str]:
+    """Replay one side's messages from an open store."""
+    meta = store.load_meta()
+    name = str(meta.get("session_id") or fallback_name)
+    agent = _agents_for(meta, store, agent_arg)
+    events = store.get_events(agent)
+    return (replay_conversation(events) if events else []), name, agent
+
+
+def _load_messages(
+    path: Path,
+    agent_arg: str | None,
+    store: SessionStore | None = None,
+) -> tuple[list[dict], str, str]:
     """Open the store, replay events, return ``(messages, name, agent)``.
 
-    Guards existence first — ``SessionStore(path)`` would otherwise
-    create an empty file as a side effect of the diff lookup.
+    ``store``: an already-open LIVE store to reuse (caller keeps
+    ownership — it is not closed here). Otherwise the on-disk file is
+    opened, guarding existence first — ``SessionStore(path)`` would
+    otherwise create an empty file as a side effect of the diff lookup.
     """
+    if store is not None:
+        return _replay_messages(store, Path(path).stem, agent_arg)
     if not Path(path).exists():
         raise NotFoundError(f"Session not found: {path}")
     store = SessionStore(path)
     try:
-        meta = store.load_meta()
-        name = str(meta.get("session_id") or path.stem)
-        agent = _agents_for(meta, store, agent_arg)
-        events = store.get_events(agent)
-        msgs = replay_conversation(events) if events else []
-        return msgs, name, agent
+        return _replay_messages(store, path.stem, agent_arg)
     finally:
         store.close(update_status=False)
 
@@ -120,6 +134,8 @@ def build_diff_payload(
     b_path: Path,
     *,
     agent: str | None,
+    a_store: SessionStore | None = None,
+    b_store: SessionStore | None = None,
 ) -> dict[str, Any]:
     """Compute the diff payload for ``a`` vs ``b``.
 
@@ -128,9 +144,13 @@ def build_diff_payload(
     shared prefix length, divergence point, and the divergent suffixes
     from each side as one-line summaries — full message bodies stay
     server-side so a single diff request stays small.
+
+    ``a_store`` / ``b_store``: already-open LIVE stores to reuse for
+    the matching side — a second open of an actively-written file is
+    unreliable on POSIX (``SQLITE_IOERR``).
     """
-    a_msgs, a_name, a_agent = _load_messages(a_path, agent)
-    b_msgs, b_name, b_agent = _load_messages(b_path, agent)
+    a_msgs, a_name, a_agent = _load_messages(a_path, agent, a_store)
+    b_msgs, b_name, b_agent = _load_messages(b_path, agent, b_store)
 
     # Shared-prefix length using the coarse signature.
     common = 0
