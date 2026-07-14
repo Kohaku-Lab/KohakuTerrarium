@@ -13,13 +13,15 @@ follow-up units.
 
 Wire types:
 
-| type              | body              | response                           |
-|-------------------|-------------------|------------------------------------|
-| ``get_api_key``   | ``{provider}``    | ``{key}``                          |
-| ``get_profile``   | ``{name}``        | ``{profile}``                      |
-| ``list_profiles`` | ``{}``            | ``{profiles}``                     |
-| ``get_mcp_server``| ``{name}``        | ``{server}``                       |
-| ``list_mcp_servers`` | ``{}``         | ``{servers}``                      |
+| type                  | body                        | response          |
+|-----------------------|-----------------------------|-------------------|
+| ``get_api_key``       | ``{provider}``              | ``{key}``         |
+| ``get_profile``       | ``{name}``                  | ``{profile}``     |
+| ``list_profiles``     | ``{}``                      | ``{profiles}``    |
+| ``get_mcp_server``    | ``{name}``                  | ``{server}``      |
+| ``list_mcp_servers``  | ``{}``                      | ``{servers}``     |
+| ``codex_usage``       | ``{}``                      | usage snapshot    |
+| ``codex_reset_consume``| ``{idempotency_key?, credit_id?}`` | ``{outcome, idempotency_key}`` |
 
 Errors translate to the standard envelope (``not_found`` /
 ``invalid`` / ``identity``).  An empty API key from the store is
@@ -39,7 +41,9 @@ from kohakuterrarium.studio.identity.api_keys import (
     set_key,
 )
 from kohakuterrarium.studio.identity.codex_oauth import (
+    consume_reset_credit_async as codex_consume_reset_credit,
     get_status as codex_get_status,
+    get_usage_async as codex_get_usage,
     login_async as codex_login_async,
 )
 from kohakuterrarium.studio.identity.llm_profiles import list_profiles_payload
@@ -105,6 +109,10 @@ class StudioIdentityAdapter:
                 return await self._op_codex_login()
             case "codex_status":
                 return codex_get_status()
+            case "codex_usage":
+                return await codex_get_usage()
+            case "codex_reset_consume":
+                return await self._op_codex_reset_consume(msg.body)
             case _:
                 return {
                     "error": {
@@ -179,6 +187,17 @@ class StudioIdentityAdapter:
         """
         result = await codex_login_async()
         return result
+
+    async def _op_codex_reset_consume(self, body: dict[str, Any]) -> dict[str, Any]:
+        """Redeem a rate-limit reset credit on THIS node's Codex account.
+
+        Runs against the node-local Codex tokens (process-bound, same
+        rationale as ``codex_login`` / ``get_codex_token``).
+        """
+        return await codex_consume_reset_credit(
+            idempotency_key=body.get("idempotency_key") or None,
+            credit_id=body.get("credit_id") or None,
+        )
 
     def _op_get_mcp_server(self, body: dict[str, Any]) -> dict[str, Any]:
         name = body.get("name")

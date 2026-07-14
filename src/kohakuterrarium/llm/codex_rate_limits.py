@@ -313,6 +313,127 @@ def parse_promo_message(headers: Mapping[str, str]) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Live usage-body parsing (GET /wham/usage)
+# ---------------------------------------------------------------------------
+
+# ``rate_limit_reached_type.type`` values the backend advertises; anything
+# else collapses to None (see codex-rs RateLimitReachedKind).
+_REACHED_TYPES = frozenset(
+    {
+        "rate_limit_reached",
+        "workspace_owner_credits_depleted",
+        "workspace_member_credits_depleted",
+        "workspace_owner_usage_limit_reached",
+        "workspace_member_usage_limit_reached",
+    }
+)
+
+
+def _window_from_body(d: Any) -> RateLimitWindow | None:
+    """Map a ``RateLimitWindowSnapshot`` object to a RateLimitWindow."""
+    if not isinstance(d, dict):
+        return None
+    used = d.get("used_percent")
+    if not isinstance(used, (int, float)) or isinstance(used, bool):
+        return None
+    seconds = d.get("limit_window_seconds")
+    window_minutes = (
+        (int(seconds) + 59) // 60
+        if isinstance(seconds, (int, float))
+        and not isinstance(seconds, bool)
+        and seconds > 0
+        else None
+    )
+    reset_at = d.get("reset_at")
+    return RateLimitWindow(
+        used_percent=float(used),
+        window_minutes=window_minutes,
+        resets_at=(
+            int(reset_at)
+            if isinstance(reset_at, (int, float)) and not isinstance(reset_at, bool)
+            else None
+        ),
+    )
+
+
+def _credits_from_body(d: Any) -> CreditsSnapshot | None:
+    if not isinstance(d, dict):
+        return None
+    has_credits = d.get("has_credits")
+    unlimited = d.get("unlimited")
+    if not isinstance(has_credits, bool) or not isinstance(unlimited, bool):
+        return None
+    balance = d.get("balance")
+    return CreditsSnapshot(
+        has_credits=has_credits,
+        unlimited=unlimited,
+        balance=str(balance) if balance is not None else None,
+    )
+
+
+def _reached_type_from_body(d: Any) -> str | None:
+    if not isinstance(d, dict):
+        return None
+    kind = d.get("type")
+    return kind if isinstance(kind, str) and kind in _REACHED_TYPES else None
+
+
+def snapshots_from_usage_body(body: Mapping[str, Any]) -> list[RateLimitSnapshot]:
+    """Parse a ``GET /wham/usage`` JSON body into rate-limit snapshots.
+
+    The authoritative live counterpart of :func:`parse_all_rate_limits`:
+    the default ``codex`` family comes from ``rate_limit`` + ``credits``,
+    and each ``additional_rate_limits`` entry becomes an extra family.
+    Faithful to codex-rs ``rate_limit_snapshots_from_payload``.
+    """
+    if not isinstance(body, Mapping):
+        return []
+    plan_type = body.get("plan_type")
+    plan = plan_type if isinstance(plan_type, str) else None
+    rate_limit = body.get("rate_limit")
+    rate_limit = rate_limit if isinstance(rate_limit, dict) else {}
+
+    snapshots = [
+        RateLimitSnapshot(
+            limit_id="codex",
+            limit_name=None,
+            primary=_window_from_body(rate_limit.get("primary_window")),
+            secondary=_window_from_body(rate_limit.get("secondary_window")),
+            credits=_credits_from_body(body.get("credits")),
+            plan_type=plan,
+            rate_limit_reached_type=_reached_type_from_body(
+                body.get("rate_limit_reached_type")
+            ),
+        )
+    ]
+
+    additional = body.get("additional_rate_limits")
+    if isinstance(additional, list):
+        for entry in additional:
+            if not isinstance(entry, dict):
+                continue
+            raw_id = entry.get("metered_feature") or entry.get("limit_name")
+            if not isinstance(raw_id, str) or not raw_id:
+                continue
+            limit_id = _normalize_limit_id(raw_id)
+            if limit_id == "codex":
+                continue
+            rl = entry.get("rate_limit")
+            rl = rl if isinstance(rl, dict) else {}
+            name = entry.get("limit_name")
+            snap = RateLimitSnapshot(
+                limit_id=limit_id,
+                limit_name=name if isinstance(name, str) else None,
+                primary=_window_from_body(rl.get("primary_window")),
+                secondary=_window_from_body(rl.get("secondary_window")),
+                plan_type=plan,
+            )
+            if snap.has_data():
+                snapshots.append(snap)
+    return snapshots
+
+
+# ---------------------------------------------------------------------------
 # SSE event parsing
 # ---------------------------------------------------------------------------
 

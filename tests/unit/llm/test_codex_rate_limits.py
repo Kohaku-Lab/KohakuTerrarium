@@ -21,6 +21,7 @@ from kohakuterrarium.llm.codex_rate_limits import (
     parse_rate_limit_event,
     parse_rate_limit_for_limit,
     set_cached,
+    snapshots_from_usage_body,
 )
 
 
@@ -279,3 +280,114 @@ class TestProcessCache:
         )
         clear_cache()
         assert get_cached() is None
+
+
+class TestSnapshotsFromUsageBody:
+    def test_default_family_maps_windows_credits_and_plan(self):
+        body = {
+            "plan_type": "pro",
+            "rate_limit": {
+                "primary_window": {
+                    "used_percent": 42,
+                    "limit_window_seconds": 300,
+                    "reset_at": 123,
+                },
+                "secondary_window": {
+                    "used_percent": 84,
+                    "limit_window_seconds": 3600,
+                    "reset_at": 456,
+                },
+            },
+            "credits": {"has_credits": True, "unlimited": False, "balance": "9.99"},
+            "rate_limit_reached_type": {"type": "workspace_member_credits_depleted"},
+        }
+        snaps = snapshots_from_usage_body(body)
+        assert len(snaps) == 1
+        codex = snaps[0]
+        assert codex.limit_id == "codex"
+        assert codex.plan_type == "pro"
+        # limit_window_seconds → ceil(seconds / 60) window_minutes.
+        assert codex.primary == RateLimitWindow(
+            used_percent=42.0, window_minutes=5, resets_at=123
+        )
+        assert codex.secondary == RateLimitWindow(
+            used_percent=84.0, window_minutes=60, resets_at=456
+        )
+        assert codex.credits == CreditsSnapshot(
+            has_credits=True, unlimited=False, balance="9.99"
+        )
+        assert codex.rate_limit_reached_type == "workspace_member_credits_depleted"
+
+    def test_additional_families_become_extra_snapshots(self):
+        body = {
+            "plan_type": "plus",
+            "rate_limit": {
+                "primary_window": {"used_percent": 10, "limit_window_seconds": 300}
+            },
+            "additional_rate_limits": [
+                {
+                    "limit_name": "Codex Other",
+                    "metered_feature": "codex_other",
+                    "rate_limit": {
+                        "primary_window": {
+                            "used_percent": 70,
+                            "limit_window_seconds": 900,
+                            "reset_at": 789,
+                        }
+                    },
+                }
+            ],
+        }
+        snaps = snapshots_from_usage_body(body)
+        assert [s.limit_id for s in snaps] == ["codex", "codex_other"]
+        other = snaps[1]
+        assert other.limit_name == "Codex Other"
+        assert other.primary == RateLimitWindow(
+            used_percent=70.0, window_minutes=15, resets_at=789
+        )
+        # Additional families never carry credits.
+        assert other.credits is None
+
+    def test_zero_percent_window_is_kept_not_dropped(self):
+        # A present-but-zero window is real data (0% used), unlike the
+        # header path which drops all-zero windows.
+        body = {
+            "plan_type": "free",
+            "rate_limit": {
+                "primary_window": {"used_percent": 0, "limit_window_seconds": 300}
+            },
+        }
+        codex = snapshots_from_usage_body(body)[0]
+        assert codex.primary == RateLimitWindow(
+            used_percent=0.0, window_minutes=5, resets_at=None
+        )
+
+    def test_absent_rate_limit_yields_empty_default_family(self):
+        codex = snapshots_from_usage_body({"plan_type": "plus"})[0]
+        assert codex.limit_id == "codex"
+        assert codex.primary is None
+        assert codex.secondary is None
+        assert codex.credits is None
+        assert codex.rate_limit_reached_type is None
+
+    def test_unknown_reached_type_collapses_to_none(self):
+        codex = snapshots_from_usage_body(
+            {"rate_limit_reached_type": {"type": "bogus"}}
+        )[0]
+        assert codex.rate_limit_reached_type is None
+
+    def test_additional_family_named_codex_is_skipped(self):
+        body = {
+            "additional_rate_limits": [
+                {
+                    "limit_name": "codex",
+                    "metered_feature": "codex",
+                    "rate_limit": {"primary_window": {"used_percent": 5}},
+                }
+            ]
+        }
+        # The extra "codex" entry must not duplicate the default family.
+        assert [s.limit_id for s in snapshots_from_usage_body(body)] == ["codex"]
+
+    def test_non_mapping_body_returns_empty(self):
+        assert snapshots_from_usage_body([]) == []
