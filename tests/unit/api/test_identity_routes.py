@@ -1,5 +1,6 @@
 """Unit tests for the API identity routes (ui_prefs, codex, api_keys)."""
 
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -104,6 +105,70 @@ class TestCodexRoute:
         client = TestClient(_app(codex_mod.router))
         resp = client.get("/codex-usage")
         assert resp.status_code == 401
+
+    def test_reset_consume_success(self, monkeypatch):
+        captured = {}
+
+        async def fake_consume(*, idempotency_key=None, credit_id=None):
+            captured["idempotency_key"] = idempotency_key
+            captured["credit_id"] = credit_id
+            return {"outcome": "reset", "idempotency_key": "k-1"}
+
+        monkeypatch.setattr(codex_mod, "consume_reset_credit_async", fake_consume)
+        client = TestClient(_app(codex_mod.router))
+        resp = client.post("/codex-reset-consume", json={"credit_id": "credit-9"})
+        assert resp.status_code == 200
+        assert resp.json() == {"outcome": "reset", "idempotency_key": "k-1"}
+        # Empty/absent idempotency_key becomes None (server generates one).
+        assert captured == {"idempotency_key": None, "credit_id": "credit-9"}
+
+    def test_reset_consume_not_authenticated_is_401(self, monkeypatch):
+        async def fake_consume(*, idempotency_key=None, credit_id=None):
+            raise PermissionError("Codex account is not authenticated")
+
+        monkeypatch.setattr(codex_mod, "consume_reset_credit_async", fake_consume)
+        client = TestClient(_app(codex_mod.router))
+        resp = client.post("/codex-reset-consume", json={})
+        assert resp.status_code == 401
+
+    def test_reset_consume_backend_error_is_502(self, monkeypatch):
+        async def fake_consume(*, idempotency_key=None, credit_id=None):
+            raise RuntimeError("backend 500")
+
+        monkeypatch.setattr(codex_mod, "consume_reset_credit_async", fake_consume)
+        client = TestClient(_app(codex_mod.router))
+        resp = client.post("/codex-reset-consume", json={})
+        assert resp.status_code == 502
+
+    def test_reset_consume_upstream_401_maps_to_401(self, monkeypatch):
+        # A genuine ChatGPT auth rejection (tokens present but stale) must
+        # surface as 401, not a misleading 502.
+        async def fake_consume(*, idempotency_key=None, credit_id=None):
+            request = httpx.Request("POST", "https://chatgpt.com/x")
+            raise httpx.HTTPStatusError(
+                "unauthorized",
+                request=request,
+                response=httpx.Response(401, request=request),
+            )
+
+        monkeypatch.setattr(codex_mod, "consume_reset_credit_async", fake_consume)
+        client = TestClient(_app(codex_mod.router))
+        resp = client.post("/codex-reset-consume", json={})
+        assert resp.status_code == 401
+
+    def test_reset_consume_upstream_500_stays_502(self, monkeypatch):
+        async def fake_consume(*, idempotency_key=None, credit_id=None):
+            request = httpx.Request("POST", "https://chatgpt.com/x")
+            raise httpx.HTTPStatusError(
+                "boom",
+                request=request,
+                response=httpx.Response(500, request=request),
+            )
+
+        monkeypatch.setattr(codex_mod, "consume_reset_credit_async", fake_consume)
+        client = TestClient(_app(codex_mod.router))
+        resp = client.post("/codex-reset-consume", json={})
+        assert resp.status_code == 502
 
 
 # ── api_keys route ──────────────────────────────────────────────

@@ -185,3 +185,53 @@ class TestGetCodexToken:
         adapter = StudioIdentityAdapter(_FakeNode())
         out = await adapter._dispatch(_msg("get_codex_token"))
         assert out.get("error", {}).get("kind") == "not_found"
+
+
+# ── codex_usage / codex_reset_consume ───────────────────────────
+
+
+class TestCodexAccount:
+    async def test_usage_dispatches_to_usage_fn(self, monkeypatch):
+        # Regression guard: the verb must dispatch to the node-local
+        # usage client, NOT fall through to the unknown-type arm.
+        async def fake_usage():
+            return {"status": "ok", "source": "live", "snapshots": []}
+
+        monkeypatch.setattr(mod, "codex_get_usage", fake_usage)
+        adapter = StudioIdentityAdapter(_FakeNode())
+        out = await adapter._dispatch(_msg("codex_usage"))
+        assert out == {"status": "ok", "source": "live", "snapshots": []}
+        assert "error" not in out
+
+    async def test_reset_consume_passes_body_params(self, monkeypatch):
+        seen = {}
+
+        async def fake_consume(*, idempotency_key=None, credit_id=None):
+            seen["idempotency_key"] = idempotency_key
+            seen["credit_id"] = credit_id
+            return {"outcome": "reset", "idempotency_key": idempotency_key}
+
+        monkeypatch.setattr(mod, "codex_consume_reset_credit", fake_consume)
+        adapter = StudioIdentityAdapter(_FakeNode())
+        out = await adapter._dispatch(
+            _msg("codex_reset_consume", {"idempotency_key": "k1", "credit_id": "c1"})
+        )
+        assert seen == {"idempotency_key": "k1", "credit_id": "c1"}
+        assert out["outcome"] == "reset"
+
+    async def test_reset_consume_empty_strings_become_none(self, monkeypatch):
+        seen = {}
+
+        async def fake_consume(*, idempotency_key=None, credit_id=None):
+            seen["idempotency_key"] = idempotency_key
+            seen["credit_id"] = credit_id
+            return {"outcome": "nothingToReset", "idempotency_key": "gen"}
+
+        monkeypatch.setattr(mod, "codex_consume_reset_credit", fake_consume)
+        adapter = StudioIdentityAdapter(_FakeNode())
+        await adapter._dispatch(
+            _msg("codex_reset_consume", {"idempotency_key": "", "credit_id": ""})
+        )
+        # Empty strings normalize to None so the client generates a key
+        # and redeems any credit (never sends an empty credit_id).
+        assert seen == {"idempotency_key": None, "credit_id": None}

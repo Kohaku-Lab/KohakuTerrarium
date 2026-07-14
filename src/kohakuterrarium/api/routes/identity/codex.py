@@ -10,8 +10,10 @@ are process-bound so the host's token cannot be reused remotely.
 import asyncio
 import json
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
 
 from kohakuterrarium.api.auth import verify_admin_token
 from kohakuterrarium.api.deps import get_service
@@ -20,6 +22,7 @@ from kohakuterrarium.api.routes.identity.node_routing import (
     is_host_target,
 )
 from kohakuterrarium.studio.identity.codex_oauth import (
+    consume_reset_credit_async,
     get_status,
     get_usage_async,
     login_async,
@@ -170,9 +173,63 @@ async def codex_status(
 
 
 @router.get("/codex-usage")
-async def get_codex_usage():
-    """Return the most-recent captured Codex rate-limit / credits snapshot."""
-    try:
-        return await get_usage_async()
-    except Exception as e:
-        raise HTTPException(401, f"Failed to refresh Codex tokens: {e}") from e
+async def get_codex_usage(
+    node: str = "",
+    service: TerrariumService = Depends(get_service),
+):
+    """Return the live Codex rate-limit / credits snapshot for the node.
+
+    Host target performs a live ``/wham/usage`` fetch (no model round);
+    a worker target routes to that worker's own Codex tokens via the
+    ``studio.identity`` ``codex_usage`` op.
+    """
+    if is_host_target(node):
+        try:
+            return await get_usage_async()
+        except Exception as e:
+            raise HTTPException(401, f"Failed to refresh Codex tokens: {e}") from e
+    return await call_node_identity(service, node, "codex_usage")
+
+
+class CodexResetConsumeRequest(BaseModel):
+    idempotency_key: str | None = None
+    credit_id: str | None = None
+
+
+@router.post("/codex-reset-consume", dependencies=[Depends(verify_admin_token)])
+async def codex_reset_consume(
+    req: CodexResetConsumeRequest,
+    node: str = "",
+    service: TerrariumService = Depends(get_service),
+):
+    """Redeem a Codex rate-limit reset credit on the targeted node.
+
+    Never optimistically decrements — the frontend refetches usage after
+    a ``reset`` / ``alreadyRedeemed`` outcome.  Worker targets route to
+    that worker's ``codex_reset_consume`` adapter op.
+    """
+    if is_host_target(node):
+        try:
+            return await consume_reset_credit_async(
+                idempotency_key=req.idempotency_key or None,
+                credit_id=req.credit_id or None,
+            )
+        except PermissionError as e:
+            raise HTTPException(401, str(e)) from e
+        except httpx.HTTPStatusError as e:
+            # An upstream auth rejection is a 401 for the caller; only
+            # genuine gateway / transport failures are a 502.
+            if e.response.status_code == 401:
+                raise HTTPException(401, f"Codex rejected the request: {e}") from e
+            raise HTTPException(502, f"Codex reset consume failed: {e}") from e
+        except Exception as e:
+            raise HTTPException(502, f"Codex reset consume failed: {e}") from e
+    return await call_node_identity(
+        service,
+        node,
+        "codex_reset_consume",
+        {
+            "idempotency_key": req.idempotency_key or "",
+            "credit_id": req.credit_id or "",
+        },
+    )

@@ -342,8 +342,23 @@
               <div v-if="codexUsage.promo_message" class="card p-3 border-l-3 border-l-iolite text-xs text-warm-600 dark:text-warm-400">
                 {{ codexUsage.promo_message }}
               </div>
-              <div class="text-[11px] text-warm-400">{{ t("settings.account.refreshHint") }}</div>
             </template>
+
+            <!-- Redeemable rate-limit reset credits -->
+            <div v-if="resetCredits.length" class="card p-4 flex flex-col gap-3">
+              <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.account.resetCredits") }}</div>
+              <div v-for="credit in resetCredits" :key="credit.id" class="flex items-center justify-between gap-3 text-xs">
+                <div class="min-w-0">
+                  <div class="text-warm-700 dark:text-warm-300 truncate">{{ credit.title || credit.reset_type || t("settings.account.resetCredit") }}</div>
+                  <div v-if="credit.description" class="text-[11px] text-warm-400 truncate">{{ credit.description }}</div>
+                  <div v-if="credit.expires_at" class="text-[11px] text-warm-400">{{ t("settings.account.resetExpires", { value: credit.expires_at }) }}</div>
+                </div>
+                <el-button size="small" type="primary" plain :loading="redeemingCreditId === credit.id" :disabled="!!redeemingCreditId" @click="redeemResetCredit(credit)">
+                  {{ t("settings.account.resetRedeem") }}
+                </el-button>
+              </div>
+            </div>
+
             <el-button size="small" @click="loadCodexUsage">{{ t("common.refresh") }}</el-button>
           </template>
         </div>
@@ -572,9 +587,12 @@ async function onCodexLoginDone() {
 
 // Re-fetch keys whenever the user switches target node. Backends and
 // presets remain host-managed metadata; only the key + Codex-OAuth
-// state is per-node.
+// state is per-node. Codex usage is per-node too, so refresh it when the
+// Account tab is open (otherwise it shows the old node's usage until a
+// manual Refresh) — UXI-13.
 watch(providerNode, () => {
   loadKeys()
+  if (activeTab.value === "account") loadCodexUsage()
 })
 
 // ───────── Backends / providers ─────────
@@ -920,16 +938,53 @@ async function removeMCPServer(name) {
 const codexUsage = ref(null)
 const codexUsageLoading = ref(false)
 const codexUsageError = ref("")
+const redeemingCreditId = ref("")
 
 async function loadCodexUsage() {
   codexUsageLoading.value = true
   codexUsageError.value = ""
   try {
-    codexUsage.value = await settingsAPI.getCodexUsage()
+    // Live snapshot for the settings-target node — no model round.
+    codexUsage.value = await settingsAPI.getCodexUsage(providerNode.value)
   } catch (err) {
     codexUsageError.value = err.response?.data?.detail || t("settings.account.loadFailed")
   } finally {
     codexUsageLoading.value = false
+  }
+}
+
+const resetCredits = computed(() => codexUsage.value?.reset_credits?.credits || [])
+
+// Outcome → user message. The redeem is idempotent on the backend, so a
+// stable key derived from the credit id means a retried click never
+// double-spends. Refetch on success so the snapshot + credit list reflect
+// the redemption.
+async function redeemResetCredit(credit) {
+  if (!credit?.id || redeemingCreditId.value) return
+  redeemingCreditId.value = credit.id
+  try {
+    const res = await settingsAPI.codexResetConsume({ idempotencyKey: `reset-${credit.id}`, creditId: credit.id }, providerNode.value)
+    switch (res?.outcome) {
+      case "reset":
+        ElMessage.success(t("settings.account.resetRedeemed"))
+        break
+      case "nothingToReset":
+        ElMessage.info(t("settings.account.resetNothing"))
+        break
+      case "noCredit":
+        ElMessage.warning(t("settings.account.resetNoCredit"))
+        break
+      case "alreadyRedeemed":
+        ElMessage.info(t("settings.account.resetAlready"))
+        break
+      default:
+        ElMessage.info(String(res?.outcome || ""))
+    }
+    await loadCodexUsage()
+  } catch (err) {
+    ElMessage.error(err.response?.data?.detail || t("settings.account.resetFailed"))
+  } finally {
+    redeemingCreditId.value = ""
   }
 }
 
@@ -977,7 +1032,9 @@ onMounted(async () => {
 })
 
 watch(activeTab, (tab) => {
-  if (tab === "account" && !codexUsage.value && !codexUsageLoading.value) loadCodexUsage()
+  // Live refresh every time the Account tab is opened — the snapshot is
+  // fetched fresh (no model round), never served from a stale cache.
+  if (tab === "account" && !codexUsageLoading.value) loadCodexUsage()
 })
 
 // The Drives *record* panel lives in a workspace, not in global Settings.

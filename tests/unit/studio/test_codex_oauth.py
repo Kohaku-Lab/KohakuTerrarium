@@ -1,5 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.studio.identity.codex_oauth`."""
 
+import pytest
+
 from kohakuterrarium.studio.identity import codex_oauth as mod
 from kohakuterrarium.studio.identity.codex_oauth import (
     get_status,
@@ -110,7 +112,22 @@ class TestLoginAsync:
         assert seen["open_browser"] is False
 
 
-# ── get_usage_async ─────────────────────────────────────────────
+# ── get_usage_async (live-first, cache fallback) ─────────────────
+
+
+def _patch_live(monkeypatch, *, usage=None, credits=None, raises=None):
+    """Install fake ``fetch_usage`` / ``list_reset_credits`` on the module."""
+
+    async def fake_fetch(tokens):
+        if raises is not None:
+            raise raises
+        return usage or {"snapshots": [], "available_count": None}
+
+    async def fake_list(tokens, *, fallback_count=None):
+        return credits or {"available_count": fallback_count, "credits": []}
+
+    monkeypatch.setattr(mod, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(mod, "list_reset_credits", fake_list)
 
 
 class TestGetUsageAsync:
@@ -119,55 +136,134 @@ class TestGetUsageAsync:
         out = await get_usage_async()
         assert out["status"] == "not_logged_in"
         assert out["snapshots"] == []
+        assert out["reset_credits"] == {"available_count": None, "credits": []}
 
-    async def test_no_data(self, monkeypatch):
+    async def test_live_ok_is_authoritative(self, monkeypatch):
         monkeypatch.setattr(
             mod.CodexTokens, "load", staticmethod(lambda: _FakeTokens())
         )
+        _patch_live(
+            monkeypatch,
+            usage={"snapshots": [{"x": 1}], "available_count": 2},
+            credits={"available_count": 2, "credits": [{"id": "c1"}]},
+        )
+        # Passive cache holds stale/other data — the live fetch wins.
         monkeypatch.setattr(mod, "_get_cached_usage", lambda: None)
         out = await get_usage_async()
-        assert out["status"] == "no_data_yet"
+        assert out["status"] == "ok"
+        assert out["source"] == "live"
+        assert out["snapshots"] == [{"x": 1}]
+        assert out["reset_credits"] == {
+            "available_count": 2,
+            "credits": [{"id": "c1"}],
+        }
 
-    async def test_empty_cache(self, monkeypatch):
+    async def test_live_promo_comes_from_passive_cache(self, monkeypatch):
         monkeypatch.setattr(
             mod.CodexTokens, "load", staticmethod(lambda: _FakeTokens())
         )
+        _patch_live(monkeypatch, usage={"snapshots": [], "available_count": 0})
         monkeypatch.setattr(
-            mod, "_get_cached_usage", lambda: _FakeUsageCached(empty=True)
+            mod, "_get_cached_usage", lambda: _FakeUsageCached(snapshots=[_FakeSnap()])
         )
         out = await get_usage_async()
-        assert out["status"] == "no_data_yet"
+        # Live snapshots, but promo is a rolling hint from the cache.
+        assert out["source"] == "live"
+        assert out["promo_message"] == "promo"
 
-    async def test_full_cache(self, monkeypatch):
+    async def test_live_failure_falls_back_to_full_cache(self, monkeypatch):
         monkeypatch.setattr(
             mod.CodexTokens, "load", staticmethod(lambda: _FakeTokens())
         )
+        _patch_live(monkeypatch, raises=RuntimeError("live down"))
         monkeypatch.setattr(
-            mod,
-            "_get_cached_usage",
-            lambda: _FakeUsageCached(snapshots=[_FakeSnap()]),
+            mod, "_get_cached_usage", lambda: _FakeUsageCached(snapshots=[_FakeSnap()])
         )
         out = await get_usage_async()
         assert out["status"] == "ok"
+        assert out["source"] == "cache"
         assert out["snapshots"] == [{"x": 1}]
-        assert out["promo_message"] == "promo"
 
-    async def test_expired_triggers_refresh(self, monkeypatch):
-        refreshed = []
-        expired_tokens = _FakeTokens(expired=True)
-
-        async def fake_refresh(t):
-            refreshed.append(t)
-
+    async def test_live_failure_empty_cache_is_no_data(self, monkeypatch):
         monkeypatch.setattr(
-            mod.CodexTokens,
-            "load",
-            staticmethod(lambda: expired_tokens),
+            mod.CodexTokens, "load", staticmethod(lambda: _FakeTokens())
         )
-        monkeypatch.setattr(mod, "refresh_tokens", fake_refresh)
+        _patch_live(monkeypatch, raises=RuntimeError("live down"))
         monkeypatch.setattr(mod, "_get_cached_usage", lambda: None)
         out = await get_usage_async()
-        # The loaded (expired) token object is the one passed to refresh.
-        assert refreshed == [expired_tokens]
-        # No cached usage after refresh → no_data_yet.
         assert out["status"] == "no_data_yet"
+        assert out["source"] == "cache"
+
+    async def test_expired_refresh_result_is_used_for_live_fetch(self, monkeypatch):
+        expired = _FakeTokens(expired=True)
+        fresh = _FakeTokens(expired=False)
+        seen = {}
+
+        async def fake_refresh(t):
+            seen["refreshed_from"] = t
+            return fresh
+
+        async def fake_fetch(tokens):
+            seen["fetched_with"] = tokens
+            return {"snapshots": [], "available_count": 0}
+
+        async def fake_list(tokens, *, fallback_count=None):
+            return {"available_count": fallback_count, "credits": []}
+
+        monkeypatch.setattr(mod.CodexTokens, "load", staticmethod(lambda: expired))
+        monkeypatch.setattr(mod, "refresh_tokens", fake_refresh)
+        monkeypatch.setattr(mod, "fetch_usage", fake_fetch)
+        monkeypatch.setattr(mod, "list_reset_credits", fake_list)
+        monkeypatch.setattr(mod, "_get_cached_usage", lambda: None)
+
+        out = await get_usage_async()
+        # Refresh return value (not the stale token) drives the live fetch.
+        assert seen["refreshed_from"] is expired
+        assert seen["fetched_with"] is fresh
+        assert out["status"] == "ok"
+
+
+# ── consume_reset_credit_async ──────────────────────────────────
+
+
+class TestConsumeResetCreditAsync:
+    async def test_not_logged_in_raises_permission_error(self, monkeypatch):
+        monkeypatch.setattr(mod.CodexTokens, "load", staticmethod(lambda: None))
+        with pytest.raises(PermissionError):
+            await mod.consume_reset_credit_async()
+
+    async def test_generates_idempotency_key_when_absent(self, monkeypatch):
+        seen = {}
+
+        async def fake_consume(tokens, key, credit_id=None):
+            seen["key"] = key
+            seen["credit_id"] = credit_id
+            return "reset"
+
+        monkeypatch.setattr(
+            mod.CodexTokens, "load", staticmethod(lambda: _FakeTokens())
+        )
+        monkeypatch.setattr(mod, "consume_reset_credit", fake_consume)
+        out = await mod.consume_reset_credit_async()
+        assert out["outcome"] == "reset"
+        # A non-empty key was generated and echoed back for retries.
+        assert out["idempotency_key"]
+        assert out["idempotency_key"] == seen["key"]
+
+    async def test_passes_through_supplied_key_and_credit_id(self, monkeypatch):
+        seen = {}
+
+        async def fake_consume(tokens, key, credit_id=None):
+            seen["key"] = key
+            seen["credit_id"] = credit_id
+            return "alreadyRedeemed"
+
+        monkeypatch.setattr(
+            mod.CodexTokens, "load", staticmethod(lambda: _FakeTokens())
+        )
+        monkeypatch.setattr(mod, "consume_reset_credit", fake_consume)
+        out = await mod.consume_reset_credit_async(
+            idempotency_key="my-key", credit_id="credit-9"
+        )
+        assert seen == {"key": "my-key", "credit_id": "credit-9"}
+        assert out == {"outcome": "alreadyRedeemed", "idempotency_key": "my-key"}
