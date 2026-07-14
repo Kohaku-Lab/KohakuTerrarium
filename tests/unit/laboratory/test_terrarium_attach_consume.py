@@ -257,6 +257,53 @@ class TestConsumeInputTargetRouting:
             adapter.detach()
             await t.shutdown()
 
+    async def test_ui_reply_targeting_sibling_routes_to_that_router(self):
+        # UXI-09 lab-path fix: a reply for a prompt a non-bound SIBLING
+        # raised must reach the SIBLING's router (else its interactive tool
+        # hangs), and the ack must be tagged with the sibling.
+        t = await (
+            TestTerrariumBuilder().with_creature("alice").with_creature("bob").build()
+        )
+        try:
+            adapter, node = await _build_adapter(t)
+            alice = t.get_creature("alice")
+            bob = t.get_creature("bob")
+            alice_received: list = []
+            bob_received: list = []
+            alice.agent.output_router = SimpleNamespace(
+                submit_reply_with_status=lambda r: alice_received.append(r)
+                or (True, "applied"),
+            )
+            bob.agent.output_router = SimpleNamespace(
+                submit_reply_with_status=lambda r: bob_received.append(r)
+                or (True, "applied"),
+            )
+            sink = _make_sink(node)
+            consumer = asyncio.create_task(
+                adapter._consume_input(sink, alice, alice.agent)
+            )
+            try:
+                await sink.inject_input(
+                    {"type": "ui_reply", "event_id": "e1", "target": "bob"}
+                )
+                for _ in range(50):
+                    if bob_received:
+                        break
+                    await asyncio.sleep(0.01)
+                # The reply reached bob's router, not the bound alice's.
+                assert bob_received and bob_received[0].event_id == "e1"
+                assert alice_received == []
+                frames = _drain(sink)
+                ack = next(f for f in frames if f["type"] == "ui_reply_ack")
+                assert ack["source"] == "bob"
+            finally:
+                consumer.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await consumer
+        finally:
+            adapter.detach()
+            await t.shutdown()
+
     async def test_input_targeting_unknown_creature_emits_error(self):
         t = await TestTerrariumBuilder().with_creature("alice").build()
         try:
