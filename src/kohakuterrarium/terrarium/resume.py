@@ -80,30 +80,30 @@ async def resume_into_engine(
         store.close(update_status=False)
     probe = _open_store_with_migration(path)
     meta = probe.load_meta()
-    if _manifest.MANIFEST_KEY in meta:
-        _manifest.parse_manifest(meta[_manifest.MANIFEST_KEY])
-        close = getattr(probe, "close", None)
-        if close is not None:
-            close(update_status=False)
-        locked = _open_store_with_migration(path, writer_lock=True)
-        try:
-            locked_manifest = _manifest.parse_manifest(
-                locked.load_meta()[_manifest.MANIFEST_KEY]
-            )
-        except BaseException:
-            locked.close(update_status=False)
-            raise
-        return await _resume_manifest_into_engine(
-            engine,
-            path,
-            locked_manifest,
-            pwd=pwd,
-            llm=llm,
-            store=locked,
-        )
+    # None is the checkpoint tombstone — legacy resume, not a manifest.
+    raw_manifest = meta.get(_manifest.MANIFEST_KEY)
     close = getattr(probe, "close", None)
     if close is not None:
         close(update_status=False)
+    if raw_manifest is not None:
+        _manifest.parse_manifest(raw_manifest)
+        locked = _open_store_with_migration(path, writer_lock=True)
+        try:
+            locked_manifest = _manifest.load_manifest(locked)
+        except BaseException:
+            locked.close(update_status=False)
+            raise
+        if locked_manifest is not None:
+            return await _resume_manifest_into_engine(
+                engine,
+                path,
+                locked_manifest,
+                pwd=pwd,
+                llm=llm,
+                store=locked,
+            )
+        # Tombstoned between the probe and the writer lock.
+        locked.close(update_status=False)
     session_type = detect_session_type(path)
 
     if session_type == "agent":

@@ -29,7 +29,9 @@ from kohakuterrarium.terrarium.drive.config import (
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -391,9 +393,11 @@ class TestRuntimeTopologyResume:
     async def test_agent_resume_remaps_assigned_drive_to_reminted_creature(
         self, patched_llm_resume, tmp_path
     ):
-        """R1-43: a standalone-agent resume re-mints the creature's runtime id
-        (``_safe_creature_id``), so a persisted assignment naming the OLD id must
-        be remapped to the resumed creature — else reconcile runs for the new id
+        """R1-43 across both resume paths. A manifest resume restores the
+        creature's exact runtime id, so the persisted assignment stays valid
+        as-is. A legacy (manifest-less) resume re-mints the id
+        (``_safe_creature_id``), so an assignment naming the OLD id must be
+        remapped to the resumed creature — else reconcile runs for the new id
         and the saved assignment never redelivers (a silent failure)."""
         _write_creature_dir(tmp_path, "solo")
         agent_yaml = str(tmp_path / "creature_solo" / "agent.yaml")
@@ -425,6 +429,8 @@ class TestRuntimeTopologyResume:
             )
             did = rec.drive_id
 
+        # Shutdown checkpointed a manifest — resume restores the exact
+        # creature id, so the saved assignment needs no remap at all.
         engine2 = Terrarium(
             pwd=str(tmp_path), session_dir=str(tmp_path / "resumed"), **_drive_kwargs()
         )
@@ -434,6 +440,36 @@ class TestRuntimeTopologyResume:
             )
             rmgr = engine2.drives.manager_for(sid)
             resumed = engine2.list_creatures()[0]
+            assert resumed.creature_id == old_id
+
+            async def _still_assigned():
+                a = await rmgr.get_assignment(did)
+                if a is not None and a.assignee_creature_id == old_id:
+                    return a
+                return None
+
+            assert await _wait_for(
+                _still_assigned, timeout=25.0
+            ), "manifest resume must keep the assignment on the restored id"
+        finally:
+            await engine2.shutdown()
+
+        # Tombstone the manifest (the checkpoint's invalidation marker) to
+        # force the legacy agent path: id re-mints, assignment must remap.
+        tomb = SessionStore(store_path)
+        tomb.meta[MANIFEST_KEY] = None
+        tomb.flush()
+        tomb.close(update_status=False)
+
+        engine3 = Terrarium(
+            pwd=str(tmp_path), session_dir=str(tmp_path / "resumed3"), **_drive_kwargs()
+        )
+        try:
+            sid = await asyncio.wait_for(
+                engine3.adopt_session(store_path, pwd=str(tmp_path)), timeout=25.0
+            )
+            rmgr = engine3.drives.manager_for(sid)
+            resumed = engine3.list_creatures()[0]
             assert resumed.creature_id != old_id  # id was re-minted on resume
 
             async def _remapped():
@@ -446,7 +482,7 @@ class TestRuntimeTopologyResume:
                 _remapped, timeout=25.0
             ), "assignment was not remapped to the resumed creature (R1-43)"
         finally:
-            await engine2.shutdown()
+            await engine3.shutdown()
 
     async def test_cross_graph_wire_drains_drive_rows_immediately(
         self, patched_llm, tmp_path

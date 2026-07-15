@@ -412,7 +412,9 @@ def _store_path(store: Any) -> str:
 def _raw_from_store(store: Any) -> tuple[bool, object]:
     try:
         meta = store.load_meta() if hasattr(store, "load_meta") else store.meta
-        if MANIFEST_KEY not in meta:
+        # A stored None is the checkpoint tombstone ("manifest invalidated,
+        # fall back to legacy resume"), not a manifest.
+        if MANIFEST_KEY not in meta or meta[MANIFEST_KEY] is None:
             return False, None
         return True, meta[MANIFEST_KEY]
     except Exception as exc:
