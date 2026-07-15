@@ -24,6 +24,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.store import SessionStore
 import kohakuterrarium.terrarium.drive.topology as _drive_topology
 import kohakuterrarium.terrarium.topology_leftovers as _topo_leftovers
@@ -249,6 +250,21 @@ def apply_merge(
         return
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
+    if any(graph_id in engine._session_stores for graph_id in delta.old_graph_ids):
+        merged_names = [
+            creature.name
+            for cid in engine._topology.graphs[keep_gid].creature_ids
+            if (creature := engine._creatures.get(cid)) is not None
+            and hasattr(creature, "name")
+        ]
+        duplicates = sorted(
+            {name for name in merged_names if merged_names.count(name) > 1}
+        )
+        if duplicates:
+            raise SessionNotResumableError(
+                "Cannot merge persisted graphs with duplicate creature names: "
+                + ", ".join(duplicates)
+            )
     # Capture every source graph's Drive rows synchronously before any store
     # closes, so the async topology drain can move them into the survivor's
     # repository. This is a no-op on a Drive-disabled engine.
@@ -277,6 +293,7 @@ def apply_merge(
         kept = old_stores[0]
         first_source_gid = next(iter(source_stores))
         kept_owned = first_source_gid in owned_source_gids
+        _merge_into_existing_store(kept, old_stores[1:])
     else:
         kept_store = engine._session_stores.get(keep_gid)
         kept_path = (
@@ -335,6 +352,7 @@ def apply_merge(
     # Unresolved replay remnants follow the surviving graph — the
     # post-merge snapshot would otherwise erase them.
     _topo_leftovers.transfer_leftovers(engine, source_gids, keep_gid)
+    _refresh_graph_meta(engine, keep_gid, kept)
     _attach_store_to_graph(engine, keep_gid, kept)
 
 
@@ -418,7 +436,39 @@ def apply_split(
     _topo_leftovers.distribute_leftovers(engine, parent_gid, list(delta.new_graph_ids))
 
 
-def _refresh_meta_for_split_graph(
+def _merge_into_existing_store(
+    destination: SessionStore, sources: list[SessionStore]
+) -> None:
+    """Preserve source histories when a merge reuses an attached store."""
+    destination_id = destination.meta.get("session_id", "")
+    parent_ids = set(destination.meta.get("parent_session_ids", []))
+    if destination_id:
+        parent_ids.add(destination_id)
+    for source in sources:
+        source_id = source.meta.get("session_id", "")
+        parent_ids.update(source.meta.get("parent_session_ids", []))
+        if source_id:
+            parent_ids.add(source_id)
+        copy_events_into(source, destination)
+    destination.meta["parent_session_ids"] = sorted(parent_ids)
+    destination.meta["merged_at"] = time.time()
+    destination.flush()
+
+
+def _delete_meta(store: SessionStore, key: str) -> None:
+    """Remove inherited reconstruction metadata from the store."""
+    meta = store.meta
+    if hasattr(meta, "exists") and hasattr(meta, "delete"):
+        if meta.exists(key):
+            meta.delete(key)
+        return
+    try:
+        del meta[key]
+    except (KeyError, TypeError):
+        pass
+
+
+def _refresh_graph_meta(
     engine: "Terrarium", graph_id: str, store: SessionStore
 ) -> None:
     """Update ``store.meta`` so it reflects the post-split graph membership.
@@ -441,9 +491,20 @@ def _refresh_meta_for_split_graph(
         if c is None:
             continue
         agents.append(getattr(c.agent.config, "name", cid))
+    store.meta["agents"] = agents
+    store.meta["config_type"] = "agent" if len(agents) <= 1 else "terrarium"
+    store.meta["config_path"] = None
+    _delete_meta(store, "config_snapshot")
+    _delete_meta(store, "runtime_topology")
+    store.flush()
+
+
+def _refresh_meta_for_split_graph(
+    engine: "Terrarium", graph_id: str, store: SessionStore
+) -> None:
+    """Compatibility wrapper for callers of the former split-only helper."""
     try:
-        store.meta["agents"] = agents
-        store.meta["config_type"] = "agent" if len(agents) <= 1 else "terrarium"
+        _refresh_graph_meta(engine, graph_id, store)
     except Exception:
         logger.warning("split: meta refresh failed", exc_info=True)
 
