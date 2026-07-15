@@ -1,11 +1,5 @@
 """
-Agent - Main orchestrator that wires all components together.
-
-The Agent class is the top-level entry point for running an agent.
-It manages the lifecycle of all modules and the main event loop.
-
-Component initialization is in agent_init.py (AgentInitMixin).
-Event handling and tool execution is in agent_handlers.py (AgentHandlersMixin).
+Top-level agent orchestration for component lifecycle and event processing.
 """
 
 import asyncio
@@ -253,17 +247,9 @@ class Agent(
             ephemeral=config.ephemeral,
         )
 
-    # ``_init_iteration_budget`` + ``_init_termination`` live in
-    # AgentInitMixin (bootstrap/agent_init.py) with the other _init_*
-    # factories — moved to keep this file under the size cap.
-
     def _on_provider_emergency_drop(self, messages: list[dict[str, Any]]) -> None:
         """Synchronize controller conversation after provider emergency drop."""
         sync_emergency_drop_conversation(self, messages)
-
-    # =========================================================================
-    # Lifecycle
-    # =========================================================================
 
     async def start(self) -> None:
         """Start all agent modules."""
@@ -408,7 +394,6 @@ class Agent(
         compact_cfg = CompactConfig(
             max_tokens=compact_data.get("max_tokens", default_compact_max),
             threshold=compact_data.get("threshold", CompactConfig.threshold),
-            target=compact_data.get("target", CompactConfig.target),
             keep_recent_turns=compact_data.get(
                 "keep_recent_turns", CompactConfig.keep_recent_turns
             ),
@@ -680,24 +665,8 @@ class Agent(
         logger.info("Task promoted via UI", job_id=job_id)
         return True
 
-    # ``switch_model`` + ``llm_identifier`` live in AgentModelMixin —
-    # see ``core/agent_model.py``. Split out to keep this file under
-    # the per-file size guard.
-
     async def run_forever(self) -> None:
-        """
-        Run the agent main loop until its input module exits.
-
-        Handles:
-        - Startup triggers
-        - Getting input
-        - Running controller
-        - Processing tool calls
-        - Routing output
-
-        (Renamed from ``run()`` — ``Agent.run(content)`` is now the
-        single-turn driver from :class:`AgentTurnMixin`.)
-        """
+        """Run the agent lifecycle and input loop until input exits."""
         await self.start()
         try:
             await self._drive_input()
@@ -794,10 +763,6 @@ class Agent(
                     exc_info=True,
                 )
             raise
-
-    # =========================================================================
-    # Programmatic API
-    # =========================================================================
 
     @property
     def is_running(self) -> bool:
@@ -923,18 +888,9 @@ class Agent(
         wire_plugin_hook_timing(self)
         logger.debug("Session store attached", agent=self.config.name)
 
-    # Wave F attach / detach — implementation in
-    # ``kohakuterrarium.session.attachment_service``; thin wrappers here
-    # to keep this file under the 1000-line hard cap.
+    # Aliases preserve the Agent API while session attachment remains centralized.
     attach_to_session = _attach_to_session
     detach_from_session = _detach_from_session
-
-    # ``set_output_handler`` moved to ``AgentExtensionsMixin``
-    # (agent_extensions.py) to keep this file under the 1000-line cap.
-
-    # =========================================================================
-    # Hot-plug API
-    # =========================================================================
 
     def update_system_prompt(self, content: str, replace: bool = False) -> None:
         """Update the system prompt of a running agent.
@@ -974,7 +930,7 @@ class Agent(
         }
 
     def session_info(self, tokens_view: str = "own") -> dict[str, Any]:
-        """Wave G session snapshot (see ``build_session_info``)."""
+        """Build a session snapshot with the requested token accounting view."""
         return _build_session_info(self, tokens_view)
 
 
