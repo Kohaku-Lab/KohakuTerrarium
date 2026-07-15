@@ -344,6 +344,11 @@ class TestGraphManifest:
         store = _Store()
         assert load_manifest(store) is None
 
+        # The checkpoint tombstone (key present, value None) reads as
+        # absent — resume must fall back to the legacy paths, not parse it.
+        store.meta[MANIFEST_KEY] = None
+        assert load_manifest(store) is None
+
         graph = GraphTopology(graph_id="graph_test")
         engine = _Engine(graph, {})
         assert checkpoint_graph(engine, "graph_test") is None

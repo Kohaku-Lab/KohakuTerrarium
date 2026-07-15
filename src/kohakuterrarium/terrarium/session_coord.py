@@ -250,10 +250,13 @@ def apply_merge(
         return
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
-    if any(graph_id in engine._session_stores for graph_id in delta.old_graph_ids):
+    keep_graph = engine._topology.graphs.get(keep_gid)
+    if keep_graph is not None and any(
+        graph_id in engine._session_stores for graph_id in delta.old_graph_ids
+    ):
         merged_names = [
             creature.name
-            for cid in engine._topology.graphs[keep_gid].creature_ids
+            for cid in keep_graph.creature_ids
             if (creature := engine._creatures.get(cid)) is not None
             and hasattr(creature, "name")
         ]

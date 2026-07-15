@@ -9,7 +9,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import cluster_fold, remote_meta, stop as _stop
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
@@ -561,15 +560,6 @@ def rename_session(service: "TerrariumService", session_id: str, name: str) -> S
         meta = meta_registry.setdefault(session_id, {})
         meta["name"] = name
         graph = next(g for g in engine.list_graphs() if g.graph_id == session_id)
-        store = getattr(engine, "_session_stores", {}).get(session_id)
-        if (
-            len(graph.creature_ids) == 1
-            and store is not None
-            and "live_graph_manifest" in store.meta
-        ):
-            raise SessionNotResumableError(
-                "persisted creature rename requires state-namespace migration"
-            )
         if len(graph.creature_ids) == 1:
             for cid in graph.creature_ids:
                 try:
@@ -608,11 +598,6 @@ def rename_creature(service: "TerrariumService", creature_id: str, name: str) ->
     meta_registry = meta_for(service)
     if engine is not None:
         creature = engine.get_creature(creature_id)
-        store = getattr(engine, "_session_stores", {}).get(creature.graph_id)
-        if store is not None and "live_graph_manifest" in store.meta:
-            raise SessionNotResumableError(
-                "persisted creature rename requires state-namespace migration"
-            )
         apply_creature_name(creature, name)
         sid = creature.graph_id
         graph = next(
