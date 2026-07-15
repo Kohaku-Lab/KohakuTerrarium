@@ -10,8 +10,13 @@ from kohakuterrarium.core.controller import (
     ControllerContext,
     _merge_text_and_parts,
 )
+from kohakuterrarium.core.conversation_elide import (
+    ELISION_MARKER,
+    TOOL_FEEDBACK_KIND,
+)
 from kohakuterrarium.core.events import (
     TriggerEvent,
+    create_tool_complete_event,
     create_user_input_event,
 )
 from kohakuterrarium.core.job import JobResult
@@ -141,6 +146,46 @@ class TestEphemeralMode:
         roles = [m.role for m in env.controller.conversation.get_messages()]
         # Non-system messages cleared between turns.
         assert roles.count("system") >= 1
+
+
+class TestStaleToolResultElision:
+    async def test_prior_round_results_elided_from_context(self):
+        env = TestAgentBuilder().with_llm_script(["r1", "r2"]).build()
+        big = "X" * 2000
+        await env.controller.push_event(
+            create_tool_complete_event("job1", "round1 output " + big)
+        )
+        async for _ in env.controller.run_once():
+            pass
+        await env.controller.push_event(
+            create_tool_complete_event("job2", "round2 output " + big)
+        )
+        async for _ in env.controller.run_once():
+            pass
+
+        feedback = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if (m.metadata or {}).get("kind") == TOOL_FEEDBACK_KIND
+        ]
+        assert len(feedback) == 2
+        # Round-1 results were stubbed before the round-2 LLM call; the
+        # latest round keeps its full output.
+        assert ELISION_MARKER in feedback[0].content
+        assert big not in feedback[0].content
+        assert big in feedback[1].content
+
+    async def test_real_user_input_is_never_tagged_or_elided(self):
+        env = TestAgentBuilder().with_llm_script(["r1", "r2"]).build()
+        long_input = "important spec " + "s" * 2000
+        await env.inject(long_input)
+        await env.inject("follow-up")
+        msgs = env.controller.conversation.get_messages()
+        user_msgs = [m for m in msgs if m.role == "user"]
+        assert all(
+            (m.metadata or {}).get("kind") != TOOL_FEEDBACK_KIND for m in user_msgs
+        )
+        assert any("s" * 2000 in (m.content or "") for m in user_msgs)
 
 
 # ── push_event / push_event_sync ────────────────────────────────
