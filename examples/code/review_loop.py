@@ -7,9 +7,8 @@ Demonstrates:
   - ``agent()`` persistent agents: both remember the full conversation,
     so the reviewer sees the evolution and the writer sees all feedback
 
-This is the canonical "write → review → revise → review → approve" loop
-that can't be expressed as a terrarium (needs strict turn ordering and
-a convergence check controlled by your code).
+This write → review → revise protocol uses native control flow because it
+requires strict turn ordering and an application-owned convergence check.
 
 Usage:
     python review_loop.py "Write a haiku about programming"
@@ -23,6 +22,7 @@ from kohakuterrarium.core.config import load_agent_config
 
 
 def make_writer_config():
+    """Build a persistent tool-free writer that emits only revised text."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = "writer"
     config.tools = []
@@ -36,6 +36,7 @@ def make_writer_config():
 
 
 def make_reviewer_config():
+    """Build a persistent reviewer with an explicit approval sentinel."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = "reviewer"
     config.tools = []
@@ -51,20 +52,20 @@ def make_reviewer_config():
 
 
 async def main(task: str) -> None:
+    """Iterate writer and reviewer turns until approval or the round limit."""
     print(f"Task: {task}\n")
 
     async with (
         await agent(make_writer_config()) as writer,
         await agent(make_reviewer_config()) as reviewer,
     ):
-        # Pipeline: writer produces text → bridge formats for reviewer → reviewer evaluates
+        # The transform frames each writer output as the reviewer's next task.
         write_and_review = (
             writer
             >> (lambda text: f"Review this text:\n\n{text}\n\nIs it good enough?")
             >> reviewer
         )
 
-        # Iterate until reviewer approves
         round_num = 0
         async for feedback in write_and_review.iterate(task):
             round_num += 1
@@ -80,10 +81,8 @@ async def main(task: str) -> None:
                 print("Max rounds reached — accepting last version.")
                 break
 
-            # Feed reviewer's feedback back as the writer's next input
-            # (iterate() automatically does this — output becomes next input)
-            # But we want to frame it as feedback:
-            write_and_review.iterate(task)  # no-op, persistent agents remember
+            # This constructor call is a no-op; the active iterator already advances.
+            write_and_review.iterate(task)
 
 
 if __name__ == "__main__":

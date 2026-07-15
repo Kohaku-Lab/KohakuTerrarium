@@ -48,7 +48,7 @@ async def main() -> None:
         print(result.text)
         print(f"\n[tools used: {[t.detail for t in result.tool_calls]}]")
 
-    # The session file is a complete record — read it back offline.
+    # SessionReader inspects the persisted run without a live engine or provider.
     with kt.SessionReader(session_file) as reader:
         print(f"\nSession {reader.meta.get('session_id')} replay:")
         for turn in reader.turns():

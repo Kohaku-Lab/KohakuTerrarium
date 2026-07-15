@@ -1,5 +1,4 @@
-"""
-Discord Input Module - Receives messages from Discord.
+"""Convert Discord messages and media into controller trigger events.
 
 Wraps DiscordClient to produce TriggerEvents for the controller.
 Uses string.format() templates for flexible context formatting.
@@ -30,14 +29,7 @@ logger = get_logger("kohakuterrarium.custom.discord_input")
 
 
 class DiscordInputModule(BaseInputModule):
-    """
-    Input module that receives messages from Discord.
-
-    Wraps DiscordClient to produce TriggerEvents for the controller.
-    Registers client to shared registry for output module to use.
-    Uses string.format() template for context formatting.
-    Supports multimodal input (images from attachments, stickers, emojis).
-    """
+    """Build text or multimodal trigger events from batched Discord input."""
 
     def __init__(
         self,
@@ -52,9 +44,7 @@ class DiscordInputModule(BaseInputModule):
         instant_memory_file: str | None = None,
         context_format_file: str | None = None,
         context_files: dict[str, str] | None = None,
-        # Timezone option
         timezone: str | None = None,
-        # Multimodal options
         include_images: bool = False,
         include_attachments: bool = True,
         include_stickers: bool = True,
@@ -64,8 +54,7 @@ class DiscordInputModule(BaseInputModule):
         max_total_images: int = 10,
         gif_sample_frames: list[str] | None = None,
     ):
-        """
-        Initialize Discord input.
+        """Initialize Discord connectivity, context rendering, and media limits.
 
         Args:
             token: Bot token (or use token_env)
@@ -113,7 +102,6 @@ class DiscordInputModule(BaseInputModule):
         self.context_format_file = context_format_file
         self.context_files = context_files or {}
 
-        # Multimodal settings
         self.include_images = include_images
         self.include_attachments = include_attachments
         self.include_stickers = include_stickers
@@ -123,12 +111,12 @@ class DiscordInputModule(BaseInputModule):
         self.max_total_images = max_total_images
         self.gif_sample_frames = gif_sample_frames or ["first", "middle", "last"]
 
-        # Load context format template (uses str.format() with {var} placeholders)
+        # Templates remain optional so the module has a self-contained fallback.
         self._context_template: str | None = None
         if context_format_file:
             self._load_context_template(context_format_file)
 
-        # Debug output directory
+        # Resolve debug output beside the agent rather than the process cwd.
         self._debug_output_dir = self._resolve_path("./debug_context")
 
         logger.info(
@@ -162,16 +150,16 @@ class DiscordInputModule(BaseInputModule):
         self._client_task: asyncio.Task | None = None
 
     def _resolve_path(self, file_path: str) -> Path:
-        """Resolve path relative to this module's directory (agent folder)."""
+        """Resolve relative paths from the agent folder."""
         path = Path(file_path)
         if path.is_absolute():
             return path
-        # Resolve relative to this module's directory (custom/ folder's parent = agent folder)
+        # Custom modules live one directory below the agent root.
         module_dir = Path(__file__).parent.parent
         return module_dir / file_path
 
     def _load_context_template(self, template_path: str) -> None:
-        """Load template from file (uses str.format() with {var} placeholders)."""
+        """Load an optional str.format context template from the agent folder."""
         try:
             path = self._resolve_path(template_path)
             if path.exists():
@@ -188,7 +176,7 @@ class DiscordInputModule(BaseInputModule):
             )
 
     def _load_context_file(self, file_path: str) -> str:
-        """Load content from a context file."""
+        """Read a context fragment from the agent folder when available."""
         try:
             path = self._resolve_path(file_path)
             if path.exists():
@@ -203,7 +191,7 @@ class DiscordInputModule(BaseInputModule):
         return ""
 
     async def _on_start(self) -> None:
-        """Start the Discord client."""
+        """Connect the Discord client when this module owns it."""
         if self._owns_client:
             logger.info("Starting Discord client...")
             await self.client.login(self.token)
@@ -212,7 +200,7 @@ class DiscordInputModule(BaseInputModule):
             logger.info("Discord client is ready")
 
     async def _on_stop(self) -> None:
-        """Stop the Discord client."""
+        """Close and await the Discord task when this module owns it."""
         if self._owns_client and self._client_task:
             await self.client.close()
             self._client_task.cancel()
@@ -222,20 +210,20 @@ class DiscordInputModule(BaseInputModule):
                 pass
 
     def _read_instant_memory(self) -> str:
-        """Read instant memory file content (raw, no wrapper)."""
+        """Return the configured instant-memory fragment without wrapping it."""
         if not self.instant_memory_file:
             return ""
         return self._load_context_file(self.instant_memory_file)
 
     def _build_history_text(self, history_msgs: list[str]) -> str:
-        """Format history messages with numbering."""
+        """Number older history messages for compact later references."""
         if not history_msgs:
             return ""
         numbered = [f"#{i} {msg}" for i, msg in enumerate(history_msgs, 1)]
         return "\n".join(numbered)
 
     def _build_recent_text(self, recent_msgs: list[str], start_num: int) -> str:
-        """Format recent messages with numbering and LATEST marker."""
+        """Number recent messages and identify the newest entry."""
         if not recent_msgs:
             return ""
         numbered = []
@@ -248,21 +236,19 @@ class DiscordInputModule(BaseInputModule):
         return "\n".join(numbered)
 
     def _build_media_markers(self, msg: DiscordMessage) -> str:
-        """Build media markers for a message (attachments, stickers, emojis)."""
+        """Summarize a message's supported media in prompt-readable markers."""
         markers = []
 
-        # Image attachments
         for att in msg.attachments:
             if att.is_image:
                 anim_tag = " (animated GIF)" if att.is_animated else ""
                 markers.append(f"[attachment:{att.filename}{anim_tag}]")
 
-        # Stickers
         for sticker in msg.stickers:
             anim_tag = " (animated)" if sticker.is_animated else ""
             markers.append(f"[sticker:{sticker.name}{anim_tag}]")
 
-        # Custom emojis (only note them, don't list URLs in text)
+        # Names are sufficient in text; image URLs are carried as vision parts.
         if msg.custom_emojis:
             emoji_names = [f":{e.name}:" for e in msg.custom_emojis]
             animated_count = sum(1 for e in msg.custom_emojis if e.animated)
@@ -278,7 +264,7 @@ class DiscordInputModule(BaseInputModule):
     def _build_new_messages_text(
         self, messages: list[DiscordMessage], is_readonly: bool
     ) -> str:
-        """Format new messages that just arrived."""
+        """Format the newly batched messages with reply and policy markers."""
         formatted_lines = []
         for i, msg in enumerate(messages, 1):
             readonly_marker = "[READONLY] " if is_readonly else ""
@@ -305,7 +291,6 @@ class DiscordInputModule(BaseInputModule):
             elif msg.reply_to_id:
                 reply_marker = f"[→msg:{short_id(msg.reply_to_id)}] "
 
-            # Build media markers
             media_markers = self._build_media_markers(msg)
             media_suffix = f" {media_markers}" if media_markers else ""
 
@@ -315,7 +300,7 @@ class DiscordInputModule(BaseInputModule):
         return "\n".join(formatted_lines)
 
     def _build_location(self, last_msg: DiscordMessage) -> str:
-        """Build location info: bot identity, server, channel."""
+        """Build compact bot, server, and channel location context."""
         bot_identity = self.client.get_bot_identity()
 
         guild_part = ""
@@ -330,24 +315,21 @@ class DiscordInputModule(BaseInputModule):
         return f"{identity_header} {guild_part} {channel_part}".strip()
 
     def _render_with_template(self, template_vars: dict) -> str:
-        """Render context using str.format() with {var} placeholders."""
+        """Render context with the configured template or built-in fallback."""
         if self._context_template:
             try:
                 result = self._context_template.format(**template_vars)
-                # self._save_debug_output(result)
                 return result
             except KeyError as e:
                 logger.error("Template missing variable", extra={"missing": str(e)})
             except Exception as e:
                 logger.error("Template render failed", extra={"error": str(e)})
 
-        # Fallback: simple concatenation if no template
         fallback = self._render_fallback(template_vars)
-        # self._save_debug_output(fallback)
         return fallback
 
     def _save_debug_output(self, content: str) -> None:
-        """Save rendered context to debug file with timestamp."""
+        """Persist rendered context for local prompt debugging."""
         try:
             self._debug_output_dir.mkdir(parents=True, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -358,7 +340,7 @@ class DiscordInputModule(BaseInputModule):
             logger.warning("Failed to save debug output", extra={"error": str(e)})
 
     def _render_fallback(self, vars: dict) -> str:
-        """Fallback rendering when no template is configured."""
+        """Render non-empty context sections in a stable default order."""
         sections = [
             ("Instant Memory", "instant_memory"),
             ("Tool History", "tool_history"),
@@ -381,18 +363,13 @@ class DiscordInputModule(BaseInputModule):
     def _collect_image_items(
         self, messages: list[DiscordMessage]
     ) -> list[tuple[str, str, str, bool]]:
-        """
-        Collect image items from messages for processing.
-
-        Returns list of (url, source_type, source_name, is_animated) tuples.
-        """
+        """Collect bounded image descriptors from messages for processing."""
         items: list[tuple[str, str, str, bool]] = []
         images_collected = 0
 
         for msg in messages:
             msg_images = 0
 
-            # Attachments
             if self.include_attachments:
                 for att in msg.attachments:
                     if att.is_image and msg_images < self.max_images_per_message:
@@ -402,11 +379,10 @@ class DiscordInputModule(BaseInputModule):
                         msg_images += 1
                         images_collected += 1
 
-            # Stickers
             if self.include_stickers:
                 for sticker in msg.stickers:
                     if msg_images < self.max_images_per_message:
-                        # Skip lottie stickers (vector format, not image)
+                        # The image pipeline cannot rasterize Lottie vectors.
                         if sticker.format_type == "lottie":
                             continue
                         items.append(
@@ -420,7 +396,6 @@ class DiscordInputModule(BaseInputModule):
                         msg_images += 1
                         images_collected += 1
 
-            # Custom emojis
             if self.include_emojis:
                 for emoji in msg.custom_emojis:
                     if msg_images < self.max_images_per_message:
@@ -434,11 +409,7 @@ class DiscordInputModule(BaseInputModule):
         return items[: self.max_total_images]
 
     async def _process_images(self, messages: list[DiscordMessage]) -> list[ImagePart]:
-        """
-        Process images from messages into ImagePart objects.
-
-        Downloads images, extracts GIF frames, converts to base64.
-        """
+        """Download, sample, and encode message images as vision parts."""
         items = self._collect_image_items(messages)
         if not items:
             return []
@@ -454,10 +425,8 @@ class DiscordInputModule(BaseInputModule):
             gif_sample_positions=self.gif_sample_frames,
         )
 
-        # Convert ProcessedImage to ImagePart
         image_parts: list[ImagePart] = []
         for img in processed:
-            # Build description for source
             if img.frame_info:
                 source_name = f"{img.source_name} ({img.frame_info})"
             else:
@@ -478,18 +447,12 @@ class DiscordInputModule(BaseInputModule):
     def _build_multimodal_content(
         self, text: str, images: list[ImagePart]
     ) -> str | list[ContentPart]:
-        """
-        Build content, using multimodal format only if images present.
-
-        Images are prepended to content with descriptions.
-        """
+        """Return plain text or image-first multimodal content as needed."""
         if not images:
             return text
 
-        # Build content parts
         parts: list[ContentPart] = []
 
-        # Add image descriptions as text header
         image_desc_lines = []
         for i, img in enumerate(images, 1):
             desc = img.get_description()
@@ -501,19 +464,16 @@ class DiscordInputModule(BaseInputModule):
             + "\n\n(Images shown below as visual content)\n\n"
         )
 
-        # Add header text
         parts.append(TextPart(text=image_header))
 
-        # Add images
         parts.extend(images)
 
-        # Add main text content
         parts.append(TextPart(text=text))
 
         return parts
 
     async def get_input(self) -> TriggerEvent | None:
-        """Get next Discord message(s) as TriggerEvent."""
+        """Batch pending Discord messages into one contextual trigger event."""
         if not self._running:
             return None
 
@@ -548,7 +508,7 @@ class DiscordInputModule(BaseInputModule):
             is_readonly = self.client.is_readonly_channel(last_msg.channel_id)
             any_mention = any(m.is_mention for m in messages)
 
-            # Fetch history from Discord
+            # History is fetched after choosing the last message's output channel.
             channel = self.client.get_channel(last_msg.channel_id)
             if not channel:
                 try:
@@ -556,7 +516,7 @@ class DiscordInputModule(BaseInputModule):
                 except discord.DiscordException:
                     channel = None
 
-            # Split into history (older) and recent (newer)
+            # Keep recent messages distinct because they receive stronger prompt markers.
             history_text = ""
             recent_text = ""
             recent_media_messages: list[DiscordMessage] = []
@@ -576,7 +536,7 @@ class DiscordInputModule(BaseInputModule):
                         recent_msgs, len(history_msgs) + 1
                     )
 
-                # Fetch recent messages with media info for image processing
+                # Media history is fetched separately because text history drops URLs.
                 if self.include_images:
                     recent_media_messages = (
                         await self.client.fetch_channel_history_with_media(
@@ -584,37 +544,32 @@ class DiscordInputModule(BaseInputModule):
                         )
                     )
 
-            # Build template variables with raw content (no formatting)
+            # Template values stay raw so custom templates control all presentation.
             template_vars = {
                 "instant_memory": self._read_instant_memory(),
                 "history": history_text,
                 "recent": recent_text,
                 "new_messages": self._build_new_messages_text(messages, is_readonly),
                 "location": self._build_location(last_msg),
-                "tool_history": "",  # TODO: implement tool history tracking
+                "tool_history": "",
             }
 
-            # Load context files (character, rules, etc.) - raw content
+            # Named context fragments map directly to custom template variables.
             for var_name, file_path in self.context_files.items():
                 template_vars[var_name] = self._load_context_file(file_path)
 
-            # Render using template or fallback
             formatted_text = self._render_with_template(template_vars)
 
-            # Process images if multimodal is enabled
             image_parts: list[ImagePart] = []
             if self.include_images:
-                # Combine new messages with recent media messages for image processing
-                # Recent media messages are from history, new messages are just arrived
+                # Include recent context and newly arrived media without duplicating IDs.
                 all_media_messages = recent_media_messages.copy()
 
-                # Filter out new messages that are already in recent history (by message_id)
                 recent_ids = {m.message_id for m in recent_media_messages}
                 for msg in messages:
                     if msg.message_id not in recent_ids and msg.has_media():
                         all_media_messages.append(msg)
 
-                # Check if any messages have media
                 if all_media_messages:
                     image_parts = await self._process_images(all_media_messages)
                     logger.info(
@@ -626,15 +581,13 @@ class DiscordInputModule(BaseInputModule):
                             - len(recent_media_messages),
                             "sources": [
                                 f"{img.source_type}:{img.source_name}"
-                                for img in image_parts[:5]  # Log first 5
+                                for img in image_parts[:5]  # Bound structured log volume.
                             ],
                         },
                     )
 
-            # Build final content (text or multimodal)
             final_content = self._build_multimodal_content(formatted_text, image_parts)
 
-            # Count media for context
             total_attachments = sum(len(m.attachments) for m in messages)
             total_stickers = sum(len(m.stickers) for m in messages)
             total_emojis = sum(len(m.custom_emojis) for m in messages)
@@ -660,5 +613,5 @@ class DiscordInputModule(BaseInputModule):
             return None
 
     def get_client(self) -> DiscordClient:
-        """Get the Discord client for sharing with output module."""
+        """Return the client shared with output and trigger modules."""
         return self.client

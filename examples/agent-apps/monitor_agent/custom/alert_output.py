@@ -9,12 +9,7 @@ logger = get_logger(__name__)
 
 
 class WebhookAlertOutput(OutputModule):
-    """
-    Send alerts to a webhook URL.
-
-    Configure via options:
-        webhook_url: URL to POST alerts to
-    """
+    """Buffer monitor output and post each flush to an optional webhook."""
 
     def __init__(self, webhook_url: str = "", **options: Any):
         self.webhook_url = webhook_url

@@ -19,6 +19,7 @@ from kohakuterrarium.llm.openai import OpenAIProvider
 
 
 async def main() -> None:
+    """Verify live structured tool calls and the no-tools compatibility path."""
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     model = os.environ.get("OPENROUTER_MODEL", "google/gemini-3-flash-preview")
 
@@ -36,7 +37,6 @@ async def main() -> None:
         base_url="https://openrouter.ai/api/v1",
     )
 
-    # Define tool schemas
     tools = [
         ToolSchema(
             name="get_weather",
@@ -111,7 +111,7 @@ async def main() -> None:
         print("This may mean the model doesn't support it via OpenRouter,")
         print("or the prompt didn't trigger tool use.")
 
-    # Test 2: Request without tools (should work as before)
+    # The same provider must clear tool-call state when no schemas are supplied.
     print()
     print("=== Test 2: Plain request (no tools) ===")
     messages2 = [

@@ -29,8 +29,10 @@ logger = get_logger(__name__)
 
 
 class PromptInjectorPlugin(BasePlugin):
+    """Inject configured rules and runtime context into each LLM request."""
+
     name = "prompt_injector"
-    priority = 90  # Run late in pre_llm_call so other plugins inject first
+    priority = 90  # Late execution places this context after earlier plugin additions.
 
     def __init__(self, options: dict[str, Any] | None = None):
         opts = options or {}
@@ -43,20 +45,12 @@ class PromptInjectorPlugin(BasePlugin):
         self._ctx = context
 
     async def pre_llm_call(self, messages: list[dict], **kwargs) -> list[dict] | None:
-        """Inject additional context as a system message before the LLM call.
-
-        The messages list is the full conversation that will be sent.
-        We prepend or append system messages with extra context.
-
-        Return the modified list to replace it, or None to keep unchanged.
-        """
+        """Insert one system message containing enabled static and dynamic context."""
         parts: list[str] = []
 
-        # Static rules from config
         if self._rules:
             parts.append("Rules:\n" + "\n".join(f"- {r}" for r in self._rules))
 
-        # Dynamic context
         if self._inject_timestamp:
             parts.append(f"Current time: {time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         if self._inject_cwd and self._ctx:
@@ -65,14 +59,12 @@ class PromptInjectorPlugin(BasePlugin):
         if not parts:
             return None
 
-        # Create a system message with the injected context
         injection = {
             "role": "system",
             "content": "[Plugin: prompt_injector]\n" + "\n".join(parts),
         }
 
-        # Insert after the first system message (the main system prompt)
-        # so it doesn't override the agent's personality.
+        # Keep the primary system prompt first so agent identity remains authoritative.
         insert_idx = 1
         for i, msg in enumerate(messages):
             if msg.get("role") == "system":

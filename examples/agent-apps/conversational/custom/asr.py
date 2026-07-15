@@ -1,5 +1,4 @@
-"""
-ASR (Automatic Speech Recognition) base classes.
+"""Define reusable speech-to-text input modules and result types.
 
 Provides abstract interface for speech-to-text with support for:
 - Local Whisper (whisper.cpp, faster-whisper)
@@ -7,13 +6,8 @@ Provides abstract interface for speech-to-text with support for:
 - NVIDIA Nemotron/Riva
 
 Usage:
-    # Create ASR input
     asr = WhisperASR(model="base", device="cuda")
-
-    # Start listening
     await asr.start()
-
-    # Get transcriptions as TriggerEvents
     async for event in asr.listen():
         print(f"User said: {event.content}")
 
@@ -45,8 +39,7 @@ class ASRState(Enum):
 
 @dataclass
 class ASRConfig:
-    """
-    Configuration for ASR modules.
+    """Configure audio capture, VAD, and transcription behavior.
 
     Attributes:
         language: Target language code (e.g., "en", "ja", "auto")
@@ -70,8 +63,7 @@ class ASRConfig:
 
 @dataclass
 class ASRResult:
-    """
-    Result from ASR transcription.
+    """Represent one final or interim transcription result.
 
     Attributes:
         text: Transcribed text
@@ -90,7 +82,7 @@ class ASRResult:
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_event(self) -> TriggerEvent:
-        """Convert to TriggerEvent."""
+        """Convert the transcription into a user-input event."""
         return TriggerEvent(
             type=EventType.USER_INPUT,
             content=self.text,
@@ -105,8 +97,7 @@ class ASRResult:
 
 
 class ASRModule(InputModule, ABC):
-    """
-    Abstract base class for ASR input modules.
+    """Manage ASR lifecycle and expose transcriptions as input events.
 
     Subclasses must implement:
     - _start_listening(): Begin audio capture
@@ -120,24 +111,19 @@ class ASRModule(InputModule, ABC):
     """
 
     def __init__(self, config: ASRConfig | None = None):
-        """
-        Initialize ASR module.
-
-        Args:
-            config: ASR configuration
-        """
+        """Initialize the module with explicit or default ASR settings."""
         self.config = config or ASRConfig()
         self._state = ASRState.IDLE
         self._running = False
 
     @property
     def state(self) -> ASRState:
-        """Get current ASR state."""
+        """Return the current ASR lifecycle state."""
         return self._state
 
     @property
     def is_listening(self) -> bool:
-        """Check if currently listening."""
+        """Return whether the module is actively listening."""
         return self._state == ASRState.LISTENING
 
     async def start(self) -> None:
@@ -162,12 +148,7 @@ class ASRModule(InputModule, ABC):
         logger.info("ASR stopped")
 
     async def get_input(self) -> TriggerEvent | None:
-        """
-        Get next input event (implements InputModule).
-
-        Returns:
-            TriggerEvent for transcription, or None
-        """
+        """Return the next non-empty transcription as an input event."""
         if not self._running:
             await self.start()
 
@@ -189,12 +170,7 @@ class ASRModule(InputModule, ABC):
         return None
 
     async def listen(self) -> AsyncIterator[TriggerEvent]:
-        """
-        Listen for speech and yield transcription events.
-
-        Yields:
-            TriggerEvent for each transcribed utterance
-        """
+        """Yield transcription events while the module is running."""
         if not self._running:
             await self.start()
 
@@ -203,42 +179,24 @@ class ASRModule(InputModule, ABC):
             if event:
                 yield event
 
-    # === Abstract methods for subclasses ===
-
     @abstractmethod
     async def _start_listening(self) -> None:
-        """Start audio capture. Implement in subclass."""
+        """Start the subclass-specific audio capture source."""
         ...
 
     @abstractmethod
     async def _stop_listening(self) -> None:
-        """Stop audio capture. Implement in subclass."""
+        """Stop the subclass-specific audio capture source."""
         ...
 
     @abstractmethod
     async def _transcribe(self) -> ASRResult | None:
-        """
-        Get next transcription.
-
-        Should block until speech is detected and transcribed.
-
-        Returns:
-            ASRResult or None if no speech detected
-        """
+        """Wait for speech and return its transcription, if any."""
         ...
 
 
-# =============================================================================
-# Placeholder Implementations (for testing)
-# =============================================================================
-
-
 class DummyASR(ASRModule):
-    """
-    Dummy ASR for testing.
-
-    Returns predefined responses or reads from stdin.
-    """
+    """Provide deterministic or stdin-backed transcriptions for testing."""
 
     def __init__(
         self,
@@ -259,7 +217,7 @@ class DummyASR(ASRModule):
 
     async def _transcribe(self) -> ASRResult | None:
         if self.use_stdin:
-            # Read from stdin (blocking, run in thread)
+            # stdin is blocking, so keep it off the event-loop thread.
             loop = asyncio.get_event_loop()
             text = await loop.run_in_executor(None, sys.stdin.readline)
             text = text.strip()
@@ -270,9 +228,9 @@ class DummyASR(ASRModule):
         if self._response_idx < len(self.responses):
             text = self.responses[self._response_idx]
             self._response_idx += 1
-            await asyncio.sleep(0.1)  # Simulate processing
+            await asyncio.sleep(0.1)  # Preserve asynchronous timing in tests.
             return ASRResult(text=text, language="en")
 
-        # No more responses, wait
+        # Avoid a busy loop after all deterministic responses are consumed.
         await asyncio.sleep(1.0)
         return None

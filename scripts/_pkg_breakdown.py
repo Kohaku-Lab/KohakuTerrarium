@@ -4,6 +4,7 @@ import subprocess
 
 
 def main() -> None:
+    """Aggregate the current coverage report by package and print totals."""
     r = subprocess.run(
         ["python", "-m", "coverage", "report", "--include=src/kohakuterrarium/*"],
         capture_output=True,

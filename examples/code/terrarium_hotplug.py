@@ -13,6 +13,7 @@ from kohakuterrarium import EventFilter, EventKind, Terrarium
 
 
 async def main() -> None:
+    """Connect and disconnect two creatures while observing topology events."""
     async with Terrarium() as engine:
         alice = await engine.add_creature("@kt-biome/creatures/general")
         bob = await engine.add_creature("@kt-biome/creatures/general")
@@ -24,6 +25,7 @@ async def main() -> None:
         events: list = []
 
         async def watch():
+            """Collect topology changes emitted during the demonstration."""
             async for ev in engine.subscribe(
                 EventFilter(kinds={EventKind.TOPOLOGY_CHANGED})
             ):
@@ -32,7 +34,7 @@ async def main() -> None:
         watcher = asyncio.create_task(watch())
         await asyncio.sleep(0)
 
-        # Cross-graph connect → merge.
+        # Connecting singleton graphs merges topology, environment, and sessions.
         result = await engine.connect(alice, bob, channel="alice_to_bob")
         print(
             f"[merge] result={result.delta_kind} channel={result.channel} "
@@ -40,7 +42,7 @@ async def main() -> None:
             f"bob graph={bob.graph_id[:14]}"
         )
 
-        # Now disconnect → split back into two graphs.
+        # Removing the only bridge splits the merged graph back into singletons.
         d = await engine.disconnect(alice, bob, channel="alice_to_bob")
         print(
             f"[split] result={d.delta_kind} channels={d.channels} "

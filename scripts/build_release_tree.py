@@ -47,6 +47,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 
 def current_platform_tag() -> str:
+    """Return the launcher platform tag for the current host."""
     sysname = sys.platform
     machine = _platform.machine().lower()
     is_arm = machine in ("arm64", "aarch64")
@@ -60,12 +61,14 @@ def current_platform_tag() -> str:
 
 
 def current_py_abi_tag() -> str:
+    """Return the compact interpreter ABI tag for the current Python."""
     impl = "cp" if sys.implementation.name == "cpython" else sys.implementation.name
     major, minor = sys.version_info[:2]
     return f"{impl}{major}{minor}"
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse release-tree build options."""
     p = argparse.ArgumentParser(description="Build a release tarball.")
     p.add_argument("--version", required=True, help="PEP 440 version string.")
     p.add_argument(
@@ -124,6 +127,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def git_short_sha() -> str:
+    """Return a short source revision or a stable no-git fallback."""
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short=7", "HEAD"],
@@ -138,11 +142,13 @@ def git_short_sha() -> str:
 
 
 def default_build_id() -> str:
+    """Build a UTC timestamp and source-revision identifier."""
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     return f"{ts}-{git_short_sha()}"
 
 
 def _pip_install_to(target: Path, source: str, extras: str) -> None:
+    """Install the release source and selected extras into a target tree."""
     spec = source
     if extras:
         spec = f"{source}[{extras}]"
@@ -161,12 +167,14 @@ def _pip_install_to(target: Path, source: str, extras: str) -> None:
 
 
 def _write_manifest(root: Path, info: dict) -> None:
+    """Write the runtime tree's deterministic JSON manifest."""
     (root / "manifest.json").write_text(
         json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
 
 
 def _sha256(path: Path) -> str:
+    """Return the SHA-256 digest of a release artifact."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -186,7 +194,7 @@ def _pack_tarball(root: Path, tarball: Path, *, use_zstd: bool) -> None:
     tarball.parent.mkdir(parents=True, exist_ok=True)
     children = sorted(root.iterdir())
     if use_zstd:
-        import zstandard  # only needed when packing zstd
+        import zstandard  # Optional unless zstd output is selected.
 
         with tarball.open("wb") as dst:
             cctx = zstandard.ZstdCompressor(level=19, threads=-1)
@@ -201,6 +209,7 @@ def _pack_tarball(root: Path, tarball: Path, *, use_zstd: bool) -> None:
 
 
 def main() -> int:
+    """Build the installed runtime tree, archive, and publish sidecar."""
     args = parse_args()
     build_id = args.build_id or default_build_id()
 
@@ -234,8 +243,7 @@ def main() -> int:
     _pack_tarball(root, tarball, use_zstd=not args.no_zstd)
     info["sha256"] = _sha256(tarball)
     info["size_bytes"] = tarball.stat().st_size
-    # Re-write the manifest (now with sha256) alongside the tarball for
-    # the publish step to slurp.
+    # The publish step consumes artifact metadata from an adjacent sidecar.
     sidecar = tarball.with_suffix(tarball.suffix + ".manifest.json")
     sidecar.write_text(
         json.dumps(info, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -247,7 +255,7 @@ def main() -> int:
 
 
 def _py_minor(abi: str) -> str:
-    """``cp313`` → ``3.13``."""
+    """Convert a compact ABI tag such as ``cp313`` to ``3.13``."""
     digits = "".join(ch for ch in abi if ch.isdigit())
     if len(digits) >= 2:
         return f"{digits[0]}.{digits[1:]}"

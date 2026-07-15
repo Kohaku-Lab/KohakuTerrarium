@@ -23,10 +23,8 @@ import sys
 from kohakuterrarium.compose import Pure, factory
 from kohakuterrarium.core.config import load_agent_config
 
-# ── Configs ──────────────────────────────────────────────────────────
-
-
 def make_classifier_config():
+    """Build a tool-free classifier that emits one routing key."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = "classifier"
     config.tools = []
@@ -44,6 +42,7 @@ def make_classifier_config():
 
 
 def make_specialist_config(role: str, description: str):
+    """Build a focused specialist and grant tools only to code tasks."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"specialist-{role}"
     config.tools = (
@@ -63,14 +62,10 @@ def make_specialist_config(role: str, description: str):
     return config
 
 
-# ── Build the router ─────────────────────────────────────────────────
-
-
 def build_router():
-    """Construct a classify → route → specialist pipeline."""
+    """Construct a classifier that routes original requests to specialists."""
     classifier = factory(make_classifier_config())
 
-    # Specialists for each category
     specialists = {
         "code": factory(make_specialist_config("code", "software engineer")),
         "writing": factory(make_specialist_config("writing", "professional writer")),
@@ -78,31 +73,24 @@ def build_router():
         "_default": factory(make_specialist_config("general", "helpful assistant")),
     }
 
-    # Classifier extracts the category, then we pair it with the original input
-    # so the specialist sees the original request, not just the category name.
-    #
-    # Flow: input → (classify, echo) → (category, original_input) → route → specialist
+    # Pair the routing key with the original request because dict routing consumes
+    # the key and forwards the paired value to the selected specialist.
 
     async def classify_and_pair(request: str) -> tuple[str, str]:
-        """Classify the request and return (category, original_request)."""
+        """Return the normalized routing key with the unchanged request."""
         category = await classifier(request)
         return (category.strip().lower(), request)
 
-    # The router pipeline:
-    #   classify_and_pair produces ("code", "Fix the bug...")
-    #   >> dict routes by key, passing the original request to the specialist
     router = Pure(classify_and_pair) >> specialists
 
     return router
 
 
-# ── Main ─────────────────────────────────────────────────────────────
-
-
 async def main(request: str) -> None:
+    """Route one request with retry and generalist fallback."""
     print(f"Request: {request}\n")
 
-    # Build the router with fallback for resilience
+    # Retry classification/routing once before using an independent generalist.
     router = build_router()
     safe_router = (router * 2) | factory(
         make_specialist_config("general", "helpful assistant")

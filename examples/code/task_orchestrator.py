@@ -6,11 +6,10 @@ Uses the composition algebra:
   - ``>>`` with auto-wrapped callables for transforms
   - ``asyncio.gather`` for parallel execution (Python-native, no custom operator)
 
-Why code, not terrarium?
-  - Agent TOPOLOGY is dynamic: the number and type of specialists
-    depends on the task. Can't pre-define this in terrarium YAML.
-  - Dependencies between sub-tasks need a DAG executor, not channels.
-  - Specialists are EPHEMERAL: created for one sub-task, destroyed after.
+Why code, not a terrarium recipe?
+  - Specialist count and role are derived from the plan at runtime.
+  - Dependency ordering requires a DAG executor rather than broadcast channels.
+  - Each specialist exists for only one sub-task.
 
 Example:
     python task_orchestrator.py "Build a landing page for a coffee shop"
@@ -22,8 +21,6 @@ import sys
 
 from kohakuterrarium.compose import factory
 from kohakuterrarium.core.config import load_agent_config
-
-# ── Config builders ──────────────────────────────────────────────────
 
 SPECIALIST_PROMPTS = {
     "planner": (
@@ -52,6 +49,7 @@ SPECIALIST_PROMPTS = {
 
 
 def make_specialist_config(role: str, context: str = ""):
+    """Build an ephemeral specialist with dependency context and minimal tools."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"specialist-{role}"
     config.tools = (
@@ -70,11 +68,8 @@ def make_specialist_config(role: str, context: str = ""):
     return config
 
 
-# ── DAG helpers ──────────────────────────────────────────────────────
-
-
 def parse_plan(raw: str) -> list[dict]:
-    """Extract task list JSON from planner output."""
+    """Parse a task list after removing an optional Markdown code fence."""
     cleaned = raw.strip()
     if cleaned.startswith("```"):
         cleaned = "\n".join(cleaned.split("\n")[1:])
@@ -84,7 +79,7 @@ def parse_plan(raw: str) -> list[dict]:
 
 
 def topological_waves(tasks: list[dict]) -> list[list[dict]]:
-    """Group tasks into waves respecting dependencies."""
+    """Group tasks into dependency-safe waves or reject a deadlocked plan."""
     done: set[str] = set()
     remaining = list(tasks)
     waves: list[list[dict]] = []
@@ -102,15 +97,13 @@ def topological_waves(tasks: list[dict]) -> list[list[dict]]:
     return waves
 
 
-# ── Main ─────────────────────────────────────────────────────────────
-
-
 async def orchestrate(request: str) -> None:
+    """Plan a request, execute its dependency waves, and print results."""
     print(f'\n{"=" * 60}')
     print(f"REQUEST: {request}")
     print(f'{"=" * 60}')
 
-    # Step 1: Plan — factory creates ephemeral planner, >> pipes through parser
+    # The planner is ephemeral and its output is parsed by a pure transform.
     print("\n[1/3] Planning...")
     planner = factory(make_specialist_config("planner"))
     plan = await (planner >> parse_plan)(request)
@@ -122,14 +115,14 @@ async def orchestrate(request: str) -> None:
             f"  {t['id']}: [{t.get('specialist', 'writer')}] {t['description']}{deps}"
         )
 
-    # Step 2: Execute DAG — parallel waves using asyncio.gather
+    # Tasks in one wave have no unresolved dependencies and can run concurrently.
     print("\n[2/3] Executing...")
     results: dict[str, str] = {}
 
     for wave in topological_waves(plan):
         print(f"\n  Wave: {[t['id'] for t in wave]}")
 
-        # Build context from completed dependencies
+        # Only completed dependency outputs enter a specialist's context.
         def build_context(task: dict) -> str:
             ctx = ""
             for dep_id in task.get("depends_on", []):
@@ -137,7 +130,7 @@ async def orchestrate(request: str) -> None:
                     ctx += f"\n--- {dep_id} ---\n{results[dep_id]}\n"
             return ctx
 
-        # Run all tasks in this wave in parallel — each with an ephemeral factory agent
+        # A fresh factory agent isolates each sub-task's conversation state.
         wave_results = await asyncio.gather(
             *(
                 factory(
@@ -155,7 +148,6 @@ async def orchestrate(request: str) -> None:
             preview = result[:100].replace("\n", " ")
             print(f"  [{task['id']}] Done: {preview}...")
 
-    # Step 3: Results
     print(f'\n[3/3] Results\n{"=" * 60}')
     for task in plan:
         print(f"\n--- {task['id']}: {task['description']} ---")

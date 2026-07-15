@@ -1,5 +1,4 @@
-"""
-SendDiscord Tool - Send messages to Discord via native tool calling.
+"""Expose guarded Discord output through native tool calling.
 
 Wraps the Discord output functionality (keyword filtering, dedup,
 drop chance, reply/mention markers) into a callable tool for
@@ -22,11 +21,7 @@ logger = get_logger("kohakuterrarium.custom.send_discord")
 
 
 class SendDiscordTool(BaseTool):
-    """
-    Tool for sending messages to Discord.
-
-    Uses the shared DiscordClient from the input module.
-    Delegates to DiscordOutputModule for filtering, dedup, and delivery.
+    """Send messages through the shared output policy and Discord client.
 
     Supports special markers in message content:
     - [reply:Username] or [reply:#N] - reply to a message
@@ -70,7 +65,7 @@ class SendDiscordTool(BaseTool):
         return ExecutionMode.DIRECT
 
     def get_parameters_schema(self) -> dict:
-        """Schema for native function calling."""
+        """Describe the message argument for native function calling."""
         return {
             "type": "object",
             "properties": {
@@ -83,7 +78,7 @@ class SendDiscordTool(BaseTool):
         }
 
     async def _execute(self, args: dict[str, Any]) -> ToolResult:
-        """Send a message to Discord."""
+        """Validate and send one message through Discord output policy."""
         message = args.get("message", args.get("content", "")).strip()
         if not message:
             return ToolResult(error="Empty message - nothing to send")

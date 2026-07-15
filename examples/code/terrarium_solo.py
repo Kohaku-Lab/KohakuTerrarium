@@ -13,6 +13,7 @@ from kohakuterrarium import Terrarium
 
 
 async def main() -> None:
+    """Chat with one engine-hosted creature and report its graph state."""
     engine, alice = await Terrarium.with_creature("@kt-biome/creatures/general")
     try:
         questions = [

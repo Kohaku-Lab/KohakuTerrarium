@@ -24,7 +24,7 @@ from kohakuterrarium.parsing import TextEvent, ToolCallEvent
 
 
 class DummyTool(BaseTool):
-    """Simple tool for testing."""
+    """Provide deterministic weather output for live parser-mode checks."""
 
     @property
     def tool_name(self) -> str:
@@ -53,6 +53,7 @@ class DummyTool(BaseTool):
 
 
 async def test_mode(mode: str) -> None:
+    """Run one live controller turn and report parsed events for a tool mode."""
     api_key = os.environ.get("OPENROUTER_API_KEY", "")
     model = os.environ.get("OPENROUTER_MODEL", "google/gemini-3-flash-preview")
 
@@ -109,6 +110,7 @@ async def test_mode(mode: str) -> None:
 
 
 async def main() -> None:
+    """Require OpenRouter credentials and exercise native and bracket modes."""
     if not os.environ.get("OPENROUTER_API_KEY"):
         print("ERROR: Set OPENROUTER_API_KEY in .env")
         return

@@ -38,8 +38,7 @@ PYPROJECT = Path("pyproject.toml")
 ALLOWLIST_PATH = Path("scripts/dep_graph_allowlist.json")
 
 
-# ── Distribution-name → top-level-module-name mapping ───────────────
-
+# Distribution names do not always match their importable top-level modules.
 DIST_TO_TOP = {
     "pyyaml": "yaml",
     "ruamel.yaml": "ruamel",
@@ -70,10 +69,11 @@ PLATFORM_OPTIONAL = {
 }
 
 
-# ── pyproject parsing ───────────────────────────────────────────────
+# Dependency classification
 
 
 def _spec_to_top(spec: str) -> str:
+    """Map a dependency specifier to its importable top-level module."""
     name = spec.split(";")[0].split("[")[0]
     for sep in ("==", ">=", "<=", "~=", "!=", ">", "<"):
         if sep in name:
@@ -97,6 +97,7 @@ def load_dependencies() -> tuple[set[str], set[str]]:
 
 
 def classify(root: str, required: set[str], optional: set[str]) -> str:
+    """Classify an imported root by project dependency policy."""
     if root == PKG:
         return "internal"
     # Platform-only (incl. stdlib platform modules like fcntl/pty/termios):
@@ -113,10 +114,11 @@ def classify(root: str, required: set[str], optional: set[str]) -> str:
     return "unknown"
 
 
-# ── AST extraction ──────────────────────────────────────────────────
+# AST extraction
 
 
 def _module_name(path: Path) -> str:
+    """Convert a source path to its fully qualified module name."""
     rel = path.relative_to(ROOT.parent)
     parts = list(rel.with_suffix("").parts)
     if parts[-1] == "__init__":
@@ -125,6 +127,7 @@ def _module_name(path: Path) -> str:
 
 
 def _scan_ranges(tree: ast.AST):
+    """Collect type-checking, function, and guarded-import source ranges."""
     tc_ranges: list[tuple[int, int]] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.If):
@@ -173,6 +176,7 @@ def _scan_ranges(tree: ast.AST):
 
 
 def extract_imports(tree: ast.AST, from_mod: str, file_path: Path) -> list[dict]:
+    """Extract import facts and their source-context classifications."""
     tc, funcs, tries = _scan_ranges(tree)
 
     def in_tc(line: int) -> bool:
@@ -244,7 +248,7 @@ def collect_facts() -> tuple[list[dict], list[tuple[str, str]], set[str]]:
     return facts, parse_errors, all_modules
 
 
-# ── Graph construction ─────────────────────────────────────────────
+# Graph construction
 
 
 def _resolve_internal(target: str, all_modules: set[str]) -> str | None:
@@ -286,10 +290,11 @@ def build_graph(
     return runtime, edges_meta
 
 
-# ── Tarjan SCCs ─────────────────────────────────────────────────────
+# Strongly connected components
 
 
 def find_sccs(graph: dict[str, set[str]]) -> list[list[str]]:
+    """Return non-trivial strongly connected components using Tarjan's algorithm."""
     sys.setrecursionlimit(max(sys.getrecursionlimit(), 10_000))
     idx: dict[str, int] = {}
     low: dict[str, int] = {}
@@ -346,7 +351,7 @@ def sample_cycle_path(scc: list[str], graph: dict[str, set[str]]) -> list[str]:
                 nxt = w
                 break
         if nxt is None:
-            # dead-end — fall back to the cycle around the smallest 2-cycle
+            # A partial path still gives diagnostics when the simple walk dead-ends.
             for w in sorted(graph.get(cur, ())):
                 if w in nodes and w in path:
                     path.append(w)
@@ -357,10 +362,11 @@ def sample_cycle_path(scc: list[str], graph: dict[str, set[str]]) -> list[str]:
         cur = nxt
 
 
-# ── Allowlist ──────────────────────────────────────────────────────
+# Import-policy allowlist
 
 
 def load_allowlist() -> list[dict]:
+    """Load explicit exceptions to the in-function import policy."""
     if not ALLOWLIST_PATH.exists():
         return []
     return json.loads(ALLOWLIST_PATH.read_text(encoding="utf-8"))
@@ -378,8 +384,7 @@ def _matches(entry: dict, fact: dict) -> bool:
     return True
 
 
-# ── Tier rules (Phase 0 of studio-cleanup refactor) ─────────────────
-# Phase 0 introduces three tier separations:
+# Import tiers enforce these architectural separations:
 #
 # - ``packages/`` is a low-tier library (peer to core / bootstrap /
 #   terrarium); it cannot reach into ``studio/``, ``api/``, or ``cli/``.
@@ -432,9 +437,6 @@ def check_tier_violations(
     return violations
 
 
-# ── Lint ───────────────────────────────────────────────────────────
-
-
 def lint_imports(
     facts: list[dict],
     required: set[str],
@@ -482,7 +484,7 @@ def lint_imports(
     return violations, allowed
 
 
-# ── Reports ─────────────────────────────────────────────────────────
+# Text and graph reports
 
 
 def _short(mod: str) -> str:
@@ -602,9 +604,6 @@ def report_lint(violations, allowed, out=sys.stdout) -> None:
             print(f"  {f['file']}:{f['line']}  ({f['in_function']})", file=out)
             print(f"    {f['stmt']}", file=out)
             print(f"    reason: {why}", file=out)
-
-
-# ── DOT and plot (kept from previous script, unchanged behavior) ─────
 
 
 def output_dot(runtime, all_modules, out=sys.stdout) -> None:
@@ -748,10 +747,11 @@ def render_plot(runtime, all_modules) -> None:
     print(f"Plot saved to {out_path}")
 
 
-# ── CLI ─────────────────────────────────────────────────────────────
+# Command-line interface
 
 
 def _build_parser() -> argparse.ArgumentParser:
+    """Build the dependency-graph command-line parser."""
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--stats", action="store_true", help="print graph statistics")
     p.add_argument("--cycles", action="store_true", help="report runtime SCCs")
@@ -778,6 +778,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Analyze imports, render requested reports, and return policy status."""
     args = _build_parser().parse_args(argv)
     facts, parse_errors, all_modules = collect_facts()
     required, optional = load_dependencies()

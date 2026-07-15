@@ -1,9 +1,4 @@
-"""
-Custom TTS output for conversational agent.
-
-For demo purposes, this prints to console with typing effect.
-Replace with actual TTS (Fish Speech, etc.) for production.
-"""
+"""Provide console-backed TTS examples with streaming and immediate output."""
 
 import asyncio
 import sys
@@ -13,11 +8,7 @@ from kohakuterrarium.builtins.outputs.tts import AudioChunk, TTSConfig, TTSModul
 
 
 class StreamingTTS(TTSModule):
-    """
-    Console-based TTS for testing.
-
-    Prints text with a typing effect, simulating speech.
-    """
+    """Simulate streaming speech by printing text with paced typing."""
 
     def __init__(
         self,
@@ -30,37 +21,35 @@ class StreamingTTS(TTSModule):
         self.word_delay = word_delay
 
     async def _initialize(self) -> None:
-        """Initialize console output."""
+        """Announce that the console playback sink is ready."""
         print("\n[StreamingTTS] Ready for output")
         print("=" * 50)
 
     async def _cleanup(self) -> None:
-        """Cleanup."""
+        """Announce that console playback has stopped."""
         print("\n[StreamingTTS] Stopped")
 
     async def _synthesize(self, text: str) -> AsyncIterator[AudioChunk]:
-        """Yield chunks for streaming output."""
-        # Process word by word for more natural pacing
+        """Yield word-sized chunks so playback can preserve natural pacing."""
         words = text.split()
 
         for i, word in enumerate(words):
             if self._interrupted:
                 break
 
-            # Add space before word (except first)
+            # Emit spaces separately so playback can distinguish word delays.
             if i > 0:
                 yield AudioChunk(data=b" ", text=" ")
 
-            # Yield word
             yield AudioChunk(data=word.encode(), text=word)
 
-        # Final chunk
+        # The terminal chunk lets the playback sink close the utterance.
         yield AudioChunk(data=b"", is_final=True, text="")
 
     async def _play_audio(self, chunk: AudioChunk) -> None:
-        """Print with typing effect."""
+        """Render one synthesized chunk with interruptible typing delays."""
         if chunk.is_final:
-            # End of utterance
+            # A final chunk terminates the current console line.
             sys.stdout.write("\n")
             sys.stdout.flush()
             return
@@ -69,7 +58,7 @@ class StreamingTTS(TTSModule):
         if not text:
             return
 
-        # Print character by character for typing effect
+        # Per-character waits make interruption visible during long words.
         for char in text:
             if self._interrupted:
                 break
@@ -77,22 +66,18 @@ class StreamingTTS(TTSModule):
             sys.stdout.flush()
             await asyncio.sleep(self.char_delay)
 
-        # Pause after word
+        # Whitespace chunks must not introduce an extra inter-word delay.
         if text and not text.isspace():
             await asyncio.sleep(self.word_delay)
 
     async def _stop_playback(self) -> None:
-        """Handle interruption."""
+        """Mark interrupted playback without leaving a partial line open."""
         sys.stdout.write(" [...]\n")
         sys.stdout.flush()
 
 
 class SimpleTTS(TTSModule):
-    """
-    Simple TTS that just prints text immediately.
-
-    No typing effect, just instant output.
-    """
+    """Render synthesized text immediately without streaming delays."""
 
     async def _synthesize(self, text: str) -> AsyncIterator[AudioChunk]:
         yield AudioChunk(data=text.encode(), text=text, is_final=True)

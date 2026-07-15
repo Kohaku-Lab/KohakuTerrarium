@@ -21,11 +21,8 @@ import sys
 from kohakuterrarium.compose import factory
 from kohakuterrarium.core.config import load_agent_config
 
-# ── Config builders ──────────────────────────────────────────────────
-
-
 def make_expert(name: str, style: str):
-    """Create a config with a specific answering style."""
+    """Build a tool-free expert configuration with one answer style."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"expert-{name}"
     config.tools = []
@@ -37,33 +34,23 @@ def make_expert(name: str, style: str):
     return config
 
 
-# ── Voting logic ─────────────────────────────────────────────────────
-
-
 def pick_best(answers: tuple[str, ...]) -> str:
-    """Simple voting: pick the longest, most detailed answer.
-
-    In production, you'd use a judge agent or semantic similarity
-    to find consensus. This is a demo of the pattern.
-    """
+    """Choose the longest answer as a simple detail proxy for this example."""
     if not answers:
         raise ValueError("No answers to vote on")
-    # Pick the answer with the most substance (longest, as proxy)
     return max(answers, key=len)
 
 
 def format_result(answer: str) -> str:
-    """Clean up the winning answer."""
+    """Normalize surrounding whitespace in the selected answer."""
     return answer.strip()
 
 
-# ── Main ─────────────────────────────────────────────────────────────
-
-
 async def main(question: str) -> None:
+    """Run a parallel expert ensemble with retry and single-agent fallback."""
     print(f"Question: {question}\n")
 
-    # Three experts with different styles — all ephemeral (factory)
+    # Factories create fresh experts so calls do not share conversation state.
     analytical = factory(
         make_expert("analytical", "with logical analysis and examples")
     )
@@ -72,10 +59,10 @@ async def main(question: str) -> None:
     )
     concise = factory(make_expert("concise", "as briefly and precisely as possible"))
 
-    # The ensemble: run all 3 in parallel, vote on the best answer, format
+    # Parallel outputs are reduced by a deterministic voting transform.
     ensemble = (analytical & creative & concise) >> pick_best >> format_result
 
-    # Fallback: if ensemble fails (all 3 crash), use a single retry
+    # Retry the ensemble once, then fall back to one analytical expert.
     safe_pipeline = (ensemble * 2) | analytical
 
     print("Running ensemble (3 experts in parallel)...")

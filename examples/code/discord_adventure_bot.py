@@ -1,9 +1,8 @@
 """
 Discord Adventure Bot — agents as NPC characters in an interactive RPG.
 
-This is NOT the agent-first pattern (examples/agent-apps/discord_bot).
-That example builds a bot FROM the agent — the agent IS the bot with
-custom discord input/output/trigger modules, launched via ``kt run``.
+Unlike the agent-first example in ``examples/agent-apps/discord_bot``,
+this program owns Discord interactions and invokes agents only as NPCs.
 
 Here, the Discord bot is the main program. It has its own slash
 commands, button interactions, thread management, game state machine.
@@ -36,12 +35,9 @@ from kohakuterrarium.terrarium.creature_host import Creature
 # One engine hosts every NPC creature for the whole bot process.
 ENGINE = Terrarium()
 
-# ── Game state ───────────────────────────────────────────────────────
-
-
 @dataclass
 class NPC:
-    """A running NPC agent in an adventure."""
+    """Associate a live creature with its in-game identity."""
 
     name: str
     role: str
@@ -50,20 +46,17 @@ class NPC:
 
 @dataclass
 class Adventure:
-    """Tracks one adventure instance (one Discord thread)."""
+    """Track one Discord-thread adventure and its live NPCs."""
 
     thread_id: int
     player_id: int
     npcs: dict[str, NPC] = field(default_factory=dict)
     history: list[str] = field(default_factory=list)
-    state: str = "tavern"  # Game state machine
+    state: str = "tavern"  # Encodes the active interaction state.
 
 
-# All active adventures, keyed by thread ID
+# Thread IDs isolate concurrent adventures and route incoming messages.
 adventures: dict[int, Adventure] = {}
-
-
-# ── NPC agent factory ────────────────────────────────────────────────
 
 
 async def create_npc(
@@ -81,11 +74,11 @@ async def create_npc(
     """
     config = load_agent_config("@kt-biome/creatures/general")
 
-    # Override for NPC behavior: small model, no tools needed
+    # NPCs only converse, so remove orchestration capabilities and use a small model.
     config.name = f"npc-{name}"
     config.model = "openai/gpt-4.1-mini"
     config.tool_format = "native"
-    config.tools = []  # NPCs don't use tools — they just talk
+    config.tools = []
     config.subagents = []
     config.system_prompt = (
         f"You are {name}, {role} in a fantasy RPG.\n\n"
@@ -96,29 +89,27 @@ async def create_npc(
         "Never break the fourth wall."
     )
 
-    # ``io="headless"`` — NPCs speak only through TurnResult, never the
-    # bot process's console.
+    # Headless I/O keeps NPC speech inside TurnResult for Discord rendering.
     creature = await ENGINE.add_creature(config, io="headless")
     return NPC(name=name, role=role, creature=creature)
 
 
 async def talk_to_npc(npc: NPC, message: str) -> str:
-    """Send a message to an NPC and return its reply."""
+    """Run one NPC turn and return an in-character fallback on failure."""
     result = await npc.creature.run(message, timeout=120, raise_on_error=False)
     return result.text.strip() if result.ok else f"*{npc.name} is at a loss*"
 
 
 async def destroy_adventure(adventure: Adventure) -> None:
-    """Stop all NPC agents in an adventure."""
+    """Remove every NPC creature owned by an adventure."""
     for npc in adventure.npcs.values():
         await ENGINE.remove_creature(npc.creature)
     adventure.npcs.clear()
 
 
-# ── Discord bot ──────────────────────────────────────────────────────
-
-
 class AdventureBot(discord.Client):
+    """Own Discord commands and interactions for all adventures."""
+
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
@@ -126,27 +117,23 @@ class AdventureBot(discord.Client):
         self.tree = app_commands.CommandTree(self)
 
     async def setup_hook(self):
+        """Synchronize slash commands after Discord client setup."""
         await self.tree.sync()
 
 
 bot = AdventureBot()
 
 
-# ── Slash commands ───────────────────────────────────────────────────
-
-
 @bot.tree.command(name="adventure", description="Start a new adventure")
 async def start_adventure(interaction: discord.Interaction):
-    """Create a thread, spawn NPC agents, begin the game."""
+    """Create an adventure thread, spawn its NPCs, and send the opening UI."""
     await interaction.response.defer()
 
-    # Create a thread for this adventure
     thread = await interaction.channel.create_thread(
         name=f"Adventure - {interaction.user.display_name}",
         type=discord.ChannelType.public_thread,
     )
 
-    # Create NPCs with dynamic personalities
     adventure = Adventure(
         thread_id=thread.id,
         player_id=interaction.user.id,
@@ -173,7 +160,6 @@ async def start_adventure(interaction: discord.Interaction):
 
     adventures[thread.id] = adventure
 
-    # Send the opening scene
     embed = discord.Embed(
         title="The Rusty Tankard",
         description=(
@@ -186,14 +172,14 @@ async def start_adventure(interaction: discord.Interaction):
         color=0xD4920A,
     )
 
-    # Buttons for NPC interaction — bot manages the UI
+    # The bot owns interaction UI; agents provide only character dialogue.
     view = NPCSelectView(adventure)
     await thread.send(embed=embed, view=view)
     await interaction.followup.send(f"Adventure started in {thread.mention}!")
 
 
 class NPCSelectView(discord.ui.View):
-    """Buttons to choose which NPC to talk to."""
+    """Present one interaction button per adventure NPC."""
 
     def __init__(self, adventure: Adventure):
         super().__init__(timeout=300)
@@ -203,6 +189,8 @@ class NPCSelectView(discord.ui.View):
 
 
 class NPCButton(discord.ui.Button):
+    """Route a Discord button interaction to one NPC."""
+
     def __init__(self, npc_key: str, name: str, role: str):
         super().__init__(label=f"Talk to {name}", style=discord.ButtonStyle.primary)
         self.npc_key = npc_key
@@ -217,7 +205,7 @@ class NPCButton(discord.ui.Button):
 
         await interaction.response.defer()
 
-        # NPC greets the player — agent is invoked here
+        # Agent invocation remains behind the bot-managed button interaction.
         greeting = await talk_to_npc(
             npc, "A new adventurer approaches you. Greet them in character."
         )
@@ -230,15 +218,13 @@ class NPCButton(discord.ui.Button):
         embed.set_footer(text="Type a message in this thread to continue talking")
         await interaction.followup.send(embed=embed)
 
-        # Track who the player is talking to
+        # The state string routes subsequent free-text messages to this NPC.
         adventure.state = f"talking:{self.npc_key}"
-
-
-# ── Message handler — route player messages to the active NPC ────────
 
 
 @bot.event
 async def on_message(message: discord.Message):
+    """Route the adventure owner's thread message to the active NPC."""
     if message.author.bot:
         return
 
@@ -248,7 +234,6 @@ async def on_message(message: discord.Message):
     if message.author.id != adventure.player_id:
         return
 
-    # Check if player is talking to an NPC
     if not adventure.state.startswith("talking:"):
         return
 
@@ -257,7 +242,6 @@ async def on_message(message: discord.Message):
     if not npc:
         return
 
-    # Feed the player's message to the NPC agent
     adventure.history.append(f"Player: {message.content}")
     response = await talk_to_npc(npc, message.content)
     adventure.history.append(f"{npc.name}: {response}")
@@ -270,13 +254,10 @@ async def on_message(message: discord.Message):
     await message.channel.send(embed=embed)
 
 
-# ── Arena command — two NPCs debate ─────────────────────────────────
-
-
 @bot.tree.command(name="arena", description="Two NPCs debate a topic")
 @app_commands.describe(topic="What should they debate?")
 async def arena(interaction: discord.Interaction, topic: str):
-    """Spawn two NPC agents with opposing views, run a debate."""
+    """Run a bot-sequenced three-round debate between temporary NPCs."""
     await interaction.response.defer()
 
     npc_for = await create_npc(
@@ -301,10 +282,9 @@ async def arena(interaction: discord.Interaction, topic: str):
         )
         await interaction.followup.send(f"Debate started in {thread.mention}!")
 
-        # Bot-controlled debate loop — 3 rounds
+        # Bot-side sequencing guarantees alternating turns for three rounds.
         last_argument = f"The topic is: {topic}"
         for round_num in range(1, 4):
-            # FOR side responds to the last argument
             arg_for = await talk_to_npc(npc_for, last_argument)
             embed = discord.Embed(
                 title=f"Round {round_num} — Scholar Aldric (FOR)",
@@ -313,7 +293,6 @@ async def arena(interaction: discord.Interaction, topic: str):
             )
             await thread.send(embed=embed)
 
-            # AGAINST side responds to FOR's argument
             arg_against = await talk_to_npc(npc_against, arg_for)
             embed = discord.Embed(
                 title=f"Round {round_num} — Merchant Vera (AGAINST)",
@@ -323,7 +302,7 @@ async def arena(interaction: discord.Interaction, topic: str):
             await thread.send(embed=embed)
 
             last_argument = arg_against
-            await asyncio.sleep(1)  # Pacing for readability
+            await asyncio.sleep(1)  # Keep successive Discord embeds readable.
 
         await thread.send("**The debate has concluded! React to vote for the winner.**")
 
@@ -332,11 +311,9 @@ async def arena(interaction: discord.Interaction, topic: str):
         await ENGINE.remove_creature(npc_against.creature)
 
 
-# ── Cleanup ──────────────────────────────────────────────────────────
-
-
 @bot.tree.command(name="end", description="End the current adventure")
 async def end_adventure(interaction: discord.Interaction):
+    """End the current thread's adventure and remove its NPC creatures."""
     adventure = adventures.pop(interaction.channel_id, None)
     if adventure:
         await destroy_adventure(adventure)
@@ -344,8 +321,6 @@ async def end_adventure(interaction: discord.Interaction):
     else:
         await interaction.response.send_message("No active adventure in this thread.")
 
-
-# ── Entry point ──────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import os

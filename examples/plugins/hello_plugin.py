@@ -20,15 +20,13 @@ logger = get_logger(__name__)
 
 
 class HelloPlugin(BasePlugin):
+    """Log the basic plugin and agent lifecycle hooks."""
+
     name = "hello"
     priority = 50
 
     async def on_load(self, context: PluginContext) -> None:
-        """Called once when the plugin is loaded during agent initialization.
-
-        The context provides agent metadata and utility methods.
-        Store it if you need it in later hooks.
-        """
+        """Capture plugin context and log the initialized agent metadata."""
         self._ctx = context
         logger.info(
             "Hello plugin loaded",
@@ -38,13 +36,13 @@ class HelloPlugin(BasePlugin):
         )
 
     async def on_unload(self) -> None:
-        """Called when the agent shuts down. Clean up resources here."""
+        """Log plugin unloading during agent shutdown."""
         logger.info("Hello plugin unloaded")
 
     async def on_agent_start(self) -> None:
-        """Called after agent.start() — all tools, sub-agents, triggers ready."""
+        """Log that all agent runtime modules have started."""
         logger.info("Agent is running — all systems go")
 
     async def on_agent_stop(self) -> None:
-        """Called before agent.stop() — agent is about to shut down."""
+        """Log the beginning of agent shutdown."""
         logger.info("Agent is stopping — goodbye!")
