@@ -839,7 +839,7 @@ export function _replayEvents(messages, events, branchView = null) {
         to: evt.to || "",
         preview: evt.content_preview || "",
         withContent: evt.with_content !== false,
-        turnIndex: evt.turn_index || 0,
+        turnIndex: evt.source_turn_index || 0,
         // Cross-site delivery flag — backend sets metadata.cross_node
         // on remote forwards via terrarium.broadcast.  The frontend
         // chips the entry with a "cross-site" badge.
@@ -2320,7 +2320,7 @@ const _chatStoreOptions = {
 
     /** Handle ALL incoming WS messages */
     _onMessage(data) {
-      const source = data.source || ""
+      const source = this._tabForSource(data.source || "")
 
       if (data.type === "user_input") {
         this._handleUserInput(source, data)
@@ -2711,7 +2711,9 @@ const _chatStoreOptions = {
           to: data.to || source,
           preview: data.content_preview || "",
           withContent: data.with_content !== false,
-          turnIndex: data.turn_index || 0,
+          // The sender's turn travels under its own key; the frame's
+          // plain turn_index/branch_id are receiver-timeline stamps.
+          turnIndex: data.source_turn_index || 0,
           // Cross-site delivery flag — set by the backend forwarder
           // (terrarium_output_wire.py) for cross-node wires.
           crossNode: !!(data.cross_node || data.metadata?.cross_node),
@@ -3156,6 +3158,27 @@ const _chatStoreOptions = {
      *     mutation; the chunk is still persisted server-side and a
      *     branch switch + resync will surface it later.
      */
+    /**
+     * Map a WS frame's ``source`` (always the creature's REAL name —
+     * ``StreamOutput`` is constructed with ``creature.name``) onto the
+     * tab key the store actually uses. Recipe-built terrariums key the
+     * privileged creature's tab as ``"root"``, so frames tagged with
+     * its real name would otherwise miss every ``messagesByTab`` /
+     * ``processingByTab`` lookup and be silently dropped — only
+     * ``session_info`` had this aliasing before.
+     */
+    _tabForSource(source) {
+      if (
+        source &&
+        source === this._rootSourceName &&
+        !this.messagesByTab[source] &&
+        this.messagesByTab["root"]
+      ) {
+        return "root"
+      }
+      return source
+    },
+
     _frameMatchesViewedBranch(tab, data) {
       const fb = data?.branch_id
       const ft = data?.turn_index
