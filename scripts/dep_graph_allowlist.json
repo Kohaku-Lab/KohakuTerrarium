@@ -1,285 +1,51 @@
 [
   {
-    "file": "src/kohakuterrarium/launcher/android.py",
-    "line": 92,
-    "function": "_serve_and_report",
-    "reason": "Lazy import of api.app.create_app — the Android launcher loads via JNI before the framework's heavy api/serving graph needs to be in memory.  Lazy import means an import-time failure surfaces in the foreground-service log (visible via adb logcat) instead of silently killing the Python interpreter at module load."
-  },
-  {
-    "file": "src/kohakuterrarium/launcher/android.py",
-    "line": 93,
-    "function": "_serve_and_report",
-    "reason": "Lazy import of serving.web.start_uvicorn_with_port_fallback — paired with the create_app lazy import above; both share the same JNI-cold-start rationale."
+    "file": "src/kohakuterrarium/__briefcase__.py",
+    "function": "main",
+    "target": "kohakuterrarium.cli",
+    "reason": "briefcase bundle entry — MUST import cli post-sys.path-swap. The launcher first runs prepare() (briefcase-bundled), then evicts kohakuterrarium.* from sys.modules and prepends the active version tree to sys.path. Importing cli at module top would pin it to the briefcase-bundled framework (defeating the in-process version swap that makes self-update work on briefcase shells where _pth disables PYTHONPATH)."
   },
   {
     "file": "src/kohakuterrarium/__main__.py",
-    "line": 33,
     "function": "main",
+    "target": "kohakuterrarium.__briefcase__",
     "reason": "entry-point dispatch: briefcase bundle vs cli (mutually exclusive runtime modes)"
   },
   {
     "file": "src/kohakuterrarium/__main__.py",
-    "line": 38,
     "function": "main",
+    "target": "kohakuterrarium.cli",
     "reason": "entry-point dispatch: cli loaded only after the briefcase branch is ruled out"
   },
   {
-    "file": "src/kohakuterrarium/__briefcase__.py",
-    "line": 81,
-    "function": "main",
-    "reason": "briefcase bundle entry — MUST import cli post-sys.path-swap. The launcher first runs prepare() (briefcase-bundled), then evicts kohakuterrarium.* from sys.modules and prepends the active version tree to sys.path. Importing cli at module top would pin it to the briefcase-bundled framework (defeating the in-process version swap that makes self-update work on briefcase shells where _pth disables PYTHONPATH)."
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.litellm_provider",
+    "reason": "LiteLLM is an optional extra (`kohakuterrarium[litellm]`); LiteLLMProvider imported lazily on the litellm backend branch so a minimal install without that extra keeps `kt --help` and core imports working"
   },
   {
-    "file": "src/kohakuterrarium/cli/serve.py",
-    "line": 34,
-    "function": "_is_pid_alive",
-    "reason": "Win32-only ctypes import inside `if sys.platform == 'win32'` branch"
-  },
-  {
-    "file": "src/kohakuterrarium/cli/serve.py",
-    "line": 35,
-    "function": "_is_pid_alive",
-    "reason": "Win32-only ctypes.wintypes import inside `if sys.platform == 'win32'` branch"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 34,
-    "function": "_resolve_config_dirs",
-    "reason": "package-discovery cold-path; avoids loading packages module on bare uvicorn boot"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 35,
-    "function": "_resolve_config_dirs",
-    "reason": "package-discovery cold-path; sibling of line 34 — same justification"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 126,
-    "function": "start_uvicorn_with_port_fallback",
-    "reason": "uvicorn deferred — heavy import (pulls fastapi-deps transitively); function is only called from desktop/web boot, not from the bare module load path"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 232,
-    "function": "run_web_server",
-    "reason": "uvicorn deferred — heavy import, function is on the boot path only"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 234,
-    "function": "run_web_server",
-    "reason": "FastAPI app factory: serving->api lazy boot avoids pulling all routes when only the helper is touched"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 393,
-    "function": "_run_desktop_app_blocking",
-    "reason": "FastAPI app factory: same as run_web_server, desktop variant"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/introspect.py",
-    "line": 368,
-    "function": "resolve_module_source",
-    "reason": "package-resolver cold-path inside `if module.startswith('@')` branch"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/introspect.py",
-    "line": 401,
-    "function": "resolve_module_source",
-    "reason": "importlib.util used only on dotted-module branch"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/introspect.py",
-    "line": 403,
-    "function": "resolve_module_source",
-    "reason": "package-resolver cold-path inside the same dotted-module branch"
-  },
-  {
-    "file": "src/kohakuterrarium/session/session.py",
-    "line": 156,
-    "function": "attach_agent",
-    "reason": "session.attach <-> session.session sibling cycle workaround (attach_agent_to_session)"
-  },
-  {
-    "file": "src/kohakuterrarium/session/session.py",
-    "line": 168,
-    "function": "detach_agent",
-    "reason": "session.attach <-> session.session sibling cycle workaround (detach helpers)"
-  },
-  {
-    "file": "src/kohakuterrarium/session/session.py",
-    "line": 172,
-    "function": "detach_agent",
-    "reason": "session.errors imported only on the not-attached error path"
-  },
-  {
-    "file": "src/kohakuterrarium/session/output.py",
-    "line": 171,
-    "function": "on_processing_end",
-    "reason": "session.history imports session.output; replay_conversation only used on processing end"
-  },
-  {
-    "file": "src/kohakuterrarium/session/output.py",
-    "line": 438,
-    "function": "_persist_subagent_conversation",
-    "reason": "json import scoped to subagent persistence path"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/codegen/common.py",
-    "line": 227,
-    "function": "_dedent_body",
-    "reason": "textwrap used only by the dedent helper; cold path"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/routes/meta.py",
-    "line": 21,
-    "function": "version",
-    "reason": "importlib.metadata is heavy; only used by the /version endpoint"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/routes/meta.py",
-    "line": 22,
-    "function": "version",
-    "reason": "same as line 21; importlib.metadata.version"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/routes/schema.py",
-    "line": 88,
-    "function": "_load_plugin_sidecar",
-    "reason": "json/pathlib used only when plugin sidecar is loaded"
-  },
-  {
-    "file": "src/kohakuterrarium/api/studio/routes/schema.py",
-    "line": 89,
-    "function": "_load_plugin_sidecar",
-    "reason": "same as line 88; pathlib"
-  },
-  {
-    "file": "src/kohakuterrarium/builtins/user_commands/fork.py",
-    "line": 59,
-    "function": "_suggest_target_path",
-    "reason": "pathlib used only by the suggest helper"
-  },
-  {
-    "file": "src/kohakuterrarium/builtins/user_commands/fork.py",
-    "line": 60,
-    "function": "_suggest_target_path",
-    "reason": "uuid used only by the suggest helper"
-  },
-  {
-    "file": "src/kohakuterrarium/llm/codex_rate_limits.py",
-    "line": 421,
-    "function": "set_cached",
-    "reason": "time imported only on the cache-fallback branch"
-  },
-  {
-    "file": "src/kohakuterrarium/core/agent.py",
-    "line": 346,
-    "function": "_init_mcp",
-    "reason": "wrapped in try/except ImportError so MCP can be used as a graceful-degradation feature when the mcp package is missing"
-  },
-  {
-    "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 98,
-    "function": "_connect_impl",
-    "reason": "mcp SDK is heavy; loaded only when a server is actually connecting"
-  },
-  {
-    "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 99,
-    "function": "_connect_impl",
-    "reason": "mcp.client.stdio is loaded on the stdio-transport path"
-  },
-  {
-    "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 124,
-    "function": "_connect_impl",
-    "reason": "mcp.client.sse is loaded only on the http/SSE-transport branch"
-  },
-  {
-    "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 130,
-    "function": "_connect_impl",
-    "reason": "mcp.client.streamable_http is loaded only on the streamable_http transport branch"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 143,
-    "function": "run_web_server",
-    "reason": "uvicorn is heavy; imported only when serving HTTP for real"
-  },
-  {
-    "file": "src/kohakuterrarium/serving/web.py",
-    "line": 279,
-    "function": "_run_desktop_app_blocking",
-    "reason": "uvicorn import deferred to desktop-app launch path"
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.testing.fake_llm_provider",
+    "reason": "test-only fake_test backend; FakeLLMProvider imported lazily so production runtime never loads the testing package"
   },
   {
     "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
-    "line": 143,
     "function": "_fetch_crawl4ai",
+    "target": "trafilatura",
     "reason": "trafilatura is invoked only when the crawl4ai backend produced HTML to parse"
   },
   {
     "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
-    "line": 168,
     "function": "_fetch_trafilatura",
+    "target": "trafilatura",
     "reason": "trafilatura backend imported only when the user picked it"
   },
   {
-    "file": "src/kohakuterrarium/api/app.py",
-    "line": 371,
-    "function": "_mount_spa",
-    "reason": "fastapi.responses imported only when a built SPA is being mounted"
-  },
-  {
-    "file": "src/kohakuterrarium/api/app.py",
-    "line": 372,
-    "function": "_mount_spa",
-    "reason": "fastapi.staticfiles imported only when a built SPA is being mounted"
-  },
-  {
-    "file": "src/kohakuterrarium/builtin_skills/__init__.py",
-    "line": 34,
-    "function": "read_skill_body",
-    "reason": "prompt.aggregator imports from builtin_skills and prompt.__init__ loads aggregator eagerly; lazy import here breaks the cycle"
-  },
-  {
-    "file": "src/kohakuterrarium/terrarium/engine_rich_cli.py",
-    "line": 78,
-    "function": "_input_conflicts_with_terminal",
-    "reason": "TUIInput pulls in Textual (third-party heavy); imported lazily so minimal installs don't have to take the Textual dependency"
-  },
-  {
-    "file": "src/kohakuterrarium/launcher/downloader.py",
-    "line": 112,
-    "function": "_open_tarball",
-    "reason": "zstandard is an optional launcher-only dep (briefcase bundles it; framework wheel doesn't require it). Lazy import so .tar.gz fallback path still works without zstandard installed."
-  },
-  {
-    "file": "src/kohakuterrarium/studio/attach/pty_router.py",
-    "line": 56,
-    "function": "pty_session",
-    "reason": "Windows-only ConPTY backend imported inside `if sys.platform == 'win32'` branch"
-  },
-  {
-    "file": "src/kohakuterrarium/studio/attach/pty_router.py",
-    "line": 64,
-    "function": "pty_session",
-    "reason": "POSIX-only PTY backend imported on non-Windows platforms (uses fcntl/pty/termios)"
-  },
-  {
-    "file": "src/kohakuterrarium/bootstrap/llm.py",
-    "line": 187,
-    "function": "_create_from_profile",
-    "reason": "test-only fake_test backend; FakeLLMProvider imported lazily so production runtime never loads the testing package"
-  },
-  {
-    "file": "src/kohakuterrarium/bootstrap/llm.py",
-    "line": 262,
-    "function": "_create_from_profile",
-    "reason": "LiteLLM is an optional extra (`kohakuterrarium[litellm]`); LiteLLMProvider imported lazily on the litellm backend branch so a minimal install without that extra keeps `kt --help` and core imports working"
+    "file": "src/kohakuterrarium/builtins/tui/app.py",
+    "function": "action_open_drives",
+    "target": "kohakuterrarium.builtins.tui.widgets.drive_panel",
+    "reason": "Lazy import of the DriveScreen panel. It transitively imports terrarium.* and studio, whose package __init__ pulls builtins.outputs -> tui.output -> tui.session; a module-top import would be a runtime import cycle (CULL_KEEP partial-init) since tui.app is imported during tui.session init. The TerrariumService is injected duck-typed onto TUISession by the engine_cli runner, so this lazy widget import is the only remaining terrarium-reaching seam. Matched by function+target (not line) so unrelated edits do not re-break the gate."
   },
   {
     "file": "src/kohakuterrarium/cli/lab_client.py",
@@ -288,75 +54,93 @@
     "reason": "test-only seam guarded by KT_TEST_LLM_SCRIPT env var; production runs never import the testing package (its __init__ eagerly loads the whole test harness). A fresh subprocess has no injection point, so an env-guarded lazy import is the only mechanism. Matched by function+target (not line) so unrelated edits do not re-break the gate."
   },
   {
-    "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 200,
-    "function": "_connect_impl",
-    "reason": "mcp SDK is heavy/optional; loaded only when a server is actually connecting"
-  },
-  {
-    "file": "src/kohakuterrarium/mcp/client.py",
-    "line": 201,
-    "function": "_connect_impl",
-    "reason": "mcp.client.stdio is loaded on the stdio-transport path"
-  },
-  {
-    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
-    "line": 78,
-    "function": "maybe_install_test_llm_seam",
-    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
-  },
-  {
-    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
-    "line": 84,
-    "function": "maybe_install_test_llm_seam",
-    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
-  },
-  {
-    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
-    "line": 90,
-    "function": "maybe_install_test_llm_seam",
-    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
+    "file": "src/kohakuterrarium/cli/serve.py",
+    "function": "_is_pid_alive",
+    "target": "ctypes",
+    "reason": "Win32-only ctypes import inside `if sys.platform == 'win32'` branch"
   },
   {
     "file": "src/kohakuterrarium/launcher/_lock.py",
-    "line": 68,
     "function": "_acquire",
+    "target": "msvcrt",
     "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
   },
   {
     "file": "src/kohakuterrarium/launcher/_lock.py",
-    "line": 85,
     "function": "_release",
+    "target": "msvcrt",
     "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
   },
   {
-    "file": "src/kohakuterrarium/utils/file_lock.py",
-    "line": 136,
-    "function": "_acquire",
-    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+    "file": "src/kohakuterrarium/launcher/android.py",
+    "function": "_serve_and_report",
+    "target": "kohakuterrarium.api.app",
+    "reason": "Lazy import of api.app.create_app — the Android launcher loads via JNI before the framework's heavy api/serving graph needs to be in memory.  Lazy import means an import-time failure surfaces in the foreground-service log (visible via adb logcat) instead of silently killing the Python interpreter at module load."
   },
   {
-    "file": "src/kohakuterrarium/utils/file_lock.py",
-    "line": 158,
-    "function": "_release",
-    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+    "file": "src/kohakuterrarium/launcher/android.py",
+    "function": "_serve_and_report",
+    "target": "kohakuterrarium.serving.web",
+    "reason": "Lazy import of serving.web.start_uvicorn_with_port_fallback — paired with the create_app lazy import above; both share the same JNI-cold-start rationale."
+  },
+  {
+    "file": "src/kohakuterrarium/launcher/downloader.py",
+    "function": "_open_tarball",
+    "target": "zstandard",
+    "reason": "zstandard is an optional launcher-only dep (briefcase bundles it; framework wheel doesn't require it). Lazy import so .tar.gz fallback path still works without zstandard installed."
   },
   {
     "file": "src/kohakuterrarium/launcher/splash_window.py",
-    "line": 86,
     "function": "_try_tk",
+    "target": "tkinter",
     "reason": "tkinter is the optional fallback splash backend used only when pywebview is unavailable; deferred so headless / non-Tk environments aren't required to have it"
   },
   {
-    "file": "src/kohakuterrarium/launcher/splash_window.py",
-    "line": 87,
-    "function": "_try_tk",
-    "reason": "tkinter.ttk sibling — same fallback rationale"
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "function": "_connect_impl",
+    "target": "mcp",
+    "reason": "mcp SDK is heavy; loaded only when a server is actually connecting"
   },
   {
-    "file": "src/kohakuterrarium/builtins/tui/app.py",
-    "function": "action_open_drives",
-    "target": "kohakuterrarium.builtins.tui.widgets.drive_panel",
-    "reason": "Lazy import of the DriveScreen panel. It transitively imports terrarium.* and studio, whose package __init__ pulls builtins.outputs -> tui.output -> tui.session; a module-top import would be a runtime import cycle (CULL_KEEP partial-init) since tui.app is imported during tui.session init. The TerrariumService is injected duck-typed onto TUISession by the engine_cli runner, so this lazy widget import is the only remaining terrarium-reaching seam. Matched by function+target (not line) so unrelated edits do not re-break the gate."
+    "file": "src/kohakuterrarium/mcp/client.py",
+    "function": "_connect_impl",
+    "target": "mcp.client.stdio",
+    "reason": "mcp.client.stdio is loaded on the stdio-transport path"
+  },
+  {
+    "file": "src/kohakuterrarium/studio/attach/pty_router.py",
+    "function": "pty_session",
+    "target": "kohakuterrarium.studio.attach",
+    "reason": "platform-selected PTY backend: ConPTY on win32, fcntl/pty/termios elsewhere — each imported only inside its `sys.platform` branch"
+  },
+  {
+    "file": "src/kohakuterrarium/terrarium/engine_rich_cli.py",
+    "function": "_input_conflicts_with_terminal",
+    "target": "kohakuterrarium.builtins.tui.input",
+    "reason": "TUIInput pulls in Textual (third-party heavy); imported lazily so minimal installs don't have to take the Textual dependency"
+  },
+  {
+    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
+    "function": "maybe_install_test_llm_seam",
+    "target": "kohakuterrarium.bootstrap",
+    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
+  },
+  {
+    "file": "src/kohakuterrarium/testing/subprocess_seam.py",
+    "function": "maybe_install_test_llm_seam",
+    "target": "kohakuterrarium.core",
+    "reason": "test-only monkeypatch installer — imports deferred so production callers don't pay the cost when KT_TEST_LLM_SCRIPT is unset"
+  },
+  {
+    "file": "src/kohakuterrarium/utils/file_lock.py",
+    "function": "_acquire",
+    "target": "msvcrt",
+    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+  },
+  {
+    "file": "src/kohakuterrarium/utils/file_lock.py",
+    "function": "_release",
+    "target": "msvcrt",
+    "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
   }
 ]

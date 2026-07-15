@@ -517,7 +517,8 @@ pre-flight) are authoritative. The compressed version:
 - **Style**: Python 3.10+; modern type hints (`list`, `X | None`, never
   `Optional`/`Union`); full asyncio; no `print()` in library code (structured
   logging, `[HH:MM:SS] [module] [LEVEL]`); no imports inside functions except
-  allowlisted lazy ones (`scripts/dep_graph_allowlist.json` pins file+line).
+  allowlisted lazy ones (`scripts/dep_graph_allowlist.json` matches
+  file+function+target).
 - **Size**: max 600 lines/file (hard 1000; `tests/unit/test_file_sizes.py`).
 - **Frontend**: Vue 3 + Vite, JavaScript only. `npm run format:check` +
   `npm run build` before committing.
