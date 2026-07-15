@@ -1,10 +1,4 @@
-"""Windows PTY (ConPTY via winpty) session + pipe fallback.
-
-Drains ``api/ws/terminal.py:_conpty_session:166`` and
-``_pipe_session:267``. The platform router in :mod:`pty_router`
-prefers ConPTY when ``winpty.PTY`` imports successfully and falls
-back to plain subprocess pipes otherwise.
-"""
+"""Bridge Windows shells through ConPTY with a subprocess-pipe fallback."""
 
 import asyncio
 import json
@@ -28,15 +22,14 @@ else:
 
 
 async def conpty_session(websocket: WebSocket, cwd: str) -> None:
-    """Windows ConPTY session via native winpty.PTY.
+    """Run a Windows shell through the low-level ``winpty.PTY`` interface.
 
-    Uses the low-level PTY class directly for reliable I/O.
-    ConPTY handles line ending translation, ANSI escapes, and
-    terminal emulation — we just forward raw bytes.
+    ConPTY owns terminal emulation, ANSI handling, and line-ending translation; this
+    coroutine only forwards terminal data and resize requests.
     """
     shell = _find_shell()
 
-    # Validate cwd exists — invalid path crashes the spawned process.
+    # ConPTY fails during spawn when the working directory does not exist.
     if not os.path.isdir(cwd):
         logger.warning("Terminal cwd does not exist, falling back to home", cwd=cwd)
         cwd = os.path.expanduser("~")
@@ -53,7 +46,7 @@ async def conpty_session(websocket: WebSocket, cwd: str) -> None:
             logger.error("ConPTY spawn returned False")
             await pipe_session(websocket, cwd)
             return
-        # Verify the process is actually alive after spawn.
+        # A successful spawn result is insufficient if the child exits immediately.
         if not pty.isalive():
             logger.error("ConPTY process died immediately after spawn")
             await pipe_session(websocket, cwd)
@@ -70,7 +63,7 @@ async def conpty_session(websocket: WebSocket, cwd: str) -> None:
     loop = asyncio.get_event_loop()
 
     def _blocking_read():
-        """Blocking read in thread — returns str or None on EOF/error."""
+        """Read in the executor, returning ``None`` for EOF or terminal failure."""
         try:
             return pty.read(blocking=True)
         except Exception:
@@ -116,7 +109,7 @@ async def conpty_session(websocket: WebSocket, cwd: str) -> None:
     )
     stop.set()
 
-    # Kill the shell so the blocking read thread unblocks and exits.
+    # Cancelling PTY I/O releases the executor thread blocked in ``read``.
     try:
         pty.cancel_io()
     except Exception:
@@ -129,7 +122,7 @@ async def conpty_session(websocket: WebSocket, cwd: str) -> None:
 
 
 async def pipe_session(websocket: WebSocket, cwd: str) -> None:
-    """Fallback: plain subprocess pipes (no PTY)."""
+    """Bridge a shell through plain subprocess pipes when ConPTY is unavailable."""
     shell = _find_shell()
     logger.warning("Using pipe session (no PTY)", shell=shell)
     proc = await asyncio.create_subprocess_exec(
@@ -185,5 +178,5 @@ async def pipe_session(websocket: WebSocket, cwd: str) -> None:
 
 
 def has_conpty() -> bool:
-    """Return True if winpty is available for ConPTY use."""
+    """Return whether the native ConPTY wrapper is available."""
     return _WinPTY is not None

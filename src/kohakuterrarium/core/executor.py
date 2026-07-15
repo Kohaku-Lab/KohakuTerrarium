@@ -1,8 +1,4 @@
-"""
-Background executor for tools and sub-agents.
-
-Manages async execution of tools without blocking the controller.
-"""
+"""Asynchronous tool execution, status tracking, and completion events."""
 
 import asyncio
 from pathlib import Path
@@ -27,41 +23,14 @@ logger = get_logger(__name__)
 
 
 class Executor:
-    """
-    Background executor for tools.
-
-    Manages tool execution in background tasks and tracks job status.
-
-    Usage:
-        executor = Executor()
-        executor.register_tool(BashTool())
-
-        # Submit from parse event
-        job_id = await executor.submit_from_event(tool_call_event)
-
-        # Or submit directly
-        job_id = await executor.submit("bash", {"command": "ls"})
-
-        # Wait for result
-        result = await executor.wait_for(job_id)
-
-        # Or get events when jobs complete
-        async for event in executor.events():
-            handle_completion(event)
-    """
+    """Run tools in background tasks and expose their lifecycle as jobs."""
 
     def __init__(
         self,
         job_store: JobStore | None = None,
         on_complete: Callable[[TriggerEvent], Any] | None = None,
     ):
-        """
-        Initialize executor.
-
-        Args:
-            job_store: Store for job statuses (creates new if None)
-            on_complete: Callback when jobs complete
-        """
+        """Initialize execution state with an optional shared job store."""
         self.job_store = job_store or JobStore()
         self._tools: dict[str, Tool] = {}
         self._tasks: dict[str, asyncio.Task[JobResult]] = {}
@@ -69,26 +38,17 @@ class Executor:
         self._on_complete = on_complete
         self._event_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
 
-        # Shared serial lock for tools with ``is_concurrency_safe = False``
-        # (Cluster 5 / G.1 of the extension-point decisions). Tools that
-        # mutate shared state — file writes, destructive shell commands —
-        # acquire this lock before running so at most one unsafe tool
-        # executes at a time. Safe tools skip the lock entirely and keep
-        # running in parallel. Created lazily inside ``_run_tool`` so the
-        # executor can be constructed outside a running event loop.
+        # Unsafe tools share one lock to protect mutable resources while safe
+        # tools remain parallel. Lazy creation permits construction off-loop.
         self._serial_lock: asyncio.Lock | None = None
 
-        # Context for tools (set by agent during init)
         self._agent_name: str = ""
         self._tool_format: str = "native"
         self._agent: Any = None  # Agent instance, set during init
         self._session: Any = None  # Session, set by agent during init
         self._environment: Any = None  # Environment, set by agent during init
-        # Default to ``Path.cwd()`` on desktop and to the writable
-        # app-private dir on Android (mobile profile). Without this
-        # override, Briefcase boots Python with ``cwd = /`` and every
-        # relative-path tool call fails with PermissionError on its
-        # first invocation. See ``utils.mobile_sandbox.default_workdir``.
+        # Mobile packaging may start in an unwritable root directory, so tools
+        # need a platform-safe default before the agent supplies its workdir.
         self._working_dir: Path = default_workdir()
         self._memory_path: Path | None = None
         self._file_read_state: Any = None  # FileReadState, set by agent
@@ -100,13 +60,7 @@ class Executor:
         logger.debug("Registered tool", tool_name=tool.tool_name)
 
     def _emit_tool_wait(self, tool_name: str, wait_ms: float, reason: str) -> None:
-        """Emit a Wave B ``tool_wait`` activity to the agent's output router.
-
-        Fires only when a tool call blocked on a concurrency-unsafe lock
-        so viewers (session store, Studio) can surface serialization
-        hotspots. Missing agent / router is tolerated — this is pure
-        observability.
-        """
+        """Emit lock-wait observability without affecting tool execution."""
         agent = self._agent
         if agent is None:
             return
@@ -123,7 +77,7 @@ class Executor:
                     "reason": reason,
                 },
             )
-        except Exception as e:  # pragma: no cover — pure observability
+        except Exception as e:  # pragma: no cover - telemetry must not fail tools
             logger.warning("tool_wait emit failed", error=str(e), exc_info=True)
 
     def _wrap_tool_execute(
@@ -134,17 +88,10 @@ class Executor:
         job_id: str,
         context: ToolContext | None = None,
     ) -> Callable[..., Any]:
-        """Return ``tool.execute`` wrapped with the agent's pre/post hooks.
+        """Wrap execution with this agent's plugin hooks without rebinding the tool.
 
-        Returns the original ``tool.execute`` unchanged when the agent
-        has no plugin manager or no plugin overrides those hooks
-        (``PluginManager.wrap_method`` short-circuits in that case).
-
-        Importantly the wrapper is a fresh closure — we do NOT assign
-        it back onto the tool. Sub-agents share tool instances with
-        the parent through ``parent_registry``; rebinding ``execute``
-        would let one agent's plugin chain (e.g. its budget plugin)
-        intercept another agent's tool calls.
+        Tool instances may be shared with sub-agents, so mutating ``execute`` would
+        leak one agent's policy chain into another agent's calls.
         """
         if context is None:
             context = self._build_tool_context()
@@ -199,11 +146,9 @@ class Executor:
         if tool is None:
             raise ValueError(f"Tool not registered: {tool_name}")
 
-        # Generate job ID
         if job_id is None:
             job_id = generate_job_id(tool_name)
 
-        # Create job status
         status = JobStatus(
             job_id=job_id,
             job_type=JobType.TOOL,
@@ -212,7 +157,6 @@ class Executor:
         )
         self.job_store.register(status)
 
-        # Start task
         task = asyncio.create_task(self._run_tool(job_id, tool, args, is_direct))
         self._tasks[job_id] = task
 
@@ -236,12 +180,10 @@ class Executor:
         return await self.submit(event.name, event.args, is_direct=is_direct)
 
     def _manual_read_gate_active(self) -> bool:
-        """Whether the ``require_manual_read`` block should apply.
+        """Return whether first-use documentation gating is actionable.
 
-        The gate forces an ``info`` read before first use. It is moot —
-        and would make the tool permanently undispatchable — when the full
-        docs are already in the prompt (static skill mode) or when no
-        ``info`` tool is registered to read them.
+        Static prompts already contain full docs, and absence of the ``info`` tool
+        would make a manual-read requirement impossible to satisfy.
         """
         agent = self._agent
         if agent is None:
@@ -263,7 +205,6 @@ class Executor:
     ) -> JobResult:
         """Run a tool and update status."""
         try:
-            # Check require_manual_read: block if manual not read yet
             if (
                 isinstance(tool, BaseTool)
                 and tool.require_manual_read
@@ -291,33 +232,22 @@ class Executor:
                 self._results[job_id] = job_result
                 return job_result
 
-            # Build one context for plugin hooks and context-aware tools.
             context = self._build_tool_context()
 
-            # Plugin hooks fire at the call site — wrap tool.execute
-            # locally with the AGENT's plugin manager so each agent's
-            # plugin chain only sees that agent's tool calls. Tool
-            # instances are shared between the parent's registry and
-            # every sub-agent's ``parent_registry`` reference, so we
-            # must NOT mutate ``tool.execute``; the wrapper here is a
-            # closure over the original.
+            # Call-site wrapping keeps shared tool instances free of agent-specific
+            # plugin state.
             exec_fn = self._wrap_tool_execute(
                 tool, args, job_id=job_id, context=context
             )
 
-            # Concurrency-safety partition (Cluster 5 / G.1):
-            # unsafe tools acquire the shared serial lock so at most
-            # one unsafe tool runs at a time. Safe tools skip the lock
-            # entirely and remain fully parallel.
+            # Only tools that declare unsafe shared-state access are serialized.
             needs_lock = isinstance(tool, BaseTool) and not tool.is_concurrency_safe
             if needs_lock:
                 if self._serial_lock is None:
                     self._serial_lock = asyncio.Lock()
                 wait_start = asyncio.get_event_loop().time()
                 async with self._serial_lock:
-                    # Wave B additive ``tool_wait`` event: emit only when
-                    # the caller actually blocked (>1ms). Keeps noise
-                    # down for the common uncontended case.
+                    # Ignore sub-millisecond contention to avoid noisy telemetry.
                     wait_ms = (asyncio.get_event_loop().time() - wait_start) * 1000.0
                     if wait_ms >= 1.0:
                         self._emit_tool_wait(tool.tool_name, wait_ms, "serial_lock")
@@ -337,7 +267,6 @@ class Executor:
             metadata = dict(result.metadata or {})
             metadata.update(normalized.metadata)
 
-            # Create job result from centrally normalized output.
             job_result = JobResult(
                 job_id=job_id,
                 output=normalized.output,
@@ -346,7 +275,6 @@ class Executor:
                 metadata=metadata,
             )
 
-            # Update status from normalized text stats.
             self.job_store.update_status(
                 job_id,
                 state=JobState.DONE if result.success else JobState.ERROR,
@@ -362,8 +290,8 @@ class Executor:
             logger.info("Tool %s: %s", tool.tool_name, status)
             logger.debug("Tool job completed", job_id=job_id, success=result.success)
 
-            # For background tools: fire completion callback and queue event
-            # Direct tools are awaited by the processing loop - no callback needed
+            # Direct calls are already awaited by the processing loop; publishing a
+            # completion event would process the same result twice.
             if not is_direct:
                 event = create_tool_complete_event(
                     job_id=job_id,
@@ -406,7 +334,6 @@ class Executor:
         except Exception as e:
             logger.error("Tool execution failed", job_id=job_id, error=str(e))
 
-            # Update status with error
             self.job_store.update_status(
                 job_id,
                 state=JobState.ERROR,
@@ -453,19 +380,9 @@ class Executor:
         job_id: str,
         timeout: float | None = None,
     ) -> JobResult | None:
-        """
-        Wait for a job to complete.
-
-        Args:
-            job_id: Job ID to wait for
-            timeout: Maximum wait time in seconds
-
-        Returns:
-            JobResult if completed, None if timeout or not found
-        """
+        """Wait for a job result, returning ``None`` on timeout or unknown id."""
         task = self._tasks.get(job_id)
         if task is None:
-            # Check if already completed
             return self._results.get(job_id)
 
         try:
@@ -478,15 +395,7 @@ class Executor:
         self,
         timeout: float | None = None,
     ) -> dict[str, JobResult]:
-        """
-        Wait for all pending jobs to complete.
-
-        Args:
-            timeout: Maximum total wait time
-
-        Returns:
-            Dict of job_id -> JobResult
-        """
+        """Wait for tracked jobs and return results available before timeout."""
         if not self._tasks:
             return {}
 
@@ -513,15 +422,7 @@ class Executor:
             }
 
     async def cancel(self, job_id: str) -> bool:
-        """
-        Cancel a running job.
-
-        Args:
-            job_id: Job to cancel
-
-        Returns:
-            True if cancelled, False if not found or already done
-        """
+        """Cancel a running job and report whether cancellation was requested."""
         task = self._tasks.get(job_id)
         if task is None or task.done():
             return False
@@ -540,24 +441,11 @@ class Executor:
         return self._results.get(job_id) or self.job_store.get_result(job_id)
 
     def get_task(self, job_id: str) -> asyncio.Task | None:
-        """
-        Get the asyncio.Task for a job by ID.
-
-        Args:
-            job_id: Job ID to look up
-
-        Returns:
-            The asyncio.Task if found, None otherwise
-        """
+        """Return the task tracking ``job_id``, if present."""
         return self._tasks.get(job_id)
 
     def get_pending_count(self) -> int:
-        """
-        Get the number of pending (not yet completed) tasks.
-
-        Returns:
-            Number of tasks still tracked by the executor
-        """
+        """Return the number of tasks still tracked by the executor."""
         return len(self._tasks)
 
     def get_running_jobs(self) -> list[JobStatus]:
@@ -565,11 +453,7 @@ class Executor:
         return self.job_store.get_running_jobs()
 
     async def events(self) -> TriggerEvent:
-        """
-        Async generator for completion events.
-
-        Yields TriggerEvents when jobs complete.
-        """
+        """Yield background tool completion events as they arrive."""
         while True:
             event = await self._event_queue.get()
             yield event

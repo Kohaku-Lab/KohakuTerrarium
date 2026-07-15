@@ -1,14 +1,9 @@
-"""Explicit Drive runtime configuration DTOs (design §8.3, §7.4, §13).
+"""Define validated configuration objects for the Drive runtime.
 
-Terrarium is dependency-injected: it accepts a :class:`DriveRuntimeConfig`,
-concrete registration instances, and an optional store through its constructor
-and never reads Studio settings or ``~/.kohakuterrarium`` itself (design §2.4).
-These DTOs are the explicit values a Studio-managed entry point resolves and
-passes down.
-
-Everything here is frozen and validated on construction, so nonsense values
-fail at engine build time rather than after a Drive is already active. No recipe
-imports and no Studio imports — this is a leaf runtime-config module.
+Terrarium receives a :class:`DriveRuntimeConfig`, concrete registration
+instances, and an optional store through dependency injection. Values are frozen
+and validated during construction so invalid settings fail before Drives start.
+This leaf module intentionally does not depend on Studio or recipe loading.
 """
 
 from dataclasses import dataclass, field
@@ -22,11 +17,6 @@ from kohakuterrarium.terrarium.drive.registration import (
 )
 
 _PERSISTENCE_MODES = frozenset({"auto", "persistent", "ephemeral"})
-
-
-# ---------------------------------------------------------------------------
-# validation helpers
-# ---------------------------------------------------------------------------
 
 
 def _require_int(value: object, name: str, *, minimum: int) -> None:
@@ -43,14 +33,9 @@ def _require_number(value: object, name: str, *, minimum: float) -> None:
         raise DriveValidationError(f"{name} must be >= {minimum}, got {value}")
 
 
-# ---------------------------------------------------------------------------
-# Retry and retention
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveRetryConfig:
-    """Delivery retry/backoff policy (design §5.6)."""
+    """Configure delivery retry attempts, backoff, and jitter."""
 
     max_attempts: int = 5
     initial_backoff_s: float = 2.0
@@ -70,8 +55,7 @@ class DriveRetryConfig:
 
 @dataclass(frozen=True)
 class DriveRetentionConfig:
-    """Retention windows (design §7.4). Day counts are non-negative; ``0``
-    means immediately eligible for compaction/retirement."""
+    """Configure retention windows; zero days means immediately eligible."""
 
     terminal_days: int = 90
     acknowledged_delivery_days: int = 30
@@ -93,28 +77,17 @@ class DriveRetentionConfig:
         _require_int(self.progress_max_age_days, "progress_max_age_days", minimum=0)
 
 
-# ---------------------------------------------------------------------------
-# Runtime config
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveRuntimeConfig:
-    """Explicit Drive runtime tuning passed to ``Terrarium(...)`` (design §8.3).
-
-    ``enabled=False`` explicitly opts the engine out of Drive. Byte limits are
-    independent per payload field
-    (design §13).
-    """
+    """Configure Drive runtime capacity, delivery, retention, and payload limits."""
 
     enabled: bool = True
     max_active_per_creature: int = 8
     max_pending_per_graph: int = 100
     max_consecutive_drive_turns: int = 3
     dispatcher_concurrency: int = 4
-    # Minimum wall-clock gap between a settled Drive turn and the next
-    # readiness-driven continuation (design §5.5 per-Drive cooldown). ``0.0``
-    # re-arms as soon as the prior turn settles, still gated by fairness.
+    # A zero cooldown allows immediate readiness re-arming while fairness still
+    # limits consecutive Drive turns.
     readiness_cooldown_s: float = 0.0
     retry: DriveRetryConfig = field(default_factory=DriveRetryConfig)
     retention: DriveRetentionConfig = field(default_factory=DriveRetentionConfig)
@@ -143,11 +116,6 @@ class DriveRuntimeConfig:
         _require_int(self.evidence_max_bytes, "evidence_max_bytes", minimum=1)
 
 
-# ---------------------------------------------------------------------------
-# Runtime selection helpers + in-process spec
-# ---------------------------------------------------------------------------
-
-
 def default_registrations() -> list[DriveRegistration]:
     """Return fresh instances of the default generic and goal registrations."""
     return [GenericDriveRegistration(), GoalDriveRegistration()]
@@ -157,7 +125,7 @@ def validate_runtime_selection(
     config: DriveRuntimeConfig,
     registrations: "list[DriveRegistration] | tuple[DriveRegistration, ...]",
 ) -> None:
-    """Raise if the runtime is enabled with no registrations (design §8.3)."""
+    """Reject an enabled runtime that has no Drive registrations."""
     if config.enabled and not registrations:
         raise DriveValidationError(
             "drive runtime is enabled but no registrations were supplied "
@@ -168,15 +136,7 @@ def validate_runtime_selection(
 
 @dataclass(frozen=True)
 class DriveRuntimeSpec:
-    """In-process grouping of the resolved runtime pieces (design §8.6).
-
-    Groups the config, concrete registration instances, the repository/store
-    selection, the settings revision it was resolved from, and the target node.
-    It holds live Python objects (``registrations``, ``store``) and is therefore
-    **in-process only**: Laboratory transports serializable names/options and
-    the worker resolves its own :class:`DriveRuntimeSpec`. Nothing here is
-    wire-serialized (there is deliberately no packer in ``drive_wire``).
-    """
+    """Group resolved, process-local Drive runtime dependencies and provenance."""
 
     config: DriveRuntimeConfig
     registrations: tuple[DriveRegistration, ...] = ()

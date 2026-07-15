@@ -1,11 +1,6 @@
-"""Phase-B repository row types + their wire (de)serialization (design §7.3).
+"""Drive repository row types and wire serialization.
 
-The outbox, dead-letter, and idempotency rows — plus the small ISO-datetime
-parser and the six pack/unpack helpers that move them across the export/import
-seam — live here so :mod:`drive.repository` stays under the file-size cap. Leaf
-module: stdlib only, no drive imports (``repository`` -> ``repository_rows`` is
-one-directional). ``repository`` re-exports these names, so existing importers
-of ``drive.repository`` keep working.
+Outbox, dead-letter, and idempotency rows with their wire conversions.
 """
 
 from dataclasses import dataclass, field
@@ -15,7 +10,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class DriveOutboxEntry:
-    """An undispatched structural event / delivery intent (design §7.3)."""
+    """An outbox event or delivery intent awaiting dispatch."""
 
     outbox_id: str
     drive_id: str
@@ -28,7 +23,7 @@ class DriveOutboxEntry:
 
 @dataclass(frozen=True)
 class DriveDeadLetter:
-    """Failure snapshot for a delivery that exhausted its retries (§7.3)."""
+    """Failure snapshot for a delivery that exhausted its retries."""
 
     delivery_id: str
     drive_id: str
@@ -40,7 +35,7 @@ class DriveDeadLetter:
 
 @dataclass(frozen=True)
 class IdempotencyRecord:
-    """A recorded ``(actor, key)`` mutation with its op hash + packed result."""
+    """A recorded mutation keyed by actor and idempotency key."""
 
     actor: str
     key: str
@@ -50,11 +45,13 @@ class IdempotencyRecord:
 
 
 def parse_dt(value: str) -> datetime:
+    """Parse an ISO datetime, including a trailing UTC ``Z`` marker."""
     text = value[:-1] + "+00:00" if value.endswith("Z") else value
     return datetime.fromisoformat(text)
 
 
 def outbox_to_wire(entry: DriveOutboxEntry) -> dict[str, Any]:
+    """Serialize an outbox entry to its wire representation."""
     return {
         "outbox_id": entry.outbox_id,
         "drive_id": entry.drive_id,
@@ -67,6 +64,7 @@ def outbox_to_wire(entry: DriveOutboxEntry) -> dict[str, Any]:
 
 
 def outbox_from_wire(data: dict[str, Any]) -> DriveOutboxEntry:
+    """Deserialize an outbox entry from its wire representation."""
     return DriveOutboxEntry(
         outbox_id=data["outbox_id"],
         drive_id=data["drive_id"],
@@ -79,6 +77,7 @@ def outbox_from_wire(data: dict[str, Any]) -> DriveOutboxEntry:
 
 
 def dead_letter_to_wire(entry: DriveDeadLetter) -> dict[str, Any]:
+    """Serialize a dead-letter row to its wire representation."""
     return {
         "delivery_id": entry.delivery_id,
         "drive_id": entry.drive_id,
@@ -90,6 +89,7 @@ def dead_letter_to_wire(entry: DriveDeadLetter) -> dict[str, Any]:
 
 
 def dead_letter_from_wire(data: dict[str, Any]) -> DriveDeadLetter:
+    """Deserialize a dead-letter row from its wire representation."""
     return DriveDeadLetter(
         delivery_id=data["delivery_id"],
         drive_id=data["drive_id"],
@@ -101,6 +101,7 @@ def dead_letter_from_wire(data: dict[str, Any]) -> DriveDeadLetter:
 
 
 def idempotency_to_wire(rec: IdempotencyRecord) -> dict[str, Any]:
+    """Serialize an idempotency record to its wire representation."""
     return {
         "actor": rec.actor,
         "key": rec.key,
@@ -111,6 +112,7 @@ def idempotency_to_wire(rec: IdempotencyRecord) -> dict[str, Any]:
 
 
 def idempotency_from_wire(data: dict[str, Any]) -> IdempotencyRecord:
+    """Deserialize an idempotency record from its wire representation."""
     return IdempotencyRecord(
         actor=data["actor"],
         key=data["key"],

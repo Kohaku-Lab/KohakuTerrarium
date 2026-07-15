@@ -186,10 +186,6 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         outcome = await fut
         return bool(getattr(outcome, "was_primary", True))
 
-    # ------------------------------------------------------------------
-    # Main processing loop (split into phases)
-    # ------------------------------------------------------------------
-
     def _prepare_processing_cycle(
         self, event: TriggerEvent, controller: Controller
     ) -> None:
@@ -328,7 +324,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         native_mode: bool,
     ) -> None:
         """Handle a ToolCallEvent: wrap in backgroundify and track."""
-        # pre_tool_dispatch plugin chain (cluster B.2) — may rewrite or veto.
+        # Plugins may rewrite or veto the call before any execution is scheduled.
         parse_event = await run_pre_tool_dispatch(self, parse_event, controller)
         if parse_event is None:
             return
@@ -508,7 +504,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         """Check if termination conditions are met. Returns True to stop.
 
         Consumes one slot from the shared :class:`IterationBudget` per
-        parent turn (cluster 6.1). When the counter hits zero the
+        parent turn. When the counter hits zero the
         ``BudgetExhausted`` raised by ``budget.consume`` is translated
         into a termination with reason ``"Iteration budget exhausted"``
         so the outer run-loop exits cleanly.
@@ -685,9 +681,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
                     },
                 )
 
-        # Flush per-turn token aggregate as a Wave B event before the
-        # ``processing_end`` marker so session readers can pin the turn
-        # rollup to this turn_index.
+        # Emit usage before processing_end so readers can bind it to this turn.
         accum = getattr(self, "_turn_usage_accum", None)
         if isinstance(accum, dict) and any(accum.values()):
             self.output_router.notify_activity(

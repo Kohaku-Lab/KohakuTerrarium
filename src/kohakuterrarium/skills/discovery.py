@@ -1,23 +1,7 @@
-"""Procedural-skill discovery across project / user / creature / packages.
+"""Discover procedural skills with deterministic scope precedence.
 
-Priority order (spec 1.3 "more limited scope = higher priority"):
-
-1. project (``.kt/skills``, ``.claude/skills``, ``.agents/skills``)
-2. user    (``~/.kohakuterrarium/skills``, ``~/.claude/skills``,
-            ``~/.agents/skills``)
-3. creature (``<agent>/prompts/skills``)
-4. package  (``resolve_package_skills`` / ``list_package_skills``
-             from :mod:`kohakuterrarium.packages.slots`)
-
-Skills are **last-wins** across origins (spec 1.1 skills exception).
-The registry is populated in *reverse* priority order — packages first,
-project last — so higher-priority origins overwrite lower ones.
-
-Within a single roots-list, the folder form (``<name>/SKILL.md``) wins
-over the flat form (``<name>.md``) when both exist. Collisions *within*
-a single origin's root sequence are still last-wins because the user
-who dropped two conflicting files locally is expected to understand
-the override. A DEBUG log trace is emitted for every supersede.
+Registration runs from package to creature to user to project so last-wins
+storage favors narrower scopes. Folder-form skills shadow flat files per root.
 """
 
 from pathlib import Path
@@ -31,10 +15,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Relative roots, scanned under cwd for project and under the home
-# directory for user.  Ordering within each group matches the spec's
-# discovery-path list in Cluster 4 (native first, Claude-Code interop
-# next, .agents ecosystem last).
+# Root order favors native KT paths before interoperability paths.
 PROJECT_SKILL_ROOTS: tuple[str, ...] = (
     ".kt/skills",
     ".claude/skills",
@@ -45,16 +26,8 @@ USER_SKILL_ROOTS: tuple[str, ...] = (
     ".claude/skills",
     ".agents/skills",
 )
-# Creature folder: <agent>/prompts/skills/<name>/SKILL.md is NEW; the
-# pre-existing <agent>/prompts/tools/<name>.md convention is *not*
-# re-used because Qc explicitly distinguishes procedural skills from
-# tool references.
+# Procedural skills remain separate from prompts/tools reference documentation.
 CREATURE_SKILL_SUBDIR: str = "prompts/skills"
-
-
-# ---------------------------------------------------------------------------
-# Low-level loader
-# ---------------------------------------------------------------------------
 
 
 def load_skill_from_path(
@@ -63,16 +36,9 @@ def load_skill_from_path(
     origin: str,
     default_name: str | None = None,
 ) -> Skill | None:
-    """Load one ``SKILL.md`` file into a :class:`Skill`.
+    """Load one skill file without allowing isolated failures to abort startup.
 
-    Returns ``None`` (with a warning) when the file can't be read or
-    parsed — never raises. Bad SKILL.md files in one creature must not
-    crash ``kt run`` / ``kt serve``; they're skipped with a log line so
-    the user can see what's wrong without losing the whole agent.
-
-    ``default_name`` is used when the frontmatter lacks a ``name`` —
-    typically the parent directory name for the folder form, or the
-    file stem for the flat form.
+    ``default_name`` supplies the folder or file-derived name when omitted.
     """
     if not skill_md.exists():
         return None
@@ -110,7 +76,7 @@ def load_skill_from_path(
             paths=paths,
             allowed_tools=allowed_tools,
         )
-    except Exception as exc:  # noqa: BLE001 — defensive: never crash the loader
+    except Exception as exc:  # noqa: BLE001 - isolate malformed skills
         logger.warning(
             "Failed to load skill; skipping",
             path=str(skill_md),
@@ -122,11 +88,7 @@ def load_skill_from_path(
 
 
 def _as_string_list(value: object) -> list[str]:
-    """Normalise YAML-ish ``foo`` / ``foo, bar`` / ``[foo, bar]`` to list.
-
-    Defensive against malformed frontmatter — a dict, set, or other
-    surprise type yields an empty list rather than raising.
-    """
+    """Normalize scalar or sequence frontmatter into a safe string list."""
     if value is None:
         return []
     if isinstance(value, list):
@@ -153,26 +115,15 @@ def _as_string_list(value: object) -> list[str]:
         return []
 
 
-# ---------------------------------------------------------------------------
-# Roots → Skill[]
-# ---------------------------------------------------------------------------
-
-
 def _scan_root(root: Path, *, origin: str) -> list[Skill]:
-    """Load every ``<name>/SKILL.md`` or ``<name>.md`` under ``root``.
-
-    Folder form shadows flat form (spec 4.1) when both exist for the
-    same name. Per-entry failures are logged and skipped — one corrupt
-    SKILL.md must never block the rest of the scan.
-    """
+    """Load folder and flat-form skills, with folder form taking precedence."""
     try:
         if not root.exists() or not root.is_dir():
             return []
-    except OSError as exc:  # weird filesystem / permission edge cases
+    except OSError as exc:  # Filesystem metadata may be unreadable.
         logger.warning("Failed to stat skill root", path=str(root), error=str(exc))
         return []
 
-    # First pass: folder form.
     folder_names: set[str] = set()
     skills: list[Skill] = []
     try:
@@ -201,7 +152,6 @@ def _scan_root(root: Path, *, origin: str) -> list[Skill]:
             folder_names.add(skill.name)
             skills.append(skill)
 
-    # Second pass: flat form (shadowed by folder form).
     for entry in entries:
         try:
             is_file = entry.is_file()
@@ -223,11 +173,6 @@ def _scan_root(root: Path, *, origin: str) -> list[Skill]:
     return skills
 
 
-# ---------------------------------------------------------------------------
-# Public: walk every origin in the right order.
-# ---------------------------------------------------------------------------
-
-
 def discover_skills(
     *,
     cwd: Path | None = None,
@@ -240,35 +185,15 @@ def discover_skills(
         "creature",
     ),
 ) -> list[Skill]:
-    """Return skills from every origin in *registration order*.
+    """Return skills in low-to-high priority registration order.
 
-    Registration order is lowest-priority first (package → creature →
-    user → project), so :meth:`SkillRegistry.add` can be called in the
-    returned order and higher-priority origins overwrite lower ones
-    thanks to the last-wins semantics.
-
-    Args:
-        cwd: Project root; defaults to :func:`Path.cwd`.
-        home: User home; defaults to :func:`Path.home`.
-        agent_path: Creature folder; skills under
-            ``<agent>/prompts/skills/`` are loaded if provided.
-        declared_package_skills: Names from the current creature's
-            ``skills: []`` opt-in list. Packaged skills that are not
-            declared here are returned *disabled by default*
-            (spec Qa: "packaged skills default disabled=True unless
-            the creature config explicitly enables them"). Passing
-            ``"*"`` as one of the entries enables *every* discovered
-            package skill — opt-in-to-all shorthand.
-        default_enabled_origins: Origins that default to enabled=True
-            when no scratchpad override exists. Creature / user /
-            project are enabled by default; ``package`` is not.
+    Package skills default disabled unless declared, enabled by wildcard, or
+    included in ``default_enabled_origins``.
     """
     cwd = cwd or Path.cwd()
     home = home or Path.home()
     declared = set(declared_package_skills or [])
-    # ``*`` is a shorthand the creature config can use to opt in to every
-    # discovered package skill. It cannot collide with a real skill name
-    # because skill names match ``[a-z][a-z0-9-]*``.
+    # ``*`` cannot collide with valid skill names.
     enable_all_packages = "*" in declared
     declared.discard("*")
 
@@ -277,16 +202,10 @@ def discover_skills(
     def _safe_extend(
         origin: str, source: str, scan: "callable[[], list[Skill]]"
     ) -> None:
-        """Run *scan* and absorb any unexpected failure with a warning.
-
-        ``_scan_root`` and ``_load_package_skills`` already swallow
-        per-skill errors; this is the outer guardrail so a busted
-        scratchpad / unicode-mangled filesystem path / etc. cannot
-        crash the whole agent boot.
-        """
+        """Contain source-wide failures after per-skill failures are isolated."""
         try:
             new_skills = scan()
-        except Exception as exc:  # noqa: BLE001 — last-resort catch
+        except Exception as exc:  # noqa: BLE001 - startup isolation boundary
             logger.warning(
                 "Failed to scan skill source",
                 origin=origin,
@@ -300,7 +219,6 @@ def discover_skills(
                 skill.enabled = origin in default_enabled_origins
             collected.append(skill)
 
-    # 4 — packages (lowest).
     _safe_extend(
         "package",
         "package-manifest",
@@ -311,7 +229,6 @@ def discover_skills(
         ),
     )
 
-    # 3 — creature.
     if agent_path is not None:
         creature_root = Path(agent_path) / CREATURE_SKILL_SUBDIR
         _safe_extend(
@@ -320,7 +237,6 @@ def discover_skills(
             lambda: _scan_root(creature_root, origin="creature"),
         )
 
-    # 2 — user.
     for rel in USER_SKILL_ROOTS:
         user_root = home / rel
         _safe_extend(
@@ -329,7 +245,6 @@ def discover_skills(
             lambda root=user_root: _scan_root(root, origin="user"),
         )
 
-    # 1 — project (highest).
     for rel in PROJECT_SKILL_ROOTS:
         project_root = cwd / rel
         _safe_extend(
@@ -347,13 +262,7 @@ def _load_package_skills(
     enable_all_packages: bool = False,
     default_enabled_origins: tuple[str, ...] = (),
 ) -> list[Skill]:
-    """Resolve every packaged skill into a :class:`Skill` instance.
-
-    Skills are *last-wins* across packages (spec 1.1 skills exception),
-    so we iterate every ``(package, entry)`` pair instead of using
-    :func:`packages_manifest.list_package_skills` — which hard-errors
-    on name collisions.
-    """
+    """Load every packaged skill while preserving last-wins collisions."""
     try:
         pairs = list_package_skills_with_owner()
     except Exception as exc:
@@ -391,13 +300,8 @@ def _load_package_skills(
         skill = load_skill_from_path(skill_path, origin=origin, default_name=name)
         if skill is None:
             continue
-        # Override frontmatter-derived description with manifest's if present.
         if entry.get("description") and not skill.description:
             skill.description = str(entry["description"])
-        # Package skills default disabled (Qa) unless:
-        #   - the creature config named this skill in ``skills:``, OR
-        #   - the creature config used the ``"*"`` wildcard, OR
-        #   - the origin rule puts ``package`` into default_enabled_origins.
         if (
             enable_all_packages
             or "package" in default_enabled_origins
@@ -411,38 +315,32 @@ def _load_package_skills(
 
 
 def _resolve_package_root(pkg_name: str, entry: dict | None) -> Path | None:
-    """Find the package root dir for ``pkg_name``."""
+    """Resolve a package root from installation metadata or test-provided data."""
     if pkg_name:
         root = get_package_path(pkg_name)
         if root is not None:
             return root
-    # Fall back: manifest entries often carry "_root" when tests stub them.
     if entry and entry.get("_root"):
         return Path(str(entry["_root"]))
     return None
 
 
 def _resolve_skill_md(candidate: Path) -> Path | None:
-    """Resolve the skill path to a readable ``SKILL.md`` or ``<name>.md``."""
+    """Resolve a manifest path to folder-form or flat-form skill Markdown."""
     if candidate.is_file():
         return candidate
     if candidate.is_dir():
         skill_md = candidate / "SKILL.md"
         if skill_md.is_file():
             return skill_md
-    # Flat form: ``<path>/<name>.md`` might be what the manifest pointed at.
     sibling = candidate.with_suffix(".md")
     if sibling.is_file():
         return sibling
     return None
 
 
-# Re-injection helper — list_package_skills returns entries without the
-# owning-package name, so we also need an alternative enumerator that
-# preserves it. This is mainly used by tests to stub out the packages
-# layer.
 def list_package_skills_with_owner() -> list[tuple[str, dict]]:
-    """Return ``[(package_name, entry), ...]`` for every packaged skill."""
+    """Return packaged skill entries paired with their owning package names."""
     out: list[tuple[str, dict]] = []
     for pkg in list_packages():
         pkg_name = pkg.get("name", "")

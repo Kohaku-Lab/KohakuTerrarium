@@ -27,7 +27,8 @@ from rich.text import Text
 from kohakuterrarium.cli.select import NavState, RunnableGroup
 
 _MIN_VISIBLE = 5
-_CHROME_ROWS = 8  # title + filter + hint + borders + breathing room
+# Reserve space for the title, filter, hint, borders, and padding.
+_CHROME_ROWS = 8
 
 
 def _viewport(total: int, cursor: int, height: int) -> tuple[int, int]:
@@ -41,6 +42,7 @@ def _viewport(total: int, cursor: int, height: int) -> tuple[int, int]:
 
 
 def _render_entry(runnable, selected: bool) -> Text:
+    """Render one runnable row."""
     line = Text()
     line.append(
         "    › " if selected else "      ", style="bold bright_cyan" if selected else ""
@@ -62,6 +64,7 @@ def _render_entry(runnable, selected: bool) -> Text:
 
 
 def _render(state: NavState, width: int, height: int) -> str:
+    """Render picker state to terminal ANSI text."""
     rows = state.rows
     body: list = []
     if not rows:
@@ -125,9 +128,11 @@ def _render(state: NavState, width: int, height: int) -> str:
 
 
 def _build_keybindings(state: NavState, app_ref: dict) -> KeyBindings:
+    """Build navigation, filtering, selection, and cancellation bindings."""
     kb = KeyBindings()
 
     def _exit(result):
+        """Exit the picker with a selection or cancellation result."""
         app_ref["app"].exit(result=result)
 
     @kb.add("up")
@@ -187,6 +192,7 @@ def run_cli_picker(groups: list[RunnableGroup]) -> str | None:
     app_ref: dict = {}
 
     def _text():
+        """Render against the current terminal dimensions."""
         size = shutil.get_terminal_size((80, 24))
         return ANSI(_render(state, size.columns, size.lines))
 

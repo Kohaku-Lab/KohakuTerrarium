@@ -1,12 +1,7 @@
-"""Catalog extensions — aggregated view of plugin / tool / trigger /
-LLM-preset / IO modules contributed by installed packages.
+"""Flatten package-contributed extensions into a read-only catalog view.
 
-CLI equivalent: ``kt extension list`` and ``kt extension info <name>``.
-
-Pure read-only — write-side actions (install / uninstall) live on
-:mod:`api.routes.catalog.packages`. This route only flattens the
-package manifests so the Vue Extensions tab can render one row per
-extension regardless of which package owns it.
+Package installation and removal remain on the package routes; this module only
+projects manifest entries into extension records.
 """
 
 from typing import Literal
@@ -23,8 +18,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# Manifest slot → extension-kind label. Anything not listed here is
-# treated as opaque package metadata and skipped.
+# Only declared extension slots are projected; other manifest keys remain metadata.
 _EXTENSION_SLOTS: dict[str, str] = {
     "plugins": "plugin",
     "tools": "tool",
@@ -64,7 +58,7 @@ class ExtensionEntry(BaseModel):
 
 
 def _entry_name(item: object) -> str:
-    """Manifest entries are either bare strings or ``{name, ...}`` dicts."""
+    """Extract the identifier from supported string or mapping entries."""
     if isinstance(item, str):
         return item
     if isinstance(item, dict):
@@ -107,7 +101,7 @@ def _collect_sync() -> list[ExtensionEntry]:
                         editable=bool(pkg.get("editable")),
                     )
                 )
-    # Stable order: kind → package → name.
+    # Deterministic ordering keeps API results and UI rows stable.
     out.sort(key=lambda e: (e.kind, e.package, e.name))
     return out
 
@@ -119,11 +113,10 @@ async def list_extensions() -> list[ExtensionEntry]:
 
 @router.get("/{kind}/{name}", response_model=ExtensionEntry)
 async def get_extension(kind: str, name: str) -> ExtensionEntry:
-    """Lookup one specific extension by ``(kind, name)``.
+    """Return the first extension matching ``(kind, name)``.
 
-    Returns the first match — extensions are expected to be unique
-    per (kind, name) but the catalog doesn't enforce it, so this is
-    "first wins" with no error on shadowing.
+    The catalog does not enforce uniqueness, so earlier sorted entries shadow later
+    matches.
     """
     entries = await run_in_io_executor(_collect_sync)
     for entry in entries:

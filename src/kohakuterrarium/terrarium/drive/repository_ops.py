@@ -1,11 +1,6 @@
-"""Delivery-plane + read + export/import Drive repository ops (design §5, §7).
+"""Delivery, read, and row-transfer Drive repository operations.
 
-:class:`DeliveryOpsMixin` carries the non-canonical-mutation surface of the
-repository — delivery leases/claims, delivery state marks, retention purge,
-reads/queries, the outbox, and the Phase-F export/import move seam. It is mixed
-into :class:`~kohakuterrarium.terrarium.drive.repository_base.BaseDriveRepository`
-and relies on that class for ``_txn`` / ``_clock`` / ``_mint`` / ``_require``.
-Split out of ``drive.repository_base`` only to respect the file-size cap.
+Delivery, query, outbox, and row-transfer operations shared by repositories.
 """
 
 from dataclasses import replace
@@ -46,9 +41,7 @@ from kohakuterrarium.terrarium.drive.requests import DriveQuery
 
 
 class DeliveryOpsMixin:
-    """Delivery, read, and export/import operations (needs the base's plumbing)."""
-
-    # -- deliveries ----------------------------------------------------------
+    """Provide delivery, read, and row-transfer operations over repository plumbing."""
 
     async def enqueue_delivery(
         self,
@@ -98,11 +91,12 @@ class DeliveryOpsMixin:
         lease_seconds: float,
         now: datetime | None = None,
     ) -> tuple[DriveDelivery, ...]:
-        """Claim due deliveries under a dispatcher lease. The lease lives on the
-        Drive's assignment (design §3.4): a delivery whose assignment lease is
-        held-and-unexpired by another owner is skipped; an expired lease is
-        reclaimable. Claiming does not change the assignment's canonical
-        revision — the lease is a runtime writer token, not a mutation."""
+        """Claim due deliveries when their assignment lease is available.
+
+        Unexpired leases held by another owner are skipped; expired leases are
+        reclaimable. Claiming does not change the assignment revision because the
+        lease is a runtime writer token rather than a canonical mutation.
+        """
         async with self._txn() as txn:
             moment = now or self._clock()
             candidates = [
@@ -156,8 +150,7 @@ class DeliveryOpsMixin:
         detail: dict[str, Any] | None = None,
         now: datetime | None = None,
     ) -> DriveDelivery:
-        """Advance a delivery's state (admitted / acknowledged / retry_wait /
-        dead_letter / superseded). Dead-letter also writes a snapshot + outbox."""
+        """Advance delivery state and emit dead-letter records when required."""
         async with self._txn() as txn:
             delivery = await txn.get_delivery(delivery_id)
             if delivery is None:
@@ -211,8 +204,7 @@ class DeliveryOpsMixin:
         dead_letter_seconds: float | None = None,
         now: datetime | None = None,
     ) -> int:
-        """Delete terminal-safe delivery rows past retention. Never touches a
-        delivery whose Drive is still nonterminal (design §7.4)."""
+        """Delete retained delivery rows only after their Drive becomes terminal."""
         async with self._txn() as txn:
             moment = now or self._clock()
             live = {
@@ -236,8 +228,6 @@ class DeliveryOpsMixin:
             if removed:
                 await txn.apply(Mutation(deleted_deliveries=removed))
             return len(removed)
-
-    # -- reads ---------------------------------------------------------------
 
     async def get(self, drive_id: str) -> DriveRecord | None:
         async with self._txn() as txn:
@@ -292,12 +282,9 @@ class DeliveryOpsMixin:
             await txn.apply(Mutation(outbox_dispatched=[outbox_id]))
 
     async def watch_outbox(self):
-        """Yield currently-undispatched outbox entries then stop. The dispatcher
-        (Phase D) owns the wake loop; this owns no background task (§7.2)."""
+        """Yield the currently undispatched outbox entries, then stop."""
         for entry in await self.list_outbox(include_dispatched=False):
             yield entry
-
-    # -- export / import (Phase F logical move seam) -------------------------
 
     async def export_rows(
         self,
@@ -318,14 +305,11 @@ class DeliveryOpsMixin:
                 "progress": [],
                 "outbox": [],
                 "dead_letters": [],
-                # Idempotency is keyed by (actor, key), not drive_id, so the whole
-                # ledger travels with the move; a retry after topology movement
-                # still returns the original result (R1-11).
+                # The full ledger must move because idempotency keys are not Drive-scoped.
                 "idempotency": [
                     idempotency_to_wire(r) for r in await txn.all_idempotency()
                 ],
-                # Pending terminal proposals travel WITH their parent Drive so a
-                # merge/split does not silently drop an awaiting approval (R1-08).
+                # Pending proposals move with their Drive to preserve awaiting approvals.
                 "proposals": [],
             }
             for record, assignment in selected:
@@ -370,16 +354,11 @@ class DeliveryOpsMixin:
         return selected
 
     async def import_rows(self, payload: dict[str, Any]) -> None:
-        """Insert exported rows into this repository (logical copy, no remap).
+        """Import exported rows without remapping identifiers or pruning existing rows.
 
-        Idempotent for the append-only tables (audit / progress) and the
-        idempotency ledger: re-importing rows already present — as happens when a
-        merge combines a payload that includes the survivor's own rows into the
-        survivor's existing store — is deduplicated by stable id, so history is
-        never multiplied (R1-11). An idempotency ``(actor, key)`` reused with an
-        incompatible operation hash is a transactional conflict. Upsert-only: rows
-        already in this repo but absent from ``payload`` are LEFT in place (merge
-        is additive)."""
+        Existing append-only rows and idempotency records are deduplicated by stable
+        identity. Incompatible operation hashes raise a transactional conflict.
+        """
         self._require_import_schema(payload)
         async with self._txn() as txn:
             await txn.apply(
@@ -387,15 +366,11 @@ class DeliveryOpsMixin:
             )
 
     async def replace_rows(self, payload: dict[str, Any]) -> None:
-        """Import ``payload`` AND prune, so this repository ends up holding EXACTLY
-        the payload's Drives (plus the graph-global idempotency ledger).
+        """Import rows and atomically prune Drives absent from the payload.
 
-        Split uses this for a retained child that keeps the parent's provider
-        repository: that repo still holds every sibling's rows, and an upsert-only
-        import would leave the moved Drives duplicated in both graphs. Pruning the
-        Drives (and their per-drive rows) that are not in this child's subset —
-        atomically, in the same transaction as the import — restores canonical
-        single ownership and exact cardinality (R1-10/R1-11)."""
+        Exact replacement prevents sibling Drive rows from remaining duplicated
+        when a retained repository is partitioned during a graph split.
+        """
         self._require_import_schema(payload)
         async with self._txn() as txn:
             await txn.apply(await self._build_import_mutation(txn, payload, prune=True))
@@ -458,8 +433,7 @@ class DeliveryOpsMixin:
 
     @staticmethod
     def _dedupe_idempotency_payload(rows: list) -> list:
-        """Collapse a payload's own duplicate (actor, key) rows, raising if the
-        same key appears with an incompatible operation hash (R1-11)."""
+        """Deduplicate idempotency rows and reject incompatible hashes for one key."""
         by_key: dict[tuple[str, str], Any] = {}
         for rec in rows:
             existing = by_key.get((rec.actor, rec.key))
@@ -487,9 +461,7 @@ class DeliveryOpsMixin:
 
     @staticmethod
     def _dedupe_proposals_payload(rows: list) -> list:
-        """Collapse a payload's own duplicate proposal ids, raising if the same
-        proposal_id names a DIFFERENT parent Drive across merged sources — a
-        genuine identity clash, not a survivor re-import (R1-08)."""
+        """Deduplicate proposal IDs and reject IDs assigned to different Drives."""
         by_id: dict[str, Any] = {}
         for prop in rows:
             existing = by_id.get(prop.proposal_id)
@@ -503,9 +475,7 @@ class DeliveryOpsMixin:
         return list(by_id.values())
 
     async def _reconcile_proposals(self, txn: DriveTransaction, rows: list) -> list:
-        """Import proposals, re-importing a survivor's own row idempotently but
-        failing closed when a proposal_id already names a different Drive in the
-        destination (a real id collision during topology movement, R1-08)."""
+        """Reconcile proposals while rejecting IDs already bound to another Drive."""
         out = []
         for prop in rows:
             existing = await txn.get_proposal(prop.proposal_id)

@@ -107,6 +107,7 @@ def drive_cli(args: argparse.Namespace) -> int:
 
 
 async def _run(args: argparse.Namespace, sub: str) -> int:
+    """Resume the target session and execute one Drive operation."""
     path = _resolve_session(args.session)
     if path is None:
         print(f"Session not found: {args.session}")
@@ -152,8 +153,7 @@ async def _creature_graph(service: Any, creature_id: str) -> str:
 
 
 async def _dispatch(sub: str, args: argparse.Namespace, service: Any) -> int:
-    # Globally id-addressed reads/writes (show / transition / deliveries /
-    # replay) resolve their record by id and need no graph selection.
+    """Dispatch a Drive subcommand against the resumed service."""
     match sub:
         case "list":
             return await _list(args, service)
@@ -173,13 +173,8 @@ async def _dispatch(sub: str, args: argparse.Namespace, service: Any) -> int:
     return EXIT_USAGE
 
 
-# ---------------------------------------------------------------------------
-# subcommands
-# ---------------------------------------------------------------------------
-
-
 async def _list(args: argparse.Namespace, service: Any) -> int:
-    # No --graph aggregates across every graph; --graph narrows to one.
+    """List Drive records across all graphs or one requested graph."""
     graph_id = await _resolve_graph(service, args.graph) if args.graph else None
     rows = await _drives.list_records(
         service,
@@ -200,6 +195,7 @@ async def _list(args: argparse.Namespace, service: Any) -> int:
 
 
 async def _show(args: argparse.Namespace, service: Any) -> int:
+    """Display one Drive record by id."""
     record = await _drives.get_record(
         service, args.drive_id, actor=_ACTOR, is_privileged=True
     )
@@ -211,6 +207,7 @@ async def _show(args: argparse.Namespace, service: Any) -> int:
 
 
 async def _create(args: argparse.Namespace, service: Any) -> int:
+    """Create a graph- or creature-scoped Drive record."""
     body: dict[str, Any] = {
         "kind": args.kind,
         "title": args.title,
@@ -246,6 +243,7 @@ async def _create(args: argparse.Namespace, service: Any) -> int:
 
 
 async def _assign(args: argparse.Namespace, service: Any) -> int:
+    """Assign a Drive with optimistic revision checking."""
     if args.revision is None:
         print(_needs_revision("assign"))
         return EXIT_USAGE
@@ -266,6 +264,7 @@ async def _assign(args: argparse.Namespace, service: Any) -> int:
 
 
 async def _transition(args: argparse.Namespace, service: Any) -> int:
+    """Transition a Drive with optimistic revision checking."""
     if args.revision is None:
         print(_needs_revision("transition"))
         return EXIT_USAGE
@@ -283,8 +282,8 @@ async def _transition(args: argparse.Namespace, service: Any) -> int:
 
 
 async def _deliveries(args: argparse.Namespace, service: Any) -> int:
-    # Globally id-addressed: no graph binding (graph_id stays None), but the
-    # merged R1-02 service now authorizes delivery reads by actor/privilege.
+    """List delivery history for a globally addressed Drive."""
+    # Delivery lookup needs no graph binding, but still enforces actor privileges.
     deliveries = await _drives.list_deliveries_records(
         service, args.drive_id, actor=_ACTOR, is_privileged=True
     )
@@ -302,6 +301,7 @@ async def _deliveries(args: argparse.Namespace, service: Any) -> int:
 
 
 async def _replay(args: argparse.Namespace, service: Any) -> int:
+    """Replay one dead-letter delivery."""
     delivery = await _drives.replay_delivery_record(
         service, args.delivery_id, actor=_ACTOR, is_privileged=True
     )
@@ -309,12 +309,8 @@ async def _replay(args: argparse.Namespace, service: Any) -> int:
     return EXIT_OK
 
 
-# ---------------------------------------------------------------------------
-# rendering + exit mapping
-# ---------------------------------------------------------------------------
-
-
 def _emit(record: dict[str, Any], as_json: bool) -> None:
+    """Render a record as JSON or terminal detail rows."""
     if as_json:
         print(json.dumps(record, indent=2, default=str))
     else:
@@ -322,6 +318,7 @@ def _emit(record: dict[str, Any], as_json: bool) -> None:
 
 
 def _print_rows(rows: list[dict[str, Any]]) -> None:
+    """Print the compact Drive table."""
     header = f"{'ID':<24} {'STATUS':<10} {'REV':>4}  {'KIND':<10} TITLE"
     print(header)
     print("-" * len(header))
@@ -333,6 +330,7 @@ def _print_rows(rows: list[dict[str, Any]]) -> None:
 
 
 def _print_detail(record: dict[str, Any]) -> None:
+    """Print selected fields from a Drive record."""
     keys = (
         "drive_id",
         "title",
@@ -354,6 +352,7 @@ def _print_detail(record: dict[str, Any]) -> None:
 
 
 def _needs_revision(op: str) -> str:
+    """Format guidance for a mutation missing its expected revision."""
     return (
         f"{op} needs --revision N; run 'kt drive --session <id> show <drive_id>' "
         "to read the current revision"
@@ -361,6 +360,7 @@ def _needs_revision(op: str) -> str:
 
 
 def _exit_for(exc: DriveError) -> int:
+    """Map Drive errors to stable CLI exit codes."""
     if isinstance(exc, (DriveConflictError, DriveIdempotencyConflictError)):
         return EXIT_CONFLICT
     if isinstance(exc, DriveNotFoundError):
@@ -371,6 +371,7 @@ def _exit_for(exc: DriveError) -> int:
 
 
 def _error_text(exc: DriveError) -> str:
+    """Format a Drive error with actionable retry guidance."""
     if isinstance(exc, (DriveConflictError, DriveIdempotencyConflictError)):
         return f"conflict: {exc}; refetch the record (its revision moved) and retry"
     if isinstance(exc, DrivePermissionError):

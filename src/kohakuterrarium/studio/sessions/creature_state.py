@@ -1,8 +1,7 @@
-"""Per-creature state: scratchpad + triggers + env + system_prompt +
-working_dir + native_tool_options.
+"""Expose mutable and read-only state from live creature agents.
 
-Replaces a swathe of legacy route handlers + manager methods that
-all pull state directly off the underlying ``Agent`` instance.
+This module covers scratchpads, triggers, environment views, system prompts,
+working directories, and provider-native tool options.
 """
 
 import os
@@ -14,7 +13,7 @@ from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.studio._runtime import as_engine
 
-# Env var keys that must be filtered out of /env responses.
+# Environment responses omit names that commonly carry credentials or secrets.
 _ENV_REDACT_SUBSTRINGS = (
     "secret",
     "key",
@@ -57,11 +56,6 @@ def _agent_working_dir(agent: Any) -> str:
     return ws.get()
 
 
-# ---------------------------------------------------------------------------
-# scratchpad
-# ---------------------------------------------------------------------------
-
-
 def get_scratchpad(
     service: "TerrariumService", session_id: str, creature_id: str
 ) -> dict[str, str]:
@@ -87,11 +81,6 @@ def patch_scratchpad(
     return pad.to_dict()
 
 
-# ---------------------------------------------------------------------------
-# triggers (read-only)
-# ---------------------------------------------------------------------------
-
-
 def list_triggers(
     service: "TerrariumService", session_id: str, creature_id: str
 ) -> list[dict[str, Any]]:
@@ -111,11 +100,6 @@ def list_triggers(
     ]
 
 
-# ---------------------------------------------------------------------------
-# env + system prompt
-# ---------------------------------------------------------------------------
-
-
 def get_env(
     service: "TerrariumService", session_id: str, creature_id: str
 ) -> dict[str, Any]:
@@ -130,11 +114,6 @@ def get_system_prompt(
 ) -> dict[str, str]:
     engine = as_engine(service)
     return {"text": _get_agent(engine, session_id, creature_id).get_system_prompt()}
-
-
-# ---------------------------------------------------------------------------
-# working dir
-# ---------------------------------------------------------------------------
 
 
 def get_working_dir(
@@ -154,11 +133,6 @@ def set_working_dir(
     if ws is None:
         raise RuntimeError(f"Creature {creature_id!r} has no workspace helper")
     return ws.set(new_path)
-
-
-# ---------------------------------------------------------------------------
-# native tool options
-# ---------------------------------------------------------------------------
 
 
 def native_tool_inventory(

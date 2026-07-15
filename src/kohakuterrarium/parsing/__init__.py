@@ -1,24 +1,4 @@
-"""
-Parsing module - Stream parsing for LLM output.
-
-Provides state machine parser for detecting configurable format tool calls
-and framework commands from streaming LLM output.
-
-Bracket format (default):
-    [/function_name]
-    @@arg=value
-    content
-    [function_name/]
-
-XML format:
-    <function_name arg="value">content</function_name>
-
-Exports:
-- StreamParser: Main streaming parser
-- ParseEvent types: TextEvent, ToolCallEvent, SubAgentCallEvent, CommandEvent
-- ParserConfig: Parser configuration
-- ToolCallFormat, BRACKET_FORMAT, XML_FORMAT: Format configuration
-"""
+"""Parse streaming LLM output into text, action, and framework events."""
 
 from kohakuterrarium.parsing.events import (
     AssistantImageEvent,
@@ -51,32 +31,30 @@ from kohakuterrarium.parsing.patterns import (
 )
 from kohakuterrarium.parsing.state_machine import ParserState, StreamParser, parse_full
 
-# Alias for backward compatibility
+# Preserve the pre-2.0 public name.
 parse_complete = parse_full
 
 
 def extract_tool_calls(events: list[ParseEvent]) -> list[ToolCallEvent]:
-    """Extract all ToolCallEvent instances from a list of events."""
+    """Return the tool-call events in their original order."""
     return [e for e in events if isinstance(e, ToolCallEvent)]
 
 
 def extract_subagent_calls(events: list[ParseEvent]) -> list[SubAgentCallEvent]:
-    """Extract all SubAgentCallEvent instances from a list of events."""
+    """Return the sub-agent call events in their original order."""
     return [e for e in events if isinstance(e, SubAgentCallEvent)]
 
 
 def extract_text(events: list[ParseEvent]) -> str:
-    """Extract and concatenate all text from TextEvent instances."""
+    """Concatenate text events in their original order."""
     return "".join(e.text for e in events if isinstance(e, TextEvent))
 
 
 __all__ = [
-    # Parser
     "StreamParser",
     "ParserState",
     "parse_full",
     "parse_complete",
-    # Events
     "ParseEvent",
     "TextEvent",
     "ToolCallEvent",
@@ -89,22 +67,17 @@ __all__ = [
     "AssistantImageEvent",
     "is_action_event",
     "is_text_event",
-    # Extraction helpers
     "extract_tool_calls",
     "extract_subagent_calls",
     "extract_text",
-    # Config
     "ParserConfig",
-    # Format
     "ToolCallFormat",
     "BRACKET_FORMAT",
     "XML_FORMAT",
-    # Pattern functions
     "parse_opening_tag",
     "parse_closing_tag",
     "parse_attributes",
     "build_tool_args",
-    # Pattern defaults (for extending)
     "DEFAULT_COMMANDS",
     "DEFAULT_CONTENT_ARG_MAP",
     "DEFAULT_SUBAGENT_TAGS",

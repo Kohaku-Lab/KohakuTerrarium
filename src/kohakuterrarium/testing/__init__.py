@@ -1,8 +1,4 @@
-"""
-Reusable test infrastructure for KohakuTerrarium.
-
-Provides fake/mock primitives for testing the agent framework without real LLMs.
-"""
+"""Provide deterministic builders, recorders, and scripted LLMs for tests."""
 
 from kohakuterrarium.testing.agent import TestAgentBuilder
 from kohakuterrarium.testing.events import EventRecorder, RecordedEvent

@@ -1,24 +1,9 @@
-"""FastAPI dependencies.
+"""Resolve request-scoped and process-wide Terrarium services.
 
-Exposes the active :class:`TerrariumService` as a process-level
-singleton.  Three boot paths set the singleton:
-
-- ``standalone`` mode (default): a fresh :class:`Terrarium` +
-  :class:`LocalTerrariumService` is constructed lazily on first
-  :func:`get_service` call.
-- ``lab-host`` mode: ``cli/serve.py`` builds a
-  :class:`MultiNodeTerrariumService` at boot and calls
-  :func:`set_service`.
-- Tests: call :func:`set_service` with a custom instance, then reset
-  with :func:`set_service(None)` (or rebuild between cases).
-
-``get_engine`` remains for back-compat with single-host routes.  In
-lab-host mode the host runs **no agent engine** — ``get_engine``
-returns the host's *coordination* engine (an always-empty Terrarium
-that only holds cross-node channel objects) and emits a one-time
-warning per route.  A route that gets results back from that engine
-in lab-host mode is looking at nothing; it must migrate to
-``Depends(get_service)`` for real cross-node visibility.
+Standalone mode lazily owns one local service, Laboratory host mode installs a
+multi-node service, and user-authenticated requests may resolve isolated local
+engines. ``get_engine`` exposes only the local or coordination engine and therefore
+cannot provide cross-node creature visibility.
 """
 
 import os
@@ -46,18 +31,15 @@ logger = get_logger(__name__)
 
 _service: TerrariumService | None = None
 _engine_legacy: Terrarium | None = None
-# Track which call sites have already heard about get_engine being
-# multi-node-blind so we don't spam every request with the same warning.
+# Deduplicate warnings for call sites that request an engine without cross-node visibility.
 _engine_legacy_warned: set[str] = set()
 
 
 def _session_dir() -> str:
-    """Resolve the session dir fresh, honouring KT_SESSION_DIR / KT_CONFIG_DIR.
+    """Resolve the live session directory with ``KT_SESSION_DIR`` precedence.
 
-    Previously a module constant computed at import time which ignored
-    both env vars for tests that set them after import.  Now resolves
-    on every call: explicit ``KT_SESSION_DIR`` wins, else falls back to
-    ``config_dir() / "sessions"`` which honours ``KT_CONFIG_DIR``.
+    Resolving on each call also allows ``KT_CONFIG_DIR`` changes to affect the
+    fallback path rather than freezing environment state at import time.
     """
     explicit = os.environ.get("KT_SESSION_DIR")
     if explicit:
@@ -65,29 +47,20 @@ def _session_dir() -> str:
     return str(config_dir() / "sessions")
 
 
-# Back-compat — display only; live reads use ``_session_dir()``.
+# Retained for display compatibility; operational reads must use ``_session_dir()``.
 _DEFAULT_SESSION_DIR = str(Path.home() / ".kohakuterrarium" / "sessions")
 
 
 def _host_drive_kwargs() -> dict:
-    """Managed host Drive kwargs for the singleton / lazy local engine.
-
-    Resolves the host node's Drive settings exactly once per engine build
-    (design §8.4). Absent/disabled settings degrade to a Drive-disabled engine.
-    """
+    """Resolve one immutable host Drive configuration for a new engine."""
     return _drive_settings.resolve_drive_kwargs()
 
 
 def set_service(service: TerrariumService | None) -> None:
-    """Install (or clear) the process-wide active service.
-
-    Called once at boot by :mod:`cli/serve.py`.  Tests can call this to
-    inject a custom service and pass ``None`` to reset between cases.
-    """
+    """Install or clear the process-wide service and invalidate its engine view."""
     global _service, _engine_legacy
     _service = service
-    # Clear the legacy engine reference; next get_engine() will pull
-    # afresh from the new service if applicable.
+    # The cached engine belongs to the previous service and cannot survive replacement.
     _engine_legacy = None
 
 
@@ -95,53 +68,23 @@ def get_service(
     conn_info: HTTPConnection,
     user: User | None = Depends(get_optional_user),
 ) -> TerrariumService:
-    """Return the active :class:`TerrariumService` for a request.
+    """Return the service scoped to an HTTP or WebSocket connection.
 
-    Takes :class:`HTTPConnection` so the same dep works on both HTTP
-    routes (``Request``) and WebSocket routes (``WebSocket``).  WS
-    routes that depend on this get the same per-user routing + L4
-    enforcement as their HTTP counterparts.
-
-    Routing rules:
-
-    1. **Multi-node mode** (``app.state.service`` is a non-Local
-       service like :class:`MultiNodeTerrariumService`): the singleton
-       is returned as-is.  The multi-node layer does its own
-       per-creature routing across worker nodes; per-user routing on
-       top is a 2.0+ topic.
-    2. **Single-host + L4 enabled**: each authenticated user gets a
-       per-user :class:`Terrarium` from the engine pool, wrapped in a
-       fresh :class:`LocalTerrariumService`.  Routing-time rules:
-       - ``multi_user="required"``: anonymous request → 401.  Routes
-         that don't strictly need a user (capabilities probe, login)
-         opt out by calling :func:`get_service_legacy` directly or
-         carrying their own ``Depends(get_optional_user)``.
-       - ``multi_user="optional"``: anonymous → shared engine
-         (``None`` slot); authenticated → per-user.
-    3. **Single-host + L4 disabled**: legacy behaviour — one global
-       service.
-
-    This is the request-scoped FastAPI dependency.  Non-HTTP callers
-    (CLI / tests / lab) should use :func:`get_service_legacy` which
-    skips the per-request branches.
+    Multi-node services route requests themselves. On a single host, enabled user
+    isolation selects an engine-pool slot by user identity; required mode rejects
+    anonymous access instead of falling through to shared state. Without user
+    isolation, all requests share the process-wide local service.
     """
     global _service
-    # Multi-node mode: respect the singleton.  Detected by the absence
-    # of an ``engine`` attribute on the service (only LocalTerrariumService
-    # carries one).
+    # Multi-node services own their routing and must not be wrapped as local engines.
     if _service is not None and not isinstance(_service, LocalTerrariumService):
         return _service
 
     pool: EnginePool | None = getattr(conn_info.app.state, "engine_pool", None)
     auth_config = get_auth_config(conn_info)
     if pool is not None and auth_config.multi_user_enabled:
-        # ``required`` mode: every engine-handing route MUST resolve
-        # to a real user.  An anonymous fall-through to the shared
-        # ``None`` slot was the audit-caught bug — it let an
-        # L2-authenticated caller skate past L4 by simply not sending
-        # a session cookie.  The 401 here propagates as a normal
-        # FastAPI exception; the frontend's connection state machine
-        # treats it like any other ``user``-flavoured auth challenge.
+        # Required isolation must never map an anonymous request to the shared
+        # pool slot, because that would bypass the user-authentication boundary.
         if user is None and auth_config.multi_user == "required":
             raise HTTPException(
                 status_code=401,
@@ -154,12 +97,11 @@ def get_service(
         user_id = user.id if user is not None else None
         engine = pool.get_or_create(user_id)
         service = LocalTerrariumService(engine)
-        # Session meta is instance-scoped — bind THIS service so the
-        # terrarium tier's gid-only lookup hits the right registry.
+        # Session metadata lookup must bind to the same service instance as the engine.
         service.set_runtime_graph_meta_lookup(partial(get_session_meta, service))
         return service
 
-    # Legacy single-engine path — standalone mode without L4.
+    # Without user isolation, lazily construct the process-wide local service.
     if _service is None:
         engine = Terrarium(session_dir=_session_dir(), **_host_drive_kwargs())
         _service = LocalTerrariumService(engine)
@@ -171,12 +113,10 @@ def resolve_request_session_dir(
     conn_info: HTTPConnection,
     user: User | None = Depends(get_optional_user),
 ) -> Path:
-    """The on-disk session directory for the current request's L4 namespace.
+    """Return the saved-session directory matching the request's engine namespace.
 
-    Mirrors :func:`get_service`'s routing so a saved-session read resolves in
-    the SAME namespace a live request would: L4 disabled → the shared session
-    dir; L4 enabled → the per-user dir. ``required`` + anonymous raises 401
-    rather than silently falling through to the shared dir (R1-01/R1-03).
+    Required user isolation rejects anonymous callers rather than exposing the
+    shared session directory.
     """
     pool: EnginePool | None = getattr(conn_info.app.state, "engine_pool", None)
     auth_config = get_auth_config(conn_info)
@@ -196,12 +136,7 @@ def resolve_request_session_dir(
 
 
 def get_service_legacy() -> TerrariumService:
-    """Non-request variant — CLI / lab / test code paths.
-
-    Always returns the legacy single global service.  Has no
-    awareness of per-user routing because there's no request /
-    user identity to scope from.
-    """
+    """Return the process-wide service when no request identity is available."""
     global _service
     if _service is None:
         engine = Terrarium(session_dir=_session_dir(), **_host_drive_kwargs())
@@ -211,35 +146,25 @@ def get_service_legacy() -> TerrariumService:
 
 
 def get_engine() -> Terrarium:
-    """Return a singleton :class:`Terrarium` engine.
+    """Return the local engine view of the process-wide service.
 
-    Back-compat shim for routes not yet migrated to
-    :func:`get_service`.
-
-    - **standalone**: the host-local agent engine.
-    - **lab-host**: the host's *coordination* engine — an always-empty
-      Terrarium that holds only cross-node channel objects.  The host
-      runs no agents, so a route reading agent state off this engine
-      sees nothing; a one-time warning per call site flags the missing
-      migration.  Cross-node visibility requires :func:`get_service`.
+    In Laboratory host mode this is the agent-free coordination engine, so callers
+    that need creature state must depend on :func:`get_service` instead.
     """
     global _engine_legacy
     svc = get_service_legacy()
     if isinstance(svc, LocalTerrariumService):
         _engine_legacy = svc.engine
     else:
-        # Multi-node (lab-host): no host agent engine.  Fall back to the
-        # coordination engine so a ``Depends(get_engine)`` route resolves
-        # instead of 500-ing — but it is provably agent-free.
+        # Laboratory hosts expose the coordination engine for compatibility, but
+        # it intentionally contains no local creatures.
         _engine_legacy = getattr(svc, "coordination_engine", None)
         if _engine_legacy is None:
             raise RuntimeError(
                 "get_engine() called in lab-host mode with no coordination "
                 "engine; route must migrate to Depends(get_service)"
             )
-        # Emit a once-per-call-site warning so the missing migration
-        # surfaces in the daemon log without spamming every request.
-        # Caller filename:lineno keys the dedup set.
+        # Filename and line identify the compatibility caller without logging per request.
         frame = sys._getframe(1)
         callsite = f"{frame.f_code.co_filename}:{frame.f_lineno}"
         if callsite not in _engine_legacy_warned:
@@ -249,14 +174,8 @@ def get_engine() -> Terrarium:
                 "coordination engine — route needs Depends(get_service)",
                 extra={"callsite": callsite},
             )
-    # ``_runtime_prompt.attach`` is the per-engine convention for
-    # wiring the runtime-graph prompt; production Terrarium always
-    # exposes it.  The ``getattr`` is defensive against a future
-    # coordination-engine type that doesn't carry the prompt
-    # internals — the audit flagged the unconditional attribute
-    # access as a hidden coupling.  A no-op attach when missing
-    # keeps ``get_engine`` honest about returning *some* engine
-    # instead of crashing on a fresh type.
+    # Coordination-engine implementations are not required to expose prompt
+    # internals, so prompt attachment remains capability-based.
     runtime_prompt = getattr(_engine_legacy, "_runtime_prompt", None)
     if runtime_prompt is not None:
         runtime_prompt.attach()

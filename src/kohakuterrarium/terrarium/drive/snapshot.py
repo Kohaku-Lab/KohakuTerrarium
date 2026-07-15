@@ -10,8 +10,6 @@ Availability of a persisted record against a snapshot is a *derived* condition
 (§8.6): ``registration_disabled`` / ``registration_unavailable`` /
 ``registration_incompatible`` — never a :class:`DriveStatus`, and computed by a
 pure function that never mutates the record.
-
-Leaf module: builds on :mod:`drive.registration` plus stdlib and the logger.
 """
 
 from dataclasses import dataclass
@@ -33,12 +31,7 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class EnabledRegistration:
-    """One entry in the enabled snapshot: descriptor + live instance + status.
-
-    ``registration`` is a live in-process object, so the snapshot is in-process
-    only and never wire-serialized. ``available`` is False when a required role
-    is missing/broken; ``prompt_text`` is the normalized, budget-checked prose.
-    """
+    """Pair an enabled descriptor with its live implementation and availability."""
 
     descriptor: DriveRegistrationDescriptor
     registration: DriveRegistration
@@ -58,11 +51,7 @@ class _BuildEntry:
 
 @dataclass(frozen=True)
 class EnabledRegistrySnapshot:
-    """Immutable, collision-checked view of the enabled registrations (§8.2).
-
-    Duplicate ``name`` and two registrations claiming one ``kind`` are hard
-    errors at :meth:`build`. Lookups are linear over the (small) entry tuple.
-    """
+    """Store the immutable, collision-checked enabled registration set."""
 
     entries: tuple[EnabledRegistration, ...] = ()
 
@@ -123,8 +112,7 @@ class EnabledRegistrySnapshot:
         return None
 
     def for_kind(self, kind: str) -> EnabledRegistration | None:
-        """The enabled entry serving ``kind`` (available or not); kinds are
-        unique per snapshot so at most one is returned."""
+        """Return the unique enabled entry serving a Drive kind."""
         for entry in self.entries:
             if entry.descriptor.kind == kind:
                 return entry
@@ -134,7 +122,7 @@ class EnabledRegistrySnapshot:
         return frozenset(e.descriptor.kind for e in self.entries if e.available)
 
     def prompt_contributions(self) -> tuple[tuple[str, str], ...]:
-        """``(name, prompt_text)`` for available entries with prose, name-ordered."""
+        """Return available prompt contributions in stable registration order."""
         pairs = [
             (e.descriptor.name, e.prompt_text)
             for e in self.entries
@@ -150,15 +138,10 @@ class EnabledRegistrySnapshot:
         return not self.entries
 
 
-# ---------------------------------------------------------------------------
-# Derived availability (design §8.6) — pure, never mutates the record
-# ---------------------------------------------------------------------------
-
-
 def availability_for_kind(
     kind: str, schema_version: int, snapshot: EnabledRegistrySnapshot
 ) -> DriveAvailability:
-    """Availability of ``kind``@``schema_version`` against the enabled snapshot."""
+    """Derive availability for a kind and schema version."""
     entry = snapshot.for_kind(kind)
     if entry is None:
         return DriveAvailability.REGISTRATION_DISABLED
@@ -172,13 +155,8 @@ def availability_for_kind(
 def derive_availability(
     record: DriveRecord, snapshot: EnabledRegistrySnapshot
 ) -> DriveAvailability:
-    """Availability of a persisted ``record`` against ``snapshot`` (§8.6)."""
+    """Derive a persisted record's availability against a snapshot."""
     return availability_for_kind(record.kind, record.schema_version, snapshot)
-
-
-# ---------------------------------------------------------------------------
-# build helpers
-# ---------------------------------------------------------------------------
 
 
 def _prov(descriptor: DriveRegistrationDescriptor) -> str:
@@ -253,11 +231,8 @@ def _normalize_prompts(
             continue
         text = _extract_prompt(entry.registration, entry.descriptor)
         if text is None:
-            # A REQUIRED prompt whose callable raised, returned ``None``, or
-            # returned a non-string yields no prose. That must fail closed —
-            # unavailable, exactly like a byte-budget overflow — never a silently
-            # prompt-less registration that still declares prompt required (R1-27
-            # edge). An optional prompt may be absent without penalty.
+            # Required prompt roles fail closed when they produce no usable prose;
+            # optional prompt roles may omit content.
             if "prompt" in entry.descriptor.required_roles:
                 entry.available = False
                 entry.reason = (
@@ -281,9 +256,8 @@ def _normalize_prompts(
                 )
             continue
         if aggregate + size > aggregate_cap:
-            # A REQUIRED prompt that does not fit the aggregate budget fails
-            # closed, exactly like the per-registration cap (R1-27); only an
-            # optional prompt may be silently omitted.
+            # Required prompts fail closed when aggregate limits cannot include
+            # them; optional prompts may be omitted.
             if "prompt" in entry.descriptor.required_roles:
                 entry.available = False
                 entry.reason = (

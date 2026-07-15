@@ -1,8 +1,5 @@
 """
-Utilities for building native tool schemas from the registry.
-
-Converts registered Tool instances into ToolSchema objects suitable
-for OpenAI-compatible native function calling.
+Build function schemas and provider-native tool lists from the registry.
 """
 
 from typing import Any
@@ -10,10 +7,7 @@ from typing import Any
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import ToolSchema
 
-# Tool parameter schemas live in a standalone module so the
-# (data-only) catalogue can grow past the file-size guard without
-# fragmenting the dispatch logic that lives here. See
-# ``tool_schemas.py`` for the per-tool schema map.
+# Built-in schemas remain centralized so registry dispatch stays provider-agnostic.
 from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
 from kohakuterrarium.utils.logging import get_logger
 
@@ -21,23 +15,7 @@ logger = get_logger(__name__)
 
 
 def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
-    """
-    Build native tool schemas from registered tools.
-
-    Uses builtin schemas for known tools, falls back to tool's
-    get_parameters_schema() method, then to a generic schema.
-
-    Provider-native tools (``tool.is_provider_native == True``) are
-    **skipped** — they do not represent callable functions; the
-    provider translates them into its own wire-format tool spec
-    instead. See :func:`build_provider_native_tools`.
-
-    Args:
-        registry: Registry containing registered tools
-
-    Returns:
-        List of ToolSchema ready for the OpenAI tools API
-    """
+    """Build callable schemas, excluding tools translated natively by providers."""
     schemas: list[ToolSchema] = []
 
     for name in registry.list_tools():
@@ -49,10 +27,8 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
         if tool is not None and getattr(tool, "is_provider_native", False):
             continue
 
-        # 1. Check builtin schemas first (most accurate)
         params = _BUILTIN_SCHEMAS.get(name)
 
-        # 2. Try tool's own schema method
         if not params:
             tool = registry.get_tool(name)
             if tool and hasattr(tool, "get_parameters_schema"):
@@ -65,7 +41,6 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
                         error=str(e),
                     )
 
-        # 3. Generic fallback
         if not params:
             params = {
                 "type": "object",
@@ -77,9 +52,9 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
                 },
             }
 
-        # Add run_in_background option to all tools
+        # Copy before adding framework execution controls to shared schemas.
         if "properties" in params:
-            params = dict(params)  # don't mutate builtin schemas
+            params = dict(params)
             props = dict(params.get("properties", {}))
             props["run_in_background"] = {
                 "type": "boolean",
@@ -95,7 +70,6 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
             )
         )
 
-    # Also include sub-agents as callable functions
     for name in registry.list_subagents():
         subagent = registry.get_subagent(name)
         desc = (
@@ -137,13 +111,7 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
 
 
 def build_provider_native_tools(registry: Registry) -> list[Any]:
-    """Return the registered tools whose ``is_provider_native`` flag is set.
-
-    The controller passes this list to the LLM provider as a separate
-    argument (see ``BaseLLMProvider.chat``). Each provider translates
-    the entries into its own built-in tool spec via
-    ``translate_provider_native_tool``, or ignores them if unsupported.
-    """
+    """Return registered tools that providers translate into native wire schemas."""
     out: list[Any] = []
     for name in registry.list_tools():
         tool = registry.get_tool(name)

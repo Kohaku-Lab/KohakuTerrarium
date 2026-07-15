@@ -1,9 +1,7 @@
 """Pre-tool-dispatch plugin chain.
 
-Extracted from ``agent_handlers.py`` to keep that file under the
-600-line soft cap. Implements cluster B.2 of the extension-point spec:
-plugins can rewrite a ``ToolCallEvent`` between parser emission and
-executor dispatch, or veto the call entirely via ``PluginBlockError``.
+Plugins can rewrite a ``ToolCallEvent`` between parser emission and
+executor dispatch, or veto the call via ``PluginBlockError``.
 """
 
 from pathlib import Path

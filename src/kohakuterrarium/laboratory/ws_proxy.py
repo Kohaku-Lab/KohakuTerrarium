@@ -1,42 +1,8 @@
 """Unified WebSocket forwarder for Lab adapters.
 
-Many lab-host features need to surface a worker-local WebSocket as if
-it were running on the controller: chat IO, PTY shells, file watch,
-future log tail and trace streams.  Each one shares the same shape:
-
-- The controller's HTTP/WS layer accepts a real WebSocket.
-- A lab stream carries frames bidirectionally to a worker adapter.
-- The worker adapter runs a producer task that emits frames (chat
-  output, PTY stdout, file-change events) and a consumer that
-  receives frames (user input, PTY stdin, resize).
-- Lifecycle: ``start`` opens the session, ``input`` ferries frames
-  from the controller back to the worker, ``cancel`` closes both
-  sides.
-
-Implementing this twice (once per WS) means duplicating ~300 lines of
-queue / pump / cleanup / backpressure / cancellation logic.  This
-module factors it out:
-
-- :class:`WSFrameSink` — bidirectional bridge a worker-side producer
-  uses as if it were a WebSocket.  ``await sink.send_json(frame)``
-  pumps onto the lab stream; ``await sink.receive_json()`` pulls
-  from frames the controller forwarded via ``input`` RPC.
-- :class:`WSProxyAdapter` — base class for the worker-side APP
-  extension.  Handles ``start`` / ``input`` / ``cancel`` dispatch and
-  per-stream sink lifecycle.  Subclasses implement
-  :meth:`on_start` (spawn the producer / consumer tasks bound to the
-  sink) and :meth:`on_close` (teardown subprocess / observers).
-- :func:`proxy_ws_to_lab` — controller-side helper.  Opens a
-  :class:`RemoteStream`, forwards frames to the WS verbatim, and
-  forwards inbound WS frames as ``input`` RPCs to the worker.
-
-Backpressure: each direction uses a bounded queue.  Outbox (worker →
-controller) blocks the producer when the controller's WS is slow to
-drain — preferable to OOM under burst loads (PTY ``ls /``, etc.).
-Inbox (controller → worker) blocks the input RPC when the worker's
-consumer hasn't caught up; the controller surfaces this as a
-request timeout the WS layer can ignore (a slow worker is the
-worker's problem).
+Bridge controller WebSockets to worker-local producers and consumers over lab
+streams. Worker-to-controller and controller-to-worker queues are bounded so
+slow peers apply backpressure rather than allowing unbounded memory growth.
 """
 
 import asyncio
@@ -56,37 +22,18 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Outbox cap — worker producers blocked beyond this back off until the
-# controller drains.  PTY's ``ls /tmp`` can dump ~10K small frames in
-# a burst; 4K is comfortable for chat and tight enough that a stuck
-# controller is detectable.
+# The outbox accommodates bursty PTY output while still making a stalled
+# controller apply backpressure.
 _DEFAULT_OUTBOX_CAP = 4096
-# Inbox is rarely full because input frames are user-generated; small
-# cap is fine and surfaces backpressure quickly.
+# User-generated input is low-volume, so a small inbox exposes slow consumers.
 _DEFAULT_INBOX_CAP = 256
 
 
 class WSFrameSink:
-    """Bidirectional bridge that looks like a WebSocket to a producer.
+    """Provide a bounded bidirectional frame bridge for worker adapters.
 
-    Worker-side adapters' producer tasks call :meth:`send_json` (push
-    onto the outbox; pump drains to ``terrarium.stream`` notify);
-    consumer tasks call :meth:`receive_json` (pull from the inbox the
-    controller populated via ``input`` RPC).
-
-    Lifecycle:
-
-    1. Construct.
-    2. :meth:`start` — spawns the pump task.
-    3. Producer uses :meth:`send_json` (async, may block on
-       backpressure).
-    4. Consumer uses :meth:`receive_json` (async).
-    5. :meth:`close` — flushes a sentinel ``{"eof": True}`` frame for
-       the controller's iterator to terminate cleanly, then stops.
-
-    Both directions are bounded — backpressure surfaces as a slow
-    ``put`` rather than OOM.  ``inject_input`` is the worker-side
-    adapter's hook for stuffing frames from an inbound RPC.
+    Producers send through the outbox to lab notifications; consumers receive
+    controller input from the inbox. Closing emits an EOF frame before stopping.
     """
 
     def __init__(
@@ -115,11 +62,11 @@ class WSFrameSink:
             self._pump = asyncio.create_task(self._drain_outbox())
 
     async def close(self) -> None:
-        """Send EOF + stop the pump.  Idempotent."""
+        """Best-effort send EOF and stop the pump; safe to call repeatedly."""
         if self._closed:
             return
         self._closed = True
-        # Best-effort eof — if outbox is wedged, give up after a beat.
+        # A wedged outbox must not prevent shutdown indefinitely.
         try:
             await asyncio.wait_for(self._outbox.put({"eof": True}), timeout=1.0)
         except (asyncio.TimeoutError, asyncio.QueueFull):
@@ -133,8 +80,6 @@ class WSFrameSink:
                 await asyncio.sleep(0.01)
             self._pump.cancel()
             self._pump = None
-
-    # ─── Producer (worker-side) ────────────────────────────────────
 
     async def send_json(self, frame: dict[str, Any]) -> None:
         if self._closed:
@@ -160,20 +105,12 @@ class WSFrameSink:
                 frame_type=frame.get("type"),
             )
 
-    # ─── Consumer (worker-side) ────────────────────────────────────
-
     async def receive_json(self) -> dict[str, Any]:
         return await self._inbox.get()
 
-    # ─── Adapter hooks (worker-side) ───────────────────────────────
-
     async def inject_input(self, frame: dict[str, Any]) -> None:
-        """Adapter's ``input`` RPC body lands here.  Surfaces backpressure
-        as a slow RPC — the controller's request will time out and the
-        WS layer logs / drops."""
+        """Queue an input RPC frame, applying backpressure to the request."""
         await self._inbox.put(frame)
-
-    # ─── Internal ──────────────────────────────────────────────────
 
     async def _drain_outbox(self) -> None:
         try:
@@ -194,33 +131,16 @@ class WSFrameSink:
                         consumer=self._consumer,
                         stream_id=self._stream_id,
                     )
-                    # Drop the frame and keep pumping — a transient
-                    # transport blip shouldn't tear down the producer.
+                    # A transient delivery failure must not stop the producer.
         except asyncio.CancelledError:
             raise
 
 
 class WSProxyAdapter:
-    """Base class for worker-side WS-proxy APP extensions.
+    """Manage worker-side WebSocket proxy sessions and APP dispatch.
 
-    Subclasses set :attr:`NAMESPACE` and implement :meth:`on_start`
-    (spawn producer + consumer tasks bound to the sink) and
-    :meth:`on_close` (teardown subprocess / observers).  The base
-    class handles the lab APP dispatch table:
-
-    - ``start({stream_id, ...subclass args})`` — opens a session.
-      :meth:`on_start` returns optional setup data (e.g. an initial
-      ``setup`` frame the controller forwards before the first
-      streamed frame).
-    - ``input({stream_id, frame})`` — push frame into the sink's
-      inbox; the subclass's consumer task pulls it.  Returns
-      ``{"accepted": True}``.
-    - ``cancel({stream_id})`` — calls :meth:`on_close` then closes
-      the sink.
-
-    Each open stream gets its own :class:`WSFrameSink` keyed by the
-    controller-generated ``stream_id``.  Concurrent streams (e.g. one
-    chat WS + one PTY WS for the same creature) are independent.
+    Subclasses provide a namespace and session startup and teardown hooks. Each
+    controller-generated stream ID owns an independent frame sink.
     """
 
     NAMESPACE: str = ""
@@ -235,17 +155,10 @@ class WSProxyAdapter:
         logger.info("lab adapter registered", namespace=self.NAMESPACE)
 
     def detach(self) -> None:
-        """Synchronously unregister the extension and schedule teardown.
+        """Unregister synchronously and tear down or schedule active sessions.
 
-        Kept for sync shutdown paths (e.g. tests outside an event loop,
-        legacy callers).  Inside a running event loop, prefer
-        :meth:`adetach` — it awaits every per-stream teardown before
-        returning so the post-detach contract ("no producer task still
-        running") actually holds.
-
-        Older revisions scheduled fire-and-forget tasks via
-        ``create_task`` and returned immediately, which raced any
-        caller that treated ``detach()`` as fully torn down.
+        Without a running loop, teardown completes before return. Within a
+        running loop, callers needing that guarantee must await :meth:`adetach`.
         """
         stream_ids = list(self._sinks.keys())
         try:
@@ -253,8 +166,7 @@ class WSProxyAdapter:
         except RuntimeError:
             loop = None
         if loop is None or not loop.is_running():
-            # No running loop — drive everything to completion so the
-            # post-detach contract holds.
+            # Without a running loop, teardown can complete synchronously.
             async def _run_all() -> None:
                 await asyncio.gather(
                     *(self._teardown(sid) for sid in stream_ids),
@@ -268,10 +180,7 @@ class WSProxyAdapter:
             self._node.unregister_app_extension(self.NAMESPACE)
             logger.info("lab adapter detached", namespace=self.NAMESPACE)
             return
-        # Running loop — we can't block here.  Unregister synchronously
-        # so no new dispatches arrive, and schedule the teardowns.
-        # Callers needing the strong "all torn down" guarantee must use
-        # :meth:`adetach` from async context.
+        # Unregister before scheduling teardown so no new sessions can arrive.
         self._node.unregister_app_extension(self.NAMESPACE)
         self._pending_teardowns = [
             loop.create_task(self._teardown(sid)) for sid in stream_ids
@@ -283,13 +192,7 @@ class WSProxyAdapter:
         )
 
     async def adetach(self) -> None:
-        """Async detach — awaits every teardown before returning.
-
-        The post-condition is the strong one: when this coroutine
-        resolves, every per-stream :meth:`_teardown` (and therefore
-        every :meth:`on_close` hook) has run to completion and the APP
-        extension is unregistered.
-        """
+        """Unregister and await teardown of every active session."""
         stream_ids = list(self._sinks.keys())
         self._node.unregister_app_extension(self.NAMESPACE)
         await asyncio.gather(
@@ -361,33 +264,17 @@ class WSProxyAdapter:
         if sink is not None:
             await sink.close()
 
-    # ─── Subclass hooks ────────────────────────────────────────────
-
     async def on_start(
         self,
         body: dict[str, Any],
         sink: WSFrameSink,
     ) -> dict[str, Any] | None:
-        """Subclass spawns producer / consumer tasks bound to ``sink``.
-
-        Return an optional dict merged into the ``start`` response.
-        Common keys: ``setup`` (a dict the controller will forward as
-        the FIRST frame to the WS — used for session_info / banner).
-        """
+        """Start tasks bound to ``sink`` and return optional setup data."""
         raise NotImplementedError
 
     async def on_close(self, stream_id: str) -> None:
-        """Subclass teardown — kill subprocess, remove observers, etc.
-
-        Called BEFORE the sink is closed so producers see a clean
-        cancellation before EOF flushes through.
-        """
+        """Tear down a session before its sink emits EOF and closes."""
         return None
-
-
-# ---------------------------------------------------------------------------
-# Controller-side helper.
-# ---------------------------------------------------------------------------
 
 
 async def proxy_ws_to_lab(
@@ -401,19 +288,10 @@ async def proxy_ws_to_lab(
     timeout: float = 60.0,
     input_timeout: float = 10.0,
 ) -> None:
-    """Open a lab proxy stream against a worker and bridge to ``websocket``.
+    """Bridge a controller WebSocket to a worker proxy stream.
 
-    The worker MUST register a subclass of :class:`WSProxyAdapter` on
-    ``namespace``.  This helper:
-
-    1. Opens a :class:`RemoteStream` against ``{namespace}.start``.
-    2. Forwards every stream frame to ``websocket.send_json`` verbatim
-       (stripping the demux ``stream_id`` wrapper).
-    3. If the start response carries a ``setup`` dict, forwards that
-       first — before any streamed frame.
-    4. Forwards every WS frame to ``{namespace}.input`` RPC.
-    5. On WS disconnect or stream EOF, cancels the forward task and
-       calls ``aclose()`` (which sends ``{namespace}.cancel`` upstream).
+    Setup data is sent before stream frames. Disconnect or EOF closes the remote
+    stream and sends its cancellation request upstream.
     """
     rs = await RemoteStream.open(
         demux=demux,
@@ -435,7 +313,7 @@ async def proxy_ws_to_lab(
             async for frame in rs:
                 if "eof" in frame:
                     break
-                # Strip the demux routing wrapper.
+                # The stream ID is transport metadata, not a WebSocket frame field.
                 ws_frame = {k: v for k, v in frame.items() if k != "stream_id"}
                 await websocket.send_json(ws_frame)
         except Exception as exc:  # pragma: no cover - defensive

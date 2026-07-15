@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 
 class RichCLIInput(BaseInputModule):
-    """Stub input module — actual input is driven by RichCLIApp."""
+    """Satisfy the input contract while RichCLIApp injects composer input."""
 
     def __init__(self):
         super().__init__()
@@ -28,7 +28,7 @@ class RichCLIInput(BaseInputModule):
         return self._exit_requested
 
     def request_exit(self) -> None:
-        """Called by RichCLIApp when the composer signals exit."""
+        """Release the waiting input task after an app exit request."""
         self._exit_requested = True
         self._wait_event.set()
 
@@ -40,7 +40,7 @@ class RichCLIInput(BaseInputModule):
         logger.debug("RichCLIInput stopped")
 
     async def get_input(self) -> TriggerEvent | None:
-        """Block until exit is requested. Input flows via RichCLIApp.inject_input."""
+        """Wait for exit because composer input bypasses this method."""
         if self._exit_requested:
             return None
         await self._wait_event.wait()

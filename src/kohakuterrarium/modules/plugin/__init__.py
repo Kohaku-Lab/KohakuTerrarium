@@ -1,4 +1,4 @@
-"""Plugin system for KohakuTerrarium agents."""
+"""Export plugin lifecycle, context, management, and option validation APIs."""
 
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,

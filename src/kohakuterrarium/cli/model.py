@@ -15,6 +15,7 @@ from kohakuterrarium.cli.identity_llm import show_cli as _llm_show_cli
 
 
 def model_cli(args: argparse.Namespace) -> int:
+    """Dispatch legacy model-management commands."""
     sub = getattr(args, "model_command", None) or "list"
     name = getattr(args, "name", None)
     match sub:

@@ -1,15 +1,15 @@
-"""Graph merge / split / fork Drive row movement (design §6.6-6.8; Phase F).
+"""Move Drive rows safely across graph merges, splits, and session forks.
 
 A Drive is graph-scoped, so when the engine's topology changes its rows must
-follow the graph — logically, with :meth:`export_rows` / :meth:`import_rows`
-(the Phase B move seam), never remapping a ``drive_id``. Ownership stays exactly
-one canonical graph repository per Drive.
+follow the graph through :meth:`export_rows` and :meth:`import_rows`, without
+remapping a ``drive_id``. Each Drive must remain owned by exactly one canonical
+graph repository.
 
 Sync/async bridge: the engine's merge/split coordination
 (:mod:`terrarium.session_coord`, :mod:`terrarium.channel_lifecycle`) is
 synchronous, but Drive repositories are async and, on Windows, a session-backed
 repo's sqlite connection is closed when its store closes (WinError 32). So the
-coordinator STASHES a cheap synchronous capture (an ephemeral repo reference, or
+coordinator retains a cheap synchronous capture (an ephemeral repo reference, or
 a persistent store's file path — the file survives a store close, only a delete
 would remove it) on the engine, and the engine's async topology method drains it
 afterwards: reopening the persistent file if needed, exporting, and importing
@@ -22,7 +22,7 @@ into the destination graph(s).
   follows its creature, assigned follows the assignee's child, unassigned follows
   ``split_policy`` (largest_component / anchor / orphan / clone). Clone mints new
   ids with ``parent_drive_id`` lineage; a now-cross-graph dependency blocks.
-- Fork (§6.8): a conversation fork carries ZERO Drives by default (see
+- Fork (§6.8): a conversation fork carries no Drives by default (see
   :func:`fork_carries_no_drives` / :mod:`session.store_fork`); explicit Drive
   cloning is unsupported in v1.
 """
@@ -60,34 +60,22 @@ _ROW_KEYS = (
     "progress",
     "outbox",
     "dead_letters",
-    # Idempotency travels with a merge so a retry after movement still replays
-    # the original result; it is (actor, key)-scoped, not per-drive (R1-11).
+    # Idempotency is actor/key-scoped, so it follows graph movement to preserve
+    # the original result for retries.
     "idempotency",
-    # Pending terminal proposals travel with their parent Drive so a merge/split
-    # never silently drops an awaiting approval; per-drive on split (R1-08).
+    # Pending terminal proposals follow their Drive so topology changes cannot
+    # discard an approval that is still awaiting a decision.
     "proposals",
 )
 
-# An unassigned graph-scoped Drive placed by the ``orphan`` split policy (and a
-# Drive whose creature/assignee did not survive the split) lands in the largest
-# child as its sole canonical owner, but BLOCKED with this reason so it cannot be
-# delivered until an actor intervenes (§6.7 / §16 invariant 8 — an explicit
-# orphaned state, never silently-continued pursuit).
+# Orphaned Drives retain one canonical owner but remain blocked until an actor
+# explicitly resolves their placement.
 ORPHAN_BLOCK_REASON = "split_orphaned: administrator action required"
-
-
-# ---------------------------------------------------------------------------
-# synchronous capture (runs inside the sync coordinator, before stores close)
-# ---------------------------------------------------------------------------
 
 
 @dataclass
 class _DriveSource:
-    """A capture of one graph's Drive rows, exportable after its store closes.
-
-    ``memory_repo`` for an ephemeral graph (never closed); ``store_path`` for a
-    persistent one (the file survives its store's close, so the drain reopens it).
-    """
+    """Retain access to a graph's Drive rows across repository shutdown."""
 
     gid: str
     memory_repo: Any = None
@@ -117,9 +105,8 @@ def _capture(runtime: Any, gid: str) -> _DriveSource | None:
 
 
 def _enqueue(engine: Any, entry: tuple) -> None:
-    # A queue (not a single slot): every engine topology method drains right
-    # after its sync op, but an un-drained stash (e.g. an ``ensure_same_graph``
-    # merge from cross-graph output wiring) must not be silently overwritten.
+    # Multiple topology changes may be captured before the async drain runs, so
+    # each pending operation must be retained in order.
     pending = getattr(engine, "_pending_drive_topology", None)
     if not pending:
         pending = []
@@ -128,7 +115,7 @@ def _enqueue(engine: Any, entry: tuple) -> None:
 
 
 def stash_merge(engine: Any, keep_gid: str, source_gids: list[str]) -> None:
-    """Record a pending Drive merge (sync; from ``session_coord.apply_merge``)."""
+    """Capture source repositories for a pending graph merge."""
     runtime = getattr(engine, "_drive_runtime", None)
     if runtime is None:
         return
@@ -142,7 +129,7 @@ def stash_merge(engine: Any, keep_gid: str, source_gids: list[str]) -> None:
 
 
 def stash_split(engine: Any, parent_gid: str, child_gids: list[str]) -> None:
-    """Record a pending Drive split (sync; from ``session_coord.apply_split``)."""
+    """Capture the source repository for a pending graph split."""
     runtime = getattr(engine, "_drive_runtime", None)
     if runtime is None:
         return
@@ -151,20 +138,8 @@ def stash_split(engine: Any, parent_gid: str, child_gids: list[str]) -> None:
         _enqueue(engine, ("split", parent_gid, list(child_gids), captured))
 
 
-# ---------------------------------------------------------------------------
-# async drain (runs from the engine's async topology method, after the sync op)
-# ---------------------------------------------------------------------------
-
-
 async def drain(runtime: Any) -> None:
-    """Apply every pending Drive topology op stashed on the engine, in order.
-
-    Each op first drains (cancel + await) the in-flight ``_reconcile_when_ready``
-    tasks of every graph whose repository it is about to rebind or close, so a
-    reconcile never starts a manager on a repository being torn down (mirrors
-    ``engine.detach_graph``; design §6.4/§6.6-6.7). The sync coordinator ran with
-    no ``await`` between closing the superseded stores and this drain, so those
-    tasks are still suspended here and are cancelled before they can resume."""
+    """Apply pending topology changes after quiescing affected reconciliations."""
     engine = runtime._engine
     pending = getattr(engine, "_pending_drive_topology", None)
     if not pending:
@@ -190,26 +165,22 @@ async def _apply_merge(
     payloads = [await src.export() for src in sources.values()]
     merged = _combine(payloads)
     if not merged["drives"]:
-        # No Drives to move; just drop the non-survivor source graphs. Awaited
-        # stop (not fire-and-forget) so each dispatcher releases against its live
-        # repo before the merge collapses its session store (design §7.1).
+        # Dispatchers must release against live repositories before superseded
+        # graph stores are collapsed.
         for gid in sources:
             if gid != keep_gid:
                 await registry.detach_and_stop(gid)
         return
-    # Rehome graph-scoped records + assignments to the survivor and invalidate
-    # dispatcher leases so the survivor re-claims (design §6.6).
+    # Leases cannot survive repository movement because the surviving dispatcher
+    # must establish ownership against its own graph.
     _rehome_payload(merged, keep_gid)
-    # One provider-aware destination resolver (R1-10): an explicit provider repo
-    # wins over the session store. When it resolves to the survivor's CURRENT
-    # repo (a single-store provider), import in place — no close/rebind.
+    # A provider repository takes precedence over session storage; resolving to
+    # the existing repository permits an in-place import without rebinding.
     new_repo, survivor_store = registry.resolve_destination_repo(keep_gid)
     old_repo = registry.repository_for(keep_gid)
     same_repo = new_repo is old_repo
-    # Import BEFORE touching the survivor's live repo/manager so a movement
-    # failure leaves the pre-merge state consistent (design §6.6 atomicity).
-    # Append-only rows already present (the survivor's own) are deduped on import
-    # so its history is not multiplied (R1-11).
+    # Import before rebinding so a failed movement leaves the survivor's live
+    # repository intact. Import deduplication preserves append-only history.
     try:
         await new_repo.import_rows(merged)
     except Exception:
@@ -217,14 +188,12 @@ async def _apply_merge(
             _close_if_persistent(new_repo)
         raise
     if not same_repo:
-        # Close the survivor's old repo, then rebind to the merged one. The
-        # survivor KEEPS its session store (no companion-closer race), so the old
-        # dispatcher's stop is fire-and-forget against the already-closed repo.
+        # The survivor keeps its session store while only its Drive repository is
+        # replaced, avoiding competing ownership of the store lifecycle.
         _close_if_persistent(old_repo)
         registry.rebind_repository(keep_gid, new_repo, survivor_store)
     await registry.ensure_started(keep_gid)
-    # Non-survivor graphs are DROPPED and their stores collapse — AWAIT-stop each
-    # so its dispatcher is down before session_coord closes its store (§7.1).
+    # Each non-survivor dispatcher must stop before its graph store is closed.
     for gid in sources:
         if gid != keep_gid:
             await registry.detach_and_stop(gid)
@@ -251,9 +220,8 @@ async def _apply_split(
     per_child = {gid: _empty_payload() for gid in live_children}
     if records:
         _place_drives(engine, records, assignments, payload, live_children, per_child)
-    # The (actor, key) idempotency ledger is graph-global, not drive-scoped, so
-    # it is replicated to every child; a retry of a pre-split mutation still
-    # returns the original result wherever its Drive landed (R1-11).
+    # The actor/key idempotency ledger is graph-wide, so every child needs it to
+    # replay mutations that began before the split.
     source_idem = payload.get("idempotency", [])
     for gid in live_children:
         per_child[gid]["idempotency"] = list(source_idem)
@@ -283,11 +251,6 @@ async def _apply_split(
         await _reconcile_graph(engine, registry, gid)
 
 
-# ---------------------------------------------------------------------------
-# split placement
-# ---------------------------------------------------------------------------
-
-
 def _place_drives(
     engine: Any,
     records: dict[str, Any],
@@ -313,9 +276,8 @@ def _place_drives(
         elif placement.kind == "clone":
             clones[drive_id] = list(child_gids)
         else:
-            # orphan (explicit policy, or a follow whose creature/assignee did
-            # not survive the split): the largest child is the sole canonical
-            # owner, but the Drive is blocked below — never silently continued.
+            # The largest child becomes the sole canonical owner, but pursuit
+            # remains blocked because the intended placement no longer exists.
             placement_of[drive_id] = largest
             orphaned.add(drive_id)
     block_reason: dict[str, str] = {d: ORPHAN_BLOCK_REASON for d in orphaned}
@@ -370,8 +332,7 @@ def _emit_drive(
     dest["drives"].append(pack_drive_record(rehomed))
     if assignment is not None:
         rehomed_assign = _rehome_assignment(assignment, target_gid)
-        # An orphaned Drive that still names a (now-gone) assignee is flipped to
-        # the orphaned assignment state so nothing treats it as deliverable.
+        # A stale assignee must not make an orphaned Drive appear deliverable.
         if orphaned and rehomed_assign.assignee_creature_id is not None:
             rehomed_assign = replace(rehomed_assign, assignment_state="orphaned")
         dest["assignments"].append(pack_drive_assignment(rehomed_assign))
@@ -417,11 +378,6 @@ def _rehome_assignment(assignment: Any, target_gid: str) -> Any:
         lease_owner=None,
         lease_expires_at=None,
     )
-
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
 
 
 def _empty_payload() -> dict[str, Any]:
@@ -470,8 +426,7 @@ def _entry_drive_id(entry: dict[str, Any]) -> str | None:
 
 
 def _rehome_payload(payload: dict[str, Any], target_gid: str) -> None:
-    """Rewrite a combined payload so graph-scoped records + assignments belong
-    to ``target_gid`` and carry no dispatcher lease (merge, §6.6)."""
+    """Rebind graph-scoped rows to a target graph and clear stale leases."""
     payload["drives"] = [
         pack_drive_record(_rehome_record(unpack_drive_record(d), target_gid))
         for d in payload.get("drives", [])
@@ -538,9 +493,8 @@ async def _reconcile_graph(engine: Any, registry: Any, gid: str) -> None:
     graph = engine._topology.graphs.get(gid)
     if graph is None:
         return
-    # Reconcile per running, restoration-ready creature so redelivery still
-    # respects the §6.5 barrier. A warm-paused creature (UXI-11) is skipped
-    # too — redelivering to it would only re-hit the paused admission gate.
+    # Redelivery is valid only after restoration and while the creature can
+    # accept work; paused creatures would reject the same delivery again.
     for cid in graph.creature_ids:
         creature = engine._creatures.get(cid)
         if creature is None or not creature.is_running:
@@ -552,23 +506,13 @@ async def _reconcile_graph(engine: Any, registry: Any, gid: str) -> None:
         await manager.reconcile(creature_id=cid)
 
 
-# ---------------------------------------------------------------------------
-# session fork (design §6.8)
-# ---------------------------------------------------------------------------
-
-
 def fork_carries_no_drives() -> bool:
-    """A conversation fork carries ZERO active Drives by default (§6.8).
-
-    The Drive tables are a separate sqlite surface that ``session.store_fork``
-    does not copy (it is a logical KVault row copy) and explicitly purges, so a
-    forked session opens with no Drives — two branches can never mutate one
-    commitment. This predicate documents the invariant for callers/tests."""
+    """Report that conversation forks do not inherit active Drives."""
     return True
 
 
 def clone_drives_for_fork(*_args: Any, **_kwargs: Any) -> None:
-    """Explicit ``fork_drives=True`` Drive cloning — unsupported in v1 (§6.8)."""
+    """Reject explicit Drive cloning for a conversation fork."""
     raise DriveValidationError(
         "forking a session's Drives (fork_drives=True) is not supported in v1; "
         "a conversation fork carries zero Drives by design (§6.8)"

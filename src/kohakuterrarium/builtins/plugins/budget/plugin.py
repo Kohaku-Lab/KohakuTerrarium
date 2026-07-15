@@ -1,20 +1,7 @@
-"""Unified runtime budget plugin.
+"""Track runtime budgets and gate work after configured hard limits.
 
-Combines ticker (consume axes), alarm (prompt + post-turn alarm
-injection), and gate (block tools/sub-agents after a hard wall) into a
-single plugin so the budget system is fully self-contained — no agent
-or sub-agent core fields, no shared :class:`BudgetSet` on the host.
-
-The plugin reads its axes from its own ``options``::
-
-    plugins:
-      - name: budget
-        options:
-          turn_budget: [40, 60]            # [soft, hard]
-          walltime_budget: {soft: 0, hard: 600}
-          tool_call_budget: [75, 100]
-
-Any axis whose option is omitted is disabled.
+Turn, walltime, and tool-call axes are optional. The plugin owns accounting,
+alarm injection, and tool or sub-agent blocking without host-level budget state.
 """
 
 import time
@@ -32,9 +19,7 @@ class BudgetPlugin(BasePlugin):
     """Self-contained multi-axis runtime budget enforcement."""
 
     name = "budget"
-    # ``priority=5`` keeps the gate (pre_tool_execute / pre_subagent_run)
-    # ahead of most user plugins so a hard-wall block fires before
-    # downstream side effects.
+    # Budget gates run before most user plugins to prevent downstream side effects.
     priority = 5
 
     @classmethod
@@ -76,9 +61,7 @@ class BudgetPlugin(BasePlugin):
         options: dict[str, Any] | None = None,
     ) -> None:
         super().__init__()
-        # Accept either flattened kwargs (loader path: ``cls(**options)``)
-        # or a nested ``options`` dict (fallback path used by tests /
-        # direct construction).
+        # Support both loader-style keyword options and direct nested construction.
         opts: dict[str, Any] = dict(options or {})
         if turn_budget is not None and "turn_budget" not in opts:
             opts["turn_budget"] = turn_budget
@@ -95,25 +78,17 @@ class BudgetPlugin(BasePlugin):
         self._pending: list[tuple[str, AlarmState]] = []
         self.refresh_options()
 
-    # ── Options ──
-
     def refresh_options(self) -> None:
         """Rebuild :attr:`_budgets` from :attr:`options`."""
         self._budgets = _build_budget_set(self.options)
-
-    # ── Public accessor (other plugins / tests can introspect) ──
 
     @property
     def budgets(self) -> BudgetSet | None:
         """Internal :class:`BudgetSet`; ``None`` when no axis is configured."""
         return self._budgets
 
-    # ── Lifecycle ──
-
     async def on_load(self, context: PluginContext) -> None:  # noqa: ARG002
         return None
-
-    # ── Prompt contribution (alarm) ──
 
     def get_prompt_content(self, context: PluginContext) -> str | None:  # noqa: ARG002
         budgets = self._budgets
@@ -142,8 +117,6 @@ class BudgetPlugin(BasePlugin):
             "- Output is consumed by another agent — be terse and structured.",
         ]
         return "\n".join(lines)
-
-    # ── LLM hooks (ticker + alarm) ──
 
     async def pre_llm_call(
         self, messages: list[dict], **kwargs: Any
@@ -175,8 +148,6 @@ class BudgetPlugin(BasePlugin):
         self._pending.extend(self._budgets.drain_alarms())
         return None
 
-    # ── Tool hooks (ticker + gate) ──
-
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> None:
         if self._budgets is not None and self._budgets.is_hard_walled():
             axis = self._budgets.exhausted_axis() or "unknown"
@@ -190,8 +161,6 @@ class BudgetPlugin(BasePlugin):
         if self._budgets is not None:
             self._budgets.tick(tool_calls=1)
         return None
-
-    # ── Sub-agent hooks (gate) ──
 
     async def pre_subagent_run(self, task: str, **kwargs: Any) -> str | None:
         if self._budgets is not None and self._budgets.is_hard_walled():

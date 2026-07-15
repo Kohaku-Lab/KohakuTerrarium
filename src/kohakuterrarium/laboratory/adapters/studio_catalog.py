@@ -1,18 +1,4 @@
-"""APP extension adapter for ``studio.catalog``.
-
-Worker-side handler exposing the worker's installed-package catalog
-to the controller.  Install / uninstall / update are explicit ops —
-they always target this node.  The controller's UI may aggregate
-across multiple workers via :class:`CatalogAggregator`.
-
-Wire types:
-
-| type                  | body                   | response                   |
-|-----------------------|------------------------|----------------------------|
-| ``list``              | ``{}``                 | ``{packages: [pkg, ...]}`` |
-| ``install``           | ``{source, editable, name?}`` | ``{installed: str}`` |
-| ``uninstall``         | ``{name}``             | ``{removed: bool}``        |
-"""
+"""Expose each node's installed package catalog through Studio."""
 
 import asyncio
 from typing import Any
@@ -30,20 +16,10 @@ logger = get_logger(__name__)
 
 
 class StudioCatalogAdapter:
-    """Per-node ``studio.catalog`` adapter.
+    """Serve per-node catalog queries and worker package mutations.
 
-    Install on both host and clients.  The host's adapter answers
-    "what's installed here" queries; the aggregator on the controller
-    fans out to every connected worker for the multi-node view.
-
-    Mutating ops (``install`` / ``uninstall``) are intentionally
-    refused on the host-side adapter (``is_host=True``).  A connected
-    worker could otherwise instruct the host to ``git clone`` and
-    install arbitrary code — that's remote code execution behind a
-    shared token.  Host-local installs go through the operator-facing
-    Studio API (Python or HTTP), not through the host's own APP
-    extension.  Workers default to ``is_host=False`` and accept
-    installs from the controller.
+    Host-side mutations are refused because allowing workers to install code on
+    the host would turn the shared cluster credential into remote code execution.
     """
 
     NAMESPACE = "studio.catalog"
@@ -78,7 +54,6 @@ class StudioCatalogAdapter:
     async def _handle(self, msg: AppMessage) -> dict[str, Any]:
         match msg.type:
             case "list":
-                # list is a cheap directory walk; OK to run on the loop.
                 return {"packages": list_installed_packages()}
             case "install":
                 return await self._op_install(msg.body)
@@ -105,11 +80,7 @@ class StudioCatalogAdapter:
         name_override = body.get("name")
         if name_override is not None and not isinstance(name_override, str):
             raise ValueError("name must be a string if provided")
-        # install_package_op does git-clone / shutil.copytree / pip
-        # under the hood — strictly blocking.  Off-loop so the worker
-        # keeps responding to heartbeats and other APP traffic while
-        # the install runs (which can take minutes for large repos).
-        # NB: the wrapper kwarg is ``name``, NOT ``name_override``.
+        # Installation performs blocking filesystem, Git, and package-manager work.
         installed = await asyncio.to_thread(
             install_package_op,
             source,
@@ -126,7 +97,7 @@ class StudioCatalogAdapter:
         name = body.get("name")
         if not isinstance(name, str) or not name:
             raise ValueError("name is required")
-        # shutil.rmtree blocks too — off-loop.
+        # Recursive package removal is blocking filesystem work.
         removed = await asyncio.to_thread(uninstall_package_op, name)
         return {"removed": bool(removed)}
 

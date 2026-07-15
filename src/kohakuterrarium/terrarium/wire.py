@@ -26,10 +26,8 @@ take a primitive dict and return the dataclass.  Unpack functions are
 strict — missing keys raise ``KeyError`` and unknown keys are ignored
 (forward-compatible with field additions).
 
-Path-form ``add_creature`` (``str`` or ``Path``) is **not supported**
-in Unit A; ``pack_creature_build_input`` raises
-:class:`RemoteAddCreatureError` for those inputs.  Lifted in Unit C
-(``studio.deploy`` lands the file bundle first; then path-form works).
+Path-form ``add_creature`` accepts only absolute worker-side paths; callers must
+first deploy local files and then pass the resulting remote path.
 """
 
 from dataclasses import is_dataclass
@@ -78,9 +76,9 @@ from kohakuterrarium.terrarium.topology import (
 class RemoteAddCreatureError(ValueError):
     """Raised when ``add_creature`` is called with an unsupported config form.
 
-    In Unit A only in-memory :class:`AgentConfig` is accepted over the
-    wire.  String / ``Path`` configs require the file-deploy pipeline
-    (Unit C, ``studio.deploy``).
+    In-memory :class:`AgentConfig` values can cross the wire directly.
+    String and ``Path`` configs must first use the ``studio.deploy`` pipeline
+    so the worker receives a path on its own filesystem.
     """
 
 
@@ -114,12 +112,11 @@ def unpack_creature_info(d: dict[str, Any]) -> CreatureInfo:
         parent_creature_id=d.get("parent_creature_id"),
         listen_channels=tuple(d.get("listen_channels", ())),
         send_channels=tuple(d.get("send_channels", ())),
-        # ``model`` is a 2026-05 addition; old workers / wire payloads
-        # may omit it — default to empty string so old peers still
-        # decode cleanly (UI falls through to "no model").
+        # Older workers may omit ``model``; default to an empty string so
+        # those payloads still decode cleanly and the UI shows "no model".
         model=str(d.get("model", "") or ""),
-        # ``llm_name`` is a 2026-05-16 addition (B3/B4 fix); same
-        # forward-compat treatment as ``model``.
+        # Older workers may also omit ``llm_name``; use the same
+        # forward-compatibility treatment as ``model``.
         llm_name=str(d.get("llm_name", "") or ""),
     )
 
@@ -370,7 +367,7 @@ def unpack_content(value: str | list[dict[str, Any]]) -> str | list[dict[str, An
 
 
 # ---------------------------------------------------------------------------
-# Drive typed-error mapping across the Lab wire (design §9.2 / §9.5)
+# Drive typed-error mapping across the Lab wire
 # ---------------------------------------------------------------------------
 #
 # A worker's Drive op can fail with a *specific* typed error

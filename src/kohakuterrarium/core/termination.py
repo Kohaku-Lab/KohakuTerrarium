@@ -1,10 +1,4 @@
-"""
-Termination conditions for agent execution.
-
-Configurable conditions that stop the agent loop: max turns, max tokens,
-max duration, idle timeout, keyword detection, and pluggable checkers
-contributed by plugins.
-"""
+"""Built-in and plugin-defined conditions for ending agent execution."""
 
 import time
 from dataclasses import dataclass, field
@@ -21,12 +15,7 @@ logger = get_logger(__name__)
 
 @dataclass(frozen=True)
 class TerminationDecision:
-    """Vote returned by a plugin termination checker.
-
-    Any-can-stop: if any plugin returns ``should_stop=True``, the run
-    terminates and the plugin's reason string is surfaced in
-    ``session_info`` metadata as ``terminated_by_reason``.
-    """
+    """Represent a plugin's vote to stop and its user-visible reason."""
 
     should_stop: bool
     reason: str = ""
@@ -34,13 +23,7 @@ class TerminationDecision:
 
 @dataclass
 class TerminationContext:
-    """Snapshot of run state passed to plugin termination checkers.
-
-    Contains enough state for a checker to decide without reaching back
-    into the agent. Built-in conditions (max_turns, max_duration, …)
-    still run first; plugin checkers fire only when no built-in has
-    already terminated the run.
-    """
+    """Provide plugin checkers a detached snapshot of relevant run state."""
 
     turn_count: int
     elapsed: float
@@ -52,34 +35,17 @@ class TerminationContext:
 
 @dataclass
 class TerminationConfig:
-    """
-    Configuration for termination conditions.
+    """Configure optional conditions where any match terminates the run."""
 
-    All conditions are optional. If multiple are set, ANY triggered condition stops the agent.
-    """
-
-    max_turns: int = 0  # Max controller turns (0 = unlimited)
-    max_tokens: int = 0  # Total token budget (0 = unlimited) - reserved for future
-    max_duration: float = 0  # Max duration in seconds (0 = unlimited)
-    idle_timeout: float = 0  # No events for N seconds (0 = unlimited)
-    keywords: list[str] = field(default_factory=list)  # Stop on output keyword
+    max_turns: int = 0
+    max_tokens: int = 0
+    max_duration: float = 0
+    idle_timeout: float = 0
+    keywords: list[str] = field(default_factory=list)
 
 
 class TerminationChecker:
-    """
-    Checks termination conditions during agent execution.
-
-    Usage:
-        checker = TerminationChecker(config)
-        checker.start()
-
-        # In event loop:
-        checker.record_turn()
-        checker.record_activity()
-
-        if checker.should_terminate(last_output="TASK_COMPLETE"):
-            break
-    """
+    """Track run progress and evaluate configured termination conditions."""
 
     def __init__(self, config: TerminationConfig):
         self.config = config
@@ -88,10 +54,8 @@ class TerminationChecker:
         self._last_activity: float = 0.0
         self._terminated: bool = False
         self._reason: str = ""
-        # Plugin-supplied checkers, wired by Agent._init_plugins.
         self._plugin_manager: "PluginManager | None" = None
-        # Hooks to pull state for TerminationContext without coupling
-        # this module to Agent. Populated by Agent wiring.
+        # Agent-supplied references keep checker evaluation independent of Agent.
         self._scratchpad_ref: "Scratchpad | None" = None
         self._recent_tool_results: list[Any] = []
 
@@ -110,7 +74,7 @@ class TerminationChecker:
             self._recent_tool_results = self._recent_tool_results[-16:]
 
     def start(self) -> None:
-        """Start tracking. Call at beginning of agent run."""
+        """Reset counters and begin timing a new agent run."""
         self._start_time = time.monotonic()
         self._last_activity = self._start_time
         self._turn_count = 0
@@ -129,34 +93,22 @@ class TerminationChecker:
         self._last_activity = time.monotonic()
 
     def should_terminate(self, last_output: str = "") -> bool:
-        """
-        Check if any termination condition is met.
+        """Return whether a built-in condition or plugin vote stops the run.
 
-        Built-in conditions fire first (max_turns, max_duration,
-        idle_timeout, keywords). If none fire, plugin-supplied checkers
-        vote — any returning ``TerminationDecision(should_stop=True,
-        …)`` wins (any-can-stop, per cluster 3.3).
-
-        Args:
-            last_output: The last output text from the controller
-                (for keyword check and plugin context)
-
-        Returns:
-            True if agent should terminate
+        Built-ins take precedence; plugins vote only when no built-in condition has
+        already terminated execution.
         """
         if self._terminated:
             return True
 
         now = time.monotonic()
 
-        # Check max turns
         if self.config.max_turns > 0 and self._turn_count >= self.config.max_turns:
             self._terminated = True
             self._reason = f"Max turns reached ({self._turn_count})"
             logger.info("Termination: %s", self._reason)
             return True
 
-        # Check max duration
         if self.config.max_duration > 0:
             elapsed = now - self._start_time
             if elapsed >= self.config.max_duration:
@@ -165,7 +117,6 @@ class TerminationChecker:
                 logger.info("Termination: %s", self._reason)
                 return True
 
-        # Check idle timeout
         if self.config.idle_timeout > 0:
             idle_time = now - self._last_activity
             if idle_time >= self.config.idle_timeout:
@@ -174,7 +125,6 @@ class TerminationChecker:
                 logger.info("Termination: %s", self._reason)
                 return True
 
-        # Check keywords in output
         if self.config.keywords and last_output:
             for keyword in self.config.keywords:
                 if keyword in last_output:
@@ -183,7 +133,6 @@ class TerminationChecker:
                     logger.info("Termination: %s", self._reason)
                     return True
 
-        # Plugin-supplied checkers (any-can-stop).
         if self._plugin_manager is not None:
             decision = self._run_plugin_checkers(last_output, now)
             if decision is not None and decision.should_stop:
@@ -198,7 +147,7 @@ class TerminationChecker:
     def _run_plugin_checkers(
         self, last_output: str, now: float
     ) -> TerminationDecision | None:
-        """Poll plugin-supplied checkers. Returns first positive vote."""
+        """Return the first positive plugin termination vote."""
         manager = self._plugin_manager
         if manager is None:
             return None
@@ -206,7 +155,7 @@ class TerminationChecker:
             checkers: list[tuple[str, Callable[[Any], Any]]] = (
                 manager.collect_termination_checkers()
             )
-        except Exception as e:  # pragma: no cover — defensive
+        except Exception as e:  # pragma: no cover - plugin failure cannot stop run
             logger.warning(
                 "Failed to collect plugin termination checkers",
                 error=str(e),
@@ -249,40 +198,30 @@ class TerminationChecker:
         return None
 
     def force_terminate(self, reason: str) -> None:
-        """Force the agent into a terminated state with ``reason``.
-
-        Used when an external signal (e.g., ``BudgetExhausted``) needs
-        to end the run cleanly without going through the standard
-        built-in/plugin checker chain.
-        """
+        """Terminate immediately with an externally supplied reason."""
         self._terminated = True
         self._reason = reason
 
     @property
     def reason(self) -> str:
-        """Get termination reason (empty if not terminated)."""
+        """Return the termination reason, or an empty string while active."""
         return self._reason
 
     @property
     def turn_count(self) -> int:
-        """Get current turn count."""
+        """Return the number of recorded controller turns."""
         return self._turn_count
 
     @property
     def elapsed(self) -> float:
-        """Get elapsed time since start."""
+        """Return elapsed seconds since tracking started."""
         if self._start_time == 0:
             return 0.0
         return time.monotonic() - self._start_time
 
     @property
     def is_active(self) -> bool:
-        """Check if any termination condition is configured.
-
-        Plugin-supplied checkers count too — a checker that fires even
-        without built-in conditions should still keep the termination
-        subsystem active.
-        """
+        """Return whether any built-in or plugin condition is configured."""
         c = self.config
         if (
             c.max_turns
@@ -295,6 +234,6 @@ class TerminationChecker:
         if self._plugin_manager is not None:
             try:
                 return bool(self._plugin_manager.collect_termination_checkers())
-            except Exception:  # pragma: no cover — defensive
+            except Exception:  # pragma: no cover - broken plugins count as inactive
                 return False
         return False

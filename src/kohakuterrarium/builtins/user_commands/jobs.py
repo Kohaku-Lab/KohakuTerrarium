@@ -1,4 +1,4 @@
-"""``/jobs`` — list the focused creature's currently-running jobs."""
+"""List the focused creature's currently running jobs."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -27,7 +27,7 @@ class JobsCommand(BaseUserCommand):
             return UserCommandResult(output="No jobs (executor unavailable)")
         try:
             jobs = list(executor.get_running_jobs())
-        except Exception as e:  # pragma: no cover - defensive
+        except Exception as e:  # pragma: no cover
             return UserCommandResult(error=f"could not read jobs: {e}")
         if not jobs:
             return UserCommandResult(output="No running jobs")

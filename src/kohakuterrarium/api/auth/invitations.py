@@ -1,11 +1,7 @@
-"""Invitation token CRUD.
+"""Create, validate, consume, and revoke single-use invitations.
 
-Each invitation is single-use: ``used_by`` + ``used_at`` are set
-atomically when consumed via :func:`consume`.  Optional ``expires_at``
-clamps the validity window.
-
-Like API tokens, the plaintext is shown once at creation; the DB
-stores only the SHA3-512 hash so a DB leak can't be replayed.
+Only token digests are persisted. Consumption conditionally sets ``used_by`` and
+``used_at`` so concurrent registrations cannot claim the same unexpired invitation.
 """
 
 import sqlite3
@@ -54,7 +50,7 @@ def create(
     role: str = "user",
     expires_in_hours: int | None = None,
 ) -> tuple[str, Invitation]:
-    """Generate + store a new invitation.  Returns ``(plaintext, row)``."""
+    """Create an invitation and return its one-time plaintext with metadata."""
     if role not in {"user", "admin"}:
         raise ValueError(f"invalid role: {role!r}")
     plaintext = generate_token()
@@ -92,12 +88,10 @@ def list_unused(conn: sqlite3.Connection) -> list[Invitation]:
 
 
 def peek(conn: sqlite3.Connection, plaintext: str) -> Invitation | None:
-    """Look up an invitation by plaintext WITHOUT consuming.
+    """Validate an unused, unexpired invitation without claiming it.
 
-    Returns the row when it exists, is unused, and not expired.
-    Otherwise ``None``.  Used by registration so we can validate the
-    invitation BEFORE creating the user — atomically consuming
-    after the user exists.
+    Registration can inspect the assigned role before creating the user, then claim
+    the invitation after the user identifier exists.
     """
     if not plaintext:
         return None
@@ -119,23 +113,16 @@ def peek(conn: sqlite3.Connection, plaintext: str) -> Invitation | None:
 def consume(
     conn: sqlite3.Connection, plaintext: str, *, used_by: int
 ) -> Invitation | None:
-    """Atomically claim an invitation.
+    """Claim an unused, unexpired invitation with a conditional update.
 
-    Returns the consumed :class:`Invitation` on success, ``None``
-    when:
-
-    - Token doesn't match anything in the DB.
-    - Token already consumed (``used_by`` non-null).
-    - Token expired.
-
-    Uses a conditional UPDATE so two simultaneous registers can't both
-    succeed against the same invitation.
+    Missing, expired, or already-consumed tokens return ``None``; concurrent claims
+    cannot both satisfy the update predicate.
     """
     if not plaintext:
         return None
     token_hash = hash_invitation_token(plaintext)
     now = _iso_now()
-    # Atomic claim — only succeeds if used_by IS NULL and not expired.
+    # The predicate is the single-use boundary for concurrent registrations.
     cur = conn.execute(
         """
         UPDATE invitations

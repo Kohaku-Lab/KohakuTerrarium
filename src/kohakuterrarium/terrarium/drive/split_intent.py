@@ -1,4 +1,4 @@
-"""Durable roll-forward intents for session-backed Drive graph splits."""
+"""Durable journal for completing session-backed graph splits after interruption."""
 
 import json
 import os
@@ -19,7 +19,11 @@ def write_split_intent(
     sessions: dict[str, str],
     payloads: dict[str, dict],
 ) -> Path:
-    """Persist one replayable split before any child repository is published."""
+    """Persist a replayable split before publishing any child repository.
+
+    The temporary file is flushed and atomically replaced so recovery never sees
+    a partially written intent.
+    """
     path = Path(source_sidecar + _SUFFIX)
     data = {
         "version": 1,
@@ -47,7 +51,11 @@ def complete_split_intent(path: str | Path) -> None:
 
 
 async def recover_split_intents(directory: str | Path) -> int:
-    """Roll every unfinished intent forward into all child repositories."""
+    """Roll unfinished split intents forward into every surviving child.
+
+    Intents whose session files no longer exist are discarded because their
+    child repositories are no longer publishable.
+    """
     root = Path(directory)
     if not root.is_dir():
         return 0

@@ -45,11 +45,6 @@ _PATCH_FIELDS = (
 )
 
 
-# ---------------------------------------------------------------------------
-# envelope + primitive coercion helpers
-# ---------------------------------------------------------------------------
-
-
 def _envelope(wire_type: str, data: dict[str, Any]) -> dict[str, Any]:
     return {"wire_schema": WIRE_SCHEMA_VERSION, "wire_type": wire_type, "data": data}
 
@@ -132,11 +127,6 @@ def _seq(value: object, name: str) -> tuple[Any, ...]:
     return tuple(value)
 
 
-# ---------------------------------------------------------------------------
-# DriveRecord
-# ---------------------------------------------------------------------------
-
-
 def pack_drive_record(record: DriveRecord) -> dict[str, Any]:
     return _envelope(
         "drive_record",
@@ -208,11 +198,6 @@ def unpack_drive_record(payload: object) -> DriveRecord:
     )
 
 
-# ---------------------------------------------------------------------------
-# DriveAssignment
-# ---------------------------------------------------------------------------
-
-
 def pack_drive_assignment(a: DriveAssignment) -> dict[str, Any]:
     return _envelope(
         "drive_assignment",
@@ -249,11 +234,6 @@ def unpack_drive_assignment(payload: object) -> DriveAssignment:
         assigned_by=_parse_actor(d.get("assigned_by"), "assigned_by", allow_none=True),
         assigned_at=_parse_dt(d.get("assigned_at"), "assigned_at"),
     )
-
-
-# ---------------------------------------------------------------------------
-# DriveDelivery
-# ---------------------------------------------------------------------------
 
 
 def pack_drive_delivery(x: DriveDelivery) -> dict[str, Any]:
@@ -300,11 +280,6 @@ def unpack_drive_delivery(payload: object) -> DriveDelivery:
         acknowledged_at=_parse_dt(d.get("acknowledged_at"), "acknowledged_at"),
         last_error=d.get("last_error"),
     )
-
-
-# ---------------------------------------------------------------------------
-# DriveProgress + DriveAuditRecord
-# ---------------------------------------------------------------------------
 
 
 def pack_drive_progress(p: DriveProgress) -> dict[str, Any]:
@@ -369,11 +344,6 @@ def unpack_drive_audit(payload: object) -> DriveAuditRecord:
     )
 
 
-# ---------------------------------------------------------------------------
-# CreateDriveRequest
-# ---------------------------------------------------------------------------
-
-
 def pack_create_request(r: CreateDriveRequest) -> dict[str, Any]:
     return _envelope(
         "create_drive_request",
@@ -426,11 +396,7 @@ def unpack_create_request(payload: object) -> CreateDriveRequest:
     )
 
 
-# ---------------------------------------------------------------------------
-# DrivePatch — only fields the caller set travel on the wire
-# ---------------------------------------------------------------------------
-
-
+# Patch payloads include only fields explicitly supplied by the caller.
 def pack_drive_patch(patch: DrivePatch) -> dict[str, Any]:
     data: dict[str, Any] = {}
     for name, value in patch.changes().items():
@@ -457,11 +423,6 @@ def unpack_drive_patch(payload: object) -> DrivePatch:
         else:
             kwargs[name] = value
     return DrivePatch(**kwargs)
-
-
-# ---------------------------------------------------------------------------
-# DriveQuery
-# ---------------------------------------------------------------------------
 
 
 def pack_drive_query(q: DriveQuery) -> dict[str, Any]:
@@ -508,11 +469,6 @@ def unpack_drive_query(payload: object) -> DriveQuery:
     )
 
 
-# ---------------------------------------------------------------------------
-# DriveTransitionProposal
-# ---------------------------------------------------------------------------
-
-
 def pack_transition_proposal(p: DriveTransitionProposal) -> dict[str, Any]:
     return _envelope(
         "drive_transition_proposal",
@@ -545,10 +501,6 @@ def unpack_transition_proposal(payload: object) -> DriveTransitionProposal:
     )
 
 
-# ---------------------------------------------------------------------------
-# Generic dispatch
-# ---------------------------------------------------------------------------
-
 _UNPACKERS = {
     "drive_record": unpack_drive_record,
     "drive_assignment": unpack_drive_assignment,
@@ -575,7 +527,7 @@ _PACKERS = {
 
 
 def pack(obj: object) -> dict[str, Any]:
-    """Pack any supported record/DTO to a versioned wire dict."""
+    """Pack a supported Drive record or DTO into a versioned wire envelope."""
     packer = _PACKERS.get(type(obj))
     if packer is None:
         raise DriveValidationError(f"cannot pack object of type {type(obj).__name__}")
@@ -583,7 +535,7 @@ def pack(obj: object) -> dict[str, Any]:
 
 
 def unpack(payload: object) -> Any:
-    """Unpack a versioned wire dict back to its record/DTO."""
+    """Unpack a versioned Drive wire envelope into its record or DTO."""
     if not isinstance(payload, dict):
         raise DriveValidationError(f"wire payload must be a dict, got {payload!r}")
     version = payload.get("wire_schema")

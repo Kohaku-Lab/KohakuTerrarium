@@ -1,11 +1,4 @@
-"""``/workspace`` slash command — view or change the agent's working dir.
-
-Mirrors the Vue ``WorkspaceTab.vue`` form: ``/workspace`` shows the
-current directory, ``/workspace <path>`` switches it. Goes through
-:class:`WorkspaceController` which already validates the path,
-re-roots :class:`PathBoundaryGuard`, and clears
-:class:`FileReadState` — same code path as the HTTP API.
-"""
+"""Show or change the agent workspace through its workspace controller."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (

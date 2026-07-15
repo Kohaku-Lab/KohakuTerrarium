@@ -1,17 +1,7 @@
-"""Tool prompt-contribution assembly.
+"""Assemble deterministic prompt guidance from registered tool contributions.
 
-Implements Cluster 5 / E.1 of the extension-point decisions: tools may
-return a short ``prompt_contribution()`` string that gets inserted into
-the system prompt once per session, between the auto-generated tool
-list and the framework hints. Contributions are partitioned into three
-ordered buckets (``first`` / ``normal`` / ``last``) and sorted
-alphabetically by tool name *within* a bucket so the prefix is stable
-across runs (important for prompt caching).
-
-The assembler is transport-agnostic — it only needs a ``Registry`` to
-look up every registered tool's live instance. If no tool contributes
-anything the function returns an empty string and the aggregator drops
-the section entirely.
+Contributions use ``first``, ``normal``, and ``last`` buckets, then sort by tool
+name within each bucket to keep prompt prefixes cache-stable.
 """
 
 from kohakuterrarium.core.registry import Registry
@@ -20,13 +10,12 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Canonical bucket order. Unknown bucket values fall back to "normal"
-# with a WARN log so typos surface without breaking aggregation.
+# Invalid buckets degrade to normal without breaking prompt aggregation.
 _BUCKETS = ("first", "normal", "last")
 
 
 def _resolve_bucket(tool: BaseTool) -> str:
-    """Return the tool's bucket or ``"normal"`` with a warning on typos."""
+    """Return a valid contribution bucket, warning on invalid values."""
     raw = getattr(tool, "prompt_contribution_bucket", "normal") or "normal"
     if raw not in _BUCKETS:
         logger.warning(
@@ -39,12 +28,7 @@ def _resolve_bucket(tool: BaseTool) -> str:
 
 
 def collect_tool_contributions(registry: Registry | None) -> list[tuple[str, str, str]]:
-    """Collect ``(bucket, tool_name, contribution)`` triples from a registry.
-
-    Skips tools that don't derive from :class:`BaseTool` (pure
-    ``Tool`` protocol implementations without the method) and tools
-    whose ``prompt_contribution()`` returns ``None`` / empty.
-    """
+    """Collect non-empty contributions from registered :class:`BaseTool` instances."""
     if registry is None:
         return []
 
@@ -56,7 +40,7 @@ def collect_tool_contributions(registry: Registry | None) -> list[tuple[str, str
 
         try:
             contribution = tool.prompt_contribution()
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover - isolate tool extensions
             logger.warning(
                 "prompt_contribution raised — skipping",
                 tool_name=name,
@@ -74,22 +58,11 @@ def collect_tool_contributions(registry: Registry | None) -> list[tuple[str, str
 
 
 def build_tool_guidance_section(registry: Registry | None) -> str:
-    """Assemble the ``## Tool guidance`` section from a registry.
-
-    Returns an empty string when no tool contributes prose. The section
-    is emitted as one markdown block; each contribution becomes a
-    paragraph prefixed with the tool name so the model can tell which
-    tool a hint came from.
-
-    Ordering is deterministic — first/normal/last buckets in that
-    order, and alphabetical-by-tool-name *within* a bucket — so the
-    aggregated prompt prefix stays cache-stable across runs.
-    """
+    """Build a cache-stable Markdown guidance section from tool contributions."""
     triples = collect_tool_contributions(registry)
     if not triples:
         return ""
 
-    # Partition by bucket, preserve alphabetical sort per bucket.
     by_bucket: dict[str, list[tuple[str, str]]] = {b: [] for b in _BUCKETS}
     for bucket, name, contribution in triples:
         by_bucket[bucket].append((name, contribution))

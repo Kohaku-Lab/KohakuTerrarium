@@ -1,17 +1,4 @@
-"""Branch command — list or switch the live branch of a turn.
-
-Different from ``/fork`` (which copies the session into a new file):
-``/branch`` rewires which sibling branch of an existing turn the
-agent treats as live. Useful for CLI/TUI users who otherwise have no
-way to navigate the ``<1/N>`` alternatives created by ``/regen`` or
-``/edit``.
-
-Usage::
-
-    /branch                    — list every turn that has alternatives
-    /branch <turn> <id>        — switch turn ``turn`` to branch ``id``
-    /branch latest             — reset every turn to its latest branch
-"""
+"""List or switch the live response branch within the current session."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -32,9 +19,7 @@ logger = get_logger(__name__)
 
 
 def _format_listing(meta: dict[int, dict], user_groups: dict[int, dict]) -> str:
-    """Pretty-print every turn that has alternatives, splitting the
-    listing into user-side edits and assistant-side regens so the
-    user sees which level the alternatives live at."""
+    """Format turns with alternatives, distinguishing edits from regenerations."""
     if not meta:
         return "No branches recorded yet."
     lines: list[str] = []
@@ -93,8 +78,7 @@ class BranchCommand(BaseUserCommand):
             return UserCommandResult(output=_format_listing(meta, user_groups))
 
         if tokens[0] == "latest":
-            # Drop any branch_view override on the agent so replay sees
-            # every turn at its latest branch.
+            # An empty branch view makes replay select each turn's latest branch.
             agent._branch_view = {}
             replayed = replay_conversation(events)
             agent.controller.conversation = _rebuild_conv(
@@ -125,9 +109,8 @@ class BranchCommand(BaseUserCommand):
                 )
             )
 
-        # Persist the override on the agent. ``replay_conversation``
-        # picks it up; the agent's runtime conversation is rebuilt to
-        # match so the next LLM turn sees the chosen branch's history.
+        # The persisted view and rebuilt conversation must agree so subsequent
+        # turns use the selected history.
         view = dict(getattr(agent, "_branch_view", {}) or {})
         view[turn_index] = branch_id
         agent._branch_view = view
@@ -145,7 +128,7 @@ class BranchCommand(BaseUserCommand):
 
 
 def _rebuild_conv(messages: list[dict], conv_cls):
-    """Reconstruct a ``Conversation`` from replay output."""
+    """Rebuild a conversation instance from replayed message dictionaries."""
     conv = conv_cls()
     for msg in messages:
         kwargs = {}

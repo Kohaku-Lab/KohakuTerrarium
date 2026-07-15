@@ -16,12 +16,7 @@ from rich.panel import Panel
 
 
 class AppOutputMixin:
-    """Receives output events from the agent and updates the live region."""
-
-    # The concrete class provides these — declared only for type hints.
-    # Runtime references resolve against the combined instance.
-
-    # ── Streaming text ──
+    """Update live and scrollback output from agent events."""
 
     def on_text_chunk(self, chunk: str) -> None:
         if not chunk:
@@ -30,10 +25,7 @@ class AppOutputMixin:
         self._invalidate()
 
     def on_processing_start(self) -> None:
-        # Spacer line before the model's response. Tool calls / text
-        # commits inside the turn add no extra blank lines, so the whole
-        # turn reads as one block surrounded by exactly one blank line
-        # before and one after.
+        # A turn is bounded by one blank line regardless of internal tool commits.
         self._commit_blank_line()
         self.live_region.start_message()
         self._invalidate()
@@ -45,8 +37,6 @@ class AppOutputMixin:
         self._commit_blank_line()
         self._invalidate()
 
-    # ── Tool lifecycle ──
-
     def on_tool_start(
         self,
         job_id: str,
@@ -56,19 +46,8 @@ class AppOutputMixin:
         parent_job_id: str = "",
         background: bool = False,
     ) -> None:
-        # Ordering rule:
-        #
-        # - Direct (blocking) tools — the controller WAITS for the tool
-        #   inside the same turn, then the model continues with post-tool
-        #   text. We flush the in-flight assistant message NOW so the
-        #   commit order in scrollback is: pre-text → tool → post-text.
-        #
-        # - Background tools — the controller does NOT wait. It feeds a
-        #   "task promoted" placeholder back to the LLM, which generates
-        #   interim text in the same cycle. If we flushed here, the
-        #   pre-tool text and the interim text would end up as TWO
-        #   separate ◆ blocks. Keeping the assistant message intact
-        #   across a bg dispatch lets the whole cycle commit as one ◆.
+        # Direct tools split pre/post text around their scrollback block; background
+        # tools keep the current assistant message intact across the dispatch.
         if not background:
             self._flush_assistant_message()
         self.live_region.add_tool(
@@ -92,9 +71,7 @@ class AppOutputMixin:
     def on_tool_done(self, job_id: str, output: str = "", **metadata) -> None:
         committed = self.live_region.update_tool_done(job_id, output, **metadata)
         if committed is not None:
-            # Tool/sub-agent commits go through block_renderable so the
-            # committer can share rule separators between consecutive
-            # blocks (one line between two tools instead of two).
+            # Consecutive blocks share a separator through the committer.
             self.committer.block_renderable(committed)
         self._invalidate()
 
@@ -113,8 +90,6 @@ class AppOutputMixin:
         if committed is not None:
             self.committer.block_renderable(committed)
         self._invalidate()
-
-    # ── Sub-agent nested tool events ──
 
     def on_subagent_tool_start(
         self, parent_id: str, tool_name: str, args_preview: str = ""
@@ -139,8 +114,6 @@ class AppOutputMixin:
     ) -> None:
         self.live_region.update_subagent_tokens(parent_id, prompt, completion, total)
         self._invalidate()
-
-    # ── Footer / session info ──
 
     def on_token_update(
         self,
@@ -167,8 +140,6 @@ class AppOutputMixin:
             self.live_region.footer._max_context = max_ctx
         self._invalidate()
 
-    # ── Errors / interrupts ──
-
     def on_processing_error(self, error_type: str, error: str) -> None:
         """Surface a processing error as a red notice in scrollback."""
         self._flush_assistant_message()
@@ -182,10 +153,7 @@ class AppOutputMixin:
         self._invalidate()
 
     def on_background_result(self, kind: str, label: str, count: int = 1) -> None:
-        """Commit a background-result delivery banner to scrollback.
-
-        ``label`` is one label or a comma-joined list; ``count`` drives the
-        singular/plural noun so a batch reads ``results delivered: a, b, c``."""
+        """Commit a background-result delivery notice to scrollback."""
         self._flush_assistant_message()
         noun = "result" if count == 1 else "results"
         prefix = f"{kind} " if kind and kind != "mixed" else ""
@@ -194,14 +162,8 @@ class AppOutputMixin:
         )
         self._invalidate()
 
-    # ── Phase B UI events (display-only in CLI v1) ──
-
     def on_ui_event_panel(self, event_type: str, payload: dict) -> None:
-        """Render an interactive event (confirm/ask_text/selection) as
-        an informational Rich panel. CLI v1 does not capture replies —
-        TUI/web are the interactive renderers; the panel just shows
-        what the agent is waiting on so a CLI user knows the state.
-        """
+        """Render an interactive event as an informational fallback panel."""
         self._flush_assistant_message()
         prompt = payload.get("prompt", "")
         title_map = {
@@ -246,12 +208,7 @@ class AppOutputMixin:
         update_target: str | None,
         payload: dict,
     ) -> None:
-        """Display-only progress rendering for CLI v1.
-
-        Updates of an existing progress event print a one-liner;
-        complete events print a final tick. CLI does not maintain
-        live progress widgets.
-        """
+        """Render progress events as append-only scrollback notices."""
         label = payload.get("label", "progress")
         value = payload.get("value", 0)
         max_v = payload.get("max", 0)

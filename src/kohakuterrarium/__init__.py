@@ -1,8 +1,5 @@
 """
-KohakuTerrarium - A universal agent framework for building any type of fully self-driven agent system.
-
-The framework enables building any kind of agent system - from SWE agents like Claude Code
-to conversational bots like Neuro-sama to autonomous monitoring systems.
+Public API for building and running agent systems with KohakuTerrarium.
 """
 
 import kohakuterrarium.errors as errors
@@ -17,10 +14,7 @@ from kohakuterrarium.terrarium import (
     Terrarium,
 )
 
-# ``validate`` (and Agent) must import AFTER studio/terrarium: their
-# import chain re-enters ``core.config`` through
-# ``studio.editors.workspace_manifest`` and would hit a partially
-# initialized module if they ran first.
+# Import after Studio and Terrarium to avoid re-entering a partial core.config.
 import kohakuterrarium.validate as validate  # noqa: E402
 from kohakuterrarium.core.agent import Agent  # noqa: E402
 from kohakuterrarium.core.turn import (  # noqa: E402

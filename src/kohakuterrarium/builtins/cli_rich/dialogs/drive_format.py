@@ -9,8 +9,7 @@ renderers and their unit tests stay deterministic.
 from datetime import datetime, timezone
 from typing import Any
 
-# status value -> (icon, short label, rich style). Icons are ASCII/emoji-free
-# glyphs that also read on a monochrome terminal; the label is the real signal.
+# Labels preserve status meaning when color or glyph rendering is unavailable.
 _STATUS_META: dict[str, tuple[str, str, str]] = {
     "draft": ("○", "draft", "bright_black"),
     "active": ("●", "active", "green"),
@@ -29,17 +28,11 @@ _AVAILABILITY_LABEL: dict[str, str] = {
     "registration_incompatible": "registration incompatible",
 }
 
-# Terminal statuses — used to decide default selection + terminal styling.
 TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled", "retired"})
 
 _NON_TERMINAL = frozenset({"draft", "active", "waiting", "blocked", "paused"})
 
-# UI actions shared by the rich-CLI overlay and the TUI panel. ``gate`` is the
-# server ``allowed_actions`` string that must be present; ``statuses`` narrows
-# the offer to states where the operation is meaningful; ``target`` is the
-# transition target status value (``None`` for wake / progress which have their
-# own service methods). Both surfaces gate on these so capability filtering
-# stays in one place — the server re-authorizes regardless.
+# Client-side gates hide invalid actions; the service still re-authorizes them.
 ACTIONS: list[dict[str, Any]] = [
     {
         "id": "pause",
@@ -85,7 +78,7 @@ ACTIONS: list[dict[str, Any]] = [
 
 
 def action_enabled(row: dict[str, Any], action: dict[str, Any]) -> bool:
-    """Whether ``action`` is offered for the Drive ``row`` (capability + state)."""
+    """Return whether capability and state permit an action."""
     if action["gate"] not in row.get("allowed_actions", ()):
         return False
     return row.get("status") in action["statuses"]
@@ -97,12 +90,7 @@ def enabled_actions(row: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def project_view(view: Any) -> dict[str, Any]:
-    """Flatten a :class:`DriveView` into a plain display dict.
-
-    Pulls the record fields the UI shows (including ``not_before``, which the
-    wire ``to_dict`` omits) plus the folded assignment / availability / actions.
-    Decouples the renderers + their tests from the dataclass shape.
-    """
+    """Flatten a Drive view into the fields required by renderers."""
     record = view.record
     not_before = getattr(record, "not_before", None)
     return {
@@ -136,11 +124,7 @@ def status_label(status: str) -> str:
 
 
 def warning_badges(view: dict[str, Any]) -> list[tuple[str, str]]:
-    """(label, style) badges for the non-nominal conditions of a Drive view.
-
-    Covers derived-availability, orphaned assignment, and blocked/recovery so
-    the list row can flag records that need attention without opening detail.
-    """
+    """Return badges for availability, assignment, and blocked-state warnings."""
     badges: list[tuple[str, str]] = []
     availability = view.get("availability", "available")
     if availability and availability != "available":

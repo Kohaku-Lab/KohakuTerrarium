@@ -1,7 +1,4 @@
-"""Catalog commands — list builtin user slash commands.
-
-Replaces ``api.routes.configs.list_commands``.
-"""
+"""Expose builtin user slash commands to catalog clients."""
 
 from fastapi import APIRouter
 
@@ -15,7 +12,7 @@ router = APIRouter()
 
 @router.get("")
 async def list_commands():
-    """List available user slash commands."""
+    """List builtin slash commands with aliases and access layers."""
     result = []
     for name in list_builtin_user_commands():
         cmd = get_builtin_user_command(name)

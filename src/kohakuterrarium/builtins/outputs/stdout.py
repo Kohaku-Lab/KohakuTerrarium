@@ -1,8 +1,4 @@
-"""
-Standard output module.
-
-Outputs to terminal/stdout with streaming support.
-"""
+"""Plain stdout output with streaming and resume-history support."""
 
 import sys
 from typing import TextIO
@@ -30,11 +26,7 @@ def _write_safe(stream: TextIO, text: str) -> None:
 
 
 def _group_resume_events(events: list[dict]) -> list[dict]:
-    """Group persisted events into condensed turns for the plain-stdout
-    resume preview. Honors Wave C ``text_chunk`` events and shows only
-    the latest branch of each turn (regen / edit+rerun siblings hidden
-    by default; the navigator surfaces them).
-    """
+    """Group live-branch session events into condensed resume turns."""
     if not events:
         return []
     events = dedupe_adjacent_duplicate_events(events)
@@ -66,8 +58,7 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
                 "tools": [],
             }
         elif etype in ("text", "text_chunk"):
-            # text_chunk is Wave C's per-chunk streaming format; both
-            # render the same way in the resume preview.
+            # Persisted full text and streamed chunks share one preview buffer.
             current["text"] += evt.get("content", "")
         elif etype == "tool_call":
             name = evt.get("name", "tool")
@@ -80,11 +71,7 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
 
 
 class StdoutOutput(BaseOutputModule):
-    """
-    Standard output module.
-
-    Writes content to stdout with streaming support.
-    """
+    """Write complete and streamed assistant output to stdout."""
 
     def __init__(
         self,
@@ -94,15 +81,7 @@ class StdoutOutput(BaseOutputModule):
         stream_suffix: str = "",
         flush_on_stream: bool = True,
     ):
-        """
-        Initialize stdout output.
-
-        Args:
-            prefix: Prefix to add before output (e.g., "Assistant: ")
-            suffix: Suffix to add after complete output (e.g., newline)
-            stream_suffix: Suffix for streaming chunks (usually empty)
-            flush_on_stream: Whether to flush after each stream chunk
-        """
+        """Configure output framing and streaming flush behavior."""
         super().__init__()
         self.prefix = prefix
         self.suffix = suffix
@@ -112,24 +91,18 @@ class StdoutOutput(BaseOutputModule):
         self._has_output = False
 
     async def _on_start(self) -> None:
-        """Initialize stdout output."""
+        """Log that stdout output is ready."""
         logger.debug("Stdout output started")
 
     async def _on_stop(self) -> None:
-        """Cleanup stdout output."""
+        """Log that stdout output has stopped."""
         logger.debug("Stdout output stopped")
 
     async def write(self, content: str) -> None:
-        """
-        Write complete content to stdout.
-
-        Args:
-            content: Content to write
-        """
+        """Write one complete output message."""
         if not content:
             return
 
-        # Add prefix if this is start of output
         output = ""
         if not self._has_output and self.prefix:
             output += self.prefix
@@ -143,16 +116,10 @@ class StdoutOutput(BaseOutputModule):
         self._streaming = False
 
     async def write_stream(self, chunk: str) -> None:
-        """
-        Write a streaming chunk to stdout.
-
-        Args:
-            chunk: Chunk to write
-        """
+        """Write one streaming chunk without closing the message."""
         if not chunk:
             return
 
-        # Add prefix if this is start of output
         if not self._streaming and not self._has_output and self.prefix:
             _write_safe(sys.stdout, self.prefix)
 
@@ -172,12 +139,12 @@ class StdoutOutput(BaseOutputModule):
         self._streaming = False
 
     def reset(self) -> None:
-        """Reset output state for new conversation turn."""
+        """Reset prefix and streaming state for the next turn."""
         self._has_output = False
         self._streaming = False
 
     async def on_resume(self, events: list[dict]) -> None:
-        """Show condensed session history on resume."""
+        """Render a bounded summary of live session history after resume."""
         if not events:
             return
 
@@ -205,11 +172,7 @@ class StdoutOutput(BaseOutputModule):
 
 
 class PrefixedStdoutOutput(StdoutOutput):
-    """
-    Stdout output with configurable prefix per message.
-
-    Useful for distinguishing different speakers in conversation.
-    """
+    """Stdout output with a configurable speaker prefix."""
 
     def __init__(
         self,
@@ -219,13 +182,7 @@ class PrefixedStdoutOutput(StdoutOutput):
         super().__init__(prefix=prefix, **kwargs)
 
     async def write_with_prefix(self, content: str, prefix: str | None = None) -> None:
-        """
-        Write content with optional custom prefix.
-
-        Args:
-            content: Content to write
-            prefix: Custom prefix (uses default if None)
-        """
+        """Write one message with an optional temporary prefix."""
         old_prefix = self.prefix
         if prefix is not None:
             self.prefix = prefix

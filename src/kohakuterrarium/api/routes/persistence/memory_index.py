@@ -1,8 +1,8 @@
 """Persistence memory-index — status + build for a saved session's
-vector index. CLI equivalent: ``kt embedding <session>``.
+vector index. The CLI equivalent is ``kt embedding <session>``.
 
-Mounted under ``/api/sessions`` (URL preservation matching the
-existing ``/api/sessions/{name}/memory/search`` shape).
+Mounting under ``/api/sessions`` preserves the existing
+``/api/sessions/{name}/memory/search`` URL family.
 """
 
 from typing import Any, Literal
@@ -41,7 +41,7 @@ class MemoryStatus(BaseModel):
 
 @router.get("/{session_name}/memory/status", response_model=MemoryStatus)
 async def get_memory_status(session_name: str) -> MemoryStatus:
-    """Snapshot the vector-index state for a saved session."""
+    """Return the current vector-index state for a saved session."""
     path = await run_in_persistence_executor(resolve_session_path_default, session_name)
     if path is None:
         raise HTTPException(404, f"Session not found: {session_name}")
@@ -53,13 +53,10 @@ async def get_memory_status(session_name: str) -> MemoryStatus:
 async def post_memory_build(
     session_name: str, body: BuildIndexRequest
 ) -> dict[str, Any]:
-    """Acknowledge a build request and return the WS path for progress.
+    """Validate a build request and return its progress WebSocket path.
 
-    The actual run happens on the WebSocket at
-    ``/ws/sessions/{name}/memory/build`` — the build request body
-    is encoded as the URL's query string so the WS handler can pick
-    it up without a separate "claim ticket" handshake. Same pattern
-    the app-update flow uses.
+    The WebSocket performs the build and receives request options through its
+    query string, avoiding a separate ticket or claim handshake.
     """
     path = await run_in_persistence_executor(resolve_session_path_default, session_name)
     if path is None:
@@ -70,8 +67,6 @@ async def post_memory_build(
     }
 
 
-# Synchronous helper exposed for the WS handler so it can run the
-# build on a worker thread without re-importing this module's body.
 def run_build_sync(
     session_name: str,
     *,
@@ -81,10 +76,11 @@ def run_build_sync(
     force: bool,
     progress,
 ) -> dict[str, Any]:
-    """Sync entry — resolve the session path then invoke ``build_index``.
+    """Resolve a saved session and build its index synchronously.
 
-    Raised exceptions propagate to the caller; the WS handler turns
-    them into a ``{"status": "failed", "error": ...}`` terminal frame.
+    Exceptions propagate so the WebSocket handler can emit its terminal failure
+    frame. The synchronous boundary allows the complete build to run in a
+    worker thread.
     """
     path = resolve_session_path_default(session_name)
     if path is None:

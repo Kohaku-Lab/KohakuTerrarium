@@ -1,11 +1,6 @@
 """YAML I/O for user-defined presets + migration from the legacy layout.
 
-Split out of :mod:`profiles` to keep that module under the
-per-file line-count guard. The write path (``_serialize_user_data``)
-emits the current nested ``{provider: {name: data}}`` shape; the
-read path (``load_presets``) accepts both nested and legacy flat
-``{name: {provider, model, ...}}`` layouts and migrates to the
-nested shape on the next save.
+Read and write provider-scoped presets while accepting legacy flat layouts.
 """
 
 from typing import Any
@@ -22,13 +17,7 @@ from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset
 
 
 def preset_from_data(name: str, data: dict[str, Any], provider: str = "") -> LLMPreset:
-    """Build a LLMPreset from raw yaml data.
-
-    ``provider`` takes priority over any ``provider`` key already on
-    ``data`` — callers passing this in have unambiguous knowledge of
-    which provider bucket the entry came from (new nested YAML shape).
-    For legacy flat YAML, falls back to inferring from ``data``.
-    """
+    """Build a preset, preferring an explicit provider bucket over legacy fields."""
     preset = LLMPreset.from_dict(name, data)
     if provider:
         preset.provider = provider
@@ -37,39 +26,17 @@ def preset_from_data(name: str, data: dict[str, Any], provider: str = "") -> LLM
     return preset
 
 
-# ---------------------------------------------------------------------------
-# Worker-side remote presets
-# ---------------------------------------------------------------------------
-#
-# Production single-host runs read presets straight from
-# ``llm_profiles.yaml``.  A Lab worker, however, has no local profile
-# store — profiles live on the host and are reached via the
-# ``studio.identity`` RPC + :class:`IdentityCache`.  The worker's
-# runtime adapter pre-warms a few profiles at spawn time and stashes
-# them in this process-local dict so that the SYNC preset lookup path
-# (:func:`load_presets` ← :func:`profiles.resolve_controller_llm` ←
-# :func:`bootstrap.llm.create_llm_provider`) finds them.  No I/O, no
-# async hop on the lookup side — by the time ``add_creature`` returns
-# the agent build has whatever profile bodies the host published.
+# Workers cache host-published presets so synchronous provider construction needs no I/O.
 _remote_presets: dict[tuple[str, str], LLMPreset] = {}
 
 
 def set_remote_preset(provider: str, name: str, preset: LLMPreset) -> None:
-    """Stash a remote-resolved preset for the sync lookup path.
-
-    Idempotent — repeated calls with the same ``(provider, name)``
-    overwrite.  The worker's identity adapter calls this after
-    fetching a profile body from the host via ``studio.identity``.
-    """
+    """Cache a host-resolved preset for synchronous worker lookup."""
     _remote_presets[(provider, name)] = preset
 
 
 def clear_remote_presets() -> None:
-    """Drop every stashed remote preset.
-
-    Called on worker teardown and on cache-invalidate broadcasts so a
-    stale-after-host-edit preset doesn't outlive its truth.
-    """
+    """Invalidate all host-resolved preset entries."""
     _remote_presets.clear()
 
 
@@ -88,13 +55,7 @@ def _load_nested_presets(stored: Any) -> dict[tuple[str, str], LLMPreset]:
 
 
 def _load_flat_presets_legacy(stored: Any) -> dict[tuple[str, str], LLMPreset]:
-    """Read a legacy flat ``{name: data}`` presets block.
-
-    The pre-2026-05 YAML shape used a single-level dict keyed by preset
-    name, with the provider inlined as a ``provider`` field on each
-    entry. This reader reconstructs ``(provider, name)`` keys from
-    those fields. Entries without a resolvable provider are dropped.
-    """
+    """Read flat legacy presets and reconstruct provider/name keys."""
     presets: dict[tuple[str, str], LLMPreset] = {}
     if not isinstance(stored, dict):
         return presets
@@ -109,18 +70,7 @@ def _load_flat_presets_legacy(stored: Any) -> dict[tuple[str, str], LLMPreset]:
 
 
 def _looks_nested(stored: dict[str, Any]) -> bool:
-    """Heuristic: does a ``presets`` block use the nested layout?
-
-    Nested: the top-level values are dicts of preset entries (no
-    ``model`` key directly). Flat: the values are preset entries with
-    a ``model`` key.
-
-    An empty dict is NOT nested — returning ``True`` for ``{}`` would
-    make ``load_presets`` short-circuit into the empty-nested path and
-    never reach the legacy ``profiles:`` merge fallback, silently
-    losing every preset for users upgrading from a pre-2026-05 config
-    that stored presets only under ``profiles:``.
-    """
+    """Detect nested provider buckets, treating empty data as legacy-compatible."""
     if not stored:
         return False
     for value in stored.values():
@@ -135,21 +85,7 @@ def _looks_nested(stored: dict[str, Any]) -> bool:
 
 
 def load_presets() -> dict[tuple[str, str], LLMPreset]:
-    """Return user-defined presets keyed by ``(provider, name)``.
-
-    Accepts both the current nested YAML shape
-    (``presets: {provider: {name: data}}``) and the legacy flat shape
-    (``presets: {name: {provider: ..., ...}}``). The next
-    :func:`kohakuterrarium.llm.profiles.save_profile` rewrites the
-    file in the nested shape.
-
-    Worker mode: any presets stashed via :func:`set_remote_preset`
-    (fetched on demand from the host's ``studio.identity``) are
-    merged on top of the local YAML so the sync lookup path sees the
-    host's authoritative profile bodies without an async hop.  Local
-    entries with the same ``(provider, name)`` are overridden by the
-    remote copy — the host is the source of truth.
-    """
+    """Load nested or legacy presets, with host-resolved worker entries authoritative."""
     data = _load_yaml()
     stored = data.get("presets", {})
     if isinstance(stored, dict) and _looks_nested(stored):
@@ -170,7 +106,7 @@ def serialize_user_data(
     backends: dict[str, LLMBackend],
     default_model: str = "",
 ) -> dict[str, Any]:
-    """Produce the YAML payload for ``~/.kohakuterrarium/llm_profiles.yaml``."""
+    """Serialize user providers and presets in the current nested schema."""
     data: dict[str, Any] = {"version": _SCHEMA_VERSION}
     if default_model:
         data["default_model"] = default_model

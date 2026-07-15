@@ -1,15 +1,7 @@
-"""Catalog marketplace — read-only browse + admin-gated source mgmt + install.
+"""Expose marketplace browsing with admin-gated source and install mutations.
 
-Wraps :mod:`kohakuterrarium.packages.marketplace` for the frontend.
-Source-list reads are public; mutating routes (add/remove sources,
-install) require the L3 admin token when L3 is enabled.
-
-``POST /install`` resolves the spec then delegates to the existing
-``install_package_op`` (which is what ``/api/catalog/packages/install``
-already calls), so the WebSocket-streaming install UX from topic 05
-is reused unchanged.
-
-Mounted by ``api/app.py`` at ``/api/catalog/marketplace``.
+Reads remain public, while source changes, refreshes, and installs require the
+configured admin token because they mutate local state or perform outbound work.
 """
 
 from typing import Any
@@ -35,11 +27,6 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# ──────────────────────────────────────────────────────────────────
-# Schemas
-# ──────────────────────────────────────────────────────────────────
-
-
 class AddSourceRequest(BaseModel):
     url: str
     alias: str | None = None
@@ -48,14 +35,8 @@ class AddSourceRequest(BaseModel):
 class InstallSpecRequest(BaseModel):
     spec: str
     name: str | None = None
-    # Editable installs apply only to local paths.  Marketplace specs
-    # raise ValueError → 400 here (mirroring ``install_package_spec``).
+    # Marketplace specs cannot be editable because they resolve to git clones.
     editable: bool = False
-
-
-# ──────────────────────────────────────────────────────────────────
-# Projection
-# ──────────────────────────────────────────────────────────────────
 
 
 def _entry_to_dict(entry: MarketplaceEntry) -> dict[str, Any]:
@@ -85,21 +66,12 @@ def _entry_to_dict(entry: MarketplaceEntry) -> dict[str, Any]:
     }
 
 
-# ──────────────────────────────────────────────────────────────────
-# Reads
-# ──────────────────────────────────────────────────────────────────
-
-
 @router.get("/packages")
 async def list_packages() -> dict[str, Any]:
-    """List every package across all configured marketplace sources.
+    """List packages using first-source-wins deduplication.
 
-    Routes through :func:`marketplace.search` (with no filter) so the
-    user-facing first-source-wins dedup applies — the frontend card
-    grid otherwise would render shadowed duplicates as separate
-    rows.  The detail route below calls :func:`marketplace.resolve`
-    against the un-deduped raw list so explicit ``@source/name``
-    resolution still works.
+    Detail resolution still uses the raw source set so explicit ``@source/name``
+    specifications can select shadowed entries.
     """
     try:
         entries = await marketplace.search()
@@ -140,24 +112,15 @@ async def search(
 
 @router.post("/refresh", dependencies=[Depends(verify_admin_token)])
 async def refresh() -> dict[str, Any]:
-    """Force cache bust + re-fetch every source.
+    """Refetch every source and replace the on-disk cache.
 
-    Admin-gated when L3 is on: refresh triggers an outbound network
-    round-trip and mutates the on-disk cache.  An anonymous caller
-    could otherwise DoS the upstream by spamming this route on a
-    multi-user host; the gate matches the other state-mutating
-    routes (sources + install).
+    Admin gating prevents anonymous callers from repeatedly forcing outbound work.
     """
     try:
         entries = await marketplace.fetch_marketplace(force=True)
     except MarketplaceUnavailableError as exc:
         raise HTTPException(503, str(exc)) from exc
     return {"ok": True, "packages": len(entries)}
-
-
-# ──────────────────────────────────────────────────────────────────
-# Source management
-# ──────────────────────────────────────────────────────────────────
 
 
 @router.get("/sources")
@@ -180,32 +143,19 @@ async def add_source(req: AddSourceRequest) -> dict[str, Any]:
 
 @router.delete("/sources", dependencies=[Depends(verify_admin_token)])
 async def remove_source(target: str) -> dict[str, Any]:
-    """Remove a source by URL or alias (passed via ``?target=...``).
+    """Remove a source by URL or alias supplied as a query parameter.
 
-    The query-param shape (rather than a path param) is deliberate:
-    URL sources contain slashes that FastAPI's path-param routing
-    does not handle cleanly even with ``{target:path}``.  Aliases
-    work either way; URLs only work via query.  Frontend always
-    sends ``target=`` so both cases route through the same shape.
+    URLs contain slashes, so a query parameter handles both URLs and aliases without
+    ambiguous path routing.
     """
     if not marketplace.remove_source(target):
         raise HTTPException(404, f"No source matches {target!r}")
     return {"sources": [s.to_dict() for s in marketplace.list_sources()]}
 
 
-# ──────────────────────────────────────────────────────────────────
-# Install
-# ──────────────────────────────────────────────────────────────────
-
-
 @router.post("/install", dependencies=[Depends(verify_admin_token)])
 async def install_by_spec(req: InstallSpecRequest) -> dict[str, Any]:
-    """Resolve ``@name`` spec then install (delegates to install_package_op).
-
-    For streaming progress, callers should use the existing WebSocket
-    endpoint on ``/api/registry/install`` instead — this REST route
-    blocks until the install completes (or fails).
-    """
+    """Resolve and install a package spec, blocking until completion."""
     spec = req.spec.strip()
     if not spec:
         raise HTTPException(400, "spec is required")
@@ -223,8 +173,7 @@ async def install_by_spec(req: InstallSpecRequest) -> dict[str, Any]:
     except MarketplaceUnavailableError as exc:
         raise HTTPException(503, str(exc)) from exc
     except ValueError as exc:
-        # ``install_package_spec`` raises ValueError when ``editable``
-        # is requested on a marketplace spec (git clones can't be -e).
+        # Editable mode is valid only for local paths, not resolved marketplace clones.
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         logger.error("Marketplace install failed", spec=spec, error=str(exc))

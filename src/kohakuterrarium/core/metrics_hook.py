@@ -1,22 +1,7 @@
-"""Process-wide metrics observation hook.
+"""Process-wide fan-out from runtime metric emitters to aggregators.
 
-Thin pub/sub between the agent's hot path (controller / tool dispatch /
-sub-agent loop / plugin manager) and one or more aggregator backends.
-Core ONLY emits — it does not maintain counters, histograms, or any
-storage. The default aggregator (``serving.process_metrics``) is the
-canonical subscriber and registers itself on import; tests and plugins
-can attach additional subscribers via :meth:`MetricsHook.subscribe`.
-
-Why a hook (and not a direct call into the aggregator) — keeping core
-free of aggregator dependencies means the aggregator can move,
-restructure, or be replaced (Prometheus exporter, OpenTelemetry, ...)
-without touching the dozens of emit sites scattered across
-``controller.py`` / ``agent_tools.py`` / ``agent_handlers.py`` /
-``modules/subagent/base.py``.
-
-Subscribers must NEVER raise: every observe_* call wraps each
-subscriber callback in ``try/except`` and logs failures at debug level.
-The hot path cannot afford a metrics bug crashing a turn.
+Core retains no metric state and depends on no aggregation backend. Subscriber
+failures are isolated because telemetry must never interrupt an agent turn.
 """
 
 from __future__ import annotations
@@ -29,11 +14,7 @@ logger = get_logger(__name__)
 
 
 class MetricsSubscriber(Protocol):
-    """Subscriber surface — implement only the events you care about.
-
-    Every method has a no-op default so partial implementations are
-    fine. The aggregator implements all of them.
-    """
+    """Structural interface for subscribers that implement relevant events."""
 
     def observe_llm(
         self,
@@ -83,12 +64,7 @@ class MetricsSubscriber(Protocol):
 
 
 class MetricsHook:
-    """Process-wide metrics fan-out.
-
-    Use the module-level :data:`metrics` singleton — never instantiate
-    in production code. Tests construct a fresh one and swap it in via
-    :func:`_set_singleton_for_tests`.
-    """
+    """Fan metric observations out to isolated process-wide subscribers."""
 
     def __init__(self) -> None:
         self._subscribers: list[MetricsSubscriber] = []
@@ -104,10 +80,8 @@ class MetricsHook:
             pass
 
     def reset(self) -> None:
-        """Drop all subscribers. Tests only."""
+        """Remove all subscribers for test isolation."""
         self._subscribers.clear()
-
-    # ── observe_* — every emit site funnels through one of these. ──
 
     def observe_llm(
         self,
@@ -170,8 +144,6 @@ class MetricsHook:
     ) -> None:
         self._fanout("observe_plugin_hook", plugin, hook, duration_ms, agent=agent)
 
-    # ── private ──
-
     def _fanout(self, method: str, *args: Any, **kwargs: Any) -> None:
         for sub in list(self._subscribers):
             fn = getattr(sub, method, None)
@@ -179,7 +151,7 @@ class MetricsHook:
                 continue
             try:
                 fn(*args, **kwargs)
-            except Exception as exc:  # pragma: no cover — defensive
+            except Exception as exc:  # pragma: no cover - metrics cannot fail turns
                 logger.debug(
                     "Metrics subscriber failed",
                     method=method,
@@ -188,15 +160,12 @@ class MetricsHook:
                 )
 
 
-# Process-wide singleton. Import this everywhere; do NOT construct your
-# own. The default aggregator subscribes itself on first import of
-# ``serving.process_metrics``.
+# Runtime emitters share one hook so subscribers observe a coherent process view.
 metrics = MetricsHook()
 
 
 def _set_singleton_for_tests(new: MetricsHook) -> MetricsHook:
-    """Swap the singleton for the duration of a test. Returns the
-    previous instance so the test fixture can restore it."""
+    """Replace the singleton for a test and return the previous hook."""
     global metrics
     previous = metrics
     metrics = new

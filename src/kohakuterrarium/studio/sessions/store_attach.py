@@ -1,11 +1,8 @@
-"""Session-store attach for studio-managed creatures.
+"""Attach session stores and channel persistence to managed creatures.
 
-Extracted from :mod:`studio.sessions.lifecycle` (file-size cap): owns
-the per-creature store attach (graph-store reuse OR fresh mint via the
-engine's autosession layer) plus the retroactive channel-persistence
-install.  ``lifecycle`` re-exports :func:`attach_session_store_for_creature`
-so existing callers (group hooks, the worker session attacher's mirror
-of this logic) keep one import path.
+Creatures reuse their graph store when available; otherwise the engine's
+autosession layer mints one. The lifecycle module re-exports the public attach
+function for callers that share this behavior.
 """
 
 import os
@@ -25,9 +22,8 @@ logger = get_logger(__name__)
 
 
 def session_dir() -> str:
-    """The studio session dir — ``KT_SESSION_DIR`` else config-dir default."""
-    # KT_SESSION_DIR overrides; else config_dir() / "sessions" so KT_CONFIG_DIR
-    # alone isolates test runs from the operator's real config.
+    """Return ``KT_SESSION_DIR`` or the config-local session directory."""
+    # Deriving the fallback from config_dir keeps isolated config roots self-contained.
     return os.environ.get("KT_SESSION_DIR") or str(config_dir() / "sessions")
 
 
@@ -57,17 +53,14 @@ def attach_session_store_for_creature(
                 )
             except Exception:
                 logger.warning("meta agent-list update skipped", exc_info=True)
-            # The reused store may have been minted by the ENGINE
-            # (autosession) — which knows nothing about the studio's
-            # saved-sessions index sidecar.  Without this hook the
-            # session never appears in the saved list until a manual
-            # ``?refresh=true`` reconcile.  Idempotent on ``sid``.
+            # Autosession stores also need the Studio index hook so saved-session
+            # listings update without an explicit reconciliation.
             _index_hooks.attach(sid, existing, session_dir())
             _retro_install_channel_persistence(engine, sid)
             return
 
-        # Dogfood the engine's E2 minting (validated meta, write-before-
-        # publish); Studio keeps its file naming + meta via overrides.
+        # Engine minting preserves validated metadata and write-before-publish;
+        # Studio supplies its own path and metadata overrides.
         sess_dir = session_dir()
         cid = creature.creature_id
         store = _autosession.mint_store(
@@ -84,7 +77,7 @@ def attach_session_store_for_creature(
         )
         creature.agent.attach_session_store(store)
         session_stores[sid] = store
-        # Mirror to engine map so channel-persistence callback finds it.
+        # Channel persistence resolves stores through the engine-owned map.
         engine._session_stores[sid] = store
         _index_hooks.attach(sid, store, sess_dir)
         _retro_install_channel_persistence(engine, sid)

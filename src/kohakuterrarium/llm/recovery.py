@@ -1,9 +1,6 @@
 """Provider-boundary recovery helpers for LLM calls.
 
-This module is intentionally provider-agnostic except for the small
-``classify_openai_error`` adapter. Providers can share the retry policy,
-backoff calculation, and emergency context-drop reducer while implementing
-provider-specific classification at their boundary.
+Share retry policy, error classification, backoff, and overflow reduction.
 """
 
 import asyncio
@@ -18,7 +15,7 @@ logger = get_logger(__name__)
 
 
 class ErrorClass(Enum):
-    """Normalised provider error classes used by KT-side recovery."""
+    """Provider error categories used by framework-side recovery."""
 
     USER_ERROR = "user_error"
     OVERFLOW = "overflow"
@@ -30,7 +27,7 @@ class ErrorClass(Enum):
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    """KT-side retry policy layered on top of provider SDK retries."""
+    """Framework retry policy layered on provider SDK retries."""
 
     max_retries: int = 3
     base_delay: float = 1.0
@@ -98,22 +95,18 @@ _TRANSIENT_MARKERS = (
     "connection reset",
     "connection error",
     "peer disconnected",
-    "peer closed connection",  # httpx.RemoteProtocolError
+    "peer closed connection",  # Typical httpx mid-stream disconnect text.
     "server disconnected",
     "timeout",
     "timed out",
     "temporarily unavailable",
-    # Truncated streaming responses — common when the upstream proxy
-    # cuts the connection mid-message. httpx raises these as
-    # ``RemoteProtocolError``; the SDK passes the message through.
+    # Upstream proxies can truncate a stream after the request succeeds.
     "incomplete chunked read",
     "incomplete read",
     "remoteprotocolerror",
     "remote protocol error",
     "protocol error",
-    # httpx connection-tier errors (ConnectError, ReadError, WriteError,
-    # PoolTimeout). The exception class names sometimes leak into the
-    # SDK-wrapped message; match defensively.
+    # SDK wrappers may expose only the underlying httpx exception class name.
     "connecterror",
     "readerror",
     "writeerror",
@@ -122,12 +115,7 @@ _TRANSIENT_MARKERS = (
 
 
 def classify_openai_error(exc: BaseException) -> ErrorClass:
-    """Classify an exception raised by the OpenAI Python SDK.
-
-    The SDK exposes a mix of typed exceptions, HTTP status codes, and
-    provider-specific JSON payloads. We avoid depending on exact classes so
-    compatible providers and tests with light-weight fakes classify cleanly.
-    """
+    """Classify SDK and compatible-provider errors without exact class coupling."""
     if isinstance(exc, (asyncio.TimeoutError, TimeoutError)):
         return ErrorClass.TRANSIENT
 
@@ -154,12 +142,7 @@ def classify_openai_error(exc: BaseException) -> ErrorClass:
         return ErrorClass.USER_ERROR
     if _contains_any(message, _TRANSIENT_MARKERS):
         return ErrorClass.TRANSIENT
-    # No status code reached us — the request died before the server
-    # could answer (DNS, TCP reset, mid-stream truncation, proxy hiccup,
-    # …). Treat it as TRANSIENT so the retry loop covers the long tail
-    # of network errors we didn't enumerate as markers. We only land in
-    # UNKNOWN when the server DID respond with a status we don't have a
-    # rule for (rare — e.g. 1xx / 3xx leaked through as an exception).
+    # Missing status means transport failure; unknown is reserved for server responses.
     if not isinstance(status, int):
         return ErrorClass.TRANSIENT
     return ErrorClass.UNKNOWN
@@ -187,10 +170,7 @@ def _extract_error_payload(exc: BaseException) -> dict[str, Any]:
 
 
 def _stringify_error(exc: BaseException, body: dict[str, Any]) -> str:
-    # Include the exception class name so providers that wrap httpx can
-    # still classify cleanly when ``str(exc)`` is sparse — e.g. a bare
-    # ``RemoteProtocolError`` instance whose message is empty still
-    # classifies as TRANSIENT via the class-name marker.
+    # Include the class name because wrapped transport exceptions may have empty text.
     pieces = [str(exc), type(exc).__name__]
     for key in ("message", "code", "type"):
         value = body.get(key)
@@ -235,7 +215,7 @@ def _tool_names_from_calls(calls: list[dict[str, Any]]) -> list[str]:
 
 
 def format_drop_placeholder(count: int, bytes_count: int, tool_names: list[str]) -> str:
-    """Create the synthetic user message inserted after emergency drop."""
+    """Describe an emergency tool-round drop and suggest narrower retries."""
     tools = ", ".join(f"`{name}`" for name in tool_names) or "(unknown)"
     return (
         "[tool-result truncated]\n\n"

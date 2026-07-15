@@ -1,11 +1,4 @@
-"""Settings command — opens the interactive settings overlay.
-
-In the Rich CLI, ``_handle_slash`` special-cases ``/settings`` and
-``/config`` to open ``SettingsOverlay`` directly (same shape as the
-``/model`` picker path). This command class exists so the entry shows
-up in ``/help`` and the slash-command hint bar, and so the TUI / web
-frontends can still receive a sensible fallback payload.
-"""
+"""Provide a settings entry point and a fallback for unsupported frontends."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -27,10 +20,8 @@ class SettingsCommand(BaseUserCommand):
     async def _execute(
         self, args: str, context: UserCommandContext
     ) -> UserCommandResult:
-        # The Rich CLI intercepts /settings before execute() runs and
-        # opens the overlay inline. Reaching here means we're on a
-        # frontend that doesn't implement the overlay yet — surface a
-        # friendly pointer to ``kt config`` instead of silently no-oping.
+        # The Rich CLI intercepts this command, so execution indicates a frontend
+        # without an overlay and must return an actionable fallback.
         return UserCommandResult(
             output=(
                 "Settings overlay is only available in the Rich CLI.\n"

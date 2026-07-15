@@ -1,6 +1,4 @@
-"""
-Timer trigger - fires at regular intervals.
-"""
+"""Fire autonomous events at fixed elapsed-time intervals."""
 
 import asyncio
 from typing import Any
@@ -13,17 +11,7 @@ logger = get_logger(__name__)
 
 
 class TimerTrigger(BaseTrigger):
-    """
-    Trigger that fires at regular intervals.
-
-    Usage:
-        trigger = TimerTrigger(
-            interval=60,  # seconds
-            prompt="Check system status",
-        )
-        await trigger.start()
-        event = await trigger.wait_for_trigger()
-    """
+    """Fire after each interval, optionally once immediately after start."""
 
     resumable = True
     universal = True
@@ -63,7 +51,7 @@ class TimerTrigger(BaseTrigger):
         return {
             "interval": self.interval,
             "prompt": self.prompt,
-            "immediate": False,  # Don't fire immediately on resume
+            "immediate": False,
         }
 
     @classmethod
@@ -81,15 +69,7 @@ class TimerTrigger(BaseTrigger):
         immediate: bool = False,
         **options: Any,
     ):
-        """
-        Initialize timer trigger.
-
-        Args:
-            interval: Seconds between triggers
-            prompt: Prompt to include in event
-            immediate: Fire immediately on start (before first interval)
-            **options: Additional options
-        """
+        """Initialize interval, prompt, and immediate-first-fire behavior."""
         super().__init__(prompt=prompt, **options)
         self.interval = interval
         self.immediate = immediate
@@ -119,7 +99,6 @@ class TimerTrigger(BaseTrigger):
         if not self._running:
             return None
 
-        # Fire immediately if configured and first trigger
         if self.immediate and self._first_trigger:
             self._first_trigger = False
             return self._create_event(
@@ -130,17 +109,14 @@ class TimerTrigger(BaseTrigger):
 
         self._first_trigger = False
 
-        # Wait for interval or stop
         self._ensure_events()
         try:
             await asyncio.wait_for(
                 self._stop_event.wait(),
                 timeout=self.interval,
             )
-            # Stop event was set
             return None
         except asyncio.TimeoutError:
-            # Interval elapsed - fire trigger
             if not self._running:
                 return None
 

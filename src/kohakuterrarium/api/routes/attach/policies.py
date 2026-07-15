@@ -1,14 +1,8 @@
-"""Attach policy hint route.
+"""Expose informational attachment-policy hints for live runtime targets.
 
-Exposes the studio :mod:`kohakuterrarium.studio.attach.policies` helpers
-over HTTP so the frontend Inspector Overview can render an "IO bindings"
-hint for any running target.
-
-The frontend treats these endpoints as **informational hints**, not as
-gating mechanisms: every running target offers Chat and Inspector tabs
-regardless of policy. Hence the routes return 404 (rather than a typed
-error) when the target is not currently live — the frontend silently
-omits the hint line.
+Policies describe available inspection bindings but do not gate Chat or
+Inspector access. Unknown or stopped targets return 404 so callers can omit the
+hint without treating it as a runtime failure.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -21,17 +15,11 @@ router = APIRouter()
 
 
 def _host_engine(service):
-    """The host-local agent engine if any, else ``None``.
+    """Resolve a host-local engine while preserving lightweight test doubles.
 
-    Avoids :func:`host_engine_or_none` (which uses a Protocol
-    ``isinstance`` check) so this route stays usable with the test
-    suite's ``SimpleNamespace`` fakes.  Logic:
-
-    - ``connected_nodes`` attribute → multi-node service → no host
-      engine.
-    - ``.engine`` attribute (single-host service) → that engine.
-    - Otherwise → treat the argument itself as the engine (legacy
-      raw-Terrarium injection).
+    Multi-node services have no local agent engine. Single-host services expose
+    ``engine``; legacy callers may pass the engine object directly. Attribute
+    checks avoid protocol ``isinstance`` requirements on simple fakes.
     """
     if hasattr(service, "connected_nodes"):
         return None
@@ -43,22 +31,11 @@ async def get_creature_policies(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, list[str]]:
-    """Return the attach policies a single creature supports.
+    """Return order-stable attachment policy codes for a creature or graph.
 
-    Returns ``{"policies": ["log", "trace", ...]}`` — order-stable list
-    of short codes from :class:`policy_lib.Policy`.
-
-    Multi-node: when the host engine has no such creature but the
-    service knows it (via the ``_home`` registry), fall back to
-    asking the service for policies.  This surfaces actual policies
-    for worker-hosted creatures instead of a blank 404.
-
-    The frontend Inspector also hits this route with a *session*
-    (graph) id — not just a creature id — so in multi-node mode an id
-    that resolves as neither a creature falls through to
-    session-policy resolution before 404-ing.  That is the reported
-    ``GET /api/attach/policies/graph_... 404`` for a live worker
-    session.
+    Local creatures resolve against the host engine. Multi-node targets fall
+    back to service routing, and the identifier is also tried as a session ID
+    because the Inspector uses this compatibility route for graph hints.
     """
     engine = _host_engine(service)
     if engine is not None:
@@ -69,10 +46,8 @@ async def get_creature_policies(
         else:
             policies = policy_lib.get_creature_policies(engine, creature_id)
             return {"policies": [p.value for p in policies]}
-    # Not local (or in lab-host mode) — try the service.  Multi-node
-    # service exposes ``attach_policies`` (routes by home node) and
-    # ``session_attach_policies`` (for a graph id).  Guard with
-    # ``_home`` so standalone services don't accidentally route.
+    # Only multi-node services own the home registry needed to route remote
+    # creature and session policy lookups.
     is_multi_node = hasattr(service, "_home")
     if is_multi_node:
         svc_fn = getattr(service, "attach_policies", None)
@@ -81,8 +56,7 @@ async def get_creature_policies(
                 return {"policies": list(await svc_fn(creature_id))}
             except KeyError:
                 pass
-        # The id may actually be a session / graph id — the
-        # Inspector Overview keys its hint off the session id.
+        # The compatibility endpoint also receives graph IDs from the Inspector.
         sess_fn = getattr(service, "session_attach_policies", None)
         if callable(sess_fn):
             try:
@@ -97,11 +71,7 @@ async def get_session_policies(
     session_id: str,
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, list[str]]:
-    """Return the attach policies a whole session (graph) supports.
-
-    Same fallback as :func:`get_creature_policies` — service-level
-    ``session_attach_policies`` for worker-hosted graphs.
-    """
+    """Return attachment policy codes for a local or worker-hosted graph."""
     engine = _host_engine(service)
     if engine is not None:
         try:

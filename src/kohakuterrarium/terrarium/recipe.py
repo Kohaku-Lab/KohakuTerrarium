@@ -5,7 +5,7 @@ declare these channels, wire these listen/send edges."  The engine has
 all the primitives needed; this file is the thin glue that walks a
 recipe and calls them in dependency order.
 
-Auto-created channels (per legacy behaviour):
+Auto-created channels preserve the recipe contract:
 
 - One channel named after each creature — the "direct" channel any
   other creature can address. (Graph topology channels are always

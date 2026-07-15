@@ -1,10 +1,6 @@
 """Agent LLM-profile switching + canonical-identifier helpers.
 
-Split out of :mod:`agent` to keep that module under the 1000-line
-hard cap. Provides a mixin whose two methods, ``switch_model`` and
-``llm_identifier``, belong to the :class:`~kohakuterrarium.core.agent.Agent`
-public surface. The mixin has no state of its own — it reads and
-writes attributes owned by ``Agent.__init__``.
+Provide model switching and canonical LLM identifiers for agents.
 """
 
 from typing import Any
@@ -17,21 +13,10 @@ logger = get_logger(__name__)
 
 
 class AgentModelMixin:
-    """Mixin providing :meth:`switch_model` and :meth:`llm_identifier`.
+    """Switch an agent's model and report its canonical identifier."""
 
-    Both methods read/write attributes owned by the main ``Agent``
-    class (``self.llm``, ``self.controller``, ``self.compact_manager``,
-    ``self._llm_selector``, ``self._llm_identifier``, ``self.config``).
-    Kept as a mixin rather than free functions so callers can still
-    write ``agent.switch_model(...)`` / ``agent.llm_identifier()``.
-    """
-
-    # Declared for static type-checkers; populated by ``Agent.__init__``.
-    # ``_build_compact_llm`` is provided by ``AgentCompactMixin`` — do
-    # NOT add a stub here, it would shadow the real implementation via
-    # MRO. ``Agent`` is composed as ``AgentInitMixin, AgentHandlersMixin,
-    # AgentMessagesMixin, AgentModelMixin, AgentCompactMixin, …`` so a
-    # method declared on this mixin wins over ``AgentCompactMixin``'s.
+    # These annotations describe state supplied by ``Agent.__init__``. A stub
+    # for ``_build_compact_llm`` would shadow ``AgentCompactMixin`` through MRO.
     llm: Any
     controller: Any
     compact_manager: Any

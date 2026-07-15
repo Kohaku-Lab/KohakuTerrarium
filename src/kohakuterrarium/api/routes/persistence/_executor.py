@@ -1,21 +1,17 @@
 """Persistence-layer executor — thin alias over the shared I/O pool.
 
-The persistence routes (saved list / disk usage / stats / delete) and
-the catalog scan routes (creature / terrarium config discovery) both
-do I/O-heavy fan-out work that competes with every other framework
-``to_thread`` call.  They share one dedicated executor — see
-:mod:`kohakuterrarium.api._io_executor` for the rationale and the
-sizing decision.
+Persistence and catalog routes perform I/O-heavy fan-out that would otherwise
+compete with unrelated framework ``to_thread`` calls. They share the dedicated
+executor defined in :mod:`kohakuterrarium.api._io_executor`.
 
-The ``run_in_persistence_executor`` name is preserved here so existing
-imports keep working; new callers should use
-``kohakuterrarium.api._io_executor.run_in_io_executor`` directly.
+The persistence-named exports remain compatibility aliases. New callers should
+use ``kohakuterrarium.api._io_executor`` directly.
 """
 
 from kohakuterrarium.api._io_executor import _MAX_WORKERS  # noqa: F401
 from kohakuterrarium.api._io_executor import get_io_executor, run_in_io_executor
 
-# Back-compat aliases — existing imports still work.
+# These aliases preserve the persistence-route import surface.
 get_persistence_executor = get_io_executor
 run_in_persistence_executor = run_in_io_executor
 

@@ -1,16 +1,7 @@
-"""Textual Drive record panel — live list/detail/actions over the service.
+"""Manage live drive records and settings through the Terrarium service boundary.
 
-``DriveScreen`` is a modal screen reachable from the F4 key binding and the
-command palette. It shows a Records tab (list + detail + capability-filtered
-actions, live-refreshing from Drive engine events) and a Settings tab (runtime +
-registration config). It talks only to a :class:`TerrariumService` built from the
-engine — never engine private dicts — so local and future remote behaviour match
-(design §12.4). Every action is filtered by the server ``allowed_actions`` and
-re-authorised server-side, so a hidden action stays safe if reached.
-
-The data-loading + projection helpers (:func:`load_drive_rows`,
-:func:`detail_lines`) are pure/async module functions so they are unit-testable
-against a scripted service without mounting the Textual app.
+The records view refreshes from drive events and exposes only service-authorized
+actions; all user-controlled text is escaped before Textual renders it.
 """
 
 from functools import partial
@@ -85,11 +76,7 @@ async def load_drive_rows(
     statuses: frozenset[str] | None,
     is_operator: bool,
 ) -> tuple[list[Any], list[dict[str, Any]]]:
-    """Load Drive views for the scope/filter, returning (views, projected rows).
-
-    ``mine`` scopes to the focused creature's assignments; ``graph`` lists the
-    whole graph. Ordering is non-terminal first, higher priority, then id.
-    """
+    """Load authorized drive views for an assignee or graph and project table rows."""
     graph_id = None
     assignee = None
     if scope == "graph":
@@ -111,12 +98,7 @@ async def load_drive_rows(
 
 
 def detail_lines(row: dict[str, Any], progress: list[Any]) -> list[str]:
-    """Textual-markup lines for the detail pane of one Drive (pure).
-
-    Every interpolated field is user/actor-controlled, so it is ``escape``-d;
-    only the structural ``[b]`` tag is real markup. This keeps a title such as
-    ``Fix [urgent] bug`` from raising a Textual markup error.
-    """
+    """Build escaped Textual markup for a drive's detail pane."""
     lines = [
         f"[b]{escape(str(row['title']))}[/b]",
         f"id: {escape(str(row['drive_id']))}",
@@ -152,7 +134,7 @@ def _sort_key(view: Any) -> tuple[int, int, str]:
 
 
 class DriveProgressModal(ModalScreen[str | None]):
-    """Small text prompt for a progress note."""
+    """Collect a progress note for a drive."""
 
     DEFAULT_CSS = """
     DriveProgressModal { align: center middle; }
@@ -178,7 +160,7 @@ class DriveProgressModal(ModalScreen[str | None]):
 
 
 class DriveScreen(ModalScreen[None]):
-    """Live Drive record panel (Records + Settings tabs)."""
+    """Display event-refreshed drive records, authorized actions, and settings."""
 
     DEFAULT_CSS = """
     DriveScreen { align: center middle; }
@@ -218,10 +200,8 @@ class DriveScreen(ModalScreen[None]):
         is_operator: bool = True,
     ) -> None:
         super().__init__()
-        # ``service`` (a TerrariumService) and ``engine`` are injected by the
-        # runner (engine_cli) and consumed as duck-typed handles — the same
-        # context-provided-service pattern the /goal command uses — so this
-        # module never imports terrarium.service.
+        # Service-only access preserves authorization and keeps local/remote
+        # implementations interchangeable; engine access is only for events/settings.
         self._engine = engine
         self._service = service
         self._creature_id = creature_id
@@ -262,8 +242,6 @@ class DriveScreen(ModalScreen[None]):
         self.run_worker(self._reload, exclusive=True, group="drive-reload")
         self.run_worker(self._watch_events, exclusive=True, group="drive-watch")
 
-    # ── Data ────────────────────────────────────────────────────
-
     async def _reload(self) -> None:
         if self._service is None:
             return
@@ -290,8 +268,7 @@ class DriveScreen(ModalScreen[None]):
         table.clear()
         for row in self._rows:
             badges = "".join(f" ({t})" for t, _ in warning_badges(row))
-            # Text() cells so user-controlled titles/owners are never parsed as
-            # Textual markup (a title with '[' would otherwise raise).
+            # User-controlled cells must bypass Textual markup parsing.
             table.add_row(
                 Text(status_label(row["status"])),
                 Text(row["title"][:28] + badges),
@@ -300,8 +277,7 @@ class DriveScreen(ModalScreen[None]):
         self._update_status_line()
         if self._rows:
             self._selected = min(self._selected, len(self._rows) - 1)
-            # Single exclusive worker serializes detail loads (and the action
-            # re-mount) so rapid reloads / highlight events never overlap.
+            # Detail loads are serialized to prevent overlapping action remounts.
             self._show_detail(self._selected)
         else:
             self.query_one("#drive-detail", Static).update("(no drives)")
@@ -353,19 +329,17 @@ class DriveScreen(ModalScreen[None]):
         )
         await self._render_actions(row)
 
-    # ── Actions ─────────────────────────────────────────────────
-
     async def _clear_actions(self) -> None:
-        # ``remove_children`` is async in Textual; awaiting it before the next
-        # mount is what prevents a DuplicateIds race across rapid reloads.
+        # Await removal before remounting to preserve Textual's unique-ID invariant.
         await self.query_one("#drive-actions", Horizontal).remove_children()
 
     async def _render_actions(self, row: dict[str, Any]) -> None:
         actions = self.query_one("#drive-actions", Horizontal)
         await actions.remove_children()
+        # enabled_actions reflects server-projected capabilities; mutations are
+        # re-authorized by the service when invoked.
         for action in enabled_actions(row):
-            # ``name`` (not ``id``): action buttons are rebuilt on every detail
-            # reload, and ids must be unique — name carries the action instead.
+            # Rebuilt buttons use names because Textual requires unique IDs.
             await actions.mount(
                 Button(action["label"], name=action["id"], variant="default")
             )
@@ -447,18 +421,14 @@ class DriveScreen(ModalScreen[None]):
                 f"[red]{escape(str(exc))}[/red]"
             )
 
-    # ── Live refresh ────────────────────────────────────────────
-
     async def _watch_events(self) -> None:
         try:
             async for _ev in self._engine.subscribe(
                 EventFilter(kinds=set(_DRIVE_EVENT_KINDS))
             ):
                 await self._reload()
-        except Exception as exc:  # pragma: no cover — cancelled on close
+        except Exception as exc:  # pragma: no cover - cancelled on close
             logger.debug("drive panel watch ended", error=str(exc))
-
-    # ── Events + bindings ───────────────────────────────────────
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._show_detail(event.cursor_row)

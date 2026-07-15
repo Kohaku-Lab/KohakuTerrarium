@@ -1,8 +1,7 @@
-"""Legacy serving event dataclasses.
+"""Preserve legacy serving event records for compatibility imports.
 
-Kept as a tiny compatibility shim for older integrations and tests that
-imported ``kohakuterrarium.serving.events`` before the serving facade moved to
-the terrarium/studio runtime modules.
+New runtime event surfaces live in the terrarium and Studio modules, but older
+integrations may still deserialize or import these dataclasses.
 """
 
 from dataclasses import dataclass, field
@@ -12,7 +11,7 @@ from typing import Any
 
 @dataclass
 class ChannelEvent:
-    """A message observed on a terrarium channel."""
+    """Record a message observed on a terrarium channel."""
 
     terrarium_id: str
     channel: str
@@ -25,7 +24,7 @@ class ChannelEvent:
 
 @dataclass
 class OutputEvent:
-    """A text/activity event emitted by a running agent."""
+    """Record text or activity emitted by a running agent."""
 
     agent_id: str
     event_type: str

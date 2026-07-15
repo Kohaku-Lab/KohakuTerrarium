@@ -8,7 +8,6 @@ from rich.text import Text
 
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_AI, ICON_AI
 
-# Markers that indicate the buffer has markdown-worthy structure.
 _MARKDOWN_HINTS = ("```", "**", "__", "##", "- ", "* ", "1. ", "> ", "[", "`")
 
 
@@ -17,13 +16,7 @@ def _looks_like_markdown(text: str) -> bool:
 
 
 class PrefixedRenderable:
-    """Render an inner renderable with an icon prefixing the first line.
-
-    Used to keep the assistant message format consistent: ``◆ first line``
-    inline, with subsequent lines indented to align under the text. Without
-    this, ``Group(header, body)`` puts the icon on its own line and the
-    body starts on the next line — which is what the user complained about.
-    """
+    """Prefix the first rendered line and align continuation lines beneath it."""
 
     def __init__(
         self,
@@ -53,13 +46,7 @@ class PrefixedRenderable:
 
 
 class AssistantMessageBlock:
-    """Streaming text accumulator for the live region.
-
-    During streaming, ``__rich__`` returns a Text with all accumulated
-    chunks (cheap, no markdown re-parse on every chunk). When the message
-    is complete, ``to_committed()`` returns rich.markdown.Markdown if the
-    buffer looks markdown-worthy.
-    """
+    """Accumulate streamed assistant text and render Markdown on commit."""
 
     def __init__(self):
         self._buffer: str = ""
@@ -89,13 +76,7 @@ class AssistantMessageBlock:
         return Group(Text.assemble(header, body))
 
     def to_committed(self) -> RenderableType:
-        """Return the renderable to print to scrollback when message is done.
-
-        Uses Rich Markdown if the buffer contains markdown markers,
-        otherwise falls back to plain text. Either way the icon (◆) is
-        rendered ON THE SAME LINE as the first line of the body via
-        PrefixedRenderable, so the layout matches the live streaming form.
-        """
+        """Render completed text with Markdown detection and aligned prefixing."""
         if self.is_empty:
             return Text("")
         if _looks_like_markdown(self._buffer):

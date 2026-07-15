@@ -1,24 +1,12 @@
-"""Canonical Drive routing / home / fencing helpers for multi-node mode.
+"""Resolve and fence canonical Drive homes in multi-node mode.
 
-A Drive is graph-scoped and its **home** is the worker that owns the graph's
-repository (design §10.1). ``MultiNodeTerrariumService`` therefore needs, on top
-of the creature/graph routing it already has:
-
-- a ``drive_id -> home_node`` route cache that re-resolves a stale *active*
-  entry on a ``not_hosted``/``not_found`` response, but refuses an unfenced move
-  to a different worker (design §10.3);
-- a delivery-id route cache for admin replay (which carries no graph id);
-- fan-out list that unions worker results and dedupes by Drive id, treating a
-  Drive claimed by two different homes as a hard integrity error (a
-  double-writer would corrupt canonical state);
-- a fencing/lease registry so an old home's late dispatch is rejected after a
-  graph moved (design §10.3).
-
-These helpers take the service as their first argument (mirroring
-:mod:`terrarium.multi_node_routing`) so they can mutate the service's route
-cache without the service class importing this module's internals. Everything
-is deterministic: token issuance uses an injected counter, never wall-clock or
-random, so unit tests pin exact fencing behavior.
+A drive's canonical home is the worker owning its graph repository. Routing
+tracks drive, delivery, and proposal homes, verifies uniqueness across connected
+workers, and quarantines IDs claimed by multiple homes. Fan-out reads union worker
+results but treat duplicate writers as an integrity failure. Because delivery
+fencing is not yet integrated end to end, a move to a different home is refused
+rather than risking late dispatch from the previous writer. Helpers accept the
+service explicitly and use deterministic, injected fencing tokens.
 """
 
 from collections.abc import Awaitable, Callable
@@ -43,18 +31,13 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Routing probes read a Drive purely to locate its home; the real op re-fetches
-# with the caller's actor, so a fixed system actor here never leaks authority.
+# Probes locate canonical state only; the routed operation reauthorizes using the
+# caller's actor, so probe identity grants no mutation authority.
 ROUTE_ACTOR: ActorRef = SYSTEM_ACTOR
 
 
 class DriveHomeUnavailableError(DriveError):
-    """The Drive's home node is disconnected; its canonical state is offline.
-
-    Distinct from :class:`DriveNotFoundError` (the Drive does not exist anywhere)
-    so the host can report *unavailable/recovery* rather than *gone* when a home
-    worker drops (design §10.2). The host never promotes a replica to writer.
-    """
+    """Indicate that canonical state is offline rather than absent."""
 
     def __init__(self, drive_id: str, *, home_node: str | None = None) -> None:
         super().__init__(
@@ -66,27 +49,16 @@ class DriveHomeUnavailableError(DriveError):
 
 
 class DriveRouteIntegrityError(DriveError):
-    """Two connected homes both claim one Drive id — a double-writer hazard.
-
-    A Drive must have exactly one canonical writer (design §10.1); if a fan-out
-    sees the same ``drive_id`` on two nodes something is badly wrong (a botched
-    move, a duplicated repository) and the host must fail loudly rather than pick
-    one and race two dispatchers.
-    """
+    """Indicate that multiple workers claim the same canonical object."""
 
 
 class DriveHomeMovedError(DriveError):
-    """A Drive's home moved to a different worker (old home connected or gone).
+    """Reject movement to a new worker while stale-home delivery is unfenced.
 
-    Stale-home fencing (design §10.3) is defined (:class:`FencingRegistry`) but
-    NOT integrated into delivery claim/admission in v1, so a late dispatch from
-    the old home cannot be mechanically rejected — whether the old home departed
-    or is merely no longer the writer. Rather than silently route to the new home
-    and risk a double-dispatch, the host refuses every (unfenced) home movement:
-    home resolution refuses a departed-old-home replacement, and
-    :func:`route_drive_write` refuses a mid-write re-resolve to a different
-    connected worker. Remove these guards only once fencing tokens are
-    issued/validated on the worker delivery path.
+    Fencing tokens exist but are not yet validated throughout delivery admission,
+    so a late dispatch from the old writer cannot be rejected mechanically. Home
+    resolution and routed writes therefore refuse every cross-worker movement
+    until end-to-end fencing is available.
     """
 
     def __init__(self, drive_id: str, *, old_home: str, new_home: str) -> None:
@@ -101,13 +73,7 @@ class DriveHomeMovedError(DriveError):
 
 
 class DriveRouteIndeterminateError(DriveError):
-    """A home probe failed, so single-writer uniqueness cannot be established.
-
-    A partial scan must never be trusted (design §10.1): if any connected node
-    could not answer whether it hosts the id, the resolver withholds a home
-    rather than routing on incomplete evidence (a silently-skipped node could be
-    the second writer).
-    """
+    """Indicate that incomplete probes cannot establish a unique home."""
 
     def __init__(self, kind: str, object_id: str, node_id: str) -> None:
         super().__init__(
@@ -121,26 +87,18 @@ class DriveRouteIndeterminateError(DriveError):
 
 @dataclass(frozen=True, slots=True)
 class VerifiedHome:
-    """A home node whose single-writer uniqueness was verified at a topology gen.
-
-    ``generation`` is the topology token the verification was bound to; a cached
-    entry is only trusted on a later resolve while that token still matches.
-    """
+    """Unique object home verified for one membership generation."""
 
     node_id: str
     generation: Any
 
 
-# Route cache
-
-
 class DriveRouteCache:
-    """``drive_id`` / ``delivery_id`` → home ``node_id`` with sticky last-home.
+    """Cache active object homes while retaining the last known drive home.
 
-    ``_active`` maps ids to a *currently connected* home; it is purged when a
-    node drops. ``_last`` is sticky: it survives a purge so the service can tell
-    "home went offline" (report unavailable) from "Drive never existed" (report
-    not-found). Both are warmed by fan-out reads and the routed op path.
+    Active routes are removed when nodes disconnect. Sticky drive history
+    distinguishes temporarily unavailable canonical state from an ID that was
+    never observed. Fan-out reads and routed operations both warm the cache.
     """
 
     def __init__(self) -> None:
@@ -148,9 +106,10 @@ class DriveRouteCache:
         self._last_drive: dict[str, str] = {}
         self._active_delivery: dict[str, str] = {}
         self._active_proposal: dict[str, str] = {}
-        # (kind, object_id) -> topology generation the active entry was bound at.
+        # An active route is trusted only in the membership generation that
+        # verified its uniqueness.
         self._generation: dict[tuple[str, str], Any] = {}
-        # (kind, object_id) pairs a duplicate-home probe found; never fast-pathed.
+        # Duplicate claims remain quarantined until a complete probe finds one home.
         self._quarantined: set[tuple[str, str]] = set()
 
     def _active_map(self, kind: str) -> dict[str, str]:
@@ -163,7 +122,6 @@ class DriveRouteCache:
                 return self._active_proposal
         raise KeyError(kind)
 
-    # -- generic kind-keyed surface (used by resolve_unique_home) --------
     def active_home(self, kind: str, object_id: str) -> str | None:
         return self._active_map(kind).get(object_id)
 
@@ -186,14 +144,13 @@ class DriveRouteCache:
         return (kind, object_id) in self._quarantined
 
     def quarantine(self, kind: str, object_id: str) -> None:
-        """Mark an id duplicate-claimed and drop any trusted active route to it."""
+        """Quarantine a duplicate claim and revoke its active route."""
         self._quarantined.add((kind, object_id))
         self.invalidate(kind, object_id)
 
     def clear_quarantine(self, kind: str, object_id: str) -> None:
         self._quarantined.discard((kind, object_id))
 
-    # -- drives ----------------------------------------------------------
     def get_drive_home(self, drive_id: str) -> str | None:
         return self.active_home("drive", drive_id)
 
@@ -201,15 +158,13 @@ class DriveRouteCache:
         return self._last_drive.get(drive_id)
 
     def put_drive_home(self, drive_id: str, node_id: str) -> None:
-        # Legacy/manual warm carries no generation (None = topology-wildcard):
-        # trusted while its node stays connected. Resolver/fan-out warms bind a
-        # real generation via bind_home.
+        # Manual warming has no generation proof and lasts only while the node
+        # remains connected; normal resolution records a concrete generation.
         self.bind_home("drive", drive_id, node_id, generation=None)
 
     def invalidate_drive(self, drive_id: str) -> None:
         self.invalidate("drive", drive_id)
 
-    # -- deliveries ------------------------------------------------------
     def get_delivery_home(self, delivery_id: str) -> str | None:
         return self.active_home("delivery", delivery_id)
 
@@ -219,16 +174,14 @@ class DriveRouteCache:
     def invalidate_delivery(self, delivery_id: str) -> None:
         self.invalidate("delivery", delivery_id)
 
-    # -- proposals -------------------------------------------------------
     def get_proposal_home(self, proposal_id: str) -> str | None:
         return self.active_home("proposal", proposal_id)
 
     def put_proposal_home(self, proposal_id: str, node_id: str) -> None:
         self.bind_home("proposal", proposal_id, node_id, generation=None)
 
-    # -- membership ------------------------------------------------------
     def purge_node(self, node_id: str) -> None:
-        """Drop *active* routes to a departed worker; keep the sticky last-home."""
+        """Drop routes to a departed worker while retaining drive history."""
         for did in [d for d, n in self._active_drive.items() if n == node_id]:
             self.invalidate("drive", did)
         for xid in [d for d, n in self._active_delivery.items() if n == node_id]:
@@ -237,16 +190,11 @@ class DriveRouteCache:
             self.invalidate("proposal", pid)
 
 
-# Resolution + routing (operate on a MultiNodeTerrariumService)
-
-
 def _topology_generation(service: Any) -> int:
-    """Return the service's monotonic worker-membership epoch.
+    """Return a generation that changes on worker join, leave, or replacement.
 
-    The epoch changes on every real join/leave, including a reconnect under the
-    same node id.  Tests and lightweight protocol fakes which predate the epoch
-    get a private identity-based counter; production services always own
-    ``_membership_epoch`` directly.
+    Lightweight service fakes without a native membership epoch receive an
+    identity-based fallback generation.
     """
     epoch = getattr(service, "_membership_epoch", None)
     if epoch is not None:
@@ -272,13 +220,11 @@ def _verdict(
     generation: Any,
     fence: Callable[[str], None] | None,
 ) -> VerifiedHome | None:
-    """The single uniqueness verdict for a probed claimant set.
+    """Convert a complete claimant set into one authoritative home verdict.
 
-    Exactly one claimant binds (and returns) a :class:`VerifiedHome`; more than
-    one quarantines the id (dropping any trusted route) and raises
-    :class:`DriveRouteIntegrityError`; none clears the active route and returns
-    ``None``. ``fence`` may veto a unique home (drive home-movement, R1-16)
-    BEFORE it is cached, so a refused move never poisons the cache.
+    One claimant binds, multiple claimants quarantine and raise, and no claimant
+    clears the active route. A movement fence runs before caching so a refused
+    home cannot poison trusted routing state.
     """
     if len(claimants) > 1:
         cache.quarantine(kind, object_id)
@@ -313,14 +259,11 @@ async def resolve_unique_home(
     fence: Callable[[str], None] | None = None,
     use_cache: bool = True,
 ) -> VerifiedHome | None:
-    """The one authoritative home resolver for drives / deliveries / proposals.
+    """Resolve a unique object home across all connected workers.
 
-    Probes ALL connected nodes (never first-wins) and delegates the verdict to
-    :func:`_verdict`. A quarantined id is never fast-pathed; an otherwise-usable
-    cache entry is trusted only while bound to the current ``generation`` (a
-    ``None`` generation is a legacy topology-wildcard). A probe that raises is
-    INDETERMINATE (:class:`DriveRouteIndeterminateError`) — a partial scan is
-    never trusted. ``use_cache=False`` forces a full re-evaluation (fan-out).
+    Resolution never accepts the first claimant. Quarantined IDs require a full
+    probe, cached routes require the current generation, and any probe failure
+    makes uniqueness indeterminate. ``use_cache=False`` always reprobes.
     """
     if use_cache and not cache.is_quarantined(kind, object_id):
         home = cache.active_home(kind, object_id)
@@ -333,8 +276,8 @@ async def resolve_unique_home(
         try:
             hosted = await probe(node_id)
         except Exception as exc:
-            # Indeterminate evidence revokes mutation authority but deliberately
-            # preserves quarantine: only a later complete unique probe may clear it.
+            # Partial evidence cannot authorize mutation; quarantine remains
+            # until a later complete probe proves a unique home.
             cache.quarantine(kind, object_id)
             raise DriveRouteIndeterminateError(kind, object_id, node_id) from exc
         if hosted:
@@ -354,7 +297,7 @@ async def _resolve_service_home(
     fence: Callable[[str], None] | None = None,
     use_cache: bool = True,
 ) -> VerifiedHome | None:
-    """Resolve against one stable membership epoch, retrying one raced scan."""
+    """Resolve within a stable membership generation, retrying one raced change."""
     for attempt in range(2):
         generation = _topology_generation(service)
         nodes = list(service._remotes.keys())
@@ -393,15 +336,11 @@ async def resolve_drive_home(
     actor: ActorRef = ROUTE_ACTOR,
     use_cache: bool = True,
 ) -> str:
-    """Resolve the connected worker that hosts ``drive_id``.
+    """Resolve the unique connected worker hosting a drive.
 
-    Routes through :func:`resolve_unique_home`: a trusted, generation-current
-    cache entry returns immediately; otherwise every connected worker is probed
-    and exactly one must claim it (two is a :class:`DriveRouteIntegrityError`;
-    none, with a sticky last-home now offline, is a
-    :class:`DriveHomeUnavailableError`; none otherwise is a
-    :class:`DriveNotFoundError`). The R1-16 fence refuses an unfenced move to a
-    worker other than the Drive's known prior home BEFORE the cache is written.
+    No claimant means unavailable when the sticky home is offline, otherwise not
+    found. Multiple claimants are an integrity error. Movement to a different
+    known home is refused before updating the cache.
     """
     cache: DriveRouteCache = service._drive_routes
 
@@ -435,12 +374,10 @@ async def resolve_drive_home(
 
 
 async def resolve_delivery_home(service: Any, delivery_id: str) -> str:
-    """Resolve the connected worker hosting delivery ``delivery_id`` (admin replay).
+    """Resolve the unique worker hosting a delivery for administrative replay.
 
-    Admin replay carries no graph id, so the delivery is located by probing every
-    connected worker through the SAME uniqueness resolver as drives: two workers
-    claiming one delivery id is a :class:`DriveRouteIntegrityError` (quarantined),
-    never a first-wins accept. No claimant is a :class:`DriveDeliveryError`.
+    Replay has no graph ID, so all connected workers are probed. Duplicate claims
+    quarantine the delivery; no claimant raises :class:`DriveDeliveryError`.
     """
     cache: DriveRouteCache = service._drive_routes
 
@@ -461,7 +398,7 @@ async def resolve_delivery_home(service: Any, delivery_id: str) -> str:
 
 
 async def resolve_proposal_home(service: Any, proposal_id: str) -> str:
-    """Freshly verify the single worker holding a pending proposal."""
+    """Verify the unique worker holding a pending proposal."""
     cache: DriveRouteCache = service._drive_routes
 
     async def probe(node_id: str) -> bool:
@@ -487,28 +424,23 @@ async def route_drive_write(
     *,
     actor: ActorRef = ROUTE_ACTOR,
 ) -> Any:
-    """Route a per-Drive mutation to the Drive's home; never move it mid-write.
+    """Route a mutation to one verified home without moving mid-write.
 
-    A stale *active* cache can point at a node that no longer hosts the Drive, so
-    on ``drive_not_found`` we invalidate and re-resolve once. Re-resolution refuses
-    (raises :class:`DriveHomeMovedError`) when the Drive now lives on a DIFFERENT
-    worker — an unfenced A→B home movement a late old-home dispatch could not be
-    fenced against (R1-16) — and does so WITHOUT rewriting the home cache, so a
-    refused move leaves the trusted/sticky home untouched and every later write
-    stays refused too. A same-home re-resolve that still cannot find the Drive
-    re-raises: it is genuinely gone. This helper therefore never executes a write
-    on a worker other than the one first resolved.
+    Mutation routing always reprobes because ownership can move without a
+    membership change. If the selected worker reports not found, one re-resolution
+    distinguishes genuine disappearance from a refused cross-worker move. The
+    write is never retried on a second worker.
     """
-    # Claim ownership may change without a membership event. Mutations therefore
-    # require fresh complete evidence rather than a cache fast path.
+    # Ownership can change without membership churn, so mutation authority
+    # requires fresh complete evidence.
     node_id = await resolve_drive_home(service, drive_id, actor=actor, use_cache=False)
     try:
         return await fn(service.service_for(node_id))
     except DriveNotFoundError:
         service._drive_routes.invalidate_drive(drive_id)
-        # A moved Drive raises DriveHomeMovedError here (and leaves the cache
-        # unpoisoned); a same-home re-resolve returns and we re-raise the genuine
-        # not-found. Either way the write never runs on a second worker.
+        # Re-resolution either refuses movement without caching it or confirms
+        # genuine disappearance at the same home; the write never reaches a
+        # second worker.
         await resolve_drive_home(service, drive_id, actor=actor)
         raise
 
@@ -516,18 +448,11 @@ async def route_drive_write(
 async def fanout_list_views(
     service: Any, call: Callable[[Any], Any]
 ) -> "tuple[DriveView, ...]":
-    """Fan out a Drive *list* read; union + dedupe by Drive id, warm the cache.
+    """Union list results by drive ID and warm only uniquely verified routes.
 
-    A Drive id reported by two different connected homes is a hard
-    :class:`DriveRouteIntegrityError` (double writer). Per-worker failures are
-    logged and skipped so one unreachable worker cannot blank the whole list.
-
-    Every listed Drive's cache warm goes through the SAME uniqueness resolver as
-    a routed op (``use_cache=False`` forces a fresh verdict on the listing), so a
-    duplicate-home Drive quarantines the id and drops any trusted route to it
-    (R3b) rather than warming one arbitrary home — even one already cached. The
-    R1-16 fence still leaves a moved (changed-home) Drive un-warmed; a first
-    observation or unchanged home warms normally.
+    Worker failures are logged and skipped for result availability, but incomplete
+    evidence quarantines affected routes. Duplicate homes raise an integrity error,
+    and refused home movement leaves the cache unwarmed.
     """
     cache: DriveRouteCache = service._drive_routes
     by_id: dict[str, Any] = {}
@@ -573,7 +498,8 @@ async def fanout_list_views(
                 use_cache=False,
             )
         except DriveHomeMovedError:
-            continue  # R1-16: leave a moved Drive fenced, not repopulated.
+            # Refused movement must leave trusted routing state empty.
+            continue
         except DriveRouteIntegrityError as exc:
             integrity = integrity or exc
     if integrity is not None:

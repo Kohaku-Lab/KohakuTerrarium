@@ -1,14 +1,9 @@
 """Canonical MCP server registry — the ONE parser for ``mcp_servers.yaml``.
 
-P2 from the studio-cleanup investigation: there used to be three
-independent readers (``routes/settings.py``, ``cli/config_mcp.py``,
-``cli/mcp.py``) for the same on-disk file. This module is now the only
-home for that read/write logic. CLI, HTTP, and the per-agent lister all
-delegate here.
-
-File location: ``~/.kohakuterrarium/mcp_servers.yaml``. Format: a YAML
-list of server dicts. Tolerant: malformed files / missing files
-collapse to ``[]``.
+This module is the shared persistence and validation surface used by CLI, HTTP,
+and per-agent listing adapters. The registry is a YAML list at
+``config_dir() / "mcp_servers.yaml"``; missing or malformed files degrade to an
+empty registry.
 """
 
 import json
@@ -19,23 +14,23 @@ import yaml
 
 from kohakuterrarium.utils.config_dir import config_dir
 
-# Import-time default — back-compat for display callers.  The live
-# read / write path goes through :func:`mcp_config_path`.
+# Retain legacy display constants; live persistence resolves through
+# :func:`mcp_config_path` so configuration-directory changes remain visible.
 KT_DIR = Path.home() / ".kohakuterrarium"
 MCP_SERVERS_PATH = KT_DIR / "mcp_servers.yaml"
 
 
 def mcp_config_path() -> Path:
-    """The ``mcp_servers.yaml`` path, honouring ``KT_CONFIG_DIR``.
+    """Return the current global MCP registry path.
 
-    Resolved fresh each call so test isolation / operator re-homing
-    works — a module constant computed once at import would not.
+    Resolving the config directory per call preserves test isolation and runtime
+    changes to ``KT_CONFIG_DIR``.
     """
     return config_dir() / "mcp_servers.yaml"
 
 
 def load_servers() -> list[dict[str, Any]]:
-    """Load the global registry. Tolerant — returns ``[]`` on any error."""
+    """Load the global registry, returning an empty list on any read error."""
     path = mcp_config_path()
     if not path.exists():
         return []
@@ -48,7 +43,7 @@ def load_servers() -> list[dict[str, Any]]:
 
 
 def save_servers(servers: list[dict[str, Any]]) -> None:
-    """Write the global registry, creating parent dirs as needed."""
+    """Persist the global registry, creating its parent directory as needed."""
     path = mcp_config_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -56,7 +51,7 @@ def save_servers(servers: list[dict[str, Any]]) -> None:
 
 
 def upsert_server(server: dict[str, Any]) -> dict[str, Any]:
-    """Add or replace ``server`` (matched by ``name``). Returns the saved dict."""
+    """Add or replace a server by name and return the persisted record."""
     if not server.get("name"):
         raise ValueError("Name is required")
     servers = load_servers()
@@ -67,7 +62,7 @@ def upsert_server(server: dict[str, Any]) -> dict[str, Any]:
 
 
 def delete_server(name: str) -> bool:
-    """Remove a server by name. Returns False if not found."""
+    """Remove a server by name and report whether it existed."""
     servers = load_servers()
     filtered = [s for s in servers if s.get("name") != name]
     if len(filtered) == len(servers):
@@ -83,19 +78,14 @@ def find_server(name: str) -> dict[str, Any] | None:
     return None
 
 
-# CLI prompt helpers ---------------------------------------------------
-
-
 def prompt_server_dict(
     existing: dict[str, Any] | None,
     prompt: Callable[[str, str], str],
 ) -> dict[str, Any]:
-    """Interactively build an MCP server dict, validating each field.
+    """Build and validate an MCP server record through a prompt callback.
 
-    ``prompt(label, default)`` is the existing
-    :func:`kohakuterrarium.cli.config_prompts.prompt` callable.
-    Raises ``ValueError`` on bad input — the caller should catch and
-    surface the message.
+    ``prompt(label, default)`` supplies each raw field. Invalid JSON, field
+    shapes, names, and timeouts raise ``ValueError`` for the caller to present.
     """
     existing = existing or {}
     name = prompt("Name", existing.get("name", ""))
@@ -154,17 +144,13 @@ def prompt_server_dict(
     }
 
 
-# Per-agent MCP lister (was ``cli/mcp.py:mcp_list_cli``) ---------------
-
-
 def load_agent_mcp_servers(
     agent_path: str,
 ) -> tuple[list[dict[str, Any]], Path | None, str | None]:
-    """Read an agent's ``config.yaml`` and return its declared MCP servers.
+    """Return an agent config's declared MCP servers, source path, and error.
 
-    Returns ``(servers, config_file, error_message)``. On success
-    ``error_message`` is ``None`` and ``config_file`` is the path that
-    was read.
+    Successful reads return ``None`` for the error. Missing paths, missing config
+    files, and decoding failures return an empty server list with a message.
     """
     path = Path(agent_path)
     if not path.exists():

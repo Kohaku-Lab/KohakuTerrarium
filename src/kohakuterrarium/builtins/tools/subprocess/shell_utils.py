@@ -7,7 +7,7 @@ import sys
 
 
 async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
-    """Terminate a subprocess and its children best-effort."""
+    """Terminate a process tree, escalating after bounded graceful waits."""
     try:
         if process.returncode is not None:
             return

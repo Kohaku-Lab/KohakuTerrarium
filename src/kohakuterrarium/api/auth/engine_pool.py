@@ -1,25 +1,9 @@
-"""Per-user :class:`Terrarium` instances with LRU eviction.
+"""Map user identities to isolated Terrarium engines with bounded retention.
 
-The pool is the ONE place where ``user_id`` selects which engine a
-request operates against.  Below the pool, every component
-(Studio, terrarium runtime, session store, …) is single-tenant — the
-exact same code that runs in standalone mode.
-
-Capacity policy:
-
-- ``max_active`` — cap on the number of live engines.  Evicts the
-  oldest when exceeded (LRU on the per-user ``_last_used`` clock).
-- ``idle_timeout_s`` — engines untouched for this long are torn down
-  by a periodic reaper task started when the pool is constructed.
-
-The anonymous slot (``user_id is None``) is used when ``multi_user``
-is off — every request shares one engine, preserving the standalone
-boot behaviour.
-
-Concurrency: ``get_or_create`` serialises engine construction with an
-``asyncio.Lock`` so two concurrent requests for the same new user
-build at most one engine.  Eviction runs under the same lock to
-prevent racing a teardown against an in-flight request.
+The pool is the tenancy boundary; downstream Studio, Terrarium, and session code
+remains single-tenant. Capacity uses LRU eviction, idle engines are reaped, and the
+anonymous key preserves a shared-engine slot. A shared lock serializes construction
+and registry mutation, while slow shutdown work runs after releasing the lock.
 """
 
 import asyncio
@@ -40,22 +24,14 @@ _ANONYMOUS_KEY = "_anon"
 
 
 def _user_session_dir(user_id: int | None) -> Path:
-    """Resolve the on-disk session directory for ``user_id``.
-
-    ``None`` → the shared ``<config_dir>/sessions/`` (standalone mode).
-    Otherwise ``<config_dir>/users/<user_id>/sessions/``.
-    """
+    """Return the shared session directory or the user's isolated directory."""
     if user_id is None:
         return config_dir() / "sessions"
     return config_dir() / "users" / str(int(user_id)) / "sessions"
 
 
 class EnginePool:
-    """LRU-evicting registry of per-user :class:`Terrarium` engines.
-
-    Build one at app startup, hand it to dependencies via
-    ``app.state.engine_pool``, and tear it down in lifespan shutdown.
-    """
+    """Own per-user Terrarium instances from app startup through shutdown."""
 
     def __init__(
         self,
@@ -66,54 +42,28 @@ class EnginePool:
     ) -> None:
         self._max_active = max(1, int(max_active))
         self._idle_timeout_s = max(0, int(idle_timeout_s))
-        # Resolves the shared operator Drive policy into explicit Terrarium
-        # kwargs (design §8.4). Called ONCE per engine build so each per-user
-        # engine gets a *fresh immutable* resolution — no registration/config
-        # instance is shared across users. ``None`` -> Drive-disabled engines.
+        # Resolve a fresh immutable Drive policy for each engine so users never
+        # share registration or configuration instances.
         self._drive_resolver = drive_resolver
         self._engines: dict[str, Terrarium] = {}
         self._last_used: dict[str, float] = {}
-        # Threading lock — sync get_or_create() can be called from
-        # both sync and async code paths.  Engine construction is
-        # bounded (a few hundred ms at most) so blocking briefly is
-        # fine; an asyncio.Lock would force the entire dependency
-        # graph onto async code.
+        # A threading lock supports synchronous dependency and CLI callers without
+        # forcing the service-resolution graph to become asynchronous.
         self._lock = threading.Lock()
         self._reaper_task: asyncio.Task | None = None
-        # Stamped so tests can assert eviction order deterministically.
+        # The clock is replaceable so recency ordering can be deterministic.
         self._monotonic = time.monotonic
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+    # Engine lookup and lifecycle operations.
 
     def get_or_create(self, user_id: int | None) -> Terrarium:
-        """Return the (cached or freshly-built) engine for ``user_id``.
-
-        Updates the per-user LRU timestamp on every call.  When the
-        pool is at capacity, evicts the oldest entry before installing
-        the new one.
-
-        Synchronous — :func:`api.deps.get_service` and CLI code paths
-        both need this path without awaiting.
-        """
+        """Return the user's engine, touching LRU state and evicting at capacity."""
         key = self._key(user_id)
         engine_to_shut_down: Terrarium | None = None
         with self._lock:
             if key in self._engines:
-                # Touch path: pop + reinsert so the dict's insertion
-                # order tracks LRU recency.  Without the pop, two
-                # back-to-back ``get_or_create`` calls on Windows can
-                # both return identical ``time.monotonic()`` values
-                # (the kernel scheduler tick caps resolution at
-                # ~100ns; float precision near boot-time then makes
-                # them indistinguishable), so the timestamp-based
-                # tie-break collapses to dict iteration order — and
-                # without the pop, that order is INSERTION order,
-                # which is the opposite of LRU.  Pop + reinsert
-                # ensures iteration order is "oldest first", so
-                # ``min(_last_used, key=get)`` evicts the genuinely-
-                # LRU entry even when timestamps tie.
+                # Reinsert recency state so dict order breaks equal-clock ties in LRU
+                # order; monotonic timestamps can repeat on some platforms.
                 del self._last_used[key]
                 self._last_used[key] = self._monotonic()
                 return self._engines[key]
@@ -133,9 +83,7 @@ class EnginePool:
                 session_dir=str(session_dir),
                 live_count=len(self._engines),
             )
-        # Shut down the evicted engine OUTSIDE the lock — shutdown
-        # can be slow (closes sessions, joins background tasks) and
-        # holding the lock would block every other engine request.
+        # Shutdown may close sessions and join tasks, so it must not hold the pool lock.
         if engine_to_shut_down is not None:
             _try_shutdown_sync(engine_to_shut_down)
         return engine
@@ -151,12 +99,9 @@ class EnginePool:
         return True
 
     def evict_others(self, keep: Terrarium | None) -> list[int | None]:
-        """Evict every pooled engine except ``keep``; return evicted user ids.
+        """Evict all engines except ``keep`` so they rebuild with current policy.
 
-        Shared host Drive settings apply live only to the requesting user's
-        engine under L4 (R1-30). The rest are left on stale policy, so evict them
-        here: each rebuilds from the freshly-persisted settings on its next
-        request. ``None`` in the returned list is the anonymous slot.
+        The returned identifiers include ``None`` for the anonymous shared slot.
         """
         with self._lock:
             victims = [k for k, e in self._engines.items() if e is not keep]
@@ -167,15 +112,7 @@ class EnginePool:
         return [None if k == _ANONYMOUS_KEY else int(k) for k in victims]
 
     def evict_all(self) -> int:
-        """Shut down every live engine.  Returns the count torn down.
-
-        Synchronous — best-effort fire-and-forget for async engines
-        (loop.create_task without await).  Use :meth:`evict_all_async`
-        from FastAPI lifespan shutdown to actually wait for async
-        teardown to complete; without that the loop closes before the
-        engine's shutdown task drains, surfacing as "Task exception
-        was never retrieved" warnings.
-        """
+        """Remove every engine and start best-effort shutdown without awaiting it."""
         with self._lock:
             keys = list(self._engines)
             engines = [self._evict_key_locked(k) for k in keys]
@@ -185,11 +122,7 @@ class EnginePool:
         return len(keys)
 
     async def evict_all_async(self) -> int:
-        """Async variant — awaits each engine's ``shutdown()``
-        coroutine.  Preferred from lifespan shutdown so file handles
-        and background tasks finish closing before the loop tears
-        down.
-        """
+        """Remove every engine and await shutdown before the event loop closes."""
         with self._lock:
             keys = list(self._engines)
             engines = [self._evict_key_locked(k) for k in keys]
@@ -199,15 +132,11 @@ class EnginePool:
         return len(keys)
 
     async def start_reaper(self) -> None:
-        """Spawn the periodic idle-eviction task.
-
-        Called once at app startup.  Idempotent — calling twice is a
-        no-op.
-        """
+        """Start the idempotent idle-engine reaper when idle expiry is enabled."""
         if self._reaper_task is not None and not self._reaper_task.done():
             return
         if self._idle_timeout_s <= 0:
-            return  # disabled
+            return  # A non-positive timeout disables idle eviction.
         self._reaper_task = asyncio.create_task(self._run_reaper())
 
     async def stop_reaper(self) -> None:
@@ -224,9 +153,7 @@ class EnginePool:
         """Snapshot of currently-pooled user ids.  Diagnostic only."""
         return [None if k == _ANONYMOUS_KEY else int(k) for k in self._engines]
 
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
+    # Locked registry primitives and idle reaping.
 
     def _key(self, user_id: int | None) -> str:
         if user_id is None:
@@ -234,8 +161,7 @@ class EnginePool:
         return str(int(user_id))
 
     def _evict_oldest_locked(self) -> Terrarium | None:
-        """Pop the LRU entry from the dict.  Caller shuts it down
-        OUTSIDE the lock."""
+        """Remove the least-recently-used engine; the caller shuts it down unlocked."""
         if not self._engines:
             return None
         oldest_key = min(self._last_used, key=self._last_used.get)
@@ -253,24 +179,13 @@ class EnginePool:
         return engine
 
     async def _run_reaper(self) -> None:  # pragma: no cover - sleep-bounded loop body
-        """Periodic sweep of idle engines.
-
-        Wakes once per ``idle_timeout_s / 2`` (min 30s) so eviction
-        latency is at most half the configured timeout.  Cancelled
-        cleanly on shutdown.  The loop body is excluded from coverage
-        because driving it deterministically requires either
-        time-mocking the asyncio sleep or running for the full
-        interval — neither warrants the test complexity.  The
-        eviction primitives it composes (``_evict_key_locked``,
-        ``_try_shutdown_sync``) are independently tested.
-        """
+        """Sweep idle engines at half-timeout intervals with a 30-second floor."""
         interval = max(30, self._idle_timeout_s // 2)
         try:
             while True:
                 await asyncio.sleep(interval)
                 cutoff = self._monotonic() - self._idle_timeout_s
-                # Collect stale keys + the engines to teardown under
-                # the lock, then run shutdowns outside.
+                # Registry removal is atomic under the lock; shutdown remains unlocked.
                 to_shutdown: list[Terrarium] = []
                 with self._lock:
                     stale = [k for k, t in self._last_used.items() if t < cutoff]
@@ -285,10 +200,7 @@ class EnginePool:
 
 
 def _try_shutdown_sync(engine: Terrarium) -> None:
-    """Best-effort engine shutdown — engines may expose async or sync
-    ``shutdown``.  We don't propagate exceptions because shutdown is
-    a cleanup path; a crash here shouldn't cascade.
-    """
+    """Start sync or async engine shutdown without propagating cleanup failures."""
     shutdown = getattr(engine, "shutdown", None)
     if shutdown is None:  # pragma: no cover - production Terrarium always has shutdown
         return
@@ -297,29 +209,19 @@ def _try_shutdown_sync(engine: Terrarium) -> None:
         if asyncio.iscoroutine(
             result
         ):  # pragma: no cover - timing-dependent path; covered by integration runs
-            # Engine shutdown is async — schedule on a loop.
+            # Preserve non-blocking eviction when an event loop is already running.
             try:
                 loop = asyncio.get_running_loop()
                 loop.create_task(result)
             except RuntimeError:
-                # No running loop — drive to completion synchronously.
-                # ``asyncio.run`` would conflict with a parent loop if
-                # there were one; we already checked.
+                # Without a running loop, shutdown must complete synchronously.
                 asyncio.run(result)
     except Exception:  # pragma: no cover - defensive
         logger.exception("engine_pool: shutdown raised")
 
 
 async def _try_shutdown_async(engine: Terrarium) -> None:
-    """Async variant — actually awaits async ``shutdown`` coroutines.
-
-    Use this from FastAPI lifespan shutdown so the engine's teardown
-    completes before the event loop closes.  The sync variant uses
-    ``create_task`` and returns immediately, which is fine for the
-    LRU-eviction hot path (we don't want to block the next
-    ``get_or_create`` on shutdown latency) but wrong at lifespan
-    shutdown where we DO want to wait.
-    """
+    """Await engine shutdown so lifecycle teardown completes before loop closure."""
     shutdown = getattr(engine, "shutdown", None)
     if shutdown is None:  # pragma: no cover - production Terrarium always has shutdown
         return

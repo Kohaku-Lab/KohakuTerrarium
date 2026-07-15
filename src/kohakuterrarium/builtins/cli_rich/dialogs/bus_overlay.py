@@ -25,13 +25,7 @@ logger = get_logger(__name__)
 
 
 class BusInteractiveOverlay:
-    """Modal overlay for Phase B interactive OutputEvents in the CLI.
-
-    The RichCLIApp owns one instance. ``open(event)`` pushes an event
-    onto the queue and makes the overlay ``visible`` if it wasn't
-    already. ``handle_key(name)`` consumes input while visible.
-    Submission calls ``router.submit_reply(...)``.
-    """
+    """Queue interactive output events and submit keyboard-driven replies."""
 
     def __init__(
         self,
@@ -39,12 +33,7 @@ class BusInteractiveOverlay:
         get_textarea_text: Any = None,
         clear_textarea: Any = None,
     ) -> None:
-        # ``get_router`` returns the OutputRouter; may not be wired at
-        # app init time. ``get_textarea_text`` / ``clear_textarea`` are
-        # accessors for the composer's textarea — used by ``ask_text``
-        # so the user types into the existing input field instead of a
-        # separate buffer (avoids fighting prompt_toolkit's key binding
-        # priority).
+        # Router and textarea access are resolved lazily because app wiring is staged.
         self._get_router = get_router
         self._get_textarea_text = get_textarea_text
         self._clear_textarea = clear_textarea
@@ -52,11 +41,8 @@ class BusInteractiveOverlay:
         self._queue: list[OutputEvent] = []
         self._current: OutputEvent | None = None
 
-        # Per-event ephemeral state.
-        self._option_index: int = 0  # for confirm + selection
-        self._multi_selected: set[str] = set()  # for selection multi=True
-
-    # ── Lifecycle ───────────────────────────────────────────────
+        self._option_index: int = 0
+        self._multi_selected: set[str] = set()
 
     def open(self, event: OutputEvent) -> None:
         """Queue an event; open if nothing is currently displayed."""
@@ -65,15 +51,12 @@ class BusInteractiveOverlay:
             self._activate_next()
 
     def close(self, *, dismiss_current: bool = True) -> None:
-        """Close the overlay. If ``dismiss_current`` and an event is
-        active, treat it as a cancel reply.
-        """
+        """Close the current event, optionally submitting cancellation."""
         if dismiss_current and self._current is not None:
             self._submit("cancel", values={})
         self._current = None
         self.visible = False
         self._reset_state()
-        # If more events are queued, open the next one.
         if self._queue:
             self._activate_next()
 
@@ -83,7 +66,6 @@ class BusInteractiveOverlay:
             return
         self._current = self._queue.pop(0)
         self._reset_state()
-        # Pre-populate option index from default if any.
         payload = self._current.payload or {}
         default_id = payload.get("default")
         options = self._options()
@@ -93,7 +75,6 @@ class BusInteractiveOverlay:
                     self._option_index = i
                     break
         if self._current.type == "ask_text" and self._clear_textarea:
-            # Pre-fill the textarea with the default value if any.
             default_text = str(payload.get("default", "") or "")
             try:
                 self._clear_textarea(default_text)
@@ -109,14 +90,7 @@ class BusInteractiveOverlay:
         self._multi_selected = set()
 
     def _options(self) -> list[dict[str, Any]]:
-        """Return the choosable options for the active event.
-
-        ``confirm`` and ``selection`` use ``payload.options``; ``card``
-        uses ``payload.actions``. We treat them uniformly so the same
-        navigation/submit machinery handles all three. ``link``-styled
-        card actions are filtered out — they open URLs externally and
-        don't submit a reply.
-        """
+        """Return replyable options for the active event."""
         if self._current is None:
             return []
         payload = self._current.payload or {}
@@ -124,8 +98,6 @@ class BusInteractiveOverlay:
             actions = payload.get("actions") or []
             return [a for a in actions if a.get("style") != "link"]
         return list(payload.get("options") or [])
-
-    # ── Keyboard ────────────────────────────────────────────────
 
     def handle_key(self, key: str) -> bool:
         """Consume a named key event. Returns ``True`` if consumed."""
@@ -139,27 +111,16 @@ class BusInteractiveOverlay:
         if et == "selection":
             return self._handle_selection_key(key)
         if et == "card":
-            # Cards-with-actions reuse the confirm key flow: arrow keys
-            # move the cursor, digits jump to an option, Enter submits,
-            # Esc cancels.
             return self._handle_confirm_key(key)
         return False
 
     def handle_text(self, char: str) -> bool:
-        """No-op — the overlay reuses the composer's textarea for text
-        input rather than maintaining a separate buffer. Kept for API
-        compatibility with the composer's text-handler pipeline.
-        """
+        """Leave printable text to the shared composer textarea."""
         return False
 
     def captures_input(self) -> bool:
-        """The overlay never captures printable characters directly:
-        ``ask_text`` reads from the composer's textarea on Enter,
-        ``confirm`` and ``selection`` only consume named keys.
-        """
+        """Return False because printable input stays in the composer."""
         return False
-
-    # ── Per-type key handlers ───────────────────────────────────
 
     def _handle_confirm_key(self, key: str) -> bool:
         options = self._options()
@@ -179,7 +140,6 @@ class BusInteractiveOverlay:
         if key == "escape":
             self.close()
             return True
-        # Number-key shortcut: 1, 2, …
         if key.isdigit():
             idx = int(key) - 1
             if 0 <= idx < len(options):
@@ -190,11 +150,7 @@ class BusInteractiveOverlay:
 
     def _handle_ask_text_key(self, key: str) -> bool:
         if key == "enter":
-            # Read the user's answer from the composer's textarea so
-            # we don't have to fight prompt_toolkit's key-binding
-            # priority. The app's textarea is the user's natural
-            # focus point; we just intercept Enter to mean "submit
-            # this answer to the awaiting tool."
+            # Enter submits the shared composer text to the pending event.
             text = ""
             if self._get_textarea_text:
                 try:
@@ -202,7 +158,6 @@ class BusInteractiveOverlay:
                 except Exception:
                     text = ""
             if not text.strip():
-                # Empty submit — let the user keep typing.
                 return True
             if self._clear_textarea:
                 try:
@@ -220,8 +175,7 @@ class BusInteractiveOverlay:
                     pass
             self.close()
             return True
-        # All other named keys (arrows, ctrl-*) — let composer/app
-        # handle for normal textarea editing while we're displaying.
+        # Other named keys retain normal composer editing behavior.
         return False
 
     def _handle_selection_key(self, key: str) -> bool:
@@ -244,7 +198,7 @@ class BusInteractiveOverlay:
             return True
         if key == "enter":
             if multi:
-                # Preserve original option order in the result.
+                # Preserve the event's option order in submitted values.
                 selected = [
                     str(o.get("id", ""))
                     for o in options
@@ -260,8 +214,6 @@ class BusInteractiveOverlay:
             self.close()
             return True
         return False
-
-    # ── Submission ──────────────────────────────────────────────
 
     def _submit(self, action_id: str, values: dict[str, Any]) -> None:
         if self._current is None:
@@ -281,8 +233,6 @@ class BusInteractiveOverlay:
             logger.warning(
                 "BusInteractiveOverlay submit failed", error=str(e), exc_info=True
             )
-
-    # ── Rendering ───────────────────────────────────────────────
 
     def render(self, width: int) -> str:
         if not self.visible or self._current is None:
@@ -311,8 +261,6 @@ class BusInteractiveOverlay:
         )
         console.print(panel, end="")
         return buf.getvalue().rstrip("\n")
-
-    # ── Per-type renderers ──────────────────────────────────────
 
     def _render_confirm(self) -> RenderableType:
         payload = self._current.payload or {}
@@ -439,14 +387,7 @@ class BusInteractiveOverlay:
         )
 
     def _render_card(self) -> RenderableType:
-        """Render an interactive card (title + body + fields + actions).
-
-        Cards with non-empty ``actions`` (excluding ``link`` style)
-        route through this overlay. The card body is shown first, then
-        the action buttons are listed with the same selection cursor
-        as confirm/selection. Number-key shortcuts and arrow keys work
-        identically.
-        """
+        """Render card content with replyable actions and link references."""
         payload = self._current.payload or {}
         title = payload.get("title", "")
         subtitle = payload.get("subtitle", "")
@@ -491,7 +432,6 @@ class BusInteractiveOverlay:
                 line.append(str(f.get("value", "")))
                 rows.append(line)
 
-        # Actions (filtered to exclude link-style which doesn't reply).
         actions = self._options()
         if actions:
             rows.append(Text(""))
@@ -514,8 +454,7 @@ class BusInteractiveOverlay:
                 )
                 rows.append(line)
 
-        # Link-only actions (informational; printed as URLs since CLI
-        # can't open browser inline from inside the overlay).
+        # Link actions are informational because the overlay cannot open a browser.
         all_actions = payload.get("actions") or []
         link_actions = [a for a in all_actions if a.get("style") == "link"]
         if link_actions:

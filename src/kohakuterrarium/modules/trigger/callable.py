@@ -1,17 +1,6 @@
 """Callable-trigger adapter.
 
-Wraps a setup-able :class:`BaseTrigger` subclass (``universal = True``,
-with ``setup_*`` metadata filled in) as a :class:`BaseTool` so that the
-agent can install it at runtime by making a normal tool call.
-
-The adapter keeps the "trigger-ness" of the action visible in the short
-description (``**Trigger**: …``) so the LLM knows calling it produces
-a long-lived side-effect rather than an immediate result. The tool
-itself always runs in ``DIRECT`` mode — it validates args against the
-trigger class's schema, instantiates the trigger, wires any
-context-derived state via ``post_setup``, registers it with the agent's
-``TriggerManager``, and returns a confirmation message with the
-installed trigger id.
+Universal triggers become direct tools whose calls install long-lived runtime state.
 """
 
 from typing import Any
@@ -47,10 +36,6 @@ class CallableTriggerTool(BaseTool):
         super().__init__()
         self._cls = trigger_cls
 
-    # ------------------------------------------------------------------
-    # Tool metadata
-    # ------------------------------------------------------------------
-
     @property
     def tool_name(self) -> str:
         return self._cls.setup_tool_name
@@ -70,14 +55,10 @@ class CallableTriggerTool(BaseTool):
 
     @require_manual_read.setter
     def require_manual_read(self, _value: bool) -> None:
-        # Derived from the trigger class; ignore external writes but accept
-        # BaseTool's init assignment silently.
+        # Class metadata remains authoritative despite BaseTool initialization.
         return None
 
-    # Every setup-able trigger tool also exposes an optional `name` arg so
-    # the agent can pick a stable, memorable `trigger_id` (used by
-    # `stop_task` and visible on resume) instead of getting an
-    # auto-generated hex id back.
+    # Stable names let callers stop or resume the same trigger predictably.
     _NAME_ARG_SCHEMA: Any = {
         "type": "string",
         "description": (
@@ -119,10 +100,6 @@ class CallableTriggerTool(BaseTool):
                 lines.append(line)
         return "\n".join(lines)
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
-
     async def _execute(
         self, args: dict[str, Any], context: ToolContext | None = None
     ) -> ToolResult:
@@ -132,8 +109,7 @@ class CallableTriggerTool(BaseTool):
                 exit_code=1,
             )
 
-        # `name` is an adapter-level arg, not part of the trigger class's own
-        # setup schema — strip it before constructing the trigger.
+        # Adapter-level names must not leak into trigger constructor arguments.
         args = dict(args)
         requested_id = args.pop("name", None) or None
         if isinstance(requested_id, str):
@@ -151,7 +127,7 @@ class CallableTriggerTool(BaseTool):
 
         try:
             trigger = self._cls.from_setup_args(args)
-        except Exception as e:  # noqa: BLE001 — surface class-level failures to the LLM
+        except Exception as e:  # noqa: BLE001
             return ToolResult(
                 error=f"Failed to build {self._cls.__name__}: {e}",
                 exit_code=1,
@@ -170,7 +146,6 @@ class CallableTriggerTool(BaseTool):
                 trigger, trigger_id=requested_id
             )
         except ValueError as e:
-            # Most likely cause: trigger_id already in use.
             return ToolResult(
                 error=(f"Failed to register trigger with name={requested_id!r}: {e}"),
                 exit_code=1,
@@ -201,10 +176,6 @@ class CallableTriggerTool(BaseTool):
             },
         )
 
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
-
     def _missing_required_args(self, args: dict[str, Any]) -> set[str]:
         schema = self._cls.setup_param_schema or {}
         required = schema.get("required", []) if isinstance(schema, dict) else []
@@ -214,7 +185,7 @@ class CallableTriggerTool(BaseTool):
 
 
 def _format_setup_summary(args: dict[str, Any]) -> str:
-    """Render the args dict as a short, LLM-readable setup summary."""
+    """Render setup arguments as a concise confirmation summary."""
     if not args:
         return "no parameters"
     parts: list[str] = []

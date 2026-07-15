@@ -1,13 +1,7 @@
-"""Modal screens for Phase B interactive OutputEvents.
+"""Collect structured UI-event replies in a shared modal result contract.
 
-Each modal returns a typed result dict that the calling code wraps
-into a :class:`UIReply` and submits to the agent's output router.
-
-Distinct from the legacy ``ConfirmModal`` / ``SelectionModal`` in
-``modals.py`` (which serve specialised in-app flows like the model
-picker). The bus modals here accept the full Phase B event payload
-schemas and support multi-button confirms, multi-select selections,
-multi-line ask_text inputs, etc.
+Every modal returns an action ID plus optional values so the output router can
+submit replies uniformly across confirmation, text, and selection events.
 """
 
 from typing import Any
@@ -25,16 +19,12 @@ from textual.widgets import (
     Static,
 )
 
-# Result is a dict so callers can reuse the same submit_reply path
-# regardless of which modal produced the value.
+# A shared result shape lets all modal types use one router submission path.
 ModalResult = dict[str, Any] | None
 
 
 class BusConfirmModal(ModalScreen[ModalResult]):
-    """N-button confirm modal. Returns ``{"action_id": "..."}`` or
-    ``None`` on cancel/escape (which the caller treats as the
-    ``"cancel"`` action).
-    """
+    """Collect an action from a multi-button confirmation prompt."""
 
     DEFAULT_CSS = """
     BusConfirmModal {
@@ -110,10 +100,7 @@ class BusConfirmModal(ModalScreen[ModalResult]):
 
 
 class BusAskTextModal(ModalScreen[ModalResult]):
-    """Free-text input modal. Returns
-    ``{"action_id": "submit", "values": {"text": "..."}}`` or
-    ``None`` on cancel.
-    """
+    """Collect free-text input for a structured UI event."""
 
     DEFAULT_CSS = """
     BusAskTextModal {
@@ -156,7 +143,7 @@ class BusAskTextModal(ModalScreen[ModalResult]):
         self._prompt = prompt
         self._placeholder = placeholder
         self._default = default
-        # multiline kept for future extension; v1 uses single-line Input
+        # The payload contract is retained although this widget currently uses Input.
         self._multiline = multiline
 
     def compose(self):
@@ -203,11 +190,7 @@ class BusAskTextModal(ModalScreen[ModalResult]):
 
 
 class BusSelectionModal(ModalScreen[ModalResult]):
-    """Single- or multi-pick selection modal. Returns
-    ``{"action_id": "submit", "values": {"selected": ...}}`` or
-    ``None`` on cancel. ``selected`` is a single id (single-pick) or a
-    list of ids (multi-pick).
-    """
+    """Collect one or multiple selections for a structured UI event."""
 
     DEFAULT_CSS = """
     BusSelectionModal {

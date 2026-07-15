@@ -1,8 +1,4 @@
-"""Per-creature model: switch + native_tool_options change set.
-
-Replaces ``KohakuManager.agent_switch_model / creature_switch_model``
-and the matching legacy routes.
-"""
+"""Switch creature models and update provider-native tool options."""
 
 from typing import Any
 

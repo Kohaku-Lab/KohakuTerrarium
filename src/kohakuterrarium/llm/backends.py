@@ -1,26 +1,9 @@
 """Backend (provider) persistence + the YAML store shared with presets.
 
-The single YAML file ``~/.kohakuterrarium/llm_profiles.yaml`` holds both
-custom providers and user presets. This module owns the low-level YAML
-read/write and the backend-level CRUD; :mod:`profiles` builds on top for
-preset lookup and runtime resolution.
+Load provider backends and the shared LLM profile YAML store.
 
-A ``backend_type`` is a tiny enum of transport implementations:
-    openai    : any OpenAI-compatible ``/chat/completions`` endpoint
-                (OpenAI, OpenRouter, Gemini's compat path, MiMo, and
-                user-defined proxies).
-    anthropic : Anthropic-compatible Messages API via the official
-                ``anthropic`` package (Claude, MiniMax's Anthropic path,
-                and compatible proxies).
-    codex     : OpenAI ChatGPT-subscription via OAuth — has its own bespoke
-                provider (``CodexOAuthProvider``) in :mod:`codex_provider`.
-
-Legacy ``codex-oauth`` values are silently migrated to ``codex`` on read.
-
-This module intentionally stays read-only + primitive-CRUD so it has no
-dependency on :mod:`profiles`. The write-side operations that touch both
-backends and presets (``save_backend``, ``delete_backend``, ``save_profile``
-etc.) live in :mod:`profiles`.
+Backend types select OpenAI-compatible, Anthropic-compatible, or Codex OAuth
+transport. Legacy ``codex-oauth`` values normalize to ``codex``.
 """
 
 from pathlib import Path
@@ -35,16 +18,13 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Import-time default — kept for back-compat display callers
-# (``cli/identity_llm.py``, the studio identity routes).  The actual
-# read / write path goes through :func:`_profiles_path`, resolved fresh
-# each call so ``KT_CONFIG_DIR`` wins (test isolation / re-homing).
+# Preserve the display constant while live I/O resolves the current config root.
 PROFILES_PATH = KT_DIR / "llm_profiles.yaml"
 _SCHEMA_VERSION = 3
 
 
 def _profiles_path() -> Path:
-    """The live ``llm_profiles.yaml`` path, honouring ``KT_CONFIG_DIR``."""
+    """Resolve the profile store against the current configuration root."""
     return config_dir() / "llm_profiles.yaml"
 
 
@@ -59,20 +39,12 @@ _BUILTIN_PROVIDER_NAMES: set[str] = {
     "glm-coding",
 }
 
-# Historical values that appeared under a preset's ``provider`` field to
-# describe the backend type. They are now only valid as ``backend_type`` and
-# get rewritten on load (see ``_normalize_backend_type``).
+# Legacy presets sometimes placed transport types in the provider field.
 _LEGACY_BACKEND_TYPE_VALUES: set[str] = {"openai", "codex", "codex-oauth", "anthropic"}
 
 
 def _normalize_backend_type(value: str) -> str:
-    """Map legacy / user-typed backend types onto the current canonical set.
-
-    - ``"codex-oauth"`` → ``"codex"`` (old name for the ChatGPT-OAuth backend)
-    - ``"anthropic"`` stays ``"anthropic"`` and selects the native
-      Anthropic-compatible Messages API provider.
-    - empty / unknown → ``"openai"`` (safe default for unconfigured data).
-    """
+    """Normalize legacy transport names and default empty values to OpenAI."""
     if value == "codex-oauth":
         return "codex"
     return value or "openai"
@@ -100,18 +72,7 @@ def save_yaml_store(data: dict[str, Any]) -> None:
 
 
 def _built_in_providers() -> dict[str, LLMBackend]:
-    """Built-in provider registry.
-
-    ``provider_name`` on each entry is the compatibility key that
-    :class:`~kohakuterrarium.modules.tool.base.BaseTool` subclasses
-    match against via their ``provider_support`` set. Only ``codex``
-    is bound to a native LLM provider that declares any provider-
-    native tools today (``ImageGenTool``); the other built-ins leave
-    ``provider_name`` empty so their tool-catalog surface stays bare
-    by default. Users can opt into e.g. ``image_gen`` on their own
-    OpenAI-backend provider by setting ``provider_name=codex`` and
-    adding ``image_gen`` to ``provider_native_tools``.
-    """
+    """Return built-in provider transports and native-tool compatibility metadata."""
     return {
         "codex": LLMBackend(
             name="codex",
@@ -165,19 +126,11 @@ def _built_in_providers() -> dict[str, LLMBackend]:
 
 
 def legacy_provider_from_data(data: dict[str, Any]) -> str:
-    """Best-effort mapping for legacy preset shapes.
-
-    Old presets stored ``provider`` as a backend type (``openai`` /
-    ``codex-oauth`` / ``anthropic``) plus ``base_url`` / ``api_key_env``.
-    Infer which built-in provider they actually referred to so runtime
-    resolution still works after the 2026-04 refactor.
-    """
+    """Infer a built-in provider from legacy transport and endpoint fields."""
     value = data.get("provider", "")
     if value and value not in _LEGACY_BACKEND_TYPE_VALUES:
         return value
 
-    # Raw backend_type declaration. ``anthropic`` maps to the built-in
-    # Anthropic-compatible Messages API provider.
     raw_backend_type = data.get("backend_type") or data.get("provider", "openai")
     backend_type = _normalize_backend_type(raw_backend_type)
     base_url = data.get("base_url", "")
@@ -217,37 +170,17 @@ _remote_backends: dict[str, LLMBackend] = {}
 
 
 def set_remote_backend(backend: LLMBackend) -> None:
-    """Stash a remote-resolved backend for the sync lookup path.
-
-    Worker mode counterpart of ``set_remote_preset``: profile bodies
-    fetched from the host's ``studio.identity`` may carry a backend
-    type the worker has never heard of (the worker has no local
-    ``llm_profiles.yaml``).  ``_resolve_preset`` rejects any preset
-    whose provider isn't in ``load_backends()`` — so without this the
-    host's profile arrives, the preset stashes, but resolution drops
-    it.  The runtime adapter's ``_prewarm_identity`` calls this with a
-    synthetic :class:`LLMBackend` derived from the profile's
-    ``backend_type`` field whenever the preset's provider isn't a
-    built-in or local-user-defined one.
-    """
+    """Cache a host-resolved backend so worker-side synchronous lookup can resolve it."""
     _remote_backends[backend.name] = backend
 
 
 def clear_remote_backends() -> None:
-    """Drop every stashed remote backend (cache invalidate)."""
+    """Invalidate all host-resolved backend entries."""
     _remote_backends.clear()
 
 
 def load_backends() -> dict[str, LLMBackend]:
-    """Return merged built-in + user-defined + remote-fetched providers.
-
-    Values are returned RAW — any ``${VAR}`` / ``${VAR:default}`` markers
-    in ``base_url`` etc. are left literal here. Interpolation happens at
-    consume time (``bootstrap.llm`` when the provider is built), so the
-    on-disk YAML keeps its templates, CRUD round-trips never freeze a
-    resolved value, and the Settings UI shows the ``${VAR}`` the user
-    wrote rather than the resolved secret.
-    """
+    """Merge providers while preserving environment templates for consume-time expansion."""
     data = load_yaml_store()
     backends = _built_in_providers()
 
@@ -257,25 +190,16 @@ def load_backends() -> dict[str, LLMBackend]:
             if isinstance(bdata, dict):
                 backends[name] = LLMBackend.from_dict(name, bdata)
 
-    # Worker mode: backends fetched from the host's studio.identity.
-    # Local user definitions (from llm_profiles.yaml) win over remote
-    # entries with the same name — but if the worker has no local
-    # entry, the remote one fills the gap.
+    # Local definitions override host-fetched entries with the same name.
     for name, backend in _remote_backends.items():
         backends.setdefault(name, backend)
 
-    # User-defined backends default ``provider_name`` to their own name
-    # so provider-native tool compatibility has something concrete to
-    # match. Setting ``provider_name=codex`` is how a user opts into
-    # Codex-compatible tools (``image_gen``) on their own endpoint.
+    # Custom providers default their native-tool compatibility key to their own name.
     for name, backend in backends.items():
         if name not in _BUILTIN_PROVIDER_NAMES and not backend.provider_name:
             backend.provider_name = name
 
-    # Legacy fallback: some old profiles stored ``base_url`` / ``api_key_env``
-    # inline on each preset. If those map onto a built-in provider that isn't
-    # present in the current ``backends`` dict, fabricate a synthetic one so
-    # resolution still reaches the right endpoint.
+    # Synthesize missing providers for legacy presets with inline transport fields.
     legacy = data.get("profiles", {})
     if isinstance(legacy, dict):
         for _name, pdata in legacy.items():
@@ -295,12 +219,7 @@ def load_backends() -> dict[str, LLMBackend]:
 
 
 def validate_backend_type(backend_type: str) -> str:
-    """Return the canonical backend_type for a new/updated provider.
-
-    Raises ``ValueError`` on anything other than ``openai`` / ``anthropic`` /
-    ``codex`` (post-normalization — ``codex-oauth`` is accepted and silently
-    rewritten).
-    """
+    """Validate and return a canonical provider transport type."""
     normalized = _normalize_backend_type(backend_type)
     if normalized not in {"openai", "anthropic", "codex"}:
         raise ValueError(f"Unsupported backend_type: {backend_type}")

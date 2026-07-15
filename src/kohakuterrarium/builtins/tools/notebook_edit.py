@@ -253,6 +253,7 @@ class NotebookEditTool(BaseTool):
 
     needs_context = True
     require_manual_read = True
+    # Ordered cell references depend on a stable notebook snapshot.
     is_concurrency_safe = False
 
     @property

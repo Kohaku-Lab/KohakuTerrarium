@@ -1,9 +1,8 @@
-"""Engine-backed output wiring between live creatures.
+"""Manage runtime output wiring and secondary sinks for live creatures.
 
-``wire_output`` / ``unwire_output`` mutate the same per-agent
-``config.output_wiring`` list that static creature configs use.  The
-lower-level secondary-output-sink helpers stay available for IO attach
-and websocket observers under explicit ``*_sink`` names.
+Creature-to-creature edges update the same ``config.output_wiring`` structure as
+static configuration. Explicit sink helpers support lower-level I/O attachment
+and WebSocket observation.
 """
 
 from typing import Any

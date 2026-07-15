@@ -43,11 +43,8 @@ def resolve_group_context(
 ) -> GroupContext:
     """Resolve the calling creature in the live engine.
 
-    ``require_privileged=True`` (default) — refuses non-privileged
-    callers. Used by graph-mutating tools (status / add / remove /
-    start / stop / channel / wire). Belt-and-braces: those tools are
-    only force-registered on privileged creatures, but if a config
-    grants one to a non-privileged creature this gate still holds.
+    ``require_privileged=True`` (default) rejects non-privileged callers even
+    if configuration accidentally grants them a graph-mutating tool.
 
     ``require_privileged=False`` — accepts any engine creature. Used
     by ``send_channel`` and ``group_send``, which are registered on
@@ -153,8 +150,8 @@ def engine_is_in_cluster(engine: "Terrarium") -> bool:
 def cross_cluster_target_error(engine: "Terrarium", identifier: str) -> str:
     """Build the standard ``cross-cluster`` error string used by every
     ``group_*`` tool when ``resolve_group_target`` returns ``None`` on a
-    cluster member's engine.  CF-7: cluster-wide ``group_*`` routing is
-    not yet wired — surface the cause so the LLM/user can distinguish
+    cluster member's engine.  Cluster-wide ``group_*`` routing is not yet
+    wired, so surface the cause to distinguish
     a typo from a "lives on another worker" miss.
     """
     if engine_is_in_cluster(engine):

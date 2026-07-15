@@ -1,11 +1,7 @@
-"""Per-creature configurable-modules routes (unified across types).
+"""Manage configurable modules for a session-scoped creature.
 
-Service-driven — route-by-home in lab-host mode.  All four endpoints
-go through the same Protocol surface as the rest of the per-creature
-ops; the worker adapter dispatches into ``terrarium.creature_ops``
-which mirrors the studio-tier registry shape.  Every handler
-resolves the ``creature_id`` slot through :func:`resolve_creature_id`
-so the modules pane (which posts the display name) works.
+Service routing reaches remote home workers, and identifier resolution accepts
+both canonical creature identifiers and display names.
 """
 
 from typing import Any

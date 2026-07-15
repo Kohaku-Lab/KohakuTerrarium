@@ -25,22 +25,7 @@ class PromotionResult:
 
 
 class BackgroundifyHandle:
-    """Wraps an asyncio.Task with mid-flight promotion to background.
-
-    Usage::
-
-        handle = backgroundify(task, "bash_abc123")
-
-        # In the agent wait loop:
-        result = await handle.wait()
-        if isinstance(result, PromotionResult):
-            # Task was promoted — add placeholder, continue
-        else:
-            # Task completed — use result normally
-
-        # From TUI/frontend:
-        handle.promote()  # returns True if promotion succeeded
-    """
+    """Wrap an asyncio task with mid-flight promotion to background."""
 
     __slots__ = (
         "_task",

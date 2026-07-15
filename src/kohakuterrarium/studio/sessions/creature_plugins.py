@@ -1,9 +1,7 @@
-"""Per-creature plugins: list + toggle + option mutation.
+"""Inspect, configure, and toggle plugins on live creatures.
 
-Replaces ``routes/agents.py:list_plugins / toggle_plugin`` and
-``routes/terrariums.py:terrarium_plugins / terrarium_toggle_plugin``.
-Mirrors :mod:`creature_state` (native_tool_options) for the runtime
-options surface — the plugin schema + current values + apply path.
+The option surface mirrors provider-native tool configuration by exposing each
+plugin's schema, current values, and mutation path.
 """
 
 from typing import Any

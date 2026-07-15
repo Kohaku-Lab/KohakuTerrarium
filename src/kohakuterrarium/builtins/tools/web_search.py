@@ -1,25 +1,7 @@
-"""
-Web search tool: search the web and return structured results.
+"""DuckDuckGo web search with an HTTP fallback for unsupported runtimes.
 
-Primary backend: ``ddgs`` (DuckDuckGo Search, no API key needed).
-``ddgs`` transitively requires ``primp`` — a Rust+reqwest HTTP
-client wrapped via PyO3.  On Android the Rust runtime's tokio /
-rustls stack hard-crashes the host process at first call, so the
-Android build drops both ``ddgs`` and ``primp`` from
-``requirements.txt`` (see ``packaging/android/postcreate.py``'s
-``_ANDROID_DROP_PACKAGES``).
-
-Fallback backend: ``_search_httpx_ddg`` — pure-Python scrape of
-https://html.duckduckgo.com/html/ via :mod:`httpx` (already a
-core dep).  Same data source as ddgs, no native code, works
-everywhere httpx works.  Brittle if DuckDuckGo restyles the HTML,
-but it's the same surface ddgs itself parses.
-
-Resolution: try ddgs first; on ``ImportError`` (Android) or any
-runtime failure (transient primp crash, ddgs API changes, …)
-fall through to the httpx scraper.  If the scraper also fails,
-return a clear tool-unavailable error instead of crashing the
-agent.
+The optional ``ddgs`` backend is preferred where available. A pure-HTTP parser
+keeps search usable on platforms where its native dependency cannot run.
 """
 
 import asyncio
@@ -39,12 +21,8 @@ logger = get_logger(__name__)
 MAX_RESULTS = 10
 
 
-# Optional-dep imports at module scope so the in-function-import
-# lint stays clean.  ``DDGS`` resolves to the first available class
-# across ``ddgs`` (newer, primp-backed) and the legacy
-# ``duckduckgo_search`` (deprecated, no primp).  ``None`` when
-# neither is installed — Android default after we drop both via
-# ``packaging/android/postcreate.py:_ANDROID_DROP_PACKAGES``.
+# Prefer the current optional package, then its legacy predecessor; ``None``
+# selects the HTTP backend on installations without either dependency.
 DDGS: Any = None
 try:
     from ddgs import DDGS  # type: ignore[no-redef]
@@ -61,12 +39,7 @@ def _has_ddg() -> bool:
 
 @register_builtin("web_search")
 class WebSearchTool(BaseTool):
-    """Search the web and return structured results.
-
-    Uses DuckDuckGo (no API key required).
-    Install: pip install ddgs  (desktop)
-    On Android the primp-free httpx fallback ships by default.
-    """
+    """Return DuckDuckGo result titles, URLs, and snippets."""
 
     @property
     def tool_name(self) -> str:
@@ -93,7 +66,7 @@ class WebSearchTool(BaseTool):
         if _has_ddg():
             try:
                 results = await _search_ddg(query, max_results, region)
-            except Exception as e:  # noqa: BLE001 — fall through to httpx
+            except Exception as e:  # noqa: BLE001 - backend failure selects fallback
                 ddgs_error = e
                 logger.warning(
                     "ddgs search failed, falling back to httpx scraper",
@@ -104,17 +77,14 @@ class WebSearchTool(BaseTool):
             try:
                 results = await _search_httpx_ddg(query, max_results, region)
             except Exception as e:
-                # Both backends down — return whichever error is more
-                # actionable.  The ddgs error usually carries more
-                # context (e.g. rate-limit, region rejected), the
-                # httpx error tends to be generic httpx.
+                # The primary backend generally carries more actionable context
+                # than the lower-level HTTP failure.
                 detail = ddgs_error or e
                 return ToolResult(error=f"Search failed: {detail}")
 
         if not results:
             return ToolResult(output="No results found.", exit_code=0)
 
-        # Format results for LLM
         lines = [f"Search results for: {query}\n"]
         for i, r in enumerate(results, 1):
             title = r.get("title", "")
@@ -131,7 +101,7 @@ class WebSearchTool(BaseTool):
 
 
 async def _search_ddg(query: str, max_results: int, region: str) -> list[dict]:
-    """Run DuckDuckGo search via ``ddgs`` (sync library, run in executor)."""
+    """Run the synchronous ``ddgs`` client without blocking the event loop."""
 
     def _do_search():
         kwargs: dict[str, Any] = {"max_results": max_results}
@@ -144,12 +114,8 @@ async def _search_ddg(query: str, max_results: int, region: str) -> list[dict]:
     return await loop.run_in_executor(None, _do_search)
 
 
-# Each DDG HTML result lives inside ``<div class="result">``; the
-# title + URL live in ``<a class="result__a">…</a>`` and the snippet
-# in a sibling ``<a class="result__snippet">…</a>``.  These regexes
-# pull both per-result so we can zip them.  Robust against minor
-# HTML tweaks (extra attributes, whitespace) but obviously not
-# against a full DDG rebrand.
+# Title and snippet patterns intentionally tolerate extra attributes and
+# whitespace but remain coupled to DuckDuckGo's HTML result class names.
 _RE_DDG_TITLE = re.compile(
     r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
     re.DOTALL,
@@ -167,12 +133,7 @@ def _strip_html(text: str) -> str:
 
 
 def _unwrap_ddg_redirect(href: str) -> str:
-    """DDG sometimes wraps result URLs in its own redirector.
-
-    The shape is ``//duckduckgo.com/l/?uddg=<url-encoded-target>&…``.
-    Pull the real target out so the agent gets a clickable URL,
-    not a tracker.  Non-redirect URLs pass through unchanged.
-    """
+    """Extract the target from DuckDuckGo redirect URLs when present."""
     m = _RE_DDG_REDIRECT.match(href)
     if m:
         return unquote(m.group(1))
@@ -180,12 +141,7 @@ def _unwrap_ddg_redirect(href: str) -> str:
 
 
 def _parse_ddg_html(body: str, max_results: int) -> list[dict]:
-    """Parse DuckDuckGo HTML response into the same shape ddgs returns.
-
-    Returns a list of ``{href, title, body}`` dicts so the formatter
-    in ``_execute`` doesn't have to fork on backend.  Caps at
-    ``max_results`` results.
-    """
+    """Parse HTML results into the same mapping shape as ``ddgs``."""
     results: list[dict] = []
     for m in _RE_DDG_TITLE.finditer(body):
         href = _unwrap_ddg_redirect(_html.unescape(m.group(1)))
@@ -204,21 +160,10 @@ async def _search_httpx_ddg(
     max_results: int,
     region: str,
 ) -> list[dict]:
-    """Pure-Python DDG search via the HTML endpoint.
-
-    Used as the Android-default and as a fallback when ``ddgs``
-    fails on desktop.  Hits the same HTML interface ddgs itself
-    scrapes, but via ``httpx`` (already a core dep) so there's no
-    native primp/Rust footprint.
-
-    Caps at 30 results regardless of ``max_results`` — the HTML
-    endpoint returns ~30 per page and we don't paginate to keep
-    the failure surface tiny.
-    """
+    """Search DuckDuckGo's HTML endpoint without native dependencies."""
     url = "https://html.duckduckgo.com/html/"
     headers = {
-        # DDG's HTML endpoint serves a CAPTCHA challenge to obvious
-        # bot user-agents; a plain desktop-Chrome UA passes through.
+        # The HTML endpoint challenges obvious bot user agents.
         "User-Agent": (
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
             "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"

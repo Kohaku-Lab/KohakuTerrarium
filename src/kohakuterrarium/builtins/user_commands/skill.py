@@ -1,21 +1,4 @@
-"""``/skill`` user command — list + enable/disable + show procedural skills.
-
-The user-facing surface for the skill registry (Qa runtime toggle).
-Accepts:
-
-- ``/skill``              — list all discovered skills with status
-- ``/skill list``         — alias for bare ``/skill``
-- ``/skill enable <name>``
-- ``/skill disable <name>``
-- ``/skill toggle <name>``
-- ``/skill show <name>``  — display frontmatter + body preamble
-
-Triple-invocation (Qd) ALSO lets the user type ``/<skill-name>`` to
-run a skill directly; that path is handled by the input module's
-wildcard dispatcher (:func:`_dispatch_skill_slash`) rather than this
-command so the existing ``/model``, ``/plugin``, … commands still
-shadow same-named skills by design.
-"""
+"""List, inspect, enable, disable, or toggle procedural skills."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -71,10 +54,6 @@ class SkillUserCommand(BaseUserCommand):
                 "Use list / enable / disable / toggle / show."
             )
         )
-
-    # ------------------------------------------------------------------
-    # Subcommand implementations
-    # ------------------------------------------------------------------
 
     def _list(self, registry: SkillRegistry) -> UserCommandResult:
         skills = registry.all()

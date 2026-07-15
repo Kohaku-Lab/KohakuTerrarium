@@ -1,15 +1,9 @@
 """Codegen for ``BasePlugin`` subclasses.
 
-Plugins are hook-driven: the user enables a set of hooks; each
-enabled hook gets its own ``async def`` method. Disabled hooks
-are simply omitted (BasePlugin's defaults take over).
-
-Round-trip strategy:
- * On parse: walk the class, collect every method whose name
-   matches a known hook, record its body text.
- * On update: rebuild the class with only the enabled hooks,
-   preserving existing bodies verbatim where the caller didn't
-   supply a new body, and replacing where they did.
+Enabled hooks are rendered as asynchronous methods; omitted hooks inherit
+``BasePlugin`` defaults. Parsing collects known hook bodies, while updates rebuild
+the regular plugin shape and preserve existing bodies when no replacement is
+supplied.
 """
 
 import json
@@ -27,7 +21,7 @@ from kohakuterrarium.studio.editors.codegen_common import (
 from kohakuterrarium.studio.editors.plugin_hooks import PLUGIN_HOOKS
 from kohakuterrarium.studio.editors.templates import render
 
-# Hook names must match catalog.PLUGIN_HOOKS.
+# Keep this set aligned with ``PLUGIN_HOOKS`` so parsing and rendering agree.
 _HOOK_NAMES = {
     "on_load",
     "on_unload",
@@ -47,21 +41,8 @@ _HOOK_NAMES = {
 }
 
 
-# ----------------------------------------------------------------------
-# Scaffold
-# ----------------------------------------------------------------------
-
-
 def render_new(form: dict) -> str:
-    """Scaffold a plugin module.
-
-    Expected form keys: ``name``, ``class_name`` (optional),
-    ``priority`` (int, default 50), ``description``,
-    ``enabled_hooks`` (list of ``{name, body}`` dicts),
-    ``options_schema`` (optional list of ``{name, type_hint,
-    default, required, description}`` param descriptors — written
-    alongside the .py as a sidecar; see :func:`sidecar_files`).
-    """
+    """Scaffold a plugin from identity, priority, hooks, and option metadata."""
     name = form.get("name", "my_plugin")
     class_name = form.get("class_name") or _to_class_name(name)
     priority = int(form.get("priority", 50))
@@ -81,18 +62,10 @@ def render_new(form: dict) -> str:
 
 
 def sidecar_files(form: dict) -> dict[str, str]:
-    """Return ``{relative_filename: content}`` for sidecars to write
-    alongside the plugin's .py file.
+    """Return the plugin option-schema sidecar when one is declared.
 
-    Plugins use an ``options: dict`` constructor by convention, so
-    their author-declared option keys can't be recovered from the
-    ``__init__`` signature alone. When the form carries an
-    ``options_schema``, we persist it as a sibling
-    ``<plugin>.schema.json`` so ``introspect.py`` can surface per-key
-    docs back to the creature editor's pool.
-
-    Returns an empty dict when no schema is declared — caller writes
-    nothing extra.
+    Plugin constructors conventionally accept an opaque options mapping, so the
+    sidecar preserves per-key metadata that cannot be recovered from signatures.
     """
     schema = form.get("options_schema")
     if not isinstance(schema, list) or not schema:
@@ -104,8 +77,7 @@ def sidecar_files(form: dict) -> dict[str, str]:
 
 
 def _normalize_schema_param(p: dict) -> dict:
-    """Coerce an incoming param dict into the canonical shape we
-    persist. Unknown keys are dropped to keep the sidecar tight."""
+    """Normalize an option descriptor and discard unsupported keys."""
     return {
         "name": p.get("name", ""),
         "type_hint": p.get("type_hint") or "",
@@ -115,19 +87,13 @@ def _normalize_schema_param(p: dict) -> dict:
     }
 
 
-# ----------------------------------------------------------------------
-# Round-trip update
-# ----------------------------------------------------------------------
-
-
 def update_existing(source: str, form: dict, execute_body: str) -> str:
-    """Rewrite the plugin class with the requested hook set.
+    """Rebuild a plugin with the requested hooks and preserved hook bodies.
 
-    *execute_body* is unused for plugins (they have multiple
-    hooks, not one ``_execute``). Kept in the signature for
-    Codegen Protocol compatibility.
+    ``execute_body`` is ignored because plugins expose multiple hooks rather than
+    one execute method.
     """
-    del execute_body  # not used
+    del execute_body
 
     tree = parse(source)
     class_name = form.get("class_name")
@@ -135,8 +101,7 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     if klass is None:
         raise RoundTripError(f"no class found (looking for {class_name!r})")
 
-    # Gather existing hook bodies so we can preserve them if the
-    # caller doesn't supply a new body for a hook.
+    # Existing bodies are the fallback for enabled hooks omitted by the form.
     existing_bodies: dict[str, str] = {}
     for node in klass.body.body:
         if isinstance(node, cst.FunctionDef) and node.name.value in _HOOK_NAMES:
@@ -145,8 +110,7 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
 
     enabled_hooks = form.get("enabled_hooks") or []
 
-    # Merge: for each enabled hook, use incoming body if provided,
-    # else fall back to existing.
+    # An explicitly supplied body wins; otherwise preserve the prior method.
     merged: list[dict] = []
     for h in enabled_hooks:
         hname = h["name"]
@@ -155,11 +119,8 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
             body = existing_bodies.get(hname, "return None")
         merged.append({**h, "body": body})
 
-    # Re-render the whole file from the template. We keep the
-    # user's custom ``name``/``priority`` fields via the form,
-    # and preserve the module docstring + imports via the
-    # template's fixed header. This is simpler than AST-surgery
-    # for plugins whose shape is fairly regular.
+    # Plugin modules have a regular generated shape, so full template rendering is
+    # safer than piecemeal class surgery.
     return render_new(
         {
             **form,
@@ -169,17 +130,10 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     )
 
 
-# ----------------------------------------------------------------------
-# Parse back
-# ----------------------------------------------------------------------
-
-
 def parse_back(source: str, sidecar_schema: list | None = None) -> dict:
-    """Extract form state from a plugin source file.
+    """Extract plugin identity, enabled hooks, and optional schema metadata.
 
-    *sidecar_schema* — optional list loaded from ``<name>.schema.json``.
-    When present, it's round-tripped into ``form.options_schema`` so the
-    OptionsSchemaEditor can re-render the author's previous choices.
+    A valid sidecar schema is normalized into form state for subsequent saves.
     """
     warnings: list[dict] = []
 
@@ -192,11 +146,9 @@ def parse_back(source: str, sidecar_schema: list | None = None) -> dict:
     if klass is None:
         return _raw_envelope("no BasePlugin-shaped class found")
 
-    # Extract identity
     name = read_property_string(klass, "name") or ""
     priority = _read_int_attr(klass, "priority", default=50)
 
-    # Enumerate enabled hooks
     enabled: list[dict] = []
     for node in klass.body.body:
         if isinstance(node, cst.FunctionDef) and node.name.value in _HOOK_NAMES:
@@ -229,16 +181,11 @@ def parse_back(source: str, sidecar_schema: list | None = None) -> dict:
     }
 
 
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
-
-
 def _hook_context(h: dict) -> dict:
-    """Enrich an incoming {name, body} with signature info."""
+    """Attach catalog signature metadata to an enabled hook."""
     spec = next((s for s in PLUGIN_HOOKS if s["name"] == h["name"]), None)
     if spec is None:
-        # Unknown hook — keep going with minimal signature
+        # Preserve unknown hooks with a minimal signature instead of dropping them.
         return {
             "name": h["name"],
             "args_signature": "",

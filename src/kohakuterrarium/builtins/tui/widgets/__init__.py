@@ -1,14 +1,4 @@
-"""
-Custom Textual widgets for the KohakuTerrarium TUI.
-
-Gemstone color palette:
-  iolite:     #5A4FCF  (primary, tools)
-  taaffeite:  #A57EAE  (sub-agents)
-  aquamarine: #4C9989  (success, done)
-  amber:      #D4920A  (running, warning)
-  sapphire:   #0F52BA  (info)
-  coral:      #E74C3C  (error)
-"""
+"""Custom Textual widgets for the KohakuTerrarium TUI."""
 
 from kohakuterrarium.builtins.tui.widgets.blocks import (
     CompactSummaryBlock,

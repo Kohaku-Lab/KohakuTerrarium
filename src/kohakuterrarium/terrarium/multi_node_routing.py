@@ -14,9 +14,8 @@ rebuild, per-node cache purge on disconnect, per-creature ``home``
 resolution with stale-route retry, and the streaming subscribe fan-out
 that merges every worker's event stream into one queue.
 
-Helpers take the service as the first argument so they can mutate the
-service's caches.  Splitting these out keeps the service class under
-the 1000-line hard cap without changing public behavior.
+Helpers take the service as the first argument because routing operations must
+update its caches atomically with worker membership.
 """
 
 import asyncio
@@ -40,7 +39,7 @@ class GraphHomeIntegrityError(ConflictError):
 
     A graph has exactly one home worker (its canonical repository). If more than
     one worker reports the same graph id, routing a write to an arbitrary one
-    would race two writers, so home resolution fails closed (R1-42).
+    would race two writers, so home resolution fails closed.
     """
 
 
@@ -152,8 +151,8 @@ async def resolve_graph_home(
 
     Probes every connected worker (not just the first) so two workers claiming
     the same graph fail closed with :class:`GraphHomeIntegrityError` rather than
-    letting a create pick an arbitrary writer (R1-42). ``KeyError`` when no
-    worker hosts the graph.
+    letting a create pick an arbitrary writer. ``KeyError`` when no worker hosts
+    the graph.
     """
     for attempt in range(2):
         epoch = getattr(service, "_membership_epoch", 0)

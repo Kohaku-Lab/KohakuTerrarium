@@ -1,15 +1,4 @@
-"""
-User command system — slash commands typed by the human user.
-
-Two execution layers:
-  INPUT: intercepted at input module, before LLM (e.g. /exit, /help)
-  AGENT: handled by agent with full state access (e.g. /model, /compact)
-
-Rich UI payloads:
-  Commands return a ``data`` field with typed UI hints. CLI/TUI renders
-  them as text; web frontend renders them as modals, pickers, etc.
-  Each payload is a dict with a ``type`` key. Typed constructors below.
-"""
+"""Define slash-command layers, results, contexts, and serializable UI payloads."""
 
 from abc import abstractmethod
 from dataclasses import dataclass, field
@@ -20,17 +9,9 @@ from typing import Any, Callable, ClassVar, Protocol, runtime_checkable
 class CommandLayer(Enum):
     """Where the command executes."""
 
-    INPUT = "input"  # Pre-LLM, fast, no agent state
-    AGENT = "agent"  # Has full agent state access
+    INPUT = "input"
+    AGENT = "agent"
 
-
-# ── Rich UI payload constructors ────────────────────────────────────
-#
-# Each returns a plain dict (JSON-serializable for the API).
-# Frontend switches on data["type"] to decide rendering.
-#
-# Supported now:  text, notify, select, info_panel, list, confirm
-# Reserved:       table, form, progress  (implement when needed)
 
 
 def ui_text(message: str) -> dict[str, Any]:
@@ -39,11 +20,7 @@ def ui_text(message: str) -> dict[str, Any]:
 
 
 def ui_notify(message: str, *, level: str = "info") -> dict[str, Any]:
-    """Toast / banner notification.
-
-    Args:
-        level: "info", "success", "warning", "error"
-    """
+    """Build a toast or banner notification payload."""
     return {"type": "notify", "message": message, "level": level}
 
 
@@ -53,11 +30,7 @@ def ui_confirm(
     action: str,
     action_args: str = "",
 ) -> dict[str, Any]:
-    """Yes/No confirmation dialog.
-
-    Frontend sends ``POST /command { command: action, args: action_args }``
-    if the user confirms.
-    """
+    """Build a confirmation payload with its follow-up command action."""
     return {
         "type": "confirm",
         "message": message,
@@ -73,12 +46,7 @@ def ui_select(
     current: str = "",
     action: str = "",
 ) -> dict[str, Any]:
-    """Picker / selector modal.
-
-    Each option: ``{"value": str, "label": str, ...extra fields}``.
-    Frontend sends ``POST /command { command: action, args: selected_value }``
-    when the user picks one.
-    """
+    """Build a selector payload whose chosen value feeds a command action."""
     return {
         "type": "select",
         "title": title,
@@ -92,10 +60,7 @@ def ui_info_panel(
     title: str,
     fields: list[dict[str, str]],
 ) -> dict[str, Any]:
-    """Key/value info card.
-
-    Each field: ``{"key": "Model", "value": "gpt-5.4"}``.
-    """
+    """Build a key/value information-card payload."""
     return {"type": "info_panel", "title": title, "fields": fields}
 
 
@@ -103,40 +68,17 @@ def ui_list(
     title: str,
     items: list[dict[str, str]],
 ) -> dict[str, Any]:
-    """Styled list of items.
-
-    Each item: ``{"label": str, "description": str, ...extra}``.
-    """
+    """Build a styled list payload."""
     return {"type": "list", "title": title, "items": items}
 
-
-# Reserved constructors (implement when needed):
-#
-# def ui_table(title, columns, rows) -> dict:
-#     """Data table with sortable columns."""
-#
-# def ui_form(title, fields, action) -> dict:
-#     """Input form with typed fields."""
-#
-# def ui_progress(message, percent) -> dict:
-#     """Progress indicator."""
-
-
-# ── Command result ──────────────────────────────────────────────────
 
 
 @dataclass
 class UserCommandResult:
-    """Result of executing a user command.
-
-    ``output``: plain text for CLI/TUI.
-    ``data``:   structured UI payload (built via ui_* constructors above).
-                Web frontend renders based on ``data["type"]``.
-                CLI/TUI ignores ``data`` and prints ``output``.
-    """
+    """Represent command text, consumption state, errors, and optional UI data."""
 
     output: str = ""
-    consumed: bool = True  # If True, don't pass text to LLM
+    consumed: bool = True
     error: str | None = None
     data: dict[str, Any] | None = None
 
@@ -145,21 +87,17 @@ class UserCommandResult:
         return self.error is None
 
 
-# ── Command context ─────────────────────────────────────────────────
-
 
 @dataclass
 class UserCommandContext:
-    """Context passed to command execute()."""
+    """Provide agent, session, input, output, and extension state to commands."""
 
-    agent: Any | None = None  # Agent instance (None for INPUT layer)
-    session: Any | None = None  # Session
+    agent: Any | None = None
+    session: Any | None = None
     input_module: Any | None = None
-    output_fn: Callable[[str], None] | None = None  # Write to user
+    output_fn: Callable[[str], None] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
-
-# ── Protocol + base class ───────────────────────────────────────────
 
 
 @runtime_checkable
@@ -202,11 +140,9 @@ class BaseUserCommand:
     ) -> UserCommandResult: ...
 
 
-# ── Parsing ─────────────────────────────────────────────────────────
-
 
 def parse_slash_command(text: str) -> tuple[str, str]:
-    """Parse "/model claude-opus-4.6" → ("model", "claude-opus-4.6")."""
+    """Split slash-command text into a lowercase name and remaining arguments."""
     text = text.lstrip("/")
     parts = text.split(None, 1)
     name = parts[0].lower() if parts else ""

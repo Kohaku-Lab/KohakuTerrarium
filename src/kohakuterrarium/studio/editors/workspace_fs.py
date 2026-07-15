@@ -1,13 +1,9 @@
 """Local filesystem workspace implementation.
 
-Reads from and writes to ``<root>/creatures/**`` and
-``<root>/modules/**``. Safe path handling enforced via
-``utils_paths.sanitize_name`` + ``ensure_in_root``.
-
-Public surface: matches the ``Workspace`` Protocol in
-``workspace_manifest.py``. Manifest sync, sidecar IO, codegen-driven
-module writes, and the post-inheritance "effective config"
-projection are delegated to sibling modules so this file stays small.
+Reads and writes ``<root>/creatures`` and ``<root>/modules`` while enforcing
+name and containment checks through ``sanitize_name`` and ``ensure_in_root``.
+The public surface implements the ``Workspace`` protocol; manifest, sidecar,
+code-generation, and inheritance concerns remain delegated to sibling modules.
 """
 
 import shutil
@@ -39,11 +35,10 @@ KNOWN_KINDS = ("tools", "subagents", "triggers", "plugins", "inputs", "outputs")
 
 @dataclass
 class LocalWorkspace:
-    """Filesystem-backed workspace.
+    """Provide filesystem-backed creature and module editing.
 
-    Constructed via ``open(path)`` — validates the path exists and
-    is a directory. Subdirectories (``creatures/``, ``modules/``)
-    are created lazily on first save.
+    :meth:`open` requires an existing directory. Creature and module
+    subdirectories are created lazily by save operations.
     """
 
     root_path: Path
@@ -74,10 +69,6 @@ class LocalWorkspace:
             raise ValueError(f"unknown module kind: {kind!r}")
         return self.modules_dir / kind
 
-    # ------------------------------------------------------------------
-    # Summary
-    # ------------------------------------------------------------------
-
     def summary(self) -> dict:
         return {
             "root": self.root,
@@ -87,10 +78,6 @@ class LocalWorkspace:
                 for kind in KNOWN_KINDS
             },
         }
-
-    # ------------------------------------------------------------------
-    # Creatures
-    # ------------------------------------------------------------------
 
     def list_creatures(self) -> list[dict]:
         if not self.creatures_dir.is_dir():
@@ -167,10 +154,6 @@ class LocalWorkspace:
 
     def write_prompt(self, creature: str, rel: str, body: str) -> None:
         creatures_crud.write_prompt(self.creatures_dir, creature, rel, body)
-
-    # ------------------------------------------------------------------
-    # Modules
-    # ------------------------------------------------------------------
 
     def list_modules(self, kind: str) -> list[dict]:
         kind_dir = self.module_kind_dir(kind)
@@ -258,11 +241,6 @@ class LocalWorkspace:
         )
 
 
-# ----------------------------------------------------------------------
-# Helpers (module-private)
-# ----------------------------------------------------------------------
-
-
 def _find_config_file(creature_dir: Path) -> Path | None:
     for name in ("config.yaml", "config.yml"):
         p = creature_dir / name
@@ -295,5 +273,5 @@ def _coerce_plain(obj: Any) -> Any:
 
 
 def _rmtree(path: Path) -> None:
-    """Recursive delete — stdlib shutil.rmtree wrapped for atomicity."""
+    """Recursively delete a workspace path through ``shutil.rmtree``."""
     shutil.rmtree(path)

@@ -1,23 +1,8 @@
-"""Attach policies — per-creature / per-graph stream advertisement.
+"""Advertise live attachment surfaces for creatures and graph sessions.
 
-The Studio UI asks the backend "what live streams does this creature /
-graph support?" so it can hide attach toggles that would 1011 close
-anyway. This module is the canonical answer.
-
-Four policies are defined (per ``plan.md §3.6``):
-
-- ``IO`` — bidirectional chat (controller stream + user input).
-  Available only for creatures with a configured input module.
-- ``LOG`` — process log tail. Always available (engine-independent).
-- ``OBSERVER`` — non-destructive channel observation.
-  Available for graphs (terrariums) and for creatures attached to a
-  graph; not for standalone creatures with no channels.
-- ``TRACE`` — live append-only event stream from the session store.
-  Available whenever a session is in-process (resumed live).
-
-The advertisement helpers return a list because a creature can support
-multiple policies simultaneously (e.g. a terrarium-attached creature
-exposes IO + LOG + OBSERVER + TRACE all at once).
+``IO`` requires an input-capable creature, ``LOG`` is process-wide, ``OBSERVER``
+requires graph channels, and ``TRACE`` represents a live session event stream.
+Advertisements are order-stable and may contain several policies at once.
 """
 
 from enum import Enum
@@ -30,11 +15,7 @@ if TYPE_CHECKING:
 
 
 class Policy(str, Enum):
-    """Attach policy codes — the four live-stream surfaces.
-
-    Values are short ASCII strings so they round-trip cleanly through
-    JSON without an explicit ``.value`` dance on the frontend.
-    """
+    """Stable string codes for the four live attachment surfaces."""
 
     IO = "io"
     LOG = "log"
@@ -43,18 +24,10 @@ class Policy(str, Enum):
 
 
 def get_policies(creature_id: str, manager: Any | None = None) -> list[Policy]:
-    """Return the attach policies a single creature supports.
+    """Return order-stable policies for a manager-owned creature.
 
-    Args:
-        creature_id: The agent / creature identifier as registered with
-            ``KohakuManager._agents``.
-        manager: Optional manager handle. When ``None`` the function
-            reports the engine-independent baseline (``LOG`` + ``TRACE``)
-            because there is no live agent to inspect for input modules
-            or channel attachments.
-
-    The returned list is order-stable so the frontend can render
-    toggles deterministically.
+    Without a manager or matching live agent, only the engine-independent ``LOG`` and
+    ``TRACE`` baseline can be advertised.
     """
     policies: list[Policy] = [Policy.LOG, Policy.TRACE]
 
@@ -66,13 +39,12 @@ def get_policies(creature_id: str, manager: Any | None = None) -> list[Policy]:
     if agent is None:
         return policies
 
-    # IO — only when the creature has an input module configured.
+    # Bidirectional attachment requires an input module to receive client messages.
     inp = getattr(agent, "input_module", None) or getattr(agent, "_input", None)
     if inp is not None:
         policies.insert(0, Policy.IO)
 
-    # OBSERVER — only when the creature is wired into a terrarium with
-    # at least one channel.
+    # Observation is meaningful only when the creature participates in channels.
     channels = getattr(agent, "_channels", None) or getattr(agent, "channels", None)
     if channels:
         policies.append(Policy.OBSERVER)
@@ -81,12 +53,10 @@ def get_policies(creature_id: str, manager: Any | None = None) -> list[Policy]:
 
 
 def get_graph_policies(session_id: str, manager: Any | None = None) -> list[Policy]:
-    """Return the attach policies a whole graph (terrarium) supports.
+    """Return policies for a manager-owned graph session.
 
-    Graphs always advertise ``OBSERVER`` (channels are the defining
-    feature) plus the engine-independent baseline. ``IO`` is advertised
-    only when the terrarium has a root agent (the user-facing creature
-    that owns terrarium I/O).
+    Graphs advertise observation and the engine-independent baseline. ``IO`` requires
+    a root agent that owns the user-facing graph interaction.
     """
     policies: list[Policy] = [Policy.LOG, Policy.OBSERVER, Policy.TRACE]
 
@@ -105,25 +75,14 @@ def get_graph_policies(session_id: str, manager: Any | None = None) -> list[Poli
     return policies
 
 
-# ---------------------------------------------------------------------------
-# Engine-backed advertisement (Step 11)
-# ---------------------------------------------------------------------------
-
-
 def get_creature_policies(
     service: "TerrariumService", creature_id: str
 ) -> list[Policy]:
-    """Engine-backed counterpart to :func:`get_policies`.
+    """Return best-effort policies for an engine-hosted creature.
 
-    Returns the attach policies a single creature supports.  ``IO`` is
-    advertised only when the creature has a configured input module;
-    ``OBSERVER`` is advertised when the creature lives in a graph that
-    has shared channels; ``LOG`` and ``TRACE`` are baseline.
-
-    These hints are best-effort and informational only (never used to
-    gate UI).  In lab-host mode the creature lives on a worker and the
-    host can't introspect its modules — we advertise the safe baseline
-    rather than reach into a host engine that doesn't exist.
+    ``IO`` reflects an input module and ``OBSERVER`` reflects shared graph channels;
+    ``LOG`` and ``TRACE`` form the baseline. Lab hosts cannot inspect worker-local
+    modules, so they return the safe baseline rather than treating hints as gates.
     """
     engine = host_engine_or_none(service)
     policies: list[Policy] = [Policy.LOG, Policy.TRACE]
@@ -148,14 +107,11 @@ def get_creature_policies(
 
 
 def get_session_policies(service: "TerrariumService", session_id: str) -> list[Policy]:
-    """Engine-backed counterpart to :func:`get_graph_policies`.
+    """Return best-effort policies for an engine-hosted graph session.
 
-    Sessions always advertise ``LOG`` + ``OBSERVER`` + ``TRACE``;
-    ``IO`` is added when the session has a creature flagged as root.
-
-    Best-effort + informational only.  In lab-host mode the session
-    lives on a worker — advertise the always-safe baseline rather than
-    reach into a host engine that does not exist.
+    Graph sessions advertise ``LOG``, ``OBSERVER``, and ``TRACE``; a privileged root
+    adds ``IO``. Lab hosts return the safe baseline because graph members live on
+    workers and policy hints must not become authorization checks.
     """
     engine = host_engine_or_none(service)
     policies: list[Policy] = [Policy.LOG, Policy.OBSERVER, Policy.TRACE]

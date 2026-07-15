@@ -1,7 +1,7 @@
 """Persistence fork — fork a saved session at an event id.
 
-Path is ``/{session_name}/fork`` so the router can be mounted under
-``/api/sessions`` for URL preservation.
+The ``/{session_name}/fork`` path preserves the public URL when this router is
+mounted under ``/api/sessions``.
 """
 
 import asyncio
@@ -25,16 +25,12 @@ async def fork_session(
     payload: ForkRequest,
     service: TerrariumService = Depends(get_service),
 ) -> ForkResponse:
-    """Fork a saved session at ``at_event_id`` into a new ``.kohakutr``.
+    """Fork a session at ``at_event_id`` into a new ``.kohakutr`` store.
 
-    Returns 201 with the child's session id + path. Returns 400 for
-    bad ``at_event_id`` or invalid mutation, 409 when the fork would
-    split an in-flight job, and 404 if the source cannot be found.
-
-    A LIVE source (still attached to the engine) is forked through the
-    engine's open store — a second open of an actively-written file is
-    unreliable on POSIX (``SQLITE_IOERR``). It is flushed first so the
-    fork point can land on this turn's freshest events.
+    Invalid fork points or mutations return 400, splitting an in-flight job
+    returns 409, and an unknown source returns 404. Live sources use and flush
+    the engine-owned store so the fork includes current events without opening
+    an unreliable second SQLite connection on POSIX.
     """
     live = live_store_entry(service, session_name)
     if live is not None:

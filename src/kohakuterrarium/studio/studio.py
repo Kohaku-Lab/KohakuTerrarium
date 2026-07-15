@@ -1,9 +1,9 @@
 """Studio — programmatic façade for the studio tier.
 
-Wraps a :class:`Terrarium` engine and exposes the studio
-sub-packages (catalog / identity / sessions / persistence / editors /
-attach) as nested namespaces.  Pure consumer of the existing
-``studio/*`` submodules — no logic of its own beyond delegation.
+Wraps a :class:`Terrarium` runtime behind stable catalog, identity,
+session, persistence, editor, and attachment namespaces. The facade keeps
+callers independent of the lower-level module layout while delegating each
+operation to its owning subsystem.
 
 Construction::
 
@@ -23,9 +23,9 @@ Usage::
             print(chunk, end="", flush=True)
         await s.sessions.stop(sess.session_id)
 
-The Studio class is *organizational* — every namespace method is a
-one-liner that forwards to an existing function under
-``kohakuterrarium.studio.<sub>.*``.
+Namespace methods intentionally remain thin so validation, persistence, and
+runtime behavior continue to have a single implementation in their owning
+``kohakuterrarium.studio.<sub>`` modules.
 """
 
 from pathlib import Path
@@ -63,21 +63,16 @@ from kohakuterrarium.terrarium.engine import Terrarium
 
 
 class Studio:
-    """Programmatic interface for the studio tier.
+    """Programmatic facade over a Studio runtime.
 
-    ``Studio()`` owns its own runtime; pass ``engine=existing_engine``
-    to share one (e.g. with the HTTP server's process-wide singleton).
-    The class is an async context manager — entering starts the
-    engine, exiting calls :meth:`shutdown`.
+    ``Studio()`` owns a local runtime, while ``engine=`` shares an existing
+    in-process engine and ``service=`` accepts another
+    :class:`TerrariumService` implementation. Entering the async context starts
+    the engine and exiting shuts it down.
 
-    **Runtime dependency.** Studio depends on a
-    :class:`TerrariumService` (an abstraction that can be a local
-    in-process :class:`LocalTerrariumService` or a future Lab-backed
-    remote service). Single-host code is unchanged because
-    ``LocalTerrariumService`` is a thin wrapper around the same
-    :class:`Terrarium` engine. The :attr:`service` property is the
-    new primary handle; :attr:`engine` remains as a backward-compat
-    escape hatch that returns ``service.engine``.
+    :attr:`service` is the host-agnostic runtime boundary. :attr:`engine` is a
+    compatibility escape hatch for operations outside that protocol and may
+    therefore couple callers to an in-process deployment.
     """
 
     def __init__(
@@ -86,20 +81,10 @@ class Studio:
         *,
         service: TerrariumService | None = None,
     ) -> None:
-        # Studio's runtime dependency is a TerrariumService. Three
-        # construction paths:
-        #
-        # - ``service=`` provided (multi-node host mode): use it
-        #   directly.  The caller is responsible for engine ownership.
-        # - ``engine=`` provided (single-host): wrap in
-        #   :class:`LocalTerrariumService`.
-        # - neither provided: fresh :class:`Terrarium` +
-        #   :class:`LocalTerrariumService` (default single-host case).
-        #
-        # NB: ``engine or Terrarium()`` is wrong here — Terrarium defines
-        # ``__len__`` (number of creatures) which makes an empty engine
-        # falsy, so the user's engine would get silently replaced. Test
-        # for ``None`` explicitly.
+        # Service injection and engine injection are mutually exclusive because
+        # a service already defines which engine and ownership policy it uses.
+        # Explicit ``is not None`` checks preserve empty Terrarium instances,
+        # whose ``__len__`` implementation makes them falsy.
         if service is not None and engine is not None:
             raise TypeError(
                 "Studio accepts at most one of {service, engine}; "
@@ -107,28 +92,24 @@ class Studio:
             )
         if service is not None:
             self._service: TerrariumService = service
-            # Only the service-injection path may hold a
-            # MultiNodeTerrariumService; calling the helper here is the
-            # only place we touch the laboratory layer.  The helper
-            # lazy-imports MultiNodeTerrariumService so this branch is
-            # the single trigger for that import.
+            # Only injected services may be multi-node. Keeping detection on
+            # this branch prevents the laboratory layer's lazy import during
+            # ordinary single-host startup.
             self.nodes: NodeMap | None = build_node_map_if_multi_node(service)
         elif engine is not None:
-            # Explicit programmatic engine — never overwrite its Drive runtime
-            # with managed settings (design §8.5).
+            # An injected engine retains its caller-selected Drive runtime;
+            # Studio-managed settings apply only to engines Studio creates.
             self._service = LocalTerrariumService(engine)
             self.nodes = None
         else:
-            # Studio owns the engine -> it is the managed surface, so it resolves
-            # the node's Drive settings into explicit constructor args (design
-            # §8.4/§8.5). Absent/disabled settings degrade to a Drive-disabled
-            # engine, so this is behaviourally identical to a bare Terrarium().
+            # Studio-owned engines resolve persisted Drive settings at
+            # construction time. Missing or disabled settings produce the same
+            # Drive-disabled runtime as a bare Terrarium.
             self._service = LocalTerrariumService(
                 Terrarium(**_identity_drives.resolve_drive_kwargs())
             )
-            # Standalone path — we just built a LocalTerrariumService.
-            # Skip the helper entirely so the laboratory layer never
-            # loads in single-host boots.
+            # The service is known to be local, so multi-node detection would
+            # only add an unnecessary laboratory-layer import.
             self.nodes = None
         self.catalog = _CatalogNS(self)
         self.identity = _IdentityNS(self)
@@ -139,30 +120,17 @@ class Studio:
 
     @property
     def service(self) -> TerrariumService:
-        """The runtime service Studio depends on.
-
-        In single-host mode this is a
-        :class:`LocalTerrariumService` wrapping the in-process
-        Terrarium engine. Multi-node deployments will swap in a
-        Lab-backed remote service implementation; Studio code is
-        agnostic to the choice.
-        """
+        """Return the host-agnostic runtime service used by this facade."""
         return self._service
 
     @property
     def engine(self) -> Terrarium:
-        """The underlying Terrarium engine.
+        """Return the underlying engine for protocol-external operations.
 
-        Backward-compatible accessor — equivalent to
-        ``studio.service.engine``. The escape hatch for code that
-        needs methods not on the :class:`TerrariumService` Protocol.
-        New code should prefer :attr:`service` plus the Protocol
-        surface; reaching into ``engine`` ties the call site to
-        single-host mode.
+        Prefer :attr:`service` where possible; direct engine access assumes the
+        service exposes a usable in-process engine.
         """
         return self._service.engine
-
-    # --- async context manager ---
 
     async def __aenter__(self) -> "Studio":
         await self.engine.__aenter__()
@@ -175,8 +143,6 @@ class Studio:
         """Stop every session and shut the engine down."""
         await self.engine.shutdown()
 
-    # --- classmethod constructors ---
-
     @classmethod
     async def from_recipe(
         cls,
@@ -186,13 +152,11 @@ class Studio:
         llm: str | None = None,
         name: str | None = None,
     ) -> "Studio":
-        """Construct a Studio with a freshly-applied terrarium recipe.
+        """Construct a Studio and start a persisted session from a recipe.
 
-        Behaves identically to ``studio.sessions.start_terrarium``: the
-        session store is attached, the session meta is registered, and
-        the session lists by name — previously this constructor applied
-        the recipe straight onto a bare engine and silently skipped all
-        persistence bookkeeping.
+        Delegating through ``sessions.start_terrarium`` preserves the same store
+        attachment, metadata registration, and session discovery invariants as
+        sessions started through the namespace directly.
         """
         studio = cls()
         await studio.sessions.start_terrarium(recipe, pwd=pwd, llm=llm, name=name)
@@ -225,11 +189,6 @@ class Studio:
         return studio
 
 
-# ---------------------------------------------------------------------------
-# catalog namespace
-# ---------------------------------------------------------------------------
-
-
 class _CatalogNS:
     """Read-only catalogs: packages, creatures, modules, builtins, introspect."""
 
@@ -245,8 +204,8 @@ class _CatalogNS:
 class _CatalogPackages:
     """Package catalog — install / uninstall / update / list."""
 
-    # ``list`` is defined last so it does not shadow the ``list``
-    # builtin in the annotations of the methods below it.
+    # Keep ``list`` last because its class-scope binding would otherwise shadow
+    # the builtin used by later return annotations.
 
     def scan(self) -> list[Any]:
         return _catalog_scan.scan_catalog()
@@ -323,11 +282,6 @@ class _CatalogIntrospect:
         return _catalog_introspect.custom_schema(*args, **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# identity namespace
-# ---------------------------------------------------------------------------
-
-
 class _IdentityNS:
     """LLM profiles + keys + Codex + MCP + UI prefs + generic config."""
 
@@ -345,7 +299,6 @@ class _IdentityNS:
 class _IdentityLLM:
     """LLM backends + profiles + default-model + native-tools."""
 
-    # backends
     def list_backends(self) -> list[dict[str, Any]]:
         return _identity_backends.list_backends()
 
@@ -355,7 +308,6 @@ class _IdentityLLM:
     def delete_backend(self, name: str) -> bool:
         return _identity_backends.remove_backend(name)
 
-    # profiles
     def list_profiles(self) -> list[dict[str, Any]]:
         return _identity_profiles.list_profiles_payload()
 
@@ -368,7 +320,6 @@ class _IdentityLLM:
     def get_profile(self, identifier: str) -> Any:
         return _identity_profiles.get_profile_for_identifier(identifier)
 
-    # default model
     def get_default(self) -> str:
         return _identity_default.get_default()
 
@@ -378,7 +329,6 @@ class _IdentityLLM:
     def list_models(self) -> list[dict[str, Any]]:
         return _identity_default.list_all_models_combined()
 
-    # native tools
     def list_native_tools(self) -> list[dict[str, Any]]:
         return _identity_native_tools.list_native_tools()
 
@@ -413,10 +363,10 @@ class _IdentityCodex:
 
 
 class _IdentityMCP:
-    """MCP server registry — single canonical yaml parser."""
+    """MCP server registry backed by the canonical YAML representation."""
 
-    # ``list`` is defined last so it does not shadow the builtin
-    # within the annotations of methods below it.
+    # Keep ``list`` last because its class-scope binding would otherwise shadow
+    # the builtin used by later annotations.
 
     def save_all(self, servers: list[dict[str, Any]]) -> None:
         return _identity_mcp.save_servers(servers)
@@ -452,11 +402,11 @@ class _IdentitySettings:
 
 
 class _IdentityDrives:
-    """Managed Drive runtime settings — the Studio settings owner (design §8.4).
+    """Manage persisted Drive settings separately from live runtime state.
 
-    ``save`` persists validated config; ``apply`` is the distinct live-application
-    operation against the Studio-owned engine (design §8.6). ``resolve`` returns
-    the explicit :class:`DriveRuntimeSpec` managed construction paths inject.
+    ``save`` only persists validated configuration, while ``apply`` explicitly
+    updates the Studio engine. ``resolve`` returns the runtime specification used
+    when Studio constructs a managed engine.
     """
 
     def __init__(self, studio: Studio) -> None:
@@ -489,27 +439,6 @@ class _IdentityDrives:
 
     def apply(self, node: str = _identity_drives.DEFAULT_NODE) -> dict[str, Any]:
         return _identity_drives.apply_runtime(self._studio.engine, node=node)
-
-
-# ---------------------------------------------------------------------------
-# sessions namespace
-# ---------------------------------------------------------------------------
-
-
-# _SessionsNS and its per-creature sub-namespaces live in
-# ``studio/facade_sessions.py`` (split for the file-size cap).
-
-
-# persistence namespace
-# ---------------------------------------------------------------------------
-
-
-# _PersistenceNS / _PersistenceViewer live in
-# ``studio/facade_persistence.py`` (split for the file-size cap).
-
-
-# editors namespace
-# ---------------------------------------------------------------------------
 
 
 class _EditorsNS:
@@ -555,20 +484,12 @@ class _EditorModules:
         return _editor_modules.save_module_doc(*args, **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# attach namespace — programmatic policy advertisement
-# ---------------------------------------------------------------------------
-
-
 class _AttachNS:
-    """Attach-policy advertisement for the studio surface.
+    """Expose attachment capabilities without opening a transport.
 
-    The streaming attach helpers (IO chat, channel observer, live
-    trace, log tail, file watcher, pty) are WebSocket-bound today and
-    intentionally not exposed here — programmatic streaming is part
-    of the follow-up work.  The advertisement helpers below let
-    programmatic callers ask "what attach modes does this creature
-    support" without spinning up a websocket.
+    Streaming attachment modes remain WebSocket-bound, but policy queries are
+    transport-independent and can be used to determine which modes a creature or
+    session supports before establishing a connection.
     """
 
     def __init__(self, studio: Studio) -> None:

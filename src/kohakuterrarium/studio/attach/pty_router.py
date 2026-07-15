@@ -1,14 +1,4 @@
-"""Platform router for the PTY attach.
-
-Drains ``api/ws/terminal.py:_find_shell:38``, ``_session_cwd:323``,
-and the dispatch logic of the two ``@router.websocket`` handlers
-(``terminal_ws:331``, ``terminal_terrarium_ws:360``) — selecting
-between the POSIX and Windows PTY backends based on
-``sys.platform``.
-
-Used by ``api/ws/pty.py`` (the thin WS shell) once the session/cwd
-have been resolved against the manager.
-"""
+"""Resolve shell settings and dispatch PTY attachments by platform."""
 
 import os
 import shutil
@@ -18,7 +8,7 @@ from fastapi import WebSocket
 
 
 def _find_shell() -> str:
-    """Find a suitable shell binary."""
+    """Return the preferred available shell for the current platform."""
     if sys.platform == "win32":
         pwsh = shutil.which("pwsh") or shutil.which("powershell")
         if pwsh:
@@ -32,12 +22,10 @@ def _find_shell() -> str:
 
 
 def session_cwd(holder) -> str:
-    """Resolve a creature's (or legacy AgentSession's) working directory.
+    """Resolve the working directory from any holder exposing ``.agent``.
 
-    ``holder`` is anything that exposes ``.agent`` — both
-    :class:`Creature` instances (engine-backed) and the historical
-    ``AgentSession`` shape work.  Falls back to the server CWD if the
-    executor does not advertise a ``_working_dir`` attribute.
+    Creature and legacy session holders share this shape. The server working
+    directory is the fallback when the executor does not advertise one.
     """
     cwd = None
     if hasattr(holder.agent, "executor"):
@@ -46,11 +34,10 @@ def session_cwd(holder) -> str:
 
 
 async def pty_session(websocket: WebSocket, cwd: str) -> None:
-    """Spawn a PTY shell and bridge I/O with the WebSocket.
+    """Bridge a shell to the websocket using the platform-specific backend.
 
-    Routes to :mod:`pty_posix` on POSIX and to :mod:`pty_windows` on
-    Windows — preferring ConPTY when winpty is available, otherwise
-    a plain subprocess-pipe fallback.
+    Windows prefers ConPTY when available and otherwise uses subprocess pipes;
+    POSIX systems use the native PTY implementation.
     """
     if sys.platform == "win32":
         from kohakuterrarium.studio.attach import pty_windows

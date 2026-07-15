@@ -1,4 +1,4 @@
-"""JSON read tool - read and query JSON files."""
+"""Read JSON documents and resolve simple dot-path queries."""
 
 import json
 from typing import Any
@@ -23,7 +23,6 @@ def _split_path(path: str) -> list[str | int]:
     for segment in path.split("."):
         if not segment:
             continue
-        # Check for array index: key[0]
         if "[" in segment:
             key, rest = segment.split("[", 1)
             if key:
@@ -36,15 +35,10 @@ def _split_path(path: str) -> list[str | int]:
 
 
 def _resolve_path(data: Any, query: str) -> Any:
-    """
-    Resolve a simple dot-path query against JSON data.
-
-    Supports: .key, .key.nested, .array[0], .array[0].field
-    """
+    """Resolve object keys and array indices from a dot-path query."""
     if not query or query == ".":
         return data
 
-    # Remove leading dot
     path = query.lstrip(".")
     current = data
 
@@ -109,19 +103,17 @@ class JsonReadTool(BaseTool):
             logger.error("JSON read failed", error=str(e))
             return ToolResult(error=str(e))
 
-        # Apply query
         try:
             result = _resolve_path(data, query)
         except KeyError as e:
             return ToolResult(error=f"Query failed: {e}")
 
-        # Format output
         if isinstance(result, (dict, list)):
             output = json.dumps(result, indent=2, ensure_ascii=False)
         else:
             output = str(result)
 
-        # Truncate if too large
+        # Bound large documents before returning them to model context.
         if len(output) > 50000:
             output = output[:50000] + "\n... (truncated)"
 

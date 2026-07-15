@@ -54,13 +54,10 @@ class AgentRuntimeToolsMixin:
         )
 
     def _emit_token_usage(self, controller: Controller) -> None:
-        """Emit token usage from the last LLM turn to output.
+        """Emit and accumulate usage from the last LLM turn.
 
-        Also accumulates the round's tokens into ``_turn_usage_accum``
-        so ``_finalize_processing`` can flush a single
-        ``turn_token_usage`` event covering the whole turn, and emits
-        a Wave B ``cache_stats`` event whenever the provider returned
-        cache hit/write counts.
+        The accumulated usage supports one turn-level event, while provider
+        cache counts are emitted separately when available.
         """
         usage = getattr(controller, "_last_usage", {})
         if not usage:

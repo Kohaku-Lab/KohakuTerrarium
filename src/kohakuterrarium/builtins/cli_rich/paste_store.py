@@ -20,17 +20,11 @@ This mirrors the "[Pasted text #N]" pattern in claude-code and
 import re
 from dataclasses import dataclass, field
 
-# Thresholds at or above which a paste is substituted with a placeholder.
-# Tuned so short multi-line pastes (3-5 lines of code) render verbatim
-# while configs / logs / long docs collapse.
+# Short code snippets remain visible; large logs and documents collapse.
 PLACEHOLDER_MIN_LINES = 8
 PLACEHOLDER_MIN_CHARS = 500
 
-# Placeholder token shape: [#pasted-<id> · <N> lines]
-#
-# The <id> is a monotonically-increasing integer scoped to the process.
-# <N> lines is the line count at stash time. We show line-count rather
-# than char-count because users count lines visually.
+# Tokens use process-local ids and user-visible line counts.
 _PLACEHOLDER_RE = re.compile(r"\[#pasted-(\d+) · \d+ lines\]")
 
 
@@ -43,7 +37,7 @@ class PasteEntry:
 
 @dataclass
 class PasteStore:
-    """Process-wide, in-memory paste cache."""
+    """Store large paste bodies behind compact in-memory placeholders."""
 
     _next_id: int = 1
     _entries: dict[int, PasteEntry] = field(default_factory=dict)
@@ -59,12 +53,7 @@ class PasteStore:
         return f"[#pasted-{paste_id} · {lines} lines]"
 
     def resolve(self, text: str) -> str:
-        """Replace every placeholder token in *text* with its stashed content.
-
-        Unknown placeholders (ids we never stashed) are left alone — they
-        might be something the user typed that happens to look like our
-        token shape.
-        """
+        """Expand known placeholders while preserving unknown token-like text."""
         if "[#pasted-" not in text:
             return text
 

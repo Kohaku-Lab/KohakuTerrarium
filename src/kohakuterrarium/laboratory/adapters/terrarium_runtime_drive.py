@@ -1,22 +1,4 @@
-"""Worker-side ``drive_*`` verb handlers for the ``terrarium.runtime`` adapter.
-
-:class:`TerrariumRuntimeAdapter` delegates every ``drive_*`` APP type here so the
-main adapter stays under the file-size cap. Each verb runs against a
-:class:`~kohakuterrarium.terrarium.service.LocalTerrariumService` bound to the
-worker's engine (the same in-process Drive surface Studio uses on a single host)
-and packs results via the versioned Drive wire DTOs.
-
-The actor on each request was derived by the *authenticated host* from its own
-authenticated context and travels the trusted host→worker Lab link; the worker
-re-parses it for the op but never invents authority from it. Creature/tool Drive
-calls on this worker use the in-process service directly (actor from
-``ToolContext``) and never reach this wire path (design §13).
-
-Typed Drive errors are caught here and packed with
-:func:`terrarium.wire.pack_drive_error` so the controller reconstructs the exact
-subtype; only an unexpected non-Drive error escapes to the generic ``engine``
-envelope.
-"""
+"""Handle remote Drive verbs against a worker's local Terrarium service."""
 
 from typing import Any
 
@@ -61,17 +43,11 @@ def _runtime_enabled(service: Any) -> bool:
 
 
 async def handle_drive_request(service: Any, msg: AppMessage) -> dict[str, Any]:
-    """Run one ``drive_*`` verb against ``service`` (a LocalTerrariumService).
+    """Dispatch a host-authorized Drive verb and preserve typed Drive errors.
 
-    Always returns a response dict; a Drive failure becomes a typed error
-    envelope rather than propagating (so the generic KeyError/ValueError mapping
-    in the outer dispatcher never mislabels a Drive error).
-
-    Drive verbs carry ``actor`` / ``is_privileged`` / ``operator`` authority that
-    only the authenticated host may assert. A worker never trusts a peer for
-    them (R1-04): a non-host origin is refused before any dispatch, so a forged
-    ``from_node`` cannot drive a mutation. The host ACL already blocks such
-    client-to-client forwards; this is the fail-closed floor.
+    Authority fields are trusted only from the authenticated host. Rejecting
+    peer origins here provides a fail-closed boundary even if upstream routing
+    checks are bypassed.
     """
     if msg.sender_node != HOST_NODE_ID:
         return {
@@ -92,7 +68,6 @@ async def handle_drive_request(service: Any, msg: AppMessage) -> dict[str, Any]:
 async def _dispatch(service: Any, msg: AppMessage) -> dict[str, Any]:
     body = msg.body
     match msg.type:
-        # -- reads ----------------------------------------------------------
         case "drive_get":
             if not _runtime_enabled(service):
                 return {"view": None}
@@ -179,7 +154,6 @@ async def _dispatch(service: Any, msg: AppMessage) -> dict[str, Any]:
             except DriveDeliveryError:
                 return {"hosted": False}
 
-        # -- writes ---------------------------------------------------------
         case "drive_create":
             view = await service.create_drive(
                 unpack_create_request(body["request"]),

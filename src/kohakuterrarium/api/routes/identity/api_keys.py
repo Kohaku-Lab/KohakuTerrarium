@@ -1,15 +1,8 @@
-"""Identity API keys — provider key CRUD.
+"""Manage node-local provider API keys and refresh live host credentials.
 
-Accepts a ``?node=<id>`` query param: when set to a connected worker,
-the operation runs against THAT worker's local api_keys.yaml via Lab
-APP (so the worker can have its OWN keys, independent of the host).
-``node`` unset or ``_host`` keeps the original host-local behaviour.
-
-Live-reload: after a successful save / delete on the host target,
-fan a no-await ``llm.reload_credentials()`` out to every live
-creature's provider so the rotation takes effect on the next chat
-request — no creature restart required. See
-:meth:`kohakuterrarium.llm.base.BaseLLMProvider.reload_credentials`.
+A worker target reads or mutates that worker's own key file, keeping credentials
+independent across nodes. Host mutations notify every live local provider so
+rotated or fallback credentials can take effect without restarting creatures.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -36,13 +29,11 @@ router = APIRouter()
 
 
 def _reload_provider_credentials(service: TerrariumService) -> int:
-    """Fan ``reload_credentials`` out to every live creature.
+    """Reload credentials for every host-local provider and count changes.
 
-    Returns the count of providers that actually rotated. Defensive
-    per-creature ``try/except`` so a malformed agent doesn't block the
-    others. Lab-host mode (``host_engine_or_none`` returns ``None``)
-    no-ops — the host has no local creatures, and the worker save path
-    already handled the key write on its own machine.
+    Failures are isolated per creature so one provider cannot prevent others
+    from refreshing. Lab hosts without local creatures return zero; worker
+    mutations are handled on the worker itself.
     """
     engine = host_engine_or_none(service)
     if engine is None:
@@ -65,12 +56,15 @@ def _reload_provider_credentials(service: TerrariumService) -> int:
 
 
 class ApiKeyRequest(BaseModel):
+    """Carry a provider name and replacement API key."""
+
     provider: str
     key: str
 
 
 @router.get("/keys")
 async def get_keys(node: str = "", service: TerrariumService = Depends(get_service)):
+    """List configured provider keys on the targeted node without exposing secrets."""
     if is_host_target(node):
         return {"providers": list_keys_payload()}
     resp = await call_node_identity(service, node, "list_keys")
@@ -83,6 +77,7 @@ async def set_key_route(
     node: str = "",
     service: TerrariumService = Depends(get_service),
 ):
+    """Persist a provider key on the target and refresh affected live providers."""
     if is_host_target(node):
         try:
             set_key(req.provider, req.key)
@@ -106,16 +101,14 @@ async def remove_key_route(
     node: str = "",
     service: TerrariumService = Depends(get_service),
 ):
+    """Remove a provider key on the target and refresh credential fallbacks."""
     if is_host_target(node):
         try:
             remove_key(provider)
         except LookupError as e:
             raise HTTPException(404, str(e)) from e
-        # Removing a key clears the file entry; running providers keep
-        # the old cached key until their next reload — which is fine
-        # for the "I removed the key by mistake" workflow. We still
-        # fan-out so providers whose key DID change (e.g. rotated to
-        # env fallback) pick the new value up.
+        # Providers may retain a cached value when no replacement exists, while
+        # providers with an environment fallback can rotate immediately.
         rotated = _reload_provider_credentials(service)
         return {"status": "removed", "provider": provider, "rotated": rotated}
     return await call_node_identity(

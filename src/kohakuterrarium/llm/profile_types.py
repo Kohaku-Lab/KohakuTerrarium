@@ -6,21 +6,7 @@ _LEGACY_BACKEND_TYPES = {"openai", "codex", "codex-oauth", "anthropic"}
 
 @dataclass
 class LLMBackend:
-    """Reusable concrete provider profile.
-
-    ``provider_name`` is the compatibility key that provider-native tools
-    match against (``BaseTool.provider_support``). Built-in backends
-    default to their own name (``codex``, ``openai``, …); custom
-    backends default to the backend's own ``name`` unless the user
-    explicitly sets something else (e.g. ``codex`` to masquerade as
-    Codex for tool-compat purposes on a ChatGPT-Enterprise endpoint).
-
-    ``provider_native_tools`` is the set of builtin tool names the user
-    has opted into for this backend. Runtime auto-injects these tools
-    when the active LLM profile resolves through this backend; tools
-    not listed here are never injected, even if the active provider
-    class (e.g. ``CodexOAuthProvider``) advertises them globally.
-    """
+    """Provider transport and native-tool compatibility configuration."""
 
     name: str
     backend_type: str
@@ -114,15 +100,7 @@ class LLMPreset:
 
 @dataclass
 class LLMProfile:
-    """Resolved runtime LLM configuration.
-
-    ``backend_provider_name`` and ``backend_native_tools`` are carried
-    through from :class:`LLMBackend` so ``bootstrap/llm.py`` can stamp
-    them onto the constructed LLM provider instance (see
-    :meth:`LLMBackend.provider_name` and
-    :meth:`LLMBackend.provider_native_tools`). These control which
-    provider-native tools auto-inject into the agent's tool registry.
-    """
+    """Resolved model, transport, variation, and native-tool runtime settings."""
 
     name: str
     model: str

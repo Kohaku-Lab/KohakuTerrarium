@@ -1,16 +1,9 @@
 """Resolve local session-artifact image URLs to inline ``data:`` URLs.
 
-Tool images are materialized by the controller to
-``/api/sessions/{sid}/artifacts/{path}`` — a relative URL that points at
-our own FastAPI server (keeps the stored conversation small). External
-providers can't fetch a relative local path, so before sending we resolve
-it back to a base64 ``data:`` URL read from disk.
+Inline local session artifacts at the provider boundary.
 
-This was originally bespoke to the Codex provider; it now lives here so
-every provider (OpenAI, Anthropic, Codex) shares one implementation. The
-provider boundary is the right place: the stored conversation / session
-file keep the small ``/api/sessions/...`` URL, and only the outgoing
-request carries the inlined bytes.
+Stored conversations keep compact relative URLs, while outgoing requests use
+base64 data URLs that external providers can consume.
 """
 
 import base64
@@ -45,14 +38,7 @@ _ARTIFACT_MIME_BY_EXT = {
 
 
 def resolve_artifact_url(url: str) -> str:
-    """Resolve a relative ``/api/sessions/.../artifacts/...`` URL to a data URL.
-
-    Returns the original URL untouched when it isn't a local artifact URL
-    (already a ``data:`` URL, fully-qualified http(s), unparseable, or
-    missing on disk). Failures are logged at warning level; the caller
-    falls back to the original string and lets the provider surface any
-    error.
-    """
+    """Inline a local artifact URL, preserving the original URL on failure."""
     if not isinstance(url, str) or not url.startswith("/api/sessions/"):
         return url
     match = _ARTIFACT_URL_RE.match(url)
@@ -81,14 +67,7 @@ def resolve_artifact_url(url: str) -> str:
 def resolve_message_image_urls(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Resolve local artifact URLs inside every ``image_url`` content part.
-
-    Walks Chat-Completions-shaped messages and rewrites the ``url`` of any
-    ``image_url`` part that points at a local session artifact into a
-    ``data:`` URL. Identity-preserving: returns the original list (and
-    original message/part dicts) when nothing needed resolving, so the
-    common "no images / already-data-URL" path stays a no-op.
-    """
+    """Inline local image parts while preserving object identity when unchanged."""
     any_changed = False
     out: list[dict[str, Any]] = []
     for msg in messages:

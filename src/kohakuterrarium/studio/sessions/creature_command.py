@@ -1,9 +1,4 @@
-"""Per-creature slash command execution.
-
-Replaces ``KohakuManager.agent_execute_command /
-creature_execute_command`` plus ``routes/agents.py:execute_command``
-and ``routes/creatures.py:execute_creature_command``.
-"""
+"""Execute slash commands against live Studio-managed creatures."""
 
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium import TerrariumService
@@ -21,15 +16,12 @@ async def execute_command(
     principal: str | None = None,
     is_operator: bool = True,
 ) -> dict:
-    """Run a slash command against a creature (trusted local Studio console).
+    """Run a slash command through the creature's live aggregated registry.
 
-    Delegates to :func:`terrarium.creature_ops.agent_execute_command`, which
-    resolves the target creature's LIVE aggregated registry (so plugin-contributed
-    ``/goal`` is reachable) and threads the trusted context DTO (service / engine
-    / focused creature / principal / operator) into the command. This is the
-    programmatic local console, so ``is_operator`` defaults on; the HTTP surface
-    derives its own principal/operator from auth and does not pass through here
-    (design §11.5, R1-20/R1-21).
+    Plugin-contributed commands remain available, and the command receives the
+    service, engine, focused creature, principal, and operator context. This local
+    programmatic console defaults to operator access; HTTP derives authorization
+    independently.
     """
     engine = as_engine(service)
     agent = find_creature(engine, session_id, creature_id).agent

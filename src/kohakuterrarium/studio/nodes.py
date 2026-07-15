@@ -1,18 +1,10 @@
 """Per-node access handles for Studio in multi-node mode.
 
-``Studio.nodes`` is a mapping ``{node_id: NodeHandle}``.  Each handle
-gives access to per-node services:
-
-- ``.runtime`` — the :class:`RemoteTerrariumService` (or
-  :class:`LocalTerrariumService` for ``_host``).
-- ``.files`` — terrarium.files client (Unit B).
-- ``.identity`` — studio.identity client (lands in Unit E).
-- ``.catalog`` — studio.catalog client (lands in Unit F).
-- ``.deploy`` — studio.deploy client (lands in Unit C).
-
-Stub attributes for not-yet-implemented surfaces raise a clear error
-when accessed so call sites get a helpful pointer at the unit that
-lands the feature.
+``Studio.nodes`` maps node IDs to handles that group each node's runtime,
+filesystem, deployment, settings, identity, and catalog capabilities. Local
+handles use in-process services where available; remote handles route supported
+operations through the laboratory transport. Unsupported capabilities fail on
+access rather than silently presenting a partial implementation.
 """
 
 import asyncio
@@ -37,7 +29,7 @@ def _raise_settings_error(body: Any) -> Any:
 
 
 class _RemoteNodeDriveSettings:
-    """Client over a worker's ``studio.settings`` Drive surface (design §8.5)."""
+    """Client for a worker's remote ``studio.settings`` Drive surface."""
 
     def __init__(self, sender: Any, node_id: str, *, timeout: float = 30.0) -> None:
         self._sender = sender
@@ -87,12 +79,11 @@ class _RemoteNodeDriveSettings:
 
 
 class _LocalNodeDriveSettings:
-    """Local (host-process) Drive settings surface for a ``LocalTerrariumService``.
+    """Manage host-process Drive settings for a local runtime service.
 
-    Reads/writes the host's own ``drive-settings.yaml`` and applies against the
-    host's live engine. In lab-host mode the ``_host`` coordination engine runs
-    no agents, so ``apply`` there reports ``restart_required`` rather than
-    configuring the agent-free engine (design §8.4 Scope).
+    Settings are stored in the host configuration and applied to its live engine.
+    A laboratory coordination host has no agent engine, so applying there reports
+    ``restart_required`` instead of configuring an inapplicable runtime.
     """
 
     def __init__(self, runtime: TerrariumService, node_id: str = "_host") -> None:
@@ -133,7 +124,8 @@ class _LocalNodeDriveSettings:
         }
 
     async def apply(self) -> dict[str, Any]:
-        # ``.engine`` raises on a lab-host coordination service (no agent engine).
+        # Coordination-only hosts expose no agent engine; treat that state as a
+        # deferred application rather than an invalid settings document.
         try:
             engine = self._runtime.engine
         except Exception:
@@ -163,7 +155,7 @@ class _NodeSettings:
 
 
 class _Pending:
-    """Placeholder for sub-services not yet implemented."""
+    """Fail explicitly when a node capability is unavailable."""
 
     def __init__(self, name: str, unit: str) -> None:
         self._name = name
@@ -177,7 +169,7 @@ class _Pending:
 
 
 class _Deploy:
-    """Per-node deploy surface.  Thin wrapper to keep call sites tidy."""
+    """Bind creature deployment requests to one target node."""
 
     def __init__(self, sender: Any, target_node: str) -> None:
         self._sender = sender
@@ -190,10 +182,10 @@ class _Deploy:
         name: str | None = None,
         timeout: float = 30.0,
     ) -> str:
-        """Deploy a local creature directory to this node.
+        """Deploy a local creature directory and return its worker-side path.
 
-        Returns the absolute target path on the worker; pass it to
-        :meth:`MultiNodeTerrariumService.add_creature`.
+        The returned absolute path is suitable for a subsequent remote
+        ``add_creature`` call.
         """
         return await deploy_creature_to_node(
             self._sender,
@@ -205,10 +197,7 @@ class _Deploy:
 
 
 class NodeHandle:
-    """Per-node service surface for Studio.
-
-    Construct via :class:`MultiNodeTerrariumService` membership.
-    """
+    """Expose the runtime and supported auxiliary services for one node."""
 
     def __init__(
         self,
@@ -219,16 +208,13 @@ class NodeHandle:
     ) -> None:
         self._node_id = node_id
         self.runtime: TerrariumService = runtime
-        # ``sender`` is the Lab node (HostEngine in lab-host mode) the
-        # controller uses for APP requests against this worker.  Local
-        # nodes (``_host``) have no remote surface — files / identity /
-        # catalog reach into Studio's own helpers directly instead of
-        # going over Lab.
+        # A sender identifies a remotely addressable worker. Local runtimes
+        # bypass laboratory transport and use host-side services instead.
         if sender is not None and not isinstance(runtime, LocalTerrariumService):
             self.files: Any = RemoteFiles(sender, node_id)
             self.deploy: Any = _Deploy(sender, node_id)
-            # Node-targeted Drive settings ride the worker's ``studio.settings``
-            # adapter (design §8.5); the local node reaches its own config home.
+            # Remote settings must be read and applied by the target worker so
+            # filesystem state and the live runtime remain on the same node.
             self.settings: Any = _NodeSettings(
                 _RemoteNodeDriveSettings(sender, node_id)
             )
@@ -245,11 +231,10 @@ class NodeHandle:
 
 
 class NodeMap:
-    """Mapping facade over a :class:`MultiNodeTerrariumService`'s nodes.
+    """Map connected node IDs to lazily constructed service handles.
 
-    Exposes ``studio.nodes[node_id]`` and iteration over connected
-    nodes.  Drops handles automatically when the underlying service
-    drops a remote (clients disconnecting).
+    Remote membership is checked on every lookup, and cached handles are replaced
+    when a reconnect yields a new runtime service instance.
     """
 
     def __init__(self, service) -> None:
@@ -257,14 +242,16 @@ class NodeMap:
         self._handles: dict[str, NodeHandle] = {}
 
     def __getitem__(self, node_id: str) -> NodeHandle:
-        # Local: always present.
+        # The service's own node remains addressable independently of remote
+        # membership and can safely reuse its cached handle.
         if node_id == self._service.node_id:
             handle = self._handles.get(node_id)
             if handle is None:
                 handle = NodeHandle(node_id, self._service.service_for(node_id))
                 self._handles[node_id] = handle
             return handle
-        # Remote: must be currently connected.
+        # Remote handles are valid only while membership reports the node as
+        # connected; stale cached handles must not outlive disconnection.
         connected = self._service.connected_nodes()
         if node_id not in connected:
             raise KeyError(f"no connected node {node_id!r}")
@@ -290,12 +277,10 @@ class NodeMap:
 
 
 def build_node_map_if_multi_node(service) -> "NodeMap | None":
-    """Return a :class:`NodeMap` if ``service`` is multi-node, else ``None``.
+    """Return a node map for services exposing multi-node membership.
 
-    Uses duck typing (``connected_nodes`` + ``service_for``) to detect
-    a multi-node service so this module doesn't need to import
-    :class:`MultiNodeTerrariumService` — keeps the studio surface
-    independent of which concrete service is in use.
+    Capability detection avoids importing a concrete laboratory service and
+    keeps the Studio facade dependent only on the behavior it needs.
     """
     if hasattr(service, "connected_nodes") and hasattr(service, "service_for"):
         return NodeMap(service)

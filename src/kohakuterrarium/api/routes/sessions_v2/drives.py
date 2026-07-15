@@ -1,17 +1,10 @@
-"""Drive record HTTP surface (design §9, §12; impl-plan Phase J).
+"""Expose graph-scoped Drive records through the session API.
 
-Mounted under ``/api/sessions`` → ``/api/sessions/{sid}/drives*``. A *session* is
-a Terrarium graph, so ``session_id`` is the ``graph_id`` the operations pass
-through. Every handler is a thin adapter over
-:mod:`kohakuterrarium.studio.sessions.drives`, which itself is thin over
-:class:`~kohakuterrarium.terrarium.service.TerrariumService`.
-
-The actor is derived from the authenticated request context, never from the body
-(design §9.1, §13): a local/single-tenant caller is the operator console; an L4
-user acts as itself with admin → operator elevation. List rows redact
-spec/evidence; detail is returned only to an authorized caller (§12.1). Typed
-Drive errors propagate to the ``DriveError`` HTTP mapper in ``api/app.py``
-(409 conflict / 403 permission / 422 registration+transition / 404 / 400 / 429).
+Actors and authority come from authentication context, never request bodies. The
+single-tenant console is an operator; multi-user callers act as themselves, with
+administrators elevated to operator authority. List responses redact sensitive
+fields, while detail access follows record ACLs. Typed Drive errors propagate to
+the application-level HTTP mapper.
 """
 
 from typing import Any
@@ -34,20 +27,11 @@ router = APIRouter()
 def _actor_privilege(
     user: User | None, *, l4_enabled: bool
 ) -> tuple[ActorRef, bool, bool]:
-    """(actor, is_privileged, operator) from the authenticated request.
+    """Derive the actor and authority flags from authentication state.
 
-    ``user is None`` has two distinct meanings and must not collapse to one
-    (R1-03):
-
-    - **L4 disabled** → the single-tenant local operator console
-      (privileged + operator);
-    - **L4 enabled + anonymous** (only reachable in ``optional`` mode; a
-      ``required``-mode anonymous is already rejected by ``get_service``) →
-      an unprivileged anonymous principal, never an operator.
-
-    An authenticated L4 user acts as ``user:<id>``; only an ``admin`` role
-    gets graph-authority / operator elevation. Never trust an actor field
-    from the request body.
+    An absent user means a trusted operator only when multi-user auth is disabled.
+    With multi-user auth enabled, an anonymous optional-auth caller remains
+    unprivileged. Authenticated administrators receive graph and operator authority.
     """
     if user is None:
         if l4_enabled:
@@ -61,19 +45,13 @@ def drive_principal(
     conn_info: HTTPConnection,
     user: User | None = Depends(get_optional_user),
 ) -> tuple[ActorRef, bool, bool]:
-    """Request-scoped ``(actor, is_privileged, operator)`` for Drive routes.
+    """Return the request actor and Drive authority flags.
 
-    Derives authority from BOTH authentication state and the active auth
-    configuration so an anonymous optional-L4 caller is not mistaken for the
-    trusted local console (R1-03).
+    Authentication configuration disambiguates the trusted local console from an
+    anonymous optional-auth caller.
     """
     cfg = get_auth_config(conn_info)
     return _actor_privilege(user, l4_enabled=cfg.multi_user_enabled)
-
-
-# ---------------------------------------------------------------------------
-# request bodies (responses are the façade's JSON-safe dicts)
-# ---------------------------------------------------------------------------
 
 
 class CreateDriveBody(BaseModel):
@@ -100,7 +78,7 @@ class CreateDriveBody(BaseModel):
 class UpdateDriveBody(BaseModel):
     expected_revision: int
     idempotency_key: str | None = None
-    # Only keys present in ``model_fields_set`` become a patch (UNSET otherwise).
+    # Only explicitly supplied fields belong to the patch.
     title: str | None = None
     spec: dict[str, Any] | None = None
     presentation: dict[str, Any] | None = None
@@ -160,11 +138,6 @@ class ProgressDriveBody(BaseModel):
     idempotency_key: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# reads
-# ---------------------------------------------------------------------------
-
-
 @router.get("/{session_id}/drives")
 async def list_drives(
     session_id: str,
@@ -177,7 +150,7 @@ async def list_drives(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Redacted Drive rows for a session/graph, filtered by the query."""
+    """Return filtered, redacted Drive rows for a session graph."""
     actor, is_privileged, _ = principal
     try:
         rows = await _drives.list_records(
@@ -206,7 +179,7 @@ async def get_drive(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Full detail (or a redacted row for an unauthorized caller)."""
+    """Return full Drive detail or an ACL-redacted row."""
     actor, is_privileged, _ = principal
     record = await _drives.get_record(
         service,
@@ -227,7 +200,7 @@ async def list_deliveries(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Delivery history (retries / recovery / dead-letter) — record-ACL gated."""
+    """Return ACL-gated retry, recovery, and dead-letter history."""
     actor, is_privileged, _ = principal
     return {
         "deliveries": await _drives.list_deliveries_records(
@@ -247,7 +220,7 @@ async def list_progress(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Append-only progress observations for a Drive — record-ACL gated."""
+    """Return ACL-gated, append-only progress observations."""
     actor, is_privileged, _ = principal
     return {
         "progress": await _drives.list_progress_records(
@@ -267,7 +240,7 @@ async def list_audit(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Canonical-mutation audit trail for a Drive — record-ACL gated (§7.3)."""
+    """Return the ACL-gated canonical mutation history."""
     actor, is_privileged, _ = principal
     return {
         "audit": await _drives.list_audit_records(
@@ -278,11 +251,6 @@ async def list_audit(
             graph_id=session_id,
         )
     }
-
-
-# ---------------------------------------------------------------------------
-# writes
-# ---------------------------------------------------------------------------
 
 
 @router.post("/{session_id}/drives")
@@ -312,7 +280,7 @@ async def update_drive(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """CAS-checked non-identity patch (title/spec/priority/…)."""
+    """Apply a revision-checked patch without changing Drive identity."""
     actor, is_privileged, _ = principal
     changes = body.model_dump(exclude_unset=True)
     changes.pop("expected_revision", None)
@@ -337,7 +305,7 @@ async def assign_drive(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Assign/reassign the Drive to a graph member (graph authority)."""
+    """Assign or reassign a Drive to a graph member."""
     actor, is_privileged, operator = principal
     return await _drives.assign_record(
         service,
@@ -361,7 +329,7 @@ async def unassign_drive(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Unassign the Drive (graph authority)."""
+    """Remove a Drive's assignee with graph authority."""
     actor, is_privileged, _ = principal
     return await _drives.unassign_record(
         service,
@@ -382,7 +350,7 @@ async def transfer_owner(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Transfer the ownership boundary (explicit, audited)."""
+    """Transfer Drive ownership through an explicit audited mutation."""
     actor, is_privileged, _ = principal
     return await _drives.transfer_owner_record(
         service,
@@ -404,7 +372,7 @@ async def transition_drive(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Pause/resume/wait/block/cancel a Drive (generic transition)."""
+    """Apply a generic pause, resume, wait, block, or cancel transition."""
     actor, is_privileged, _ = principal
     return await _drives.transition_record(
         service,
@@ -427,7 +395,7 @@ async def wake_drive(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Manually wake a Drive (re-arm pursuit); graph-bound like /transition."""
+    """Re-arm pursuit for a Drive within the session graph."""
     actor, is_privileged, _ = principal
     return await _drives.wake_record(
         service,
@@ -474,7 +442,7 @@ async def approve_proposal(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Approve a pending terminal proposal (verifier/operator authority)."""
+    """Approve a pending terminal proposal with verifier or operator authority."""
     actor, is_privileged, operator = principal
     return await _drives.approve_proposal_record(
         service,
@@ -495,7 +463,7 @@ async def report_progress(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Append a progress observation (append-only; no revision required)."""
+    """Append a progress observation without requiring a revision."""
     actor, is_privileged, _ = principal
     return await _drives.report_progress_record(
         service,
@@ -516,7 +484,7 @@ async def replay_delivery(
     service: TerrariumService = Depends(get_service),
     principal: tuple[ActorRef, bool, bool] = Depends(drive_principal),
 ):
-    """Replay a dead-letter delivery (admin capability); mints a new delivery."""
+    """Replay a dead-letter delivery by minting a new delivery record."""
     actor, is_privileged, _ = principal
     return await _drives.replay_delivery_record(
         service,

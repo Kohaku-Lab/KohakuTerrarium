@@ -1,27 +1,8 @@
 """Push-side integration for the session index sidecar.
 
-The reconciler (``reconcile.py``) is the always-available pull path —
-it'll catch every disk change on the next ``?refresh=true`` or
-periodic scan.  This module adds the push path so the sidecar
-stays current without polling: a SessionStore's lifecycle events
-trigger debounced upserts into the index.
-
-Design:
-
-* :func:`push_index_update` — synchronous helper.  Read the store's
-  current meta + state, build a fresh :class:`SessionIndexEntry`,
-  upsert.  Safe to call repeatedly — :meth:`SessionIndex.upsert`
-  is idempotent.
-
-* :class:`SessionIndexHook` — wraps a single SessionStore + index
-  pair and debounces ``append_event`` notifications so we don't
-  thrash the sidecar on a busy chat (one push per N events OR per
-  M seconds, whichever fires first; mirrors the cache-flush gates
-  in :class:`SessionStore` itself).
-
-The studio lifecycle layer is the canonical place to attach the
-hook (see :mod:`kohakuterrarium.studio.sessions.lifecycle` wiring).
-Tests construct the hook directly to assert push semantics.
+Reconciliation provides the pull path for disk changes. These hooks provide a
+push path by translating store events into debounced, idempotent sidecar
+upserts. Studio lifecycle wiring owns hook attachment and final flushing.
 """
 
 from collections.abc import Callable
@@ -43,12 +24,10 @@ logger = get_logger(__name__)
 def push_index_update(
     store: SessionStore, index: SessionIndex
 ) -> SessionIndexEntry | None:
-    """Push the store's current state into the index as one upsert.
+    """Upsert the store's current metadata and return the indexed entry.
 
-    Returns the entry that was upserted (handy for tests + the
-    lifecycle layer's audit log); returns ``None`` and logs at
-    debug level when the store can't be read (corrupted meta,
-    closed mid-call, etc.) — never raises into the caller.
+    Read or write failures are logged and converted to ``None`` so indexing
+    cannot interrupt session processing.
     """
     try:
         path = Path(store._path)
@@ -66,27 +45,12 @@ def push_index_update(
 
 
 class SessionIndexHook:
-    """Glue one ``SessionStore`` to one ``SessionIndex`` for live updates.
+    """Keep one live store's index entry current with debounced pushes.
 
-    On construction, subscribes to the store's event stream.  Pushes
-    a fresh entry into the index either every ``flush_every_n_events``
-    events or every ``flush_every_seconds`` seconds — whichever fires
-    first.
-
-    Lifecycle:
-
-    * ``hook = SessionIndexHook(store, index)`` — registers + does
-      one initial push so the index reflects ``init_meta`` even
-      before the first event arrives.
-    * ``hook.flush()`` — caller invokes before ``store.close()`` to
-      capture the final state.
-    * ``hook.detach()`` — caller invokes after ``store.close()`` so
-      the subscriber doesn't dangle.
-
-    The debounce gates mirror :class:`SessionStore`'s own
-    ``DEFAULT_FLUSH_EVERY_N_EVENTS`` / ``DEFAULT_FLUSH_EVERY_N_SECONDS``
-    — same intent (avoid per-event cost on a busy chat) at a slightly
-    looser cadence because the index is cheaper than a SQLite flush.
+    Construction subscribes and optionally performs an initial push. The event
+    count or elapsed-time threshold, whichever occurs first, triggers updates.
+    Callers flush before closing the store and detach afterward to avoid a
+    dangling subscriber.
     """
 
     DEFAULT_FLUSH_EVERY_N_EVENTS = 20
@@ -123,8 +87,7 @@ class SessionIndexHook:
         if self._attached:
             return
 
-        # Build a thin closure so we keep ``unsubscribe`` correctness —
-        # ``store.subscribe`` keys subscribers by identity.
+        # Preserve the exact callback identity required by ``unsubscribe``.
         def _on_event(key: str, data: dict) -> None:  # noqa: ARG001 — protocol args
             self._on_event()
 
@@ -147,7 +110,7 @@ class SessionIndexHook:
         push_index_update(self._store, self._index)
 
     def detach(self) -> None:
-        """Stop listening to the store.  Idempotent."""
+        """Idempotently stop listening to store events."""
         if not self._attached or self._listener is None:
             return
         try:
@@ -156,8 +119,6 @@ class SessionIndexHook:
             logger.warning("detach unsubscribe failed", error=str(exc), exc_info=True)
         self._attached = False
         self._listener = None
-
-    # Convenience: context-manager form for tests + tight scopes.
 
     def __enter__(self) -> "SessionIndexHook":
         return self

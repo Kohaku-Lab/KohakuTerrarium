@@ -131,7 +131,7 @@ class MultiEditTool(BaseTool):
 
     needs_context = True
     require_manual_read = True
-    # Multi-edit mutates the filesystem — serialize with other unsafe tools.
+    # Serial execution prevents concurrent writers from invalidating ordered edits.
     is_concurrency_safe = False
 
     @property

@@ -30,14 +30,7 @@ logger = get_logger(__name__)
 HISTORY_DIR = Path.home() / ".kohakuterrarium" / "history"
 
 
-# Proxy keys: prompt_toolkit's `Keys` enum is closed and doesn't have
-# slots for Shift+Enter / Ctrl+Enter — but it DOES have F19/F20/F21,
-# which are rarely used on modern keyboards. We hijack those slots and
-# redirect the relevant escape sequences (xterm modifyOtherKeys + kitty
-# CSI u) to land on them, then bind F19/F20/F21 to "insert newline".
-#
-# Trade-off: pressing actual F19/F20/F21 will also insert a newline,
-# which is fine — virtually no one has those keys on a real keyboard.
+# Closed Keys enums require rarely used function-key proxies for modified Enter.
 SHIFT_ENTER_KEY = Keys.F19
 CTRL_ENTER_KEY = Keys.F20
 CTRL_SHIFT_ENTER_KEY = Keys.F21
@@ -102,34 +95,22 @@ def _register_enhanced_keyboard_keys() -> None:
         return
     _ENHANCED_KEYS_REGISTERED = True
 
-    # Modifier + Enter (proxied through F19/F20/F21).
-    # xterm modifyOtherKeys=2 — `ESC [ 27 ; mod ; 13 ~`
+    # Modified Enter uses function-key proxies under both terminal protocols.
     ANSI_SEQUENCES["\x1b[27;2;13~"] = SHIFT_ENTER_KEY
     ANSI_SEQUENCES["\x1b[27;5;13~"] = CTRL_ENTER_KEY
     ANSI_SEQUENCES["\x1b[27;6;13~"] = CTRL_SHIFT_ENTER_KEY
-    # Kitty CSI u — `ESC [ 13 ; mod u`
     ANSI_SEQUENCES["\x1b[13;2u"] = SHIFT_ENTER_KEY
     ANSI_SEQUENCES["\x1b[13;5u"] = CTRL_ENTER_KEY
     ANSI_SEQUENCES["\x1b[13;6u"] = CTRL_SHIFT_ENTER_KEY
 
-    # Ctrl+a..z under Kitty CSI u + modifyOtherKeys=2.
-    # Without these, Ctrl+D (exit), Ctrl+C (interrupt), Ctrl+L (clear),
-    # Ctrl+B (bg), Ctrl+X (cancel bg), Ctrl+J (newline fallback) all
-    # silently stop working on Ghostty / Kitty / Foot / WezTerm / recent
-    # iTerm2 — the bytes `[100;5u` would just get typed into the buffer.
+    # Enhanced protocols otherwise expose Ctrl+letter sequences as literal text.
     for letter in "abcdefghijklmnopqrstuvwxyz":
-        codepoint = ord(letter)  # 97..122
+        codepoint = ord(letter)
         key = getattr(Keys, f"Control{letter.upper()}")
         ANSI_SEQUENCES[f"\x1b[{codepoint};5u"] = key
         ANSI_SEQUENCES[f"\x1b[27;5;{codepoint}~"] = key
 
-    # Esc / Enter / Tab / Backspace — Kitty CSI u disambiguated forms.
-    # Terminals emit these when flag 1 of the protocol is active and
-    # they choose to disambiguate all keys (not every terminal does,
-    # but it costs us nothing to register defensively).
-    # Without the Esc mapping, pressing Esc on macOS (Ghostty / Kitty /
-    # WezTerm / recent iTerm2) leaks the bytes `[27u` into the composer
-    # instead of firing the interrupt hotkey.
+    # Kitty may disambiguate unmodified control keys under protocol flag 1.
     ANSI_SEQUENCES["\x1b[27u"] = Keys.Escape  # Esc
     ANSI_SEQUENCES["\x1b[13u"] = Keys.ControlM  # Enter
     ANSI_SEQUENCES["\x1b[9u"] = Keys.ControlI  # Tab
@@ -156,9 +137,6 @@ class Composer:
         picker_key_handler: Callable[[str], bool] | None = None,
         picker_text_handler: Callable[[str], bool] | None = None,
         picker_captures_input: Callable[[], bool] | None = None,
-        # Topic 08 — multi-creature focus controls. All optional: the
-        # composer treats ``None`` callbacks as "single-creature mode"
-        # and falls through to its existing Tab/Shift+Tab semantics.
         on_focus_next: Callable[[], None] | None = None,
         on_focus_prev: Callable[[], None] | None = None,
         on_open_overlay: Callable[[], None] | None = None,
@@ -172,13 +150,7 @@ class Composer:
         self._on_backgroundify = on_backgroundify
         self._on_cancel_bg = on_cancel_bg
         self._on_toggle_expand = on_toggle_expand
-        # Returns True if the key was consumed by a visible picker; the
-        # composer then skips its default handler so arrow keys etc. flow
-        # into the picker instead of moving the text cursor.
         self._picker_key = picker_key_handler
-        # Returns True if a printable character was consumed by an overlay
-        # form. Drives the ``Keys.Any`` binding below via a Condition so
-        # we only steal text when the overlay is genuinely capturing input.
         self._picker_text = picker_text_handler
         self._picker_captures_input = picker_captures_input
         self._on_focus_next = on_focus_next
@@ -190,26 +162,13 @@ class Composer:
         self._completer = SlashCommandCompleter()
         self._paste_store = PasteStore()
 
-        # Paste burst-detector — fallback for Win32Input which never
-        # fires ``Keys.BracketedPaste`` (so pasted text arrives as a
-        # flood of single-char keystrokes; the first embedded newline
-        # would otherwise fire our Enter handler mid-paste). The Enter
-        # handler treats Enter as a paste-newline iff the current burst
-        # is both recent (< window) and substantial (>= min_count
-        # consecutive sub-window text changes), which keeps single
-        # programmatic ``buf.text = ...`` writes from false-positiving.
+        # Win32 paste detection prevents embedded newlines from submitting mid-paste.
         self._last_text_change_ts: float = 0.0
         self._paste_burst_count: int = 0
-        self._paste_burst_window: float = 0.005  # 5 ms
+        self._paste_burst_window: float = 0.005
         self._paste_burst_min_count: int = 3
 
-        # The bordered input box. Frame is added by RichCLIApp around this.
-        #
-        # ``dont_extend_height=True`` with ``height=None`` — the Window
-        # inside the TextArea shrinks exactly to the content's line count.
-        # Empty buffer → 1 line. Type "line1\nline2\nline3" → 3 lines.
-        # Without ``dont_extend_height``, the TextArea greedily fills the
-        # remaining vertical space in its HSplit parent (eats the screen).
+        # Dynamic height prevents the composer from consuming the remaining layout.
         self.text_area = TextArea(
             multiline=True,
             wrap_lines=True,
@@ -222,25 +181,12 @@ class Composer:
             dont_extend_height=True,
         )
 
-        # Track the most recent buffer mutation so the Enter handler can
-        # tell paste-newlines apart from human-typed Enter. ``+=`` here
-        # registers the listener on prompt_toolkit's
-        # :class:`prompt_toolkit.eventloop.utils.Event` (``on_text_changed``
-        # is fired after every insert / delete / undo).
         self.text_area.buffer.on_text_changed += self._record_text_change
 
         self.key_bindings = self._build_key_bindings()
 
     def _record_text_change(self, _buf) -> None:
-        """Tick the paste burst-detector on every buffer mutation.
-
-        A real paste through Win32Input delivers a back-to-back run of
-        single-char inserts; this listener fires for each one. We count
-        how many fired within ``_paste_burst_window`` of the previous
-        change so the Enter handler can tell paste-newlines apart from
-        a single programmatic insert immediately followed by Enter (the
-        shape unit tests produce).
-        """
+        """Update the Win32 paste-burst detector after a buffer mutation."""
         now = time.monotonic()
         if now - self._last_text_change_ts < self._paste_burst_window:
             self._paste_burst_count += 1
@@ -248,7 +194,6 @@ class Composer:
             self._paste_burst_count = 1
         self._last_text_change_ts = now
 
-    # Public accessor — the app resolves paste placeholders on submit.
     @property
     def paste_store(self) -> PasteStore:
         return self._paste_store
@@ -269,18 +214,7 @@ class Composer:
                 return False
             return self._picker_key(key)
 
-        # Picker-priority keys — when a dialog (currently model picker)
-        # is visible, arrows / tab / enter / esc are routed to it first.
-        # If consumed, the composer's normal handler for that key is
-        # suppressed. This is the cleanest way we've found to "modal"
-        # a prompt_toolkit Application without juggling focus between
-        # containers.
-        # When the slash-command completion menu is open, up/down must
-        # cycle the menu — our original bindings went straight to
-        # ``auto_up`` / ``auto_down`` and silently skipped menu
-        # navigation. Symptom was "arrow keys randomly not working":
-        # they worked fine on an empty buffer but felt dead the moment
-        # you typed ``/`` and the completer popped open.
+        # Visible overlays take key priority; completion menus take arrow priority.
         @kb.add("up")
         def _up(event):
             if _picker("up"):
@@ -317,7 +251,6 @@ class Composer:
         def _pgup(event):
             if _picker("pageup"):
                 return
-            # Default: move to start of buffer (closest analogue).
             event.current_buffer.cursor_position = 0
 
         @kb.add("pagedown")
@@ -331,18 +264,10 @@ class Composer:
             if _picker("tab"):
                 return
             buf = event.current_buffer
-            # Tab accepts the current completion (menu-cycling semantics
-            # shared with up/down below). Without this, pressing Tab on
-            # ``/mod`` would insert a literal tab character instead of
-            # finishing the ``/model`` suggestion — a 90%-of-the-time
-            # papercut.
             if buf.complete_state:
                 buf.complete_next()
                 return
-            # Topic 08 — multi-creature focus cycling. Only fires when
-            # the buffer is empty (so half-typed input isn't ambiguous)
-            # and the host wired a focus handler. Single-creature mode
-            # falls through to the literal tab insert.
+            # Empty input makes Tab unambiguous for creature focus cycling.
             if not buf.text and self._on_focus_next is not None:
                 self._on_focus_next()
                 return
@@ -361,10 +286,6 @@ class Composer:
 
         @kb.add("c-a")
         def _open_overlay(event):
-            # Ctrl+A opens the multi-creature agent overlay (topic 08).
-            # Bound unconditionally so the binding doesn't drift between
-            # single/multi-creature builds; the callback is a no-op in
-            # single-creature mode (handler is None).
             if self._on_open_overlay is not None:
                 self._on_open_overlay()
 
@@ -373,26 +294,10 @@ class Composer:
             if _picker("enter"):
                 return
             buf = event.current_buffer
-            # If the completion menu is open and the user has a row
-            # highlighted, accept the completion instead of submitting.
-            # The submit-through-menu behaviour (empty menu, or nothing
-            # highlighted) still falls through to the normal path.
             if buf.complete_state and buf.complete_state.current_completion:
                 buf.apply_completion(buf.complete_state.current_completion)
                 return
-            # Paste burst-detector. On Win32Input (Windows default), a
-            # ``Keys.BracketedPaste`` event never fires, so pasted text
-            # arrives as a stream of synthetic keystrokes — including
-            # the embedded newlines. If we treated those as submits the
-            # user would lose half the paste. Fall back to a timing
-            # heuristic: only treat Enter as a paste-newline when the
-            # current burst is BOTH rapid (last text change within
-            # ``_paste_burst_window``) AND substantial (at least
-            # ``_paste_burst_min_count`` consecutive rapid changes —
-            # a single programmatic ``buf.text = "..."`` fires only
-            # once, so test-shaped "set text then Enter" still submits
-            # normally). Human-typed Enter is preceded by a much bigger
-            # gap, so this never false-positives on real keyboard input.
+            # Rapid, sustained changes identify Win32 paste newlines, not human Enter.
             now = time.monotonic()
             if (
                 now - self._last_text_change_ts < self._paste_burst_window
@@ -404,39 +309,22 @@ class Composer:
             if not text.strip():
                 return
             if text.rstrip().endswith("\\"):
-                # Line continuation: drop trailing backslash, insert newline
                 buf.delete_before_cursor()
                 buf.insert_text("\n")
                 return
-            # Expand paste placeholders back to their full content before
-            # shipping the text to the agent. The visible buffer stayed
-            # compact thanks to the placeholder token; the model sees the
-            # real paste body.
+            # Expand placeholders only for submission; history retains compact tokens.
             submitted = self._paste_store.resolve(text)
-            # append_to_history=True persists the submission to FileHistory
-            # so history recall can find it next session. We persist the
-            # visible text (with placeholders), not the expanded form —
-            # otherwise replaying history would dump huge pastes back into
-            # the buffer.
             buf.reset(append_to_history=True)
             if self._on_submit:
                 self._on_submit(submitted)
 
         @kb.add(Keys.BracketedPaste)
         def _bracketed_paste(event):
-            # Real terminals (Windows Terminal, iTerm2, Kitty, Alacritty,
-            # WezTerm, Foot, modern tmux/screen) emit CSI 200~ … CSI 201~
-            # around pasted content. prompt_toolkit's Vt100Parser decodes
-            # that into a BracketedPaste key whose .data is the full
-            # payload — so multiline pastes arrive as ONE event instead of
-            # a burst of individual Enter keys. Without this binding, each
-            # newline in the paste would trigger our submit handler.
+            # Bracketed paste arrives as one event, preserving embedded newlines.
             data = event.data or ""
             if not data:
                 return
-            # Normalise CRLF / lone-CR pastes to LF — Windows clipboards
-            # serve CRLF and Rich would otherwise render the stray ``\r``
-            # as a visible ``^M`` box in committed scrollback.
+            # Normalize clipboard line endings before display and submission.
             data = data.replace("\r\n", "\n").replace("\r", "\n")
             buf = event.current_buffer
             if should_placeholderize(data):
@@ -451,14 +339,10 @@ class Composer:
 
         @kb.add(SHIFT_ENTER_KEY)
         def _shift_enter(event):
-            # Shift+Enter — works in terminals that emit modifyOtherKeys
-            # (Windows Terminal, xterm) or kitty CSI u (kitty, foot,
-            # alacritty, modern WT). See _register_enhanced_keyboard_keys.
             event.current_buffer.insert_text("\n")
 
         @kb.add(CTRL_ENTER_KEY)
         def _ctrl_enter(event):
-            # Ctrl+Enter — same protocol notes as Shift+Enter.
             event.current_buffer.insert_text("\n")
 
         @kb.add(CTRL_SHIFT_ENTER_KEY)
@@ -467,8 +351,7 @@ class Composer:
 
         @kb.add("c-j")
         def _ctrl_j(event):
-            # Ctrl+J literally sends \n in a PTY — universal fallback
-            # for terminals without modifyOtherKeys / CSI u protocol.
+            # Ctrl+J remains the protocol-independent newline fallback.
             event.current_buffer.insert_text("\n")
 
         @kb.add("c-c")
@@ -484,47 +367,26 @@ class Composer:
             if self._on_ctrl_c:
                 self._on_ctrl_c()
 
-        # Esc binding — note the missing ``eager=True``. With ``eager``
-        # set, prompt_toolkit dispatches the bare-Esc handler the moment
-        # the parser has *only* seen ``\x1b``, before the timeout that
-        # waits for follow-up bytes elapses. That breaks every multi-key
-        # sequence starting with Esc — Alt+P / Alt+N (history recall),
-        # Alt+Enter (insert newline) — and on terminals where arrow
-        # keys still arrive as plain ``\x1b[A`` etc. it can also race
-        # with the CSI parser and leak the trailing ``[A`` bytes into
-        # the buffer. Without ``eager``, prompt_toolkit's normal escape
-        # timeout (a few milliseconds) is long enough to disambiguate.
+        # Esc must not be eager because Alt and CSI sequences share its prefix.
         @kb.add("escape")
         def _esc(event):
             if _picker("escape"):
                 return
-            # Close an open completion menu before treating Esc as
-            # "interrupt". Without this, once the slash completer
-            # popped open it would stay open — every subsequent arrow
-            # key would cycle the hidden menu instead of moving the
-            # cursor, which is the "arrow keys randomly not working"
-            # bug.
+            # Completion owns the first Esc; a second Esc may interrupt the agent.
             buf = event.current_buffer
             if buf.complete_state:
                 buf.cancel_completion()
                 return
-            # Esc is the dedicated "interrupt the agent" hotkey, like
-            # Claude Code. Ctrl+C is reserved for clearing the buffer.
             if self._on_interrupt:
                 self._on_interrupt()
 
         @kb.add("c-b")
         def _ctrl_b(event):
-            # Backgroundify the most recent direct (blocking) tool /
-            # sub-agent. The agent will keep running it but the LLM
-            # turn returns immediately with a placeholder result.
             if self._on_backgroundify:
                 self._on_backgroundify()
 
         @kb.add("c-x")
         def _ctrl_x(event):
-            # Cancel the most recent backgrounded job. The corresponding
-            # block in the live region is finalized as "✗ cancelled".
             if self._on_cancel_bg:
                 self._on_cancel_bg()
 
@@ -541,21 +403,10 @@ class Composer:
 
         @kb.add("c-o")
         def _ctrl_o(event):
-            # Toggle expand/collapse on the most recent top-level tool
-            # block. Useful when a long tool output was truncated to
-            # preview size in the live region — press Ctrl+O to see all
-            # of it, press again to re-collapse. Mnemonic: "output".
             if self._on_toggle_expand:
                 self._on_toggle_expand()
 
-        # Power-user history bindings — Alt+P prev / Alt+N next. The bare
-        # Up/Down arrows are already smart via prompt_toolkit's auto_up /
-        # auto_down (they move within a multiline buffer first and only
-        # fall through to history when the cursor is at the very top/
-        # bottom line). Alt+P/N force the history step unconditionally,
-        # which is the shell convention — useful when editing a long
-        # multiline message and you want to cycle to a prior command
-        # without first scrolling the cursor to the top.
+        # Alt+P/N force history movement even within multiline input.
         @kb.add("escape", "p")
         def _alt_p(event):
             event.current_buffer.history_backward()
@@ -564,10 +415,7 @@ class Composer:
         def _alt_n(event):
             event.current_buffer.history_forward()
 
-        # Named keys the settings overlay needs to intercept in form mode.
-        # Without these, Backspace would delete from the textarea buffer
-        # instead of the form field value, and Home/End would move the
-        # composer cursor instead of being swallowed as no-ops.
+        # Modal forms receive editing keys before the composer buffer.
         @kb.add("backspace")
         def _bksp(event):
             if _picker("backspace"):
@@ -592,12 +440,7 @@ class Composer:
                 return
             event.current_buffer.cursor_position = len(event.current_buffer.text)
 
-        # Printable-character capture for overlay forms. Only fires when
-        # an overlay explicitly asks for it — in list/confirm mode the
-        # Condition returns False and Keys.Any falls through to the
-        # textarea's default character-insertion handler. Without the
-        # filter we'd swallow every keystroke whenever any overlay was
-        # open, which would break the composer entirely.
+        # Capture printable input only while a modal overlay claims it.
         @kb.add(
             Keys.Any,
             filter=Condition(
@@ -615,14 +458,7 @@ class Composer:
 
         @kb.add("c-r")
         def _ctrl_r(event):
-            # Reverse-incremental history search. prompt_toolkit wires
-            # this up to the buffer's search state — the default search
-            # toolbar is not in our layout, but the buffer's internal
-            # search still works: start_search puts the buffer into
-            # "searching" mode, subsequent chars narrow the match, Enter
-            # accepts, Esc cancels. Without any toolbar the user sees
-            # the buffer text update to the matched entry as they type —
-            # mirrors bash's C-r UX, minimally.
+            # Search works through prompt_toolkit's buffer state without a toolbar.
             start_search(direction=SearchDirection.BACKWARD)
 
         return kb

@@ -1,26 +1,8 @@
-"""Test-only LLM seam for subprocess workers.
+"""Install a scripted LLM seam inside real subprocess workers for tests.
 
-Tests that boot a real ``kt lab-client`` subprocess cannot reach into
-that subprocess to monkey-patch ``bootstrap.llm.create_llm_provider``.
-This module gives them a controlled seam they activate via env var
-instead: when ``KT_TEST_LLM_SCRIPT`` points at a JSON file, every call
-to the LLM factory in the subprocess returns a fresh
-:class:`ScriptedLLM` whose script is read from that file.
-
-The seam is a **test-only** entry point — production runs never set
-the env var, never import this module, and never wrap the factories.
-The wrapper preserves the real factory's ``__name__`` so other
-monkeypatch points (e.g. ``agent_init.create_llm_provider``) keep
-pointing at the same wrapped callable.
-
-JSON file shape::
-
-    {"script": ["first reply", "second reply", ...]}
-
-The file is read each time a new provider is created (i.e. each new
-creature spawn / model switch / compact run), so tests can rewrite
-the file between operations to script the next provider's responses
-without restarting the worker.
+``KT_TEST_LLM_SCRIPT`` points to a ``{"script": [...]}`` file read whenever a
+provider is created, allowing tests to change responses without restarting the
+worker. Production processes do not activate this seam.
 """
 
 import json
@@ -46,12 +28,7 @@ def _load_script(path: Path) -> list[Any]:
 
 
 def maybe_install_test_llm_seam() -> bool:
-    """Install the scripted-LLM seam if ``KT_TEST_LLM_SCRIPT`` is set.
-
-    Returns True if the seam was activated; False otherwise.  Safe to
-    call more than once — repeated calls are no-ops after the first
-    install.
-    """
+    """Install the environment-controlled seam once and report activation."""
     global _INSTALLED
     if _INSTALLED:
         return True
@@ -69,11 +46,7 @@ def maybe_install_test_llm_seam() -> bool:
     _bootstrap_llm.create_llm_provider = _fake_create
     _bootstrap_llm.create_llm_from_profile_name = _fake_from_profile
 
-    # Also patch sites that rebind the factory by name at import time.
-    # Lazy import — both modules may not be imported yet, and on import
-    # they will pick up the already-wrapped symbol via ``from ... import``
-    # only if the import happens after this call.  So patch them too,
-    # if present.
+    # Patch modules that may already hold imported factory references.
     try:
         from kohakuterrarium.bootstrap import agent_init as _agent_init
 

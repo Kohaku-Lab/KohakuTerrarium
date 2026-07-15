@@ -22,11 +22,9 @@ escaping for binary data:
     | header.sig_len bytes              raw signature          |
     +----------------------------------------------------------+
 
-The msgpack header (via ``kohakuvault.DataPacker('msgpack')``) handles
-metadata efficiently; payload and signature ride on the wire raw, with
-their lengths referenced from the header. This avoids the base64
-expansion that a flat-msgpack design would require (kohakuvault's
-msgpack rejects raw bytes values).
+Payload and signature bytes remain outside the msgpack header because
+``kohakuvault`` rejects raw bytes in msgpack values. Their lengths in the
+header preserve framing without base64 expansion.
 """
 
 import struct
@@ -37,33 +35,15 @@ from typing import Any
 from kohakuvault import DataPacker
 
 _PACKER = DataPacker("msgpack")
-"""Process-wide msgpack codec. DataPacker construction is cheap but
-caching avoids repeated allocation on the hot path."""
+"""Shared codec cached to avoid allocation on the framing hot path."""
 
 _HEADER_LEN_STRUCT = struct.Struct(">I")
-"""4-byte big-endian uint32 prefix carrying header length."""
 
 _HEADER_PREFIX_LEN = _HEADER_LEN_STRUCT.size
 
 
 class EnvelopeKind(str, Enum):
-    """The L4 verb or control-plane purpose an envelope serves.
-
-    L4 user verbs:
-        SEND — point-to-point delivery (Channel.send)
-        BROADCAST — pub-sub fan-out (Topic.publish)
-        APP — structured application-level message with
-            namespace + type + body (request/response capable)
-        LOG — Replicate verb (reserved; not shipped in 1.5)
-
-    Control plane:
-        ACK — acknowledgement for ack-required SEND
-        HELLO — client-to-host handshake (carries auth token)
-        WELCOME — host-to-client handshake response
-        HEARTBEAT — periodic liveness check
-        CONTROL — framework-internal control messages
-            (subscribe, register_creature, reject, etc.)
-    """
+    """Identify the user or control-plane operation carried by an envelope."""
 
     SEND = "send"
     BROADCAST = "broadcast"
@@ -105,8 +85,7 @@ class Envelope:
         payload: Opaque bytes. The L4 verb interprets contents.
         flags: Per-call options recognized by L3 (e.g.
             ``ack_required``, ``retransmit``).
-        sig: Optional cryptographic signature over the envelope. Reserved
-            for trust-boundary deployments; not used in 1.5.0.
+        sig: Optional cryptographic signature over the envelope.
         request_id: Optional correlation id for request/response RPC.
             When set, the receiver may respond with an envelope whose
             ``in_reply_to`` matches this value. Applies to any kind, but

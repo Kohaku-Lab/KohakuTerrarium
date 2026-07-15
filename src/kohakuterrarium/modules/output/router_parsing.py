@@ -1,33 +1,6 @@
 """Parser-event routing for :class:`OutputRouter`.
 
-Translates :class:`ParseEvent` objects (produced by the streaming
-parser in ``kohakuterrarium.parsing``) into ``OutputModule`` calls
-and state-machine transitions. Lives in a mixin so the main router
-file stays focused on the typed-event bus + lifecycle.
-
-Responsibilities:
-
-- ``route(event)`` — top-level dispatch on ParseEvent variants.
-- ``_handle_text`` — text chunk routing under the suppression state
-  machine (TOOL_BLOCK, SUBAGENT_BLOCK, etc. silence raw text by
-  default).
-- ``_handle_output`` — explicit ``[/output_<target>]…`` blocks routed
-  to a named output module, with completed-output tracking for
-  controller feedback.
-- ``_handle_assistant_image`` — fans assistant image parts to every
-  attached output (default + secondaries).
-- ``_handle_block_start`` / ``_handle_block_end`` — drive the
-  ``OutputState`` enum.
-
-The mixin requires the host class to expose:
-
-- ``self._state`` (:class:`OutputState`)
-- ``self.default_output`` and ``self._secondary_outputs``
-- ``self.named_outputs``
-- ``self.suppress_tool_blocks`` / ``self.suppress_subagent_blocks``
-- ``self._pending_tool_calls`` / ``_pending_subagent_calls`` /
-  ``_pending_commands``
-- ``self._completed_outputs``
+Parse events drive output suppression state, named routing, and pending call queues.
 """
 
 from __future__ import annotations
@@ -83,13 +56,7 @@ class OutputRouterParseEventMixin:
                 self._handle_assistant_image(event)
 
     def _handle_assistant_image(self, event: AssistantImageEvent) -> None:
-        """Fan out an assistant image to every attached output module.
-
-        Both the default output and every secondary output receives
-        the notification. Text-only outputs inherit the default
-        no-op; StreamOutput (API) pushes a JSON event to the WS
-        queue so the frontend can render live.
-        """
+        """Fan out an assistant image to each output that supports it."""
         targets = [self.default_output, *self._secondary_outputs]
         for target in targets:
             handler = getattr(target, "on_assistant_image", None)
@@ -112,7 +79,7 @@ class OutputRouterParseEventMixin:
 
     async def _handle_text(self, text: str) -> None:
         """Handle text event based on current state."""
-        # Always send to secondary outputs (for API streaming, logging, etc.)
+        # Secondary outputs observe raw text regardless of default-output suppression.
         for secondary in self._secondary_outputs:
             await secondary.write_stream(text)
 
@@ -135,11 +102,7 @@ class OutputRouterParseEventMixin:
                 pass
 
     async def _handle_output(self, event: OutputCallEvent) -> None:
-        """Handle an explicit ``[/output_<target>]…`` block.
-
-        Routes to the named output module if registered. Tracks
-        completed outputs for feedback to the controller.
-        """
+        """Route a named output block and record its completion status."""
         target = event.target
         content = event.content
 

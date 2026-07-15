@@ -1,12 +1,7 @@
-"""User CRUD — raw sqlite, no ORM.
+"""Create and manage users through explicit SQLite connections.
 
-Every function takes an explicit ``sqlite3.Connection`` so the caller
-controls the transaction boundary.  All writes commit on success;
-read-only helpers don't.
-
-Username case-folding: stored as-typed for display, but uniqueness is
-enforced via ``LOWER(username)`` lookups so ``Alice`` and ``alice``
-can't both register.  KohakuHub does the same.
+Callers own transaction context, writes commit on success, and reads remain passive.
+Usernames preserve display casing while lookup and uniqueness are case-insensitive.
 """
 
 import re
@@ -67,15 +62,10 @@ def create_user(
     role: str = "user",
     bcrypt_rounds: int = 12,
 ) -> User:
-    """Insert a new user.  Returns the freshly-created :class:`User`.
-
-    Validates the username charset and uniqueness BEFORE hashing the
-    password (bcrypt is slow; failing fast saves CPU on bad-username
-    inputs).
-    """
+    """Validate and create a user, rejecting cheap failures before bcrypt work."""
     cleaned = validate_username(username)
     role_clean = _normalize_role(role)
-    # Case-insensitive uniqueness check.
+    # Display casing is preserved, but identity uniqueness is case-insensitive.
     existing = conn.execute(
         "SELECT 1 FROM users WHERE LOWER(username) = LOWER(?)", (cleaned,)
     ).fetchone()
@@ -123,9 +113,7 @@ def get_user_by_username(conn: sqlite3.Connection, username: str) -> User | None
 def verify_user_password(
     conn: sqlite3.Connection, username: str, password: str
 ) -> User | None:
-    """Look up + verify in one shot.  Returns the :class:`User` on
-    match, ``None`` otherwise (any reason — missing user, wrong
-    password, inactive)."""
+    """Return an active user only when the supplied password verifies."""
     row = conn.execute(
         "SELECT id, username, password_hash, role, is_active, "
         "created_at, last_login_at FROM users "
@@ -199,8 +187,7 @@ def delete_user(conn: sqlite3.Connection, user_id: int) -> bool:
 
 
 def count_admins(conn: sqlite3.Connection) -> int:
-    """Number of currently-active admins.  Used to prevent the only
-    admin from disabling / demoting themselves and locking the host."""
+    """Count active administrators so management access cannot be removed entirely."""
     row = conn.execute(
         "SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1"
     ).fetchone()

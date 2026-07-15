@@ -1,35 +1,7 @@
-"""
-Skill/Documentation loader with frontmatter YAML support.
+"""Load Markdown skill documentation with optional YAML frontmatter.
 
-Loads markdown files with optional YAML frontmatter for metadata.
-
-Format:
-```
----
-name: tool_name
-description: One-line description
-category: builtin
----
-
-# Full Documentation
-
-...markdown content...
-```
-
-Recognized frontmatter keys are split across three buckets:
-
-1. **Native KT fields** (`name`, `description`, `category`, `tags`) live as
-   first-class attributes on :class:`SkillDoc`.
-2. **agentskills.io / Claude Code standard fields** — ``license``,
-   ``compatibility``, ``allowed-tools``, ``disable-model-invocation``,
-   ``when_to_use``, ``paths``, ``agent``, ``arguments``, ``user-invocable``,
-   ``model``, ``effort``, ``hooks``, plus the standard's user-extension
-   ``metadata`` map — are preserved verbatim in :attr:`SkillDoc.standard`.
-3. **Anything else** — completely unknown keys — lands in
-   :attr:`SkillDoc.extra` so future tooling can still round-trip them.
-
-The full parsed YAML dict is also stashed under
-:attr:`SkillDoc.raw_frontmatter` for re-serialization use cases.
+Native fields become attributes, recognized external fields remain in
+``standard``, and unknown fields remain in ``extra`` for round trips.
 """
 
 import warnings
@@ -44,15 +16,9 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Keys promoted to first-class attributes on SkillDoc.
 _NATIVE_KEYS: frozenset[str] = frozenset({"name", "description", "category", "tags"})
 
-# Keys defined by the agentskills.io spec and/or Claude Code frontmatter
-# extensions. Kept verbatim in SkillDoc.standard. Unknown keys go into
-# SkillDoc.extra instead.
-#
-# Note: the agentskills.io spec itself defines ``metadata`` as a user
-# extension dict. We keep that key in ``standard`` rather than ``extra``.
+# The standard's ``metadata`` key belongs here, not in the unknown-key bucket.
 _STANDARD_KEYS: frozenset[str] = frozenset(
     {
         "license",
@@ -77,22 +43,7 @@ _STANDARD_KEYS: frozenset[str] = frozenset(
 
 @dataclass
 class SkillDoc:
-    """Parsed skill/tool documentation.
-
-    Field layout:
-
-    - ``name`` / ``description`` / ``content`` — required-ish identifiers plus
-      the markdown body.
-    - ``category`` — KT-specific bucket (``builtin`` / ``custom`` / …).
-    - ``tags`` — free-form tag list (rendered by info output).
-    - ``standard`` — recognized agentskills.io / Claude Code frontmatter
-      fields (see ``_STANDARD_KEYS``). Kept as parsed YAML values
-      (strings, lists, dicts) without normalization.
-    - ``extra`` — YAML keys that are neither native nor standard. Preserved
-      so future tooling can re-emit SKILL.md round-trippable.
-    - ``raw_frontmatter`` — the full parsed YAML dict (useful when a caller
-      wants to re-serialise without losing any ordering or provenance).
-    """
+    """Represent parsed skill content and losslessly bucketed frontmatter."""
 
     name: str
     description: str
@@ -105,20 +56,15 @@ class SkillDoc:
 
     @property
     def full_doc(self) -> str:
-        """Get full documentation (frontmatter + content)."""
+        """Return the Markdown body used as full documentation."""
         return self.content
 
     @property
     def metadata(self) -> dict[str, Any]:
-        """Deprecated alias for :attr:`extra`.
+        """Return unknown fields through the deprecated ``metadata`` alias.
 
-        Historically ``SkillDoc`` used a single ``metadata`` dict as the
-        catch-all for every non-native frontmatter key. That name collides
-        with the agentskills.io spec's own ``metadata`` user-extension
-        field, so the catch-all moved to :attr:`extra` and recognized spec
-        fields moved to :attr:`standard`. This alias preserves source
-        compatibility for one minor version (per cluster 7.2) and will be
-        removed afterwards.
+        The alias remains temporarily because the standard now owns a distinct
+        ``metadata`` frontmatter key stored in :attr:`standard`.
         """
         warnings.warn(
             "SkillDoc.metadata is deprecated; use SkillDoc.extra for unknown "
@@ -131,14 +77,7 @@ class SkillDoc:
 
 
 def _normalize_skill_text(text: str) -> str:
-    """Strip a leading BOM and normalise line endings.
-
-    Markdown editors on Windows / various export pipelines like to
-    prepend a UTF-8 BOM (``\\ufeff``); the YAML frontmatter detection
-    further down checks for a literal ``---`` prefix and would silently
-    skip every BOM'd file. CR / CRLF line endings are likewise folded
-    to ``\\n`` so ``yaml.safe_load`` doesn't choke on stray CRs.
-    """
+    """Remove a leading BOM and normalize line endings for frontmatter parsing."""
     if not isinstance(text, str):
         return ""
     if text.startswith("﻿"):
@@ -149,24 +88,14 @@ def _normalize_skill_text(text: str) -> str:
 
 
 def read_skill_text(path: "Path | str") -> str | None:
-    """Read a SKILL.md / *.md file with permissive decoding.
-
-    Tries UTF-8 first (the documented format), then falls back to UTF-8
-    with replacement, then latin-1. Returns ``None`` when the file
-    can't be read at all (missing, permission denied, …) — callers warn
-    and skip rather than crash. BOM and CR characters are stripped on
-    the way out so downstream YAML / markdown parsing stays robust.
-    """
+    """Read a skill file with best-effort decoding and normalized text."""
     p = Path(path)
     try:
         raw = p.read_bytes()
     except OSError as exc:
         logger.warning("Failed to read skill file", path=str(p), error=str(exc))
         return None
-    # Try strict UTF-8 first. Fall back through utf-8-sig (eats BOM
-    # too), then replacement-mode UTF-8, then latin-1 as a last
-    # resort. None of these can raise — the loader will log a warning
-    # and the markdown body will be best-effort recovered.
+    # Decode fallbacks keep one malformed skill from aborting discovery.
     for encoding, errors in (
         ("utf-8", "strict"),
         ("utf-8-sig", "strict"),
@@ -190,47 +119,30 @@ def read_skill_text(path: "Path | str") -> str | None:
 
 
 def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
-    """
-    Parse YAML frontmatter from markdown text.
-
-    Args:
-        text: Markdown text potentially with frontmatter
-
-    Returns:
-        (metadata_dict, content_without_frontmatter). The dict is the raw
-        YAML mapping — every parsed key is included verbatim so callers
-        can decide how to bucket them. Returns ``({}, text)`` when the
-        text has no (valid) frontmatter.
-    """
+    """Split valid YAML frontmatter from Markdown body text."""
     if not isinstance(text, str):
         return {}, ""
-    # Strip BOM + normalise newlines BEFORE the ``---`` prefix check
-    # so a BOM'd file doesn't fall straight through to the no-fm path.
+    # Normalization must precede delimiter detection.
     text = _normalize_skill_text(text).strip()
 
-    # Check for frontmatter delimiter
     if not text.startswith("---"):
         return {}, text
 
-    # Find end of frontmatter
     end_idx = text.find("---", 3)
     if end_idx == -1:
         return {}, text
 
-    # Extract frontmatter YAML
     frontmatter_text = text[3:end_idx].strip()
     content = text[end_idx + 3 :].strip()
 
-    # Parse YAML — both YAMLError (malformed) and any unexpected
-    # exception (e.g. corrupt unicode that survived decoding) must
-    # degrade to "no frontmatter" rather than bubbling up.
+    # Malformed metadata degrades to an empty mapping; the body remains usable.
     parsed: Any
     try:
         parsed = yaml.safe_load(frontmatter_text)
     except yaml.YAMLError as e:
         logger.warning("Failed to parse skill frontmatter", error=str(e))
         parsed = {}
-    except Exception as e:  # noqa: BLE001 — defensive
+    except Exception as e:  # noqa: BLE001 - defensive parser boundary
         logger.warning(
             "Unexpected error parsing skill frontmatter",
             error=str(e),
@@ -239,9 +151,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
         parsed = {}
 
     if not isinstance(parsed, dict):
-        # YAML "front matter" that parses to e.g. a string or list is
-        # technically valid YAML but useless to the loader — treat as
-        # absent rather than blowing up downstream.
+        # Valid non-mapping YAML cannot supply named frontmatter fields.
         parsed = {}
 
     return parsed, content
@@ -250,12 +160,7 @@ def parse_frontmatter(text: str) -> tuple[dict[str, Any], str]:
 def _split_frontmatter(
     raw: dict[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Partition a raw frontmatter dict into (standard, extra) buckets.
-
-    Native keys (``name`` / ``description`` / ``category`` / ``tags``) are
-    already consumed by the caller and intentionally excluded from both
-    buckets.
-    """
+    """Partition non-native frontmatter into recognized and unknown fields."""
     standard: dict[str, Any] = {}
     extra: dict[str, Any] = {}
     for key, value in raw.items():
@@ -269,19 +174,7 @@ def _split_frontmatter(
 
 
 def load_skill_doc(path: Path | str) -> SkillDoc | None:
-    """
-    Load a skill/tool documentation file.
-
-    Returns ``None`` (with a warning) for any failure — bad encoding,
-    BOM-only file, malformed frontmatter, OS error — so a single
-    broken skill never crashes the agent loader.
-
-    Args:
-        path: Path to markdown file
-
-    Returns:
-        SkillDoc or None if the file is missing or unreadable.
-    """
+    """Load one skill document, returning ``None`` for isolated file failures."""
     path = Path(path)
 
     if not path.exists():
@@ -309,7 +202,7 @@ def load_skill_doc(path: Path | str) -> SkillDoc | None:
             extra=extra,
             raw_frontmatter=dict(raw),
         )
-    except Exception as e:  # noqa: BLE001 — last line of defense
+    except Exception as e:  # noqa: BLE001 - isolate malformed skill files
         logger.warning(
             "Failed to load skill doc; skipping",
             path=str(path),
@@ -320,15 +213,7 @@ def load_skill_doc(path: Path | str) -> SkillDoc | None:
 
 
 def load_skill_docs_from_dir(directory: Path | str) -> dict[str, SkillDoc]:
-    """
-    Load all skill docs from a directory.
-
-    Args:
-        directory: Path to directory containing .md files
-
-    Returns:
-        Dict mapping skill name to SkillDoc
-    """
+    """Load top-level Markdown skill files keyed by declared skill name."""
     directory = Path(directory)
     docs = {}
 

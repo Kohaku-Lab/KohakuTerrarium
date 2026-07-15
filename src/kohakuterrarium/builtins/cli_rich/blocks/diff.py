@@ -40,7 +40,7 @@ class Hunk:
     new_start: int = 0
     new_count: int = 0
     heading: str = ""
-    lines: list[tuple[str, str]] = field(default_factory=list)  # (sign, content)
+    lines: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass
@@ -53,8 +53,7 @@ class FileDiff:
 
     @property
     def display_name(self) -> str:
-        # Prefer the new path; strip leading "a/" or "b/" git prefixes
-        # and any "/dev/null" sentinels.
+        # Prefer the new path while ignoring git prefixes and deletion sentinels.
         for candidate in (self.new_path, self.old_path):
             if not candidate or candidate == "/dev/null":
                 continue
@@ -87,7 +86,6 @@ def parse_unified_diff(text: str) -> list[FileDiff]:
 
     for raw in text.splitlines():
         if raw.startswith("--- "):
-            # New file starts — close previous hunk, flush previous file.
             current_file = FileDiff(old_path=raw[4:].strip())
             current_hunk = None
             files.append(current_file)
@@ -123,10 +121,8 @@ def parse_unified_diff(text: str) -> list[FileDiff]:
                 "Binary files",
             )
         ):
-            # Git-specific metadata we don't render.
             continue
         if current_hunk is None:
-            # Hunk body can't start without a header — ignore.
             continue
         if raw.startswith("+"):
             current_hunk.lines.append(("+", raw[1:]))
@@ -135,9 +131,7 @@ def parse_unified_diff(text: str) -> list[FileDiff]:
         elif raw.startswith(" "):
             current_hunk.lines.append((" ", raw[1:]))
         elif raw == "":
-            # Blank line inside a hunk — treat as context.
             current_hunk.lines.append((" ", ""))
-        # Anything else (e.g. "\ No newline at end of file") is dropped.
 
     return files
 
@@ -191,14 +185,7 @@ def _sign_style(sign: str) -> str:
 
 
 def _highlight_line(content: str, lexer: str, sign: str) -> Text:
-    """Apply syntax highlighting to a single diff body line.
-
-    For a ``+`` / ``-`` line we overlay the sign color as a foreground
-    tint on top of whatever the syntax highlighter produced, so additions
-    read as "green Python" and deletions as "red Python". Pure-context
-    lines are dimmed.
-    """
-    # Strip the trailing newline the parser preserved on the raw line.
+    """Syntax-highlight a diff line and tint it by addition or deletion."""
     body = content.rstrip("\n")
     if sign == " ":
         return Text(body, style="bright_black")
@@ -212,17 +199,10 @@ def _highlight_line(content: str, lexer: str, sign: str) -> Text:
             word_wrap=False,
             code_width=None,
         )
-        # Syntax.highlight() ALWAYS appends a trailing newline to the
-        # returned Text (it treats the body as a source-code string
-        # with an implicit newline at EOF). Inside a Table cell that
-        # trailing \n renders as an extra empty line per diff row,
-        # which looks like "blank line between every line of the diff"
-        # — exactly the bug the user reported. Strip it.
+        # Rich appends a newline that would create an empty row inside the table.
         highlighted = syntax.highlight(body)
         while highlighted.plain.endswith("\n"):
             highlighted = highlighted[:-1]
-        # Tint the whole line with the sign color (green/red) while
-        # keeping the syntax colors intact under it.
         out = Text()
         out.append(highlighted)
         out.stylize(_sign_style(sign))
@@ -244,7 +224,6 @@ def _render_hunk(hunk: Hunk, lexer: str, gutter_width: int) -> RenderableType:
     table.add_column(width=1)
     table.add_column(overflow="fold")
 
-    # Hunk heading row — shown once at top of every hunk.
     header = Text()
     header.append(
         f"@@ -{hunk.old_start},{hunk.old_count} "
@@ -276,9 +255,7 @@ def _render_hunk(hunk: Hunk, lexer: str, gutter_width: int) -> RenderableType:
 
 
 def _gutter_width(files: list[FileDiff]) -> int:
-    """Compute a shared right-aligned gutter width wide enough for the
-    largest line number across all hunks.
-    """
+    """Compute a shared gutter width for the largest line number."""
     largest = 1
     for f in files:
         for h in f.hunks:
@@ -291,20 +268,10 @@ def render_unified_diff(
     max_lines: int = 40,
     default_filename: str = "",
 ) -> RenderableType:
-    """Public entry point — parse and render a unified diff to Rich.
-
-    Returns a ``Group`` containing one ``Table`` per file, separated by
-    the file's display name as a bold magenta header. If more than
-    ``max_lines`` body rows would be rendered, the output is truncated
-    at the next hunk boundary and a dim ``… (N more lines)`` footer is
-    appended. ``default_filename`` is used when the diff has no
-    ``---``/``+++`` header — this happens when a tool emits just a
-    standalone hunk.
-    """
+    """Render a unified diff by file, truncating only at hunk boundaries."""
     files = parse_unified_diff(text)
     if not files:
-        # Nothing parsable — fall back to plain text rendering so we
-        # never drop the raw body entirely.
+        # Malformed diff output must remain visible as plain text.
         return Text(text.rstrip("\n"))
 
     gutter = _gutter_width(files)
@@ -320,7 +287,7 @@ def render_unified_diff(
         rendered.append(Text(f"📝 {name}", style="bold magenta"))
         lines_used += 1
         for hunk in file_diff.hunks:
-            hunk_lines = len(hunk.lines) + 1  # +1 for the @@ header row
+            hunk_lines = len(hunk.lines) + 1
             if lines_used + hunk_lines > max_lines:
                 break
             rendered.append(_render_hunk(hunk, lexer, gutter))

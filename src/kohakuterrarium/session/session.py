@@ -1,11 +1,4 @@
-"""Async wrapper around a running agent + :class:`SessionStore`.
-
-Wave E only needs the fork-related surface; the rest of the Session
-lifecycle (``process_event``, attach / detach, token views) is the
-concern of later waves. The API surface is kept deliberately minimal
-and extensible so Waves F / G can bolt on methods without reshaping
-the constructor.
-"""
+"""Provide asynchronous session forking and optional agent attachment."""
 
 import asyncio
 import uuid
@@ -31,19 +24,14 @@ logger = get_logger(__name__)
 def _derive_fork_path(parent_path: str, name: str | None) -> Path:
     """Build the on-disk path for a forked child session.
 
-    Uses :func:`path_for_version` so the child lands on the current
-    ``FORMAT_VERSION`` slot (``<stem>.kohakutr.v2`` today). The stem is
-    the parent stem suffixed with the supplied ``name`` (or a short
-    uuid). Parent directory is reused.
+    The child reuses the parent directory, adds the supplied name or a UUID to
+    the stem, and targets the current format's versioned path.
     """
     parent = Path(parent_path)
     bare_stem = parent.stem
-    # Strip a trailing ``.kohakutr`` if present — Path.stem of
-    # ``alice.kohakutr.v2`` keeps ``.kohakutr`` in place, but
-    # path_for_version strips the version suffix for us.
+    # Versioned paths retain ``.kohakutr`` in ``Path.stem``.
     suffix = name or f"fork-{uuid.uuid4().hex[:8]}"
-    # Insert the fork tag before the ``.kohakutr`` extension so the
-    # result stays a well-formed session filename.
+    # The fork tag belongs before the session extension.
     if parent.suffixes and parent.suffixes[0] == ".kohakutr":
         base = parent.name.split(".kohakutr", 1)[0]
         child_bare = parent.parent / f"{base}-{suffix}.kohakutr"
@@ -53,18 +41,9 @@ def _derive_fork_path(parent_path: str, name: str | None) -> Path:
 
 
 class Session:
-    """Async facade over :class:`SessionStore` and an optional :class:`Agent`.
+    """Wrap a session store with optional agent attachment and async forking.
 
-    Wave E responsibilities only:
-
-    * Own a :class:`SessionStore`.
-    * Expose :meth:`fork` that produces another :class:`Session` backed
-      by a freshly forked store (copy-on-fork via
-      :meth:`SessionStore.fork`).
-
-    The :attr:`agent` attribute is optional — a Session with no agent
-    is a pure data handle, useful for tests and HTTP fork endpoints
-    where the caller does not run the forked session immediately.
+    Agent-less instances remain useful as data handles for persisted forks.
     """
 
     def __init__(
@@ -99,14 +78,11 @@ class Session:
         """Path to the backing ``.kohakutr`` file."""
         return self._store.path
 
-    # ─── Fork ───────────────────────────────────────────────────────
-
     def _pending_job_ids(self) -> set[str]:
         """Collect in-flight call ids from the attached agent, if any.
 
-        Used by :meth:`fork` to decide whether the fork point is
-        stable. With no agent attached (typical HTTP / resume case),
-        there are no in-flight calls so we return an empty set.
+        Fork stability requires identifiers for active executor jobs. Agent-less
+        sessions have no in-flight work.
         """
         agent = self._agent
         if agent is None:
@@ -117,10 +93,7 @@ class Session:
         if executor is None:
             return pending
 
-        # Duck-type: anything exposing a list of pending jobs with a
-        # ``call_id`` / ``job_id`` attribute is accepted. Keep the
-        # surface small so we don't accidentally freeze the executor
-        # interface.
+        # Duck typing avoids coupling session forks to one executor job class.
         list_fn = getattr(executor, "list_pending_jobs", None)
         jobs: list[Any]
         if callable(list_fn):
@@ -145,25 +118,18 @@ class Session:
                 pending.add(str(call_id))
         return pending
 
-    # ─── Attach (Wave F) ────────────────────────────────────────────
-
     def attach_agent(self, agent: "Agent", role: str) -> None:
         """Attach ``agent`` to this session under ``role``.
 
-        Thin mirror of :meth:`Agent.attach_to_session` — both call the
-        same underlying primitive in
-        :mod:`kohakuterrarium.session.attachment_service`. Explicit-only;
-        one session per agent (see
-        :class:`kohakuterrarium.session.errors.AlreadyAttachedError`).
+        An agent may attach to only one session at a time.
         """
         attach_agent_to_session(agent, self, role)
 
     def detach_agent(self, agent: "Agent") -> None:
         """Detach ``agent`` from this session.
 
-        Mirror of :meth:`Agent.detach_from_session`. Raises
-        :class:`kohakuterrarium.session.errors.NotAttachedError` when
-        ``agent`` is not currently attached here.
+        Raise :class:`NotAttachedError` when the agent belongs to another session
+        or has no attachment.
         """
         state = get_attach_state(agent)
         if state is None or state.get("session") is not self:
@@ -180,11 +146,8 @@ class Session:
     ) -> "Session":
         """Fork into a new :class:`Session` rooted at ``at_event_id``.
 
-        The fork runs under a lock to avoid two concurrent forks
-        racing to register under the parent's ``forked_children``
-        list. The underlying :meth:`SessionStore.fork` is synchronous;
-        we off-thread it so the event loop stays responsive even when
-        the event log is large.
+        Forks serialize parent lineage updates and run the synchronous copy in a
+        worker thread so large histories do not block the event loop.
         """
         child_name = name or f"{self._name}-fork-{uuid.uuid4().hex[:8]}"
         target = _derive_fork_path(self._store.path, name=child_name)

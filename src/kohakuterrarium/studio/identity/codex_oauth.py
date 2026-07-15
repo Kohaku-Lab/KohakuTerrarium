@@ -26,27 +26,18 @@ _EMPTY_RESET_CREDITS: dict[str, Any] = {"available_count": None, "credits": []}
 
 
 async def login_async(on_device_code=None, open_browser: bool = True) -> dict[str, Any]:
-    """Run the Codex OAuth flow and return ``{status, expires_at}``.
+    """Run Codex OAuth and return its status and token expiry.
 
-    ``on_device_code`` is forwarded to :func:`oauth_login` so the
-    SSE-streaming route in ``api/routes/identity/codex.py`` can push
-    the verification URL + user code to the frontend modal as soon
-    as the device-code flow obtains them.
-
-    ``open_browser`` is forwarded too: the SSE route passes ``False``
-    because the user already has the modal driving their interaction;
-    auto-popping a system browser on the server's machine is
-    redundant (web UI = same machine) and on Android Chaquopy /
-    headless boxes actively harmful.  The CLI ``run_login_blocking``
-    path keeps the default ``True`` since CLI users expect an
-    auto-opened browser.
+    ``on_device_code`` lets streaming callers publish the verification URL and
+    user code as soon as they arrive. Web, Android, and headless callers can
+    disable ``open_browser``; the CLI keeps browser opening enabled by default.
     """
     tokens = await oauth_login(on_device_code=on_device_code, open_browser=open_browser)
     return {"status": "ok", "expires_at": tokens.expires_at}
 
 
 def run_login_blocking() -> int:
-    """CLI entry — perform OAuth login, return CLI exit code."""
+    """Perform interactive Codex OAuth and return the CLI exit code."""
     existing = CodexTokens.load()
     if existing and not existing.is_expired():
         print("Already authenticated (tokens valid).")
@@ -85,12 +76,11 @@ def get_status() -> dict[str, Any]:
 
 
 async def get_usage_async() -> dict[str, Any]:
-    """Return the Codex rate-limit / credits snapshot for the host account.
+    """Return the host account's Codex rate-limit and credit snapshot.
 
-    Authoritative source is a LIVE ``GET /wham/usage`` (no model round);
-    the passive header/SSE cache is only a fallback when the live fetch
-    fails.  ``reset_credits`` lists the earned rate-limit reset credits
-    ready to redeem.  ``source`` is ``"live"`` or ``"cache"``.
+    A live WHAM request is authoritative and does not consume a model round.
+    The passive header/SSE cache is used only when the live request fails.
+    ``source`` identifies which path produced the response.
     """
     tokens = CodexTokens.load()
     if not tokens:
@@ -103,8 +93,7 @@ async def get_usage_async() -> dict[str, Any]:
             "reset_credits": dict(_EMPTY_RESET_CREDITS),
         }
     if tokens.is_expired():
-        # The error type is preserved here so the route layer can map it
-        # to a 401 response.
+        # Preserve refresh failures so the route layer can retain its 401 mapping.
         tokens = await refresh_tokens(tokens)
 
     try:
@@ -155,14 +144,11 @@ async def consume_reset_credit_async(
     idempotency_key: str | None = None,
     credit_id: str | None = None,
 ) -> dict[str, Any]:
-    """Redeem a rate-limit reset credit for the host account.
+    """Redeem a host-account reset credit and return its outcome and key.
 
-    Generates a stable ``idempotency_key`` when the caller omits one so a
-    single logical redeem stays idempotent across transport retries.
-    Returns ``{outcome, idempotency_key}`` where ``outcome`` is one of
-    ``reset|nothingToReset|noCredit|alreadyRedeemed``.  Raises
-    :class:`PermissionError` when no Codex account is authenticated so
-    the route can map it to a 401.
+    A generated key keeps a caller-initiated redemption idempotent across
+    transport retries. Missing authentication raises :class:`PermissionError`
+    so route adapters can map the failure to HTTP 401.
     """
     tokens = CodexTokens.load()
     if not tokens:

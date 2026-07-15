@@ -1,11 +1,8 @@
-"""Serialization + primitive-parsing helpers for the Drive record façade.
+"""Serialize Drive records and parse primitive API inputs.
 
-Split out of :mod:`studio.sessions.drives` (file-size cap): the record-shape
-serializers (row / detail / progress / delivery / audit) and the
-primitive-``dict`` → typed-DTO builders (create request / patch / status /
-actor parsing). The record-operation functions in ``drives`` import from here;
-the public names stay re-exported from ``drives`` so callers keep importing
-``studio.sessions.drives.build_create_request`` etc.
+The record operations in :mod:`studio.sessions.drives` use these JSON-safe
+serializers and typed request builders, then re-export the public helpers for
+compatibility.
 """
 
 from __future__ import annotations
@@ -24,13 +21,8 @@ from kohakuterrarium.terrarium.drive.models import (
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest, DrivePatch
 from kohakuterrarium.terrarium.drive.wire_service import DriveView
 
-# Fields dropped from a list row — sensitive/verbose payloads live on detail only.
+# List rows omit sensitive or verbose payloads reserved for authorized detail views.
 _REDACTED_KEYS = ("spec", "presentation", "metadata", "terminal_evidence")
-
-
-# ---------------------------------------------------------------------------
-# serialization
-# ---------------------------------------------------------------------------
 
 
 def row(view: DriveView) -> dict[str, Any]:
@@ -104,11 +96,6 @@ def audit_to_dict(audit: DriveAuditRecord) -> dict[str, Any]:
 
 def _iso_or_none(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
-
-
-# ---------------------------------------------------------------------------
-# primitive -> typed input
-# ---------------------------------------------------------------------------
 
 
 def parse_status(value: str) -> DriveStatus:
@@ -199,7 +186,7 @@ def build_create_request(
     scope_type = body.get("scope_type") or "graph"
     if scope_type not in ("graph", "creature"):
         raise DriveValidationError("scope_type must be 'graph' or 'creature'")
-    # Creature scope must name its creature; only graph scope defaults to the graph.
+    # Creature scope requires explicit identity; only graph scope can infer it.
     scope_id = body.get("scope_id")
     if scope_type == "creature" and not scope_id:
         raise DriveValidationError(

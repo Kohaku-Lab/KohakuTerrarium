@@ -1,24 +1,10 @@
-"""Process-wide metrics — REST snapshot.
+"""Expose process metrics and live runtime gauges through one snapshot route.
 
-Mounted at ``/api/metrics``. Currently a single endpoint
-``GET /api/metrics/snapshot`` returns the entire aggregator state in
-one shot — counters, sliding histograms (5-minute and 1-hour windows),
-and the per-minute rate buckets the dashboard sparklines render.
-
-Adding a websocket delta-stream is on the M3 milestone; the snapshot
-shape is forward-compatible so the WS deltas can reuse the same field
-names without a frontend migration.
-
-The snapshot intentionally re-computes every histogram on each call
-(no caching). Aggregator instance is process-wide; multiple browser
-tabs polling at 5 s each costs a few hundred microseconds total.
-
-Some gauges (running creatures / terrariums / jobs / MCP / sessions)
-read directly off the engine + the active session bookkeeping rather
-than living in the aggregator — they are instantaneous and labelling
-them with closed cardinality is trivial. Putting them on the snapshot
-keeps the frontend's single ``/api/metrics/snapshot`` poll covering
-everything the Stats tab and the dashboard mini-strip need.
+Histogram and rate data comes from the process-wide aggregator, while gauges
+that represent current runtime state are read from sessions and the host
+engine. Keeping both sources in one response lets dashboard consumers poll a
+single endpoint. Histograms are recomputed on every request because the
+calculation is cheap and caching would make the snapshot stale.
 """
 
 from __future__ import annotations
@@ -40,15 +26,11 @@ router = APIRouter()
 def metrics_snapshot(
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, Any]:
-    """Return a full metrics snapshot.
+    """Return aggregator metrics augmented with current runtime gauges.
 
-    Cheap to compute (~1 ms for ~50 series). Polled every 5 s by the
-    Stats tab; the dashboard mini-strip reuses the same payload.
-
-    Service-routed: ``list_sessions`` / ``get_session`` already accept
-    the ``TerrariumService`` (standalone OR multi-node), so the
-    session-count gauges aggregate across workers in lab-host mode
-    instead of reading an empty host engine.
+    Session lookups use ``TerrariumService`` so counts aggregate across workers
+    in lab-host mode rather than depending on the host engine, which may not
+    contain agents.
     """
     aggregator = get_aggregator()
     snapshot = aggregator.snapshot()
@@ -57,24 +39,19 @@ def metrics_snapshot(
 
 
 def _build_gauges(service: TerrariumService) -> dict[str, int]:
-    """Read instantaneous gauges off live session state.
+    """Compute session, creature, and reachable MCP connection gauges.
 
-    Solo-vs-multi separation comes from the listing's creature count —
-    1 creature is a solo session, 2+ is a multi-creature graph
-    (matches the frontend's ``isMulti`` derivation).
-    ``mcp_servers_connected`` peeks into the agent's MCP manager — only
-    reachable for host-local creatures, so in lab-host mode (no host
-    agent engine) it reports 0; a cross-node MCP count would need a
-    dedicated service surface.
+    A session with at most one creature is classified as solo; larger sessions
+    are multi-creature terrariums. MCP managers are only accessible for
+    host-local creatures, so the MCP gauge is zero when the service has no host
+    engine.
     """
     sessions = list(sessions_lifecycle.list_sessions(service))
     creatures_running = sum(1 for s in sessions if s.creatures <= 1)
     terrariums_running = sum(1 for s in sessions if s.creatures > 1)
 
-    # Each session is a graph; its creature count is on the listing.
-    # ``creatures_total`` counts every creature across every active
-    # session (the dashboard's "Running" card uses this for the badge
-    # in the section title).
+    # Session summaries may not include the complete creature collection.
+    # Fetch each full session before summing all active creatures.
     creatures_total = 0
     for s in sessions:
         try:
@@ -83,10 +60,8 @@ def _build_gauges(service: TerrariumService) -> dict[str, int]:
         except Exception:  # pragma: no cover — defensive
             pass
 
-    # MCP — sample each reachable creature's manager.  Only host-local
-    # creatures expose ``agent._mcp_manager``; in lab-host mode the
-    # host runs no agents, so ``host_engine_or_none`` is ``None`` and
-    # this gauge is 0 (documented above).
+    # MCP manager internals are available only for creatures hosted by this
+    # process; remote worker connections cannot be counted from the host.
     mcp_connected = 0
     engine = host_engine_or_none(service)
     if engine is not None:

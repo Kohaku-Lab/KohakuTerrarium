@@ -4,15 +4,8 @@ from textual.events import Key
 from textual.message import Message
 from textual.widgets import TextArea
 
-# ── Chat Input ─────────────────────────────────────────────────
-
-
 class ChatInput(TextArea):
-    """Multi-line input. Enter sends, Shift+Enter or Ctrl+J inserts newline.
-
-    Ctrl+J works universally (including SSH) since it is the literal
-    newline character and does not depend on terminal modifier support.
-    """
+    """Collect multiline chat input with terminal-portable shortcuts."""
 
     DEFAULT_CSS = """
     ChatInput {
@@ -26,30 +19,30 @@ class ChatInput(TextArea):
     }
     """
 
-    # Available commands — set by TUI app for hint display
+    # The owning TUI session refreshes this list when runtime commands change.
     command_names: ClassVar[list[str]] = []
 
     class Submitted(Message):
-        """Posted when the user presses Enter to send."""
+        """Carry submitted chat text."""
 
         def __init__(self, value: str) -> None:
             super().__init__()
             self.value = value
 
     class EditQueued(Message):
-        """Posted when user presses Up on empty input to edit last queued message."""
+        """Request editing of the latest queued message."""
 
         pass
 
     class CommandHint(Message):
-        """Posted when user is typing a / command, for hint display."""
+        """Carry slash-command completion hints."""
 
         def __init__(self, hint: str) -> None:
             super().__init__()
             self.hint = hint
 
     def on_text_area_changed(self) -> None:
-        """Show command hints when typing /."""
+        """Emit command hints while slash commands are typed."""
         text = self.text.strip()
         if text.startswith("/") and self.command_names:
             partial = text.lstrip("/").split()[0].lower() if text.strip("/") else ""
@@ -66,13 +59,12 @@ class ChatInput(TextArea):
             self.post_message(self.CommandHint(""))
 
     def _on_key(self, event: Key) -> None:
-        # Shift+Enter, Ctrl+Enter, Ctrl+J: insert newline
+        # Ctrl+J remains distinguishable from submit across limited terminals and SSH.
         if event.key in ("shift+enter", "ctrl+enter", "ctrl+j"):
             event.prevent_default()
             event.stop()
             self.insert("\n")
             return
-        # Plain Enter: send message
         if event.key == "enter":
             event.prevent_default()
             event.stop()
@@ -81,7 +73,6 @@ class ChatInput(TextArea):
                 self.post_message(self.Submitted(text))
                 self.clear()
             return
-        # Up arrow on empty input: edit last queued message
         if event.key == "up" and not self.text.strip():
             event.prevent_default()
             event.stop()

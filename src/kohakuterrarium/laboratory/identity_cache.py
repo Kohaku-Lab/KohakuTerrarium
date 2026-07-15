@@ -1,19 +1,8 @@
 """Worker-side identity cache for the hybrid identity model.
 
-A worker that runs creatures on behalf of a controller needs to make
-LLM calls.  Those calls need API keys, profile bodies, and MCP server
-configs.  Rather than each worker maintaining its own identity files,
-the worker fetches identity from the controller (the source of truth)
-and caches with a short TTL.
-
-Per ``management-wiring.md``:
-
-- API keys → pulled on demand (sensitive; want quick invalidation)
-- LLM profiles + MCP server configs → cached with longer TTL
-- All caches honour broadcast invalidations (future unit)
-
-The cache is async-safe via a single lock; concurrent requests for
-the same record coalesce into one underlying fetch.
+Workers resolve identity data locally first, then fetch it from the
+controller and cache it with type-specific TTLs. Concurrent requests for
+the same record share one underlying fetch.
 """
 
 import asyncio
@@ -38,9 +27,8 @@ logger = get_logger(__name__)
 HOST_NODE = "_host"
 NAMESPACE = "studio.identity"
 
-# TTLs are deliberately tight for keys (revocation must propagate
-# quickly) and looser for profiles / MCP configs (rarely change at
-# runtime).  Configurable per-instance.
+# Short key TTLs propagate revocation quickly; profiles and MCP configs change
+# less frequently and can remain cached longer.
 DEFAULT_KEY_TTL_SECONDS = 30.0
 DEFAULT_PROFILE_TTL_SECONDS = 300.0
 DEFAULT_MCP_TTL_SECONDS = 300.0
@@ -59,19 +47,10 @@ class _Entry:
 
 
 class IdentityCache:
-    """TTL-bounded cache over ``studio.identity`` RPCs.
+    """Resolve and cache worker identity data from local files or host RPCs.
 
-    All getters are async.  Cache hits return immediately; misses or
-    expired entries trigger a fetch from the host.  Concurrent callers
-    requesting the same record share one inflight fetch via a per-key
-    asyncio.Lock.
-
-    For sync consumers (``llm.api_keys.get_api_key`` is sync), see
-    :meth:`sync_api_key` — it does a non-blocking dict lookup against
-    the cache's own internal store, never blocks on a fetch.  The
-    expected pattern: pre-fetch keys async at spawn time (via
-    :meth:`prefetch_for_provider`), then the sync agent code finds
-    them in the cache.
+    Async getters coalesce cache misses by key. Synchronous consumers must
+    prefetch and then use the non-blocking lookup methods.
     """
 
     def __init__(
@@ -93,13 +72,10 @@ class IdentityCache:
         self._keys: dict[str, _Entry] = {}
         self._profiles: dict[str, _Entry] = {}
         self._mcp: dict[str, _Entry] = {}
-        # Codex tokens are a single-record cache (one host == one
-        # ChatGPT subscription).  Stored under a fixed sentinel key.
+        # A host has one ChatGPT subscription, so Codex tokens use a fixed key.
         self._codex: dict[str, _Entry] = {}
-        # Per-fetch coalescing locks.  WeakValueDictionary lets a lock
-        # be GC'd once every concurrent waiter has released — prevents
-        # an unbounded build-up of dead locks for unique keys over the
-        # cache's lifetime.
+        # Weak references discard per-key locks after all concurrent waiters
+        # release them, preventing growth from one-time cache keys.
         self._locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = (
             weakref.WeakValueDictionary()
         )
@@ -122,32 +98,18 @@ class IdentityCache:
         return await self._fetch("mcp", name, self._mcp, self._mcp_ttl, self._fetch_mcp)
 
     async def get_codex_token(self) -> dict[str, Any]:
-        """Fetch the host's Codex OAuth tokens (cached briefly).
-
-        Same TTL as API keys — codex tokens revoke / refresh on a similar
-        cadence and a stale local copy must not outlive the host's view.
-        """
+        """Return Codex OAuth tokens cached with the API-key TTL."""
         return await self._fetch(
             "codex", "_singleton", self._codex, self._key_ttl, self._fetch_codex
         )
 
     def sync_codex_tokens(self):
-        """Non-blocking lookup for Codex tokens.
+        """Return worker-local or cached Codex tokens without blocking.
 
-        **Local-first**: try the worker's own
-        ``<config_dir>/codex-auth.json`` (or the Codex CLI cache)
-        before falling back to whatever the host most recently shared.
-        Codex tokens are process-scoped — the host's token belongs to
-        the host's OAuth session and routing it through a worker
-        invariably fails with a refresh-mismatch.  A worker with its
-        OWN ``kt login codex`` (or the system Codex CLI) MUST use that
-        token, not the host's.
-
-        Returns a :class:`kohakuterrarium.llm.codex_auth.CodexTokens`
-        instance (or ``None`` on miss).
+        Worker-local tokens take precedence because OAuth refresh state is
+        process-scoped and a host token can cause refresh mismatches.
         """
-        # Local-first: read the worker's file directly, bypassing the
-        # registered resolver (which would loop back into this method).
+        # Reading the file directly avoids re-entering this registered resolver.
         local = _read_local_codex_tokens()
         if local is not None:
             return local
@@ -168,7 +130,7 @@ class IdentityCache:
         )
 
     async def prefetch_for_codex_if_needed(self) -> None:
-        """Async-warm the Codex token cache.  Silent on miss."""
+        """Warm the Codex token cache, ignoring missing credentials."""
         try:
             await self.get_codex_token()
         except IdentityNotFound:
@@ -177,23 +139,12 @@ class IdentityCache:
             logger.warning("prefetch_for_codex_if_needed failed", exc_info=True)
 
     def sync_api_key(self, provider: str) -> str:
-        """Non-blocking lookup for an API key.
+        """Return a worker-local or cached API key without blocking.
 
-        **Local-first**: try the worker's own ``api_keys.yaml`` (and
-        its env-var fallback) before falling back to the host-fetched
-        cache.  Workers that have their own provider credentials
-        (typical when ``--home-dir`` points at a real config dir)
-        should use them rather than receiving the host's keys.
-
-        Returns ``""`` when neither local nor host caches have an
-        entry.  Used by :func:`llm.api_keys.get_api_key` via the
-        registered resolver — must not await.
+        Local credentials take precedence. An empty string indicates a miss.
         """
-        # Local-first: read the worker's own api_keys.yaml directly.
-        # ``_load_api_keys`` is a sync file-read that honours
-        # ``KT_CONFIG_DIR``; bypassing the public ``get_api_key`` here
-        # avoids re-entering the resolver chain (which would loop
-        # back into this method).
+        # The private loader honors KT_CONFIG_DIR without re-entering this
+        # registered resolver through the public accessor.
         local = _read_local_api_key(provider)
         if local:
             return local
@@ -205,12 +156,11 @@ class IdentityCache:
         return entry.value if isinstance(entry.value, str) else ""
 
     async def prefetch_for_provider(self, provider: str) -> None:
-        """Async-warm the cache for ``provider``.  Silent on miss."""
+        """Warm one provider's cache, ignoring missing credentials."""
         try:
             await self.get_api_key(provider)
         except IdentityNotFound:
-            # Worker may not need this key (creature picks up a key
-            # from elsewhere, or the LLM call is non-authed).
+            # A creature may obtain credentials elsewhere or not require them.
             pass
         except Exception:  # pragma: no cover - defensive
             logger.warning(
@@ -245,10 +195,6 @@ class IdentityCache:
         else:
             target.pop(name, None)
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
-
     async def _fetch(
         self,
         kind: str,
@@ -262,18 +208,14 @@ class IdentityCache:
         if entry is not None and entry.expires_at > now:
             return entry.value
         lock_key = f"{kind}:{key}"
-        # WeakValueDictionary doesn't have setdefault; do an
-        # explicit get-or-insert so concurrent waiters see the same
-        # lock for the duration of the fetch.  The local ``lock``
-        # variable keeps it alive while we await; once every awaiter
-        # releases, GC drops it from the WeakValueDictionary.
+        # The local strong reference keeps this weakly stored lock alive while
+        # all concurrent waiters share it.
         lock = self._locks.get(lock_key)
         if lock is None:
             lock = asyncio.Lock()
             self._locks[lock_key] = lock
         async with lock:
-            # Re-check after acquiring the lock — another task may have
-            # populated the entry while we were waiting.
+            # Another task may have populated the entry while this task waited.
             now = time.monotonic()
             entry = cache.get(key)
             if entry is not None and entry.expires_at > now:
@@ -283,7 +225,7 @@ class IdentityCache:
             return value
 
     async def _fetch_api_key(self, provider: str) -> str:
-        # Local-first: worker's own api_keys.yaml + env wins over host.
+        # Worker-local credentials intentionally override host credentials.
         local = _read_local_api_key(provider)
         if local:
             return local
@@ -291,7 +233,7 @@ class IdentityCache:
         return body["key"]
 
     async def _fetch_profile(self, name: str) -> dict[str, Any]:
-        # Local-first: worker's own llm_profiles.json wins over host.
+        # Worker-local profiles intentionally override host profiles.
         local = _read_local_profile(name)
         if local is not None:
             return local
@@ -303,9 +245,7 @@ class IdentityCache:
         return body["server"]
 
     async def _fetch_codex(self, _key: str) -> dict[str, Any]:
-        # Local-first: worker's own codex-auth.json (or Codex CLI
-        # cache) wins over the host's token.  Codex tokens are
-        # process-bound and the host's are NOT interchangeable.
+        # Process-bound worker tokens cannot safely be replaced by host tokens.
         local = _read_local_codex_tokens()
         if local is not None:
             return {
@@ -338,16 +278,8 @@ class IdentityCache:
         return resp
 
 
-# ---------------------------------------------------------------------------
-# Local-file readers — used by every "local-first" branch above.  Each
-# one reads the SAME file the standalone Studio reads (honouring
-# ``KT_CONFIG_DIR`` / ``--home-dir``) but bypasses the public sync
-# accessor so we don't loop back into our own resolver.
-# ---------------------------------------------------------------------------
-
-
 def _read_local_api_key(provider: str) -> str:
-    """Worker-local api_keys.yaml + env fallback, no resolver."""
+    """Read a worker-local API key without invoking the resolver."""
     keys = _load_api_keys()
     if provider in keys and keys[provider]:
         return keys[provider]
@@ -358,11 +290,7 @@ def _read_local_api_key(provider: str) -> str:
 
 
 def _read_local_codex_tokens():
-    """Worker-local codex-auth.json (or Codex CLI cache), no resolver.
-
-    Bypasses :func:`CodexTokens.load`'s resolver branch by passing the
-    default path explicitly.
-    """
+    """Read worker-local Codex tokens without invoking the resolver."""
     tokens = CodexTokens.load(path=_default_token_path())
     if tokens is not None and tokens.access_token:
         return tokens
@@ -370,7 +298,7 @@ def _read_local_codex_tokens():
 
 
 def _read_local_profile(name: str) -> dict[str, Any] | None:
-    """Worker-local llm_profiles.json, as a wire dict.  None on miss."""
+    """Return a worker-local profile as a wire dictionary, if present."""
     profile = _local_get_profile(name)
     if profile is None:
         return None

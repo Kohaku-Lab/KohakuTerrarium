@@ -1,15 +1,8 @@
 """AgentConfig <-> primitive-dict (de)serialization.
 
-Carved out of :mod:`kohakuterrarium.terrarium.wire` so the resume path
-in :mod:`kohakuterrarium.session.resume` can reconstruct an
-``AgentConfig`` from a saved ``config_snapshot`` without dragging in
-``terrarium.engine`` / ``terrarium.service`` / ``terrarium.creature_ops``
-(which all back-import ``terrarium.engine`` and create an import cycle
-with the resume module).
-
-This module's only dependencies are pure data: :mod:`core.config_types`
-and :mod:`core.output_wiring`.  ``terrarium.wire`` re-exports the
-helpers for back-compat with the existing wire DTO surface.
+Keeping these helpers dependent only on configuration data types avoids
+an import cycle between session resume and the terrarium engine. The wire
+module re-exports them for compatibility with its existing DTO surface.
 """
 
 from dataclasses import asdict, fields
@@ -49,10 +42,12 @@ def stringify_paths(value: Any) -> Any:
 
 
 def pack_agent_config(c: AgentConfig) -> dict[str, Any]:
+    """Convert an agent configuration to wire-safe primitives."""
     return stringify_paths(asdict(c))
 
 
 def unpack_agent_config(d: dict[str, Any]) -> AgentConfig:
+    """Reconstruct an agent configuration from wire-safe primitives."""
     payload = dict(d)
     known = {f.name for f in fields(AgentConfig)}
     payload = {k: v for k, v in payload.items() if k in known}

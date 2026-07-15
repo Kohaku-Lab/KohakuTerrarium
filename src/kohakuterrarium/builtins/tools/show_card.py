@@ -1,23 +1,8 @@
-"""show_card tool — emit a Phase B ``card`` :class:`OutputEvent`.
+"""Structured card output with optional interactive actions.
 
-Lets the model display structured information beautifully (title +
-body + fields + footer + accent color) without inventing ad-hoc
-markdown formatting, and optionally collect user input via action
-buttons (a card-shaped survey form).
-
-The tool reads the same payload schema the renderers consume. Two
-modes:
-
-- **Display-only** (no ``actions``, or ``wait_for_reply=False``):
-  emits the card and returns immediately. Useful for plan previews,
-  cost summaries, sub-agent result cards, monitoring tiles, etc.
-- **Interactive** (``actions`` non-empty and ``wait_for_reply=True``):
-  emits the card and awaits the user's button click via the bus.
-  Returns the chosen ``action_id``. Useful for "approve / edit /
-  reject" gates and small forms.
-
-Falls back gracefully (returns a status message) when no output
-router is wired (programmatic / test contexts).
+Display-only cards return after emission. Interactive cards wait for a
+non-link action and return its identifier. Calls without an output router
+receive a plain-text rendering instead.
 """
 
 from typing import Any
@@ -42,21 +27,11 @@ _VALID_STYLES = {"primary", "secondary", "danger", "link"}
 
 @register_builtin("show_card")
 class ShowCardTool(BaseTool):
-    """Render a styled card to the user (display or interactive).
-
-    A card has a header (title + optional subtitle + icon + accent),
-    a body (markdown), optional key/value fields, an optional footer,
-    and optional action buttons. When actions are present and
-    ``wait_for_reply=True`` (the default), the tool blocks until the
-    user clicks one and returns the action id.
-    """
+    """Render a styled card and optionally wait for an action selection."""
 
     needs_context: bool = True
-    # The schema is rich (fields, actions, accent enum, ...) and the
-    # right call shape depends on intent (display vs interactive vs
-    # link-out). Force the model to read the manual once before its
-    # first call so it produces structured args rather than guessing
-    # — same pattern as ``edit`` / ``multi_edit``.
+    # The manual distinguishes display, interactive, and link-only call shapes,
+    # which cannot be inferred safely from the compact tool description.
     require_manual_read: bool = True
 
     @property
@@ -108,8 +83,7 @@ class ShowCardTool(BaseTool):
         router = getattr(agent, "output_router", None) if agent else None
 
         if router is None:
-            # Programmatic / test mode — surface a textual fallback so the
-            # caller still sees something useful in the tool result.
+            # A textual fallback keeps headless callers from losing card content.
             return ToolResult(
                 output=self._fallback_text(payload),
                 exit_code=0,
@@ -136,7 +110,7 @@ class ShowCardTool(BaseTool):
                     output=self._fallback_text(payload),
                 )
             if wants_reply:
-                # Wanted a button reply but no renderer can collect one.
+                # Emission can succeed even when no renderer can return an action.
                 return ToolResult(
                     output=(
                         "card displayed; no interactive responder is attached "
@@ -157,8 +131,7 @@ class ShowCardTool(BaseTool):
         if reply.is_timeout:
             return ToolResult(output="card timed out without reply", exit_code=0)
         action_id = reply.action_id or ""
-        # Echo any submitted values too (cards may grow form-style data
-        # later; staying forward-compatible).
+        # Preserve renderer-supplied values so richer card inputs are not discarded.
         values = reply.values or {}
         if values:
             return ToolResult(
@@ -167,10 +140,7 @@ class ShowCardTool(BaseTool):
         return ToolResult(output=f"action: {action_id}", exit_code=0)
 
     def _build_payload(self, args: dict[str, Any]) -> dict[str, Any]:
-        """Construct a card payload from tool arguments, validating
-        types and dropping unknown keys to keep the renderer schema
-        stable.
-        """
+        """Build a renderer-safe card payload from validated arguments."""
         payload: dict[str, Any] = {"title": args["title"]}
         for key in ("subtitle", "icon", "body", "footer"):
             val = args.get(key)
@@ -226,11 +196,7 @@ class ShowCardTool(BaseTool):
 
     @staticmethod
     def _fallback_text(payload: dict[str, Any]) -> str:
-        """Plain-text rendering used when no router is attached.
-
-        Keeps the model's tool result informative even when the bus
-        isn't available (test contexts, programmatic invocation).
-        """
+        """Render card content as text for callers without an output router."""
         parts = [f"# {payload.get('title', 'Card')}"]
         if payload.get("subtitle"):
             parts.append(payload["subtitle"])

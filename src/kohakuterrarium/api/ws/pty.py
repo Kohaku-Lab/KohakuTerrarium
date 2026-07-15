@@ -43,8 +43,8 @@ async def session_pty_ws(
     """Interactive terminal in the working directory of a creature."""
     await accept_with_auth_echo(websocket)
 
-    # Lab-host has no host engine — ``host_engine_or_none`` returns
-    # ``None`` and we go straight to the remote PTY-proxy branch.
+    # A lab host has no local engine, so creature lookup must fall back to
+    # the worker-backed PTY proxy.
     engine = host_engine_or_none(service)
     creature = None
     if engine is not None:
@@ -58,10 +58,8 @@ async def session_pty_ws(
         except Exception:
             info = None
         if info is not None:
-            # Remote-hosted creature — open a PTY proxy stream to the
-            # worker that hosts it.  The worker's TerrariumPtyAdapter
-            # spawns the shell on its own machine in the creature's
-            # working directory and bridges via the unified ws-proxy.
+            # The hosting worker must create the shell so its process inherits
+            # the creature's remote working directory and filesystem context.
             home = await _resolve_creature_home(service, cid)
             if home is None or home == "_host":
                 await websocket.send_json(
@@ -109,6 +107,7 @@ async def session_pty_ws(
 
 
 async def _resolve_creature_home(service, cid: str) -> str | None:
+    """Return the worker hosting a creature, or ``None`` when unresolved."""
     resolver = getattr(service, "_resolve_home", None)
     if resolver is None:
         return "_host"

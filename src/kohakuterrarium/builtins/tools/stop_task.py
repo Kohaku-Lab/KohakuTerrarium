@@ -1,4 +1,4 @@
-"""Stop task tool. Cancel a running background tool or sub-agent."""
+"""Cancel direct, tool, or sub-agent jobs by identifier."""
 
 from typing import Any
 
@@ -56,25 +56,22 @@ class StopTaskTool(BaseTool):
 
         agent = context.agent
 
-        # Try current direct-run jobs first so interruption is finalized and persisted
+        # Direct jobs must finalize interruption state before other registries are tried.
         if agent._interrupt_direct_job(job_id):
             logger.info("Direct task cancelled", job_id=job_id)
             return ToolResult(output=f"Cancelled task: {job_id}", exit_code=0)
 
-        # Try executor first (background tools)
         cancelled = await agent.executor.cancel(job_id)
         if cancelled:
             logger.info("Tool task cancelled", job_id=job_id)
             return ToolResult(output=f"Cancelled tool: {job_id}", exit_code=0)
 
-        # Try sub-agent manager (background sub-agents)
         if hasattr(agent, "subagent_manager") and agent.subagent_manager:
             cancelled = await agent.subagent_manager.cancel(job_id)
             if cancelled:
                 logger.info("Sub-agent cancelled", job_id=job_id)
                 return ToolResult(output=f"Cancelled sub-agent: {job_id}", exit_code=0)
 
-        # Check if it exists but is already done
         status = agent.executor.get_status(job_id)
         if not status and hasattr(agent, "subagent_manager") and agent.subagent_manager:
             status = agent.subagent_manager.get_status(job_id)

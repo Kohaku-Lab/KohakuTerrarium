@@ -1,15 +1,9 @@
-"""``/api/lab/clients/*`` and ``/api/lab/pairing-tokens/*`` — per-client
-control surface for the operator's Sites tab.
+"""Control lab clients, the transient blocklist, and the pairing token.
 
-In standalone mode every route returns 404 (no host engine to act on).
-In lab-host mode each route reaches into ``app.state.lab_host_engine``
-and either evicts a client, updates the host's in-memory blocklist, or
-rotates the shared pairing token.
-
-The "block" verb updates HostEngine's in-memory blocklist so future
-handshakes for that client id are rejected. The blocklist does not
-persist across daemon restarts on purpose — operators expecting
-permanent bans should rotate the pairing token instead.
+These routes are available only when the API owns a lab host engine. Blocking
+rejects future handshakes and evicts an active client, but the blocklist is
+intentionally process-local; rotating the shared pairing token is the durable
+way to invalidate access after a restart.
 """
 
 import secrets
@@ -26,10 +20,14 @@ router = APIRouter()
 
 
 class BlockReason(BaseModel):
+    """Describe the operator-supplied reason for blocking a client."""
+
     reason: str | None = None
 
 
 class RotateResult(BaseModel):
+    """Return a newly installed pairing token and its activation semantics."""
+
     token: str
     note: str
 
@@ -46,11 +44,7 @@ def _require_lab_host(request: Request) -> Any:
 async def disconnect_client(
     request: Request, node_id: str
 ) -> dict[str, Literal["ok"] | str]:
-    """Evict a single client from the lab cluster.
-
-    Equivalent of the operator running ``kt kick <node>`` on the host
-    (no such CLI command exists; this is the only surface today).
-    """
+    """Evict a connected client without preventing a later reconnect."""
     host = _require_lab_host(request)
     clients = getattr(host, "_clients", {}) or {}
     client = clients.get(node_id)
@@ -68,11 +62,10 @@ async def disconnect_client(
 async def block_client(
     request: Request, node_id: str, body: BlockReason
 ) -> dict[str, Any]:
-    """Add ``node_id`` to the in-memory blocklist and evict if connected.
+    """Block future handshakes for ``node_id`` and evict it if connected.
 
-    HostEngine's accept loop checks its in-memory blocklist during
-    handshakes; operators that need permanent bans should rotate the
-    pairing token.
+    The block is process-local; rotating the pairing token is required to
+    invalidate credentials across host restarts.
     """
     host = _require_lab_host(request)
     blocklist = getattr(request.app.state, "lab_blocklist", None)
@@ -82,7 +75,7 @@ async def block_client(
     blocklist.add(node_id)
     if hasattr(host, "block_client_id"):
         host.block_client_id(node_id)
-    # Evict if currently connected.
+    # A block must take effect immediately, not only on the next handshake.
     clients = getattr(host, "_clients", {}) or {}
     client = clients.get(node_id)
     if client is not None:
@@ -115,6 +108,7 @@ async def unblock_client(request: Request, node_id: str) -> dict[str, Any]:
 
 @router.get("/clients/blocklist")
 async def list_blocked(request: Request) -> dict[str, Any]:
+    """Return the union of API-state and host-engine blocked client IDs."""
     host = _require_lab_host(request)
     blocklist = set(getattr(request.app.state, "lab_blocklist", None) or set())
     if hasattr(host, "blocked_clients"):
@@ -124,10 +118,10 @@ async def list_blocked(request: Request) -> dict[str, Any]:
 
 @router.post("/pairing-tokens/rotate", response_model=RotateResult)
 async def rotate_pairing_token(request: Request) -> RotateResult:
-    """Generate a fresh shared pairing token and install it on the host.
+    """Install a fresh pairing token for new joins.
 
-    Existing connected clients are NOT evicted — they keep their
-    session. Only NEW joins must present the new token.
+    Existing sessions remain connected; only subsequent handshakes must present
+    the new token.
     """
     host = _require_lab_host(request)
     new_token = secrets.token_urlsafe(24)

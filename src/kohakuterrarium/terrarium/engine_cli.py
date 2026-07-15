@@ -55,13 +55,9 @@ async def _handle_tui_slash(text: str, tui: "TUISession", focus: Any) -> bool:
     Returns True if the slash was handled (caller should ``continue``);
     False to fall through to the standard agent slash dispatch.
 
-    Mirrors ``cli_rich/app.py:RichCLIApp._handle_slash`` for TUI mode.
-    The old design routed this via ``TUIInput.try_user_command`` →
-    ``_intercept_module`` / ``_intercept_model``, which required the
-    agent's input to BE TUIInput. With the input swap to NoneInput
-    (stdin-contention fix), that path is gone — so the dispatch moves
-    here, the runner-level loop where the engine already has the
-    TUISession + focus agent in scope.
+    This runner owns the dispatch because replacing stdin-consuming inputs
+    with ``NoneInput`` bypasses ``TUIInput``'s interception hooks. It already
+    has both the TUI session and focus agent needed by modal commands.
 
     Modal-backed commands act on the ACTIVE tab's creature (resolved
     via ``tui.agent_for_tab``), so ``/model`` on bob's tab picks a
@@ -350,10 +346,10 @@ async def run_engine_with_tui(
                 # Engine-aware subcommands (`/drives list`, `/goal …`) run
                 # against the trusted local-console context so they reach the
                 # live Drive service instead of the engine-agnostic agent
-                # pipeline that returns "unavailable" (R1-32). The registry +
-                # context are resolved from the ACTIVE tab per dispatch so
-                # plugin commands (/goal) are seen and both the service target
-                # and the rendered notice follow that tab (R1-32 §6+§7).
+                # pipeline that returns "unavailable". The registry and context
+                # are resolved from the active tab per dispatch so plugin commands
+                # are seen and both the service target and rendered notice follow
+                # that tab.
                 if await _dispatch_active_engine_command(
                     text, tui, engine, focus, focus_creature_id, graph_id, commands
                 ):

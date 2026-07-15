@@ -1,30 +1,7 @@
-"""
-Framework-hint prose blocks used by the prompt aggregator.
+"""Provide canonical, overrideable framework-hint prose blocks.
 
-The aggregator splices four short prose blocks into every creature's system
-prompt. Each block has a stable, dotted **canonical key** so harness authors
-can override the wording without patching the framework.
-
-Canonical keys
---------------
-
-=============================================  ===========================================
-Key                                            Meaning
-=============================================  ===========================================
-``framework.output_model``                     Output-block wrapping rules + named outputs
-``framework.execution_model.dynamic``          Execution model for dynamic skill mode
-``framework.execution_model.static``           Execution model for static skill mode
-``framework.execution_model.native``           Execution model for native tool calling
-=============================================  ===========================================
-
-Override resolution order (first match wins, built-in is the fallback):
-
-1. Creature-level ``framework_hint_overrides`` (``AgentConfig``)
-2. Package-level ``framework_hints`` map in ``kohaku.yaml``
-3. Built-in defaults defined in this module
-
-An empty string override means "omit this block entirely". Unknown keys are
-ignored and logged at WARNING level.
+Creature overrides take precedence over package overrides and built-in defaults.
+An empty override omits the block; unknown keys are ignored with a warning.
 """
 
 from kohakuterrarium.utils.logging import get_logger
@@ -32,23 +9,13 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Canonical key constants — use these, not string literals, when looking up
-# hints from the aggregator.
-# ---------------------------------------------------------------------------
 HINT_OUTPUT_MODEL = "framework.output_model"
 HINT_EXECUTION_MODEL_DYNAMIC = "framework.execution_model.dynamic"
 HINT_EXECUTION_MODEL_STATIC = "framework.execution_model.static"
 HINT_EXECUTION_MODEL_NATIVE = "framework.execution_model.native"
 
 
-# ---------------------------------------------------------------------------
-# Default prose blocks.
-# ``framework.output_model`` retains the ``{named_outputs_section}`` placeholder
-# because that part is populated at aggregation time from the registered
-# named outputs. Override prose does NOT need the placeholder — if an override
-# is supplied, it is used verbatim (no ``.format(...)`` is applied).
-# ---------------------------------------------------------------------------
+# Only the default output block supports named-output interpolation.
 _DEFAULT_OUTPUT_MODEL = """
 ## Output Format
 
@@ -144,7 +111,6 @@ You may ONLY call tools listed in the "Available Functions" section above.
 """
 
 
-# Map canonical key -> default prose. Single source of truth.
 _DEFAULTS: dict[str, str] = {
     HINT_OUTPUT_MODEL: _DEFAULT_OUTPUT_MODEL,
     HINT_EXECUTION_MODEL_DYNAMIC: _DEFAULT_EXECUTION_MODEL_DYNAMIC,
@@ -154,7 +120,7 @@ _DEFAULTS: dict[str, str] = {
 
 
 def canonical_keys() -> tuple[str, ...]:
-    """Return the set of recognised override keys."""
+    """Return recognized override keys in definition order."""
     return tuple(_DEFAULTS.keys())
 
 
@@ -162,30 +128,15 @@ def get_framework_hint(
     key: str,
     overrides: dict[str, str] | None = None,
 ) -> str | None:
-    """Resolve a framework-hint block by canonical key.
+    """Resolve a canonical hint, preserving empty-string suppression.
 
-    Looks up ``overrides`` first; if present (even if empty string) the
-    override wins. Otherwise returns the built-in default.
-
-    Args:
-        key: A canonical key from :data:`_DEFAULTS` (see module docstring).
-        overrides: Optional override map. Unknown keys in this dict are
-            ignored with a WARNING log line — they won't crash aggregation.
-
-    Returns:
-        The prose for ``key``. An empty string indicates the block should
-        be omitted entirely. Returns ``None`` if the key itself is not
-        canonical (caller should treat this as a bug in the aggregator,
-        not a user error).
+    Unknown requested keys return ``None``; unknown override keys are ignored.
     """
     if key not in _DEFAULTS:
         logger.warning("Unknown framework-hint key requested", hint_key=key)
         return None
 
     if overrides:
-        # Warn about unknown keys in the override map exactly once per lookup.
-        # (Aggregator calls get_framework_hint for each known key, so the
-        # first call that sees a bad override will surface it.)
         _warn_unknown_overrides(overrides)
         if key in overrides:
             logger.debug("Framework-hint override applied", hint_key=key)
@@ -195,7 +146,7 @@ def get_framework_hint(
 
 
 def _warn_unknown_overrides(overrides: dict[str, str]) -> None:
-    """Emit a single WARNING listing any unknown keys in ``overrides``."""
+    """Warn when an override map contains non-canonical keys."""
     unknown = [k for k in overrides if k not in _DEFAULTS]
     if unknown:
         logger.warning(
@@ -209,12 +160,9 @@ def merge_overrides(
     package_level: dict[str, str] | None,
     creature_level: dict[str, str] | None,
 ) -> dict[str, str]:
-    """Merge package-level and creature-level override maps.
+    """Merge override maps with creature entries taking precedence.
 
-    Creature-level entries win over package-level entries for the same key.
-    Returns an empty dict if both inputs are falsy. Unknown keys are
-    preserved as-is; :func:`get_framework_hint` will warn about them on
-    lookup.
+    Unknown keys remain present so lookup can report them consistently.
     """
     merged: dict[str, str] = {}
     if package_level:

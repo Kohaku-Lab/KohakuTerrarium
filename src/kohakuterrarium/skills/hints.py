@@ -1,8 +1,4 @@
-"""Skill auto-activate injection helpers.
-
-Extracted from :mod:`kohakuterrarium.core.agent_handlers` so the
-cluster-4 logic doesn't push that file past the 600-line soft cap.
-"""
+"""Inject path-activated procedural skill hints into controller context."""
 
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -16,12 +12,9 @@ logger = get_logger(__name__)
 
 
 def inject_skill_path_hint(agent: "Agent") -> None:
-    """Scan cwd for files matching any enabled skill's ``paths`` and
-    queue a hint into the agent's controller pending-injection list.
+    """Queue hints for enabled skills whose path globs match the working tree.
 
-    Safe to call on every ``user_input`` event — the scanner caches
-    by ``(cwd, mtime)`` and this function no-ops when there is no
-    skill registry, no path scanner, no controller, or no match.
+    Missing components and no-match scans are no-ops; the scanner owns caching.
     """
     registry = getattr(agent, "skills", None)
     scanner = getattr(agent, "skill_path_scanner", None)

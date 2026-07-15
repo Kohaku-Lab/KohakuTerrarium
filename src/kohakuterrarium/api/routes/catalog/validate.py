@@ -28,7 +28,7 @@ async def validate_creature(
     """Run pydantic + reference validation over a creature config."""
     errors: list[dict] = []
 
-    # 1. Schema validation
+    # Reference checks rely on the normalized schema model.
     try:
         cfg = AgentConfigIn(**body.config)
     except ValidationError as e:
@@ -42,7 +42,6 @@ async def validate_creature(
             )
         return {"ok": False, "errors": errors}
 
-    # 2. Reference validation
     builtin_tools = set(list_builtin_tools())
     builtin_subagents = set(list_builtin_subagents())
 
@@ -76,11 +75,9 @@ async def validate_creature(
                 }
             )
 
-    # 3. Prompt file existence (best-effort — when we have a workspace)
+    # The workspace root only establishes that relative prompt paths are meaningful here.
     if cfg.system_prompt_file and getattr(ws, "root_path", None):
-        # We don't know which creature this config belongs to; just
-        # flag a warning rather than an error if the path is absolute
-        # or doesn't match the expected shape.
+        # Without a creature directory, validation can enforce portability but not existence.
         if cfg.system_prompt_file.startswith("/") or cfg.system_prompt_file.startswith(
             "\\"
         ):
@@ -98,7 +95,7 @@ async def validate_creature(
 
 @router.post("/module")
 async def validate_module(body: ValidateModuleBody) -> dict:
-    """Parse the module source. Currently just a syntax check."""
+    """Validate a catalog module's kind and Python syntax."""
     if body.kind not in (
         "tools",
         "subagents",

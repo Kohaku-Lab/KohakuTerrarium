@@ -1,9 +1,8 @@
 """Controller-side helper for deploying a workspace creature to a worker.
 
-Walks a local creature directory, computes sha256 for each file,
-calls ``studio.deploy.push_creature_bundle`` on the target node, and
-returns the absolute path on the worker that
-:meth:`MultiNodeTerrariumService.add_creature` should reference.
+Packages a local creature directory into a hash-verified bundle, pushes it
+through ``studio.deploy.push_creature_bundle``, and returns the worker-side path
+used to start the deployed creature.
 
 Usage::
 
@@ -12,9 +11,9 @@ Usage::
     )
     info = await service.add_creature(target_path, on_node="worker-1")
 
-Files larger than :data:`MAX_BUNDLE_FILE_BYTES` are rejected — chunked
-upload via ``terrarium.files.write_stream`` (deferred) is the path for
-oversize assets.
+Each file must fit the one-shot request envelope; oversized assets require a
+separate streaming transfer rather than weakening the bundle's atomicity and
+validation guarantees.
 """
 
 import base64
@@ -29,25 +28,22 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Per-file ceiling for one-shot bundle pushes.  Set slightly below the
-# adapter's MAX_ONESHOT_BYTES to leave room for base64 expansion +
-# envelope overhead.
+# Base64 and request metadata expand the payload, so the raw-file ceiling must
+# remain below the transport's one-shot limit.
 MAX_BUNDLE_FILE_BYTES = MAX_ONESHOT_BYTES // 2  # 512 KiB
 
-# Files we always skip when walking a creature directory.
 _SKIP_NAMES = {".git", "__pycache__", ".DS_Store", ".staging"}
 
 
 class DeployError(RuntimeError):
-    """Raised when a deploy run fails (conflicts, oversize, etc.)."""
+    """Raised when a creature bundle cannot be safely deployed."""
 
 
 def _walk_creature_files(root: Path) -> "dict[str, bytes]":
-    """Return ``{posix_rel: bytes}`` for every regular file under ``root``.
+    """Collect deployable files using portable relative paths.
 
-    Skips ``.git`` / ``__pycache__`` / staging directories.  Reads every
-    file fully into memory — fine for creature bundles (small configs +
-    prompts), explicit ``MAX_BUNDLE_FILE_BYTES`` cap below.
+    Repository metadata, caches, and staging state are excluded. Files are read
+    eagerly because the per-file cap bounds memory use and bundle payload size.
     """
     if not root.exists():
         raise DeployError(f"creature path does not exist: {root}")
@@ -84,25 +80,12 @@ async def deploy_creature_to_node(
     name: str | None = None,
     timeout: float = 30.0,
 ) -> str:
-    """Push a local creature directory to ``target_node`` and return the remote path.
+    """Push a creature bundle and return its absolute worker-side path.
 
-    Args:
-        sender: lab node with a ``request()`` method — typically a
-            :class:`HostEngine` in lab-host mode.
-        target_node: worker's client id.
-        local_path: local directory containing ``config.yaml`` +
-            sibling prompt / module files.
-        name: optional override for the recipe scope arg.  Defaults to
-            the local directory's basename.
-        timeout: request timeout for the underlying APP call.
-
-    Returns:
-        The absolute path on the worker that subsequent
-        ``add_creature`` calls should reference.
-
-    Raises:
-        DeployError: if the local path is missing, oversized, or the
-            worker reports a hash conflict.
+    ``name`` defaults to the local directory name. Every file is accompanied by
+    its SHA-256 digest so the worker can reject conflicts instead of overwriting
+    divergent content. Invalid local input, transport errors, conflicts, and
+    partial commits surface as :class:`DeployError`.
     """
     local = Path(local_path).expanduser().resolve()
     creature_name = name or local.name
@@ -132,10 +115,9 @@ async def deploy_creature_to_node(
         raise DeployError(
             f"deploy to {target_node!r} aborted; hash conflicts on: {conflicts}"
         )
-    # A partial deploy (one or more files committed, then ``os.replace``
-    # failed mid-bundle) leaves the recipe directory in a Frankenstein
-    # state — the next spawn would pick up a half-written creature.
-    # Refuse the partial response so the caller knows to retry or abort.
+    # A partially committed directory is not a valid creature snapshot and must
+    # never be passed to a subsequent spawn. Surface the incomplete state so the
+    # caller can retry or clean it up explicitly.
     if response.get("partial"):
         raise DeployError(
             f"deploy to {target_node!r} partial; deployed={response.get('deployed', [])} "

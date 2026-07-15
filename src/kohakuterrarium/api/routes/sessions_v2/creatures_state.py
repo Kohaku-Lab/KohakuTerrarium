@@ -1,13 +1,7 @@
-"""Per-creature state routes — scratchpad / triggers / env / system
-prompt / working dir / native tool options.
+"""Expose per-creature scratchpad, trigger, environment, and runtime settings.
 
-Service-driven: ``Depends(get_service)`` so multi-node deployments
-route by creature ``_home`` automatically.  Every handler resolves
-the URL ``creature_id`` slot through :func:`resolve_creature_id`
-because the frontend stores display names (the user-visible tab
-label) and pre-v2 routes accepted those interchangeably with the
-engine-side hashed id.  Without that resolver, panels like
-plugins / modules / scratchpad / triggers / env regress to 404.
+Service routing reaches each creature's home worker, while identifier resolution
+accepts both canonical identifiers and session-scoped display names.
 """
 
 from typing import Any

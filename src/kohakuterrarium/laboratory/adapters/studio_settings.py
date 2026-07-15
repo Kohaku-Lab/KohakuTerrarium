@@ -1,22 +1,4 @@
-"""APP extension adapter for ``studio.settings`` — node-targeted Drive settings.
-
-This is a **worker-side** adapter (installed on each worker, like
-``terrarium.runtime``): it exposes the worker's own ``drive-settings.yaml`` and
-live Drive runtime so the host's ``Studio.nodes[node].settings.drives`` surface
-can read/validate/save/apply Drive settings *on that node's config home*
-(design §8.4 Scope, §8.5 Laboratory surface).
-
-It is deliberately NOT the credential-oriented ``studio.identity`` adapter, whose
-host→worker credential direction has different security semantics. Node-targeted
-settings mutation is gated by the operator/admin authorization at the host API;
-the worker trusts its authenticated Lab peer and never reads an actor from the
-request payload.
-
-Because the worker process sets ``KT_CONFIG_DIR`` at boot, the ``drive_settings``
-module functions here resolve the *worker's* config home, and ``apply_runtime``
-targets the *worker's* live engine — the host never edits the worker file as a
-proxy.
-"""
+"""Expose node-local Drive settings and runtime state to the host Studio."""
 
 import asyncio
 from typing import Any
@@ -35,13 +17,7 @@ logger = get_logger(__name__)
 
 
 class StudioSettingsAdapter:
-    """Worker-side ``studio.settings`` APP extension for Drive settings.
-
-    Args:
-        engine: the worker's live :class:`Terrarium` (for live apply + status).
-        lab_node: the Lab client this worker runs as.
-        node_id: this node's id (defaults to ``lab_node.client_id`` / ``_host``).
-    """
+    """Serve a worker's Drive settings through ``studio.settings``."""
 
     NAMESPACE = "studio.settings"
 
@@ -54,9 +30,7 @@ class StudioSettingsAdapter:
     ) -> None:
         self._engine = engine
         self._node = lab_node
-        # Resolve the node id LIVE per request: on a worker ``client_id`` is only
-        # assigned after ``client.start()``, so a value captured at construction
-        # would stick at ``_host`` and mislabel the node in status responses.
+        # Worker IDs are assigned at client start, so resolve implicit IDs lazily.
         self._explicit_node_id = node_id
         self._drive_service: LocalTerrariumService | None = None
         lab_node.register_app_extension(self.NAMESPACE, self._dispatch)
@@ -80,9 +54,7 @@ class StudioSettingsAdapter:
         return self._drive_service
 
     async def _dispatch(self, msg: AppMessage) -> dict[str, Any]:
-        # Node-targeted settings mutation is host-only: the host derives operator
-        # authority from its request context and issues from ``_host``. A peer
-        # worker is never trusted here (R1-04); reject before touching disk.
+        # Only the authenticated host may authorize node-local settings access.
         if msg.sender_node != HOST_NODE_ID:
             return {
                 "error": {
@@ -96,8 +68,7 @@ class StudioSettingsAdapter:
         try:
             return await self._handle(msg)
         except DriveError as exc:
-            # Typed Drive/settings errors (validation, optimistic-concurrency
-            # conflict) survive the wire as their subtype.
+            # Preserve validation and concurrency subtypes across the wire.
             return {"error": pack_drive_error(exc)}
         except ValueError as exc:
             return {"error": {"kind": "invalid", "message": str(exc)}}

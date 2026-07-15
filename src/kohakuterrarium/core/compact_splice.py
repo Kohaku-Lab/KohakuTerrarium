@@ -69,12 +69,9 @@ def splice_conversation(
     if getattr(messages[boundary], "role", None) == "tool":
         return False
 
-    # Build new message list:
-    # [system_prompt] + [summary_as_assistant] + [live_zone]
-    system_msg = messages[0]  # Always keep system prompt
-    live_zone = messages[boundary:]  # Everything after boundary
+    system_msg = messages[0]  # The system prompt survives every compaction round.
+    live_zone = messages[boundary:]  # Messages after the boundary remain verbatim.
 
-    # Clear and rebuild
     conversation._messages.clear()
     conversation._messages.append(system_msg)
 

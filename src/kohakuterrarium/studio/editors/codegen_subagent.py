@@ -1,6 +1,6 @@
 """Codegen for sub-agent modules (Python form).
 
-Pattern of a sub-agent module:
+Sub-agent modules use a module-level ``SubAgentConfig`` call:
 
     SYSTEM_PROMPT = \"\"\"...\"\"\"
 
@@ -13,10 +13,8 @@ Pattern of a sub-agent module:
         stateless=True,
     )
 
-Round-trip strategy: the config is a single ``Call`` expression
-with keyword arguments. We parse the kwargs into form state and
-rewrite them on save. The optional ``SYSTEM_PROMPT`` string is
-kept next to the call.
+The editor maps managed keyword arguments to form state and rewrites only those
+arguments. An optional nearby ``SYSTEM_PROMPT`` assignment remains editable.
 """
 
 import libcst as cst
@@ -57,9 +55,9 @@ def render_new(form: dict) -> str:
 
 
 def update_existing(source: str, form: dict, execute_body: str) -> str:
-    """Rewrite the SubAgentConfig call's keyword arguments.
+    """Rewrite managed ``SubAgentConfig`` keywords while preserving the module.
 
-    *execute_body* unused (sub-agents don't have one).
+    ``execute_body`` is ignored because sub-agent modules have no execute method.
     """
     del execute_body
 
@@ -102,7 +100,7 @@ def parse_back(source: str) -> dict:
         "model": "",
     }
 
-    # Also resolve SYSTEM_PROMPT = "..." if the call references a name
+    # Resolve named string assignments so prompt constants remain editable.
     sys_prompts = _collect_string_assignments(tree)
 
     for arg in call.args:
@@ -119,11 +117,6 @@ def parse_back(source: str) -> dict:
         "execute_body": "",
         "warnings": [],
     }
-
-
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
 
 
 def _find_subagent_config_call(tree: cst.Module) -> cst.Call | None:
@@ -151,8 +144,10 @@ def _find_subagent_config_call(tree: cst.Module) -> cst.Call | None:
 
 
 def _rewrite_call_kwargs(call: cst.Call, form: dict) -> cst.Call:
-    """Build a new Call with updated kwargs for the form fields."""
-    # Preserve args we don't manage; rewrite/add ones we do.
+    """Return a call with managed form keywords updated or appended.
+
+    Positional and unmanaged keyword arguments are preserved.
+    """
     new_args: list[cst.Arg] = []
     consumed: set[str] = set()
 
@@ -168,7 +163,7 @@ def _rewrite_call_kwargs(call: cst.Call, form: dict) -> cst.Call:
         else:
             new_args.append(arg)
 
-    # Add any form fields that weren't in the original args
+    # Append missing managed fields in canonical form order.
     for key in _FORM_FIELDS:
         if key in form and key not in consumed:
             value_node = _literal_to_cst(form[key])
@@ -186,7 +181,7 @@ def _rewrite_call_kwargs(call: cst.Call, form: dict) -> cst.Call:
 
 
 def _literal_to_cst(value) -> cst.BaseExpression:
-    """Turn a Python value into a libcst node."""
+    """Convert a supported form value into a LibCST expression."""
     if isinstance(value, bool):
         return cst.Name(value="True" if value else "False")
     if isinstance(value, int):
@@ -213,7 +208,7 @@ def _eval_simple(node: cst.BaseExpression, string_bindings: dict[str, str]):
         except Exception:
             return node.value
     if isinstance(node, cst.ConcatenatedString):
-        # Best-effort concatenation of adjacent string literals
+        # Concatenated literals are editable only when LibCST can evaluate them.
         try:
             return node.evaluated_value
         except Exception:
@@ -225,7 +220,7 @@ def _eval_simple(node: cst.BaseExpression, string_bindings: dict[str, str]):
             return False
         if node.value == "None":
             return None
-        # Named reference (e.g. SYSTEM_PROMPT)
+        # Named references resolve only through collected module string constants.
         return string_bindings.get(node.value, "")
     if isinstance(node, cst.Integer):
         try:
@@ -240,7 +235,7 @@ def _eval_simple(node: cst.BaseExpression, string_bindings: dict[str, str]):
 
 
 def _collect_string_assignments(tree: cst.Module) -> dict[str, str]:
-    """Return {NAME: value} for module-level ``NAME = "..."`` assignments."""
+    """Return evaluable module-level string assignments by name."""
     out: dict[str, str] = {}
     for node in tree.body:
         if not isinstance(node, cst.SimpleStatementLine):

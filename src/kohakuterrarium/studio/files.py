@@ -1,7 +1,6 @@
 """Controller-side client for the ``terrarium.files`` namespace.
 
-A :class:`RemoteFiles` instance is the Python surface for a single
-worker node's filesystem (scope-bounded).  Studio code reaches one
+A :class:`RemoteFiles` instance exposes one worker's scope-bounded filesystem
 through :attr:`NodeHandle.files`:
 
 ::
@@ -17,8 +16,7 @@ through :attr:`NodeHandle.files`:
         },
     )
 
-All methods raise typed errors translated from the worker's wire
-envelope:
+Worker error envelopes are translated into local exception categories:
 
 - ``not_found`` → :class:`FileNotFoundError`
 - ``invalid`` (malformed scope, escaped path, hash mismatch, …) →
@@ -34,7 +32,7 @@ from kohakuterrarium.laboratory.protocols import LabSender
 
 
 class RemoteFilesError(RuntimeError):
-    """Catch-all for non-classified ``terrarium.files`` failures."""
+    """Represent remote filesystem failures without a builtin equivalent."""
 
     def __init__(self, kind: str, message: str) -> None:
         super().__init__(f"{kind}: {message}")
@@ -58,7 +56,7 @@ def _maybe_raise(body: Any) -> dict[str, Any]:
 
 
 class RemoteFiles:
-    """Python wrapper around the ``terrarium.files`` APP namespace."""
+    """Provide scope-bounded filesystem operations for one remote node."""
 
     NAMESPACE = "terrarium.files"
 
@@ -98,8 +96,8 @@ class RemoteFiles:
 
     async def read(self, scope: str, path: str) -> tuple[bytes, str]:
         body = _maybe_raise(await self._req("read", {"scope": scope, "path": path}))
-        # Wire encodes bytes as base64 strings — the APP layer can't
-        # carry raw bytes through kohakuvault's DataPacker.
+        # The APP serialization layer cannot carry raw bytes, so file content is
+        # encoded as base64 at the transport boundary.
         b64 = body.get("bytes_b64", "")
         return base64.b64decode(b64), body["sha256"]
 
@@ -129,14 +127,11 @@ class RemoteFiles:
         scope: str,
         files: "dict[str, tuple[str, bytes]]",
     ) -> "dict[str, list[str]]":
-        """Push a content-addressable bundle.
+        """Push a hash-verified bundle without overwriting divergent files.
 
-        ``files`` is ``{rel_path: (sha256_hex, bytes)}``.  On hash
-        collisions with different content the bundle aborts; the
-        returned ``conflicts`` list names the offending relpaths and
-        ``deployed`` is empty.  On success ``deployed`` lists the
-        relpaths that were actually written (skipping idempotent
-        no-ops).
+        ``files`` maps relative paths to expected SHA-256 digests and content.
+        Conflicting existing content aborts the bundle; matching content is an
+        idempotent no-op and only newly written paths appear in ``deployed``.
         """
         wire_files = {
             rel: [h, base64.b64encode(b).decode("ascii")]
@@ -152,9 +147,8 @@ class RemoteFiles:
             "deployed": list(body.get("deployed", [])),
             "conflicts": list(body.get("conflicts", [])),
         }
-        # Pass through partial-deploy diagnostics so callers can decide
-        # how to react (typically: retry the bundle, which is
-        # idempotent — already-deployed entries hash-skip).
+        # Preserve partial-commit diagnostics because callers need them to
+        # distinguish safe idempotent retries from complete success.
         for k in ("partial", "remaining", "error"):
             if k in body:
                 out[k] = body[k]

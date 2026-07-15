@@ -1,18 +1,4 @@
-"""Fork command — branch the current session into a new file.
-
-Different from regen / edit+rerun: those open a new ``branch_id`` of
-an existing turn within the same session. ``/fork`` creates a whole
-new ``.kohakutr.v2`` file via ``SessionStore.fork()`` (Wave E) so the
-user can explore an alternate trajectory without affecting the
-current session. The new file is reported back; the user can resume
-it later with ``kt resume <name>``.
-
-Usage::
-
-    /fork                       — fork at the current end-of-stream
-    /fork <event_id>            — fork at a specific event_id
-    /fork --name <new_name>     — name the new session
-"""
+"""Fork the current session into a resumable file at a selected event."""
 
 import uuid
 from pathlib import Path
@@ -31,10 +17,7 @@ logger = get_logger(__name__)
 
 
 def _parse_args(args: str) -> tuple[int | None, str | None]:
-    """Parse ``[event_id] [--name <new_name>]`` into ``(event_id, name)``.
-
-    Returns ``(None, None)`` for fork-at-end with auto-generated name.
-    """
+    """Parse an optional event ID and session name for a fork operation."""
     tokens = (args or "").split()
     event_id: int | None = None
     name: str | None = None
@@ -54,13 +37,9 @@ def _parse_args(args: str) -> tuple[int | None, str | None]:
 
 
 def _suggest_target_path(parent_path: str, name: str | None) -> str:
-    """Resolve the new session file path next to the parent.
-
-    Uses ``path_for_version`` so the suffix matches whatever
-    ``MAX_SUPPORTED_VERSION`` is on this build.
-    """
+    """Build a sibling session path using the current format-version suffix."""
     parent = Path(parent_path)
-    # Strip ``.v2``-style version suffix to get the bare name.
+    # Version suffixes must be removed before the fork name and current suffix apply.
     stem = parent.name
     for sep in (".v",):
         if sep in stem:
@@ -75,9 +54,7 @@ def _suggest_target_path(parent_path: str, name: str | None) -> str:
 @register_user_command("fork")
 class ForkCommand(BaseUserCommand):
     name = "fork"
-    # No "branch" alias here — ``/branch`` is now a separate command
-    # for switching the live regen / edit branch within the same
-    # session. Aliasing fork to "branch" would shadow that resolution.
+    # ``branch`` must remain available for switching branches within one session.
     aliases: list[str] = []
     description = "Fork the current session into a new file (Wave E branching)"
     layer = CommandLayer.AGENT

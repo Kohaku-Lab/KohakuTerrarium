@@ -1,12 +1,10 @@
 """Codex account — live usage + rate-limit-reset-credit client.
 
 Talks to the ChatGPT backend WHAM endpoints directly with the Codex
-**access-token** bearer + ``ChatGPT-Account-Id`` header, deliberately
-BYPASSING :class:`~kohakuterrarium.llm.codex_provider.CodexOAuthProvider`
-and the Responses API: reading usage or redeeming a reset credit must
-NEVER cost a model round.  Ported from codex-rs ``backend-client``
-(``rate_limit_resets``) + the app-server ``account_processor``
-consume-outcome mapping.
+access-token bearer and ``ChatGPT-Account-Id`` header. These account operations
+bypass :class:`~kohakuterrarium.llm.codex_provider.CodexOAuthProvider` and the
+Responses API so reading usage or redeeming a reset credit cannot consume a
+model round. The endpoint and outcome semantics match codex-rs.
 
 The ``transport`` kwarg on every request lets tests inject an
 ``httpx.MockTransport``; production leaves it ``None`` (real network).
@@ -27,9 +25,8 @@ logger = get_logger(__name__)
 
 
 def _kt_version() -> str:
-    # Read from dist metadata, not ``kohakuterrarium.__version__``: this
-    # module loads while the package ``__init__`` is still executing
-    # (Studio import chain), so the attribute is not yet bound.
+    # Studio imports this module before the package initializer binds
+    # ``kohakuterrarium.__version__``, so distribution metadata is authoritative.
     try:
         return version("kohakuterrarium")
     except PackageNotFoundError:
@@ -41,18 +38,15 @@ USAGE_URL = f"{CHATGPT_BASE_URL}/wham/usage"
 RESET_CREDITS_URL = f"{CHATGPT_BASE_URL}/wham/rate-limit-reset-credits"
 CONSUME_URL = f"{RESET_CREDITS_URL}/consume"
 
-# ``codex_cli_rs`` originator prefix — the backend gates the WHAM paths on
-# a first-party Codex user agent (codex-rs ``get_codex_user_agent``).
+# The WHAM endpoints require the first-party ``codex_cli_rs`` user-agent prefix.
 CODEX_USER_AGENT = f"codex_cli_rs/{_kt_version()} (KohakuTerrarium)"
 
 USAGE_TIMEOUT = 10.0
 RESET_CREDITS_TIMEOUT = 5.0
 CONSUME_TIMEOUT = 10.0
 
-# Backend consume ``code`` → the four canonical outcomes.  Keys are
-# normalized (underscore/dash-stripped, lowercased) so both the
-# snake_case wire form and a camelCase variant map identically.
-# ``alreadyRedeemed`` is an idempotent success (a retried redeem).
+# Normalized keys accept snake_case, kebab-case, and camelCase backend codes.
+# ``alreadyRedeemed`` represents an idempotent retry and remains a success.
 _CONSUME_OUTCOMES = {
     "reset": "reset",
     "nothingtoreset": "nothingToReset",
@@ -86,10 +80,10 @@ class ResetCredit:
 
 
 def _headers(tokens: CodexTokens) -> dict[str, str]:
-    """Access-token bearer + account-id + codex UA (never the id-token).
+    """Build the access-token, account-id, and Codex user-agent headers.
 
-    The account id is derived from the id-token when the token object
-    didn't carry one (codex-rs sources it from the same id-token claim).
+    The ID token is used only to derive a missing account ID; it is never sent
+    as the bearer credential.
     """
     account_id = tokens.account_id or account_id_from_id_token(tokens.id_token)
     headers = {
@@ -112,11 +106,10 @@ async def fetch_usage(
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = USAGE_TIMEOUT,
 ) -> dict[str, Any]:
-    """``GET /wham/usage`` → ``{snapshots, available_count}``.
+    """Fetch usage snapshots and the available reset-credit count.
 
-    ``available_count`` is the reset-credit count carried on the usage
-    body; it is the fallback for :func:`list_reset_credits` when the
-    detail endpoint fails.
+    The usage response's ``available_count`` is suitable as the fallback for
+    :func:`list_reset_credits` when the detail endpoint fails.
     """
     async with httpx.AsyncClient(transport=transport, timeout=timeout) as client:
         resp = await client.get(USAGE_URL, headers=_headers(tokens))
@@ -143,12 +136,10 @@ async def list_reset_credits(
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = RESET_CREDITS_TIMEOUT,
 ) -> dict[str, Any]:
-    """``GET /wham/rate-limit-reset-credits`` → ``{available_count, credits}``.
+    """Fetch detailed reset credits and their available count.
 
-    On any failure this degrades to the count fallback (from the usage
-    body) with an empty credit list — matching codex-rs
-    ``detailed_rate_limit_reset_credits`` falling back to the usage
-    response.
+    Any endpoint or decoding failure returns ``fallback_count`` with an empty
+    credit list, preserving the usage response as the degraded source of truth.
     """
     try:
         async with httpx.AsyncClient(transport=transport, timeout=timeout) as client:
@@ -189,13 +180,11 @@ async def consume_reset_credit(
     transport: httpx.AsyncBaseTransport | None = None,
     timeout: float = CONSUME_TIMEOUT,
 ) -> str:
-    """``POST .../consume`` → one of ``reset|nothingToReset|noCredit|alreadyRedeemed``.
+    """Redeem a reset credit and return its canonical outcome code.
 
-    ``idempotency_key`` (the backend ``redeem_request_id``) MUST be
-    non-empty so a retried redeem is idempotent (``alreadyRedeemed``).
+    ``idempotency_key`` must be non-empty so retries remain idempotent.
     ``credit_id`` targets a specific credit when supplied; pass ``None``
-    (not ``""``) to redeem any — an explicit empty string is rejected
-    for codex-rs parity.
+    to redeem any credit. An explicit empty string is invalid.
     """
     if not idempotency_key:
         raise ValueError("idempotency_key must not be empty")

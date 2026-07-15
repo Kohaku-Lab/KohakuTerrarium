@@ -1,4 +1,4 @@
-"""Public sandbox contract."""
+"""Export sandbox profiles, parsing, intersections, and violations."""
 
 from kohakuterrarium.modules.sandbox.parse import parse_profile
 from kohakuterrarium.modules.sandbox.presets import (

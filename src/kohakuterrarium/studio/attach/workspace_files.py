@@ -1,11 +1,4 @@
-"""Workspace files HTTP body — tree browsing, reading, writing.
-
-Drains every helper and handler from the legacy
-``api/routes/files.py`` (317 LoC). The route shell at
-``api/routes/attach/files.py`` is a thin wrapper over the helpers
-defined here; nothing in this module touches FastAPI's routing
-decorators, so the helpers are reusable from non-HTTP entry points.
-"""
+"""Provide route-independent workspace browsing and file operations."""
 
 import shutil
 import sys
@@ -14,7 +7,7 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-# Extension → language mapping for editor syntax highlighting
+# Editor language IDs are derived from lowercase filename extensions.
 _EXT_LANG: dict[str, str] = {
     ".py": "python",
     ".js": "javascript",
@@ -61,7 +54,7 @@ _EXT_LANG: dict[str, str] = {
     ".zig": "zig",
 }
 
-# Directories/files to skip in tree listing (exact names)
+# Generated and dependency directories are hidden from workspace navigation.
 _SKIP_NAMES: set[str] = {
     "__pycache__",
     ".git",
@@ -77,7 +70,7 @@ _SKIP_NAMES: set[str] = {
 
 
 def _validate_path(path_str: str) -> Path:
-    """Validate and resolve a file path."""
+    """Resolve a filesystem path or raise an HTTP-friendly validation error."""
     try:
         return Path(path_str).resolve()
     except (ValueError, OSError) as e:
@@ -105,7 +98,7 @@ def _parent_directory(path: Path) -> str | None:
 
 
 def _should_skip(name: str) -> bool:
-    """Check if a file/dir name should be skipped in tree listing."""
+    """Return whether a workspace entry is intentionally hidden."""
     if name in _SKIP_NAMES:
         return True
     if name.endswith(".egg-info"):
@@ -122,11 +115,7 @@ def _dir_entry(path: Path) -> dict:
 
 
 def _has_visible_children(path: Path) -> bool:
-    """Peek into a directory and return True if it has any non-skipped entry.
-
-    Used to populate the ``has_children`` flag so the frontend can render
-    the expand chevron without fetching the subtree.
-    """
+    """Return whether a directory has a visible child without building its subtree."""
     try:
         for entry in path.iterdir():
             if not _should_skip(entry.name):
@@ -137,13 +126,10 @@ def _has_visible_children(path: Path) -> bool:
 
 
 def _build_tree(path: Path, depth: int) -> dict:
-    """Recursively build a file tree dict.
+    """Build a tree node to the requested depth.
 
-    Directory entries carry ``has_children: bool`` so the frontend can
-    show expand chevrons for collapsed branches without a second
-    roundtrip.  ``depth <= 0`` returns the node only (no ``children``
-    key) — caller fetches children lazily by re-calling ``get_file_tree``
-    on the directory's path.
+    Directory nodes always advertise ``has_children`` for collapsed rendering.
+    ``depth <= 0`` omits ``children`` so clients can fetch that branch lazily.
     """
     node = _dir_entry(path)
 
@@ -154,7 +140,7 @@ def _build_tree(path: Path, depth: int) -> dict:
             node["size"] = 0
         return node
 
-    # Directory node — advertise expand-ability for every collapsed branch.
+    # Collapsed directories still need enough state to render an expand control.
     node["has_children"] = _has_visible_children(path)
 
     if depth <= 0:
@@ -177,8 +163,8 @@ def _build_tree(path: Path, depth: int) -> dict:
 
 
 def _detect_language(path: Path) -> str:
-    """Detect language from file extension."""
-    # Handle special filenames
+    """Return the editor language ID inferred from the filename."""
+    # Extensionless build files require exact-name handling.
     name_lower = path.name.lower()
     if name_lower == "dockerfile":
         return "dockerfile"
@@ -192,13 +178,10 @@ def _detect_language(path: Path) -> str:
 
 
 async def get_file_tree(root: str, depth: int = 1):
-    """Return a nested file tree starting from the given root directory.
+    """Return a lazily expandable tree rooted at an existing directory.
 
-    Defaults to ``depth=1`` (immediate children only) for lazy
-    expansion — the frontend re-fetches per branch as the user expands.
-    No upper cap: callers that want a full subtree can ask for it
-    explicitly.  Each directory entry carries ``has_children: bool`` so
-    the UI can render the expand chevron for collapsed branches.
+    The default includes immediate children. Callers may request deeper traversal,
+    and every directory reports whether a visible child exists.
     """
     root_path = _validate_path(root)
     if not root_path.is_dir():
@@ -209,7 +192,7 @@ async def get_file_tree(root: str, depth: int = 1):
 
 
 async def browse_directories(path: str | None = None):
-    """Return browsable directories under the local filesystem."""
+    """List visible child directories plus platform roots and parent navigation."""
     roots = _list_browse_roots()
     if path:
         current = _validate_path(path)
@@ -241,7 +224,7 @@ async def browse_directories(path: str | None = None):
 
 
 async def read_file(path: str):
-    """Read a file and return its content with metadata."""
+    """Read a UTF-8 text file with size, modification time, and language metadata."""
     file_path = _validate_path(path)
     if not file_path.exists():
         raise HTTPException(404, f"File not found: {path}")
@@ -269,7 +252,7 @@ async def read_file(path: str):
 
 
 async def write_file(path: str, content: str):
-    """Write content to a file, creating parent directories if needed."""
+    """Write UTF-8 text, creating missing parent directories."""
     file_path = _validate_path(path)
 
     try:
@@ -285,7 +268,7 @@ async def write_file(path: str, content: str):
 
 
 async def rename_file(old_path: str, new_path: str):
-    """Rename or move a file/directory."""
+    """Move a file or directory without overwriting an existing destination."""
     old = _validate_path(old_path)
     new = _validate_path(new_path)
 
@@ -306,7 +289,7 @@ async def rename_file(old_path: str, new_path: str):
 
 
 async def delete_file(path: str):
-    """Delete a file or empty directory."""
+    """Delete a file or directory tree."""
     target = _validate_path(path)
 
     if not target.exists():
@@ -326,7 +309,7 @@ async def delete_file(path: str):
 
 
 async def make_directory(path: str):
-    """Create a directory, including parent directories."""
+    """Create a new directory and any missing parents."""
     dir_path = _validate_path(path)
 
     if dir_path.exists():

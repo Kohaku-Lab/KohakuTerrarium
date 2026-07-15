@@ -1,9 +1,7 @@
 """Shared helpers for listing modules from the three catalog sources:
-workspace-authored files, workspace ``kohaku.yaml`` manifest entries,
-and entries declared by installed packages.
-
-Used by both ``studio.catalog.builtins`` (catalog routes) and
-``studio.editors.workspace_*`` (dashboard module listing).
+Combines workspace-authored files, workspace manifest declarations, and
+installed-package declarations under shared normalization and precedence rules.
+Catalog and editor surfaces use these helpers to avoid divergent module lists.
 """
 
 from pathlib import Path
@@ -13,9 +11,8 @@ import yaml
 
 from kohakuterrarium.packages.walk import list_packages
 
-# Mapping from module "kind" (as used by workspace routes — plural) to
-# kohaku.yaml manifest keys. ``io`` is shared between inputs/outputs
-# and classified by ``_classify_io``.
+# Inputs and outputs share the manifest's ``io`` slot and are separated by
+# declaration metadata; other kinds map directly.
 MANIFEST_KEYS: dict[str, str] = {
     "tools": "tools",
     "subagents": "subagents",
@@ -27,7 +24,7 @@ MANIFEST_KEYS: dict[str, str] = {
 
 
 def load_workspace_manifest(ws: Any) -> dict:
-    """Return the parsed ``kohaku.yaml`` for a workspace (or ``{}``)."""
+    """Return a workspace manifest, treating absence or invalid YAML as empty."""
     if ws is None:
         return {}
     root = getattr(ws, "root_path", None)
@@ -44,7 +41,7 @@ def load_workspace_manifest(ws: Any) -> dict:
 
 
 def manifest_entry(raw: dict, *, source: str, entry_type: str) -> dict:
-    """Normalize a kohaku.yaml manifest entry into the catalog shape."""
+    """Normalize a manifest declaration into the shared catalog shape."""
     return {
         "name": raw.get("name", ""),
         "description": raw.get("description", ""),
@@ -56,7 +53,7 @@ def manifest_entry(raw: dict, *, source: str, entry_type: str) -> dict:
 
 
 def classify_io(item: dict) -> str:
-    """Classify a kohaku.yaml ``io:`` entry as input / output / unknown."""
+    """Infer whether a shared ``io`` declaration represents input or output."""
     name = (item.get("name") or "").lower()
     class_name = (item.get("class") or item.get("class_name") or "").lower()
     if "input" in name or class_name.endswith("input") or "input" in class_name:
@@ -67,7 +64,7 @@ def classify_io(item: dict) -> str:
 
 
 def workspace_manifest_entries(ws: Any, kind: str) -> list[dict]:
-    """Manifest entries from the open workspace's kohaku.yaml."""
+    """Return normalized declarations from the open workspace manifest."""
     key = MANIFEST_KEYS.get(kind)
     if key is None:
         return []
@@ -88,7 +85,7 @@ def workspace_manifest_entries(ws: Any, kind: str) -> list[dict]:
 
 
 def package_entries(kind: str) -> list[dict]:
-    """Entries from every installed kt package."""
+    """Return normalized declarations from every readable installed package."""
     key = MANIFEST_KEYS.get(kind)
     if key is None:
         return []
@@ -114,7 +111,7 @@ def package_entries(kind: str) -> list[dict]:
 
 
 def dedupe_preserve_order(entries: list[dict]) -> list[dict]:
-    """Keep first entry per name. Caller orders sources by precedence."""
+    """Keep the first named entry, allowing caller order to define precedence."""
     seen: set[str] = set()
     out: list[dict] = []
     for e in entries:

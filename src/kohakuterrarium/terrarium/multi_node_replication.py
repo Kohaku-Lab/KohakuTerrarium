@@ -10,11 +10,8 @@ graph isolated; cross-node ``connect`` / ``disconnect`` and lazy
 - Track cluster-link bookkeeping for the runtime-graph fold.
 - Track per-subscription refcounts for clean teardown.
 
-Each helper takes the service as its first argument so the
-``MultiNodeTerrariumService`` class stays slim (under the 1000-line
-hard cap) while the cross-node behavior continues to mutate the
-service's caches (``_cluster_links``, ``_cross_subs``,
-``_coordination_engine``-attached broadcast adapter).
+Each helper receives the service explicitly because replication mutates its
+cluster-link and cross-subscription caches and uses its coordination adapter.
 """
 
 from typing import TYPE_CHECKING

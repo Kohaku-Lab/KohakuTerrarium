@@ -1,10 +1,8 @@
 """Round-trip YAML IO for workspace ``kohaku.yaml`` manifests.
 
-Same ruamel round-trip discipline as ``yaml_creature.py`` — when a studio
-user asks us to sync a newly-scaffolded module into the manifest, we
-must not clobber existing comments / formatting / key order. The
-public surface here is kept deliberately small: load + idempotent
-entry append.
+Uses ruamel.yaml round-trip mode so synchronizing scaffolded modules preserves
+existing comments, formatting, quoting, and key order. The helpers expose only
+the loading, saving, and list-entry operations needed by manifest editors.
 """
 
 from pathlib import Path
@@ -23,10 +21,9 @@ def _yaml() -> YAML:
 
 
 def load_manifest(path: Path) -> Any:
-    """Load ``kohaku.yaml`` preserving comments + order.
+    """Load ``kohaku.yaml`` with round-trip metadata.
 
-    Returns a fresh ``CommentedMap`` when the file doesn't exist,
-    letting callers append entries into an empty document.
+    Missing and empty files return a fresh ``CommentedMap`` ready for mutation.
     """
     if not path.exists():
         return CommentedMap()
@@ -37,11 +34,7 @@ def load_manifest(path: Path) -> Any:
 
 
 def save_manifest(path: Path, data: Any) -> None:
-    """Write the manifest document back to disk atomically.
-
-    Uses a sibling ``.tmp`` file + atomic rename so a crash mid-dump
-    cannot leave a truncated manifest behind.
-    """
+    """Atomically persist a manifest through a sibling temporary file."""
     y = _yaml()
     tmp = path.with_suffix(path.suffix + ".tmp")
     with tmp.open("w", encoding="utf-8", newline="\n") as f:
@@ -50,17 +43,16 @@ def save_manifest(path: Path, data: Any) -> None:
 
 
 def ensure_list(doc: Any, key: str) -> CommentedSeq:
-    """Return the ``doc[key]`` list, creating a fresh CommentedSeq if missing.
+    """Return ``doc[key]`` as a mutable round-trip sequence.
 
-    Deliberately not a get-or-default — we mutate the doc in place so
-    round-trip formatting for other keys is left untouched.
+    Missing or plain-list values are replaced in place without disturbing other
+    manifest keys.
     """
     current = doc.get(key)
     if isinstance(current, CommentedSeq):
         return current
     if isinstance(current, list):
-        # Coerce plain lists into CommentedSeq so subsequent appends
-        # keep round-trip support.
+        # Convert plain lists so subsequent mutations retain round-trip metadata.
         seq = CommentedSeq(current)
         doc[key] = seq
         return seq
@@ -70,8 +62,7 @@ def ensure_list(doc: Any, key: str) -> CommentedSeq:
 
 
 def entry_by_name(seq: CommentedSeq, name: str) -> dict | None:
-    """Linear lookup — the manifest lists are small enough that this
-    beats building a by-name index."""
+    """Return the named mapping from a small manifest sequence."""
     for item in seq:
         if isinstance(item, dict) and item.get("name") == name:
             return item
@@ -79,8 +70,7 @@ def entry_by_name(seq: CommentedSeq, name: str) -> dict | None:
 
 
 def append_entry(seq: CommentedSeq, entry: dict) -> None:
-    """Append *entry* as a ``CommentedMap`` so ruamel preserves its
-    key order on subsequent saves."""
+    """Append an entry as a ``CommentedMap`` with stable key order."""
     wrapped = CommentedMap()
     for k, v in entry.items():
         wrapped[k] = v

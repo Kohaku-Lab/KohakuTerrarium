@@ -1,8 +1,7 @@
 """Provider-native tool inventory.
 
-Surfaces the metadata for every provider-native built-in tool so the
-frontend can render them as a checkbox list inside the custom-backend
-form. Pure read-side wrapper over
+Exposes provider-native tool metadata for custom-backend configuration. This is
+a read-only Studio wrapper over
 :func:`kohakuterrarium.builtins.tool_catalog.list_provider_native_tools`.
 """
 
@@ -12,5 +11,5 @@ from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
 
 
 def list_native_tools() -> list[dict[str, Any]]:
-    """Return native-tool metadata as a list of plain dicts."""
+    """Return provider-native tool metadata as Studio records."""
     return list_provider_native_tools()

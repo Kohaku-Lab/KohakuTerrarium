@@ -136,7 +136,7 @@ class NotebookReadTool(BaseTool):
 
         if context and context.file_read_state:
             mtime_ns = os.stat(file_path).st_mtime_ns
-            # Reading any notebook view parses the full file, so record it as a full read.
+            # Parsing any view establishes a complete-file baseline for edit guards.
             context.file_read_state.record_read(
                 str(file_path), mtime_ns, False, time.time()
             )
@@ -162,6 +162,7 @@ def _render_notebook(
     max_source_chars: int,
     max_output_chars: int,
 ) -> str:
+    """Render selected cells with bounded source and output detail."""
     language = notebook_language(data)
     nbformat = data.get("nbformat", "?")
     nbformat_minor = data.get("nbformat_minor", "?")

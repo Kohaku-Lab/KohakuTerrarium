@@ -1,11 +1,4 @@
-"""Fork / branch primitive for :class:`SessionStore` (Wave E).
-
-Copy-on-fork implementation: every fork is an independent v2 file.
-Lineage sidecar is deferred to a later wave.
-
-Kept out of ``session/store.py`` so the store module stays under the
-600-line soft cap. :meth:`SessionStore.fork` delegates straight here.
-"""
+"""Create independent session forks with event-range and lineage controls."""
 
 import shutil
 import sqlite3
@@ -25,8 +18,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Event types that open a "pending" span until their matching result
-# event arrives. Used by the stability check.
+# Fork stability pairs each call event with its corresponding result event.
 _OPEN_CALL_TYPES = {"tool_call", "subagent_call"}
 _CLOSE_RESULT_TYPES = {
     "tool_call": "tool_result",
@@ -43,9 +35,8 @@ def _decode_key(key_bytes: bytes | str) -> str:
 def _call_id_for(evt: dict[str, Any]) -> str:
     """Extract a stable identifier for a call event.
 
-    Tool calls carry ``call_id`` (preferred) or ``job_id``. Sub-agent
-    calls carry ``job_id``. Empty string means "no id" — we don't try
-    to match those.
+    Tool calls prefer ``call_id`` and fall back to ``job_id``; sub-agent calls
+    use ``job_id``. Unidentified calls cannot participate in span matching.
     """
     return str(evt.get("call_id") or evt.get("job_id") or "")
 
@@ -58,23 +49,13 @@ def check_fork_stability(
 ) -> None:
     """Raise :class:`ForkNotStableError` if the fork point is unsafe.
 
-    ``events_in_range`` are the (key, event) pairs whose
-    ``event_id <= at_event_id``, in storage order. ``pending_job_ids``
-    is the set of call ids the parent :class:`Session` reports as
-    currently in-flight; an empty / ``None`` set means "nothing is
-    actively running" — the common resume-from-disk case.
-
-    Rules:
-
-    * Every ``tool_call`` / ``subagent_call`` in the range whose
-      matching result is ALSO in the range is fine (closed span).
-    * Every call whose result is missing from the range is only
-      unstable if its ``call_id`` is in ``pending_job_ids``. Otherwise
-      the call finished after the fork point and the fork is clean.
+    Events must be in storage order and bounded by ``at_event_id``. A call
+    without an in-range result is unsafe only when its identifier is still in
+    ``pending_job_ids``; completed calls whose result lies after the fork point
+    do not prevent forking.
     """
     pending = set(pending_job_ids or set())
 
-    # Collect calls opened and results closed inside the copy range.
     opened: dict[str, dict[str, Any]] = {}
     closed: set[str] = set()
     for _key, evt in events_in_range:
@@ -109,11 +90,9 @@ def _iter_keys(table: KVault) -> list[str]:
 
 
 def _copy_table(src: KVault, dst: KVault, keys: list[str] | None = None) -> int:
-    """Copy entries from ``src`` to ``dst``. Returns rows copied.
+    """Copy selected rows from ``src`` to ``dst`` and return the count.
 
-    When ``keys`` is ``None``, every row is copied. Otherwise only the
-    provided keys are copied (use-case: restrict events to the copy
-    range).
+    ``keys=None`` copies the complete table.
     """
     target_keys = keys if keys is not None else _iter_keys(src)
     written = 0
@@ -142,8 +121,8 @@ def _build_lineage(
 ) -> dict[str, Any]:
     """Build the fork lineage record for the child's meta.
 
-    Preserves any earlier lineage entries (e.g. Wave D migration data)
-    under their original keys so the chain is still traversable.
+    Existing lineage entries retain their original keys so ancestry remains
+    traversable.
     """
     existing = parent_meta.get("lineage")
     if isinstance(existing, dict):
@@ -194,17 +173,10 @@ def _record_child_in_parent(
 
 
 def _copy_artifacts(source_path: Path, dest_path: Path) -> None:
-    """Shallow-copy the parent's ``<stem>.artifacts/`` tree to the child.
+    """Copy the parent's artifact tree into independent child storage.
 
-    We choose a shallow copy (not a hardlink / reflink) because:
-
-    * events inside the copy range may reference artifacts by relative
-      path — the child must be able to resolve them after a detach.
-    * forks are low-frequency (a handful per session lifetime), so the
-      O(size) cost is acceptable.
-
-    Subdirectories are copied recursively with ``copytree``; missing
-    source dir is a no-op.
+    Physical copies keep relative references valid after detachment and avoid
+    shared mutable files. A missing source directory is a no-op.
     """
     source_art = source_path.parent / f"{source_path.stem}.artifacts"
     if not source_art.exists():
@@ -224,12 +196,7 @@ def _collect_copy_range(
     source: SessionStoreLike,
     at_event_id: int,
 ) -> tuple[list[tuple[str, dict[str, Any]]], dict[str, Any] | None]:
-    """Return (events-in-range, fork-point event). Events in storage order.
-
-    ``fork_point_event`` is the event whose ``event_id == at_event_id``
-    (if any). Returned separately so the caller can pass it to
-    ``mutate`` before re-inserting.
-    """
+    """Return ordered events through the fork point and that point's event."""
     source.events.flush_cache()
     in_range: list[tuple[str, dict[str, Any]]] = []
     fork_point: dict[str, Any] | None = None
@@ -255,28 +222,23 @@ def _collect_copy_range(
         in_range.append((key, dict(evt)))
         if eid == at_event_id:
             fork_point = dict(evt)
-    # Stable ordering: by event_id first (same global ordering the
-    # replay uses), then by key as a tiebreaker.
+    # Match replay ordering, using the storage key only as a stable tiebreaker.
     in_range.sort(key=lambda pair: (pair[1].get("event_id", 0), pair[0]))
     return in_range, fork_point
 
 
 def _child_session_id(parent_session_id: str) -> str:
-    """Build a child session id from the parent's id + a short uuid."""
+    """Build a child session identifier from its parent and a short UUID."""
     short = uuid.uuid4().hex[:8]
     return f"{parent_session_id}-fork-{short}"
 
 
 def _purge_drive_tables(target_path: str) -> None:
-    """Drop any ``drive_*`` tables from a forked session file (design §6.8).
+    """Remove Drive tables so a conversation fork carries no commitments.
 
-    A conversation fork must carry ZERO Drives: two branches mutating one
-    commitment is the §6.8 bug. The Drive runtime keeps its rows in sidecar
-    ``drive_*`` tables opened by Terrarium (see ``terrarium.drive.store``), which
-    this logical KVault row copy never duplicates — so a forked file normally
-    has none. This purge makes the invariant explicit and robust to any future
-    physical-copy fork, using raw SQL so ``session`` stays free of any Drive
-    import (the dependency only ever points terrarium -> session)."""
+    Independent branches must never mutate the same Drive state. Raw SQL keeps
+    the session package independent of the Terrarium Drive implementation.
+    """
     conn = sqlite3.connect(target_path)
     try:
         conn.execute("PRAGMA busy_timeout = 5000")
@@ -287,7 +249,7 @@ def _purge_drive_tables(target_path: str) -> None:
             conn.execute(f'DROP TABLE IF EXISTS "{name}"')
         if rows:
             conn.commit()
-    except sqlite3.Error as exc:  # pragma: no cover - defensive
+    except sqlite3.Error as exc:  # pragma: no cover - cleanup is best-effort
         logger.warning("Fork drive-table purge failed", error=str(exc))
     finally:
         conn.close()
@@ -302,9 +264,10 @@ def perform_fork(
     name: str | None = None,
     pending_job_ids: set[str] | None = None,
 ) -> SessionStoreLike:
-    """Implementation behind :meth:`SessionStore.fork`.
+    """Fork a session through one event, optionally rewriting that event.
 
-    Kept as a module-level function so the store class stays lean.
+    The child receives independent metadata, events, state, artifacts, and
+    lineage while excluding stale snapshots and all Drive commitments.
     """
     if at_event_id < 1:
         raise ValueError(
@@ -347,11 +310,10 @@ def perform_fork(
 
     dest = type(source)(str(target))
     try:
-        # --- meta: copy parent meta verbatim, then overwrite the
-        # session identity + stamp lineage.
+        # Child identity and lineage replace parent-local metadata after copying.
         for key, value in parent_meta.items():
             if key in ("forked_children",):
-                # Parent-local bookkeeping doesn't cross into the child.
+                # Child discovery records belong only to the parent.
                 continue
             try:
                 dest.meta[key] = value
@@ -379,8 +341,7 @@ def perform_fork(
         )
         dest.meta["lineage"] = lineage
 
-        # --- events: restrict to the copy range and optionally mutate
-        # the fork-point event.
+        # Only the fork-point event may be rewritten or dropped.
         mutated_fork_event: dict[str, Any] | None = None
         if mutate is not None and fork_point_event is not None:
             try:
@@ -388,7 +349,7 @@ def perform_fork(
             except Exception as exc:
                 raise RuntimeError(f"Fork mutate callable raised: {exc}") from exc
             if result is None:
-                mutated_fork_event = None  # drop the event
+                mutated_fork_event = None
             elif isinstance(result, dict):
                 mutated_fork_event = result
             else:
@@ -408,9 +369,7 @@ def perform_fork(
         if mutate is None or fork_point_event is None:
             _copy_table(source.events, dest.events, keys=event_keys)
         else:
-            # Copy every event except the fork-point key; re-insert the
-            # fork-point with the mutated payload (or drop it entirely
-            # if mutate returned None).
+            # Reinsert the fork point only when the mutator returns an event.
             for key in event_keys:
                 if key == fork_point_key:
                     continue
@@ -424,26 +383,14 @@ def perform_fork(
                         exc_info=True,
                     )
             if mutated_fork_event is not None and fork_point_key is not None:
-                # Preserve the original event_id / type if the mutator
-                # stripped them (defensive — spec allows a full rewrite
-                # but we still want a playable event).
+                # Preserve replay-critical identity when the mutator omits it.
                 payload = dict(mutated_fork_event)
                 payload.setdefault("event_id", at_event_id)
                 payload.setdefault("type", fork_point_event.get("type", "user_message"))
                 dest.events[fork_point_key] = payload
 
-        # --- other tables: copy wholesale, with two fork-specific
-        # exclusions.
-        #
-        # 1. ``state`` copies EXCEPT the per-agent ``snapshot_event_id``
-        #    markers. The fork truncated the event log, so a marker
-        #    copied from the parent would outrank the child's last
-        #    event and make resume trust a stale snapshot.
-        # 2. The ``conversation`` snapshot is NOT copied at all — it
-        #    still holds the parent's post-fork turns. The child's event
-        #    log is correctly truncated; ``resume`` rebuilds the
-        #    conversation from it via replay (with no snapshot present,
-        #    ``_load_conversation_with_replay_fallback`` always replays).
+        # Snapshot markers and conversation caches may include post-fork events,
+        # so the child must rebuild conversation state from its truncated log.
         state_keys = [
             k for k in _iter_keys(source.state) if not k.endswith(":snapshot_event_id")
         ]
@@ -455,9 +402,7 @@ def perform_fork(
 
         dest.flush()
 
-        # Re-derive the per-agent / global counters from whatever
-        # landed on disk so the returned store is ready for further
-        # appends.
+        # Counters must reflect the child's copied rows before further appends.
         dest._event_seq.clear()
         dest._channel_seq.clear()
         dest._subagent_runs.clear()
@@ -480,11 +425,10 @@ def perform_fork(
 
     _copy_artifacts(Path(source.path), target)
 
-    # A conversation fork carries ZERO Drives by default (design §6.8): purge
-    # any sidecar ``drive_*`` tables so two branches can't mutate one Drive.
+    # Conversation forks cannot inherit mutable Drive commitments.
     _purge_drive_tables(str(target))
 
-    # Record the child in the parent's meta so tree walks can find it.
+    # Parent metadata provides the reverse edge for lineage traversal.
     try:
         _record_child_in_parent(
             source.meta,

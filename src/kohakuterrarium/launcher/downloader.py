@@ -1,15 +1,9 @@
-"""HTTPS download + sha256 + tarball extract.
+"""Download, verify, and safely extract launcher release archives.
 
-Three primitives:
-
-- :func:`download_to` — streaming HTTPS GET with incremental SHA-256.
-- :func:`extract_tarball` — `.tar.zst` (preferred) or `.tar.gz` with
-  zip-slip protection.
-- :func:`fetch_and_extract` — convenience wrapper used by the runner.
-
-``zstandard`` is an optional dep. When unavailable, only ``.tar.gz``
-sources work — the bundled-release artifact and the github_releases
-default feed both stay ``.tar.gz``-compatible.
+Downloads require HTTPS and are atomically promoted only after SHA-256
+verification. Extraction rejects path traversal and special entries. Zstandard
+support remains optional; gzip and uncompressed tar archives use the standard
+library.
 """
 
 import hashlib
@@ -25,11 +19,10 @@ from kohakuterrarium.launcher.log import get_logger
 
 
 class DownloadError(RuntimeError):
-    """Network / hash / extract failure surfaced to UI."""
+    """Report a download, integrity, or extraction failure to callers."""
 
 
-# Progress callback: (bytes_done, bytes_total) -> None. Total is 0 when
-# the server didn't send Content-Length.
+# A zero total indicates that the server omitted Content-Length.
 ProgressCallback = Callable[[int, int], None]
 
 
@@ -46,10 +39,10 @@ def download_to(
     chunk_size: int = 65536,
     timeout: float = 60.0,
 ) -> None:
-    """Stream-download ``url`` into ``dest``, verifying ``expected_sha256``.
+    """Download an HTTPS resource and atomically verify it into ``dest``.
 
-    Atomically: writes to ``dest.tmp`` first, verifies, then renames.
-    Removes the tmp file on any failure.
+    Data is streamed through SHA-256 into a temporary file. Network, file, or
+    checksum failures remove the temporary file and raise :class:`DownloadError`.
     """
     log = get_logger()
     if not url.startswith("https://"):
@@ -82,7 +75,7 @@ def download_to(
                     done += len(chunk)
                     try:
                         progress(done, total)
-                    except Exception as e:  # pragma: no cover - defensive
+                    except Exception as e:  # pragma: no cover - callback isolation
                         log.debug("progress callback raised: %s", e)
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         if tmp.exists():
@@ -99,13 +92,8 @@ def download_to(
     log.info("downloader: wrote %s (%d bytes, sha256 ok)", dest, done)
 
 
-# ── Tarball extract ─────────────────────────────────────────────────
-
-
 def _open_tarball(path: Path) -> tarfile.TarFile:
-    """Open the tarball. ``.tar.zst`` requires the optional ``zstandard``
-    dep; ``.tar.gz`` and ``.tar`` use stdlib.
-    """
+    """Open a supported tar archive, including optional Zstandard streams."""
     name = path.name.lower()
     if name.endswith(".tar.zst") or name.endswith(".tzst"):
         try:
@@ -115,9 +103,9 @@ def _open_tarball(path: Path) -> tarfile.TarFile:
                 f"{path.name} requires the `zstandard` package "
                 "(install it or use a .tar.gz mirror)"
             ) from e
-        # zstd streaming decompression piped into tarfile.
+        # Streaming avoids materializing a second decompressed archive on disk.
         dctx = zstandard.ZstdDecompressor()
-        # Path can't be Path here — tarfile wants a file-like.
+
         src = path.open("rb")
         try:
             reader = dctx.stream_reader(src)
@@ -133,7 +121,7 @@ def _open_tarball(path: Path) -> tarfile.TarFile:
 
 
 def _safe_member_path(member: tarfile.TarInfo, root: Path) -> Path:
-    """Zip-slip guard: resolve member path under root, reject escapes."""
+    """Resolve an archive member under ``root`` or reject path traversal."""
     candidate = (root / member.name).resolve()
     root_resolved = root.resolve()
     try:
@@ -144,13 +132,11 @@ def _safe_member_path(member: tarfile.TarInfo, root: Path) -> Path:
 
 
 def extract_tarball(tarball: Path, dest_dir: Path) -> None:
-    """Extract ``tarball`` into ``dest_dir`` (created if missing).
+    """Validate and extract a release archive into ``dest_dir``.
 
-    Zip-slip protected. Symlinks/hardlinks rejected (we don't need them
-    in a site-packages tree and they're an attack vector). Devices/FIFOs
-    rejected too. Any tarfile-level error (corrupt header, truncated
-    body) surfaces as :class:`DownloadError` so callers only need one
-    exception class.
+    The validation pass rejects traversal, links, devices, and FIFOs before any
+    member is written. Tar parsing and extraction failures are normalized to
+    :class:`DownloadError`.
     """
     dest_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -176,11 +162,9 @@ def extract_tarball(tarball: Path, dest_dir: Path) -> None:
                     or member.isdev()
                     or member.isfifo()
                 ):
-                    continue  # already rejected in the validation pass
+                    continue  # The validation pass guarantees these are absent.
                 _safe_member_path(member, dest_dir)
-                # ``filter="data"`` (PEP 706 / 3.12+) blocks dangerous
-                # tar features — second line of defence after the
-                # manual zip-slip guard above.
+                # The data filter reinforces the explicit traversal and type checks.
                 tar.extract(member, path=str(dest_dir), filter="data")
     except tarfile.TarError as e:
         raise DownloadError(f"tarball extract failed: {e}") from e
@@ -194,11 +178,10 @@ def fetch_and_extract(
     *,
     progress: ProgressCallback | None = None,
 ) -> None:
-    """Download + extract in one call.
+    """Download a verified archive and replace its extraction directory.
 
-    ``tarball_cache`` is where the tarball lands on disk; we keep it
-    after extract so a smoke failure can be retried without re-download.
-    Caller cleans up when done.
+    The verified archive remains in ``tarball_cache`` for caller-managed retry
+    or cleanup. A failed extraction removes the partial destination.
     """
     download_to(url, tarball_cache, expected_sha256, progress=progress)
     if extract_dir.exists():

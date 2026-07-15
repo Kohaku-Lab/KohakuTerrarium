@@ -1,9 +1,7 @@
 """Workspace Protocol + manifest / sidecar / effective-config helpers.
 
-The Workspace Protocol (consumed by routes via dependency injection)
-lives here alongside the manifest-sync, doc-sidecar and post-inheritance
-"effective config" computation that ``workspace_fs.LocalWorkspace``
-delegates to so that file stays small.
+Defines the dependency-injected workspace protocol and the manifest, sidecar,
+and effective-configuration operations shared by workspace implementations.
 """
 
 import ast
@@ -34,46 +32,37 @@ from kohakuterrarium.studio.editors.yaml_manifest import (
 class Workspace(Protocol):
     """Protocol for a studio workspace (FS, remote server, …)."""
 
-    root: str  # display label (usually a path string)
+    root: str  # Human-readable workspace identity, usually a path.
 
-    # Creatures ------------------------------------------------------
     def list_creatures(self) -> list[dict]: ...
     def load_creature(self, name: str) -> dict: ...
     def save_creature(self, name: str, data: dict) -> dict: ...
     def scaffold_creature(self, name: str, base: str | None) -> dict: ...
     def delete_creature(self, name: str) -> None: ...
 
-    # Modules --------------------------------------------------------
     def list_modules(self, kind: str) -> list[dict]: ...
     def load_module(self, kind: str, name: str) -> dict: ...
     def save_module(self, kind: str, name: str, data: dict) -> dict: ...
     def scaffold_module(self, kind: str, name: str, template: str | None) -> dict: ...
     def delete_module(self, kind: str, name: str) -> None: ...
 
-    # Prompts --------------------------------------------------------
     def read_prompt(self, creature: str, rel: str) -> str: ...
     def write_prompt(self, creature: str, rel: str, body: str) -> None: ...
 
 
-# ----------------------------------------------------------------------
-# Effective config
-# ----------------------------------------------------------------------
-
-
 def compute_effective(cfg_path: Path, data: dict) -> dict:
-    """Compute the post-inheritance effective config summary.
+    """Return a best-effort summary of the post-inheritance configuration.
 
-    Calls the core config loader in a best-effort way — if it
-    fails (missing package, broken base ref, …), returns an
-    ``error`` key instead of crashing the read.
+    Core loading failures are represented by ``error`` so workspace reads remain
+    available when a base package or reference is broken.
     """
     try:
         cfg = load_agent_config(cfg_path.parent)
     except Exception as e:
         return {"error": str(e)}
 
-    # Chain reconstruction from raw data (core doesn't expose the
-    # chain as a field — we re-walk it for display)
+    # The core config omits lineage, so reconstruct the visible first hop from
+    # raw configuration for display.
     chain: list[str] = []
     cur = data
     seen: set[str] = set()
@@ -86,9 +75,7 @@ def compute_effective(cfg_path: Path, data: dict) -> dict:
             break
         seen.add(base)
         chain.append(base)
-        # We don't follow further — just surface the first hop is
-        # usually enough for the UI. Phase 4 can extend this if
-        # needed.
+        # Only the first hop is available without reimplementing core resolution.
         break
 
     tools = [t.name for t in cfg.tools] if cfg.tools else []
@@ -101,16 +88,11 @@ def compute_effective(cfg_path: Path, data: dict) -> dict:
     }
 
 
-# ----------------------------------------------------------------------
-# Sidecars (per-module .md doc, .schema.json options descriptors)
-# ----------------------------------------------------------------------
-
-
 def load_sidecar_doc(py_path: Path, root_path: Path) -> dict:
-    """Return the sidecar ``.md`` envelope for *py_path*.
+    """Return a module documentation sidecar envelope.
 
-    Sidecar is ``<py_path>.with_suffix('.md')``. Empty content when the
-    file doesn't exist yet — the caller can treat that as "author it".
+    Missing sidecars produce empty content and ``exists=False`` so callers can
+    offer creation without treating absence as an error.
     """
     sidecar = py_path.with_suffix(".md")
     content = sidecar.read_text(encoding="utf-8") if sidecar.exists() else ""
@@ -129,11 +111,10 @@ def save_sidecar_doc(py_path: Path, content: str) -> None:
 
 
 def read_sidecar_schema(py_path: Path) -> list | None:
-    """Load ``<stem>.schema.json`` sitting next to *py_path*.
+    """Load a valid list from a module's ``.schema.json`` sidecar.
 
-    Returns the parsed list when the sidecar exists and parses; ``None``
-    otherwise. A malformed JSON file is treated as absent rather than
-    raising — the author can re-save to regenerate it.
+    Missing, malformed, and non-list sidecars return ``None`` so a later save can
+    regenerate them.
     """
     sidecar = py_path.with_suffix(".schema.json")
     if not sidecar.is_file():
@@ -146,12 +127,10 @@ def read_sidecar_schema(py_path: Path) -> list | None:
 
 
 def write_codegen_sidecars(cg: Any, form: dict, py_path: Path) -> None:
-    """Ask *cg* for any ``{suffix: content}`` sidecars and write them
-    next to *py_path*.
+    """Write optional sidecars supplied by a code-generation module.
 
-    Suffixes starting with ``.`` (e.g. ``.schema.json``) become
-    ``py_path.with_suffix(suffix)``; plain suffixes append after the
-    stem. Silently no-ops when the codegen module exposes no writer.
+    Dot-prefixed suffixes replace the Python suffix; other suffixes append after
+    the stem. Missing, failing, or invalid writers are treated as no sidecars.
     """
     writer = getattr(cg, "sidecar_files", None)
     if writer is None:
@@ -172,11 +151,6 @@ def write_codegen_sidecars(cg: Any, form: dict, py_path: Path) -> None:
         target.write_text(content, encoding="utf-8")
 
 
-# ----------------------------------------------------------------------
-# Manifest sync
-# ----------------------------------------------------------------------
-
-
 def sync_manifest_entry(
     root_path: Path,
     kind: str,
@@ -184,14 +158,10 @@ def sync_manifest_entry(
     py_path: Path,
     known_kinds: tuple[str, ...],
 ) -> dict:
-    """Append ``(kind, name)`` to the workspace's ``kohaku.yaml``.
+    """Idempotently add a resolved module to the workspace manifest.
 
-    Idempotent. The caller (``LocalWorkspace.sync_manifest``) provides
-    the already-resolved ``.py`` path so we don't need to redo module
-    discovery here. Preserves existing comments via ruamel round-trip.
-
-    Returns ``{ok, added, path, entry}``. ``added=False`` when a prior
-    entry with the same ``name`` already sat under the right key.
+    Existing comments and ordering are preserved. The result reports whether an
+    entry was added and returns the effective manifest record.
     """
     name = sanitize_name(name)
     if kind not in known_kinds:
@@ -204,7 +174,7 @@ def sync_manifest_entry(
 
     doc = load_manifest(manifest_path)
 
-    # Seed minimal top-level metadata for freshly-created manifests.
+    # New manifests require minimal package identity before module entries.
     if "name" not in doc:
         doc["name"] = root_path.name
     if "version" not in doc:
@@ -215,8 +185,8 @@ def sync_manifest_entry(
     dotted = module_dotted_path(root_path, py_path)
     class_name = detect_class_name(py_path, kind)
 
-    # IO entries share a list — de-dupe must respect the input/output
-    # classification so "x" as input doesn't shadow "x" as output.
+    # Inputs and outputs share one manifest list, so names are unique only within
+    # their I/O classification.
     existing = entry_by_name(seq, name)
     if existing is not None and kind in ("inputs", "outputs"):
         want = "input" if kind == "inputs" else "output"
@@ -246,13 +216,7 @@ def sync_manifest_entry(
 
 
 def module_dotted_path(root: Path, py_path: Path) -> str:
-    """Convert a workspace-relative .py file path to a dotted module path.
-
-    ``<root>/modules/tools/my_tool.py`` → ``modules.tools.my_tool``.
-    ``<root>/kt_template/tools/package_tool.py`` →
-    ``kt_template.tools.package_tool``. The caller ensures the file
-    is inside *root*.
-    """
+    """Convert a workspace-contained Python path to a dotted module path."""
     rel = py_path.relative_to(root)
     parts = list(rel.parts)
     if parts and parts[-1].endswith(".py"):
@@ -261,12 +225,10 @@ def module_dotted_path(root: Path, py_path: Path) -> str:
 
 
 def resolve_manifest_path(root_path: Path, module: str | None) -> Path | None:
-    """Return the on-disk .py file for a dotted ``module:`` ref if it
-    lives inside *root_path*; otherwise None.
+    """Resolve a dotted module only when its Python file is inside the workspace.
 
-    Rejects anything outside the root (installed packages, absolute
-    paths, parent-escape attempts) — the editor must only ever
-    touch files the user already considers part of this workspace.
+    Installed packages, absolute references, and parent escapes return ``None``
+    because editors may modify only workspace-owned files.
     """
     if not module or not isinstance(module, str):
         return None
@@ -330,11 +292,9 @@ def modules_summary(
     kind: str,
     workspace_files: list[dict],
 ) -> list[dict]:
-    """Merged module list — files + manifest + packages.
+    """Merge workspace files, manifest records, and package modules.
 
-    *workspace_files* is the list of workspace-authored entries the
-    caller already produced via ``ws.list_modules(kind)``; we annotate
-    them with ``source/editable`` and append manifest + package entries.
+    Workspace-owned records are marked editable before ordered deduplication.
     """
     merged: list[dict] = []
     for item in workspace_files:
@@ -358,12 +318,10 @@ def modules_summary(
 
 
 def detect_class_name(py_path: Path, kind: str) -> str | None:
-    """Best-effort AST scan for the primary class exported by the file.
+    """Return the first exported class name when the module shape supports one.
 
-    Sub-agents export a ``SubAgentConfig`` instance rather than a class,
-    so we always return ``None`` for them — the manifest entry then
-    omits ``class:`` and the framework falls back to attribute scanning
-    at load time.
+    Sub-agents expose ``SubAgentConfig`` instances, so their manifest entries omit
+    ``class`` and rely on loader attribute discovery.
     """
     if kind == "subagents":
         return None

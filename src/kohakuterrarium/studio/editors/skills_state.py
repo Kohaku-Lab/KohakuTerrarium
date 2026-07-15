@@ -1,9 +1,8 @@
 """Persisted skill toggle state.
 
-Discoverable skills carry a default ``enabled`` flag from their
-manifest; this module persists user overrides to
-``~/.kohakuterrarium/skill_state.json`` so the Studio can manage
-them across runs even when no agent is active.
+Skill manifests provide default enabled states. This module persists user
+overrides in ``skill_state.json`` so Studio can manage them independently of any
+running agent.
 """
 
 import json
@@ -14,17 +13,15 @@ from kohakuterrarium.utils.config_dir import config_dir
 
 
 def _state_file() -> Path:
-    """Resolve the skill-state path fresh, honouring KT_CONFIG_DIR.
+    """Return the current skill-state path.
 
-    The previous module-constant ``Path.home() / ".kohakuterrarium" /
-    "skill_state.json"`` was computed at import time and ignored the
-    env override, leaking test-suite writes into the operator's real
-    config dir.
+    Resolving the config directory per call preserves test isolation and runtime
+    changes to ``KT_CONFIG_DIR``.
     """
     return config_dir() / "skill_state.json"
 
 
-# Back-compat — display only; live read/write uses ``_state_file()``.
+# Retain the legacy display constant; live persistence uses ``_state_file``.
 _STATE_FILE = Path.home() / ".kohakuterrarium" / "skill_state.json"
 
 
@@ -43,14 +40,14 @@ def load_state() -> dict[str, bool]:
 
 
 def save_state(state: dict[str, bool]) -> None:
-    """Atomically persist *state* to disk (creates parent dir if needed)."""
+    """Persist skill overrides, creating the parent directory as needed."""
     path = _state_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(state, indent=2, sort_keys=True), "utf-8")
 
 
 def serialize(skill: Skill, state: dict[str, bool]) -> dict:
-    """Produce the JSON shape the frontend consumes for one skill."""
+    """Serialize one skill with any persisted enabled-state override."""
     enabled = state.get(skill.name, skill.enabled)
     return {
         "name": skill.name,

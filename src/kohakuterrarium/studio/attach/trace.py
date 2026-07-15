@@ -1,22 +1,8 @@
-"""Live trace attach — engine-event stream over a session.
+"""Stream newly appended events from a live session store over a websocket.
 
-Body drained verbatim from ``api/ws/sessions.py`` (Phase 1, agent E).
-Subscribes to a running session's ``SessionStore.append_event`` and
-streams every new event to a connected WS client in real time.
-
-Mechanics:
-
-* Resolves the session against the studio's live store registry —
-  only works while the session is live (resumed in-process).
-  Closed-on-disk sessions reject with code 1011 and a ``not_live``
-  reason.
-* Per-connection ``asyncio.Queue`` decouples the synchronous
-  ``append_event`` callback from the async WS send path. The callback
-  uses ``loop.call_soon_threadsafe`` so a tool worker thread that emits
-  via the store cannot block on the WS.
-* Optional ``agent`` parameter filters by event-key prefix
-  (``<agent>:e``) so a viewer focused on one creature does not get
-  flooded by sibling agents in a terrarium.
+Only in-process stores can be attached. A bounded per-connection queue bridges
+synchronous, potentially cross-thread store callbacks to asynchronous websocket
+sends, and optional agent filtering limits the stream to one creature namespace.
 """
 
 import asyncio
@@ -30,9 +16,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Bounded queue per connection. Events are small dicts; 1000 covers any
-# realistic burst (a slow client falling behind by 1k events is already
-# pathological — drop newer events rather than balloon memory).
+# A lagging trace viewer must drop new events rather than grow session memory without
+# bound; one thousand small event dictionaries accommodates normal bursts.
 _QUEUE_MAX = 1000
 
 
@@ -40,17 +25,12 @@ def _find_live_store(
     session_name: str,
     stores: "Mapping[str, SessionStore] | Iterable[SessionStore] | None" = None,
 ) -> SessionStore | None:
-    """Locate the live ``SessionStore`` for ``session_name``.
+    """Locate the runtime-owned live store identified by graph ID or file stem.
 
-    ``stores`` may be the registry MAPPING (``graph_id -> store``) or a
-    plain iterable of stores. A mapping is matched on its key first —
-    the live-session URL passes the graph id, which is unrelated to the
-    store's file name. Falls back to matching the file stem so saved
-    session names (no ``.kohakutr`` extension, no version suffix) also
-    resolve. Returns ``None`` if no live creature / session owns this
-    name.  Session stores are instance-scoped
-    (``studio.sessions.registry``) so the caller — who knows which
-    runtime it serves — supplies the registry.
+    Mapping keys are checked first because live-session URLs may contain a graph ID
+    unrelated to the backing filename. File matching accepts canonical session names
+    without ``.kohakutr``, ``.kt``, or version suffixes. The caller supplies the
+    instance-scoped registry for the runtime it serves.
     """
     if stores is None:
         return None
@@ -68,8 +48,7 @@ def _find_live_store(
         path_str = str(path)
         if not path_str:
             continue
-        # Match on the basename without ``.kohakutr`` / ``.kohakutr.vN``
-        # so the WS URL can pass the canonical name the lister surfaces.
+        # Session listings expose a canonical stem rather than storage suffixes.
         base = path_str.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         stem = base
         for suffix in (".kohakutr", ".kt"):
@@ -95,16 +74,11 @@ async def run_trace_attach(
     agent: str | None,
     stores: "Mapping[str, SessionStore] | Iterable[SessionStore] | None" = None,
 ) -> None:
-    """Live event stream for a running session.
+    """Stream events for an in-process session until the websocket disconnects.
 
-    Closes with 1011 ``not_live`` if the session is not in-process. The
-    frontend should hide / disable the Live-attach toggle for sessions
-    whose status is ``"paused"`` so this close path is the exception,
-    not the common case.
-
-    ``stores`` is the runtime's live store registry (the WS shell passes
-    ``registry.stores_for(service)`` mapping); ``None`` means no live
-    stores and rejects every session as not-live.
+    Missing live stores produce a ``not_live`` error and close code 1011. ``stores``
+    is the serving runtime's registry; ``None`` intentionally makes every lookup
+    unavailable rather than consulting global state.
     """
     await websocket.accept()
     store = _find_live_store(session_name, stores)
@@ -127,9 +101,7 @@ async def run_trace_attach(
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=_QUEUE_MAX)
 
     def _on_event(key: str, data: dict) -> None:
-        # ``key`` is ``<agent>:e<seq>``. Filter by agent prefix if the
-        # caller asked for one. Match the bare name and any attached-
-        # agent namespace anchored at it (``<agent>:attached:...``).
+        # Filtering includes the bare agent namespace and attached-agent descendants.
         if agent is not None:
             ns = _agent_from_key(key)
             if ns != agent and not ns.startswith(f"{agent}:attached:"):
@@ -138,12 +110,11 @@ async def run_trace_attach(
         try:
             loop.call_soon_threadsafe(_enqueue_or_drop, queue, payload)
         except RuntimeError:
-            # Loop closed (WS torn down between callback and dispatch).
+            # Teardown may close the loop after the store invokes this callback.
             return
 
     store.subscribe(_on_event)
-    # Send a small hello so clients know subscription succeeded; useful
-    # for the "Live attach" badge to flip from "connecting" to "live".
+    # The acknowledgement distinguishes a quiet live stream from a stalled connection.
     try:
         await websocket.send_json(
             {
@@ -172,9 +143,7 @@ async def run_trace_attach(
 
 
 def _enqueue_or_drop(queue: asyncio.Queue, payload: dict) -> None:
-    """Best-effort enqueue. Drops the event if the queue is full so a
-    slow client can't pin memory in the running session.
-    """
+    """Enqueue an event unless the bounded queue is full."""
     try:
         queue.put_nowait(payload)
     except asyncio.QueueFull:

@@ -1,14 +1,9 @@
 """Anthropic Messages API tool_use ↔ tool_result pairing enforcement.
 
-Mirrors what ``codex_format.fix_tool_call_pairing`` does for the Codex
-Responses API: a final pass over the converted message list that fixes
-ordering, synthesises missing tool_result blocks for unmatched
-tool_use, and drops orphan tool_result blocks. Anthropic's API
-rejects (400) any conversation where a ``tool_use`` block lacks a
-matching ``tool_result`` in the immediately-following user message
-or where a ``tool_result`` references no preceding ``tool_use``;
-this pass keeps those constraints satisfied even after interrupts,
-branch switches, mid-turn input injection, or compaction.
+Repair Anthropic tool-use/result ordering after history mutation.
+
+Anthropic requires each tool use to pair with a result in the immediately
+following user message, so missing results are synthesized and orphans dropped.
 """
 
 from copy import deepcopy
@@ -18,10 +13,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Synthetic placeholder content for a ``tool_use`` block whose matching
-# ``tool_result`` is missing from the converted conversation. Shaped
-# so the model treats it as a recoverable interruption ("retry if you
-# still need the result") rather than a hard failure to debug.
+# Missing results are represented as recoverable interruptions that may be retried.
 SYNTHETIC_TOOL_RESULT_TEXT = (
     "Tool call was interrupted or removed before producing a result. "
     "This may not mean any error — if you receive no new input from "
@@ -30,9 +22,7 @@ SYNTHETIC_TOOL_RESULT_TEXT = (
 
 
 def synthetic_tool_result_block(tool_use_id: str, tool_name: str) -> dict[str, Any]:
-    """Build a placeholder ``tool_result`` block for an unmatched
-    ``tool_use``. ``is_error: True`` is honoured by Claude — the model
-    treats the result as a failure and decides whether to retry."""
+    """Build a retryable error result for an unmatched tool use."""
     label = f"[{tool_name}] " if tool_name else ""
     return {
         "type": "tool_result",
@@ -45,38 +35,11 @@ def synthetic_tool_result_block(tool_use_id: str, tool_name: str) -> dict[str, A
 def fix_anthropic_tool_block_pairing(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Enforce Anthropic's strict ``tool_use`` ↔ ``tool_result`` pairing.
-
-    Three transformations applied to the converted Anthropic native
-    message list:
-
-    1. **Splice** ``tool_result`` blocks from later user messages up
-       to the user message immediately following the matching
-       ``assistant``. Ordering-only fix — a real user text that
-       landed between the assistant and the eventual tool_result
-       (e.g. opportunistic input injection) stays in place, just
-       after the synthesised tool_result group.
-    2. **Synthesise** an ``is_error: True`` placeholder for any
-       ``tool_use`` block whose ``tool_result`` is missing entirely
-       (interrupted job, dropped by compaction, persisted-but-
-       orphaned by a crash). Placeholder content tells the model
-       the call was interrupted and that retrying is valid.
-    3. **Drop** orphan ``tool_result`` blocks — a ``tool_result``
-       whose ``tool_use_id`` never appears in any preceding
-       ``assistant`` message. A user message that ends up empty
-       after dropping its orphan blocks is itself dropped.
-
-    Idempotent — running the pass on its own output yields the same
-    result.
-    """
+    """Splice matching results, synthesize missing results, and drop orphans."""
     if not messages:
         return messages
 
-    # Pre-pass — index every ``tool_result`` block by tool_use_id so
-    # the main pass can splice it up to immediately follow its matching
-    # assistant regardless of where it ended up. Last-occurrence wins
-    # for duplicate ids (retry produced two results — Anthropic accepts
-    # only one, so we use the later one).
+    # Index results first; duplicate ids use the latest result because only one is valid.
     result_block_locations: dict[str, tuple[int, int, dict[str, Any]]] = {}
     for mi, msg in enumerate(messages):
         if msg.get("role") != "user":
@@ -149,8 +112,7 @@ def fix_anthropic_tool_block_pairing(
                 if tu_id not in seen_tool_use_ids:
                     dropped_orphan += 1
                     continue
-                # Belongs to a preceding tool_use AND wasn't pulled up
-                # by the splice — keep it. Rare; defensive.
+                # Keep valid results not already moved beside their tool use.
                 filtered.append(block)
             if dropped_orphan:
                 logger.warning(
@@ -165,8 +127,7 @@ def fix_anthropic_tool_block_pairing(
                     new_msg = dict(msg)
                     new_msg["content"] = filtered
                     rebuilt.append(new_msg)
-            # else: user message ended up empty (all tool_results were
-            # consumed by splices or dropped as orphans) — skip it.
+            # Empty user messages are invalid after all result blocks are removed.
         else:
             rebuilt.append(msg)
 

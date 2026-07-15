@@ -1,14 +1,8 @@
-"""Per-registration option resolution + injection (design §8.1, R1-17).
+"""Resolve, validate, and apply per-registration options.
 
-Split from :mod:`registration` so that leaf module stays under the size cap.
-These helpers resolve the effective options for a registration (defaults merged
-with the operator's serialized selection), validate them against the descriptor
-schema, and inject them into the live instance through its optional
-``configure`` hook — the difference between "options stored and ignored" and
-"options that actually change runtime behaviour".
-
-Leaf module: imports only stdlib, the Drive errors, and duck-types the
-descriptor (never importing :mod:`registration`, so there is no cycle).
+These helpers merge operator selections with descriptor defaults, validate the
+result, and apply it through an optional ``configure`` hook. This module avoids
+importing :mod:`registration` to keep the dependency direction acyclic.
 """
 
 import importlib.metadata
@@ -17,8 +11,8 @@ from typing import Any
 
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 
-# Attribute a configured registration instance carries so the running engine can
-# report its effective options in the runtime revision (design §8.6, R1-29).
+# Effective options are retained on the instance so runtime revisions include
+# the configuration that actually governs behavior.
 EFFECTIVE_OPTIONS_ATTR = "_kt_effective_options"
 
 _OPTION_TYPES: dict[str, type | tuple[type, ...]] = {
@@ -32,8 +26,7 @@ _OPTION_TYPES: dict[str, type | tuple[type, ...]] = {
 
 
 def option_type_ok(value: object, expected: str) -> bool:
-    """Whether ``value`` matches an option-schema ``type`` name (bools are not
-    ints/floats here). An unknown type name does not constrain."""
+    """Check an option type without treating booleans as numeric values."""
     py = _OPTION_TYPES.get(expected)
     if py is None:
         return True
@@ -47,16 +40,7 @@ def apply_registration_options(
     descriptor: Any,
     options: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Resolve, validate, and inject a registration's effective options (R1-17).
-
-    Merges ``options`` over the descriptor defaults, validates them against the
-    option schema, and configures the instance through its optional
-    ``configure(effective)`` hook. Rejection is keyed on the EFFECTIVE options,
-    not the raw caller options: a registration with no ``configure`` method whose
-    effective set is non-empty is rejected even when the caller supplied nothing,
-    because a non-empty default with nowhere to apply it is the exact
-    stored-and-ignored silent-no-op the finding calls out. The effective options
-    are stamped on the instance so the runtime revision can hash them."""
+    """Resolve, validate, apply, and retain a registration's effective options."""
     effective = descriptor.normalized_options(options)
     descriptor.validate_options(effective)
     configure = getattr(instance, "configure", None)
@@ -72,19 +56,12 @@ def apply_registration_options(
 
 
 def effective_options(instance: object) -> dict[str, Any]:
-    """The effective options a configured registration was injected with."""
+    """Return the effective options applied to a registration instance."""
     return dict(getattr(instance, EFFECTIVE_OPTIONS_ATTR, {}) or {})
 
 
 def implementation_fingerprint(instance: object) -> dict[str, str | None]:
-    """Stable identity of the code behind a resolved registration (R1-29).
-
-    Resolved module + qualified class name + installed distribution version, so
-    swapping the implementation class behind a same-named descriptor moves the
-    running runtime revision instead of being invisible. Deliberately excludes
-    process-local reprs (``id()`` / the default ``object.__repr__`` address):
-    those differ per process and would make the revision unstable across
-    restarts, defeating the compare it feeds."""
+    """Return a process-independent identity for a registration implementation."""
     cls = type(instance)
     module = getattr(cls, "__module__", None)
     return {
@@ -95,11 +72,7 @@ def implementation_fingerprint(instance: object) -> dict[str, str | None]:
 
 
 def _distribution_version(module: str | None) -> str | None:
-    """Best-effort installed version of ``module``'s top-level distribution.
-
-    The import name is used as the distribution name; a package whose metadata
-    is not installed (an in-tree test module, a namespace package) simply
-    contributes ``None`` — module + qualname already distinguish two classes."""
+    """Return the installed version of a module's top-level distribution."""
     if not module:
         return None
     top = module.split(".", 1)[0]
@@ -112,13 +85,7 @@ def _distribution_version(module: str | None) -> str | None:
 
 
 def json_type_equal(want: Any, got: Any) -> bool:
-    """Recursive JSON-type-aware equality for compatibility markers (R1-18).
-
-    Python treats ``True == 1`` and ``False == 0``, but a compatibility marker is
-    a JSON contract, so a bool must never satisfy a number (or vice versa). A bool
-    matches only a bool of the same value; dicts/lists compare structurally and
-    recurse; every other scalar (str / int / float / None) uses plain equality.
-    Mismatched container shapes (dict vs list, etc.) compare unequal."""
+    """Compare compatibility markers using JSON type semantics recursively."""
     if isinstance(want, bool) or isinstance(got, bool):
         return type(want) is type(got) and want == got
     if isinstance(want, dict) and isinstance(got, dict):
@@ -133,9 +100,8 @@ def json_type_equal(want: Any, got: Any) -> bool:
 
 
 def json_bytes(obj: object) -> int:
-    # default=str keeps this a pure byte-sizer for non-JSON-native values
-    # (e.g. datetimes in a projection context); JSON-safety is enforced
-    # separately by require_json_safe where it matters.
+    # Sizing tolerates projected non-JSON values; callers enforce JSON safety at
+    # boundaries where serialization is required.
     return len(json.dumps(obj, ensure_ascii=False, default=str).encode("utf-8"))
 
 

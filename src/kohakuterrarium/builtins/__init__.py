@@ -1,13 +1,4 @@
-"""
-Builtins module - all built-in components for the framework.
-
-Contains:
-- tools: Built-in tool registry + lazy tool exports
-- subagents: Built-in sub-agent registry
-- inputs: Built-in input modules (cli, tui, none)
-- outputs: Built-in output modules (stdout, tts)
-- skills: Skill documentation files
-"""
+"""Expose built-in component registries and lazily loaded tool classes."""
 
 import importlib
 
@@ -99,6 +90,7 @@ __all__ = [
 
 
 def __getattr__(name: str):
+    """Load a tool class on first access and cache it in the module."""
     module_name = _TOOL_EXPORTS.get(name)
     if module_name is None:
         raise AttributeError(name)

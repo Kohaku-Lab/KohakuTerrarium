@@ -1,8 +1,6 @@
 """Rendering helpers for :class:`ModulePicker`.
 
-Split out of ``module_picker.py`` to keep both files under the
-600-line soft limit. All functions here take the live overlay and
-return Rich renderables — no mutation, pure read.
+These helpers are read-only views over module-picker state.
 """
 
 from io import StringIO
@@ -42,9 +40,6 @@ def render_overlay(overlay: "ModulePicker", width: int) -> str:
     )
     console.print(_build_panel(overlay), end="")
     return buf.getvalue().rstrip("\n")
-
-
-# ── Panel composition ───────────────────────────────────────────
 
 
 def _build_panel(overlay: "ModulePicker") -> RenderableType:
@@ -93,9 +88,6 @@ def _render_tab_line(overlay: "ModulePicker") -> Text:
     return line
 
 
-# ── List body ───────────────────────────────────────────────────
-
-
 def _render_list_body(overlay: "ModulePicker") -> RenderableType:
     rows: list[RenderableType] = []
     entries = overlay._entries_by_type.get(overlay.active_type) or []
@@ -120,8 +112,7 @@ def _render_list_body(overlay: "ModulePicker") -> RenderableType:
     if start > 0:
         rows.append(Text(f"  ↑ {start} more above", style="dim bright_black"))
 
-    # For plugins: insert "Enabled" / "Disabled" sub-headers at the
-    # transition between groups (within the visible window).
+    # Mixed plugin states receive sub-headings within the visible window.
     show_groups = (
         overlay.active_type == "plugin"
         and any(m.enabled is True for m in entries)
@@ -147,7 +138,6 @@ def _render_row(m: ModuleEntry, selected: bool) -> Text:
     prefix = "  › " if selected else "    "
     line.append(prefix, style="bold bright_cyan" if selected else "dim")
 
-    # Status glyph.
     if m.enabled is True:
         line.append("● ", style="green")
     elif m.enabled is False:
@@ -158,23 +148,18 @@ def _render_row(m: ModuleEntry, selected: bool) -> Text:
     name_style = "bold" if selected else ""
     line.append(m.name, style=name_style)
 
-    # Priority + opt count chips.
     if m.priority is not None:
         line.append(f"  p{m.priority}", style="dim cyan")
     if m.schema:
         line.append(f"  {len(m.schema)} opt", style="dim")
 
-    # Description tail (only for selected row, to keep the list dense).
     if selected and m.description:
-        # Single line, ellipsised so the row never wraps.
+        # Selected descriptions remain single-line to preserve row density.
         text = m.description.replace("\n", " ")
         if len(text) > 60:
             text = text[:57] + "…"
         line.append(f"   {text}", style="dim italic")
     return line
-
-
-# ── Form body ───────────────────────────────────────────────────
 
 
 def _render_form_body(form: "ModuleFormState | None") -> RenderableType:
@@ -228,9 +213,7 @@ def _render_value(fld: "ModuleFormField", is_current: bool) -> Text:
         return out
     value = fld.value or ""
     if fld.kind in ("list", "dict") and value:
-        # Multi-line values: render first line + count of remaining
-        # lines so the form stays single-row per field. Full editing
-        # still works (Backspace deletes char-by-char).
+        # Summarize multiline values without expanding a field beyond one row.
         lines = value.split("\n")
         display = lines[0][:40] + ("…" if len(lines[0]) > 40 else "")
         if len(lines) > 1:
@@ -243,9 +226,6 @@ def _render_value(fld: "ModuleFormField", is_current: bool) -> Text:
     if is_current:
         out.append("█", style="cyan")
     return out
-
-
-# ── Hint bar ────────────────────────────────────────────────────
 
 
 def _render_hint(overlay: "ModulePicker") -> Text:
@@ -273,7 +253,4 @@ def _render_hint(overlay: "ModulePicker") -> Text:
     return hint
 
 
-# Re-export to silence unused-import lint (the typed import is for
-# type-checking only; the renderer references `Any` indirectly via
-# the Rich return types).
 _ = Any

@@ -13,8 +13,8 @@ class InputConfig:
     """Configuration for input module."""
 
     type: str = "cli"  # builtin type or "custom"/"package"
-    module: str | None = None  # For custom: "./custom/input.py", for package: "pkg.mod"
-    class_name: str | None = None  # Class name to instantiate
+    module: str | None = None  # Custom file path or package module reference.
+    class_name: str | None = None  # Class instantiated from ``module``.
     prompt: str = "> "
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -24,8 +24,8 @@ class TriggerConfig:
     """Configuration for a trigger."""
 
     type: str  # builtin type (timer, idle, etc.) or "custom"/"package"
-    module: str | None = None  # For custom: "./custom/trigger.py"
-    class_name: str | None = None  # Class name to instantiate
+    module: str | None = None  # Custom file path or package module reference.
+    class_name: str | None = None  # Class instantiated from ``module``.
     prompt: str | None = None
     options: dict[str, Any] = field(default_factory=dict)
     # Optional stable identity — used as trigger_id and as the identity key for
@@ -39,8 +39,8 @@ class ToolConfigItem:
 
     name: str
     type: str = "builtin"  # "builtin", "custom", or "package"
-    module: str | None = None  # For custom: "./custom/tools/my_tool.py"
-    class_name: str | None = None  # Class name to instantiate
+    module: str | None = None  # Custom file path or package module reference.
+    class_name: str | None = None  # Class instantiated from ``module``.
     options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -49,8 +49,8 @@ class OutputConfigItem:
     """Configuration for a single output module."""
 
     type: str = "stdout"  # builtin type or "custom"/"package"
-    module: str | None = None  # For custom: "./custom/output.py"
-    class_name: str | None = None  # Class name to instantiate
+    module: str | None = None  # Custom file path or package module reference.
+    class_name: str | None = None  # Class instantiated from ``module``.
     options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -60,8 +60,8 @@ class OutputConfig:
 
     # Default output (for model "thinking" / stdout)
     type: str = "stdout"  # builtin type or "custom"/"package"
-    module: str | None = None  # For custom: "./custom/output.py"
-    class_name: str | None = None  # Class name to instantiate
+    module: str | None = None  # Custom file path or package module reference.
+    class_name: str | None = None  # Class instantiated from ``module``.
     controller_direct: bool = True
     options: dict[str, Any] = field(default_factory=dict)
 
@@ -76,9 +76,9 @@ class SubAgentConfigItem:
 
     name: str
     type: str = "builtin"  # "builtin", "custom", or "package"
-    module: str | None = None  # For custom: "./custom/subagents/my_agent.py"
+    module: str | None = None  # Custom file path or package module reference.
     config_name: str | None = (
-        None  # Config object name in module (e.g., "MY_AGENT_CONFIG")
+        None  # Selects among configuration objects exposed by a custom module.
     )
     description: str | None = None
     tools: list[str] = field(default_factory=list)
@@ -89,11 +89,7 @@ class SubAgentConfigItem:
 
 @dataclass
 class AgentConfig:
-    """
-    Complete configuration for an agent.
-
-    Loaded from a config file (YAML/JSON/TOML) in the agent folder.
-    """
+    """Complete runtime configuration for an agent."""
 
     name: str
     version: str = "1.0"
@@ -160,7 +156,6 @@ class AgentConfig:
     # strips a partial pair. Set ``False`` to preserve raw history.
     sanitize_orphan_tool_calls: bool = True
 
-    # Module configs
     input: InputConfig = field(default_factory=InputConfig)
     triggers: list[TriggerConfig] = field(default_factory=list)
     tools: list[ToolConfigItem] = field(default_factory=list)
@@ -174,14 +169,11 @@ class AgentConfig:
     # research-only creature that shouldn't produce images.
     disable_provider_tools: list[str] = field(default_factory=list)
 
-    # Auto-compact config (dict with max_tokens, threshold, target, keep_recent_turns)
     compact: dict[str, Any] | None = None
 
-    # Startup trigger (fires once when agent starts)
     startup_trigger: dict[str, Any] | None = None
 
-    # Termination conditions
-    termination: dict[str, Any] | None = None  # Raw termination config dict
+    termination: dict[str, Any] | None = None
 
     # Sub-agent depth limit (0 = unlimited)
     max_subagent_depth: int = 3
@@ -202,19 +194,15 @@ class AgentConfig:
     # Tool call format: "bracket", "xml", "native", or custom dict
     tool_format: str | dict = "bracket"
 
-    # Path to agent folder
     agent_path: Path | None = None
 
     # Session key for shared state isolation (None = use agent name)
     session_key: str | None = None
 
-    # MCP server configurations (connected on agent start)
     mcp_servers: list[dict[str, Any]] = field(default_factory=list)
 
-    # Plugin configurations (loaded during agent init)
     plugins: list[dict[str, Any]] = field(default_factory=list)
 
-    # Memory / embedding configuration
     memory: dict[str, Any] = field(default_factory=dict)
 
     # Output wiring: framework-level automatic round-output routing.
@@ -244,5 +232,5 @@ class AgentConfig:
     framework_hint_overrides: dict[str, str] = field(default_factory=dict)
 
     def get_api_key(self) -> str | None:
-        """Get API key from environment."""
+        """Return the configured API key from the environment."""
         return os.environ.get(self.api_key_env)

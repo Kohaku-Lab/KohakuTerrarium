@@ -1,11 +1,7 @@
-"""Studio sessions — engine-backed runtime ops on creatures and topology.
+"""Expose Studio operations and handles for Terrarium graph sessions.
 
-A *session* in studio vocabulary is a Terrarium engine *graph* — one
-or more creatures sharing an environment.  Standalone agents live in
-1-creature sessions; recipe-built terrariums live in N-creature
-sessions.  Per-creature operations (interrupt / chat / scratchpad /
-plugins / model / command / state) take ``(session_id, creature_id)``
-and resolve through the engine.
+Standalone creatures and recipe-built teams share the same session abstraction.
+Per-creature operations identify both the graph and the creature within it.
 """
 
 from kohakuterrarium.studio.sessions import lifecycle

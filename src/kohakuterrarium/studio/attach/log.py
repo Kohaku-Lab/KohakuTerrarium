@@ -1,14 +1,7 @@
-"""Process log tail attach — engine-independent.
+"""Expose the current process log as structured websocket frames.
 
-Body drained verbatim from ``api/ws/logs.py`` (Phase 1, agent E).
-
-Each Python process writes its own log file under
-``~/.kohakuterrarium/logs/YYYY-MM-DD_HHMMSS_pid<N>_<pwdhash>.log``
-(see ``utils/logging.py``). When the web frontend wants a live log
-view, it connects to this stream and receives parsed lines as
-``{ts, level, module, text}`` JSON messages.
-
-Read-only. No new logging behavior — just a tail on the existing file.
+The attachment is read-only and independent of the Terrarium engine. Existing log
+lines are parsed into ``{ts, level, module, text}`` records before transmission.
 """
 
 import asyncio
@@ -23,16 +16,14 @@ from kohakuterrarium.utils.logging import DEFAULT_LOG_DIR, get_logger
 logger = get_logger(__name__)
 
 
-# Matches the format produced by ColoredFormatter in utils/logging.py.
-# Example line:
-#   [12:34:56] [kohakuterrarium.core.agent] [INFO] Starting agent
+# ColoredFormatter emits ``[time] [module] [level] message`` before file output.
 _LINE_RE = re.compile(
     r"^\[(?P<ts>[^\]]+)\]\s+\[(?P<module>[^\]]+)\]\s+\[(?P<level>[^\]]+)\]\s+(?P<text>.*)$"
 )
 
 
 def _find_current_process_log() -> Path | None:
-    """Locate the log file for THIS process by PID match in filename."""
+    """Locate the newest log file whose filename identifies this process."""
     if not DEFAULT_LOG_DIR.exists():
         return None
     pid = os.getpid()
@@ -40,16 +31,13 @@ def _find_current_process_log() -> Path | None:
     candidates = [p for p in DEFAULT_LOG_DIR.glob("*.log") if marker in p.name]
     if not candidates:
         return None
-    # If several matches (e.g. PID reuse across days), pick the newest.
+    # PID reuse can leave older matches, so modification time breaks the tie.
     candidates.sort(key=lambda p: p.stat().st_mtime, reverse=True)
     return candidates[0]
 
 
 def _parse_line(raw: str) -> dict[str, str]:
-    """Parse one log line into a structured dict.
-
-    Malformed lines fall back to ``{level: "unknown", text: <raw>}``.
-    """
+    """Parse one log line, preserving malformed input as unknown-level text."""
     m = _LINE_RE.match(raw.rstrip())
     if m is None:
         return {"ts": "", "level": "unknown", "module": "", "text": raw.rstrip()}
@@ -62,12 +50,12 @@ def _parse_line(raw: str) -> dict[str, str]:
 
 
 async def _tail_file(path: Path, websocket: WebSocket) -> None:
-    """Tail ``path`` and push each new line as a JSON frame.
+    """Send recent context and then follow new log lines until disconnection.
 
-    Exits when the websocket is closed. If the file doesn't exist yet
-    it polls for it for up to ten seconds.
+    A newly configured logger may not have created the file yet, so attachment waits
+    for up to ten seconds before reporting it missing.
     """
-    # Wait for the file if it's not there yet.
+    # Logger initialization may race the websocket attachment.
     for _ in range(20):
         if path.exists():
             break
@@ -80,13 +68,12 @@ async def _tail_file(path: Path, websocket: WebSocket) -> None:
 
     fh = open(path, "r", encoding="utf-8", errors="replace")
     try:
-        # Seed the stream with the most recent ~200 lines so the client
-        # has context without replaying an hour of history.
+        # Recent context is bounded so attachment cost does not scale with log age.
         fh.seek(0, os.SEEK_END)
         size = fh.tell()
         tail_chunk = 32_768 if size > 32_768 else size
         fh.seek(size - tail_chunk)
-        # Drop the first (likely partial) line if we didn't start at 0.
+        # A chunk starting mid-file usually begins inside a partial line.
         if size > tail_chunk:
             fh.readline()
         for line in fh.readlines()[-200:]:
@@ -95,7 +82,7 @@ async def _tail_file(path: Path, websocket: WebSocket) -> None:
             await websocket.send_json({"type": "line", **_parse_line(line)})
         fh.seek(0, os.SEEK_END)
 
-        # Then follow new lines as they land.
+        # EOF is temporary because the process continues appending to the file.
         while True:
             line = fh.readline()
             if line:
@@ -108,11 +95,7 @@ async def _tail_file(path: Path, websocket: WebSocket) -> None:
 
 
 async def run_log_attach(websocket: WebSocket) -> None:
-    """Live tail of the current API server process log file.
-
-    Drained verbatim from ``api/ws/logs.py:tail_logs:111``. The shell
-    in ``api/ws/logs.py`` only registers the route and delegates here.
-    """
+    """Attach the websocket to the current server process log."""
     await websocket.accept()
     path = _find_current_process_log()
     if path is None:

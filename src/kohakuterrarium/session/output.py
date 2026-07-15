@@ -1,10 +1,4 @@
-"""
-SessionOutput - OutputModule that persists events to SessionStore.
-
-Added as a secondary output on the agent's output router (same pattern
-as the WS StreamOutput). Captures text, tool activity, processing state,
-trigger events, and token usage without modifying the processing loop.
-"""
+"""Persist routed agent output and activity events to a session store."""
 
 import json
 from typing import Any
@@ -24,13 +18,10 @@ logger = get_logger(__name__)
 class SessionOutput(OutputModule):
     """Output module that records events to a SessionStore.
 
-    Streamed text is coalesced into ONE ``text_chunk`` event per segment:
-    chunks accumulate in a durable slot and flush at the next boundary (a
-    routed non-text event or ``on_processing_end``); a crash mid-stream is
-    recovered when this sink is next constructed (attach/resume), stamped
-    to the interrupted turn. Tool/subagent activity is recorded immediately
-    when enabled. Saves conversation snapshot and agent state after each
-    processing cycle.
+    Streamed text is coalesced into one durable segment and flushed at the
+    next non-text boundary. Interrupted segments retain their original turn.
+    Activity is recorded immediately when enabled, and each processing cycle
+    saves the conversation snapshot and agent state.
     """
 
     def __init__(
@@ -44,41 +35,27 @@ class SessionOutput(OutputModule):
     ):
         self._agent_name = agent_name
         self._store = store
-        self._agent = agent  # direct reference, not dict lookup
+        self._agent = agent
         self._capture_activity = capture_activity
-        # Wave F: attached agents write events under a custom key prefix
-        # (``<host>:attached:<role>:<attach_seq>``). Defaults to the
-        # agent's own name for the standard one-agent-per-store case.
+        # Attached agents require a host-scoped namespace to avoid collisions.
         self._event_key_prefix = event_key_prefix or agent_name
-        # UXI-02: streamed text is coalesced into ONE ``text_chunk`` event
-        # per segment. The in-flight segment lives in a durable state slot
-        # so a crash mid-stream is recovered on resume (never in-memory
-        # only). ``_chunk_seq`` numbers the flushed segments within one
-        # assistant response and resets at each ``processing_start``.
+        # Durable buffering preserves partial text across process interruption.
+        # Sequence numbers restart for each assistant response.
         self._open_text = OpenTextSegment(store, self._event_key_prefix)
         self._recovered_open_text: bool = False
         self._chunk_seq: int = 0
-        # Wave C: track ``subagent_start`` tasks so a later
-        # ``subagent_done`` can persist a minimal conversation record
-        # for child agents that ran outside SubAgentManager.
+        # Retain tasks for child runs that lack SubAgentManager persistence.
         self._subagent_tasks: dict[str, dict] = {}
-        # Cumulative API token usage across the session. Restored lazily
-        # (one-shot) from the persisted slot before the first accumulate
-        # — ``start`` is not called on secondary outputs in prod, so
-        # relying on it alone would zero the total on every resume.
+        # Secondary outputs may skip ``start``, so totals restore lazily before use.
         self._token_totals_restored: bool = False
         self._total_input_tokens: int = 0
         self._total_output_tokens: int = 0
         self._total_cached_tokens: int = 0
-        # A sink is constructed at every attach/resume point; flush any
-        # segment a crashed process left in the durable slot right away, so
-        # viewing a resumed session shows the partial text immediately.
+        # Recover immediately so read-only resumes expose interrupted text.
         self._recover_open_text()
 
     def _current_turn_branch(self) -> tuple[int | None, int | None]:
-        """Return ``(turn_index, branch_id)`` from the agent, or
-        ``(None, None)`` for sinks without an attached agent.
-        """
+        """Return the active positive turn and branch identifiers, if available."""
         agent = self._agent
         if agent is None:
             return None, None
@@ -89,11 +66,7 @@ class SessionOutput(OutputModule):
         return None, None
 
     def _current_parent_path(self) -> list[tuple[int, int]] | None:
-        """Snapshot of the agent's branch lineage at this moment.
-
-        Returned as a fresh list (caller may mutate). ``None`` when
-        the agent or its path has not been initialised.
-        """
+        """Return a mutable snapshot of the active branch lineage, if available."""
         agent = self._agent
         if agent is None:
             return None
@@ -105,21 +78,15 @@ class SessionOutput(OutputModule):
     def _record(self, event_type: str, data: dict) -> None:
         """Record a non-text event, closing the open text segment first.
 
-        UXI-02: a routed non-text event is a segment boundary — flush the
-        buffered streaming text as one ``text_chunk`` event before this
-        event so the assistant text keeps its place in the log.
+        A routed non-text event defines a segment boundary, so buffered text
+        must be persisted first to preserve event order.
         """
         self._recover_open_text()
         self._flush_text_segment()
         self._append_event(event_type, data)
 
     def _append_event(self, event_type: str, data: dict) -> None:
-        """Append one event under this sink's event-key prefix.
-
-        Wave F: ``event_key_prefix`` replaces the agent-name namespace
-        when the agent is attached to a host session. Defaults to the
-        agent's own name (the pre-Wave-F behavior).
-        """
+        """Append one event under this sink's configured namespace."""
         ti, bi = self._current_turn_branch()
         self._append_event_at(event_type, data, ti, bi, self._current_parent_path())
 
@@ -147,10 +114,8 @@ class SessionOutput(OutputModule):
     def _ensure_token_totals_restored(self) -> None:
         """Seed cumulative totals from the persisted slot, exactly once.
 
-        Wave F: keyed by ``event_key_prefix`` so each sink restores its
-        own counters. Runs before the first accumulate (and from
-        ``start``) so resume continues the running total instead of
-        overwriting it with this run's tokens.
+        Counters are namespace-scoped and restored before accumulation so a
+        resumed run extends rather than replaces prior totals.
         """
         if self._token_totals_restored:
             return
@@ -166,8 +131,7 @@ class SessionOutput(OutputModule):
 
     async def start(self) -> None:
         self._ensure_token_totals_restored()
-        # UXI-02: a process that died mid-stream left its partial segment
-        # in the durable slot — flush it as one finalized event.
+        # Finalize any segment left by an interrupted process.
         self._recover_open_text()
 
     async def stop(self) -> None:
@@ -182,10 +146,8 @@ class SessionOutput(OutputModule):
     def _ingest_text(self, chunk: str) -> None:
         """Buffer a streamed text chunk into the open segment.
 
-        UXI-02: chunks accumulate in a durable slot and flush as ONE
-        ``text_chunk`` event at the next segment boundary (a non-text
-        event or ``on_processing_end``) — not one event per transport
-        write. Wave F ``event_key_prefix`` still scopes the slot/event.
+        Chunks accumulate in durable state and flush as one ``text_chunk`` at
+        the next non-text event or processing boundary.
         """
         self._recover_open_text()
         if chunk:
@@ -194,14 +156,9 @@ class SessionOutput(OutputModule):
     def _recover_open_text(self) -> None:
         """Flush a segment orphaned by a crashed process, exactly once.
 
-        The durable slot is authoritative: a sink created on resume has
-        an empty in-memory buffer, so recovery reads whatever the prior
-        process left behind. Runs at construction (so a view-only resume
-        surfaces the text without waiting for a new turn) and is idempotent
-        — ``start`` / ``on_processing_start`` / the first write re-trigger
-        it, only the first run acts. The recovered chunk is stamped from
-        the last persisted event's turn (the interrupted turn), not the
-        resumed agent's advanced current turn.
+        Recovery is idempotent and runs during construction so view-only resumes
+        surface partial text. The recovered event uses the interrupted turn's
+        stamps rather than the resumed agent's current turn.
         """
         if self._recovered_open_text:
             return
@@ -240,19 +197,15 @@ class SessionOutput(OutputModule):
         pass
 
     async def on_processing_start(self) -> None:
-        # Wave C: chunk_seq is per-assistant-response.
+        # Sequence numbers are local to one assistant response.
         self._chunk_seq = 0
         self._record("processing_start", {})
 
     async def on_processing_end(self) -> None:
         self._record("processing_end", {})
 
-        # Wave C: snapshot is now a derived cache rebuilt from the
-        # event stream. Falls back to the in-memory controller messages
-        # if replay is empty (e.g. very first turn before any events
-        # landed). Wave F: all reads/writes are keyed by
-        # ``_event_key_prefix`` so attached agents' snapshots/state
-        # live under their attached namespace.
+        # Snapshots are derived caches; use live controller messages when event
+        # replay cannot yet reconstruct the conversation.
         try:
             events = self._store.get_events(self._event_key_prefix)
             if self._agent and hasattr(self._agent, "controller"):
@@ -278,33 +231,25 @@ class SessionOutput(OutputModule):
         except Exception as e:
             logger.warning("Conversation snapshot failed", error=str(e))
 
-        # Save agent state (scratchpad, turn count, token usage)
+        # Token totals have a separate cumulative writer and must not be overwritten.
         try:
             if self._agent:
                 state_kwargs = {}
 
-                # Scratchpad
                 if hasattr(self._agent, "session") and self._agent.session:
                     pad = self._agent.session.scratchpad
                     if hasattr(pad, "to_dict"):
                         state_kwargs["scratchpad"] = pad.to_dict()
 
-                # The cumulative ``<prefix>:token_usage`` slot is owned by
-                # ``_handle_token_usage``; never write it here (a per-call
-                # shape would clobber the running totals).
+                # A per-call token shape here would clobber cumulative totals.
 
                 if state_kwargs:
                     self._store.save_state(self._event_key_prefix, **state_kwargs)
         except Exception as e:
             logger.warning("State save failed", error=str(e), exc_info=True)
 
-        # Flush the events cache so the per-turn snapshot we just wrote
-        # is consistent with the on-disk event log. Without this, the
-        # ``events`` table can hold up to ``flush_interval`` seconds of
-        # writes in memory; a UI that switches to a different session
-        # tab and immediately re-opens the file (or any out-of-process
-        # reader) sees a truncated history. The flush is bounded —
-        # there is at most one batch per turn, so the cost is small.
+        # Keep the on-disk event log consistent with the snapshot for immediate
+        # out-of-process readers; at most one buffered batch is flushed per turn.
         try:
             flush = getattr(self._store, "flush", None)
             if callable(flush):
@@ -331,9 +276,8 @@ class SessionOutput(OutputModule):
     ) -> None:
         """Append an ``assistant_image`` event to the session log.
 
-        The image bytes are already on disk (written by the controller
-        via ``SessionStore.write_artifact``). This just records the
-        metadata so resume + event-log consumers can surface it.
+        Image bytes already reside in artifact storage; this event records the
+        metadata required by resume and history consumers.
         """
         payload: dict = {
             "url": url,
@@ -358,12 +302,8 @@ class SessionOutput(OutputModule):
     async def emit(self, event: OutputEvent) -> None:
         """Native event consumer.
 
-        Translates each ``OutputEvent`` to the same persistence calls
-        the legacy hooks would make. The mapping is byte-identical: a
-        renderer override here records the same session-log records
-        SessionOutput records when called via ``write_stream`` /
-        ``on_activity_with_metadata`` / ``on_processing_*`` /
-        ``on_assistant_image``.
+        Translate each native event to the same persistence path used by the
+        corresponding output hooks.
         """
         match event.type:
             case "text":
@@ -375,8 +315,7 @@ class SessionOutput(OutputModule):
             case "processing_end":
                 await self.on_processing_end()
             case "user_input":
-                # SessionOutput historically does not record user_input
-                # via OutputModule (the agent records it elsewhere).
+                # The agent writes the canonical user-input event directly.
                 pass
             case "assistant_image":
                 payload = event.payload
@@ -388,7 +327,7 @@ class SessionOutput(OutputModule):
                     revised_prompt=payload.get("revised_prompt"),
                 )
             case "resume_batch":
-                # SessionOutput is a writer, not a replayer.
+                # Replay batches are consumed by readers, not persisted again.
                 pass
             case _:
                 if not self._capture_activity:
@@ -397,7 +336,7 @@ class SessionOutput(OutputModule):
                 name, info = _parse_detail(detail)
                 self._record_activity(event.type, name, info, event.payload or {})
 
-    # Dispatch table: activity_type -> handler method name
+    # String targets keep activity dispatch declarative at class scope.
     _ACTIVITY_HANDLERS: dict[str, str] = {
         "trigger_fired": "_handle_trigger_fired",
         "tool_start": "_handle_tool_start",
@@ -415,18 +354,13 @@ class SessionOutput(OutputModule):
         "processing_complete": "_handle_processing_complete",
         "processing_error": "_handle_processing_error",
         "context_cleared": "_handle_context_cleared",
-        # Wave B additive event types — emit via notify_activity.
         "tool_wait": "_handle_tool_wait",
         "compact_decision": "_handle_compact_decision",
         "turn_token_usage": "_handle_turn_token_usage",
         "plugin_hook_timing": "_handle_plugin_hook_timing",
         "cache_stats": "_handle_cache_stats",
         "scratchpad_write": "_handle_scratchpad_write",
-        # Feat 3 — mid-turn user-input injection. The agent's drain
-        # path writes the canonical ``user_input`` session event
-        # directly with the correct (turn_index, branch_id); this
-        # handler exists ONLY to suppress the catch-all from logging
-        # a duplicate ``activity:user_input_injected`` row.
+        # Suppress duplicate activity rows for input already persisted by the agent.
         "user_input_injected": "_handle_user_input_injected",
     }
 
@@ -472,9 +406,7 @@ class SessionOutput(OutputModule):
             "output": metadata.get("result", metadata.get("output", detail)),
             "exit_code": 0,
         }
-        # Feat 1 — preserve the canvas-preview dict so resume + history
-        # reload both surface the file in the canvas panel without
-        # re-reading from disk.
+        # Persist preview metadata so history reload need not read the file again.
         canvas_preview = metadata.get("canvas_preview")
         if canvas_preview:
             event_data["canvas_preview"] = canvas_preview
@@ -499,8 +431,7 @@ class SessionOutput(OutputModule):
         task = metadata.get("task", detail)
         job_id = metadata.get("job_id", "")
         if job_id:
-            # Wave C: remember the task so ``subagent_done`` can persist
-            # a minimal child conversation for plugin-spawned agents.
+            # Completion may need the task to synthesize missing child history.
             self._subagent_tasks[job_id] = {
                 "name": name,
                 "task": task,
@@ -531,8 +462,7 @@ class SessionOutput(OutputModule):
                 **_token_metadata(metadata),
             },
         )
-        # Wave C: persist a minimal child conversation so plugin-spawned
-        # agents (no SubAgentManager) don't drop their history.
+        # Preserve history for child runs outside SubAgentManager.
         self._persist_subagent_conversation(
             name, job_id, output_text, success=True, metadata=metadata
         )
@@ -583,23 +513,15 @@ class SessionOutput(OutputModule):
         success: bool,
         metadata: dict,
     ) -> None:
-        """Wave C: save a minimal child conversation for SubAgentManager runs.
+        """Persist a minimal conversation when no full child history exists.
 
-        The SubAgentManager path already writes the full conversation
-        via ``SubAgent._build_result``; we only fill the gap when a
-        child agent ran outside the manager (pre-Wave-F plugin flow).
-        Wave F replacement: plugin-spawned ``Agent`` instances now
-        attach to the host :class:`Session` via
-        :func:`kohakuterrarium.session.attachment_service.attach_agent_to_session`
-        and write their own events under
-        ``<host>:attached:<role>:<attach_seq>:e<seq>``. This method
-        stays for the SubAgent (tool-like) path.
+        Managed sub-agents already store their complete conversation; this path
+        preserves tool-like child runs that bypass that persistence.
         """
         task_record = self._subagent_tasks.pop(job_id, None)
         task_text = task_record.get("task", "") if task_record is not None else ""
         try:
-            # Already persisted by SubAgentManager? Skip to avoid
-            # overwriting the full conversation with a synthetic stub.
+            # Never replace a full managed conversation with a synthetic stub.
             run = self._store.next_subagent_run(self._agent_name, name)
             convo = [
                 {"role": "user", "content": task_text},
@@ -644,9 +566,7 @@ class SessionOutput(OutputModule):
                 "cached_tokens": cached,
             },
         )
-        # Save cumulative totals to session state for fast resume.
-        # Wave F: keyed under the attached-namespace prefix so attached
-        # agents' counters don't collide with the host's.
+        # Namespace cumulative totals so attached agents cannot collide with hosts.
         try:
             self._store.save_state(
                 self._event_key_prefix,
@@ -738,8 +658,6 @@ class SessionOutput(OutputModule):
             },
         )
 
-    # ── Wave B additive event handlers ──
-
     def _handle_tool_wait(self, name: str, detail: str, metadata: dict) -> None:
         self._record(
             "tool_wait",
@@ -772,11 +690,7 @@ class SessionOutput(OutputModule):
                 "total_tokens": metadata.get("total_tokens", 0),
             },
         )
-        # Populate the ``turn_rollup`` KVault table so the Trace / Cost
-        # / Overview tabs in the viewer have data to render. The
-        # endpoints fall back to events-derivation when this row is
-        # missing, but writing the row at the source is cheaper for
-        # subsequent reads.
+        # Persist the derived rollup at the source to avoid repeated event scans.
         turn_index = metadata.get("turn_index", 0)
         if self._store and isinstance(turn_index, int) and turn_index > 0:
             try:
@@ -838,11 +752,7 @@ class SessionOutput(OutputModule):
     def _handle_user_input_injected(
         self, name: str, detail: str, metadata: dict
     ) -> None:
-        # No-op — the canonical ``user_input`` row was already written
-        # by the agent's drain path with the correct (turn_index,
-        # branch_id) and parent_branch_path. Registering a handler
-        # here just suppresses the catch-all that would otherwise log
-        # a duplicate ``activity:user_input_injected`` event.
+        # The agent already wrote the canonical event with branch attribution.
         return
 
 
@@ -892,11 +802,11 @@ def _parse_detail(detail: str) -> tuple[str, str]:
     """
     try:
         if detail.startswith("["):
-            # Find "] " to handle labels with nested brackets like [name[id]]
+            # The delimiter preserves nested brackets inside the label.
             end = detail.index("] ", 1)
             return detail[1:end], detail[end + 2 :]
     except ValueError:
-        # Fall back: no trailing content (bare [name])
+        # A bare bracketed label has no detail suffix.
         try:
             if detail.startswith("[") and detail.endswith("]"):
                 return detail[1:-1], ""

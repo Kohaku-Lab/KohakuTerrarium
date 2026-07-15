@@ -1,8 +1,6 @@
 """Rendering for :class:`DriveOverlay`.
 
-Split out of ``drive_overlay.py`` to keep both files under the 600-line soft
-cap. Pure read-only views over overlay state — each function takes the overlay
-and returns a Rich renderable / ANSI string.
+These helpers are read-only views over overlay state.
 """
 
 from io import StringIO

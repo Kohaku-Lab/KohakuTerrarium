@@ -1,9 +1,7 @@
 """Interactive prompts + formatters used by ``kt config``.
 
-Split out of :mod:`config` to keep the command-dispatch module under the
-per-file line-count guard. These are all small, side-effecty (print/input)
-helpers — they intentionally have no return-value side effects beyond the
-value they return, so callers compose them freely.
+These input and formatting helpers keep interactive configuration behavior
+consistent across provider, preset, key, and MCP commands.
 """
 
 import json
@@ -13,16 +11,15 @@ from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
 from kohakuterrarium.llm.profile_types import LLMProfile
 from kohakuterrarium.llm.profiles import _get_preset_definition
 
-# ── Primitive prompts ──────────────────────────────────────────
-
-
 def prompt(label: str, default: str = "") -> str:
+    """Prompt for a string, returning the default on blank input."""
     suffix = f" [{default}]" if default else ""
     value = input(f"{label}{suffix}: ").strip()
     return value if value else default
 
 
 def prompt_choice(label: str, choices: list[str], default: str) -> str:
+    """Prompt until the input matches an allowed choice."""
     while True:
         value = prompt(f"{label} ({'/'.join(choices)})", default)
         if value in choices:
@@ -31,6 +28,7 @@ def prompt_choice(label: str, choices: list[str], default: str) -> str:
 
 
 def prompt_int(label: str, default: int) -> int:
+    """Prompt until an integer is entered."""
     while True:
         value = prompt(label, str(default))
         try:
@@ -40,6 +38,7 @@ def prompt_int(label: str, default: int) -> int:
 
 
 def prompt_optional_float(label: str, default: float | None) -> float | None:
+    """Prompt for an optional floating-point value."""
     current = "" if default is None else str(default)
     while True:
         value = input(f"{label}{f' [{current}]' if current else ''}: ").strip()
@@ -56,6 +55,7 @@ def prompt_optional_float(label: str, default: float | None) -> float | None:
 def prompt_optional_json(
     label: str, default: dict[str, Any] | None
 ) -> dict[str, Any] | None:
+    """Prompt for an optional JSON object."""
     current = json.dumps(default, ensure_ascii=False) if default else ""
     while True:
         value = input(f"{label}{f' [{current}]' if current else ''}: ").strip()
@@ -75,6 +75,7 @@ def prompt_optional_json(
 
 
 def confirm(message: str, default: bool = False) -> bool:
+    """Prompt for a yes-or-no confirmation."""
     suffix = "[Y/n]" if default else "[y/N]"
     answer = input(f"{message} {suffix}: ").strip().lower()
     if not answer:
@@ -121,8 +122,6 @@ def prompt_native_tools(default: list[str]) -> list[str]:
             selected.append(entry_name)
     return selected
 
-
-# ── Variation-group builder ────────────────────────────────────
 
 VARIATION_PATCH_ROOTS: tuple[str, ...] = (
     "temperature",
@@ -194,7 +193,7 @@ def prompt_variation_groups(
     if mode == "json":
         return _prompt_variation_groups_raw(default)
     if mode != "edit":
-        # Anything else — treat as a legacy JSON blob on the same line.
+        # Preserve the shorthand JSON form accepted by earlier versions.
         try:
             parsed = json.loads(mode)
         except json.JSONDecodeError:
@@ -293,12 +292,10 @@ def _prompt_variation_groups_raw(
         return parsed
 
 
-# ── Formatters ─────────────────────────────────────────────────
-
-
 def format_variation_groups(
     variation_groups: dict[str, dict[str, dict[str, Any]]],
 ) -> list[str]:
+    """Format variation group names and options."""
     if not variation_groups:
         return []
     lines = ["Variation groups:"]
@@ -332,6 +329,7 @@ def format_variation_examples(
 
 
 def format_profile(profile: LLMProfile) -> str:
+    """Format an LLM profile and its variation metadata."""
     lines = [
         f"Name:         {profile.name}",
         f"Provider:     {profile.provider}",

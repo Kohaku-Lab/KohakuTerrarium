@@ -1,17 +1,4 @@
-"""Controller plugin extension helpers.
-
-Extracted from ``controller.py`` to keep that file under the 1000-line
-hard cap. Two concerns live here:
-
-* ``run_post_llm_call_chain`` — chain-with-return dispatch for the
-  ``post_llm_call`` plugin hook (cluster B.3 of the extension-point
-  spec). When a plugin rewrites the assistant text, the router emits an
-  ``assistant_message_edited`` activity event so the UI can render an
-  "[edited by plugin: X]" marker.
-* ``register_controller_command`` — pluggable ``##xxx##`` controller
-  command registration (cluster C.1). Built-in names are protected;
-  overriding requires ``override=True`` at the call site.
-"""
+"""Plugin response rewriting and controller command registration."""
 
 import importlib
 from typing import TYPE_CHECKING
@@ -28,19 +15,17 @@ if TYPE_CHECKING:
 
 logger = get_logger(__name__)
 
-# Built-in controller commands. Overriding requires ``override=True``.
+# Built-ins are protected because plugins and packages share one command namespace.
 BUILTIN_COMMANDS: frozenset[str] = frozenset({"read_job", "info", "jobs", "wait"})
 
 
 async def run_post_llm_call_chain(
     controller: "Controller", messages: list[dict]
 ) -> None:
-    """Run ``post_llm_call`` plugin chain; mutate the last assistant
-    message in place when any plugin rewrites it.
+    """Apply post-LLM rewrites to the canonical assistant message.
 
-    Emits the ``assistant_message_edited`` activity event on mutation.
-    Individual plugin exceptions are logged; the chain continues with
-    the unmutated text from that plugin.
+    Plugin failures are isolated so later rewrites still run. Successful changes
+    emit an edit marker through the output router.
     """
     plugins = controller.plugins
     if plugins is None:
@@ -85,12 +70,10 @@ def _emit_edit_marker(
     rewritten: str,
     plugin_names: list[str],
 ) -> None:
-    """Emit the ``assistant_message_edited`` activity event.
+    """Notify outputs that plugins rewrote the recorded assistant message.
 
-    Routed through ``output_router.notify_activity`` so every output
-    module (TUI, WebSocket, stdout) renders the marker in its own
-    style. The streamed text itself stays visible — the marker is an
-    audit annotation, not a replacement render.
+    The original stream remains visible; the activity is an annotation rather
+    than replacement output.
     """
     router = controller.output_router
     if router is None or not hasattr(router, "notify_activity"):
@@ -106,7 +89,7 @@ def _emit_edit_marker(
                 "final_length": len(rewritten),
             },
         )
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - marker failure must not fail turn
         logger.debug(
             "Failed to emit assistant_message_edited marker",
             error=str(e),
@@ -120,16 +103,10 @@ def register_controller_command(
     cmd: Command,
     override: bool = False,
 ) -> None:
-    """Register a ``##name##`` controller command on ``controller``.
+    """Register a controller command and update any live parser configuration.
 
-    Built-in names are protected (see ``BUILTIN_COMMANDS``). Overriding
-    any existing command requires ``override=True``. Duplicate
-    registration without ``override`` is a hard error per cluster 1.1.
-
-    Side effect: ensures the parser's ``known_commands`` set includes
-    ``command_name`` so the stream state machine emits a
-    :class:`CommandEvent` instead of a :class:`ToolCallEvent` when the
-    model writes ``##<command_name>##``.
+    Built-in and duplicate names require explicit override. Updating the parser
+    ensures ``##name##`` is classified as a command rather than a tool call.
     """
     if command_name in BUILTIN_COMMANDS and not override:
         raise ValueError(
@@ -154,21 +131,15 @@ def register_controller_command(
 
 
 def register_plugin_and_package_commands(agent: "Agent") -> None:
-    """Register pluggable controller commands on ``agent.controller``.
+    """Register command contributions from loaded plugins and packages.
 
-    Aggregates contributions from every applicable plugin and every
-    command declared under ``commands:`` in an installed package
-    manifest. Collisions without ``override: true`` are hard errors
-    (cluster 1.1).
-
-    Called from ``Agent._load_plugins`` AFTER ``on_load`` so plugins
-    can lazy-build commands using their loaded state.
+    Plugin loading must finish first because command construction may depend on
+    state initialized by ``on_load``. Unapproved collisions remain hard errors.
     """
     controller = getattr(agent, "controller", None)
     if controller is None or not hasattr(controller, "register_command"):
         return
 
-    # Plugin contributions.
     plugins = getattr(agent, "plugins", None)
     if plugins is not None:
         for plugin, mapping in plugins.collect_commands():
@@ -186,19 +157,16 @@ def register_plugin_and_package_commands(agent: "Agent") -> None:
                     )
                     raise
 
-    # Package-manifest contributions (``commands:`` field).
     _register_package_commands(controller)
 
 
 def _register_package_commands(controller: "Controller") -> None:
-    """Load every ``commands:`` entry declared by an installed package and
-    register it on ``controller``.
+    """Load package commands while rejecting cross-package name collisions.
 
-    Collisions across packages raise ``ValueError`` (cluster 1.1). An
-    entry that is missing ``module``/``class`` or that fails to import
-    is logged and skipped — the rest of the registry still loads.
+    Invalid or unimportable entries are skipped so unrelated package commands
+    remain available.
     """
-    seen: dict[str, str] = {}  # command name -> first owning package
+    seen: dict[str, str] = {}
     for pkg in list_packages():
         pkg_name = pkg.get("name", "?")
         for entry in pkg.get("commands", []) or []:

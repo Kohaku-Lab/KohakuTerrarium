@@ -1,44 +1,4 @@
-"""APP extension adapter for ``terrarium.files``.
-
-Worker-side handler for scope-bounded file operations.  Supports the
-one-shot operations (list / stat / read / write / delete), the chunked
-``write_stream`` family (``write_begin`` / ``write_chunk`` /
-``write_commit`` / ``write_abort``) for transfers beyond the one-shot
-size limit, plus the :meth:`push_bundle` deploy primitive used by
-``studio.deploy``.
-
-Why chunking — a single Lab APP message has a finite frame ceiling
-(``transport_ws.LAB_WS_MAX_SIZE``), and a one-shot ``write`` of a
-large ``.kohakutr`` (resume-onto-worker) or creature bundle would
-otherwise either overflow that frame and silently drop the
-connection, or hit the ``MAX_ONESHOT_BYTES`` guard.  The
-``write_stream`` family splits an arbitrarily-large payload into
-sequential bounded chunks reassembled into a staging file, then
-atomically committed — no single message ever approaches the frame
-ceiling.  :func:`stream_write_file` is the host-side driver.
-
-Out of scope (added later):
-
-- ``read_stream`` — chunked *reads* of large files.  ``read`` of a
-  file exceeding the one-shot cap still returns an ``invalid`` error.
-- ``watch`` — file-system change events as a Channel stream.
-
-Path safety is enforced at the boundary by
-:mod:`kohakuterrarium.laboratory.adapters.file_scopes`.  Every
-operation resolves ``(scope, path)`` to an absolute path through
-:func:`resolve_in_scope`, which rejects absolute or ``..``-bearing
-relatives.
-
-``push_bundle`` semantics — for each file in ``files``:
-
-- absent at target → write
-- present, hash matches → no-op (idempotent re-push)
-- present, hash differs → bundle aborts; conflicts returned
-
-Writes go through ``<root>/.staging-<uuid>/`` first, then are
-``os.replace``-d into place — partial failures don't leave half-written
-files at the canonical paths.
-"""
+"""Serve scope-bounded file operations and chunked writes on workers."""
 
 import asyncio
 import base64
@@ -65,22 +25,14 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-MAX_ONESHOT_BYTES = 1 * 1024 * 1024  # 1 MiB cap for read/write without streaming
+MAX_ONESHOT_BYTES = 1 * 1024 * 1024  # Larger writes must use staged chunks.
 CHUNK_HASH_ALGO = "sha256"
-# Per-chunk payload size for the ``write_stream`` family.  Kept well
-# under both ``MAX_ONESHOT_BYTES`` and the transport frame ceiling so a
-# base64-encoded chunk message can never approach the limit, no matter
-# how large the overall transfer.
+# Leave headroom for base64 and APP envelope overhead below transport limits.
 STREAM_CHUNK_BYTES = 256 * 1024
 
 
 class _StreamingWrite:
-    """Server-side state for one in-flight chunked write.
-
-    Chunks are appended to a per-transfer staging file in ``seq`` order;
-    ``write_commit`` verifies the running hash + total size and then
-    atomically ``os.replace``-s the staging file into place.
-    """
+    """Track ordered chunks and integrity metadata for a staged write."""
 
     __slots__ = (
         "scope",
@@ -125,15 +77,13 @@ class TerrariumFilesAdapter:
     def __init__(self, engine: Terrarium, lab_node: LabRegistrar) -> None:
         self._engine = engine
         self._node = lab_node
-        # In-flight chunked writes, keyed by transfer_id.
         self._transfers: dict[str, _StreamingWrite] = {}
         lab_node.register_app_extension(self.NAMESPACE, self._dispatch)
         logger.info("lab adapter registered", namespace=self.NAMESPACE)
 
     def detach(self) -> None:
         self._node.unregister_app_extension(self.NAMESPACE)
-        # Drop any half-finished transfers — a never-committed staging
-        # file would otherwise linger inside the scope root forever.
+        # Remove staging files that were never committed.
         for transfer in list(self._transfers.values()):
             try:
                 transfer.staging.unlink(missing_ok=True)
@@ -160,10 +110,6 @@ class TerrariumFilesAdapter:
             return {"error": {"kind": "files", "message": str(e)}}
 
     async def _handle(self, msg: AppMessage) -> dict[str, Any]:
-        # File ops use ``aiofiles`` for reads/writes and ``to_thread``
-        # for the bits aiofiles doesn't cover (``os.replace``,
-        # ``shutil.rmtree``, directory listing, ``stat``).  Either way,
-        # nothing here blocks the event loop while a bundle deploys.
         match msg.type:
             case "list":
                 return await self._op_list(msg.body)
@@ -195,18 +141,12 @@ class TerrariumFilesAdapter:
                     }
                 }
 
-    # ------------------------------------------------------------------
-    # Operations
-    # ------------------------------------------------------------------
-
     async def _op_list(self, body: dict[str, Any]) -> dict[str, Any]:
         scope = body["scope"]
         rel = body.get("path", "")
         recursive = bool(body.get("recursive", False))
         target = resolve_in_scope(scope, rel, self._engine)
-        # Directory traversal + per-entry stat() are sync syscalls that
-        # have no aiofiles equivalent; offload to a worker thread so a
-        # deep ``rglob`` doesn't stall the loop.
+        # Directory traversal and per-entry metadata calls are synchronous.
         return await asyncio.to_thread(_list_sync, target, scope, rel, recursive)
 
     async def _op_stat(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -241,8 +181,7 @@ class TerrariumFilesAdapter:
             )
         async with aiofiles.open(target, "rb") as f:
             data = await f.read()
-        # Wire format encodes bytes as base64 strings; the kohakuvault
-        # DataPacker used by the APP layer rejects raw bytes.
+        # APP msgpack payloads cannot carry raw bytes, so encode them as base64.
         return {"bytes_b64": _b64encode(data), "sha256": _hash_bytes(data)}
 
     async def _op_write(self, body: dict[str, Any]) -> dict[str, Any]:
@@ -267,10 +206,6 @@ class TerrariumFilesAdapter:
             await f.write(data)
         return {"written": len(data), "sha256": _hash_bytes(data)}
 
-    # ------------------------------------------------------------------
-    # Chunked write_stream — begin / chunk / commit / abort
-    # ------------------------------------------------------------------
-
     async def _op_write_begin(self, body: dict[str, Any]) -> dict[str, Any]:
         scope = body["scope"]
         rel = body.get("path", "")
@@ -281,7 +216,6 @@ class TerrariumFilesAdapter:
         await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
         transfer_id = uuid.uuid4().hex
         staging = target.parent / f".staging-stream-{transfer_id}"
-        # Create the staging file empty — chunks append to it in order.
         async with aiofiles.open(staging, "wb"):
             pass
         self._transfers[transfer_id] = _StreamingWrite(
@@ -304,9 +238,7 @@ class TerrariumFilesAdapter:
             raise KeyError(f"unknown transfer_id: {transfer_id!r}")
         seq = body.get("seq")
         if seq != transfer.next_seq:
-            # Out-of-order / duplicate chunk — discard the whole transfer
-            # so the caller restarts cleanly instead of silently
-            # corrupting the staging file.
+            # Discard on sequence errors rather than retain ambiguous staged bytes.
             await self._discard_transfer(transfer_id)
             raise ScopeError(
                 f"chunk out of order: expected seq {transfer.next_seq}, got {seq!r}"
@@ -356,10 +288,7 @@ class TerrariumFilesAdapter:
         try:
             await asyncio.to_thread(os.replace, transfer.staging, transfer.target)
         except PermissionError as exc:
-            # Windows: destination held open (typical: a SessionStore
-            # adopted by a prior resume). The next reader picks up our
-            # bytes once its WAL checkpoints; refuse to rewrite-over a
-            # locking handle but treat the call as idempotently OK.
+            # Windows may lock a resumed session target; retain idempotent success.
             if not transfer.target.exists():
                 raise
             logger.warning(
@@ -376,7 +305,7 @@ class TerrariumFilesAdapter:
         return {"written": transfer.received, "sha256": actual_sha}
 
     async def _commit_is_idempotent(self, transfer, actual_sha: str) -> bool:
-        """The destination already holds exactly what we'd write."""
+        """Return whether the destination already contains the staged content."""
         if not transfer.target.exists():
             return False
         try:
@@ -399,7 +328,7 @@ class TerrariumFilesAdapter:
         return {}
 
     async def _discard_transfer(self, transfer_id: str) -> None:
-        """Drop transfer state and remove its staging file.  Idempotent."""
+        """Idempotently remove transfer state and its staging file."""
         transfer = self._transfers.pop(transfer_id, None)
         if transfer is None:
             return
@@ -411,12 +340,7 @@ class TerrariumFilesAdapter:
     async def _op_delete(self, body: dict[str, Any]) -> dict[str, Any]:
         scope = body["scope"]
         rel = body.get("path", "")
-        # Refuse to delete a scope root.  Resolving an empty relative
-        # path returns the scope root itself (see ``resolve_in_scope``),
-        # and the recursive delete below would then nuke entire
-        # scope-rooted directories like ``~/.kohakuterrarium`` for
-        # ``config://``.  Require an explicit non-empty path so a
-        # frontend bug or a misconfigured tool can't trigger it.
+        # Empty paths resolve to the scope root, which must never be deleted.
         if not rel:
             raise ScopeError(
                 f"refusing to delete scope root {scope!r}; "
@@ -425,7 +349,6 @@ class TerrariumFilesAdapter:
         target = resolve_in_scope(scope, rel, self._engine)
         if not target.exists():
             raise FileNotFoundError(f"no such path: {scope}/{rel}")
-        # ``rmtree``/``unlink`` are sync; offload.
         if target.is_dir():
             await asyncio.to_thread(shutil.rmtree, target)
         else:
@@ -433,15 +356,7 @@ class TerrariumFilesAdapter:
         return {}
 
     async def _op_getcwd(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Return the worker's default working directory.
-
-        Used by the host to populate the "Working directory" field in
-        the New Creature / New Terrarium modal when the user picks a
-        worker as the spawn target.  ``cwd`` is the worker process's
-        ``os.getcwd()`` and ``home`` is the worker's ``Path.home()`` —
-        the host route prefers ``home`` because the worker process
-        directory is rarely a useful workspace default.
-        """
+        """Return worker process, home, and platform defaults for spawn forms."""
         return {
             "cwd": str(await asyncio.to_thread(os.getcwd)),
             "home": str(Path.home()),
@@ -456,9 +371,9 @@ class TerrariumFilesAdapter:
         root = resolve_scope_root(scope, self._engine)
         await asyncio.to_thread(root.mkdir, parents=True, exist_ok=True)
 
-        # First pass: classify each file as no-op, conflict, or pending.
+        # Detect all conflicts before writing any bundle file.
         conflicts: list[str] = []
-        pending: list[tuple[str, bytes, str]] = []  # (rel, blob, expected_hash)
+        pending: list[tuple[str, bytes, str]] = []
         for rel, payload in files.items():
             target = resolve_in_scope(scope, rel, self._engine)
             expected_hash, blob = _unpack_bundle_entry(payload)
@@ -471,7 +386,7 @@ class TerrariumFilesAdapter:
             if target.exists():
                 on_disk = await _hash_file_async(target)
                 if on_disk == expected_hash:
-                    continue  # idempotent skip
+                    continue
                 conflicts.append(rel)
                 continue
             pending.append((rel, blob, expected_hash))
@@ -479,14 +394,7 @@ class TerrariumFilesAdapter:
         if conflicts:
             return {"deployed": [], "conflicts": conflicts}
 
-        # Second pass: stage every file (verify hashes), then commit
-        # via ``os.replace``.  If anything goes wrong during the commit
-        # loop, partial replaces stay on disk — there's no general way
-        # to roll back to "pre-deploy" state once a file has been
-        # replaced.  Instead we report the partial outcome in the
-        # response so the caller can decide how to recover (typically:
-        # fix the underlying problem and retry; the second push will
-        # idempotently skip the already-deployed files).
+        # Replacements cannot be rolled back generally; report partial commits for retry.
         staging = root / f".staging-{uuid.uuid4().hex}"
         await asyncio.to_thread(staging.mkdir)
         deployed: list[str] = []
@@ -510,9 +418,7 @@ class TerrariumFilesAdapter:
                 try:
                     await asyncio.to_thread(os.replace, stage_path, final_path)
                 except OSError as e:
-                    # First commit error — surface a structured partial
-                    # result instead of an empty deployed list with the
-                    # already-replaced files silently in place.
+                    # Preserve the committed prefix in the error response.
                     commit_error = f"failed to commit {rel!r}: {e}"
                     logger.warning(
                         "push_bundle partial deploy",
@@ -538,17 +444,12 @@ class TerrariumFilesAdapter:
         return {"deployed": deployed, "conflicts": []}
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _hash_bytes(data: bytes | bytearray) -> str:
     return hashlib.sha256(bytes(data)).hexdigest()
 
 
 def _hash_file(path: Path) -> str:
-    """Synchronous chunked sha256.  Kept for tests and any sync caller."""
+    """Hash a file synchronously in bounded chunks."""
     h = hashlib.sha256()
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""):
@@ -557,7 +458,7 @@ def _hash_file(path: Path) -> str:
 
 
 async def _hash_file_async(path: Path) -> str:
-    """Async chunked sha256 via aiofiles — never blocks the event loop."""
+    """Hash a file asynchronously in bounded chunks."""
     h = hashlib.sha256()
     async with aiofiles.open(path, "rb") as f:
         while True:
@@ -569,7 +470,7 @@ async def _hash_file_async(path: Path) -> str:
 
 
 def _list_sync(target: Path, scope: str, rel: str, recursive: bool) -> dict[str, Any]:
-    """Worker-thread body for ``_op_list`` — pure sync, no event loop."""
+    """List directory entries synchronously for worker-thread execution."""
     if not target.exists():
         raise FileNotFoundError(f"no such path: {scope}/{rel}")
     if not target.is_dir():
@@ -595,7 +496,7 @@ def _list_sync(target: Path, scope: str, rel: str, recursive: bool) -> dict[str,
 
 
 def _unpack_bundle_entry(payload: Any) -> tuple[str, bytes]:
-    """Bundle entries are ``[sha256_hex, base64_str]`` on the wire."""
+    """Decode a bundle entry containing a digest and base64 payload."""
     if not isinstance(payload, (list, tuple)) or len(payload) != 2:
         raise ScopeError("bundle entry must be [sha256_hex, base64_str]")
     expected_hash, blob_b64 = payload
@@ -615,7 +516,7 @@ def _b64encode(data: bytes) -> str:
 
 
 def _decode_wire_bytes(body: dict[str, Any], key: str) -> bytes:
-    """Decode a base64 string from the body, or accept raw bytes for tests."""
+    """Decode wire-safe base64, accepting raw bytes for direct callers."""
     raw = body.get(key)
     if raw is None:
         raise ScopeError(f"missing required field: {key!r}")

@@ -1,9 +1,7 @@
-"""Identity UI preferences — theme/zoom/layout state.
+"""Read and update shared or per-user UI preferences.
 
-When L4 (multi-user) is on, prefs are routed per-user via the
-:func:`get_optional_user` dependency.  Anonymous callers (L4 off
-or optional) read / write the shared ``<config_dir>/ui_prefs.json``
-— preserves single-user behaviour.
+Authenticated multi-user requests use the user's preference store. Anonymous
+and single-user requests retain the shared configuration-backed behavior.
 """
 
 from typing import Any
@@ -18,11 +16,14 @@ router = APIRouter()
 
 
 class UIPrefsUpdateRequest(BaseModel):
+    """Carry UI preference keys and replacement values."""
+
     values: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/ui-prefs")
 async def get_ui_prefs(user: User | None = Depends(get_optional_user)):
+    """Return preferences from the current user or shared store."""
     return {"values": load_prefs(user_id=user.id if user else None)}
 
 
@@ -31,4 +32,5 @@ async def update_ui_prefs(
     req: UIPrefsUpdateRequest,
     user: User | None = Depends(get_optional_user),
 ):
+    """Persist preferences to the current user or shared store."""
     return {"values": save_prefs(req.values or {}, user_id=user.id if user else None)}

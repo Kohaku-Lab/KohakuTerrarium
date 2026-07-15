@@ -88,7 +88,7 @@ HOST_NODE = "_host"
 
 
 class CrossNodeNotSupportedError(RuntimeError):
-    """Raised for ops that would require cross-node wiring (deferred)."""
+    """Raised for operations that cannot be routed across nodes."""
 
 
 class MultiNodeTerrariumService(
@@ -391,8 +391,8 @@ class MultiNodeTerrariumService(
         return None
 
     # ------------------------------------------------------------------
-    # Channels — must stay within one graph's home node in Unit A.
-    # Cross-node wiring (channel spanning two nodes) is deferred.
+    # Channel mutations route through the graph's home worker.
+    # Cross-node creature wiring is coordinated separately through replication.
     # ------------------------------------------------------------------
 
     async def add_channel(
@@ -729,7 +729,7 @@ class MultiNodeTerrariumService(
         args: dict[str, Any] | str | None = None,
         **kwargs: Any,
     ) -> dict[str, Any]:
-        # ``principal`` / ``is_operator`` (R1-20) ride to the home worker.
+        # The trusted ``principal`` and ``is_operator`` context rides to the home worker.
         return await self._route_per_creature(
             creature_id,
             lambda svc: svc.execute_command(creature_id, command, args, **kwargs),
@@ -841,8 +841,8 @@ class MultiNodeTerrariumService(
         )
 
     async def session_attach_policies(self, session_id: str) -> list[str]:
-        # CF-10: cluster sessions span multiple workers — each member's
-        # worker may advertise its own subset of policies (e.g. one has
+        # Cluster sessions span multiple workers, and each member's worker may
+        # advertise its own subset of policies (e.g. one has
         # an input module → IO, another has channels → OBSERVER). Union
         # across cluster members so the UI shows the full set rather
         # than only the primary's slice. ``cluster_members_for`` returns
@@ -917,7 +917,7 @@ class MultiNodeTerrariumService(
         Used by ``GET /api/configs/server-info?on_node=<node_id>`` to
         seed the New Creature / New Terrarium modal's "Working
         directory" field with a worker-side path rather than the host's
-        ``os.getcwd()`` (B5).  Routes through the ``terrarium.files``
+        ``os.getcwd()``. Routes through the ``terrarium.files``
         APP namespace ``getcwd`` verb on the named worker.
 
         Returns a dict with ``cwd``, ``home``, and ``platform`` keys.

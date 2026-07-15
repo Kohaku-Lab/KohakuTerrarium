@@ -1,6 +1,4 @@
-"""
-Read tool - read file contents (text and images).
-"""
+"""Read text, images, and PDFs into tool-result content."""
 
 import base64
 import io
@@ -28,11 +26,7 @@ logger = get_logger(__name__)
 
 @register_builtin("read")
 class ReadTool(BaseTool):
-    """
-    Tool for reading file contents.
-
-    Supports reading entire files or specific line ranges.
-    """
+    """Read files with line ranges and multimodal handling where supported."""
 
     needs_context = True
 
@@ -56,28 +50,23 @@ class ReadTool(BaseTool):
         if not path:
             return ToolResult(error="No path provided")
 
-        # Resolve path
         file_path = resolve_tool_path(path, context)
 
-        # Image files: return as multimodal content
         if _is_image_file(file_path):
             return await self._read_image(file_path, path)
 
-        # PDF files: return text + rendered page images
-        # offset/limit are reused as page offset/limit for PDFs
+        # PDFs interpret the text-range arguments as page offset and page count.
         if file_path.suffix.lower() == ".pdf":
             page_offset = int(args.get("offset", 0))
             page_limit = int(args.get("limit", 0))
             return await self._read_pdf(file_path, path, page_offset, page_limit)
 
-        # Binary file guard (non-image binaries)
         if is_binary_file(file_path):
             return ToolResult(
                 error=f"Binary file detected ({file_path.suffix}). "
                 "Use bash with xxd, file, or other tools to inspect binary files."
             )
 
-        # Path boundary guard
         if context and context.path_guard:
             msg = context.path_guard.check(str(file_path))
             if msg:
@@ -89,11 +78,9 @@ class ReadTool(BaseTool):
         if not file_path.is_file():
             return ToolResult(error=f"Not a file: {path}")
 
-        # Get optional parameters
         offset = int(args.get("offset", 0))
         limit = int(args.get("limit", 0))
 
-        # Configurable output truncation
         max_output_bytes = int(self.config.extra.get("max_output_bytes", 200000))
 
         try:
@@ -146,7 +133,7 @@ class ReadTool(BaseTool):
                 lines_read=len(lines),
             )
 
-            # Record read to file_read_state
+            # Write/edit guards require the timestamp and whether the read was partial.
             if context and context.file_read_state:
                 mtime_ns = os.stat(file_path).st_mtime_ns
                 partial = bool(args.get("offset") or args.get("limit"))
@@ -169,10 +156,7 @@ class ReadTool(BaseTool):
         page_offset: int,
         page_limit: int,
     ) -> ToolResult:
-        """Read a PDF file: extract text + render page images.
-
-        Uses offset/limit as page numbers (0-based offset, limit = page count).
-        """
+        """Extract PDF text and render the selected pages as images."""
         try:
             import fitz  # pymupdf
         except ImportError:
@@ -199,7 +183,7 @@ class ReadTool(BaseTool):
         if page_limit > 0:
             end = min(start + page_limit, total_pages)
 
-        # Soft warning for large reads without explicit offset/limit
+        # Refuse unbounded large PDFs before they inflate multimodal context.
         warn_threshold = int(self.config.extra.get("pdf_page_warn", 20))
         if page_offset == 0 and page_limit == 0 and total_pages > warn_threshold:
             doc.close()
@@ -213,7 +197,6 @@ class ReadTool(BaseTool):
                 f"if you really want all pages."
             )
 
-        # Extract text + render pages
         parts: list[TextPart | ImagePart] = []
         text_sections: list[str] = []
 
@@ -224,7 +207,7 @@ class ReadTool(BaseTool):
         for page_num in range(start, end):
             page = doc[page_num]
 
-            # Extract text with block sorting
+            # Geometric sorting approximates natural reading order across blocks.
             blocks = page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE)[
                 "blocks"
             ]
@@ -243,7 +226,6 @@ class ReadTool(BaseTool):
                             page_lines.append("".join(text_parts))
             text_sections.extend(page_lines)
 
-            # Render page image
             try:
                 pix = page.get_pixmap(matrix=mat)
                 img_data = pix.tobytes("png")
@@ -265,7 +247,6 @@ class ReadTool(BaseTool):
 
         doc.close()
 
-        # Combine text + images
         text_content = "\n".join(text_sections)
         if not text_content.strip():
             text_content = "(No extractable text — check the page images below.)"
@@ -288,17 +269,11 @@ class ReadTool(BaseTool):
         return ToolResult(output=parts, exit_code=0)
 
     async def _read_image(self, file_path: Path, original_path: str) -> ToolResult:
-        """Read an image file and return as multimodal content.
-
-        Only the four formats LLM providers reliably accept are
-        supported: PNG, JPEG, WEBP, GIF. The bytes are decoded with
-        Pillow before being base64-encoded so corrupt / mislabeled
-        files fail cleanly here instead of at the provider boundary.
-        """
+        """Validate an image and return provider-compatible multimodal content."""
         if not file_path.exists():
             return ToolResult(error=f"File not found: {original_path}")
 
-        max_image_bytes = 20 * 1024 * 1024  # 20 MB limit
+        max_image_bytes = 20 * 1024 * 1024  # Keep encoded payloads within provider limits.
         file_size = file_path.stat().st_size
 
         if file_size > max_image_bytes:
@@ -322,11 +297,8 @@ class ReadTool(BaseTool):
         except Exception as e:
             return ToolResult(error=f"Failed to read image: {e}")
 
-        # Verify the file actually decodes as a valid image of the
-        # expected format. Pillow's verify() does a header-level
-        # integrity check; we follow with a load on a fresh handle to
-        # confirm the pixel data is intact too (verify() invalidates
-        # the image afterwards, hence the second open).
+        # Header verification alone misses damaged pixel data; a fresh handle is
+        # required because Pillow invalidates the image after ``verify()``.
         verified_format = _verify_image(data)
         if verified_format is None:
             return ToolResult(
@@ -407,13 +379,7 @@ _PIL_FORMAT_TO_MIME = {
 
 
 def _verify_image(data: bytes) -> str | None:
-    """Decode-check ``data`` with Pillow; return the format name or ``None``.
-
-    Returns the Pillow format string (e.g. ``"PNG"``, ``"JPEG"``) when
-    the bytes parse cleanly, ``None`` when Pillow refuses them. Catches
-    every exception class Pillow may raise — corrupt headers, truncated
-    streams, decoder-not-available, etc.
-    """
+    """Return Pillow's format name when the complete image decodes cleanly."""
     try:
         with Image.open(io.BytesIO(data)) as img:
             img.verify()
@@ -428,12 +394,6 @@ def _verify_image(data: bytes) -> str | None:
 
 
 def _is_image_file(path: Path) -> bool:
-    """Check if a file looks like an image (extension-based).
-
-    Includes both the supported set and a small list of legacy formats
-    we explicitly reject in ``_read_image`` — that routes them through
-    the image branch and yields a "supported set is PNG/JPEG/WEBP/GIF"
-    message instead of a generic "binary file detected".
-    """
+    """Route recognized image extensions through image-specific diagnostics."""
     suffix = path.suffix.lower()
     return suffix in _IMAGE_MIME or suffix in _UNSUPPORTED_IMAGE_EXTENSIONS

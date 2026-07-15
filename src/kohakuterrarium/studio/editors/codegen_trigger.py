@@ -1,8 +1,7 @@
 """Codegen for ``BaseTrigger`` subclasses.
 
-Round-trip: find the subclass, replace the body of
-``wait_for_trigger`` (the one required method) + universal
-metadata class attributes.
+Round-tripping selects the trigger subclass, replaces the required
+``wait_for_trigger`` body, and updates the managed class metadata.
 """
 
 import libcst as cst
@@ -49,10 +48,8 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     if body:
         klass = replace_method_body(klass, "wait_for_trigger", body)
 
-    # Persist the metadata class attributes from the form — the module
-    # docstring promises this round-trip, but ``update_existing``
-    # previously only touched the method body and silently dropped the
-    # ``universal`` / ``setup_tool_name`` / ``setup_description`` toggles.
+    # Metadata and method body must be updated together so the form remains a
+    # complete representation of the managed trigger surface.
     if "universal" in form:
         klass = replace_class_attr_bool(klass, "universal", bool(form["universal"]))
     if "setup_tool_name" in form:
@@ -98,9 +95,6 @@ def parse_back(source: str) -> dict:
         "execute_body": wait_body or "",
         "warnings": warnings,
     }
-
-
-# ---- helpers --------------------------------------------------------
 
 
 def _pick_trigger_class(tree: cst.Module) -> cst.ClassDef | None:

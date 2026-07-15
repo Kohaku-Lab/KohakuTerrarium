@@ -1,22 +1,9 @@
 """Deferred LLM provider for "no model configured yet" state.
 
-Model selection is a runtime concern — the user picks a model in the
-Studio UI, swaps it via ``switch_model``, or uses ``/model`` from the
-chat composer.  Creature **creation** must therefore succeed even when
-no usable LLM is configured: a creature with a deferred provider runs,
-holds its conversation, accepts inputs, lists in the runtime graph; the
-"select a model" error surfaces only when a chat turn actually tries to
-call the LLM.
+Keep creatures constructible before a usable model is selected.
 
-Replacing the deferred provider with a working one is what
-``switch_model`` does internally — the engine rebuilds ``self.llm`` via
-:func:`bootstrap.llm.create_llm_from_profile_name`, the deferred
-instance is discarded, and the next chat turn streams normally.
-
-The provider returns the same Protocol shape as a real provider so
-nothing else in the agent runtime needs to know about it.  The error
-message threads the original construction failure so the operator can
-fix the underlying issue (missing key, unknown profile, etc.).
+The placeholder matches the provider protocol and defers the original setup
+error until a chat request, allowing runtime model switching to recover.
 """
 
 from typing import Any, AsyncIterator
@@ -26,29 +13,15 @@ from kohakuterrarium.llm.message import Message
 
 
 class DeferredLLMProvider:
-    """A placeholder provider that raises only on chat()/chat_complete().
+    """Placeholder provider that postpones configuration errors until chat."""
 
-    Construction NEVER fails.  Used when the agent build's real
-    provider construction raised (e.g. missing API key) AND the agent
-    must still exist so the user can pick a model at runtime.
-
-    ``reason`` is surfaced verbatim in the runtime-error message that
-    a chat turn produces — usually the ``ValueError`` text from
-    ``_create_from_profile``.
-    """
-
-    # Class-level defaults so the auto-tool-injection path in
-    # ``bootstrap.agent_init`` sees a sane (empty) native-tool set
-    # instead of an AttributeError.
+    # Empty compatibility metadata keeps native-tool discovery safe.
     provider_name: str = ""
     provider_native_tools: frozenset[str] = frozenset()
 
     def __init__(self, reason: str = "no LLM model configured") -> None:
         self.reason = reason
         self._profile_max_context = 8192
-        # Mirrors the public surface of the real providers — callers
-        # read this property; on a deferred provider there are no
-        # recorded tool calls.
         self._last_tool_calls: list[NativeToolCall] = []
 
     @property
@@ -72,9 +45,7 @@ class DeferredLLMProvider:
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         self._raise()
-        # Unreachable — ``_raise`` always throws.  ``yield`` keeps the
-        # function as an async generator so ``async for`` doesn't trip
-        # on a coroutine-returning callable.
+        # Keep the async-generator contract even though the error always raises.
         yield ""  # pragma: no cover
 
     async def chat_complete(
@@ -83,7 +54,7 @@ class DeferredLLMProvider:
         **kwargs: Any,
     ) -> ChatResponse:
         self._raise()
-        return ChatResponse(  # pragma: no cover - unreachable
+        return ChatResponse(  # pragma: no cover - _raise always exits
             content="",
             finish_reason="error",
             usage={"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},

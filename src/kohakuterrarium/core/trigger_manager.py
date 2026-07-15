@@ -1,10 +1,4 @@
-"""
-TriggerManager - centralized trigger lifecycle management.
-
-Owns all trigger state (instances, tasks) and provides the event loop
-for each trigger. Tools can add/remove triggers at runtime via the
-agent's trigger_manager.
-"""
+"""Lifecycle, scheduling, and event delivery for an agent's triggers."""
 
 import asyncio
 import time
@@ -18,15 +12,13 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Wave B: drift threshold (seconds). Trigger firings later than this
-# get a ``schedule_drift`` event so session readers can see scheduler
-# backlog. Kept small so real-time triggers flag promptly.
+# Firings later than this threshold record scheduler backlog in the session.
 SCHEDULE_DRIFT_THRESHOLD_S = 1.0
 
 
 @dataclass
 class TriggerInfo:
-    """Info about an active trigger."""
+    """Describe an active trigger and its lifecycle state."""
 
     trigger_id: str
     trigger_type: str
@@ -35,13 +27,7 @@ class TriggerInfo:
 
 
 class TriggerManager:
-    """
-    Manages trigger lifecycle for an agent.
-
-    Provides add/remove/list API and runs the event loop for each
-    trigger. When a trigger fires, it calls _process_event which
-    is bound to the owning agent's _process_event method.
-    """
+    """Own trigger instances, run loops, pause state, and event admission."""
 
     def __init__(
         self,
@@ -51,18 +37,15 @@ class TriggerManager:
         self._tasks: dict[str, asyncio.Task] = {}
         self._created_at: dict[str, datetime] = {}
         self._process_event = process_event
-        # Optional callback: (trigger_id, event) -> None
+        # Observers receive each firing without participating in delivery.
         self.on_trigger_fired: Callable[[str, Any], None] | None = None
-        # Optional hook: admit extra ready trigger events into the agent's
-        # mid-turn buffer so a burst drains in ONE turn (UXI-08b). Set by
-        # the owning agent to ``Agent.admit_ready_events``; None when the
-        # host doesn't support mid-turn buffering (bare test fakes).
+        # Backlog admission folds an already-ready burst into one turn; hosts
+        # without mid-turn buffering leave this unset.
         self.admit_ready: Callable[[list[Any]], int] | None = None
-        # Warm-pause gate (UXI-11): cleared to hold every trigger run-loop
-        # at the top of its next iteration; set to release. Starts open.
+        # Pausing blocks loops before they consume another source event.
         self._resume_gate = asyncio.Event()
         self._resume_gate.set()
-        # Session store ref for saving resumable triggers (set by agent)
+        # The agent attaches persistence after session initialization.
         self._session_store: Any = None
         self._agent_name: str = ""
 
@@ -72,17 +55,7 @@ class TriggerManager:
         trigger_id: str | None = None,
         autostart: bool = True,
     ) -> str:
-        """Add a trigger. Starts it immediately if autostart=True.
-
-        Args:
-            trigger: The trigger instance
-            trigger_id: Optional ID (auto-generated if not provided)
-            autostart: If True, start the trigger and its event loop
-                       Set False for triggers added before agent.start()
-
-        Returns:
-            The trigger_id
-        """
+        """Register a trigger and optionally start its run loop immediately."""
         if trigger_id is None:
             trigger_id = f"trigger_{uuid4().hex[:8]}"
 
@@ -105,7 +78,6 @@ class TriggerManager:
                 trigger_type=type(trigger).__name__,
             )
 
-        # Persist resumable triggers to session store
         if getattr(trigger, "resumable", False) and self._session_store:
             try:
                 self._session_store.save_state(
@@ -135,11 +107,7 @@ class TriggerManager:
         return trigger_id
 
     async def remove(self, trigger_id: str) -> bool:
-        """Stop and remove a trigger.
-
-        Returns:
-            True if removed, False if not found
-        """
+        """Stop and remove a trigger, reporting whether it existed."""
         trigger = self._triggers.pop(trigger_id, None)
         if trigger is None:
             return False
@@ -190,7 +158,7 @@ class TriggerManager:
         return self._triggers.get(trigger_id)
 
     async def start_all(self) -> None:
-        """Start all registered triggers. Called by agent.start()."""
+        """Start every registered trigger that lacks a run-loop task."""
         for trigger_id, trigger in self._triggers.items():
             if trigger_id not in self._tasks:
                 await trigger.start()
@@ -205,7 +173,7 @@ class TriggerManager:
             logger.info("Triggers started", count=count)
 
     async def stop_all(self) -> None:
-        """Stop all triggers. Called by agent.stop()."""
+        """Cancel all run loops, stop triggers, and clear registrations."""
         for task in self._tasks.values():
             task.cancel()
         if self._tasks:
@@ -230,11 +198,10 @@ class TriggerManager:
                 )
 
     def suspend_all(self) -> None:
-        """Hold every trigger run-loop at its next iteration (warm pause).
+        """Pause trigger loops before their next source read.
 
-        Triggers stop consuming their sources; queued channel messages
-        accumulate and are drained when :meth:`resume_all` releases the
-        loops. Idempotent."""
+        Source queues continue accumulating until ``resume_all`` releases the loops.
+        """
         self._resume_gate.clear()
 
     def resume_all(self) -> None:
@@ -245,8 +212,7 @@ class TriggerManager:
         """Run a single trigger's event loop."""
         while trigger.is_running:
             try:
-                # Warm-pause gate — blocks here while suspended so the
-                # trigger stops consuming its source until resumed.
+                # Gate before source consumption so pausing cannot lose an event.
                 await self._resume_gate.wait()
                 if not trigger.is_running:
                     break
@@ -257,15 +223,11 @@ class TriggerManager:
                         trigger_id=trigger_id,
                         event_type=event.type,
                     )
-                    # Wave B ``schedule_drift`` — compares the event's
-                    # scheduled timestamp (if set) against now. Only
-                    # emits when drift crosses the threshold.
+                    # Record only material scheduling delays to avoid telemetry noise.
                     self._maybe_emit_schedule_drift(trigger_id, trigger, event)
                     self._fire_notification(trigger_id, event)
-                    # Drain the rest of this trigger's ready backlog and
-                    # admit it into the agent's mid-turn buffer BEFORE the
-                    # primary turn starts, so the whole burst is absorbed
-                    # in one turn (UXI-08b) instead of one round per event.
+                    # Claim ready backlog before the primary turn starts so one burst
+                    # is processed as one turn rather than repeated rounds.
                     self._admit_extra_ready(trigger_id, trigger)
                     await self._process_event(event)
             except asyncio.CancelledError:
@@ -292,15 +254,11 @@ class TriggerManager:
             )
 
     def _admit_extra_ready(self, trigger_id: str, trigger: BaseTrigger) -> None:
-        """Drain every message already queued for ``trigger`` beyond the
-        one that started the turn and admit them into the agent's
-        mid-turn buffer (UXI-08b).
+        """Admit an already-ready trigger backlog into the current turn.
 
-        Only consumes from the channel when an ``admit_ready`` hook is
-        wired — otherwise the drained events would be lost, since
-        ``drain_ready`` removes them from the subscription queue. Each
-        admitted event fires the same drift + notification bookkeeping
-        the primary event got so per-message observability is preserved.
+        Draining occurs only when an admission hook exists, preventing destructive
+        reads on hosts that cannot accept the events. Each event retains normal
+        notification and drift observability.
         """
         admit = self.admit_ready
         drain = getattr(trigger, "drain_ready", None)
@@ -308,7 +266,7 @@ class TriggerManager:
             return
         try:
             extra = drain()
-        except Exception as e:  # pragma: no cover - defensive
+        except Exception as e:  # pragma: no cover - backlog failure is isolated
             logger.warning(
                 "trigger drain_ready failed",
                 trigger_id=trigger_id,
@@ -331,14 +289,7 @@ class TriggerManager:
     def _maybe_emit_schedule_drift(
         self, trigger_id: str, trigger: BaseTrigger, event: Any
     ) -> None:
-        """Record Wave B ``schedule_drift`` when the trigger fired late.
-
-        The event's ``scheduled_at`` timestamp (if set by the trigger)
-        is compared to ``time.time()``. If the delta exceeds
-        :data:`SCHEDULE_DRIFT_THRESHOLD_S`, a store event is written.
-        Pure observability — missing store / missing scheduled_at is
-        fine.
-        """
+        """Record material delay between a scheduled time and actual firing."""
         scheduled = getattr(event, "scheduled_at", None)
         if scheduled is None:
             scheduled = getattr(event, "context", None)
@@ -362,5 +313,5 @@ class TriggerManager:
                     "drift_ms": drift_s * 1000.0,
                 },
             )
-        except Exception as e:  # pragma: no cover — observability
+        except Exception as e:  # pragma: no cover - telemetry must not stop triggers
             logger.warning("schedule_drift emit failed", error=str(e), exc_info=True)

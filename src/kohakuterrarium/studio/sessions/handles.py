@@ -1,15 +1,8 @@
-"""Session and SessionListing dataclasses.
+"""Define read-only handles for active Terrarium graph sessions.
 
-A *session* corresponds to a Terrarium engine *graph*: one or more
-creatures sharing an environment. There is no creature-vs-terrarium
-distinction at the runtime level — a session is a session, sized
-0..N creatures and 0..M channels. Solo creatures are graphs with
-one node; recipe-built terrariums are graphs with several. The same
-endpoints, the same shape, the same routing apply to both.
-
-These are read-only handles describing what is currently running.
-Mutations live in :mod:`studio.sessions.lifecycle`,
-:mod:`studio.sessions.topology`, etc.
+A session uniformly represents a graph, whether it contains one standalone
+creature or a recipe-built team. Lifecycle and topology mutations live in the
+neighboring session modules.
 """
 
 import os
@@ -37,8 +30,7 @@ class Session:
     pwd: str = ""
     has_root: bool = False
     home_node: str = "_host"
-    # Derived: False only when a saved pwd is set but missing on disk —
-    # the "offer a new working dir" signal for resume UIs.
+    # Resume UIs use this to request a replacement for a missing saved directory.
     pwd_exists: bool = True
 
     def __post_init__(self) -> None:

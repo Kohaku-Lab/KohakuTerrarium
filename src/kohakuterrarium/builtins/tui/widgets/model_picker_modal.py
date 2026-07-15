@@ -1,16 +1,7 @@
-"""Textual model-picker modal with variation-group support.
+"""Switch the active agent using canonical model and variation identifiers.
 
-Mirrors the Vue ``ModelSwitcher.vue`` UX: provider tabs at the top,
-a list of models per provider, and dropdowns for any variation groups
-the highlighted model exposes (``effort=high``, ``tier=large``, …).
-Apply assembles the canonical ``provider/name[@var1=opt1,var2=opt2]``
-identifier and calls :meth:`Agent.switch_model`.
-
-Pushed by:
-
-* ``AgentTUI.action_open_model_picker`` (F3 keybinding).
-* The ``/model`` (no-args) slash-command intercept in
-  :class:`TUIInput`.
+Available models are grouped by provider, current selections are restored, and
+variation controls are filtered before ``switch_model`` receives the identifier.
 """
 
 from typing import Any
@@ -34,11 +25,8 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ── Helpers ──────────────────────────────────────────────────────
-
-
 def _identifier(entry: dict[str, Any]) -> str:
-    """Return ``provider/name`` (or just name when no provider)."""
+    """Return an entry's provider-qualified identifier."""
     provider = entry.get("provider") or entry.get("login_provider") or ""
     return f"{provider}/{entry['name']}" if provider else entry["name"]
 
@@ -48,7 +36,7 @@ def _strip_variation(ident: str) -> str:
 
 
 def _parse_variation_suffix(ident: str) -> dict[str, str]:
-    """Extract ``{group: option, …}`` from a ``…@a=x,b=y`` identifier."""
+    """Extract variation selections from a model identifier."""
     if "@" not in ident:
         return {}
     _, _, suffix = ident.partition("@")
@@ -69,11 +57,8 @@ def _format_identifier(base: str, variations: dict[str, str]) -> str:
     return f"{base}@{suffix}" if suffix else base
 
 
-# ── Picker modal ─────────────────────────────────────────────────
-
-
 class ModelPickerModal(ModalScreen[bool]):
-    """Pick a model + variation options. Returns ``True`` if applied."""
+    """Browse available models and apply a validated variation selection."""
 
     DEFAULT_CSS = """
     ModelPickerModal {
@@ -134,11 +119,9 @@ class ModelPickerModal(ModalScreen[bool]):
         self._agent = agent
         self._entries: list[dict[str, Any]] = []
         self._by_provider: dict[str, list[dict[str, Any]]] = {}
-        # Per-tab row index → entry dict (for cursor-row → model lookup).
+        # Provider row indexes map DataTable cursors back to profile entries.
         self._row_index: dict[str, list[dict[str, Any]]] = {}
-        # Tab-id ↔ provider name map. ``_safe_id`` is lossy (slashes,
-        # spaces become ``_``) so we store the real provider string
-        # keyed by the safe id used as the Textual TabPane id.
+        # Safe tab IDs are lossy, so retain the original provider names.
         self._tab_to_provider: dict[str, str] = {}
         self._selected_variations: dict[str, str] = {}
         self._current_identifier = ""
@@ -146,7 +129,6 @@ class ModelPickerModal(ModalScreen[bool]):
     def compose(self):
         with Vertical(id="picker-container"):
             with TabbedContent(id="picker-tabs"):
-                # Tabs are populated dynamically in on_mount.
                 yield TabPane("loading…", id="tab-_init")
             with VerticalScroll(id="variations-pane"):
                 yield Static(
@@ -165,8 +147,6 @@ class ModelPickerModal(ModalScreen[bool]):
         self._entries = self._load_entries()
         self._populate_tabs()
 
-    # Data ──────────────────────────────────────────────────────────
-
     def _read_current_identifier(self) -> str:
         get_ident = getattr(self._agent, "llm_identifier", None)
         if callable(get_ident):
@@ -180,12 +160,11 @@ class ModelPickerModal(ModalScreen[bool]):
     def _load_entries(self) -> list[dict[str, Any]]:
         try:
             return [e for e in list_all() if e.get("available")]
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover - defensive boundary
             logger.warning("model picker list_all failed", error=str(exc))
             return []
 
     def _populate_tabs(self) -> None:
-        # Group by provider (login_provider preferred).
         groups: dict[str, list[dict[str, Any]]] = {}
         for e in self._entries:
             prov = e.get("login_provider") or e.get("provider") or "—"
@@ -193,14 +172,13 @@ class ModelPickerModal(ModalScreen[bool]):
         self._by_provider = groups
 
         tabs = self.query_one("#picker-tabs", TabbedContent)
-        # Remove the placeholder tab and add real ones.
         try:
             tabs.remove_pane("tab-_init")
         except Exception:
+            # The placeholder may already be gone during remounts.
             pass
 
-        # Stable order: provider of the current model first, then
-        # alphabetical.
+        # Keep the current provider first, followed by alphabetical order.
         current_base = _strip_variation(self._current_identifier)
         current_provider = ""
         if "/" in current_base:
@@ -245,25 +223,19 @@ class ModelPickerModal(ModalScreen[bool]):
         if active_pane:
             tabs.active = active_pane
 
-        # Position cursors after the panes finish mounting; calling
-        # ``move_cursor`` synchronously here can race with the
-        # initial layout and end up no-op'd on some Textual versions.
+        # Cursor placement waits for pane layout to complete.
         def _seat_cursors() -> None:
             for tbl, row in cursor_targets:
                 try:
                     tbl.move_cursor(row=row)
                 except Exception:
+                    # A provider pane may disappear before the deferred layout callback.
                     pass
 
         self.call_after_refresh(_seat_cursors)
-        # Update variations pane for whatever's currently highlighted.
         self.call_after_refresh(self._refresh_variations)
 
-    # Events ───────────────────────────────────────────────────────
-
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
-        # When the user moves the cursor between rows, refresh the
-        # variation widgets to match that model's groups.
         self._refresh_variations()
 
     def on_tabbed_content_tab_activated(
@@ -272,7 +244,6 @@ class ModelPickerModal(ModalScreen[bool]):
         self._refresh_variations()
 
     def on_select_changed(self, event: Select.Changed) -> None:
-        # Variation dropdown changed.
         wid = event.select.id or ""
         if wid.startswith("var-"):
             group = wid[len("var-") :]
@@ -294,8 +265,6 @@ class ModelPickerModal(ModalScreen[bool]):
     def action_apply(self) -> None:
         self._apply()
 
-    # Variation widgets ────────────────────────────────────────────
-
     def _highlighted_entry(self) -> dict[str, Any] | None:
         tabs = self.query_one("#picker-tabs", TabbedContent)
         active = tabs.active
@@ -315,7 +284,7 @@ class ModelPickerModal(ModalScreen[bool]):
         return None
 
     def _refresh_variations(self) -> None:
-        """Rebuild the variation-pane content for the highlighted model."""
+        """Rebuild variation controls for the highlighted model."""
         try:
             pane = self.query_one("#variations-pane", VerticalScroll)
         except Exception:
@@ -330,8 +299,7 @@ class ModelPickerModal(ModalScreen[bool]):
             pane.mount(Static("[dim]This model has no variation options.[/dim]"))
             return
         ident_base = _identifier(entry)
-        # If the user just highlighted a different model, drop any
-        # variation choices that don't apply to this model's groups.
+        # A new model retains only variation choices valid for its groups.
         prev = self._selected_variations
         applicable: dict[str, str] = {}
         if _strip_variation(self._current_identifier) == ident_base:
@@ -358,8 +326,6 @@ class ModelPickerModal(ModalScreen[bool]):
             row.mount(label)
             row.mount(select)
 
-    # Apply ────────────────────────────────────────────────────────
-
     def _apply(self) -> None:
         entry = self._highlighted_entry()
         if not entry:
@@ -385,9 +351,6 @@ class ModelPickerModal(ModalScreen[bool]):
             pass
 
 
-# ── Tab id helpers ──────────────────────────────────────────────
-
-
 def _safe_id(name: str) -> str:
-    """Map an arbitrary provider name to a Textual-safe widget id."""
+    """Convert a provider name to a Textual-safe widget ID."""
     return "".join(ch if ch.isalnum() else "_" for ch in name) or "_"

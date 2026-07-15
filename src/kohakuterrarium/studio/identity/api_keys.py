@@ -16,7 +16,7 @@ KEYS_FILE_PATH = KEYS_PATH
 
 
 def list_keys_payload() -> list[dict[str, Any]]:
-    """Return per-provider key status (HTTP shape)."""
+    """Return the HTTP-facing API-key status for each configured provider."""
     masked = list_api_keys()
     entries: list[dict[str, Any]] = []
     for name, backend in load_backends().items():
@@ -35,7 +35,7 @@ def list_keys_payload() -> list[dict[str, Any]]:
 
 
 def list_keys_for_cli() -> list[dict[str, Any]]:
-    """Return masked keys + env-resolution status for ``kt config key list``."""
+    """Return masked keys and environment resolution for the CLI listing."""
     masked = list_api_keys()
     rows: list[dict[str, Any]] = []
     for provider, backend in sorted(load_backends().items()):
@@ -60,7 +60,7 @@ def list_keys_for_cli() -> list[dict[str, Any]]:
 
 
 def set_key(provider: str, key: str) -> None:
-    """Persist an API key. Raises ``ValueError`` for missing/unknown provider."""
+    """Persist an API key, rejecting missing values or unknown providers."""
     if not provider or not key:
         raise ValueError("Provider and key are required")
     if provider not in load_backends():
@@ -69,12 +69,12 @@ def set_key(provider: str, key: str) -> None:
 
 
 def remove_key(provider: str) -> None:
-    """Delete the stored key for a provider. Raises on unknown provider."""
+    """Delete a provider's stored key, rejecting unknown providers."""
     if provider not in load_backends():
         raise LookupError(f"Provider not found: {provider}")
     save_api_key(provider, "")
 
 
 def get_existing_key(provider: str) -> str:
-    """Return the currently stored key (for masked display only)."""
+    """Return the resolved provider key for masked display workflows."""
     return get_api_key(provider)

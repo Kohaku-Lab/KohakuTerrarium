@@ -91,7 +91,7 @@ _ALIASES: dict[str, str] = {
 
 
 def get_profile(name: str) -> SandboxProfile:
-    """Resolve a preset by name or alias."""
+    """Resolve a canonical sandbox preset from its name or alias."""
     key = str(name or "WORKSPACE")
     key = _ALIASES.get(key, key)
     key = _ALIASES.get(key.lower(), key)

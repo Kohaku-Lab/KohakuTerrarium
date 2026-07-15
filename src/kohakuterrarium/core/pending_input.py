@@ -1,16 +1,7 @@
-"""Stable per-item ids for queued mid-turn inputs + edit/cancel ops.
+"""Stable identities and edit or cancellation helpers for queued input.
 
-A message typed while the agent is mid-turn is buffered in
-``Agent._pending_mid_turn_inputs`` and drained into the running turn
-later (see :mod:`core.agent_mid_turn`). UXI-08(a) lets a shell correct
-or drop such a message *before it is sent*: each buffered event carries
-a stable id in ``event.context[PENDING_ID_KEY]``, and the edit/cancel
-ops act on the live buffer keyed by that id.
-
-The ops are pure functions over the buffer list so they win iff they
-run before the drain's ``list(buffer); buffer.clear()`` claims the
-event — after the claim the event is gone from the buffer and the op is
-a plain "already sent" no-op.
+Edits apply only while an event remains in the live queue; once the consumer
+claims it, the operation safely reports that the message is no longer pending.
 """
 
 from typing import Any
@@ -22,16 +13,15 @@ PENDING_ID_KEY = "pending_id"
 
 
 def new_pending_id() -> str:
-    """Mint a fresh queued-input id."""
+    """Return a fresh identifier for queued input."""
     return f"pending_{uuid4().hex[:12]}"
 
 
 def stamp_pending_id(event: TriggerEvent) -> str:
-    """Ensure ``event`` carries a pending id; return it.
+    """Return the event's stable pending id, creating one when absent.
 
-    Idempotent — a caller-supplied id already in ``event.context``
-    survives so a shell can mint the id up front and target the message
-    by it as soon as the queued ack arrives.
+    Preserving caller-supplied ids lets frontends target a message immediately
+    after acknowledging that it was queued.
     """
     if event.context is None:
         event.context = {}
@@ -51,11 +41,7 @@ def pending_id_of(event: TriggerEvent) -> str | None:
 
 
 def edit_pending(buffer: list[TriggerEvent], pending_id: str, content: Any) -> bool:
-    """Replace the content of the buffered event with ``pending_id``.
-
-    Returns ``True`` when the message was still queued (edit committed),
-    ``False`` when it was already claimed by the drain / never existed.
-    """
+    """Replace queued content and report whether the event was still pending."""
     for event in buffer:
         if pending_id_of(event) == pending_id:
             event.content = content
@@ -64,11 +50,7 @@ def edit_pending(buffer: list[TriggerEvent], pending_id: str, content: Any) -> b
 
 
 def cancel_pending(buffer: list[TriggerEvent], pending_id: str) -> bool:
-    """Drop the buffered event with ``pending_id`` from the buffer.
-
-    Returns ``True`` when it was still queued (cancel committed),
-    ``False`` when it was already claimed / never existed.
-    """
+    """Remove a queued event and report whether it was still pending."""
     for idx, event in enumerate(buffer):
         if pending_id_of(event) == pending_id:
             del buffer[idx]

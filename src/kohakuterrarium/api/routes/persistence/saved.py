@@ -1,22 +1,20 @@
 """Persistence saved — list / delete saved sessions.
 
-The listing path is backed by the SessionIndex sidecar
-(``studio/persistence/session_index``): a single SQLite file at
-``<session_dir>/.kt-index.kvault`` cached across server restarts.
-Cold-listing 1000 sessions is one file open + one table scan
-instead of N parallel ``.kohakutr`` opens.
+Listings use the SessionIndex sidecar at
+``<session_dir>/.kt-index.kvault``. The persistent SQLite index keeps listing
+cost to one file open and one table scan instead of opening every
+``.kohakutr`` file.
 
-Search uses FTS5 (BM25) when a query is present; faceted filters
-(``status``, ``config_type``, ``node_id``) apply after the FTS
-hit-set is collected so the rank stays meaningful.
+Queries use FTS5 BM25 ranking. Exact-match facets such as ``status``,
+``config_type``, and ``node_id`` filter the FTS hit set without changing its
+relevance scores.
 
-``refresh=true`` triggers an **incremental** reconcile — every
-file whose ``(mtime, size)`` fingerprint matches the sidecar is
-skipped without opening it.  Pass ``full_rescan=true`` to force
-a re-read of every file (use after a manual disk edit).
+``refresh=true`` incrementally reconciles only files whose ``(mtime, size)``
+fingerprint changed. ``full_rescan=true`` rereads every file and is intended
+for changes made outside the application.
 
-Mounted under both ``/api/persistence/saved`` and ``/api/sessions``
-(URL preservation for the existing frontend ``sessionAPI`` callers).
+The router mounts under both ``/api/persistence/saved`` and ``/api/sessions``
+to preserve the session API URLs.
 """
 
 import os
@@ -42,35 +40,30 @@ router = APIRouter()
 
 @router.get("/disk-usage")
 async def get_disk_usage():
-    """Aggregate disk usage of the saved-session directory.
+    """Return disk usage for canonical session files and SQLite sidecars.
 
-    Pure filesystem — stats every canonical session file + its
-    SQLite sidecars without opening any database. Off-loaded to the
-    dedicated persistence executor so the directory walk doesn't
-    block the loop's default thread pool (which other ``to_thread``
-    calls — chat WS, runtime graph, identity routes — share).
+    The filesystem-only directory walk runs on the dedicated persistence
+    executor so it cannot occupy the default thread pool shared by unrelated
+    event-loop work.
     """
     return await run_in_persistence_executor(disk_usage)
 
 
 @router.get("/stats")
 async def get_session_stats():
-    """Aggregations over the session index sidecar.
+    """Return aggregations from the cached session-index sidecar.
 
-    Pure read of the cached sidecar — no ``.kohakutr`` is opened.
-    Sub-millisecond for ~thousands of sessions; runs on the
-    persistence executor because the underlying KVault scan is sync.
+    No session store is opened. The synchronous KVault scan runs on the
+    persistence executor to keep it off the event loop.
     """
     return await run_in_persistence_executor(_stats_via_index)
 
 
 def _stats_via_index() -> dict:
-    """Sync entrypoint — runs on the persistence executor.
+    """Read aggregate statistics through the configured session index.
 
-    Passes ``_session_dir()`` explicitly so the SessionIndex
-    singleton picks up the same path that tests monkeypatch via
-    ``store._SESSION_DIR`` + ``KT_SESSION_DIR`` (same pattern
-    :func:`_list_via_index` uses).
+    Passing ``_session_dir()`` explicitly keeps the index singleton aligned
+    with runtime or test overrides of the session directory.
     """
     session_dir = _session_dir()
     index = get_session_index_default(session_dir)
@@ -90,15 +83,10 @@ def _list_via_index(
     refresh: bool,
     full_rescan: bool,
 ) -> dict:
-    """Sync entrypoint — runs on the persistence executor.
+    """List indexed sessions through one synchronous executor entrypoint.
 
-    Resolved here (not inline in the route) so the executor sees
-    a single function call.  Bridges the route's keyword args to
-    the SessionIndex API.
-
-    Passes ``_session_dir()`` explicitly so the SessionIndex
-    singleton picks up the same path that tests monkeypatch via
-    ``store._SESSION_DIR`` + ``KT_SESSION_DIR``.
+    Passing ``_session_dir()`` explicitly keeps the index singleton aligned
+    with runtime or test overrides of the session directory.
     """
     session_dir = _session_dir()
     index = get_session_index_default(session_dir)
@@ -115,9 +103,8 @@ def _list_via_index(
         offset=offset,
     )
     result = page.to_dict()
-    # Pre-resume missing-workdir signal. Only rows that live on THIS
-    # host can be stat'd here — worker-hosted rows get the flag from
-    # the worker's own resume response instead.
+    # Only local working directories can be checked from this host. Remote
+    # workers report their own ``pwd_exists`` value when resuming.
     for row in result.get("sessions", []):
         if row.get("node_id"):
             continue
@@ -139,26 +126,12 @@ async def list_sessions(
     config_type: str | None = None,
     node_id: str | None = None,
 ):
-    """List saved sessions with search, sort, filter, pagination.
+    """List indexed sessions with search, sorting, facets, and pagination.
 
-    Backed by the SessionIndex sidecar.  Cold-list cost is one
-    file open regardless of how many sessions exist (vs the
-    legacy "open N ``.kohakutr`` files" path).
-
-    Query params:
-      * ``search`` — FTS5 query over name / preview / config_path /
-        agents / pwd.  When set, ``sort=relevance`` orders by
-        BM25 (most relevant first); any other ``sort`` orders the
-        FTS hit-set by that field.
-      * ``sort`` — ``last_active`` (default) | ``created_at`` |
-        ``name`` | ``status`` | ``relevance``.
-      * ``order`` — ``desc`` (default) | ``asc``.
-      * ``status`` / ``config_type`` / ``node_id`` — exact-match
-        facet filters.
-      * ``refresh=true`` — incremental reconcile before listing
-        (re-reads only files whose mtime/size changed).
-      * ``full_rescan=true`` — force-re-read every file regardless
-        of fingerprint (use after manual disk edits).
+    ``search`` covers name, preview, config path, agents, and working directory.
+    ``sort=relevance`` uses BM25 order; other sort fields reorder the matching
+    set. ``refresh`` reconciles changed fingerprints before listing, while
+    ``full_rescan`` rereads every session file to account for external edits.
     """
     return await run_in_persistence_executor(
         _list_via_index,
@@ -177,12 +150,10 @@ async def list_sessions(
 
 @router.delete("/{session_name}")
 async def delete_session(session_name: str):
-    """Delete a saved session file.
+    """Delete every file belonging to one logical saved session.
 
-    Removes every on-disk file that belongs to the logical session
-    (``foo.kohakutr.v2`` plus its ``foo.kohakutr`` v1 rollback when
-    both exist). Falls back to fuzzy lookup if the user passes a
-    legacy raw stem.
+    Versioned and rollback files are removed together. Raw stems are accepted
+    through fuzzy lookup for session names that omit the canonical suffix.
     """
     try:
         deleted_paths = await run_in_persistence_executor(
@@ -191,9 +162,8 @@ async def delete_session(session_name: str):
     except HTTPException:
         raise
     except (PermissionError, OSError) as e:
-        # The `.kohakutr` file is locked — typically a still-open
-        # SQLite/WAL handle from a session that has not fully released
-        # it. That is a transient conflict, not a server fault: 409.
+        # An open SQLite or WAL handle makes deletion a transient resource
+        # conflict rather than an internal server failure.
         raise HTTPException(
             status_code=409,
             detail=f"Session file is in use and cannot be deleted yet: {e}",
@@ -205,8 +175,7 @@ async def delete_session(session_name: str):
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"
         )
-    # ``delete_session_files`` itself purges the matching entries
-    # from the session-index sidecar — see store._purge_index_entries.
+    # File deletion also removes the corresponding session-index entries.
     return {
         "status": "deleted",
         "name": session_name,

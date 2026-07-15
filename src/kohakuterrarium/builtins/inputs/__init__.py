@@ -9,14 +9,12 @@ from typing import Any
 from kohakuterrarium.builtins.inputs.cli import CLIInput, NonBlockingCLIInput
 from kohakuterrarium.builtins.inputs.none import NoneInput
 
-# Registry of builtin input types
 _BUILTIN_INPUTS: dict[str, type] = {
     "cli": CLIInput,
     "cli_nonblocking": NonBlockingCLIInput,
     "none": NoneInput,
 }
 
-# Factory functions for inputs that need special handling
 _BUILTIN_INPUT_FACTORIES: dict[str, Any] = {}
 
 
@@ -51,27 +49,14 @@ def list_builtin_inputs() -> list[str]:
 
 
 def create_builtin_input(name: str, options: dict[str, Any] | None = None) -> Any:
-    """
-    Create a builtin input instance.
-
-    Args:
-        name: Builtin input type name
-        options: Configuration options
-
-    Returns:
-        Input module instance
-
-    Raises:
-        ValueError: If input type not found
-    """
+    """Create a registered input module or raise for an unknown name."""
     options = options or {}
 
-    # Check for factory first
+    # Factories take precedence so registrations can override class construction.
     if name in _BUILTIN_INPUT_FACTORIES:
         factory = _BUILTIN_INPUT_FACTORIES[name]
         return factory(options)
 
-    # Fall back to class
     if name in _BUILTIN_INPUTS:
         cls = _BUILTIN_INPUTS[name]
         return cls(**options)
@@ -79,7 +64,7 @@ def create_builtin_input(name: str, options: dict[str, Any] | None = None) -> An
     raise ValueError(f"Unknown builtin input type: {name}")
 
 
-# Register TUI input
+# Delayed import avoids loading the TUI before the registry is initialized.
 from kohakuterrarium.builtins.tui.input import TUIInput
 
 register_builtin_input("tui", TUIInput)

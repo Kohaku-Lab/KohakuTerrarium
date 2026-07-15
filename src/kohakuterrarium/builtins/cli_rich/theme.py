@@ -1,6 +1,5 @@
 """Theme constants for the rich CLI — colors, glyphs, status icons."""
 
-# Status glyphs
 ICON_RUNNING = "●"
 ICON_DONE = "✓"
 ICON_ERROR = "✗"
@@ -11,10 +10,8 @@ ICON_SUBAGENT = "↳"
 ICON_BG = "⏳"
 ICON_COMPACT = "⟳"
 
-# Spinner frames (used by live blocks)
 SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
-# Thinking indicator label (Kohaku + UwU + ing)
 THINKING_LABEL = "KohakUwUing"
 
 
@@ -25,12 +22,7 @@ def spinner_frame(now: float, fps: float = 5.0) -> str:
 
 
 def fmt_elapsed_compact(seconds: float) -> str:
-    """Format elapsed seconds as ``1.2s`` / ``12s`` / ``3m 05s`` / ``1h 04m 03s``.
-
-    Sub-10s keeps 1 decimal so fast tools don't snap to ``0s``. Integer
-    seconds past 10s avoid the flicker of sub-second digits updating.
-    Past 60s switches to ``Xm YYs``; past 3600s to ``Xh YYm ZZs``.
-    """
+    """Format elapsed time with stable precision across seconds, minutes, and hours."""
     if seconds < 0:
         seconds = 0.0
     if seconds < 10:
@@ -48,15 +40,11 @@ def fmt_elapsed_compact(seconds: float) -> str:
     return f"{hours}h {minutes:02d}m {secs:02d}s"
 
 
-# Gutter prefix for the single ⎿ that marks the start of a tool body
-# in the committed Panel. Claude-code style: one glyph at the top of
-# the output block, continuation lines indent to match the content
-# column.
+# Continuation lines align with the content column after the first gutter glyph.
 GUTTER_GLYPH = "⎿ "
 GUTTER_INDENT = "  "
 
 
-# Colors (Rich-compatible)
 COLOR_RUNNING = "yellow"
 COLOR_DONE = "green"
 COLOR_ERROR = "red"

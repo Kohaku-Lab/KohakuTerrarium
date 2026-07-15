@@ -42,32 +42,20 @@ logger = get_logger(__name__)
 
 
 class ModulePicker:
-    """Tabbed module picker with list + edit-form modes.
-
-    The :class:`RichCLIApp` holds one instance and forwards key /
-    text events through :meth:`handle_key` / :meth:`handle_text`.
-    """
+    """Browse, toggle, and edit configurable agent modules."""
 
     def __init__(self, get_agent: Callable[[], Any]) -> None:
         self._get_agent = get_agent
         self.visible: bool = False
-        self.mode: str = "list"  # list | form
+        self.mode: str = "list"  # list or form
         self.active_type: str = "plugin"
         self._entries_by_type: dict[str, list[ModuleEntry]] = {}
         self._cursor: dict[str, int] = {}
         self._form: ModuleFormState | None = None
         self._flash: str = ""
 
-    # ── Lifecycle ───────────────────────────────────────────────
-
     def open(self, *, edit_target: str = "") -> None:
-        """Show the overlay.
-
-        ``edit_target`` (when set) is a ``name`` or ``type/name``
-        reference that opens straight into the edit form for that
-        module — used by ``/module edit <name>``. If the reference
-        doesn't resolve, falls through to list mode.
-        """
+        """Open the list or directly edit a resolvable module target."""
         self.mode = "list"
         self._form = None
         self._flash = ""
@@ -85,11 +73,8 @@ class ModulePicker:
         self._form = None
 
     def is_capturing_text(self) -> bool:
-        """True while a form is open — Composer routes printable
-        characters here instead of into the chat textarea."""
+        """Return whether a form currently owns printable input."""
         return self.visible and self.mode == "form" and self._form is not None
-
-    # ── Data load ───────────────────────────────────────────────
 
     def _reload(self) -> None:
         agent = self._get_agent()
@@ -138,7 +123,6 @@ class ModulePicker:
                         priority=None,
                     )
                 )
-        # Sort plugins enabled-on-top, priority ASC then name ASC.
         plugins.sort(
             key=lambda m: (
                 0 if m.enabled else 1,
@@ -151,12 +135,9 @@ class ModulePicker:
             "plugin": plugins,
             "native_tool": natives,
         }
-        # Clamp / initialise cursors. New modules append at end so
-        # this only matters when the active tab shrinks.
         for tid, entries in self._entries_by_type.items():
             cur = self._cursor.get(tid, 0)
             self._cursor[tid] = max(0, min(cur, max(0, len(entries) - 1)))
-        # If the active tab is empty but another has content, jump.
         if not self._entries_by_type.get(self.active_type):
             for tid in DEFAULT_TAB_ORDER:
                 if self._entries_by_type.get(tid):
@@ -176,8 +157,6 @@ class ModulePicker:
             return matches[0]
         return None
 
-    # ── Keyboard ────────────────────────────────────────────────
-
     def handle_key(self, key: str) -> bool:
         if not self.visible:
             return False
@@ -190,14 +169,11 @@ class ModulePicker:
             return False
         if self.mode == "form":
             return self._form_text(char)
-        # List mode: ``t`` toggles, otherwise swallow so stray chars
-        # don't leak into the composer textarea.
+        # List mode remains modal even when a character has no shortcut.
         if char in ("t", "T"):
             self._toggle_current()
             return True
         return True
-
-    # ── List mode ───────────────────────────────────────────────
 
     def _list_key(self, key: str) -> bool:
         if key == "escape":
@@ -226,7 +202,7 @@ class ModulePicker:
             if entry is not None:
                 self._open_form_for(entry)
             return True
-        return True  # modal — swallow other named keys
+        return True  # The modal list owns all named keys.
 
     def _move(self, delta: int) -> None:
         entries = self._entries_by_type.get(self.active_type) or []
@@ -238,8 +214,7 @@ class ModulePicker:
 
     def _cycle_tab(self, delta: int) -> None:
         order = list(DEFAULT_TAB_ORDER)
-        # Fall back to whatever types are present if the defaults
-        # don't cover them. Stable order so navigation is predictable.
+        # Append unknown module types without disturbing stable defaults.
         for t in self._entries_by_type:
             if t not in order:
                 order.append(t)
@@ -273,20 +248,13 @@ class ModulePicker:
                 mgr.disable(entry.name)
                 self._flash = f"Plugin {entry.name!r} disabled"
             elif mgr.enable(entry.name):
-                # ``load_pending`` is async; the toggle's effects on
-                # ``list_plugins_with_options`` land before next reload
-                # because enable() is synchronous. We don't await
-                # load_pending here (would need an async key handler);
-                # the next slash command or external trigger flushes
-                # pending loads.
+                # Synchronous enable updates inventory before deferred plugin loading.
                 self._flash = f"Plugin {entry.name!r} enabled"
             else:
                 self._flash = f"Plugin {entry.name!r} not found"
         except Exception as e:
             self._flash = f"Toggle failed: {e}"
         self._reload()
-
-    # ── Form mode ───────────────────────────────────────────────
 
     def _open_form_for(self, entry: ModuleEntry) -> None:
         if not entry.schema:
@@ -357,7 +325,6 @@ class ModulePicker:
                 fld.error = ""
             return True
         if key == "enter":
-            # Last field → submit; otherwise advance.
             if self._form.cursor < len(self._form.fields) - 1:
                 self._form.cursor += 1
                 return True
@@ -372,7 +339,6 @@ class ModulePicker:
         if fld is None:
             return True
         if fld.options:
-            # Enum: typed letter jumps to first option starting with it.
             for opt in fld.options:
                 if opt.lower().startswith(char.lower()):
                     fld.value = opt
@@ -380,7 +346,6 @@ class ModulePicker:
                     return True
             return True
         if fld.kind == "bool":
-            # Bool: ``y`` / ``t`` / ``1`` → true; ``n`` / ``f`` / ``0`` → false.
             lc = char.lower()
             if lc in ("y", "t", "1"):
                 fld.value = "true"
@@ -390,8 +355,7 @@ class ModulePicker:
                 fld.error = ""
             return True
         if fld.kind in ("int", "float"):
-            # Allow only digits, sign, decimal point, and ``e`` for
-            # scientific notation (float).
+            # Floats additionally accept decimal and exponent notation.
             allowed = set("0123456789-+")
             if fld.kind == "float":
                 allowed |= set(".eE")
@@ -399,7 +363,6 @@ class ModulePicker:
                 fld.value += char
                 fld.error = ""
             return True
-        # string / list / dict — accept any printable.
         fld.value += char
         fld.error = ""
         return True
@@ -421,8 +384,7 @@ class ModulePicker:
         if agent is None:
             self._form.message = "No agent in context"
             return
-        # Find the underlying module record (may have shifted across
-        # reloads — resolve by composite key).
+        # Resolve by stable key because inventory ordering may change after reload.
         target: ModuleEntry | None = None
         for entries in self._entries_by_type.values():
             for m in entries:
@@ -434,7 +396,6 @@ class ModulePicker:
         if target is None:
             self._form.message = "Module disappeared"
             return
-        # Coerce + validate field values.
         payload: dict[str, Any] = {}
         for fld in self._form.fields:
             try:
@@ -443,7 +404,6 @@ class ModulePicker:
                 fld.error = str(exc)
                 self._form.message = f"{fld.label}: {exc}"
                 return
-        # Diff against current options — only send changed keys.
         diff = {
             k: v
             for k, v in payload.items()
@@ -479,13 +439,8 @@ class ModulePicker:
         self._flash = f"Saved {target.type}/{target.name}"
         self._reload()
 
-    # ── Rendering ───────────────────────────────────────────────
-
     def render(self, width: int) -> str:
         return render_overlay(self, width)
-
-
-# ── Helpers ─────────────────────────────────────────────────────
 
 
 def _stringify(value: Any, kind: str) -> str:
@@ -507,12 +462,7 @@ def _stringify(value: Any, kind: str) -> str:
 
 
 def _coerce(fld: ModuleFormField) -> Any:
-    """Coerce a form field's text back to the right typed value.
-
-    Raises ``ValueError`` on invalid input — the form catches and
-    surfaces these as per-field errors so the user can correct
-    without losing other edits.
-    """
+    """Coerce editable text to the field's typed option value."""
     text = (fld.value or "").strip()
     kind = fld.kind
     if kind == "enum":

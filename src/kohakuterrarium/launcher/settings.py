@@ -1,38 +1,8 @@
-"""``app-settings.json`` read / write / validate.
+"""Read, validate, and atomically write launcher application settings.
 
-Schema lives in this module so the launcher can validate without
-pulling pydantic. Invalid fields fall back to defaults with a one-line
-warning so a hand-edited file never wedges the wrapper on a parse
-error.
-
-Settings shape (canonical: ``plans/1.5.0-roadmap/06b-release-bundle-update/design.md`` §3):
-
-.. code-block:: json
-
-    {
-      "feed": {
-        "kind": "github_releases" | "custom",
-        "repo": "Kohaku-Lab/KohakuTerrarium",
-        "url": null | "https://..."
-      },
-      "channel": "stable" | "beta" | "nightly",
-      "pinned_version": null | "1.5.1",
-      "update": {
-        "mode": "manual" | "notify-on-launch" | "auto-on-launch",
-        "check-cache-hours": 24,
-        "keep-versions": 3
-      },
-      "runtime": {
-        "active-version": null | "1.5.1",
-        "active-build-id": null | "20260519-153000-abc1234",
-        "last-check-at": null | "<iso8601>",
-        "last-check-error": null | "<message>"
-      }
-    }
-
-Legacy 06 settings (``source`` block + ``runtime.venv-path``) are
-silently ignored — the loader resets to defaults if the new keys are
-missing.
+The lightweight dataclass schema keeps launcher startup independent of pydantic.
+Invalid user-edited values produce warnings and fall back to safe defaults;
+obsolete settings fields are ignored and disappear on the next save.
 """
 
 import json
@@ -53,6 +23,8 @@ DEFAULT_KEEP_VERSIONS = 3
 
 @dataclass
 class FeedConfig:
+    """Configure release feed resolution."""
+
     kind: str = "github_releases"
     repo: str = DEFAULT_REPO
     url: str | None = None
@@ -60,6 +32,8 @@ class FeedConfig:
 
 @dataclass
 class UpdateConfig:
+    """Configure update policy, caching, and release retention."""
+
     mode: str = "notify-on-launch"
     check_cache_hours: int = DEFAULT_CHECK_CACHE_HOURS
     keep_versions: int = DEFAULT_KEEP_VERSIONS
@@ -67,6 +41,8 @@ class UpdateConfig:
 
 @dataclass
 class RuntimeConfig:
+    """Persist launcher-maintained release and update status."""
+
     active_version: str | None = None
     active_build_id: str | None = None
     last_check_at: str | None = None
@@ -75,14 +51,13 @@ class RuntimeConfig:
 
 @dataclass
 class AppSettings:
+    """Aggregate persisted launcher configuration and runtime status."""
+
     feed: FeedConfig = field(default_factory=FeedConfig)
     channel: str = "stable"
     pinned_version: str | None = None
     update: UpdateConfig = field(default_factory=UpdateConfig)
     runtime: RuntimeConfig = field(default_factory=RuntimeConfig)
-
-
-# ── Coercion helpers ────────────────────────────────────────────────
 
 
 def _coerce_feed(raw: Any, log) -> FeedConfig:
@@ -207,15 +182,11 @@ def _to_json(s: AppSettings) -> dict[str, Any]:
     }
 
 
-# ── Public IO ───────────────────────────────────────────────────────
-
-
 def load() -> AppSettings:
-    """Read settings, creating defaults if missing or invalid.
+    """Load and coerce settings, creating defaults when the file is absent.
 
-    Legacy 06 ``source`` blocks are silently dropped — the new schema
-    has no equivalent. ``update.mode`` and the cache-hours are
-    preserved if valid.
+    Parse failures return in-memory defaults without overwriting the source.
+    Obsolete source settings are ignored and removed by a later save.
     """
     log = get_logger()
     path = settings_path()
@@ -232,7 +203,7 @@ def load() -> AppSettings:
     if not isinstance(raw, dict):
         log.warning("settings: top-level is not a mapping; using defaults")
         return AppSettings()
-    # Detect legacy 06 shape and log once so support can spot it.
+    # Log obsolete schema detection without making it a startup failure.
     if "source" in raw and "feed" not in raw:
         log.info(
             "settings: legacy 06 source block detected at %s; ignoring (drop on next save)",
@@ -267,15 +238,14 @@ def reset() -> AppSettings:
 
 
 def to_public_dict(s: AppSettings) -> dict[str, Any]:
-    """Same as ``_to_json`` but exposed for the API layer."""
+    """Serialize settings into the public JSON-compatible schema."""
     return _to_json(s)
 
 
 def from_public_dict(raw: dict[str, Any]) -> AppSettings:
-    """Build an ``AppSettings`` from a dict supplied by the API client.
+    """Coerce an API-supplied mapping into validated application settings.
 
-    Runs through the same coercion path as :func:`load` so invalid
-    inputs end up as warnings + defaults instead of HTTP 500s.
+    Invalid fields follow the same warning and fallback behavior as file input.
     """
     log = get_logger()
     if not isinstance(raw, dict):

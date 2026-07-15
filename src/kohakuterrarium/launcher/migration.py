@@ -1,18 +1,8 @@
-"""Legacy detection + one-shot cleanup.
+"""Detect obsolete launcher layouts and remove legacy runtime state.
 
-Two kinds of legacy we may encounter on startup:
-
-1. **06 layout** — ``~/.kohakuterrarium/runtime/venv/`` from the old
-   pip+venv-based launcher. The 06 launcher couldn't actually run on
-   the briefcase shell (missing ``venv`` module), so any venv on disk
-   was either built by a dev install or left dangling. Either way, the
-   06b launcher doesn't read it; we wipe it on first encounter.
-
-2. **Pre-launcher legacy bundle** — a frozen briefcase artifact from
-   before the wrapper existed at all. Detected via the
-   ``app_packages`` substring in ``sys.executable``.
-
-Both probes are stateless. The wipe action is one-shot and idempotent.
+The migration probes distinguish the retired managed-venv layout from frozen
+Briefcase bundles that predate the launcher. Cleanup is idempotent and does not
+alter active versioned releases.
 """
 
 import shutil
@@ -27,16 +17,12 @@ from kohakuterrarium.launcher.paths import (
 
 
 def legacy_venv_present() -> bool:
-    """True when ``runtime/venv/`` (06 layout) exists on disk."""
+    """Return whether the obsolete managed-venv directory exists."""
     return legacy_venv_dir().is_dir()
 
 
 def wipe_legacy_venv() -> Path | None:
-    """Delete the 06-layout venv if present.
-
-    Idempotent — returns the path that was wiped, or ``None`` if
-    nothing was there. Safe to call on every launcher startup.
-    """
+    """Idempotently remove the obsolete venv and return its path if found."""
     if not legacy_venv_present():
         return None
     log = get_logger()
@@ -47,12 +33,10 @@ def wipe_legacy_venv() -> Path | None:
 
 
 def is_launcher_install() -> bool:
-    """True when the running framework process was exec'd by the launcher.
+    """Return whether the current process appears to use a managed release.
 
-    Heuristic: a valid ``active`` pointer file exists AND
-    ``sys.executable``'s ancestor includes ``runtime/versions/``. The
-    framework's API layer uses this to gate ``/api/app/*`` (which is
-    meaningless for dev installs or laboratory worker nodes).
+    Detection requires both an active pointer and an executable located beneath
+    the launcher runtime's versions directory.
     """
     if not active_pointer_path().is_file():
         return False
@@ -64,7 +48,7 @@ def is_launcher_install() -> bool:
 
 
 def is_legacy_bundle() -> bool:
-    """Pre-launcher frozen briefcase bundle (no wrapper at all)."""
+    """Return whether the process appears to be a pre-launcher frozen bundle."""
     if is_launcher_install():
         return False
     exe = sys.executable.replace("\\", "/").lower()

@@ -1,4 +1,4 @@
-"""Model command — list or switch LLM models."""
+"""List available LLM profiles or switch the focused agent's model."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.llm.profiles import list_all
@@ -31,8 +31,7 @@ class ModelCommand(BaseUserCommand):
         current = ""
         current_identifier = ""
         if context.agent:
-            # Prefer the canonical ``provider/name[@variations]`` identifier
-            # so the "Current model:" line matches the switcher output.
+            # Canonical identifiers preserve provider and variation selections.
             get_ident = getattr(context.agent, "llm_identifier", None)
             current_identifier = get_ident() if callable(get_ident) else ""
             current = current_identifier or getattr(context.agent.llm, "model", "")
@@ -41,12 +40,11 @@ class ModelCommand(BaseUserCommand):
         available = [e for e in entries if e.get("available")]
 
         def _identifier(entry: dict) -> str:
-            """Canonical ``provider/name`` identifier for an entry."""
+            """Return the canonical provider-qualified identifier for an entry."""
             provider = entry.get("provider") or entry.get("login_provider") or ""
             return f"{provider}/{entry['name']}" if provider else entry["name"]
 
-        # Strip any ``@variations`` suffix from the current identifier
-        # so the row match works regardless of selected options.
+        # Variation selections do not affect which base profile is marked current.
         current_base = (current_name.split("@", 1)[0]) if current_name else ""
 
         def _is_current(entry: dict) -> bool:
@@ -55,7 +53,6 @@ class ModelCommand(BaseUserCommand):
                 return True
             return not current_base and entry["model"] == current
 
-        # Plain text for CLI/TUI
         lines = [f"Current model: {current}", ""]
         if available:
             lines.append("Available models:")

@@ -1,11 +1,8 @@
 """Runtime group-prompt — keeps each creature's system prompt in sync
 with the live wiring it has access to.
 
-Replaces ``studio.sessions.runtime_topology``. The block lives at the
-Terrarium layer because engine-driven mutations (tool calls, recipe
-applies, hot-plug API operations) all flow through one engine — keeping
-the refresh listener engine-side guarantees no path forgets to update
-the prompt.
+The block lives at the Terrarium layer so every engine mutation path refreshes
+the prompt consistently.
 
 Sentinel-bounded by ``<!-- runtime-graph -->`` ... ``<!-- /runtime-graph -->``
 so repeated refreshes replace the previous block instead of stacking.

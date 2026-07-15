@@ -1,18 +1,6 @@
 """LLM preset/provider system — preset loading + runtime resolution.
 
-Backend management lives in :mod:`backends`; the pure variation-selector
-machinery lives in :mod:`variations`. This module builds on both for preset
-persistence, preset-level YAML round-tripping, and the ``resolve_controller_llm``
-entrypoint called from :mod:`bootstrap.llm`.
-
-The backend types in use:
-    openai    : OpenAI-compatible HTTP client. Used for OpenAI, OpenRouter,
-                Gemini, MiMo, and any user-defined provider that exposes a
-                ``/chat/completions`` interface.
-    anthropic : Anthropic-compatible Messages API via the official
-                ``anthropic`` package (Claude, MiniMax, and compatible
-                proxies).
-    codex     : OpenAI ChatGPT subscription via OAuth.
+Resolve, persist, and list LLM presets against configured provider backends.
 """
 
 from copy import deepcopy
@@ -69,17 +57,8 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ── Backend CRUD (writes touch both backends + presets, so lives here) ──
-
-
 def save_backend(backend: LLMBackend) -> None:
-    """Persist a user-defined provider.
-
-    ``backend_type`` values are ``openai`` (OpenAI-compatible
-    ``/chat/completions``), ``anthropic`` (Anthropic-compatible Messages API),
-    and ``codex`` (ChatGPT-subscription OAuth). Legacy ``codex-oauth`` values
-    are normalized here so older API clients keep working.
-    """
+    """Persist a user provider after normalizing its backend type."""
     backend.backend_type = validate_backend_type(backend.backend_type)
     data = _load_yaml()
     backends = load_backends()
@@ -103,9 +82,6 @@ def delete_backend(name: str) -> bool:
     _save_yaml(_serialize_user_data(presets, backends, data.get("default_model", "")))
     save_api_key(name, "")
     return True
-
-
-# ── Runtime resolution ─────────────────────────────────────────
 
 
 def _resolve_preset(
@@ -154,10 +130,7 @@ def load_profiles() -> dict[tuple[str, str], LLMProfile]:
     return profiles
 
 
-# Default-model ordering: the first provider in this list that has a
-# reachable preset wins if no explicit default is set. Each tuple is
-# ``(provider_name, preferred_bare_preset_name)``; the bare name
-# reflects the new naming — no ``-api`` / ``-or`` suffixes.
+# The first available provider supplies the implicit default model.
 _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
     ("codex", "gpt-5.5"),
     ("openrouter", "mimo-v2.5-pro"),
@@ -170,29 +143,14 @@ _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
 ]
 
 
-# Legacy raw ``controller.model`` values historically named the provider's
-# API model id rather than a user-facing preset. Under the new (provider,
-# name) hierarchy that raw id can be ambiguous, so the old bare-model path
-# keeps a stable preference order. This applies only to ``model: ...``
-# resolution; explicit preset references stay strict.
+# Legacy raw model ids use stable provider preference; explicit presets stay strict.
 _LEGACY_MODEL_PROVIDER_PREFERENCE: list[str] = [
     provider for provider, _ in _PROVIDER_DEFAULT_MODELS
 ]
 
 
 def get_default_model() -> str:
-    """Return the default model identifier as ``provider/name``.
-
-    ``provider/name`` is unambiguous under the new (provider, name)
-    hierarchy — a bare name could exist under multiple providers and
-    would trigger the ambiguity error during resolution.
-
-    Legacy bare-name values (written by pre-refactor builds that wrote
-    ``default_model: gpt-5.4`` straight from the preset key) are
-    upgraded on read: the first ``_PROVIDER_DEFAULT_MODELS`` provider
-    that actually has the preset wins. Storage is not rewritten here
-    — :func:`set_default_model` handles that on the next save.
-    """
+    """Return an unambiguous default identifier, upgrading legacy bare names."""
     data = _load_yaml()
     explicit = data.get("default_model", "")
     if explicit:
@@ -206,16 +164,7 @@ def get_default_model() -> str:
 
 
 def _upgrade_bare_default(bare: str) -> str:
-    """Map a legacy bare-name default to ``provider/name``.
-
-    Tries, in order:
-      1. alias lookup (``gpt-5.4-api`` → openai/gpt-5.4);
-      2. the first provider from ``_PROVIDER_DEFAULT_MODELS`` that has
-         a preset with this canonical name;
-      3. any provider that has it (stable-sorted).
-    Returns an empty string if nothing matches — the caller falls
-    back to the raw bare string in that case.
-    """
+    """Upgrade a bare default using aliases, provider preference, then stable order."""
     aliased = resolve_alias(bare)
     if aliased is not None:
         provider, canonical = aliased
@@ -236,19 +185,7 @@ def set_default_model(model_name: str) -> None:
 
 
 def save_profile(profile: LLMProfile | LLMPreset) -> None:
-    """Persist a user-defined preset.
-
-    Uniqueness is ``(provider, name)`` — two user presets can share a
-    bare name as long as they bind to different providers. Built-in
-    presets with the same ``(provider, name)`` are overridden; any
-    built-in whose pair differs stays visible.
-
-    When called with an :class:`LLMProfile` (which has no
-    ``variation_groups`` field of its own), any ``variation_groups``
-    already defined on the existing preset with the same
-    ``(provider, name)`` are preserved — otherwise round-tripping a
-    profile through the API would silently erase its variation set.
-    """
+    """Persist a provider-scoped preset while preserving existing variations."""
     if isinstance(profile, LLMPreset):
         preset = profile
     else:
@@ -282,13 +219,7 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
 
 
 def delete_profile(name: str, provider: str = "") -> bool:
-    """Delete a user preset.
-
-    ``provider`` disambiguates across the nested layout. If omitted
-    and the bare ``name`` appears under multiple providers, this
-    returns ``False`` without deleting anything — the API surface is
-    expected to pass the provider explicitly.
-    """
+    """Delete one user preset, refusing ambiguous bare-name matches."""
     data = _load_yaml()
     presets = load_presets()
     if provider:
@@ -318,18 +249,11 @@ def _builtin_preset_to_runtime(
 
 
 def _all_preset_definitions() -> dict[tuple[str, str], LLMPreset]:
-    """User presets merged over built-ins by ``(provider, name)`` key.
-
-    When both a user preset and a built-in preset share the same
-    (provider, name), the user preset wins. Otherwise both show up
-    — a user preset named ``gpt-5.4`` under their own custom
-    provider does NOT hide the built-in codex ``gpt-5.4``.
-    """
+    """Merge user presets over built-ins only on exact provider/name matches."""
     presets: dict[tuple[str, str], LLMPreset] = {}
     for key, data in get_all_presets().items():
         provider, name = key
         presets[key] = _preset_from_data(name, data, provider)
-    # User entries override the built-ins of the same (provider, name).
     presets.update(load_presets())
     return presets
 
@@ -352,16 +276,7 @@ def _split_provider_prefix(name: str) -> tuple[str, str]:
 
 
 def _get_preset_definition(name: str, provider: str = "") -> LLMPreset | None:
-    """Resolve a preset by bare or qualified name.
-
-    Rules:
-      1. ``provider`` argument wins when non-empty.
-      2. ``provider/name`` syntax in ``name`` picks that provider.
-      3. Aliases (``gpt-5.4-api`` → (openai, gpt-5.4)) are resolved.
-      4. A bare name that exists under exactly one provider resolves
-         silently. If it exists under multiple, ``ValueError`` is
-         raised with the ambiguity message.
-    """
+    """Resolve qualified names, aliases, or uniquely matched bare preset names."""
     base_name, _ = parse_variation_selector(name)
     qualified_provider, bare_name = _split_provider_prefix(base_name)
     if provider:
@@ -380,7 +295,6 @@ def _get_preset_definition(name: str, provider: str = "") -> LLMPreset | None:
             return preset
         return None
 
-    # Bare name lookup across all providers.
     matches = [p for (prov, n), p in definitions.items() if n == bare_name]
     if not matches:
         return None
@@ -442,13 +356,7 @@ def get_profile(name: str, provider: str = "") -> LLMProfile | None:
 
 
 def profile_to_identifier(profile: LLMProfile) -> str:
-    """Render an :class:`LLMProfile` as its canonical selector string.
-
-    Output shape is ``provider/name[@group=option,...]`` — the same
-    form the pickers emit and :func:`resolve_controller_llm` accepts.
-    Used by the ``/model`` command, rich-CLI banner, and web model
-    pill so every surface agrees on how the current model is spelt.
-    """
+    """Render a profile as ``provider/name`` plus sorted variation selections."""
     if not profile:
         return ""
     base = f"{profile.provider}/{profile.name}" if profile.provider else profile.name
@@ -466,13 +374,7 @@ def get_preset(name: str, provider: str = "") -> LLMProfile | None:
 
 
 def _legacy_model_provider_hint(controller_config: dict[str, Any]) -> str:
-    """Infer a provider for legacy raw ``controller.model`` configs.
-
-    Pre-hierarchy configs often specified only the backend model id
-    (e.g. ``model: gpt-5.4``) plus transport hints like
-    ``auth_mode: codex-oauth``. Preserve that behavior here without
-    weakening the stricter ambiguity checks for explicit preset names.
-    """
+    """Infer a provider from legacy transport hints without weakening preset checks."""
     auth_mode = controller_config.get("auth_mode", "") or ""
     if auth_mode == "codex-oauth":
         return "codex"
@@ -545,9 +447,6 @@ def resolve_controller_llm(
     return profile
 
 
-# ── Helpers ────────────────────────────────────────────────────
-
-
 def _login_provider_for(profile_or_data: dict[str, Any] | LLMProfile) -> str:
     """Return the provider name a caller should authenticate against."""
     if isinstance(profile_or_data, LLMProfile):
@@ -566,12 +465,11 @@ def _is_available(provider_name: str) -> bool:
     backend = backends.get(provider_name)
     if backend and backend.backend_type == "codex":
         if backend.base_url:
-            # Custom Responses endpoint -> API-key auth (base_url is the
-            # single discriminator, matching bootstrap + cli + frontend).
+            # A custom Responses endpoint uses API-key auth instead of OAuth.
             if get_api_key(provider_name):
                 return True
             return bool(backend.api_key_env and get_api_key(backend.api_key_env))
-        # ChatGPT-subscription -> OAuth token.
+        # The built-in Codex endpoint requires a cached OAuth token.
         return CodexTokens.load() is not None
     if provider_name == "codex":
         return CodexTokens.load() is not None
@@ -587,14 +485,7 @@ def _is_available(provider_name: str) -> bool:
 
 
 def list_all() -> list[dict[str, Any]]:
-    """List every user + built-in preset resolved against current providers.
-
-    Dedup key is ``(provider, name)``. A user preset at
-    ``(my-enterprise, gpt-5.4)`` never hides the built-in at
-    ``(codex, gpt-5.4)`` — they coexist in the output. User entries
-    only override built-ins when the full (provider, name) tuple
-    matches.
-    """
+    """List resolved presets, with user entries overriding exact built-in keys."""
     result: list[dict[str, Any]] = []
     definitions = _all_preset_definitions()
 

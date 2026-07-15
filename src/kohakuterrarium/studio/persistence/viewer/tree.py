@@ -1,8 +1,7 @@
 """Session-tree pane payload — fork lineage + attached agents.
 
-Verbatim port of ``api/routes/_session_viewer.py:build_tree_payload``.
-Returns ``{nodes, edges}`` for the viewer's tree pane: parent stub
-(if forked), direct children, attached agents.
+Builds the session viewer's tree payload from lineage metadata and
+agents attached to the same store.
 """
 
 from typing import Any
@@ -11,14 +10,11 @@ from kohakuterrarium.session.store import SessionStore
 
 
 def build_tree_payload(store: SessionStore, session_name: str) -> dict[str, Any]:
-    """Return ``{nodes, edges}`` for the session-tree pane.
+    """Return the focused session, adjacent forks, and attached agents.
 
-    One hop in each direction: parent (if forked) and direct
-    forked-children. Attached agents are always included recursively
-    because they live in this same store. Walking the full fork tree
-    would require opening every child file, which we defer to client-
-    side navigation (the user clicks a child node, the frontend calls
-    ``/tree`` again on that session).
+    Fork lineage is limited to the parent and direct children because deeper
+    traversal would require opening other session files. Attached agents are
+    included because their records live in the focused session's store.
     """
     meta = store.load_meta()
     session_id = str(meta.get("session_id") or session_name)
@@ -30,7 +26,6 @@ def build_tree_payload(store: SessionStore, session_name: str) -> dict[str, Any]
     nodes: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
 
-    # Root node = the session being viewed.
     nodes.append(
         {
             "id": session_id,
@@ -44,7 +39,7 @@ def build_tree_payload(store: SessionStore, session_name: str) -> dict[str, Any]
         }
     )
 
-    # Parent stub — only id is reliable without opening the file.
+    # Parent metadata is a stub because only its ID is reliable locally.
     if isinstance(fork_meta, dict):
         parent_id = fork_meta.get("parent_session_id")
         fork_point = fork_meta.get("fork_point")
@@ -66,7 +61,7 @@ def build_tree_payload(store: SessionStore, session_name: str) -> dict[str, Any]
                 }
             )
 
-    # Direct forked children — metadata-only nodes, no file opens.
+    # Child stubs avoid opening every forked session file.
     for child in forked_children:
         if not isinstance(child, dict):
             continue
@@ -92,7 +87,7 @@ def build_tree_payload(store: SessionStore, session_name: str) -> dict[str, Any]
             }
         )
 
-    # Attached agents — full nodes (they share the store).
+    # Attached-agent records are complete because they share this store.
     for entry in attached:
         ns = entry.get("namespace")
         if not ns:

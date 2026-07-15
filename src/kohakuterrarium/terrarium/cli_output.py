@@ -123,8 +123,7 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
                 "tools": [],
             }
         elif etype in ("text", "text_chunk"):
-            # ``text_chunk`` is Wave C's per-chunk streaming format;
-            # both render the same way in the resume preview.
+            # Persisted full text and streaming chunks share one replay representation.
             current["text"] += evt.get("content", "")
         elif etype == "tool_call":
             name = evt.get("name", "tool")

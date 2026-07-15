@@ -1,20 +1,8 @@
-"""Migration runner — applies ``*.sql`` files in lexical order.
+"""Apply append-only authentication migrations in numeric order.
 
-Each migration is wrapped in a transaction.  The :func:`run_migrations`
-function:
-
-1. Ensures ``schema_version`` exists (running the schema-bootstrap
-   migration 001 if not — that file creates ``schema_version`` plus
-   every other table).
-2. Reads ``schema_version`` to find the highest applied version.
-3. Iterates ``*.sql`` files in this folder, sorted lexically.  For
-   each file whose prefix integer is higher than the current version,
-   applies it inside a transaction and inserts an audit row in
-   ``schema_version``.
-
-The migrations are append-only by convention.  Down-migrations are not
-supported — same discipline as KohakuVault.  Sequential numbering
-keeps the lexical sort identical to the numeric sort.
+The runner bootstraps version tracking, skips applied files, and records each pending
+migration atomically with its schema-version row. Down-migrations are intentionally
+unsupported, and three-digit prefixes keep file order unambiguous.
 """
 
 import re
@@ -46,12 +34,7 @@ def _list_migrations() -> list[tuple[int, Path]]:
 
 
 def _ensure_schema_version_table(conn) -> None:
-    """Create ``schema_version`` if missing — bootstrap for a fresh DB.
-
-    The first migration (``001_initial.sql``) also creates this table;
-    we re-issue ``CREATE TABLE IF NOT EXISTS`` here so a partially-
-    applied first migration doesn't deadlock the runner.
-    """
+    """Ensure version tracking exists even after an interrupted initial migration."""
     conn.execute("""
         CREATE TABLE IF NOT EXISTS schema_version (
             version    INTEGER PRIMARY KEY,
@@ -84,14 +67,11 @@ def run_migrations(conn) -> int:
         logger.info("auth.migrations: applying", version=version, file=path.name)
         sql = path.read_text(encoding="utf-8")
         try:
-            # SQLite's executescript() runs in its own transaction;
-            # we manage commits manually so the version-bump row lands
-            # in the same atomic step.
+            # Explicit transaction control keeps schema changes and version tracking
+            # within one migration outcome.
             conn.execute("BEGIN")
             conn.executescript(sql)
-            # The migration file MAY itself insert into schema_version
-            # (001 does so to bootstrap the version row); ensure idempotency
-            # by checking before inserting.
+            # Bootstrap migrations may record themselves, so avoid a duplicate row.
             cur = conn.execute(
                 "SELECT 1 FROM schema_version WHERE version = ?", (version,)
             )

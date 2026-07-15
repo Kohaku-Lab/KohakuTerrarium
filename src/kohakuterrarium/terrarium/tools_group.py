@@ -1,38 +1,8 @@
-"""Group management tool surface.
-
-Two registration tiers:
-
-- :data:`ENGINE_BASIC_TOOL_NAMES` — ``send_channel`` (broadcast on a
-  wired channel) and ``group_send`` (point-to-point direct event).
-  Registered on **every** engine-backed creature regardless of
-  privilege. Their bodies enforce per-call gates (send-edge required
-  for ``send_channel``; non-privileged → privileged-target-only for
-  ``group_send``), so handing them out is safe.
-
-- :data:`PRIVILEGED_TOOL_NAMES` — graph-mutating tools (status / add /
-  remove / start / stop / channel / wire). Registered only on
-  privileged creatures.
-
-The nine tools are split across sibling modules to keep each file
-under the project's per-file budget:
-
-- :mod:`tools_group_status` — ``group_status``
-- :mod:`tools_group_lifecycle` — add / remove / start / stop node
-- :mod:`tools_group_channel` — channel CRUD + per-creature wiring
-- :mod:`tools_group_wire` — output-wire add / remove
-- :mod:`tools_group_send` — ``group_send`` and ``send_channel``
-
-Importing this module imports all of them, which fires every
-``@register_builtin`` decorator.
-"""
+"""Register communication tools for all creatures and mutation tools by privilege."""
 
 from typing import Any
 
-# Importing the submodules registers every group_* tool via their
-# ``@register_builtin`` decorators. Module-direct imports (rather than
-# ``from kohakuterrarium.terrarium import ...``) avoid pulling the
-# package __init__ into the dep graph, which would create a cycle with
-# engine.py.
+# Direct submodule imports trigger registration without cycling through package init.
 import kohakuterrarium.terrarium.tools_group_channel as _channel_mod  # noqa: F401
 import kohakuterrarium.terrarium.tools_group_lifecycle as _lifecycle_mod  # noqa: F401
 import kohakuterrarium.terrarium.tools_group_send as _send_mod  # noqa: F401
@@ -40,14 +10,13 @@ import kohakuterrarium.terrarium.tools_group_status as _status_mod  # noqa: F401
 import kohakuterrarium.terrarium.tools_group_wire as _wire_mod  # noqa: F401
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
 
-#: Tools every engine-backed creature gets — comm primitives that
-#: gate themselves at call time.
+#: Communication tools that enforce authorization per call.
 ENGINE_BASIC_TOOL_NAMES: tuple[str, ...] = (
     "send_channel",
     "group_send",
 )
 
-#: Tools only privileged creatures get — graph-mutating surface.
+#: Graph mutation tools reserved for privileged creatures.
 PRIVILEGED_TOOL_NAMES: tuple[str, ...] = (
     "group_status",
     "group_add_node",
@@ -62,21 +31,16 @@ PRIVILEGED_TOOL_NAMES: tuple[str, ...] = (
     "group_wire",
 )
 
-#: Union of both tiers — used by registration tests / introspection.
+#: Complete group tool surface for compatibility and introspection.
 GROUP_TOOL_NAMES: tuple[str, ...] = ENGINE_BASIC_TOOL_NAMES + PRIVILEGED_TOOL_NAMES
 
 
 def _register_named(agent: Any, names: tuple[str, ...]) -> None:
-    """Register every tool in ``names`` on ``agent``. Idempotent —
-    tools already present are skipped. Silently no-ops when the
-    agent's registry doesn't support ``register_tool`` (test fakes).
+    """Register missing tools and refresh the prompt when its surface changes.
 
-    Rebuilds the system prompt after any NEW registration so the group_*
-    tools (and ``group_status``'s "graph creature as unbounded sub-agent"
-    guidance) actually reach the model. Without this the prompt stays
-    frozen at build time and the tools are invisible in bracket/text mode
-    unless the Drive plugin install happens to rebuild it — so a
-    Drive-disabled creature could never see them (UXI-10 critic fix)."""
+    Unsupported registries and individual registration failures are tolerated for
+    lightweight hosts; executor registration mirrors the agent registry when present.
+    """
     registry = getattr(agent, "registry", None)
     executor = getattr(agent, "executor", None)
     if registry is None:
@@ -112,24 +76,15 @@ def _register_named(agent: Any, names: tuple[str, ...]) -> None:
 
 
 def force_register_basic_tools(agent: Any) -> None:
-    """Register the engine-tier comm tools (``send_channel``,
-    ``group_send``) on every engine-backed creature. Called from
-    :meth:`Terrarium.add_creature` for all creatures regardless of
-    ``is_privileged``."""
+    """Register communication tools on an engine-backed creature."""
     _register_named(agent, ENGINE_BASIC_TOOL_NAMES)
 
 
 def force_register_privileged_tools(agent: Any) -> None:
-    """Register the privileged graph-mutating tools on a creature's
-    agent. Called from :meth:`Terrarium.add_creature` when
-    ``is_privileged=True`` and from :meth:`Terrarium.assign_root`
-    when post-creation elevation occurs."""
+    """Register graph mutation tools on a privileged creature."""
     _register_named(agent, PRIVILEGED_TOOL_NAMES)
 
 
 def force_register_group_tools(agent: Any) -> None:
-    """Backward-compat helper — registers both tiers on a privileged
-    creature. New code should call :func:`force_register_basic_tools`
-    and :func:`force_register_privileged_tools` separately based on
-    privilege."""
+    """Register both tool tiers for backward compatibility."""
     _register_named(agent, GROUP_TOOL_NAMES)

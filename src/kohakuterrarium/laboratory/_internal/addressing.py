@@ -1,39 +1,13 @@
-"""L3 addressing — map logical names to node ids.
-
-Two address spaces:
-
-- **Creature refs** (1:1) — strings of the form ``creature://group/id``
-  or any opaque identifier. Each creature lives on exactly one node;
-  the directory stores ``ref → node_id``.
-- **Channels / topics** (1:N) — multiple subscribers across nodes.
-  The directory stores ``name → set[node_id]``. For SEND-to-channel
-  (load-balanced), :meth:`AddressDirectory.pick_listener` picks one
-  listener round-robin. For BROADCAST, :meth:`listeners` returns the
-  full set for fan-out.
-
-Node eviction (:meth:`evict_node`) cascades: when a node disconnects,
-all its creature registrations and listener entries are removed.
-"""
+"""Map creature references and channel listeners to Laboratory nodes."""
 
 
 class AddressDirectory:
-    """Per-host mapping of names → node ids.
-
-    Lives on the host engine. Updated via control messages when clients
-    register their creatures and channel subscriptions. Queried per
-    envelope to determine routing.
-
-    Not thread-safe; drive from the host's asyncio loop.
-    """
+    """Maintain host-loop routing state for creatures and channel listeners."""
 
     def __init__(self) -> None:
         self._creatures: dict[str, str] = {}
         self._listeners: dict[str, set[str]] = {}
         self._round_robin: dict[str, int] = {}
-
-    # ------------------------------------------------------------------
-    # Creature refs (1:1)
-    # ------------------------------------------------------------------
 
     def register_creature(self, ref: str, node_id: str) -> None:
         """Bind a creature ref to its hosting node. Overwrites any prior."""
@@ -50,10 +24,6 @@ class AddressDirectory:
     def known_creatures(self) -> dict[str, str]:
         """Snapshot of all (ref → node_id) registrations."""
         return dict(self._creatures)
-
-    # ------------------------------------------------------------------
-    # Channel listeners (1:N)
-    # ------------------------------------------------------------------
 
     def register_listener(self, channel: str, node_id: str) -> bool:
         """Add a listener to a channel. Returns whether it was new for this channel."""
@@ -97,17 +67,8 @@ class AddressDirectory:
         self._round_robin[channel] = idx + 1
         return picked
 
-    # ------------------------------------------------------------------
-    # Bulk operations
-    # ------------------------------------------------------------------
-
     def evict_node(self, node_id: str) -> tuple[int, int]:
-        """Remove all entries that reference ``node_id``.
-
-        Used when a node disconnects (gracefully or via heartbeat loss).
-        Returns ``(creatures_removed, listener_entries_removed)`` for
-        diagnostics.
-        """
+        """Remove a departed node's creatures and listener registrations."""
         creatures_removed = 0
         for ref, host in list(self._creatures.items()):
             if host == node_id:

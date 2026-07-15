@@ -1,8 +1,6 @@
 """Shared state types for the output router.
 
-Lives in its own module so :class:`OutputRouter` (``router.py``) and
-the parser-event mixin (``router_parsing.py``) can both import these
-types without an import cycle.
+Shared state types remain dependency-light to avoid router/mixin import cycles.
 """
 
 from dataclasses import dataclass, field
@@ -12,11 +10,7 @@ from enum import Enum, auto
 
 @dataclass
 class CompletedOutput:
-    """Record of a completed output event.
-
-    Tracked by the router so the controller can surface "your output
-    landed" feedback without re-reading the output module's state.
-    """
+    """Record output delivery for controller feedback without re-reading targets."""
 
     target: str
     content: str
@@ -25,32 +19,26 @@ class CompletedOutput:
     error: str | None = None
 
     def preview(self, max_len: int = 100) -> str:
-        """Get a preview of the content."""
+        """Return a length-limited content preview."""
         if len(self.content) <= max_len:
             return self.content
         return self.content[:max_len] + "..."
 
     def to_feedback_line(self) -> str:
-        """Format as a single feedback line for controller."""
+        """Format one controller feedback line."""
         time_str = self.timestamp.strftime("%H:%M:%S")
         if self.success:
             preview = self.preview(80)
-            # Escape newlines for single-line display
             preview = preview.replace("\n", "\\n")
             return f'- [{self.target}] ({time_str}): "{preview}"'
         return f"- [{self.target}] ({time_str}): FAILED - {self.error}"
 
 
 class OutputState(Enum):
-    """Output routing state machine.
+    """Represent parser context that controls raw-text visibility."""
 
-    Determines how raw text from the LLM is routed under different
-    parser contexts. The router transitions between states as parser
-    block-start/block-end events arrive.
-    """
-
-    NORMAL = auto()  # Regular text output (stdout)
-    TOOL_BLOCK = auto()  # Inside tool call block (suppress output)
-    SUBAGENT_BLOCK = auto()  # Inside sub-agent block (suppress output)
-    COMMAND_BLOCK = auto()  # Inside command block
-    OUTPUT_BLOCK = auto()  # Inside explicit output block
+    NORMAL = auto()
+    TOOL_BLOCK = auto()
+    SUBAGENT_BLOCK = auto()
+    COMMAND_BLOCK = auto()
+    OUTPUT_BLOCK = auto()

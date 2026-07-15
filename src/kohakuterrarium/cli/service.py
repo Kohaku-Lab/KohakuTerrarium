@@ -12,7 +12,7 @@ Three roles:
                  ``--name`` becomes the instance suffix when starting)
 - ``--all``    → ``kohakuterrarium-all.service`` (one-process AIO)
 
-Use ``--no-install`` to render the rendered files into the CWD without
+Use ``--no-install`` to render the files into the CWD without
 touching ``/etc/systemd/system/`` — useful for review or for shipping
 the rendered units via a configuration-management tool (Ansible,
 puppet) instead of letting the installer touch root paths.
@@ -30,9 +30,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# ``/etc`` paths the installer touches. Constants so tests can pin
-# them and so the same names appear in the generated journalctl
-# instructions.
+# Keep system paths and unit names centralized for rendering and operator output.
 SYSTEMD_UNIT_DIR = Path("/etc/systemd/system")
 SYSTEMD_ENV_DIR = Path("/etc/kohakuterrarium")
 UNIT_HOST = "kohakuterrarium-host.service"
@@ -46,15 +44,11 @@ DEFAULT_HOME_CLIENT_BASE = "/var/lib/kohakuterrarium-client"
 DEFAULT_HOME_ALL = "/var/lib/kohakuterrarium"
 
 _PACKAGING_DIR = Path(__file__).resolve().parents[1] / "packaging" / "systemd"
-# Templates ship inside the wheel under
-# ``kohakuterrarium/packaging/systemd/*.template`` via package-data
-# (see pyproject ``[tool.setuptools.package-data]``).  Editable
-# installs also have a copy at the repo's top-level
-# ``packaging/systemd/`` — ``_read_template`` tries the package
-# location first so dev and prod always resolve to the same content.
+# Prefer wheel package data, with the repository copy as an editable-install fallback.
 
 
 def _is_supported_platform() -> bool:
+    """Return whether systemd service management is supported."""
     return sys.platform.startswith("linux")
 
 
@@ -114,6 +108,7 @@ def _resolve_kt_aio_executable() -> str:
 def _render_host_unit(
     *, home_dir: str, http_host: str, http_port: int, lab_bind: str
 ) -> str:
+    """Render the lab-host systemd unit."""
     template = _read_template("kohakuterrarium-host.service.template")
     return template.format(
         kt_bin=_resolve_kt_executable(),
@@ -125,6 +120,7 @@ def _render_host_unit(
 
 
 def _render_client_unit(*, home_dir_base: str) -> str:
+    """Render the lab-client systemd template unit."""
     template = _read_template("kohakuterrarium-client@.service.template")
     return template.format(
         kt_bin=_resolve_kt_executable(),
@@ -133,6 +129,7 @@ def _render_client_unit(*, home_dir_base: str) -> str:
 
 
 def _render_all_unit(*, home_dir: str) -> str:
+    """Render the all-in-one systemd unit."""
     template = _read_template("kohakuterrarium-all.service.template")
     return template.format(
         kt_aio_bin=_resolve_kt_aio_executable(),
@@ -146,6 +143,7 @@ def _render_env(pairs: dict[str, str]) -> str:
 
 
 def _require_linux() -> None:
+    """Exit when service management is requested off Linux."""
     if not _is_supported_platform():
         print(
             "ERROR: `kt service` only supports Linux. "
@@ -158,6 +156,7 @@ def _require_linux() -> None:
 
 
 def _require_root() -> None:
+    """Exit when installation lacks permission to write system paths."""
     if os.geteuid() != 0:
         print(
             "ERROR: `kt service install` writes to /etc/systemd/system/ "
@@ -200,6 +199,7 @@ def _write_unit_and_env(
 
 
 def _atomic_write(path: Path, content: str, *, mode: int) -> None:
+    """Replace a file atomically with the requested mode."""
     tmp = Path(str(path) + ".tmp")
     tmp.write_text(content, encoding="utf-8")
     os.chmod(tmp, mode)
@@ -207,12 +207,14 @@ def _atomic_write(path: Path, content: str, *, mode: int) -> None:
 
 
 def _systemctl(*args: str) -> int:
+    """Run systemctl with visible operator logging."""
     cmd = ["systemctl", *args]
     print(f"[service] {' '.join(cmd)}", file=sys.stderr)
     return subprocess.call(cmd)
 
 
 def _print_post_install(unit_full_name: str) -> None:
+    """Print enablement, log, and status commands for an installed unit."""
     print(f"\nUnit installed: {unit_full_name}\n")
     print("Enable on boot and start now:")
     print(f"  sudo systemctl enable --now {unit_full_name}")
@@ -223,12 +225,8 @@ def _print_post_install(unit_full_name: str) -> None:
     print()
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Subcommand handlers
-# ─────────────────────────────────────────────────────────────────────
-
-
 def _cmd_install(args: argparse.Namespace) -> int:
+    """Install or render the requested service role."""
     _require_linux()
     if not args.no_install:
         _require_root()
@@ -247,6 +245,7 @@ def _cmd_install(args: argparse.Namespace) -> int:
 
 
 def _install_host(args, *, out_dir: Path, install: bool) -> int:
+    """Install or render the lab-host unit and environment."""
     home_dir = args.home_dir or DEFAULT_HOME_HOST
     http_host = args.http_host or "0.0.0.0"
     http_port = args.http_port or 8001
@@ -288,6 +287,7 @@ def _install_host(args, *, out_dir: Path, install: bool) -> int:
 
 
 def _install_client(args, *, out_dir: Path, install: bool) -> int:
+    """Install or render a lab-client template and environment."""
     if not args.host_url:
         print("ERROR: --host-url is required for client install", file=sys.stderr)
         return 2
@@ -331,6 +331,7 @@ def _install_client(args, *, out_dir: Path, install: bool) -> int:
 
 
 def _install_all(args, *, out_dir: Path, install: bool) -> int:
+    """Install or render the all-in-one unit and optional environment."""
     home_dir = args.home_dir or DEFAULT_HOME_ALL
     unit = _render_all_unit(home_dir=home_dir)
 
@@ -374,6 +375,7 @@ def _install_all(args, *, out_dir: Path, install: bool) -> int:
 
 
 def _cmd_uninstall(args: argparse.Namespace) -> int:
+    """Disable and remove the requested service role."""
     _require_linux()
     _require_root()
 
@@ -395,8 +397,7 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
     _systemctl("disable", "--now", unit_full)
 
-    # For --client we only remove the unit FILE when the LAST instance
-    # is being uninstalled. Detect that by listing enabled instances.
+    # Keep the shared client template until no installed instances remain.
     if args.role == "client":
         out = subprocess.run(
             ["systemctl", "list-units", "--all", "kohakuterrarium-client@*"],
@@ -422,7 +423,7 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
     _systemctl("daemon-reload")
 
-    # Ask before removing state.
+    # State removal is a separate destructive decision from unit removal.
     if state_dir.exists():
         ans = (
             input(
@@ -443,6 +444,7 @@ def _cmd_uninstall(args: argparse.Namespace) -> int:
 
 
 def _cmd_status(args: argparse.Namespace) -> int:
+    """Show systemd status for the requested service role."""
     _require_linux()
     if args.role == "host":
         unit_full = "kohakuterrarium-host.service"
@@ -457,6 +459,7 @@ def _cmd_status(args: argparse.Namespace) -> int:
 
 
 def _cmd_edit(args: argparse.Namespace) -> int:
+    """Open a systemd override editor for the requested service role."""
     _require_linux()
     _require_root()
     if args.role == "host":
@@ -469,11 +472,6 @@ def _cmd_edit(args: argparse.Namespace) -> int:
         print("ERROR: one of --host, --client, --all is required", file=sys.stderr)
         return 2
     return _systemctl("edit", unit_full)
-
-
-# ─────────────────────────────────────────────────────────────────────
-# CLI parser
-# ─────────────────────────────────────────────────────────────────────
 
 
 def add_service_subparser(subparsers) -> None:
@@ -489,7 +487,6 @@ def add_service_subparser(subparsers) -> None:
     )
     service_sub = service.add_subparsers(dest="service_command", required=True)
 
-    # install
     inst = service_sub.add_parser("install", help="Render + install a unit")
     _add_role_flags(inst)
     inst.add_argument("--name", default="worker-1", help="for --client: instance name")
@@ -507,27 +504,25 @@ def add_service_subparser(subparsers) -> None:
         help="render to CWD without writing to /etc/systemd/system/",
     )
 
-    # uninstall
     uninst = service_sub.add_parser("uninstall", help="Disable + remove a unit")
     _add_role_flags(uninst)
     uninst.add_argument(
         "--name", default="worker-1", help="for --client: instance name"
     )
 
-    # status
     status = service_sub.add_parser("status", help="systemctl status wrapper")
     _add_role_flags(status)
     status.add_argument(
         "--name", default="worker-1", help="for --client: instance name"
     )
 
-    # edit
     edit = service_sub.add_parser("edit", help="systemctl edit (overlay)")
     _add_role_flags(edit)
     edit.add_argument("--name", default="worker-1", help="for --client: instance name")
 
 
 def _add_role_flags(parser: argparse.ArgumentParser) -> None:
+    """Add mutually exclusive host, client, and all-in-one role flags."""
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
         "--host",

@@ -1,7 +1,7 @@
 """Persistence namespace for the :class:`Studio` façade.
 
-Split out of ``studio/studio.py`` (file-size cap).  Thin delegation
-over ``kohakuterrarium.studio.persistence.*`` with real signatures.
+Provides the typed ``studio.persistence`` namespaces while delegating storage,
+indexing, resume, fork, and viewer behavior to their owning persistence modules.
 """
 
 from __future__ import annotations
@@ -55,24 +55,19 @@ class _PersistenceNS:
         config_type: str | None = None,
         node_id: str | None = None,
     ) -> list[dict]:
-        """All saved sessions matching the given filters.
+        """Return every indexed session matching the supplied filters.
 
-        Backed by the session-index sidecar — no ``.kohakutr`` file
-        is opened.  Returns every matching row (no pagination); use
-        :meth:`stats` for aggregations or ``GET /api/sessions`` for a
-        paginated HTTP listing.
-
-        ``refresh=True`` runs an incremental reconcile first (catches
-        sessions written by sibling processes); ``full_rescan=True``
-        re-reads every file regardless of the fingerprint cache.
+        Listing reads only the sidecar index and deliberately does not paginate.
+        ``refresh`` reconciles external changes incrementally, while
+        ``full_rescan`` bypasses cached fingerprints and re-reads every session
+        file.
         """
         session_dir = _persistence_store._session_dir()
         index = _persistence_get_index(session_dir)
         if refresh or full_rescan:
             _persistence_reconcile(index, session_dir, full=full_rescan)
-        # Unpaginated: programmatic callers expect the full list.  The
-        # sidecar list method's ``limit`` is enforced for the HTTP
-        # surface only; here we widen it to the index size.
+        # The programmatic contract is unpaginated, so the shared index query is
+        # widened to the current row count rather than inheriting HTTP limits.
         total = index.count() or 1
         page = index.list(
             search=search,
@@ -92,9 +87,9 @@ class _PersistenceNS:
         refresh: bool = False,
         full_rescan: bool = False,
     ) -> dict[str, Any]:
-        """Aggregations over the sidecar.  Same shape as ``GET /api/sessions/stats``.
+        """Return session-index aggregations in the HTTP statistics shape.
 
-        ``refresh`` / ``full_rescan`` follow the same semantics as
+        ``refresh`` and ``full_rescan`` use the same reconciliation semantics as
         :meth:`list`.
         """
         session_dir = _persistence_store._session_dir()
@@ -151,7 +146,7 @@ class _PersistenceNS:
 
 
 class _PersistenceViewer:
-    """Post-hoc viewer payloads — tree / summary / turns / events / diff / export."""
+    """Build read-only tree, summary, history, diff, and export payloads."""
 
     def tree(self, store: Any, session_name: str) -> dict[str, Any]:
         return _viewer_tree.build_tree_payload(store, session_name)

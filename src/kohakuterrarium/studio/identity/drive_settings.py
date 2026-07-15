@@ -1,24 +1,15 @@
 """Studio-owned Drive runtime settings — the canonical ``drive-settings.yaml``.
 
-Studio is the management owner (design §2.4, §8.4): it loads/validates the
-per-node settings file, joins it with the registration catalog, and resolves an
-explicit :class:`DriveRuntimeSpec` that managed engine-construction paths inject
-into ``Terrarium(...)``. The low-level engine never reads this file.
+Studio owns the per-node settings file, joins it with the registration catalog,
+and resolves the explicit :class:`DriveRuntimeSpec` injected into managed
+``Terrarium`` instances. The low-level engine never reads this file.
 
-Locked semantics (design §8.4):
-
-- canonical file is ``config_dir() / "drive-settings.yaml"`` (honours
-  ``KT_CONFIG_DIR``); it is NOT the launcher's ``app-settings.json``;
-- the file stores serializable selections/options only — never live Python
-  objects or Drive records;
-- an absent file is atomically initialized with the runtime and built-in generic
-  and goal registrations enabled; a malformed file raises a typed validation
-  error and the last valid file is left untouched;
-- writes are atomic (tmp + replace) and optimistic-concurrency protected by a
-  content-hash ``revision``; a stale write raises :class:`DriveSettingsConflictError`;
-- **save and apply are distinct**: :func:`save_settings` only persists validated
-  config; :func:`apply_runtime` is the separate typed live-application operation
-  returning ``applied_live`` / ``restart_required`` / ``rejected``.
+The canonical file is ``config_dir() / "drive-settings.yaml"`` and contains
+only serializable selections and options. Missing files are initialized
+atomically; malformed files raise typed validation errors without modification.
+Writes use atomic replacement and content-hash revisions for optimistic
+concurrency. Saving persists configuration only; :func:`apply_runtime` performs
+the separate live-application operation.
 """
 
 import hashlib
@@ -61,8 +52,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Reconfigure result strings mirror ``drive.runtime`` (design §8.6) so callers
-# depend on one vocabulary. Imported lazily-free here to avoid an engine import.
+# Keep reconfiguration results aligned with ``drive.runtime`` without importing
+# the engine layer.
 APPLIED_LIVE = "applied_live"
 RESTART_REQUIRED = "restart_required"
 REJECTED = "rejected"
@@ -83,9 +74,10 @@ _RUNTIME_INT_FIELDS = (
 
 
 def drive_settings_path() -> Path:
-    """The ``drive-settings.yaml`` path, honouring ``KT_CONFIG_DIR``.
+    """Return the current ``drive-settings.yaml`` path.
 
-    Resolved fresh per call so test isolation / operator re-homing works.
+    Resolving the config directory per call preserves test isolation and runtime
+    changes to ``KT_CONFIG_DIR``.
     """
     return config_dir() / "drive-settings.yaml"
 
@@ -100,12 +92,11 @@ class RegistrationSetting:
 
 @dataclass(frozen=True)
 class DriveSettings:
-    """Parsed + validated ``drive-settings.yaml`` (design §8.4).
+    """Represent validated Drive settings and their persisted revision.
 
-    ``runtime`` reuses :class:`DriveRuntimeConfig` (its ``__post_init__`` is the
-    single source of tuning validation). ``revision`` is the content hash of the
-    on-disk bytes this was loaded from / would be saved as; it is excluded from
-    equality so two settings with identical content compare equal.
+    :class:`DriveRuntimeConfig` remains the source of runtime-tuning validation.
+    ``revision`` hashes the serialized bytes and is excluded from equality so
+    equivalent settings compare equal regardless of load history.
     """
 
     runtime: DriveRuntimeConfig = field(default_factory=DriveRuntimeConfig)
@@ -128,12 +119,12 @@ def default_settings() -> DriveSettings:
 
 
 class SaveDurability(Enum):
-    """Crash-durability a save actually achieved (design §8.4).
+    """Describe the crash durability achieved by a settings save.
 
-    ``FULL`` = file contents AND the directory-entry rename were fsync-durable;
-    ``FILE_ONLY`` = only file *contents* are guaranteed (the directory-fsync
-    barrier was unavailable — Windows has no directory-fsync API, or the
-    filesystem rejected it with ``EINVAL``)."""
+    ``FULL`` covers both file contents and the directory-entry rename.
+    ``FILE_ONLY`` guarantees file contents when no directory-fsync barrier is
+    available.
+    """
 
     FULL = "full"
     FILE_ONLY = "file_only"
@@ -172,8 +163,8 @@ def _parse_runtime(raw: dict[str, Any]) -> DriveRuntimeConfig:
             kwargs[name] = raw[name]
     retry_raw = _require_dict(raw.get("retry"), "runtime.retry")
     retention_raw = _require_dict(raw.get("retention"), "runtime.retention")
-    # DriveRetryConfig / DriveRetentionConfig / DriveRuntimeConfig each validate
-    # their own fields in __post_init__ -> malformed values raise DriveValidationError.
+    # Nested runtime dataclasses enforce their own field invariants in
+    # ``__post_init__`` and raise ``DriveValidationError`` for malformed values.
     if retry_raw:
         kwargs["retry"] = DriveRetryConfig(
             **_filter_dataclass(DriveRetryConfig, retry_raw)
@@ -186,8 +177,10 @@ def _parse_runtime(raw: dict[str, Any]) -> DriveRuntimeConfig:
 
 
 def _filter_dataclass(cls: type, raw: dict[str, Any]) -> dict[str, Any]:
-    """Keep only the keys ``cls`` declares — unknown keys are ignored for
-    forward-compatibility; the values are validated by ``cls.__post_init__``."""
+    """Filter input to declared dataclass fields for forward compatibility.
+
+    The dataclass initializer validates all retained values.
+    """
     fields = {f for f in cls.__dataclass_fields__}
     return {k: v for k, v in raw.items() if k in fields}
 
@@ -211,10 +204,10 @@ def _parse_registrations(raw: dict[str, Any]) -> dict[str, RegistrationSetting]:
 
 
 def parse_settings(raw: object, *, revision: str | None = None) -> DriveSettings:
-    """Validate a raw mapping into :class:`DriveSettings` (design §8.4).
+    """Validate a raw mapping into :class:`DriveSettings`.
 
-    Raises :class:`DriveValidationError` on any structural problem so a malformed
-    file is surfaced rather than silently enabling code.
+    Structural errors raise :class:`DriveValidationError` rather than silently
+    enabling malformed configuration.
     """
     raw = _require_dict(raw, "drive-settings")
     schema_version = raw.get("schema_version", CURRENT_SCHEMA_VERSION)
@@ -240,7 +233,7 @@ def parse_settings(raw: object, *, revision: str | None = None) -> DriveSettings
 
 
 def settings_to_dict(settings: DriveSettings) -> dict[str, Any]:
-    """Canonical serializable mapping (stable key order for a stable revision)."""
+    """Return the canonical mapping whose stable order defines the revision."""
     runtime = settings.runtime
     return {
         "schema_version": settings.schema_version,
@@ -288,19 +281,19 @@ def _revision_of(data: bytes) -> str:
 
 
 def load_settings() -> DriveSettings:
-    """Load + validate the settings file (design §8.4).
+    """Load and validate Drive settings, initializing defaults when absent.
 
-    An absent file is initialized atomically to :func:`default_settings`, then
-    loaded normally so callers always receive its content-hash revision. A
-    malformed file raises :class:`DriveValidationError` and is left untouched.
+    Initialization is atomic and followed by a normal load so the result always
+    includes its content-hash revision. Malformed files remain untouched and
+    raise :class:`DriveValidationError`.
     """
     path = drive_settings_path()
     if not path.exists():
         try:
             save_settings(default_settings(), expected_exists=False)
         except DriveSettingsConflictError:
-            # A conflict means another process won only if its file now exists;
-            # lock timeouts without a winner must remain visible to the caller.
+            # Suppress only the expected race where another process created the
+            # file; lock failures without a resulting file remain visible.
             if not path.exists():
                 raise
     data = path.read_bytes()
@@ -327,15 +320,12 @@ def save_settings(
     expected_revision: str | None = None,
     expected_exists: bool | None = None,
 ) -> SaveSettingsResult:
-    """Validate + atomically persist settings (design §8.4).
+    """Validate and atomically persist settings with optional concurrency checks.
 
-    ``settings`` may be a :class:`DriveSettings` or a raw mapping (validated
-    first). ``expected_exists=False`` explicitly means expect-absent;
-    ``expected_exists=None`` and no revision preserves unconditional-write
-    compatibility. A supplied revision must exactly match an existing file.
-    Returns the saved settings plus the :class:`SaveDurability` achieved: a
-    ``FILE_ONLY`` result means only file contents are crash-durable because the
-    directory-entry fsync barrier was unavailable.
+    Raw mappings are validated before serialization. ``expected_exists=False``
+    requires an absent file, while omitting both expectations permits an
+    unconditional write. A supplied revision must match the existing file.
+    The result reports whether both file and directory barriers were available.
     """
     parsed = (
         settings if isinstance(settings, DriveSettings) else parse_settings(settings)
@@ -343,11 +333,8 @@ def save_settings(
     path = drive_settings_path()
     new_bytes = _serialize(parsed)
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Hold BOTH locks across the optimistic check AND the replace so the read and
-    # write are one atomic critical section. ``_SAVE_LOCK`` excludes in-process
-    # threads; the OS file lock excludes separate processes. Either way the loser
-    # reads the winner's fresh revision and conflicts instead of silently
-    # overwriting it (R1-28).
+    # Hold thread and process locks across both revision validation and replacement
+    # so concurrent writers observe the winner's revision instead of overwriting it.
     with _SAVE_LOCK:
         file_lock = _acquire_save_lock(path)
         try:
@@ -374,19 +361,12 @@ def save_settings(
     )
 
 
-# ---------------------------------------------------------------------------
-# resolve — settings + catalog -> explicit DriveRuntimeSpec
-# ---------------------------------------------------------------------------
-
-
 def resolve_runtime(node: str = DEFAULT_NODE) -> DriveRuntimeSpec:
-    """Resolve settings into an explicit :class:`DriveRuntimeSpec` (design §8.4).
+    """Resolve persisted settings into an explicit :class:`DriveRuntimeSpec`.
 
-    Imports/instantiates ONLY enabled registrations. A missing/unloadable enabled
-    registration raises its typed error (never a silent substitution); enabling
-    the runtime with no enabled registration is rejected by
-    :class:`DriveRuntimeSpec` validation. When the runtime is disabled the catalog
-    is not scanned at all.
+    Disabled runtimes avoid catalog discovery. Enabled runtimes instantiate only
+    selected registrations and propagate typed load errors without substitution;
+    :class:`DriveRuntimeSpec` rejects an enabled runtime with no registrations.
     """
     settings = load_settings()
     if not settings.runtime.enabled:
@@ -400,8 +380,7 @@ def resolve_runtime(node: str = DEFAULT_NODE) -> DriveRuntimeSpec:
         instantiate_registration(name, settings.registrations[name].options)
         for name in settings.enabled_registration_names()
     )
-    # Surface duplicate-name / kind-collision loudly at resolve time (the same
-    # check the engine runs when it builds its snapshot).
+    # Validate duplicate names and kind collisions before the spec reaches an engine.
     EnabledRegistrySnapshot.build(registrations)
     return DriveRuntimeSpec(
         config=settings.runtime,
@@ -414,13 +393,11 @@ def resolve_runtime(node: str = DEFAULT_NODE) -> DriveRuntimeSpec:
 def resolve_drive_kwargs(
     node: str = DEFAULT_NODE, *, strict: bool = False
 ) -> dict[str, Any]:
-    """Explicit ``Terrarium(...)`` Drive kwargs from managed settings.
+    """Return explicit ``Terrarium`` Drive arguments from managed settings.
 
-    Managed construction paths call this exactly once and splat the result into
-    the constructor. ``strict=False`` (the construction default) degrades a
-    settings/registration error to a **disabled** runtime with a logged warning
-    so one bad setting cannot take the whole process down; ``strict=True`` (the
-    Settings save/apply path) re-raises so the operator sees the error.
+    Non-strict resolution degrades configuration or registration errors to a
+    disabled runtime so managed process startup can continue. Strict callers
+    receive the typed error for operator-facing save and apply workflows.
     """
     try:
         spec = resolve_runtime(node)
@@ -442,25 +419,18 @@ def resolve_drive_kwargs(
     }
 
 
-# ---------------------------------------------------------------------------
-# apply — the distinct live-application operation (design §8.6)
-# ---------------------------------------------------------------------------
-
-
 def _config_tuning_differs(a: DriveRuntimeConfig, b: DriveRuntimeConfig) -> bool:
     """Whether two runtime configs differ in anything other than ``enabled``."""
     return replace(a, enabled=False) != replace(b, enabled=False)
 
 
 def _engine_runtime_revision(engine: Any) -> str | None:
-    """Opaque hash of the engine's *running* Drive runtime state (or ``None``).
+    """Hash the engine's effective running Drive state, or return ``None``.
 
-    Hashes each enabled registration's effective *identity* — name, kind, schema
-    range, provenance package, compatibility, verifier mode, and the resolved
-    implementation fingerprint (module + qualname + distribution version) — plus
-    its normalized effective options and the runtime tuning (R1-29). A same-name
-    implementation-class / schema / package / option change therefore moves the
-    running revision instead of being silently invisible.
+    The hash covers runtime tuning plus each registration's schema, provenance,
+    compatibility, verifier mode, implementation fingerprint, and normalized
+    options. Same-name implementation or option changes therefore alter the
+    revision.
     """
     drives = getattr(engine, "drives", None)
     if drives is None:
@@ -495,14 +465,11 @@ def _engine_runtime_revision(engine: Any) -> str | None:
 
 
 def apply_runtime(engine: Any, *, node: str = DEFAULT_NODE) -> dict[str, Any]:
-    """Apply the current settings to a live engine (design §8.6).
+    """Apply current settings to a live engine and report the resulting state.
 
-    Returns ``{result, desired_revision, running_revision, warnings}`` where
-    ``result`` is ``applied_live`` / ``restart_required`` / ``rejected``. Only a
-    live registration-set change on an already-enabled runtime with unchanged
-    tuning is applied live; turning the runtime on/off or changing tuning
-    conservatively reports ``restart_required`` (v1 boundary). A save never
-    implies apply.
+    Registration changes can apply live only while the runtime stays enabled and
+    tuning is unchanged. Enabling, disabling, or retuning requires a restart.
+    Persisting settings never implies live application.
     """
     running_rev = _engine_runtime_revision(engine)
     try:
@@ -541,16 +508,11 @@ def apply_runtime(engine: Any, *, node: str = DEFAULT_NODE) -> dict[str, Any]:
     }
 
 
-# ---------------------------------------------------------------------------
-# status DTO for the Settings panel
-# ---------------------------------------------------------------------------
-
-
 def settings_status(node: str = DEFAULT_NODE) -> dict[str, Any]:
-    """Settings-file view for the Settings panel (available/enabled/load status).
+    """Return the settings-panel view of runtime and registration status.
 
-    Never raises on a malformed file — the parse error is surfaced as
-    ``parse_error`` so the panel can render it instead of 500-ing.
+    Malformed files are represented by ``parse_error`` so presentation layers can
+    render the problem instead of returning an internal error.
     """
     try:
         settings = load_settings()

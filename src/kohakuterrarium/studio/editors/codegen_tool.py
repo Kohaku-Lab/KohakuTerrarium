@@ -1,14 +1,8 @@
 """Codegen for ``BaseTool`` subclasses.
 
-Three entry points (see ``codegen_init.py``):
-
-* ``render_new(form)`` — scaffold a new tool file from
-  ``templates/tool.py.j2``.
-* ``update_existing(source, form, execute_body)`` — patch an
-  existing file in place, preserving formatting + comments.
-* ``parse_back(source)`` — extract form state + execute body
-  from existing source. Raises ``RoundTripError`` if the file
-  doesn't look like a BaseTool subclass.
+Scaffolds tool modules, updates managed properties and ``_execute`` bodies with
+LibCST, and extracts form state. Unsupported source shapes fall back to raw mode
+instead of risking a lossy rewrite.
 """
 
 import libcst as cst
@@ -27,23 +21,8 @@ from kohakuterrarium.studio.editors.codegen_common import (
 )
 from kohakuterrarium.studio.editors.templates import render
 
-# ----------------------------------------------------------------------
-# Scaffold
-# ----------------------------------------------------------------------
-
-
 def render_new(form: dict) -> str:
-    """Render a brand-new tool source file.
-
-    Required form keys:
-      - ``name``: snake_case tool identifier (used as file stem)
-      - ``class_name``: PascalCase class name (optional, derived
-        from name if missing)
-      - ``description``: one-liner for the prompt list
-      - ``execution_mode``: direct | background | stateful
-      - ``needs_context``: bool
-      - ``execute_body``: python body text
-    """
+    """Render a new tool from identity, execution metadata, and method body."""
     name = form.get("name") or form.get("tool_name") or "my_tool"
     class_name = form.get("class_name") or _to_class_name(name)
     ctx = {
@@ -58,13 +37,8 @@ def render_new(form: dict) -> str:
     return render("tool.py.j2", **ctx)
 
 
-# ----------------------------------------------------------------------
-# Round-trip update
-# ----------------------------------------------------------------------
-
-
 def update_existing(source: str, form: dict, execute_body: str) -> str:
-    """Patch *source* in place. See module docstring."""
+    """Update managed tool properties and the ``_execute`` body in place."""
     tree = parse(source)
     class_name = form.get("class_name")
     if class_name:
@@ -85,17 +59,10 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     return replace_class_in_module(tree, class_name, klass).code
 
 
-# ----------------------------------------------------------------------
-# Parse back
-# ----------------------------------------------------------------------
-
-
 def parse_back(source: str) -> dict:
-    """Extract form state from existing tool source.
+    """Extract editable tool state, falling back to raw mode when unsafe.
 
-    Returns an envelope with ``mode``, ``form``, ``execute_body``,
-    ``warnings``. Never raises; returns ``mode=raw`` on shapes we
-    can't handle.
+    The returned envelope includes form values, the execute body, and warnings.
     """
     warnings: list[dict] = []
 
@@ -149,16 +116,12 @@ def parse_back(source: str) -> dict:
             "execution_mode": execution_mode or "direct",
             "needs_context": needs_context,
             "require_manual_read": require_manual_read,
-            "params": [],  # Not inferable from BaseTool files; Phase 5 UI edits this separately
+            # BaseTool source does not expose a canonical parameter declaration.
+            "params": [],
         },
         "execute_body": exec_body,
         "warnings": warnings,
     }
-
-
-# ----------------------------------------------------------------------
-# Helpers
-# ----------------------------------------------------------------------
 
 
 def _raw_mode_envelope(source: str, reason: str) -> dict:
@@ -179,12 +142,10 @@ def _raw_mode_envelope(source: str, reason: str) -> dict:
 
 
 def _pick_tool_class(tree: cst.Module) -> cst.ClassDef | None:
-    """Find a class that looks like a BaseTool subclass."""
-    # Prefer an explicit BaseTool subclass.
+    """Return an explicit ``BaseTool`` subclass or the first class fallback."""
     for node in tree.body:
         if isinstance(node, cst.ClassDef) and _has_base(node, "BaseTool"):
             return node
-    # Fall back to the first class in the module.
     return first_class(tree)
 
 
@@ -203,7 +164,7 @@ def _has_base(klass: cst.ClassDef, name: str) -> bool:
 
 
 def _read_execution_mode(klass: cst.ClassDef) -> str | None:
-    """Parse ``return ExecutionMode.DIRECT`` out of the property."""
+    """Read a literal ``ExecutionMode`` member returned by the property."""
     for node in klass.body.body:
         if not (
             isinstance(node, cst.FunctionDef) and node.name.value == "execution_mode"
@@ -234,6 +195,6 @@ def _has_decorators_on_execute(klass: cst.ClassDef) -> bool:
 
 
 def _to_class_name(name: str) -> str:
-    """my_tool -> MyTool."""
+    """Convert a module-style name to its tool class name."""
     parts = name.replace("-", "_").split("_")
     return "".join(p[:1].upper() + p[1:] for p in parts if p) + "Tool"

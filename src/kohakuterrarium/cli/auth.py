@@ -11,9 +11,8 @@ def login_cli(provider: str) -> int:
     if backend is None:
         print(f"Unknown provider: {provider}")
         return 1
-    # A codex (Responses-API) backend uses OAuth only with no custom
-    # endpoint; a ``base_url`` means API-key auth (single discriminator,
-    # matching bootstrap + _is_available + frontend).
+    # Codex uses OAuth only for the default endpoint; a custom base URL selects
+    # API-key authentication consistently across bootstrap and UI availability.
     if backend.backend_type == "codex" and not backend.base_url:
         return _codex_login()
     return login_with_api_key(provider, backend.api_key_env)

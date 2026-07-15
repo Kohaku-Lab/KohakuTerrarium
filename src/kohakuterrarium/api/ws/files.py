@@ -2,10 +2,9 @@
 
 Host-local: thin shell over
 :func:`kohakuterrarium.studio.attach.workspace_watch.watch_directory`.
-Remote: refuse with a structured error frame — workspace-watch needs
-a worker-side filesystem-events stream that hasn't been wired yet.
-(``terrarium.files`` adapter handles one-shot read/write/list/delete;
-adding a ``watch`` stream type is a follow-up.)
+Remote creatures receive a structured error because workspace watching
+requires a worker-side filesystem event stream; ``terrarium.files`` currently
+supports only one-shot file operations.
 
 Wire format (server → client):
 
@@ -38,8 +37,8 @@ async def watch_files(
     """Watch file changes in a creature's working directory."""
     await accept_with_auth_echo(websocket)
 
-    # Lab-host has no host engine — ``host_engine_or_none`` returns
-    # ``None`` and we go straight to the remote-check branch.
+    # Lab hosts have no local engine, so lookup falls through to the
+    # cluster-wide remote-creature check.
     engine = host_engine_or_none(service)
     creature = None
     if engine is not None:
@@ -48,8 +47,8 @@ async def watch_files(
         except Exception:  # noqa: BLE001 — local-lookup failure routes to remote
             creature = None
     if creature is None:
-        # Presence in the service's cluster-wide registry is enough to
-        # mean "remote"; don't gate on ``info.graph_id`` (over-strict).
+        # Registry presence alone establishes that the creature is remote;
+        # requiring graph metadata would reject otherwise valid entries.
         try:
             info = await service.get_creature_info(agent_id)
         except Exception:

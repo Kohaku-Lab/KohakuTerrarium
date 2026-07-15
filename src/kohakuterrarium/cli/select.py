@@ -34,11 +34,11 @@ class Runnable:
 
     ref: str
     name: str
-    kind: str  # "creature" | "terrarium"
-    source: str  # package name or "local"
+    kind: str
+    source: str
     description: str = ""
     model: str = ""
-    members: tuple[str, ...] = ()  # terrarium-only: member creature names
+    members: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -137,7 +137,7 @@ def _matches(runnable: Runnable, needle: str) -> bool:
 class Row:
     """One rendered line in the picker: a group header or a runnable."""
 
-    kind: str  # "header" | "entry"
+    kind: str
     source: str
     runnable: Runnable | None = None
 
@@ -194,44 +194,43 @@ class NavState:
         self._refresh()
         self.cursor = self._first_entry_index()
 
-    # ── derivation ──
-
     def _refresh(self) -> None:
+        """Recompute visible rows and clamp the cursor."""
         self.rows = flatten_rows(self.groups, self.expanded, self.filter)
         self._clamp()
 
     def _clamp(self) -> None:
+        """Clamp the cursor to the visible row range."""
         if not self.rows:
             self.cursor = 0
             return
         self.cursor = max(0, min(self.cursor, len(self.rows) - 1))
 
     def _first_entry_index(self) -> int:
+        """Return the first selectable row index."""
         for i, row in enumerate(self.rows):
             if row.kind == "entry":
                 return i
         return 0
 
-    # ── queries ──
-
     def current(self) -> Row | None:
+        """Return the row under the cursor."""
         if not self.rows:
             return None
         return self.rows[max(0, min(self.cursor, len(self.rows) - 1))]
 
     def is_empty(self) -> bool:
+        """Return whether no picker rows are visible."""
         return not self.rows
 
-    # ── cursor ──
-
     def move(self, delta: int) -> None:
+        """Move the cursor within the visible rows."""
         if not self.rows:
             return
         self.cursor = max(0, min(len(self.rows) - 1, self.cursor + delta))
 
-    # ── expand / collapse ──
-
     def _header_source_for_cursor(self) -> str | None:
+        """Return the source group associated with the current row."""
         row = self.current()
         if row is None:
             return None
@@ -261,6 +260,7 @@ class NavState:
         self._move_cursor_to_header(row.source)
 
     def _move_cursor_to_header(self, source: str) -> None:
+        """Move the cursor to a source group's header."""
         for i, row in enumerate(self.rows):
             if row.kind == "header" and row.source == source:
                 self.cursor = i
@@ -277,8 +277,7 @@ class NavState:
             return None
         if row.kind == "entry" and row.runnable is not None:
             return row.runnable.ref
-        # Header: toggle expansion (ignored while filtering — everything
-        # is already expanded then).
+        # Filtering forces matching groups open, so collapse state is ignored.
         if not self.filter.strip():
             if row.source in self.expanded:
                 self.expanded.discard(row.source)
@@ -288,14 +287,14 @@ class NavState:
             self._move_cursor_to_header(row.source)
         return None
 
-    # ── filter ──
-
     def add_char(self, char: str) -> None:
+        """Append one character to the active filter."""
         self.filter += char
         self._refresh()
         self.cursor = self._first_entry_index()
 
     def backspace(self) -> None:
+        """Remove one character from the active filter."""
         if self.filter:
             self.filter = self.filter[:-1]
             self._refresh()

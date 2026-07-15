@@ -1,10 +1,4 @@
 """Inline TUI widgets for Phase B display events: card and progress.
-
-Both mount in the chat scroll like the existing tool/sub-agent blocks
-and update in place when an OutputEvent with ``update_target`` lands.
-``CardBlock`` with non-empty ``actions`` becomes interactive: the
-buttons submit a :class:`UIReply` to the agent's output_router via
-the ``router`` argument passed on construction.
 """
 
 import webbrowser
@@ -25,16 +19,7 @@ _ACCENT_COLOR_MAP = {
 
 
 class CardBlock(Vertical):
-    """Inline card widget — Phase B ``card`` event renderer.
-
-    When ``payload.actions`` is non-empty AND ``on_action`` is wired,
-    actions render as real Textual Button widgets that submit a reply.
-    A ``link``-styled action opens its ``url`` in the default browser
-    instead of submitting a reply (no agent round-trip).
-
-    Display-only mode (no actions, or no callback) shows the card with
-    no interactive controls.
-    """
+    """Render a card with display-only, reply, or link actions."""
 
     DEFAULT_CSS = """
     CardBlock {
@@ -87,9 +72,7 @@ class CardBlock(Vertical):
         super().__init__()
         self._payload = payload
         self._event_id = event_id
-        # Callable invoked with (event_id, action_id) when the user
-        # clicks a non-link action. The TUI's output module wires this
-        # to ``router.submit_reply``.
+        # Non-link actions report their event and action IDs through this callback.
         self._on_action = on_action
         self._resolved: bool = False
         self._resolved_action: str = ""
@@ -140,7 +123,7 @@ class CardBlock(Vertical):
             yield Horizontal(*buttons, classes="card-actions")
             yield Static("", classes="card-resolved", id="card-resolved-line")
         elif actions:
-            # Display-only chips for non-interactive cards.
+            # Without a reply callback, actions are informational rather than clickable.
             chips = []
             for a in actions:
                 label = a.get("label", a.get("id", "?"))
@@ -168,6 +151,7 @@ class CardBlock(Vertical):
         try:
             self.styles.border = ("round", colour)
         except Exception:
+            # Style application is cosmetic and may race an early unmount.
             pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -177,22 +161,21 @@ class CardBlock(Vertical):
         if not btn_id.startswith("act-"):
             return
         action_id = btn_id[len("act-") :]
-        # Find the action definition.
         actions = self._payload.get("actions") or []
         action = next((a for a in actions if a.get("id") == action_id), None)
         if action is None:
             return
-        # Link actions open the URL and don't submit a reply.
+        # Link actions bypass the agent and open directly in the browser.
         if action.get("style") == "link":
             url = action.get("url", "")
             if url:
                 try:
                     webbrowser.open(url)
                 except Exception:
+                    # Browser availability must not turn a card action into a TUI failure.
                     pass
             return
-        # Submit the reply. Mark resolved so further clicks don't
-        # double-submit; dim the buttons.
+        # Resolve after submission so repeated clicks cannot duplicate the reply.
         try:
             self._on_action(self._event_id or "", action_id)
         finally:
@@ -207,15 +190,12 @@ class CardBlock(Vertical):
             line = self.query_one("#card-resolved-line", Static)
             line.update(f"[#888888]→ {action_id}[/]")
         except Exception:
+            # Resolution state still prevents duplicate replies if widgets unmount early.
             pass
 
 
 class ProgressBlock(Vertical):
-    """Inline progress widget — Phase B ``progress`` event renderer.
-
-    Mounts a Textual ``ProgressBar`` plus a label. Updates mutate
-    in place via ``update_progress``.
-    """
+    """Render an in-place updatable progress label and bar."""
 
     DEFAULT_CSS = """
     ProgressBlock {
@@ -248,7 +228,6 @@ class ProgressBlock(Vertical):
 
     def compose(self) -> ComposeResult:
         yield Static(self._label_text, classes="progress-label")
-        # Textual ProgressBar accepts total=None for indeterminate.
         total = None if self._indeterminate or self._max is None else float(self._max)
         bar = ProgressBar(total=total, show_eta=False)
         yield bar
@@ -273,11 +252,12 @@ class ProgressBlock(Vertical):
             if value is not None:
                 bar.update(progress=float(value))
             if complete:
-                # Visually mark done. For determinate bars, fill to total.
+                # Determinate completion fills the bar before marking the label.
                 if max_value is not None:
                     bar.update(progress=float(max_value))
                 self.query_one(".progress-label", Static).update(
                     f"[#4C9989]✓[/] {self._label_text}"
                 )
         except Exception:
+            # Updates may arrive before mount or after removal; stored values remain valid.
             pass

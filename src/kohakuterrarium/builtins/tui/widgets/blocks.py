@@ -5,15 +5,8 @@ from textual.widgets import Collapsible, Static
 
 from kohakuterrarium.builtins.tui.widgets.helpers import _summarize_output
 
-# ── Tool Call Block ─────────────────────────────────────────────
-
-
 class ToolBlock(Collapsible):
-    """A single tool call displayed as a collapsible accordion.
-
-    Collapsed title shows: icon + name + args + (summary)
-    Expanded body shows: full tool output sent to LLM
-    """
+    """Display a tool call and its result in a collapsible block."""
 
     DEFAULT_CSS = """
     ToolBlock {
@@ -102,8 +95,8 @@ class ToolBlock(Collapsible):
             try:
                 self._output_widget.update(output[:3000])
             except Exception as e:
-                _ = e  # fallback: Textual markup parse failure, use raw Content
-                # Escape markup-like content that Textual can't parse
+                _ = e
+                # Raw Content prevents tool output from being parsed as Textual markup.
                 from textual.content import Content
 
                 self._output_widget.update(Content(output[:3000]))
@@ -118,7 +111,8 @@ class ToolBlock(Collapsible):
             try:
                 self._output_widget.update(error[:3000])
             except Exception as e:
-                _ = e  # fallback: Textual markup parse failure, use raw Content
+                _ = e
+                # Raw Content prevents tool output from being parsed as Textual markup.
                 from textual.content import Content
 
                 self._output_widget.update(Content(error[:3000]))
@@ -128,7 +122,7 @@ class ToolBlock(Collapsible):
 
 
 class SubAgentBlock(Collapsible):
-    """A sub-agent collapsible. Nested tools are plain text lines, not accordions."""
+    """Display a sub-agent and its nested tool activity."""
 
     DEFAULT_CSS = """
     SubAgentBlock {
@@ -205,10 +199,10 @@ class SubAgentBlock(Collapsible):
         self.start_time = time.monotonic()
         self._tools_container = Vertical(classes="sa-tools")
         self._result_widget = Static("", classes="sa-result")
-        # Track tool lines by unique key for updating
+        # Unique keys preserve repeated same-name calls; the name index lets legacy
+        # completion events find the first still-running call.
         self._tool_lines: dict[str, Static] = {}
         self._tool_counter: int = 0
-        # Map: tool_name -> list of keys (for matching done events by name)
         self._tool_name_keys: dict[str, list[str]] = {}
         super().__init__(
             self._tools_container,
@@ -242,7 +236,7 @@ class SubAgentBlock(Collapsible):
             return "".join(parts)
 
     def add_tool_line(self, tool_name: str, args_preview: str = "") -> str:
-        """Add a single-line tool entry. Returns unique key for update."""
+        """Add a tool entry and return its update key."""
         key = f"{tool_name}_{self._tool_counter}"
         self._tool_counter += 1
         text = f"\u25cb {tool_name}"
@@ -255,18 +249,18 @@ class SubAgentBlock(Collapsible):
         try:
             self._tools_container.mount(line)
         except Exception as e:
-            _ = e  # fallback: widget not yet mounted, defer to on_mount
+            _ = e
+            # Tool activity may arrive before the nested container is mounted.
             if not hasattr(self, "_pending_tool_lines"):
                 self._pending_tool_lines = []
             self._pending_tool_lines.append(line)
         return key
 
     def on_mount(self) -> None:
-        """Mount pending tool lines and apply deferred CSS classes."""
+        """Mount deferred tool lines and apply their state classes."""
         if hasattr(self, "_pending_tool_lines"):
             for line in self._pending_tool_lines:
                 self._tools_container.mount(line)
-                # Apply CSS class that was set before mount
                 if hasattr(line, "_deferred_class"):
                     line.add_class(line._deferred_class)
             del self._pending_tool_lines
@@ -274,8 +268,7 @@ class SubAgentBlock(Collapsible):
     def update_tool_line(
         self, tool_name: str, done: bool = True, error: bool = False
     ) -> None:
-        """Update the first unfinished tool line matching tool_name."""
-        # Find first key for this tool_name that's still running (○)
+        """Complete the first running tool entry with the given name."""
         keys = self._tool_name_keys.get(tool_name, [])
         line = None
         for key in keys:
@@ -289,10 +282,9 @@ class SubAgentBlock(Collapsible):
         new_text = old_text.replace("\u25cb ", "\u25cf " if done else "\u2717 ", 1)
         line._raw_text = new_text
         line.update(new_text)
-        # Store desired class for deferred application after mount
         cls = "-error" if error else "-done"
+        # Preserve state for lines whose widgets have not mounted yet.
         line._deferred_class = cls
-        # Try to apply now (works if already mounted, harmless if not)
         line.add_class(cls)
 
     def mark_done(
@@ -332,10 +324,7 @@ class SubAgentBlock(Collapsible):
 
 
 class CompactSummaryBlock(Collapsible):
-    """Compact summary displayed as a collapsible accordion.
-
-    Amber while compacting, aquamarine when done.
-    """
+    """Display context compaction progress and its summary."""
 
     DEFAULT_CSS = """
     CompactSummaryBlock {
@@ -383,7 +372,7 @@ class CompactSummaryBlock(Collapsible):
         self.add_class("-done" if done else "-running")
 
     def mark_done(self, summary: str) -> None:
-        """Transition from running (amber) to done (sapphire)."""
+        """Complete the compaction block with its summary."""
         self._body.update(summary)
         self.title = "\u25cf Context auto-compact"
         self.remove_class("-running")

@@ -1,8 +1,4 @@
-"""
-Output router - routes parse events to appropriate output modules.
-
-Uses a simple state machine to handle different output modes.
-"""
+"""Route parsed and typed events across default, named, and secondary outputs."""
 
 import asyncio
 
@@ -26,37 +22,7 @@ logger = get_logger(__name__)
 
 
 class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
-    """Routes parse events to appropriate output modules.
-
-    Handles:
-    - Text events → default output module (stdout)
-    - OutputCallEvent → named output module (e.g., discord, tts)
-    - Tool/subagent events → suppress text, queue for handling
-    - Commands → queue for handling
-
-    The implementation is split across mixins so each file stays
-    focused:
-
-    - :class:`OutputRouterParseEventMixin` (``router_parsing.py``) —
-      ``route(parse_event)`` and the per-ParseEvent handlers
-      (``_handle_text``, ``_handle_output``, ``_handle_assistant_image``,
-      block start/end).
-    - :class:`OutputRouterInteractiveMixin` (``router_interactive.py``)
-      — Phase B interactive bus (``emit_and_wait``, ``submit_reply``,
-      supersede broadcast).
-    - This file — typed-event ``emit()`` dispatch, secondary-output
-      management, lifecycle (``start``/``stop``/``flush``/processing
-      hooks).
-
-    Note on current architecture:
-        In the standard Agent flow, ToolCallEvent, SubAgentCallEvent, and
-        CommandEvent are handled BEFORE reaching the router:
-        - ToolCallEvent/SubAgentCallEvent: Agent handles directly from controller output
-        - CommandEvent: Controller handles inline, converts to TextEvent
-
-        The pending_* properties exist for alternative architectures where
-        the router receives all events and the caller processes them afterward.
-    """
+    """Coordinate output state, typed events, lifecycle, and interactive replies."""
 
     def __init__(
         self,
@@ -66,15 +32,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         suppress_tool_blocks: bool = True,
         suppress_subagent_blocks: bool = True,
     ):
-        """
-        Initialize output router.
-
-        Args:
-            default_output: Default output module for text (stdout)
-            named_outputs: Named output modules (e.g., {"discord": DiscordOutput})
-            suppress_tool_blocks: Don't output text inside tool blocks
-            suppress_subagent_blocks: Don't output text inside subagent blocks
-        """
+        """Initialize output targets, suppression state, and event queues."""
         self.default_output = default_output
         self.named_outputs = named_outputs or {}
         self.suppress_tool_blocks = suppress_tool_blocks
@@ -86,20 +44,14 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         self._pending_commands: list[CommandEvent] = []
         self._pending_outputs: list[OutputCallEvent] = []
 
-        # Track completed outputs for feedback to controller
         self._completed_outputs: list[CompletedOutput] = []
 
-        # Secondary output modules (receive copies of all text output)
         self._secondary_outputs: list[OutputModule] = []
 
-        # Phase B: pending interactive events awaiting a UIReply.
-        # Keyed by event.id; values are Futures that resolve when a
-        # renderer submits the reply via ``submit_reply``.
+        # Interactive reply futures are keyed by the originating event ID.
         self._pending_replies: dict[str, asyncio.Future[UIReply]] = {}
 
-        # Phase B: outputs that submit replies (TUI / web bridge)
-        # need a reference back to the router. Set duck-typed ``_router``
-        # on every output that exposes it.
+        # Interactive outputs need a back-reference for reply submission.
         for output in (default_output, *self._secondary_outputs):
             self._maybe_link_router(output)
         for output in (self.named_outputs or {}).values():
@@ -140,7 +92,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
 
     @property
     def completed_outputs(self) -> list[CompletedOutput]:
-        """Get completed outputs (does not clear - use get_and_clear_completed_outputs)."""
+        """Return completed outputs without consuming them."""
         return self._completed_outputs
 
     def get_and_clear_completed_outputs(self) -> list[CompletedOutput]:
@@ -150,12 +102,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         return outputs
 
     def get_output_feedback(self) -> str | None:
-        """
-        Get feedback string for completed outputs and clear the list.
-
-        Returns:
-            Formatted feedback string, or None if no outputs.
-        """
+        """Consume completed outputs and format controller feedback."""
         outputs = self.get_and_clear_completed_outputs()
         if not outputs:
             return None
@@ -173,17 +120,11 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         self._maybe_link_router(output)
 
     def _maybe_link_router(self, output: OutputModule) -> None:
-        """Set ``output._router`` to ``self`` if the output exposes the
-        slot, so interactive renderers (TUI / web bridge) can call back
-        into ``router.submit_reply``. Outputs without the slot are
-        unaffected.
-        """
+        """Best-effort link an interactive output back to this router."""
         try:
             object.__setattr__(output, "_router", self)
         except Exception:
-            # Some output types may forbid arbitrary attribute setting
-            # (e.g. strict slots). Best-effort; non-interactive
-            # renderers don't need this.
+            # Non-interactive or slotted outputs do not require the back-reference.
             pass
 
     def remove_secondary(self, output: OutputModule) -> None:
@@ -193,22 +134,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         ]
 
     async def emit(self, event: OutputEvent) -> None:
-        """Bus-level entry point for typed OutputEvents.
-
-        Phase A semantics: fans every event type to the same set of
-        targets the legacy per-method hooks already fan to. Existing
-        renderers see byte-identical method calls.
-
-        Type → routing rule:
-        - ``text``: through the text state machine (default + secondaries).
-        - ``processing_start`` / ``processing_end``: default + named +
-          secondary outputs.
-        - ``user_input``: default output only (matches today's behaviour).
-        - ``assistant_image``: default + secondaries.
-        - ``resume_batch``: default output only.
-        - any other type (activity events): default + secondaries via
-          the same dispatch ``notify_activity`` uses.
-        """
+        """Dispatch a typed event according to its output visibility contract."""
         match event.type:
             case "text":
                 content = event.content
@@ -244,20 +170,13 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
                 | "card"
                 | "ui_supersede"
             ):
-                # Phase B kinds. Fan via outputs' ``emit()`` so renderers
-                # see the typed event with full payload — the legacy
-                # ``on_activity`` path would lose the structure.
+                # Rich UI events retain their typed payload through output emitters.
                 await self._fan_event_to_outputs(event)
             case _:
                 self._dispatch_activity_event(event)
 
     async def _fan_event_to_outputs(self, event: OutputEvent) -> None:
-        """Call ``emit()`` on default + every secondary output.
-
-        Used for Phase B event types that carry rich payloads — those
-        bypass the legacy activity dispatch because renderers want the
-        typed event. Failures in one renderer don't stop the others.
-        """
+        """Fan a typed event to outputs while isolating renderer failures."""
         targets = [self.default_output, *self._secondary_outputs]
         for target in targets:
             try:
@@ -272,38 +191,16 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
                 )
 
     def _dispatch_activity_event(self, event: OutputEvent) -> None:
-        """Internal sync dispatch for activity-style OutputEvents.
-
-        Shared by ``emit()`` (async path) and ``notify_activity`` (legacy
-        sync path) so the bus is uniformly event-based regardless of
-        which entry point a caller uses.
-
-        Renderers that override ``emit()`` natively (Phase A3) take
-        precedence: this helper only runs for outputs that haven't
-        migrated. The check is best-effort — we look for an overridden
-        ``emit`` and call it via ``asyncio`` when possible, otherwise
-        fall back to the legacy ``on_activity_with_metadata`` /
-        ``on_activity`` hooks.
-        """
+        """Synchronously dispatch activity events through legacy renderer hooks."""
         detail = event.content if isinstance(event.content, str) else ""
         metadata = event.payload or None
         targets = [self.default_output, *self._secondary_outputs]
         for target in targets:
-            # Per-target isolation: a misbehaving output (e.g. a plugin
-            # / renderer whose ``on_activity_with_metadata`` raises) MUST
-            # NOT prevent downstream targets from receiving the event.
-            # Previously this loop had no try/except, so one throw
-            # silently aborted the whole dispatch — most catastrophically
-            # killing the StreamOutput WS sink without any browser-side
-            # log. Convergent root-cause analysis fingered this as a
-            # likely cause of the "FE never updates after queue has
-            # entry" symptom (no errors anywhere, just frames vanishing).
+            # One renderer failure must not prevent delivery to remaining targets.
             try:
                 if metadata and hasattr(target, "on_activity_with_metadata"):
-                    # logger.warning(f"Dispatch to {target} with metadata")
                     target.on_activity_with_metadata(event.type, detail, metadata)
                 else:
-                    # logger.warning(f"Dispatch to {target}")
                     target.on_activity(event.type, detail)
             except Exception as exc:  # pragma: no cover - defensive
                 logger.warning(
@@ -314,27 +211,10 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
                     exc_info=True,
                 )
 
-    # ─────────────────────────────────────────────────────────────
-    # Phase B: interactive bus
-    # ─────────────────────────────────────────────────────────────
-
     def notify_activity(
         self, activity_type: str, detail: str, metadata: dict | None = None
     ) -> None:
-        """Broadcast activity to default + all secondary outputs.
-
-        Sync entry point preserved for callers that cannot ``await``
-        (trigger callbacks, plugin observers, etc.). Internally
-        constructs an :class:`OutputEvent` and routes through the
-        same dispatch helper as :meth:`emit`, so the bus is event-
-        based for every caller.
-
-        Args:
-            activity_type: Event type (tool_start, tool_done, subagent_start, etc.)
-            detail: Human-readable summary (truncated, for TUI/stdout)
-            metadata: Structured data (full args, job_id, tools_used, etc.)
-                      Only consumed by outputs that support it (e.g. WebSocket).
-        """
+        """Broadcast an activity event from synchronous callback paths."""
         self._dispatch_activity_event(
             OutputEvent(
                 type=activity_type,
@@ -359,10 +239,6 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         await self.default_output.stop()
         logger.debug("Output router stopped")
 
-    # ParseEvent routing (route, _handle_text, _handle_output,
-    # _handle_block_start/end, _handle_assistant_image) lives in
-    # OutputRouterParseEventMixin (router_parsing.py).
-
     async def flush(self) -> None:
         """Flush output modules."""
         await self.default_output.flush()
@@ -375,11 +251,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
             await self.default_output.on_user_input(text)
 
     async def on_resume(self, events: list[dict]) -> None:
-        """Replay session history to user-facing outputs.
-
-        Forwards to default output only (not secondary outputs,
-        since those are observers like SessionOutput/StreamOutput).
-        """
+        """Replay session history only to the user-facing default output."""
         if hasattr(self.default_output, "on_resume"):
             await self.default_output.on_resume(events)
 
@@ -400,12 +272,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
             await secondary.on_processing_end()
 
     def reset(self) -> None:
-        """
-        Reset router state for new round (within a turn).
-
-        Note: completed_outputs is NOT cleared here - it accumulates across rounds
-        and is cleared when feedback is consumed via get_output_feedback().
-        """
+        """Reset per-round state while retaining unconsumed completion feedback."""
         self._state = OutputState.NORMAL
         self._pending_tool_calls.clear()
         self._pending_subagent_calls.clear()
@@ -413,11 +280,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         self._pending_outputs.clear()
 
     def clear_all(self) -> None:
-        """
-        Clear all state including completed outputs.
-
-        Call this when a turn is completely finished.
-        """
+        """Clear per-round state and completed output feedback after a turn."""
         self.reset()
         self._completed_outputs.clear()
 

@@ -1,9 +1,4 @@
-"""
-Builtin skills - default documentation for builtin tools and subagents.
-
-These files are packaged with the library and serve as default documentation.
-Users can override them by placing files in their agent's prompts/tools/ folder.
-"""
+"""Load packaged reference documentation for built-in tools and sub-agents."""
 
 from pathlib import Path
 
@@ -12,24 +7,11 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Path to builtin skills directory
 BUILTIN_SKILLS_DIR = Path(__file__).parent
 
 
 def read_skill_body(path: Path) -> str | None:
-    """
-    Read a skill markdown file and return only the body (frontmatter stripped).
-
-    If the file has no frontmatter, the whole file is treated as content.
-    If the file is malformed or fails to parse, falls back to the raw text
-    so info output never breaks on a bad YAML block.
-
-    Args:
-        path: Path to a markdown skill file.
-
-    Returns:
-        The post-frontmatter body, or ``None`` if the file does not exist.
-    """
+    """Return a reference file's body, falling back to raw text on parse failure."""
     if not path.exists():
         return None
 
@@ -39,8 +21,7 @@ def read_skill_body(path: Path) -> str | None:
             logger.debug("Skill file has empty body", path=str(path))
         return doc.content
 
-    # load_skill_doc failed (logged inside). Degrade gracefully by
-    # returning the raw text so the controller still gets something.
+    # Reference lookup should remain usable when frontmatter is malformed.
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError as exc:
@@ -51,43 +32,19 @@ def read_skill_body(path: Path) -> str | None:
 
 
 def get_builtin_tool_doc(name: str) -> str | None:
-    """
-    Get builtin tool documentation by name.
-
-    The returned string is the documentation body only - any YAML frontmatter
-    is stripped. Callers that need the frontmatter metadata should use
-    ``skill_docs.load_skill_doc`` directly.
-
-    Args:
-        name: Tool name (e.g., "bash", "read")
-
-    Returns:
-        Documentation body or None if not found
-    """
+    """Return a built-in tool's documentation body by name."""
     doc_path = BUILTIN_SKILLS_DIR / "tools" / f"{name}.md"
     return read_skill_body(doc_path)
 
 
 def get_builtin_subagent_doc(name: str) -> str | None:
-    """
-    Get builtin subagent documentation by name.
-
-    The returned string is the documentation body only - any YAML frontmatter
-    is stripped. Callers that need the frontmatter metadata should use
-    ``skill_docs.load_skill_doc`` directly.
-
-    Args:
-        name: Subagent name
-
-    Returns:
-        Documentation body or None if not found
-    """
+    """Return a built-in sub-agent's documentation body by name."""
     doc_path = BUILTIN_SKILLS_DIR / "subagents" / f"{name}.md"
     return read_skill_body(doc_path)
 
 
 def list_builtin_tool_docs() -> list[str]:
-    """List all builtin tool names that have documentation."""
+    """List built-in tool names with packaged documentation."""
     tools_dir = BUILTIN_SKILLS_DIR / "tools"
     if not tools_dir.exists():
         return []
@@ -95,7 +52,7 @@ def list_builtin_tool_docs() -> list[str]:
 
 
 def list_builtin_subagent_docs() -> list[str]:
-    """List all builtin subagent names that have documentation."""
+    """List built-in sub-agent names with packaged documentation."""
     subagents_dir = BUILTIN_SKILLS_DIR / "subagents"
     if not subagents_dir.exists():
         return []
@@ -103,15 +60,7 @@ def list_builtin_subagent_docs() -> list[str]:
 
 
 def get_all_tool_docs(tool_names: list[str] | None = None) -> dict[str, str]:
-    """
-    Get documentation for multiple tools.
-
-    Args:
-        tool_names: List of tool names, or None for all builtin tools
-
-    Returns:
-        Dict of tool_name -> documentation
-    """
+    """Return documentation bodies for selected or all built-in tools."""
     if tool_names is None:
         tool_names = list_builtin_tool_docs()
 
@@ -124,15 +73,7 @@ def get_all_tool_docs(tool_names: list[str] | None = None) -> dict[str, str]:
 
 
 def get_all_subagent_docs(subagent_names: list[str] | None = None) -> dict[str, str]:
-    """
-    Get documentation for multiple subagents.
-
-    Args:
-        subagent_names: List of subagent names, or None for all builtin
-
-    Returns:
-        Dict of subagent_name -> documentation
-    """
+    """Return documentation bodies for selected or all built-in sub-agents."""
     if subagent_names is None:
         subagent_names = list_builtin_subagent_docs()
 

@@ -1,20 +1,8 @@
-"""APP extension adapter for ``terrarium.events``.
+"""Produce remote chat and event-subscription streams.
 
-Producer side of the streaming protocol described in
-:mod:`kohakuterrarium.laboratory.streams`.  Lives on a worker node
-alongside :class:`TerrariumRuntimeAdapter`.  Handles three stream
-starts (``start_chat``, ``start_subscribe``) plus the universal
-``cancel_stream`` teardown.
-
-Each ``start_*`` request spawns a background task that pumps events
-from the local engine into ``terrarium.stream`` APP frames addressed
-back to the consumer (typically the controller-side host).  On
-producer-side natural end the task emits an ``eof`` frame; on
-exception, an ``error`` frame.  ``cancel_stream`` cancels the task
-and clears bookkeeping.
-
-The consumer is identified by ``AppMessage.sender_node`` of the
-``start_*`` request; we send frames back to that node.
+Each start request creates a background pump that sends stream frames back to
+the requesting node. Natural completion emits EOF, failures emit an error, and
+cancellation stops the pump without EOF.
 """
 
 import asyncio
@@ -35,13 +23,7 @@ logger = get_logger(__name__)
 
 
 class TerrariumEventsAdapter:
-    """Producer-side adapter for ``terrarium.events`` streams.
-
-    Args:
-        engine: the local :class:`Terrarium` engine providing events.
-        lab_node: a :class:`ClientConnector` or :class:`HostEngine` —
-            anything that satisfies the :class:`LabNode` protocol.
-    """
+    """Serve engine-backed chat and event streams over Laboratory APP frames."""
 
     NAMESPACE = "terrarium.events"
 
@@ -53,7 +35,7 @@ class TerrariumEventsAdapter:
         logger.info("lab adapter registered", namespace=self.NAMESPACE)
 
     def detach(self) -> None:
-        """Unregister + cancel every in-flight stream. Idempotent."""
+        """Unregister the adapter and cancel all active streams."""
         self._node.unregister_app_extension(self.NAMESPACE)
         active_count = len(self._active)
         for task in self._active.values():
@@ -84,8 +66,7 @@ class TerrariumEventsAdapter:
                 creature_id = msg.body["creature_id"]
                 message = unpack_content(msg.body["message"])
                 consumer = msg.sender_node
-                # Verify the creature exists *before* returning so the
-                # consumer gets a useful synchronous error.
+                # Validate before acknowledging so startup errors are synchronous.
                 self._engine.get_creature(creature_id)
                 task = asyncio.create_task(
                     self._pump_chat(stream_id, creature_id, message, consumer)
@@ -118,10 +99,6 @@ class TerrariumEventsAdapter:
                     }
                 }
 
-    # ------------------------------------------------------------------
-    # Pump tasks
-    # ------------------------------------------------------------------
-
     async def _pump_chat(
         self,
         stream_id: str,
@@ -137,7 +114,7 @@ class TerrariumEventsAdapter:
                 )
             await self._send_frame(consumer, {"stream_id": stream_id, "eof": True})
         except asyncio.CancelledError:
-            # Consumer asked us to stop. Don't send EOF — they're gone.
+            # Cancellation is consumer-driven, so no terminal frame is needed.
             raise
         except Exception as e:
             await self._send_frame(

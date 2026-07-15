@@ -1,12 +1,9 @@
-"""Memory-index status + progress-emitting build for a saved session.
+"""Inspect and build saved-session memory indexes.
 
-Companion to :mod:`studio.sessions.memory_search`: the search routes
-read indexes, this module *creates* them. Both eventually call into
-:class:`kohakuterrarium.session.memory.SessionMemory`.
-
-The build job runs on a background thread (it spends most of its
-time inside the embedder + SQLite writes) and reports progress via
-a sync callback that the HTTP/WS adapter forwards to the client.
+Search operations live in :mod:`studio.sessions.memory_search`; this module
+creates indexes through :class:`kohakuterrarium.session.memory.SessionMemory`.
+Builds are suitable for a background thread and report synchronous progress for
+HTTP and WebSocket adapters to forward.
 """
 
 from pathlib import Path
@@ -45,8 +42,7 @@ def index_status(path: Path) -> dict[str, Any]:
     try:
         meta = store.load_meta()
         agents = list(meta.get("agents", []))
-        # No embedder — open in search-only mode so SessionMemory can
-        # reflect whatever index has been written previously.
+        # Search-only mode reports persisted index state without loading an embedder.
         memory = SessionMemory(str(path), embedder=None)
         try:
             stats = memory.get_stats()
@@ -154,9 +150,7 @@ def build_index(
                 "provider": resolved_provider,
                 "model": model,
                 "indexed_per_agent": {},
-                # Same shape as ``SessionMemory.get_stats()`` so callers
-                # (CLI formatter, HTTP route) don't have to special-case
-                # the no-agents path.
+                # Keep the no-agent result compatible with SessionMemory.get_stats().
                 "stats": {
                     "fts_blocks": 0,
                     "vec_blocks": 0,
@@ -174,8 +168,7 @@ def build_index(
         embedder = create_embedder(embed_config)
         memory = SessionMemory(str(path), embedder=embedder)
         try:
-            # Force rebuild — clear the previous indexed-count so
-            # ``index_events`` re-indexes from event 0.
+            # Reset both indexes so a forced build starts from event zero.
             if force:
                 for agent_name in agents:
                     try:
@@ -191,8 +184,7 @@ def build_index(
 
             indexed_per_agent: dict[str, dict[str, int]] = {}
             total_events_seen = 0
-            # Two-pass: count events first so percent has a meaningful
-            # denominator, then index. Counting is a cheap meta read.
+            # Count first so indexing progress has a stable denominator.
             agent_events: dict[str, list[dict]] = {}
             for agent_name in agents:
                 events = store.get_events(agent_name) or []
@@ -230,13 +222,8 @@ def build_index(
                     blocks_total=total_events_seen,
                 )
 
-            # Persist the embedder choice so subsequent searches use
-            # the same provider/model without the caller having to
-            # repeat the config — but ONLY when at least one block was
-            # actually written. Otherwise ``index_status`` would
-            # report a configured embedder for a session that has no
-            # vectors, and the frontend would show "Rebuild" instead
-            # of "Build".
+            # Persist configuration only for a non-empty vector index; otherwise
+            # status must continue to present the session as needing its first build.
             total_blocks_indexed = sum(
                 info["blocks"] for info in indexed_per_agent.values()
             )

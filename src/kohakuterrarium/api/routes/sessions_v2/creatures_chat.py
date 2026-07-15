@@ -1,10 +1,6 @@
-"""Per-creature chat routes — HTTP fallback chat / regen / edit /
-rewind / history / branches.
+"""Expose per-creature chat, editing, history, and branch operations.
 
-Service-driven: ``Depends(get_service)`` so multi-node lab-host
-deployments route by ``_home`` automatically.  ``service.chat`` and
-``service.chat_history`` already cross the lab transport for remote
-creatures.
+Service routing sends remote creature operations to their home workers.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -54,9 +50,7 @@ async def regenerate_creature(
         )
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
-    # Pass through ``turn_index`` / ``branch_id`` from the service so
-    # the frontend can promote the <N/M> navigator the instant the API
-    # call returns, instead of waiting for the post-turn resync.
+    # Preserve branch metadata so clients can update navigation before resync.
     if isinstance(result, dict):
         return result
     return {"status": "regenerating", "turn_index": turn_index}
@@ -91,10 +85,8 @@ async def edit_creature_message(
         raise HTTPException(404, f"creature {creature_id!r} not found")
     if not edited:
         raise HTTPException(400, "Invalid edit target; expected a user message")
-    # Newer service implementations return a dict carrying the just-
-    # opened branch_id / turn_index so the frontend's navigator can
-    # promote immediately. Older ones still return ``True`` — fall
-    # back to echoing the request fields then.
+    # Dict results carry new branch metadata; boolean results require a
+    # compatibility response based on the request.
     if isinstance(edited, dict):
         return {
             "user_position": req.user_position,
@@ -128,13 +120,8 @@ async def creature_history(
     creature_id: str,
     service: TerrariumService = Depends(get_service),
 ):
-    # The frontend uses the same endpoint for per-creature chat tabs and
-    # per-channel tabs (``ch:<name>``).  In lab-host mode the host engine
-    # has no attached session store, but the service's cluster-aware
-    # ``channel_history`` already unions messages across every cluster
-    # member's worker store (CF-4). CF-9: delegate to it so the channel
-    # tab is non-empty even when ``channel_history``'s studio-attached
-    # store walk finds nothing.
+    # Channel tabs share this endpoint through the ``ch:`` prefix. Prefer the
+    # host store when populated, then use cluster-aware worker history.
     if creature_id.startswith("ch:"):
         channel_name = creature_id[3:]
         engine = host_engine_or_none(service)
@@ -142,10 +129,7 @@ async def creature_history(
             payload = channel_history(engine, session_id, channel_name)
             if payload.get("events"):
                 return payload
-        # Fall back to (or default to in lab-host) the service-routed
-        # cluster fan-out. Shape the returned list of channel-message
-        # dicts as ``channel_message`` events so the frontend's chat
-        # replay can render them in the channel tab.
+        # Normalize service messages as events expected by channel-tab replay.
         try:
             messages = await service.channel_history(session_id, channel_name)
         except (KeyError, AttributeError):

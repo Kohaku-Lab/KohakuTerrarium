@@ -1,14 +1,8 @@
 """Read-only on-disk history (per-target) for saved sessions.
 
-Verbatim port of the ``GET /sessions/{name}/history`` and
-``GET /sessions/{name}/history/{target}`` handler bodies from the
-former ``api/routes/sessions.py``. The HTTP route layer resolves the
-session name to a path and delegates here.
-
-The ``*_from_store`` cores also serve LIVE sessions: the route reuses
-the engine's already-open store instead of opening the same SQLite file
-a second time (a second open of an actively-written store is unreliable
-on POSIX — ``SQLITE_IOERR`` on the tables the live writer touched).
+Builds history indexes and target payloads for saved or live sessions. Live
+callers reuse the engine-owned store because reopening an actively written
+SQLite file can fail on POSIX.
 """
 
 from pathlib import Path
@@ -23,7 +17,7 @@ from kohakuterrarium.studio.persistence.store import (
 
 
 def history_index_from_store(store: SessionStore, session_name: str) -> dict[str, Any]:
-    """``{session_name, meta, targets}`` built from an already-open store."""
+    """Build session metadata and history targets from an open store."""
     try:
         meta = store.load_meta()
         targets = session_targets(store, meta)
@@ -33,11 +27,10 @@ def history_index_from_store(store: SessionStore, session_name: str) -> dict[str
 
 
 def history_index_payload(path: Path) -> dict[str, Any]:
-    """Return ``{session_name, meta, targets}`` for a saved session.
+    """Return session metadata and history targets for a saved session.
 
-    Raises :class:`SessionNotFoundError` when ``path`` is missing (before
-    any store open — ``SessionStore(path)`` creates the file) and
-    :class:`SessionError` on load failure.
+    Missing paths are rejected before ``SessionStore`` can create them. Other
+    load failures are wrapped in ``SessionError``.
     """
     path = Path(path)
     if not path.exists():
@@ -61,7 +54,7 @@ def history_from_store(
     target: str,
     live_job_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Per-target history built from an already-open store."""
+    """Build validated target history from an already-open store."""
     try:
         meta = store.load_meta()
         valid_targets = set(session_targets(store, meta))
@@ -82,17 +75,12 @@ def history_payload(
     target: str,
     live_job_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Return read-only history for an agent/root/channel target.
+    """Return read-only history for an agent, root, or channel target.
 
-    ``live_job_ids`` — in-flight job ids on the live agent backing this
-    session. The live-store history route passes them so an in-flight
-    tool / sub-agent isn't rendered as ``interrupted``; the saved path
-    leaves it ``None`` (read-only semantics: unmatched starts →
-    interrupted).
-
-    Raises :class:`SessionNotFoundError` for a missing session file,
-    :class:`NotFoundError` for an unknown target, and
-    :class:`SessionError` on load failure.
+    ``live_job_ids`` prevents active work from being synthesized as interrupted.
+    Saved sessions omit it because unmatched starts are no longer running.
+    Missing sessions and targets retain their typed errors; other failures are
+    wrapped in ``SessionError``.
     """
     path = Path(path)
     if not path.exists():
@@ -106,7 +94,7 @@ def history_payload(
     except Exception as e:
         raise SessionError(f"History load failed: {e}") from e
     finally:
-        # Close on EVERY path — the unknown-target raise used to leak
-        # the SQLite handle until GC (Windows then blocks deletes).
+        # Deterministic closure prevents failed lookups from leaving Windows
+        # file handles that block deletion.
         if store is not None:
             store.close(update_status=False)

@@ -1,23 +1,9 @@
-"""Feed resolution — pick the right release tarball for this machine.
+"""Resolve release manifests into artifacts compatible with this runtime.
 
-Two feed kinds (see ``plans/1.5.0-roadmap/06b-release-bundle-update/design.md`` §4):
-
-- ``github_releases`` — fetch
-  ``https://github.com/<repo>/releases/download/manifests-<channel>/<channel>.json``.
-  The release pipeline pre-publishes the channel manifest to a stable
-  URL so the launcher doesn't have to walk the GitHub releases API
-  (rate-limited, paginated).
-- ``custom`` — fetch ``<feed.url>/<channel>.json`` verbatim. The
-  manifest schema is the same; URLs inside the manifest point wherever
-  the operator hosts the tarballs.
-
-Resolution picks: (1) the channel manifest, (2) the release by version
-(pinned → that one; else newest), (3) the artifact matching this
-machine's ``(platform, py_abi)`` tag.
-
-This module uses ``urllib`` only — no third-party HTTP client. Stale-
-manifest cache lives at ``manifest-cache/<channel>.json`` with sibling
-``.meta.json`` storing ETag / Last-Modified for conditional GETs.
+GitHub and custom feeds share one manifest schema. Resolution selects the
+configured channel and optional pinned release, then matches platform and
+Python ABI tags. Conditional requests use cached validators, and stale cached
+manifests remain available during network failures.
 """
 
 import json
@@ -38,11 +24,13 @@ USER_AGENT = "KohakuTerrarium-Launcher/1"
 
 
 class FeedError(RuntimeError):
-    """Raised when feed resolution fails (network, schema, no match)."""
+    """Report network, manifest, or compatibility resolution failure."""
 
 
 @dataclass
 class ReleaseTarget:
+    """Describe a verified feed artifact selected for installation."""
+
     version: str
     build_id: str
     url: str
@@ -51,9 +39,6 @@ class ReleaseTarget:
     platform: str
     py_abi: str
     release_notes_url: str | None = None
-
-
-# ── Platform / ABI tags ─────────────────────────────────────────────
 
 
 def current_platform_tag() -> str:
@@ -66,9 +51,7 @@ def current_platform_tag() -> str:
     if sysname == "darwin":
         return "macos-arm64" if is_arm else "macos-x64"
     if sysname == "win32":
-        # 32-bit windows is unsupported by the framework matrix; we tag
-        # everything ``win-x64`` and let smoke-test catch ABI mismatch
-        # if someone tries it.
+        # The release matrix supports only 64-bit Windows artifacts.
         return "win-x64"
     return f"{sysname}-{machine}"
 
@@ -77,17 +60,13 @@ def current_py_abi_tag() -> str:
     """``cp311`` / ``cp312`` / ``cp313`` / ``cp314`` — matches wheel tags."""
     impl = "cp" if sys.implementation.name == "cpython" else sys.implementation.name
     major, minor = sys.version_info[:2]
-    # struct.calcsize("P") == 8 on 64-bit; we record but don't tag-suffix
-    # since the framework matrix is 64-bit only.
+    # Pointer width is intentionally absent from tags because releases are 64-bit only.
     _ = struct.calcsize("P")
     return f"{impl}{major}{minor}"
 
 
-# ── Manifest fetch ──────────────────────────────────────────────────
-
-
 def _channel_manifest_url(settings: AppSettings) -> str:
-    """Resolve the URL to GET for the channel manifest."""
+    """Return the configured channel manifest URL or reject an invalid feed."""
     feed = settings.feed
     channel = settings.channel
     if feed.kind == "github_releases":
@@ -148,11 +127,11 @@ def _write_cached_manifest(channel: str, data: dict) -> None:
 
 
 def fetch_manifest(settings: AppSettings, *, force_refresh: bool = False) -> dict:
-    """Fetch the channel manifest, using conditional GET when possible.
+    """Fetch and validate the channel manifest with conditional caching.
 
-    Returns the parsed JSON dict. Falls back to a stale cached copy if
-    the network is unreachable. Raises :class:`FeedError` if no
-    manifest can be obtained at all (no cache + network failure).
+    Network and HTTP failures fall back to a cached manifest when available.
+    Invalid JSON or schema data raises :class:`FeedError` and is never cached.
+    ``force_refresh`` bypasses cached content and validators.
     """
     log = get_logger()
     url = _channel_manifest_url(settings)
@@ -210,9 +189,6 @@ def fetch_manifest(settings: AppSettings, *, force_refresh: bool = False) -> dic
     return data
 
 
-# ── Resolution ──────────────────────────────────────────────────────
-
-
 def _pick_release(manifest: dict, pinned: str | None) -> dict:
     releases = manifest.get("releases") or []
     if not isinstance(releases, list) or not releases:
@@ -242,7 +218,7 @@ def resolve_feed(
     platform_tag: str | None = None,
     py_abi_tag: str | None = None,
 ) -> ReleaseTarget:
-    """End-to-end: fetch manifest, pick release, pick artifact for this machine."""
+    """Resolve the configured release and compatible artifact for this runtime."""
     plat = platform_tag or current_platform_tag()
     abi = py_abi_tag or current_py_abi_tag()
     manifest = fetch_manifest(settings, force_refresh=force_refresh)
@@ -263,10 +239,9 @@ def resolve_feed(
 def list_available_releases(
     manifest: dict, *, platform_tag: str, py_abi_tag: str
 ) -> list[dict]:
-    """For the UI: return the subset of manifest releases that have a
-    build for ``(platform_tag, py_abi_tag)``, in newest-first order.
+    """Return JSON-ready releases compatible with the supplied runtime tags.
 
-    Each entry is a public-friendly dict; the API layer can JSON-serialize.
+    Manifest order is preserved, which is expected to be newest first.
     """
     out: list[dict] = []
     for rel in manifest.get("releases") or []:

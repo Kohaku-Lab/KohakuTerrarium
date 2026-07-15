@@ -1,10 +1,4 @@
-"""``/triggers`` slash command — list active triggers (read-only).
-
-Mirrors :class:`TriggersTab.vue`: shows trigger_id, type, running
-state, and creation timestamp for every trigger registered with the
-agent's :class:`TriggerManager`. Read-only — adding or removing
-triggers belongs in agent config, not at runtime.
-"""
+"""List each active trigger's identity, type, state, and creation time."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (

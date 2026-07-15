@@ -1,9 +1,8 @@
 """Request-scoped dependencies for legacy studio routes.
 
-Delegates to ``api.routes.catalog._deps`` so the new and legacy mounts
-share a single ``_active`` workspace state. Kept as a thin shim because
-the test suite + remaining studio routes (``meta``, ``packages``) still
-import these helpers from the legacy path.
+Delegates to ``api.routes.catalog._deps`` so every route mount shares one
+active workspace state. The shim preserves the established Studio import path
+for remaining routes and tests.
 """
 
 from kohakuterrarium.api.routes.catalog._deps import (

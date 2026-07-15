@@ -1,9 +1,4 @@
-"""
-Sub-agent configuration.
-
-Defines configuration for sub-agents including tool access, execution limits,
-and output routing.
-"""
+"""Define sub-agent capabilities, prompt loading, limits, and output routing."""
 
 from dataclasses import dataclass, field
 from enum import Enum
@@ -14,47 +9,21 @@ from typing import Any
 class OutputTarget(Enum):
     """Where sub-agent output goes."""
 
-    CONTROLLER = "controller"  # Return to parent controller (default)
-    EXTERNAL = "external"  # Stream directly to user/output
+    CONTROLLER = "controller"
+    EXTERNAL = "external"
 
 
 class ContextUpdateMode(Enum):
     """How interactive sub-agents handle context updates."""
 
-    INTERRUPT_RESTART = "interrupt_restart"  # Stop current, start new response
-    QUEUE_APPEND = "queue_append"  # Queue updates, process after current
-    FLUSH_REPLACE = "flush_replace"  # Flush output, replace context immediately
+    INTERRUPT_RESTART = "interrupt_restart"
+    QUEUE_APPEND = "queue_append"
+    FLUSH_REPLACE = "flush_replace"
 
 
 @dataclass
 class SubAgentConfig:
-    """
-    Configuration for a sub-agent.
-
-    Attributes:
-        name: Sub-agent identifier
-        description: One-line description for controller
-        tools: List of allowed tool names
-        system_prompt: System prompt for the sub-agent
-        prompt_file: Path to system prompt file (relative to agent folder)
-        extra_prompt: Extra prompt text appended to base prompt
-        extra_prompt_file: Path to extra prompt file (relative to agent folder)
-        can_modify: Whether sub-agent can modify files
-        stateless: No persistent state between calls
-        interactive: Receives ongoing context updates from parent
-        context_mode: How to handle context updates (for interactive agents)
-        output_to: Where output goes (controller or external)
-        output_module: Output module name (if output_to=external)
-        return_as_context: Return output text to parent controller as context
-        max_turns: Maximum conversation turns
-        timeout: Maximum execution time in seconds
-        model: LLM model to use (None = inherit from parent)
-        temperature: LLM temperature (None = inherit from parent)
-        memory_path: Path to memory folder (for memory sub-agents)
-        notify_controller_on_background_complete: Whether background completion
-            should push a new event back into the parent controller loop
-        extra: Additional configuration
-    """
+    """Configure one sub-agent's tools, prompts, limits, plugins, and routing."""
 
     name: str
     description: str = ""
@@ -69,50 +38,26 @@ class SubAgentConfig:
     context_mode: ContextUpdateMode = ContextUpdateMode.INTERRUPT_RESTART
     output_to: OutputTarget = OutputTarget.CONTROLLER
     output_module: str | None = None
-    return_as_context: bool = False  # Return output text to parent as context
-    max_turns: int = 0  # 0 = unlimited (agent runs until task is done)
-    timeout: float = 0  # 0 = no timeout
-    # Plugin packs to opt into (e.g. ``["auto-compact"]``). Budget axes
-    # are NOT a sub-agent core field — declare the ``budget`` plugin via
-    # ``plugins`` with its own options if you want one.
+    return_as_context: bool = False
+    max_turns: int = 0
+    timeout: float = 0
+    # Runtime budget axes belong to the budget plugin, not core sub-agent config.
     default_plugins: list[str] = field(default_factory=list)
-    # Per-instance plugin entries (``[{name, module, class, options}, …]``).
     plugins: list[dict[str, Any]] = field(default_factory=list)
     compact: dict[str, Any] | None = None
     model: str | None = None
     temperature: float | None = None
     memory_path: str | None = None
     modifying_tools: set[str] | None = None
-    tool_format: str | None = None  # None = inherit from parent
+    tool_format: str | None = None
     notify_controller_on_background_complete: bool = True
-    # Shared-iteration-budget controls (legacy ``max_iterations`` path,
-    # distinct from the runtime ``budget`` plugin).
-    # - budget_inherit=True (default): the child reuses the parent's
-    #   IterationBudget reference — every child turn decrements the
-    #   same pool the parent draws from.
-    # - budget_allocation=N: hand the child a fresh isolated budget of
-    #   N turns; parent's remaining counter is untouched.
-    # - budget_inherit=False and allocation=None: today's behavior,
-    #   child runs unbounded (or bounded by its own ``max_turns``).
+    # Legacy iteration limits may share the parent pool or allocate an isolated one.
     budget_inherit: bool = True
     budget_allocation: int | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
     def load_prompt(self, agent_path: Path | None = None) -> str:
-        """
-        Load system prompt from file or use inline prompt.
-
-        Resolution order:
-        1. If system_prompt is set -> use it entirely (full override, backward compat)
-        2. If extra_prompt or extra_prompt_file is set -> base prompt + extra
-        3. If neither -> base prompt only
-
-        Args:
-            agent_path: Base path for resolving prompt_file
-
-        Returns:
-            System prompt string with path context injected
-        """
+        """Load the prompt with inline override, extras, and optional path context."""
         prompt = ""
 
         if self.system_prompt:
@@ -122,15 +67,12 @@ class SubAgentConfig:
             if prompt_path.exists():
                 prompt = prompt_path.read_text(encoding="utf-8")
             else:
-                # prompt_file was configured but the file is missing —
-                # fall back to the base default rather than running the
-                # sub-agent with no system prompt at all.
+                # Missing prompt files must not leave the sub-agent without a role.
                 prompt = f"You are a {self.name} sub-agent."
         else:
             prompt = f"You are a {self.name} sub-agent."
 
-        # Append extra prompt if set (only when system_prompt is NOT a full override)
-        # When system_prompt is explicitly set, it's a full override - don't append extra
+        # Inline system prompts are complete overrides and exclude extra fragments.
         if not self.system_prompt:
             extra = self.extra_prompt
             if self.extra_prompt_file and agent_path:
@@ -141,7 +83,6 @@ class SubAgentConfig:
             if extra:
                 prompt = f"{prompt}\n\n## Additional Instructions\n\n{extra}"
 
-        # Inject path context if memory_path is set
         if self.memory_path and agent_path:
             full_memory_path = agent_path / self.memory_path
             path_context = f"\n\n## Path Context\nMemory folder path: `{full_memory_path}`\nUse this exact path when calling tools.\n"
@@ -151,23 +92,18 @@ class SubAgentConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SubAgentConfig":
-        """Create config from dictionary (e.g., YAML config)."""
-        # Defensive copy FIRST — every mutation below (enum coercion,
-        # set conversion, key filtering) must write to our own copy,
-        # never through to the caller's dict.
+        """Create a config from mapping data while preserving unknown fields in extra."""
+        # Coercion must not mutate the caller's configuration mapping.
         data = dict(data)
 
-        # Handle enum conversions
         if "output_to" in data and isinstance(data["output_to"], str):
             data["output_to"] = OutputTarget(data["output_to"])
         if "context_mode" in data and isinstance(data["context_mode"], str):
             data["context_mode"] = ContextUpdateMode(data["context_mode"])
 
-        # Convert modifying_tools list to set if present
         if "modifying_tools" in data and isinstance(data["modifying_tools"], list):
             data["modifying_tools"] = set(data["modifying_tools"])
 
-        # Filter to known fields
         known_fields = {
             "name",
             "description",
@@ -219,11 +155,7 @@ class SubAgentConfig:
 
 @dataclass
 class SubAgentInfo:
-    """
-    Sub-agent information for registration and system prompt.
-
-    Lightweight representation for listing available sub-agents.
-    """
+    """Represent the sub-agent metadata shown in prompt inventories."""
 
     name: str
     description: str

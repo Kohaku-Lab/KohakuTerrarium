@@ -1,4 +1,4 @@
-"""Identity MCP — MCP server registry."""
+"""Manage, probe, and inspect usage of registered MCP servers."""
 
 import asyncio
 import time
@@ -21,6 +21,8 @@ router = APIRouter()
 
 
 class MCPServerRequest(BaseModel):
+    """Describe a complete MCP server registration."""
+
     name: str
     transport: str = "stdio"
     command: str = ""
@@ -31,11 +33,10 @@ class MCPServerRequest(BaseModel):
 
 
 class MCPServerPatch(BaseModel):
-    """Partial update — every field is optional; only set fields apply.
+    """Describe a partial MCP server update.
 
-    ``name`` is immutable (the resource identity); callers that want to
-    rename should ``DELETE`` + ``POST``.  ``args`` / ``env`` are
-    replace-in-full to keep the wire format predictable.
+    Server names are immutable resource identities. Sequence and mapping fields
+    replace their existing values in full rather than merging element-wise.
     """
 
     transport: Literal["stdio", "http"] | None = None
@@ -47,6 +48,8 @@ class MCPServerPatch(BaseModel):
 
 
 class MCPTestResult(BaseModel):
+    """Report MCP connectivity, advertised tool count, and probe duration."""
+
     ok: bool
     error: str | None = None
     tool_count: int | None = None
@@ -54,6 +57,8 @@ class MCPTestResult(BaseModel):
 
 
 class CreatureRef(BaseModel):
+    """Identify an installed creature or terrarium that references a server."""
+
     name: str
     kind: Literal["creature", "terrarium"]
     path: str
@@ -61,11 +66,13 @@ class CreatureRef(BaseModel):
 
 @router.get("/mcp")
 async def list_mcp_servers():
+    """Return all registered MCP server configurations."""
     return {"servers": load_servers()}
 
 
 @router.post("/mcp", dependencies=[Depends(verify_admin_token)])
 async def add_mcp_server(req: MCPServerRequest):
+    """Validate and persist a complete MCP server registration."""
     try:
         upsert_server(req.model_dump())
     except ValueError as e:
@@ -75,18 +82,17 @@ async def add_mcp_server(req: MCPServerRequest):
 
 @router.patch("/mcp/{name}", dependencies=[Depends(verify_admin_token)])
 async def patch_mcp_server(name: str, body: MCPServerPatch):
-    """Partial in-place edit of an existing MCP server.
+    """Overlay explicitly supplied fields onto an existing MCP server.
 
-    Loads the existing dict, overlays only the fields the client sent,
-    then writes back. ``404`` if the server is unknown; ``400`` if the
-    overlay produces an invalid configuration.
+    Unknown servers return 404, and invalid merged configurations return 400.
     """
     existing = find_server(name)
     if existing is None:
         raise HTTPException(404, f"MCP server not found: {name}")
     patch = body.model_dump(exclude_unset=True)
     merged = {**existing, **patch}
-    merged["name"] = name  # immutable
+    # The path identity is authoritative even if model behavior changes later.
+    merged["name"] = name
     try:
         upsert_server(merged)
     except ValueError as e:
@@ -96,6 +102,7 @@ async def patch_mcp_server(name: str, body: MCPServerPatch):
 
 @router.delete("/mcp/{name}", dependencies=[Depends(verify_admin_token)])
 async def remove_mcp_server(name: str):
+    """Delete a registered MCP server by immutable name."""
     if not delete_server(name):
         raise HTTPException(404, f"MCP server not found: {name}")
     return {"status": "removed", "name": name}
@@ -107,11 +114,10 @@ async def remove_mcp_server(name: str):
     dependencies=[Depends(verify_admin_token)],
 )
 async def test_mcp_server(name: str) -> MCPTestResult:
-    """Probe the server: connect, list tools, disconnect.
+    """Connect, list advertised tools, and disconnect within 20 seconds.
 
-    Hard timeout of 20 seconds. The MCP SDK is an optional dep — if
-    it's missing we return ``ok=False`` with a clear error rather than
-    500-ing.
+    Probe and optional-dependency failures are returned as ``ok=False`` results
+    rather than server errors so the caller receives diagnostic details.
     """
     server = find_server(name)
     if server is None:
@@ -137,25 +143,23 @@ async def test_mcp_server(name: str) -> MCPTestResult:
 
 @router.get("/mcp/{name}/usage", response_model=list[CreatureRef])
 async def mcp_server_usage(name: str) -> list[CreatureRef]:
-    """List installed creatures + terrariums that reference this server.
+    """List installed creatures and terrariums that reference this server.
 
-    Scans configs from the catalog roots; missing reads are silently
-    skipped (the catalog tier already exposes a richer surface).
+    The catalog scan skips unreadable or missing configs because this endpoint
+    reports references rather than catalog integrity.
     """
     refs = await asyncio.to_thread(find_creatures_using_server, name)
     return [CreatureRef(**r) for r in refs]
 
 
 async def _probe_server(server: dict[str, Any]) -> dict[str, Any]:
-    """Connect to the server, capture its advertised tool list, disconnect.
+    """Connect to a registry entry and return its advertised tool count.
 
-    The MCP SDK itself is optional, but :mod:`kohakuterrarium.mcp.client`
-    defers the SDK import to the connect() call, so importing the
-    manager class is cheap and safe — no top-of-file optional-dep
-    weirdness is needed here.
+    The client defers its optional SDK import until connection, and shutdown is
+    attempted for every outcome.
     """
-    # Drop keys ``MCPServerConfig`` doesn't accept; the registry dict
-    # may carry extra metadata we don't want to forward.
+    # Registry entries may carry metadata that is not part of the connection
+    # schema, so only constructor-supported fields cross this boundary.
     allowed = {
         "name",
         "transport",

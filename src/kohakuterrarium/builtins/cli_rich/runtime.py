@@ -14,13 +14,7 @@ logger = get_logger(__name__)
 
 
 class StderrToLogger:
-    """Sink that re-routes stderr writes to the file logger.
-
-    Installed for the duration of the Application's run loop. Catches
-    asyncio's "Task exception was never retrieved" warnings, prompt_toolkit
-    renderer error prints, and any other stray traceback that would
-    otherwise corrupt the live region by landing on the screen.
-    """
+    """Redirect stderr lines to logging while the live terminal UI is active."""
 
     def __init__(self):
         self._buf: str = ""
@@ -49,12 +43,7 @@ class StderrToLogger:
 
 
 def spawn(coro) -> asyncio.Task:
-    """asyncio.create_task with a done-callback that swallows exceptions.
-
-    Without this, an exception inside a fire-and-forget task triggers
-    "Task exception was never retrieved" on garbage-collection — which
-    asyncio's default handler dumps to stderr.
-    """
+    """Create a background task and log unobserved exceptions."""
     task = asyncio.create_task(coro)
 
     def _done(t: asyncio.Task) -> None:
@@ -83,10 +72,7 @@ DISABLE_ENHANCED_KEYBOARD = "\x1b[>4;0m\x1b[<u"
 
 
 def enable_enhanced_keyboard() -> None:
-    """Ask the terminal to start emitting modifier+Enter as distinct keys.
-
-    Safe in non-terminal environments — write failures are swallowed.
-    """
+    """Request distinct modified-Enter sequences when the terminal supports them."""
     try:
         sys.stdout.write(ENABLE_ENHANCED_KEYBOARD)
         sys.stdout.flush()
@@ -104,14 +90,7 @@ def disable_enhanced_keyboard() -> None:
 
 
 def make_output() -> Output | None:
-    """Create the appropriate prompt_toolkit Output for the current terminal.
-
-    On Windows, prompt_toolkit auto-picks ``Win32Output``, which crashes
-    in xterm-style PTYs (git bash, mintty, MSYS2, WSL bridge). When we
-    detect TERM=xterm* or COLORTERM, force the Vt100 backend so we get
-    standards-compliant ANSI output instead. Returns None to let
-    prompt_toolkit auto-detect when no override is needed.
-    """
+    """Use VT100 output for Windows terminals that expose an ANSI-style PTY."""
     if sys.platform != "win32":
         return None
     term = os.environ.get("TERM", "")

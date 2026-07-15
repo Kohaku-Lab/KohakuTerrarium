@@ -1,19 +1,14 @@
 """Drive outbox dispatcher: claim, schedule, admit, settle, retry (design §5).
 
-:class:`DriveDispatcher` is the mechanical delivery plane. It owns exactly one
-background task per manager, wakes on manager mutations (outbox activity) plus a
-bounded periodic scan for retry/lease timers, and never polls in a hot loop. For
-each due delivery it re-verifies revision/epoch/assignment/readiness against the
-claimed row (a stale row is superseded, never delivered), projects the §5.1
-``TriggerEvent`` through the enabled registration, and hands it to a
-:class:`DriveDeliverySink` — the Phase E seam over ``Creature.inject_event``.
+The dispatcher owns one background task per manager. Mutations wake it
+immediately, while a bounded scan handles retry and lease timers without hot
+polling. Before delivery it revalidates revision, epoch, assignment, and
+readiness; stale rows are superseded. Registrations may project bounded event
+context, but framework identity remains authoritative.
 
-Physical admission and turn settlement are separated (§5.2): the sink returns an
-admission decision immediately and a settlement source resolved later. Settled
-errors classify into retry-backoff (injected clock/rng) or, after
-``max_attempts``, dead-letter plus a default Drive block (§5.6). Stopped
-assignees are deferred with no failure count (§6.1). No LLM, no spec
-interpretation, no ``datetime.now``/``random`` outside the injected clock/rng.
+Physical admission is separate from later turn settlement. Stopped assignees are
+deferred without failure, transient failures use injected-clock backoff, and
+exhausted attempts dead-letter the delivery and normally block its drive.
 """
 
 import asyncio
@@ -56,35 +51,30 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# §5.1 event type is projected from the delivery reason; identity/revision/epoch
-# stay framework-owned and cannot be patched by a registration projection.
+# Delivery reason selects the event type; registrations cannot replace framework
+# identity, revision, or lifecycle fields.
 DRIVE_READY_EVENT = "drive_ready"
 DRIVE_RESUME_EVENT = "drive_resume"
 DRIVE_RECOVERY_EVENT = "drive_recovery"
 _EVENT_TYPE_BY_REASON = {"resume": DRIVE_RESUME_EVENT, "recovery": DRIVE_RECOVERY_EVENT}
 
-# §6.1 uncertain-attempt warning that every recovery projection must carry.
+# Every recovery prompt must disclose that the prior attempt may have side effects.
 RECOVERY_WARNING = (
     "A previous attempt may have executed side effects. Inspect current state "
     "and reconcile before repeating actions. Use the delivery ID as an "
     "idempotency key where supported."
 )
 
-# Non-terminal statuses a dead-letter default-block may move a Drive from (§5.6).
+# Dead-letter handling may block only non-terminal pursuit states.
 BLOCKABLE_STATUSES = frozenset(
     {DriveStatus.ACTIVE, DriveStatus.WAITING, DriveStatus.PAUSED}
 )
-# Delivery states that still hold a claim/lease this dispatcher must release.
+# Dispatcher shutdown releases claims that have not reached physical admission.
 _CLAIMED_STATE = "claimed"
 
 
-# ---------------------------------------------------------------------------
-# Dispatcher
-# ---------------------------------------------------------------------------
-
-
 class DriveDispatcher:
-    """One claim/dispatch loop over a repository outbox (design §5)."""
+    """Claim due deliveries, admit them to creatures, and track settlement."""
 
     def __init__(
         self,
@@ -119,30 +109,29 @@ class DriveDispatcher:
         self._wake = asyncio.Event()
         self._task: asyncio.Task | None = None
         self._stopping = False
-        # one admission per assignee at a time (§5.5) + fairness accounting.
+        # Serial admission per assignee prevents concurrent drive turns from
+        # bypassing fairness accounting.
         self._inflight: dict[str, str] = {}
         self._consecutive: dict[str, int] = {}
         self._settle_tasks: set[asyncio.Task] = set()
 
-    # -- lifecycle -----------------------------------------------------------
-
     def notify(self) -> None:
-        """Wake the claim loop after a manager mutation enqueued outbox work."""
+        """Wake the claim loop after new or changed delivery work."""
         self._wake.set()
 
     async def start(self) -> None:
-        """Idempotent: a second call while running is a no-op."""
+        """Start the dispatcher unless it is already running."""
         if self._task is not None:
             return
         self._stopping = False
         self._task = asyncio.create_task(self._run())
 
     async def stop(self) -> None:
-        """Idempotent: stop the loop, drain settlements, release every claim.
+        """Stop the loop, drain settlements, and release outstanding claims.
 
-        Claim release opens a repository transaction, so it tolerates a repo
-        whose companion closer already shut the executor (store close raced the
-        stop): there is nothing to release against a closed repository."""
+        Repository closure may race shutdown. In that case no claim can be
+        released through the closed store, so closure is treated as quiescence.
+        """
         task = self._task
         self._task = None
         if task is not None:
@@ -150,7 +139,7 @@ class DriveDispatcher:
             self._wake.set()
             try:
                 await task
-            except asyncio.CancelledError:  # pragma: no cover - defensive
+            except asyncio.CancelledError:  # pragma: no cover
                 pass
         await self._drain_settlements()
         try:
@@ -159,7 +148,7 @@ class DriveDispatcher:
             pass
 
     async def drain(self) -> None:
-        """Await every in-flight settlement task (test + shutdown helper)."""
+        """Wait for every in-flight settlement task."""
         await self._drain_settlements()
 
     async def _run(self) -> None:
@@ -169,13 +158,12 @@ class DriveDispatcher:
                     await self._scan_callback()
                 await self.dispatch_once()
             except DriveRepositoryClosedError:
-                # The repository's executor was shut underneath the loop (a store
-                # close / replacement raced ahead of stop()). A closed repo is a
-                # quiesce signal, not a round failure: stop cleanly rather than
-                # spinning and logging bogus round errors until stop() flags us.
+                # Repository closure is a quiescence signal, not a failed round;
+                # continuing would only spin on an unavailable executor.
                 self._stopping = True
                 break
-            except Exception as exc:  # a bad round must not kill the loop
+            except Exception as exc:
+                # One failed round must not terminate future dispatch.
                 logger.error("drive dispatch round failed", error=str(exc))
             try:
                 await asyncio.wait_for(self._wake.wait(), timeout=self._scan_interval)
@@ -183,8 +171,6 @@ class DriveDispatcher:
                 pass
             self._wake.clear()
         await self._drain_settlements()
-
-    # -- one claim/dispatch round -------------------------------------------
 
     async def dispatch_once(self) -> None:
         """Claim due deliveries and dispatch them in deterministic order."""
@@ -219,8 +205,8 @@ class DriveDispatcher:
         if is_delivery_stale(
             delivery, record, assignment, current_readiness_generation=gen
         ) or await self._already_admitted(delivery):
-            # Stale row, or another delivery with the same §5.3 logical key already
-            # reached the creature — one logical admission, never delivered twice.
+            # A logical key may reach a creature only once. Stale rows and later
+            # physical duplicates are superseded before delivery.
             await self._repo.mark_delivery(delivery.delivery_id, "superseded", now=now)
             emit_observation(
                 self._observer,
@@ -230,7 +216,7 @@ class DriveDispatcher:
             )
             return
         assignee = delivery.assignee_creature_id
-        # One Drive admission per assignee per round and while one is in flight.
+        # One assignee cannot receive overlapping drive admissions.
         if assignee in dispatched_assignees or assignee in self._inflight:
             return
         if len(self._inflight) >= self._config.dispatcher_concurrency:
@@ -244,7 +230,7 @@ class DriveDispatcher:
                 },
             )
             return
-        # Fairness: after N consecutive Drive turns, yield to queued foreign work.
+        # Consecutive drive turns yield when the assignee has queued non-drive work.
         if (
             self._consecutive.get(assignee, 0)
             >= self._config.max_consecutive_drive_turns
@@ -272,9 +258,11 @@ class DriveDispatcher:
         await self._dispatch(delivery, assignee, event, now)
 
     async def _already_admitted(self, delivery: DriveDelivery) -> bool:
-        """Whether a *different* delivery with the same §5.3 logical key already
-        reached the creature (admitted/acknowledged) — the repository-authoritative
-        logical dedupe behind the at-least-once physical guarantee."""
+        """Return whether this logical delivery already reached the creature.
+
+        Durable logical deduplication permits at-least-once physical attempts
+        without admitting the same drive generation twice.
+        """
         key = delivery.logical_key()
         for other in await self._repo.list_deliveries(delivery.drive_id):
             if other.delivery_id == delivery.delivery_id:
@@ -285,8 +273,6 @@ class DriveDispatcher:
             ):
                 return True
         return False
-
-    # -- physical dispatch + settlement -------------------------------------
 
     async def _dispatch(
         self, delivery: DriveDelivery, assignee: str, event: TriggerEvent, now: datetime
@@ -303,8 +289,8 @@ class DriveDispatcher:
             )
             return
         if not outcome.admitted:
-            # Stopped assignee: defer, no failure count (§6.1). Back to pending so
-            # a restart reconcile can redeliver; the lease stays this owner's.
+            # A stopped assignee is temporary unavailability, not a failed attempt;
+            # return the row to pending for restoration-time redelivery.
             self._inflight.pop(assignee, None)
             self._consecutive[assignee] = 0
             await self._repo.mark_delivery(delivery.delivery_id, "pending", now=now)
@@ -324,8 +310,8 @@ class DriveDispatcher:
             {"delivery_id": delivery.delivery_id},
         )
         if outcome.settlement is None:
-            # Admitted with no settlement: leave admitted; reconcile classifies it
-            # as an uncertain attempt if the lease is lost (§5.2, §6.1).
+            # Without settlement evidence the admitted row remains uncertain and
+            # reconciliation must assume side effects may have occurred.
             self._inflight.pop(assignee, None)
             return
         task = asyncio.create_task(self._settle(delivery, assignee, outcome.settlement))
@@ -337,7 +323,8 @@ class DriveDispatcher:
     ) -> None:
         try:
             settlement = await _resolve_settlement(source)
-        except Exception as exc:  # a broken settlement source is a transient turn error
+        except Exception as exc:
+            # Settlement-source failures are retryable turn errors.
             settlement = Settlement(SettlementStatus.ERROR, {"error": str(exc)})
         now = self._clock()
         try:
@@ -390,9 +377,11 @@ class DriveDispatcher:
             self._wake.set()
 
     async def _notify_acknowledged(self, drive_id: str) -> None:
-        """Post-ack continuation hook (design §4.4): let the manager re-evaluate
-        the registration's readiness right after a turn settles. Fail-open — a
-        re-arm failure must never break settlement bookkeeping."""
+        """Notify readiness after settlement without compromising acknowledgement.
+
+        Continuation evaluation fails open because delivery settlement is already
+        authoritative and must not be rolled back by a callback error.
+        """
         if self._ack_callback is None:
             return
         try:
@@ -444,7 +433,8 @@ class DriveDispatcher:
                 await self._repo.mark_delivery(
                     delivery.delivery_id, "superseded", now=now
                 )
-            case _:  # DEAD_LETTER and FAIL_CLOSED both terminate the delivery
+            case _:
+                # Dead-letter and fail-closed dispositions both terminate delivery.
                 await self._repo.mark_delivery(
                     delivery.delivery_id,
                     "dead_letter",
@@ -462,7 +452,7 @@ class DriveDispatcher:
                 await self._block_on_dead_letter(delivery.drive_id, now)
 
     async def _block_on_dead_letter(self, drive_id: str, now: datetime) -> None:
-        """§5.6 default: a dead-lettered delivery blocks its Drive (system actor)."""
+        """Block a non-terminal drive after its delivery dead-letters."""
         record = await self._repo.get(drive_id)
         if record is None or record.status not in BLOCKABLE_STATUSES:
             return
@@ -481,9 +471,8 @@ class DriveDispatcher:
                 drive_id,
                 {"status": "blocked", "reason": "dead_letter"},
             )
-        except (
-            DriveError
-        ) as exc:  # blocking is best-effort; dead-letter already recorded
+        except DriveError as exc:
+            # Dead-letter persistence remains authoritative if blocking races.
             logger.warning(
                 "dead-letter block failed", drive_id=drive_id, error=str(exc)
             )
@@ -491,11 +480,9 @@ class DriveDispatcher:
     def _backoff_seconds(self, attempt: int) -> float:
         retry = self._config.retry
         base = min(retry.initial_backoff_s * (2 ** (attempt - 1)), retry.max_backoff_s)
-        # Symmetric jitter in [-jitter, +jitter] of base; rng.random() in [0, 1).
+        # Symmetric jitter keeps the expected delay at the capped exponential base.
         delta = retry.jitter * (2 * self._rng.random() - 1)
         return max(0.0, base * (1 + delta))
-
-    # -- event projection ----------------------------------------------------
 
     def _build_event(
         self,
@@ -526,8 +513,8 @@ class DriveDispatcher:
             "delivery_id": delivery.delivery_id,
             "assignment_id": delivery.assignment_id,
             "delivery_reason": reason,
-            # Bounded projected view is namespaced so it can never overwrite the
-            # framework identity fields above (design §5.1).
+            # Registration context is namespaced so bounded presentation data
+            # cannot overwrite framework-owned identity fields.
             "drive": projected,
         }
         if reason == "recovery":
@@ -544,16 +531,13 @@ class DriveDispatcher:
             stackable=False,
         )
 
-    # -- shutdown helpers ----------------------------------------------------
-
     async def _drain_settlements(self) -> None:
         tasks = list(self._settle_tasks)
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _release_claims(self) -> None:
-        """Return this owner's claimed-but-unadmitted deliveries to pending and
-        clear its leases so a stop never strands a claim (design §6.4)."""
+        """Release this dispatcher's unadmitted claims and assignment leases."""
         async with self._repo.transaction() as txn:
             now = self._clock()
             mutation = Mutation()
@@ -580,8 +564,11 @@ class DriveDispatcher:
 def _schedule_item(
     delivery: DriveDelivery, record: DriveRecord | None
 ) -> DriveScheduleItem:
-    """Build the §5.5 scheduler key input; a missing record sorts by the
-    delivery's own timing at priority zero (it will be superseded anyway)."""
+    """Build deterministic scheduling input for a delivery.
+
+    A missing drive uses priority zero and delivery timing; stale validation will
+    supersede it before admission.
+    """
     priority = record.priority if record is not None else 0
     created_at = record.created_at if record is not None else delivery.created_at
     return DriveScheduleItem(
@@ -594,7 +581,7 @@ def _schedule_item(
 
 
 async def _resolve_settlement(source: SettlementSource) -> Settlement:
-    if source is None:  # caller guards this; kept total for safety
+    if source is None:
         return Settlement(SettlementStatus.OK)
     awaitable = source() if callable(source) else source
     return await awaitable

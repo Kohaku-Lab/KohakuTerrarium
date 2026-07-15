@@ -1,7 +1,6 @@
-"""Engine-aware slash-command dispatch for the TUI runner (design §12.4, R1-32).
+"""Dispatch engine-aware slash commands from the TUI runner.
 
-Extracted from :mod:`engine_cli` (which sits at the file-size cap) so the
-trusted-context construction and the ``needs_engine`` dispatch stay one unit.
+Keeps trusted-context construction and ``needs_engine`` dispatch together.
 Typed ``/drives`` / ``/goal`` subcommands must run against a trusted local-console
 context (a live service + focused creature + explicit operator authority) so they
 reach the Drive service instead of the engine-agnostic agent pipeline, which
@@ -21,15 +20,10 @@ from kohakuterrarium.terrarium.service import LocalTerrariumService
 def _engine_command_context(
     focus: Any, engine: Terrarium, focus_creature_id: str, commands: dict
 ) -> UserCommandContext:
-    """Trusted local-console context for engine-aware TUI slash commands (R1-32).
+    """Build the trusted local-console context for engine-aware commands.
 
-    Mirrors the Rich CLI dispatch (``cli_rich/app_multi.dispatch_topology_command``):
-    a ready ``service`` + focused ``creature_id`` + local ``principal`` + EXPLICIT
-    operator authority. ``engine_cli`` is a terrarium-layer module, so importing
-    :class:`LocalTerrariumService` is legal here. The operator flag is set
-    explicitly because the command default is unprivileged (R1-21) — a context
-    that is not a trusted console (any adapter that does not set the flag) stays
-    unprivileged.
+    The terrarium layer may provide a local service and explicit operator authority.
+    Other adapters remain unprivileged unless they deliberately grant that authority.
     """
     ctx = UserCommandContext(agent=focus, session=focus.session)
     ctx.extra["command_registry"] = commands
@@ -53,12 +47,10 @@ def _build_command_aliases(commands: dict) -> dict[str, str]:
 def _active_command_target(
     tui: Any, engine: Terrarium, focus: Any, focus_creature_id: str, graph_id: str
 ) -> tuple[str, Any]:
-    """The ``(creature_id, agent)`` the next engine-aware command must act on.
+    """Resolve the active creature targeted by the next engine-aware command.
 
-    Engine-aware slash commands target the ACTIVE tab's creature, not the launch
-    focus, so ``/drives`` / ``/goal`` typed on a sibling tab operate on and render
-    to that creature (R1-32 §7). Channel tabs, unknown tabs, and tabs outside the
-    focus graph fall back to the focus creature.
+    Commands follow the active creature tab for execution and rendering. Channel,
+    unknown, and out-of-graph tabs fall back to the launch focus.
     """
     getter = getattr(tui, "get_active_tab", None)
     active = getter() if callable(getter) else None
@@ -73,12 +65,10 @@ def _active_command_target(
 
 
 def _live_command_registry(agent: Any, fallback: dict) -> dict:
-    """The agent's LIVE aggregated slash registry (design §8.9, R1-32 §6).
+    """Return the agent's current aggregated slash-command registry.
 
-    Reads ``list_user_commands()`` so plugin-contributed commands (e.g. ``/goal``)
-    are present and drop out again when the plugin is disabled — a built-in-only
-    snapshot never sees them. ``fallback`` covers bare agent stubs that do not
-    aggregate their own registry.
+    Reading the live registry reflects plugin enablement changes; the fallback
+    supports lightweight agents that do not aggregate commands themselves.
     """
     lister = getattr(agent, "list_user_commands", None)
     if callable(lister):
@@ -97,12 +87,10 @@ async def _dispatch_active_engine_command(
     graph_id: str,
     fallback_commands: dict,
 ) -> bool:
-    """Dispatch an engine-aware slash command bound to the ACTIVE tab (R1-32).
+    """Dispatch an engine-aware command against the active creature tab.
 
-    Resolves the currently-focused ``(creature_id, agent)``, reads that agent's
-    live aggregated registry (so plugin commands like ``/goal`` are found — §6),
-    and builds the trusted context targeting that creature so both the service
-    call and the rendered notice follow the active tab (§7).
+    The selected agent supplies the live command registry, and the same creature
+    target governs both service execution and notice rendering.
     """
     creature_id, agent = _active_command_target(
         tui, engine, focus, focus_creature_id, graph_id

@@ -34,9 +34,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Runtime-only readiness barrier (design §6.5, Phase E). NOT an Agent
-# cognitive state — pure engine bookkeeping that gates Drive delivery until
-# the creature has started and its startup trigger has settled.
+# Engine bookkeeping that prevents Drive delivery until startup has settled;
+# this state is not part of the agent's cognitive state.
 RESTORATION_ADDED = "added"
 RESTORATION_RESTORING = "restoring"
 RESTORATION_STARTED = "started"
@@ -104,11 +103,11 @@ class Creature:
     # is captured here so :attr:`status` can report ``"error"`` until
     # the next ``start()`` clears it.
     _input_loop_error: BaseException | None = None
-    # Force-stop-with-marker (UXI-11 kill): distinguishes a creature that
-    # was killed from one plainly stopped. Cleared on the next start().
+    # Force-stop marker distinguishes a creature that was killed from one
+    # plainly stopped. Cleared on the next start().
     _killed: bool = False
-    # Restoration barrier (design §6.5) — runtime-only readiness state the
-    # engine's Drive runtime gates reconciliation on. Transitions:
+    # The restoration barrier is runtime-only readiness state that the engine's
+    # Drive runtime gates reconciliation on. Transitions:
     # added -> restoring -> started -> startup_settled -> restoration_ready.
     _restoration_state: str = RESTORATION_ADDED
     _restoration_ready_event: "asyncio.Event | None" = None
@@ -188,7 +187,7 @@ class Creature:
 
     @property
     def restoration_state(self) -> str:
-        """Current restoration-barrier state (design §6.5)."""
+        """Current restoration-barrier state."""
         return self._restoration_state
 
     @property
@@ -331,14 +330,14 @@ class Creature:
 
     @property
     def paused(self) -> bool:
-        """Whether the creature is warm-paused (UXI-11). Orthogonal to
+        """Whether the creature is warm-paused. Orthogonal to
         :attr:`status`/:attr:`is_running` — a paused creature stays alive
         and warm, it just admits no new turns until resumed."""
         return bool(getattr(self.agent, "_paused", False))
 
     @property
     def killed(self) -> bool:
-        """Whether this creature was force-stopped via a kill op (UXI-11).
+        """Whether this creature was force-stopped via a kill operation.
         Cleared on the next :meth:`start`."""
         return self._killed
 
@@ -353,7 +352,7 @@ class Creature:
         self.agent.resume()
 
     # ------------------------------------------------------------------
-    # typed turn drivers (E3) — the programmatic chat surface
+    # typed turn drivers — the programmatic chat surface
     # ------------------------------------------------------------------
 
     async def run(self, content, **kwargs):
@@ -411,7 +410,7 @@ class Creature:
         raise_on_error: bool = False,
     ) -> TurnResult:
         """Drive a pre-built :class:`TriggerEvent` and return its correlated
-        :class:`TurnResult` (public creature ingress, design §5.1-5.2).
+        :class:`TurnResult` through the public creature ingress.
 
         This is the seam the Terrarium Drive dispatcher delivers over. It
         distinguishes *rejected-because-stopped* (``status="rejected"``,

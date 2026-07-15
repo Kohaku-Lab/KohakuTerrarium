@@ -1,15 +1,7 @@
-"""POSIX PTY session — bridges a forked shell with a WebSocket.
+"""Bridge a forked POSIX shell and websocket through a pseudo-terminal.
 
-Drains ``api/ws/terminal.py:_pty_session:52`` (the POSIX branch).
-Windows fallbacks live in :mod:`pty_windows`; the platform router in
-:mod:`pty_router` picks between them.
-
-Wire format (server ↔ client):
-
-    Client → Server: { "type": "input",  "data": "ls\\n" }
-    Client → Server: { "type": "resize", "rows": 24, "cols": 80 }
-    Server → Client: { "type": "output", "data": "..." }
-    Server → Client: { "type": "error",  "data": "..." }
+Client frames provide terminal input or dimensions; server frames carry decoded
+terminal output or errors.
 """
 
 import asyncio
@@ -27,7 +19,7 @@ logger = get_logger(__name__)
 
 
 async def pty_session(websocket: WebSocket, cwd: str) -> None:
-    """Spawn a POSIX PTY shell and bridge I/O with the WebSocket."""
+    """Run a login shell until either the PTY or websocket side closes."""
     import fcntl
     import pty
     import termios
@@ -49,7 +41,7 @@ async def pty_session(websocket: WebSocket, cwd: str) -> None:
     }
     child_pid = os.fork()
     if child_pid == 0:
-        # Child — become session leader, attach slave PTY, exec shell.
+        # A session-leading child must bind all standard streams to the slave PTY.
         try:
             os.setsid()
             os.close(master_fd)
@@ -63,7 +55,7 @@ async def pty_session(websocket: WebSocket, cwd: str) -> None:
         except Exception:
             os._exit(1)
 
-    # Parent — close slave side, keep master.
+    # The parent owns only the master endpoint used for asynchronous bridging.
     os.close(slave_fd)
     loop = asyncio.get_event_loop()
 

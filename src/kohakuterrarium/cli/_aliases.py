@@ -4,10 +4,6 @@ The framework's canonical commands are ``kt serve start --mode lab-host``
 and ``kt lab-client``.  Operators and the deployment docs use the
 shorter ``kt host`` / ``kt client`` forms; this module defines the
 alias parsers and dispatches them onto the canonical CLIs.
-
-Keeping the alias surface here (rather than inline in
-:mod:`kohakuterrarium.cli.__init__`) keeps the package entry under the
-600-line cap.
 """
 
 import argparse

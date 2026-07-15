@@ -1,7 +1,6 @@
 """CLI MCP management — global registry CRUD + per-agent lister.
 
-Folds the legacy ``cli/config_mcp.py`` and ``cli/mcp.py`` into one module
-that delegates to the canonical parser
+Delegates global and per-agent MCP operations to the canonical parser
 :mod:`kohakuterrarium.studio.identity.mcp_servers`.
 """
 
@@ -42,6 +41,7 @@ def list_cli() -> int:
 
 
 def add_or_update_cli(name: str | None) -> int:
+    """Interactively add or update a global MCP server."""
     existing = find_server(name) if name else None
     try:
         server = prompt_server_dict(existing, _prompt)
@@ -54,6 +54,7 @@ def add_or_update_cli(name: str | None) -> int:
 
 
 def delete_cli(name: str) -> int:
+    """Delete a global MCP server by name."""
     if not delete_server(name):
         print(f"MCP server not found: {name}")
         return 1
@@ -62,12 +63,7 @@ def delete_cli(name: str) -> int:
 
 
 def list_for_agent_cli(agent_path: str) -> int:
-    """List MCP servers configured in a specific agent's ``config.yaml``.
-
-    Was ``cli/mcp.py:mcp_list_cli``. Routes through
-    :func:`mcp_servers.load_agent_mcp_servers` so there is exactly one
-    yaml-walking implementation in the codebase.
-    """
+    """List MCP servers configured in a specific agent's config."""
     servers, config_file, error = load_agent_mcp_servers(agent_path)
     if error:
         print(f"Error: {error}")

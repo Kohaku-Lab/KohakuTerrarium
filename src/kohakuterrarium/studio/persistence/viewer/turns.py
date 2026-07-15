@@ -1,7 +1,6 @@
 """Per-turn rollup pagination for the Session Viewer.
 
-Verbatim port of ``_session_viewer.py:build_turns_payload`` — drives
-the trace timeline + the Cost tab's per-turn aggregation.
+Builds filtered, paginated turn rollups for trace and cost views.
 """
 
 from typing import Any
@@ -25,12 +24,10 @@ def build_turns_payload(
     offset: int,
     aggregate: bool = False,
 ) -> dict[str, Any]:
-    """Paginated rollup rows. Drives the trace timeline + collapsed list.
+    """Return filtered and paginated turn-rollup rows.
 
-    When ``aggregate`` is true, sum across **every** agent in the
-    session (main + attached) and include a per-agent ``breakdown``
-    field in each row. ``agent`` is then ignored. Used by the Cost tab
-    to show a unified per-turn view of the whole session.
+    Aggregate mode ignores ``agent`` and sums main, attached, and sub-agent
+    contributions into per-turn rows with breakdowns.
     """
     meta = store.load_meta()
 

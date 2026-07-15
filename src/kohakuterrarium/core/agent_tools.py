@@ -25,26 +25,12 @@ logger = get_logger(__name__)
 
 
 class AgentToolsMixin(AgentRuntimeToolsMixin):
-    """Mixin providing tool execution and background job handling for the Agent class.
-
-    Contains tool startup, result collection, sub-agent spawning,
-    and background completion callbacks.
-    """
-
-    # ------------------------------------------------------------------
-    # Tool execution
-    # ------------------------------------------------------------------
+    """Provide tool execution, result handling, and background job management."""
 
     async def _start_tool_async(
         self, tool_call: ToolCallEvent
     ) -> tuple[str, asyncio.Task, bool]:
-        """Start a tool execution immediately as an async task.
-
-        Does NOT wait for completion.
-
-        Returns:
-            (job_id, task, is_direct): is_direct indicates if we should wait
-        """
+        """Start a tool asynchronously and return its ID, task, and wait mode."""
         try:
             logger.info("Running tool: %s", tool_call.name)
             tool = self.executor.get_tool(tool_call.name)
@@ -75,10 +61,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             task = asyncio.create_task(_error_result())
             return error_job_id, task, True
 
-    # ------------------------------------------------------------------
-    # Handle-based waiting (replaces asyncio.gather)
-    # ------------------------------------------------------------------
-
     async def _wait_handles(
         self,
         handles: dict[str, BackgroundifyHandle],
@@ -87,13 +69,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         tool_call_ids: dict[str, str],
         native_mode: bool,
     ) -> tuple[dict[str, Any], bool]:
-        """Wait for all handles, processing promotions as they occur.
-
-        Returns:
-            (results, had_promotions) — results maps job_id → result for
-            tasks that completed as direct.  had_promotions is True if
-            any task was promoted (placeholder already added to conversation).
-        """
+        """Collect direct results while processing background promotions."""
         if not handles:
             return {}, False
 
@@ -140,7 +116,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         tool_name, label = _make_job_label(job_id)
         logger.info("Task promoted to background", job_id=job_id)
 
-        # In native mode, add placeholder tool result so conversation stays valid
+        # Native tool-call protocols require a result even when the real result
+        # will arrive in a later turn.
         tool_call_id = tool_call_ids.get(job_id)
         if native_mode and tool_call_id:
             controller.conversation.append(
@@ -150,7 +127,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 name=tool_name,
             )
 
-        # Plugin callback
         if hasattr(self, "plugins") and self.plugins:
             asyncio.create_task(
                 self.plugins.notify(
@@ -200,8 +176,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             "background": False,
             "interruptible": True,
             "notify_controller_on_background_complete": notify_controller_on_background_complete,
-            # Used by ``_emit_direct_completion_activity`` to compute the
-            # tool/subagent execution duration for the metrics hook.
+            # Monotonic time avoids wall-clock adjustments corrupting durations.
             "started_at": time.monotonic(),
         }
 
@@ -217,9 +192,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         _, label = _make_job_label(job_id)
         error = getattr(result, "error", None) or "User manually interrupted this job."
         activity = "subagent_error" if kind == "subagent" else "tool_error"
-        # Process-metrics: interrupted-by-user counts as a terminal job.
-        # Compute duration if we still have ``started_at`` recorded; the
-        # name fallback mirrors ``_emit_direct_completion_activity``.
+        # User interruption is a terminal outcome and must contribute to metrics.
         started_at = meta.get("started_at")
         duration_ms = (
             (time.monotonic() - started_at) * 1000.0
@@ -244,8 +217,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             activity_meta["total_tokens"] = getattr(result, "total_tokens", 0)
             activity_meta["prompt_tokens"] = getattr(result, "prompt_tokens", 0)
             activity_meta["completion_tokens"] = getattr(result, "completion_tokens", 0)
-            # Wave B audit finding A: surface sub-agent cached_tokens to
-            # the parent's session output.
             activity_meta["cached_tokens"] = getattr(result, "cached_tokens", 0)
             activity_meta["tools_used"] = getattr(result, "metadata", {}).get(
                 "tools_used", []
@@ -289,21 +260,14 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
     def _append_interrupted_tool_message(
         self, job_id: str, meta: dict[str, Any], result: Any
     ) -> None:
-        """Synthesise the matching ``role=tool`` conversation entry for an
-        interrupted direct job (Bug 2).
+        """Add the tool response required for an interrupted direct job.
 
-        User-initiated interrupt cancels ``_processing_task`` and the
-        controller loop dies BEFORE ``_add_native_results_to_conversation``
-        can append the tool messages that pair with the assistant turn's
-        ``tool_calls``. Without this synthesised entry the next LLM call
-        ships ``assistant.tool_calls`` with no matching ``role=tool``
-        message and most providers (OpenAI / Anthropic-compat) reject it
-        with a 400.
+        Interrupting ``_processing_task`` can prevent the normal result path from
+        pairing the assistant's tool call with a tool response. Providers reject
+        that incomplete conversation on the next request.
 
-        Idempotent: skipped when the controller already appended a tool
-        message for this ``tool_call_id`` (defensive against the race
-        where ``_add_native_results_to_conversation`` actually ran before
-        the cancel propagated).
+        Existing responses are preserved because cancellation can race with the
+        normal result path.
         """
         controller = getattr(self, "controller", None)
         conversation = getattr(controller, "conversation", None)
@@ -344,11 +308,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         Builds a TriggerEvent and reuses the existing ``_on_bg_complete``
         path for activity notification and event processing.
         """
-        # NOTE: ``asyncio.CancelledError`` is a ``BaseException`` (not
-        # ``Exception``) since Python 3.8, so it must be checked
-        # explicitly *before* the generic exception arm — otherwise a
-        # cancelled background task is misreported as an error instead
-        # of an interrupt.
+        # ``CancelledError`` is a ``BaseException`` and must precede the generic
+        # arm so cancellation is reported as an interrupt rather than an error.
         if isinstance(result, asyncio.CancelledError):
             extra_context: dict[str, Any] = {
                 "interrupted": True,
@@ -366,7 +327,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 job_id=job_id, content="", error=str(result), **extra_context
             )
         elif hasattr(result, "output"):
-            # JobResult or SubAgentResult
             extra_context = {
                 "interrupted": bool(getattr(result, "interrupted", False)),
                 "cancelled": bool(getattr(result, "cancelled", False)),
@@ -382,7 +342,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 error=result.error if hasattr(result, "error") else None,
                 **extra_context,
             )
-            # Attach sub-agent metadata if present
             if hasattr(result, "turns"):
                 if event.context is None:
                     event.context = {}
@@ -406,12 +365,10 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
 
     def _emit_direct_completion_activity(self, job_id: str, result: Any) -> None:
         """Emit terminal activity immediately when a direct job finishes."""
-        # Post-stop the sweep already emitted the job's terminal — a
-        # second emission here would contradict it (mirrors _on_bg_complete).
+        # The post-stop sweep already emitted a terminal state for this job.
         if not self._running:
             return
-        # Record for plugin termination checkers that want to peek at
-        # the recent tool-result tail (cluster C.2 TerminationContext).
+        # Termination checkers need the recent result tail to evaluate stopping.
         checker = getattr(self, "_termination_checker", None)
         if checker is not None and hasattr(checker, "record_tool_result"):
             try:
@@ -425,13 +382,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         done_activity = "subagent_done" if is_subagent else "tool_done"
         error_activity = "subagent_error" if is_subagent else "tool_error"
 
-        # Process-metrics: compute duration from the tracked start
-        # timestamp; if the job ran in background and ``meta`` has been
-        # popped (or was never tracked) fall back to 0 so we still
-        # observe the count. ``metric_name`` is the canonical
-        # tool/subagent name (matches the registry key) — the
-        # ``_make_job_label`` form includes a job-id suffix and isn't a
-        # bounded label.
+        # Missing background metadata still contributes a count with zero duration.
+        # Use the registry name because job-ID suffixes would create unbounded labels.
         started_at = meta.get("started_at")
         duration_ms = (
             (time.monotonic() - started_at) * 1000.0
@@ -519,12 +471,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         )
         output = output or ""
         exit_code = getattr(result, "exit_code", 0)
-        # ``ToolResult.success`` is the canonical success signal:
-        # ``exit_code=None`` (the default for tools that never shell out)
-        # with no error IS a success. A bare ``exit_code == 0`` check
-        # wrongly flags those tools as failures — both in the activity
-        # label and, worse, in the metrics status fed to
-        # ``serving.process_metrics``.
+        # ``exit_code=None`` is valid for tools that do not launch a process, so
+        # prefer the result's canonical success signal when available.
         succeeded = result.success if hasattr(result, "success") else exit_code == 0
         status = "OK" if succeeded else f"exit={exit_code}"
         preview = (
@@ -544,11 +492,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             metadata["tools_used"] = getattr(result, "metadata", {}).get(
                 "tools_used", []
             )
-        # Canvas-preview metadata (Feat 1) — write / edit / multi_edit
-        # tools attach a ``canvas_preview`` dict to their ToolResult so
-        # the frontend's canvas panel can render the just-touched file
-        # in place. Pass it straight through so the WS / event log both
-        # carry it; the FE picks it up via ``resultMeta.canvas_preview``.
+        # Preserve preview metadata so event consumers can render modified files.
         tool_metadata = getattr(result, "metadata", None) or {}
         canvas_preview = tool_metadata.get("canvas_preview")
         if canvas_preview:
@@ -565,10 +509,6 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             duration_ms,
         )
 
-    # ------------------------------------------------------------------
-    # Result processing (native and text format)
-    # ------------------------------------------------------------------
-
     def _add_native_results_to_conversation(
         self,
         controller: Controller,
@@ -579,7 +519,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         """Add completed results as role='tool' messages (native mode)."""
         for job_id in handle_order:
             if job_id not in results:
-                continue  # Was promoted — placeholder already added
+                continue  # Promoted jobs already have a protocol placeholder.
 
             result = results[job_id]
             tool_name, _ = _make_job_label(job_id)
@@ -625,7 +565,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         result_strs: list[str] = []
         for job_id in handle_order:
             if job_id not in results:
-                continue  # Was promoted
+                continue
 
             result = results[job_id]
 

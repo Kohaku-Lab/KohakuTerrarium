@@ -1,11 +1,10 @@
 """Drive registration protocol, descriptor, and the builtin generic registration.
 
-A *registration* supplies the deterministic, kind-specific policy Terrarium is
-allowed to run for a Drive kind (design §8.1): spec validation, transition
-constraints, readiness, event projection, terminal verification, and a bounded
-prompt contribution. Registrations are runtime extension objects — **not** Agent
-plugins and **not** recipe fields — and may never run an LLM, write the
-repository, or dispatch events.
+A registration supplies deterministic, kind-specific Drive policy: spec
+validation, transition constraints, readiness, event projection, terminal
+verification, and a bounded prompt contribution. Registrations are runtime
+extension objects rather than Agent plugins or recipe fields, and they may not
+run an LLM, write the repository, or dispatch events.
 
 Discovery is separate from enablement (§8.2): a package declares a
 ``drive_registrations:`` manifest slot and its :class:`DriveRegistrationDescriptor`
@@ -14,9 +13,6 @@ through :func:`resolve_registration`, on explicit enable/validate.
 
 The immutable enabled-registry snapshot and derived-availability calculation
 live in :mod:`drive.snapshot`, which builds on this module.
-
-Leaf module: imports only stdlib, :mod:`kohakuterrarium.errors`-derived Drive
-errors, and the logger. No Agent/engine/LLM/plugin imports.
 """
 
 import importlib
@@ -43,19 +39,15 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Byte budgets for prompt normalization at registration load time (§8.7). A
-# per-registration cap bounds one contribution; the aggregate cap bounds the
-# sum across all enabled registrations so the system prompt stays small.
+# Per-registration and aggregate limits keep extension prose from dominating
+# the system prompt.
 PER_REGISTRATION_PROMPT_MAX_BYTES = 2048
 AGGREGATE_PROMPT_MAX_BYTES = 8192
-# Reference opaque-spec byte cap. The engine's DriveRuntimeConfig carries the
-# AUTHORITATIVE per-field limits (§13, R1-41): by default the generic
-# registration imposes no independent byte cap so a runtime ``spec_max_bytes``
-# larger than this value is fully effective; an explicit cap is honoured only
-# when a caller opts into a tighter one.
+# Runtime configuration owns the authoritative spec limit; registrations may
+# opt into a tighter independent cap.
 DEFAULT_SPEC_MAX_BYTES = 16384
 
-# role name -> the method a registration exposes for that role.
+# Role names map to the methods registrations expose.
 ROLE_METHODS: dict[str, str] = {
     "spec": "validate_spec",
     "transition": "validate_transition",
@@ -67,7 +59,7 @@ ROLE_METHODS: dict[str, str] = {
 ALL_ROLES = frozenset(ROLE_METHODS)
 _VERIFIER_MODES = frozenset({"none", "actor", "extension", "two_party"})
 
-# Distinguishes an absent compatibility marker from an explicit ``None`` (R1-18).
+# Compatibility treats a missing marker differently from an explicit null value.
 _MISSING = object()
 
 _GENERIC_PROMPT = (
@@ -75,11 +67,6 @@ _GENERIC_PROMPT = (
     "report material progress with evidence, and propose completion or failure "
     "for verification rather than asserting a terminal outcome yourself."
 )
-
-
-# ---------------------------------------------------------------------------
-# Role result types (design §8.1 role split)
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -140,11 +127,6 @@ class DriveRegistration(Protocol):
     def descriptor(self) -> "DriveRegistrationDescriptor": ...
 
 
-# ---------------------------------------------------------------------------
-# DriveRegistrationDescriptor — wire-safe metadata; carries no live object
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveRegistrationDescriptor:
     """Identity + capability metadata for one registration (design §8.1).
@@ -169,8 +151,7 @@ class DriveRegistrationDescriptor:
     prompt_contribution: str | None = None
     option_defaults: dict[str, Any] = field(default_factory=dict)
     option_schema: dict[str, Any] = field(default_factory=dict)
-    # Capability markers the manifest advertises; matched by
-    # :meth:`assert_implementation_compatible` (design §8.2, R1-18).
+    # Manifest capability markers must match the loaded implementation exactly.
     compatibility: dict[str, Any] = field(default_factory=dict)
     verifier_mode: str = "none"
 
@@ -321,8 +302,8 @@ class DriveRegistrationDescriptor:
             "optional_roles": sorted(self.optional_roles),
             "verifier_mode": self.verifier_mode,
             "has_prompt": self.prompt_contribution is not None,
-            # Additive Settings-UI fields (design §12.2): schema-driven option
-            # form + bounded prompt preview, straight from descriptor metadata.
+            # Settings surfaces consume schema metadata without importing the
+            # registration implementation.
             "option_schema": dict(self.option_schema),
             "option_defaults": dict(self.option_defaults),
             "prompt_preview": self.prompt_contribution,
@@ -390,11 +371,6 @@ class DriveRegistrationDescriptor:
         )
 
 
-# ---------------------------------------------------------------------------
-# Builtin generic registration (design §8.1)
-# ---------------------------------------------------------------------------
-
-
 class GenericDriveRegistration:
     """Opaque-spec builtin registration with manual terminal proposals.
 
@@ -409,10 +385,8 @@ class GenericDriveRegistration:
     description = "Opaque-spec drive with manual terminal proposals."
 
     def __init__(self, *, spec_max_bytes: int | None = None) -> None:
-        # ``None`` (default) means no independent byte cap: the manager's central
-        # runtime ``spec_max_bytes`` is authoritative, so a larger runtime cap is
-        # effective (R1-09). An explicit int imposes a tighter belt-and-suspenders
-        # cap on top; JSON safety is always checked.
+        # Without an explicit cap, runtime configuration remains authoritative;
+        # a supplied value imposes a stricter registration-level limit.
         if spec_max_bytes is not None and (
             not isinstance(spec_max_bytes, int) or spec_max_bytes < 1
         ):
@@ -435,8 +409,7 @@ class GenericDriveRegistration:
         if not isinstance(spec, dict):
             raise DriveValidationError("generic drive spec must be a dict")
         require_json_safe(spec, "spec")
-        # The manager's central per-field validator enforces the authoritative
-        # runtime byte cap (R1-09); this only applies an EXPLICIT tighter cap.
+        # This check applies only the optional stricter registration limit.
         if self._spec_max_bytes is None:
             return
         size = json_bytes(spec)
@@ -446,7 +419,6 @@ class GenericDriveRegistration:
             )
 
     def validate_transition(self, before: Any, proposal: Any, context: Any) -> None:
-        # Generic edges are enforced by drive_policy; no extra transitions.
         return None
 
     def readiness(self, drive: Any, dependencies: Any, now: Any) -> Readiness:
@@ -467,11 +439,6 @@ class GenericDriveRegistration:
 def builtin_registrations() -> list[DriveRegistration]:
     """The framework's builtin registrations (currently just ``generic``)."""
     return [GenericDriveRegistration()]
-
-
-# ---------------------------------------------------------------------------
-# Lazy resolution of a manifest-declared registration (import on enable only)
-# ---------------------------------------------------------------------------
 
 
 def resolve_registration(descriptor: DriveRegistrationDescriptor) -> DriveRegistration:
@@ -508,15 +475,10 @@ def resolve_registration(descriptor: DriveRegistrationDescriptor) -> DriveRegist
             f"resolved object for {descriptor.name!r} is not a DriveRegistration "
             "(missing name/kind/schema_version)"
         )
-    # Fail closed when the loaded implementation contradicts the manifest's
-    # advertised identity / schema / roles / verifier contract (design §8.2, R1-18).
+    # Loaded implementations must honor every capability advertised by the
+    # manifest before they become executable.
     descriptor.assert_implementation_compatible(_implementation_descriptor(instance))
     return instance
-
-
-# ---------------------------------------------------------------------------
-# internal helpers (shared with drive.snapshot)
-# ---------------------------------------------------------------------------
 
 
 def _looks_like_registration(obj: object) -> bool:

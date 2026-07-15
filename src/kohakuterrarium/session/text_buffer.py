@@ -1,11 +1,7 @@
-"""Durable streaming-text segment buffer for :class:`SessionOutput` (UXI-02).
+"""Coalesce streamed assistant text and preserve partial segments for recovery.
 
-Streamed assistant text is coalesced into ONE ``text_chunk`` event per
-segment instead of one event per transport write. The in-flight segment
-is mirrored to a durable session-state slot (``<namespace>:open_text``)
-so a crash/shutdown mid-stream recovers the partial text on resume
-rather than dropping it. The event write itself stays in
-``SessionOutput`` — this class owns only the buffer + its durable slot.
+The buffer mirrors in-flight text to ``<namespace>:open_text`` while leaving
+event persistence to ``SessionOutput``.
 """
 
 import time
@@ -21,15 +17,14 @@ _SLOT_SUFFIX = "open_text"
 def last_persisted_turn_branch(
     store: Any, prefix: str
 ) -> tuple[int | None, int | None, list[tuple[int, int]] | None]:
-    """Turn/branch/path of the most recent persisted event with a turn.
+    """Return turn, branch, and parent path from the latest indexed event.
 
-    A crashed segment belongs to the turn that was in flight when the
-    process died, so recovered text is stamped from that last persisted
-    event — NOT the resumed agent's (already advanced) current turn.
+    Recovered text must retain the interrupted turn rather than inherit the
+    resumed agent's already-advanced turn index.
     """
     try:
         events = store.get_events(prefix)
-    except Exception:  # pragma: no cover — defensive
+    except Exception:  # pragma: no cover - recovery must tolerate unavailable stores
         return None, None, None
     for evt in reversed(events):
         ti = evt.get("turn_index")
@@ -42,24 +37,18 @@ def last_persisted_turn_branch(
     return None, None, None
 
 
-# The slot exists only for crash recovery, so mid-stream writes are gated
-# to bound work on the hot path: persist once the segment grows past this
-# many chars, or this many seconds since the last write. A boundary flush
-# always persists (clears). Worst case a hard crash loses the sub-gate tail.
+# Gate durable writes by size and time to limit streaming-path overhead. A
+# hard crash can lose only the text accumulated since the most recent gate.
 _FLUSH_CHARS = 512
 _FLUSH_SECONDS = 0.5
 
 
 class OpenTextSegment:
-    """The current run of streamed text, backed by a durable state slot.
+    """Buffer one streamed-text segment with gated durable recovery state.
 
-    Appends accumulate in memory for cheap concatenation and are mirrored
-    to ``state[<prefix>:open_text]`` on a size/time gate (plus on every
-    boundary), so the slot trails the live segment by at most the gate
-    window. :meth:`take` returns the in-memory segment for a normal
-    boundary flush; :meth:`recover` reads the durable slot (used on
-    resume, when the in-memory buffer is empty but a prior process left
-    text behind). Both clear the slot.
+    ``append`` mirrors accumulated text after the size or time threshold.
+    ``take`` closes a live segment, while ``recover`` restores a segment left
+    by an interrupted process. Both reset memory and durable state.
     """
 
     def __init__(self, store: Any, prefix: str) -> None:
@@ -82,11 +71,10 @@ class OpenTextSegment:
             self._last_persist = now
 
     def take(self) -> str:
-        """Return the in-memory segment and clear memory + slot.
+        """Return the live segment and clear its memory and durable state.
 
-        Only clears the durable slot when it actually holds gated text —
-        so a boundary that closes a short (never-persisted) segment does
-        not write to the slot at all.
+        Short segments never cross the persistence gate, so closing them does
+        not perform an unnecessary state write.
         """
         text = self._buf
         had_slot = self._persisted_len > 0
@@ -96,11 +84,7 @@ class OpenTextSegment:
         return text
 
     def recover(self) -> str:
-        """Return the durable slot's text and clear memory + slot.
-
-        For resume: a fresh instance has an empty in-memory buffer but a
-        non-empty slot means a previous process died mid-stream.
-        """
+        """Return interrupted text from durable state and clear the segment."""
         text = self._load()
         self._reset()
         if text:
@@ -122,5 +106,5 @@ class OpenTextSegment:
     def _persist(self, text: str) -> None:
         try:
             self._store.state[self._key] = text
-        except Exception as e:  # pragma: no cover — defensive
+        except Exception as e:  # pragma: no cover - buffering cannot fail the turn
             logger.warning("open_text slot write failed", error=str(e), exc_info=True)

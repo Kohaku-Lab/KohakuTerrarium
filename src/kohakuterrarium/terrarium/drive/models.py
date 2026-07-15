@@ -17,8 +17,8 @@ from typing import Any, Literal
 
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 
-# Allowed literal sets — validated at construction so an illegal record can
-# never be built (the pure state machine assumes well-formed inputs).
+# Literal domains are validated at construction because policy assumes
+# well-formed records.
 _ACTOR_KINDS = frozenset({"user", "service", "creature", "plugin", "system"})
 _SCOPE_TYPES = frozenset({"creature", "graph"})
 _OWNER_SCOPES = frozenset({"actor", "creature", "graph", "service"})
@@ -75,18 +75,13 @@ class DriveAvailability(str, Enum):
     REGISTRATION_INCOMPATIBLE = "registration_incompatible"
 
 
-# ---------------------------------------------------------------------------
-# validation helpers (pure; raise DriveValidationError with a clear message)
-# ---------------------------------------------------------------------------
-
-
 def _require_nonempty(value: object, name: str) -> None:
     if not isinstance(value, str) or not value.strip():
         raise DriveValidationError(f"{name} must be a non-empty string, got {value!r}")
 
 
 def _require_int(value: object, name: str, *, minimum: int | None = None) -> None:
-    # bool is an int subclass; reject it so a flag can't masquerade as a count.
+    # Booleans are integers in Python but are invalid for numeric Drive fields.
     if not isinstance(value, int) or isinstance(value, bool):
         raise DriveValidationError(f"{name} must be an int, got {value!r}")
     if minimum is not None and value < minimum:
@@ -121,11 +116,6 @@ def _require_in(value: object, name: str, allowed: frozenset[str]) -> None:
         )
 
 
-# ---------------------------------------------------------------------------
-# ActorRef
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class ActorRef:
     """A mutation's authenticated principal (design §3.6).
@@ -155,13 +145,8 @@ class ActorRef:
         return cls(kind=kind, identity=identity)
 
 
-# The framework itself, used for engine-originated reconciliation mutations.
+# Engine-originated reconciliation mutations use the framework system actor.
 SYSTEM_ACTOR = ActorRef(kind="system", identity="terrarium")
-
-
-# ---------------------------------------------------------------------------
-# DriveRecord
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -228,11 +213,6 @@ class DriveRecord:
             _require_nonempty(dep, "dependency_ids entry")
 
 
-# ---------------------------------------------------------------------------
-# DriveAssignment
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveAssignment:
     """Which creature (if any) currently owns pursuit of a Drive (design §3.4).
@@ -274,19 +254,9 @@ class DriveAssignment:
             _require_actor(self.assigned_by, "assigned_by")
 
 
-# ---------------------------------------------------------------------------
-# DriveDelivery
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveDelivery:
-    """One physical delivery attempt of a Drive event (design §3.5).
-
-    ``readiness_generation`` is carried per the §3.5 logical-dedupe key
-    ``(drive_id, lifecycle_epoch, drive_revision, assignment_id,
-    readiness_generation)`` even though the illustrative dataclass omits it.
-    """
+    """Represent one physical attempt for a revisioned logical Drive delivery."""
 
     delivery_id: str
     drive_id: str
@@ -342,7 +312,7 @@ class DriveDelivery:
         _require_aware(self.acknowledged_at, "acknowledged_at")
 
     def logical_key(self) -> tuple[str, int, int, str, int]:
-        """The §3.5 tuple identifying one nonterminal logical delivery."""
+        """Return the identity tuple for one logical nonterminal delivery."""
         return (
             self.drive_id,
             self.lifecycle_epoch,
@@ -350,11 +320,6 @@ class DriveDelivery:
             self.assignment_id,
             self.readiness_generation,
         )
-
-
-# ---------------------------------------------------------------------------
-# DriveProgress
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -375,11 +340,6 @@ class DriveProgress:
         if not isinstance(self.summary, str):
             raise DriveValidationError("summary must be a string")
         _require_aware(self.created_at, "created_at", allow_none=False)
-
-
-# ---------------------------------------------------------------------------
-# DriveAuditRecord
-# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)

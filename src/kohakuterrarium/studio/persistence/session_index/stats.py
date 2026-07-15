@@ -1,21 +1,8 @@
 """Aggregations over the session-index sidecar.
 
-The HTTP ``GET /api/sessions/stats`` route + the Python
-``Studio.persistence.stats()`` surface both rely on this helper.
-Every field comes straight off the cached :class:`SessionIndexEntry`
-columns — no ``.kohakutr`` file is opened.
-
-Output shape (frozen — frontend consumers rely on it)::
-
-    {
-        "count": int,
-        "by_config_type":    {<type>: <n>, ...},
-        "by_status":         {<status>: <n>, ...},
-        "by_recency":        {"1d": <n>, "7d": <n>, "30d": <n>, "older": <n>},
-        "by_format_version": {"1": <n>, "2": <n>, ...},
-        "agents_top":        [[<agent>, <n>], ...],   # top 5 by count
-        "average_age_seconds": float | None,
-    }
+Both HTTP and programmatic statistics are derived solely from cached index
+entries; no session database is opened. The returned keys and recency buckets
+form a stable frontend contract.
 """
 
 import time
@@ -41,12 +28,7 @@ def _empty() -> dict[str, Any]:
 
 
 def _to_ts(s: str) -> float | None:
-    """Parse an ISO-8601 timestamp into a float epoch.  ``None`` on failure.
-
-    Mirrors the legacy parser: accepts ``Z`` suffix via the
-    ``+00:00`` rewrite that ``datetime.fromisoformat`` needs pre-3.11
-    (we still support 3.10).
-    """
+    """Parse ISO-8601 text to epoch seconds, accepting ``Z`` on Python 3.10."""
     if not s:
         return None
     try:
@@ -56,11 +38,7 @@ def _to_ts(s: str) -> float | None:
 
 
 def aggregate_stats(index: SessionIndex) -> dict[str, Any]:
-    """Walk every sidecar entry once and return aggregation counts.
-
-    The aggregation is a single linear scan, dominated by KVault
-    deserialisation per row — sub-millisecond up to ~10k sessions.
-    """
+    """Aggregate session counts and age statistics in one index scan."""
     by_config_type: Counter = Counter()
     by_status: Counter = Counter()
     by_format: Counter = Counter()

@@ -1,18 +1,8 @@
 """Per-kind codegen dispatch.
 
-Each module kind (``tools``, ``subagents``, …) has its own
-codegen module exposing three functions:
-
-* ``render_new(form: dict) -> str`` — scaffold a brand-new file
-* ``update_existing(source: str, form: dict, execute_body: str) -> str``
-   — patch an existing file in place (via libcst), preserving
-   formatting + comments
-* ``parse_back(source: str) -> dict`` — read form state out of an
-   existing file for the editor
-
-``RoundTripError`` is raised when ``update_existing`` can't
-patch the file safely; routes surface it as a 422 and the
-frontend falls back to raw-Monaco mode.
+Dispatches each module kind to a code generator that scaffolds new source,
+updates supported structures, and extracts editor form state. Unsafe structured
+updates raise ``RoundTripError`` so adapters can fall back to raw-source editing.
 """
 
 from kohakuterrarium.studio.editors import (
@@ -35,7 +25,7 @@ _DISPATCH = {
 
 
 def get_codegen(kind: str) -> Codegen:
-    """Return the codegen module for *kind* or raise ValueError."""
+    """Return the code generator for a module kind, rejecting unknown kinds."""
     if kind not in _DISPATCH:
         raise ValueError(f"unknown module kind: {kind!r}")
     return _DISPATCH[kind]

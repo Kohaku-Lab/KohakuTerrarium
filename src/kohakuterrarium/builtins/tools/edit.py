@@ -1,11 +1,4 @@
-"""
-Edit tool - modify files via unified diff or search/replace.
-
-Supports two modes (auto-detected from arguments):
-- **Unified diff**: ``path`` + ``diff`` args. Multi-hunk, context-aware.
-- **Search/replace**: ``path`` + ``old`` + ``new`` args.
-  Simple single-string replacement with optional ``replace_all``.
-"""
+"""File editing through exact search/replace or unified diffs."""
 
 import os
 import re
@@ -41,34 +34,17 @@ class DiffHunk:
     old_count: int
     new_start: int
     new_count: int
-    lines: list[str]  # Lines with prefixes: ' ', '-', '+'
+    lines: list[str]  # Prefixes preserve context, removal, and addition semantics.
 
 
 class DiffParseError(Exception):
-    """Error parsing diff format."""
+    """Indicate malformed or inapplicable unified-diff input."""
 
     pass
 
 
 def parse_unified_diff(diff_text: str) -> list[DiffHunk]:
-    """
-    Parse unified diff format into hunks.
-
-    Supports standard unified diff:
-    - Lines starting with '-' are removed
-    - Lines starting with '+' are added
-    - Lines starting with ' ' are context (unchanged)
-    - @@ -old_start,old_count +new_start,new_count @@ markers
-
-    Args:
-        diff_text: The unified diff content
-
-    Returns:
-        List of DiffHunk objects
-
-    Raises:
-        DiffParseError: If diff format is invalid
-    """
+    """Parse standard unified-diff text into validated hunk structures."""
     lines = diff_text.split("\n")
     hunks: list[DiffHunk] = []
     current_hunk: DiffHunk | None = None
@@ -78,15 +54,12 @@ def parse_unified_diff(diff_text: str) -> list[DiffHunk]:
     while i < len(lines):
         line = lines[i]
 
-        # Skip file headers (--- and +++ lines)
         if line.startswith("---") or line.startswith("+++"):
             i += 1
             continue
 
-        # Check for hunk header
         match = hunk_pattern.match(line)
         if match:
-            # Save previous hunk
             if current_hunk:
                 hunks.append(current_hunk)
 
@@ -105,16 +78,15 @@ def parse_unified_diff(diff_text: str) -> list[DiffHunk]:
             i += 1
             continue
 
-        # If we're in a hunk, collect lines
         if current_hunk is not None:
             if line.startswith(" ") or line.startswith("-") or line.startswith("+"):
                 current_hunk.lines.append(line)
             elif line.startswith("\\"):
-                # "\ No newline at end of file" - skip
+                # The marker describes file termination and is not hunk content.
                 pass
             elif line == "":
-                # Empty line could be context (space was stripped) or end of hunk
-                # Treat as context if we haven't reached expected line count
+                # ``split`` erases a context line's single-space prefix, so recover
+                # it only while the hunk still expects content.
                 expected = current_hunk.old_count + current_hunk.new_count
                 actual_context = sum(
                     1
@@ -122,13 +94,12 @@ def parse_unified_diff(diff_text: str) -> list[DiffHunk]:
                     if l.startswith(" ") or l.startswith("-") or l.startswith("+")
                 )
                 if actual_context < expected:
-                    current_hunk.lines.append(" ")  # Treat as context
+                    current_hunk.lines.append(" ")
             i += 1
             continue
 
         i += 1
 
-    # Save last hunk
     if current_hunk:
         hunks.append(current_hunk)
 
@@ -139,30 +110,17 @@ def parse_unified_diff(diff_text: str) -> list[DiffHunk]:
 
 
 def apply_hunks(original: str, hunks: list[DiffHunk]) -> str:
-    """
-    Apply diff hunks to original content.
-
-    Args:
-        original: Original file content
-        hunks: List of parsed hunks to apply
-
-    Returns:
-        Modified content
-
-    Raises:
-        DiffParseError: If hunk cannot be applied (context mismatch)
-    """
+    """Apply parsed hunks, rejecting line-range or context mismatches."""
     original_lines = original.split("\n")
-    # Track if original ended with newline
+    # Splitting drops termination semantics, so preserve the original final newline.
     had_trailing_newline = original.endswith("\n")
     if had_trailing_newline and original_lines and original_lines[-1] == "":
         original_lines = original_lines[:-1]
 
-    # Apply hunks in reverse order to preserve line numbers
+    # Reverse application keeps earlier hunk coordinates stable.
     sorted_hunks = sorted(hunks, key=lambda h: h.old_start, reverse=True)
 
     for hunk in sorted_hunks:
-        # Extract expected old lines and new lines from hunk
         old_lines = []
         new_lines = []
 
@@ -175,10 +133,8 @@ def apply_hunks(original: str, hunks: list[DiffHunk]) -> str:
             elif line.startswith("+"):
                 new_lines.append(line[1:])
 
-        # Find where to apply (0-indexed)
         start_idx = hunk.old_start - 1
 
-        # Verify context matches (if we have old lines to match)
         if old_lines:
             end_idx = start_idx + len(old_lines)
             if end_idx > len(original_lines):
@@ -189,7 +145,6 @@ def apply_hunks(original: str, hunks: list[DiffHunk]) -> str:
 
             actual_lines = original_lines[start_idx:end_idx]
 
-            # Check for context match
             for i, (expected, actual) in enumerate(zip(old_lines, actual_lines)):
                 if expected != actual:
                     raise DiffParseError(
@@ -198,10 +153,8 @@ def apply_hunks(original: str, hunks: list[DiffHunk]) -> str:
                         f"  Actual:   {actual!r}"
                     )
 
-            # Apply: remove old, insert new
             original_lines[start_idx:end_idx] = new_lines
         else:
-            # Pure insertion (no old lines)
             original_lines[start_idx:start_idx] = new_lines
 
     result = "\n".join(original_lines)
@@ -212,7 +165,7 @@ def apply_hunks(original: str, hunks: list[DiffHunk]) -> str:
 
 
 def check_edit_guards(file_path: Path, context: Any) -> ToolResult | None:
-    """Run all pre-edit guards. Returns ToolResult on failure, None on success."""
+    """Return the first pre-edit guard failure, if any."""
     if is_binary_file(file_path):
         return ToolResult(
             error=f"Binary file detected ({file_path.suffix}). "
@@ -263,19 +216,11 @@ def build_result_diff(path: Path, original: str, new_content: str) -> str:
 
 @register_builtin("edit")
 class EditTool(BaseTool):
-    """
-    Tool for editing files using unified diff format.
-
-    Accepts standard unified diff with:
-    - @@ -start,count +start,count @@ hunk headers
-    - Lines starting with '-' for deletions
-    - Lines starting with '+' for additions
-    - Lines starting with ' ' for context
-    """
+    """Edit one file through exact replacement or standard unified diffs."""
 
     needs_context = True
     require_manual_read = True
-    # Edits mutate the filesystem — serialize with other unsafe tools.
+    # Serial execution prevents a concurrent writer from invalidating guard state.
     is_concurrency_safe = False
 
     @property
@@ -294,12 +239,7 @@ class EditTool(BaseTool):
         return ExecutionMode.DIRECT
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
-        """Edit a file using unified diff or search/replace.
-
-        Mode is auto-detected from arguments:
-        - ``diff`` present: unified diff mode
-        - ``old`` present: search/replace mode
-        """
+        """Select and execute the edit mode encoded by the arguments."""
         context = kwargs.get("context")
         path = args.get("path", "")
 
@@ -310,7 +250,6 @@ class EditTool(BaseTool):
                 "2. Search/replace: path + old + new\n"
             )
 
-        # Detect mode from args
         has_diff = bool(args.get("diff"))
         has_old = "old" in args
 
@@ -432,11 +371,9 @@ class EditTool(BaseTool):
             return ToolResult(error=f"Not a file: {path}")
 
         try:
-            # Read current content
             async with aiofiles.open(file_path, encoding="utf-8") as f:
                 original = await f.read()
 
-            # Parse diff
             try:
                 hunks = parse_unified_diff(diff)
             except DiffParseError as e:
@@ -455,7 +392,6 @@ class EditTool(BaseTool):
                     "- Lines starting with + = added"
                 )
 
-            # Apply hunks
             try:
                 new_content = apply_hunks(original, hunks)
             except DiffParseError as e:
@@ -465,18 +401,15 @@ class EditTool(BaseTool):
                     "numbers and content, then match them exactly in your diff."
                 )
 
-            # Check if anything changed
             if new_content == original:
                 return ToolResult(
                     output="No changes made (diff produced identical content)",
                     exit_code=0,
                 )
 
-            # Write back
             async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
                 await f.write(new_content)
 
-            # Calculate stats
             added = sum(1 for h in hunks for l in h.lines if l.startswith("+"))
             removed = sum(1 for h in hunks for l in h.lines if l.startswith("-"))
 

@@ -1,6 +1,6 @@
 """``kt shims`` — expose ``kt`` / ``kt-cli`` / ``kt-tui`` on the terminal.
 
-Two install worlds (see ``plans/cli-tui-uiux/05-briefcase-packaging.md``):
+Two installation environments require different shim strategies:
 
 - **Real-interpreter install** (``pip``/``pipx``/``uv``/dev): the console
   scripts already exist next to ``sys.executable``.  On POSIX we symlink
@@ -30,8 +30,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# The commands we expose, mapped to the ``kt`` subcommand each forwards to
-# in bundle mode (``kt`` itself forwards no subcommand).
+# Bundle wrappers map standalone commands back to the corresponding ``kt`` mode.
 SHIM_SUBCOMMANDS: dict[str, str | None] = {
     "kt": None,
     "kt-cli": "cli",
@@ -46,25 +45,26 @@ MODE_DEFER_PIPX = "defer-pipx"
 
 @dataclass
 class ShimItem:
+    """Describe one planned shim filesystem action."""
+
     name: str
     action: str  # "symlink" | "wrapper" | "skip"
     dest: Path
-    source: Path | None = None  # symlink target
-    content: str | None = None  # wrapper body
-    reason: str = ""  # for "skip"
+    source: Path | None = None
+    content: str | None = None
+    reason: str = ""
 
 
 @dataclass
 class ShimPlan:
+    """Describe a platform-specific shim installation plan."""
+
     mode: str
     target_dir: Path
     system: str = ""
     items: list[ShimItem] = field(default_factory=list)
     on_path: bool = False
     note: str = ""
-
-
-# ── detection (defaults; all injectable into build_plan) ────────────────
 
 
 def in_bundle() -> bool:
@@ -79,6 +79,7 @@ def in_bundle() -> bool:
 
 
 def _default_target_dir(system: str) -> Path:
+    """Return the default user-level shim directory for a platform."""
     if system == "Windows":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home())
         return Path(base) / "KohakuTerrarium" / "bin"
@@ -86,6 +87,7 @@ def _default_target_dir(system: str) -> Path:
 
 
 def _path_contains(target_dir: Path, path_env: str) -> bool:
+    """Return whether PATH contains the target directory."""
     try:
         target = target_dir.resolve()
     except OSError:
@@ -102,6 +104,7 @@ def _path_contains(target_dir: Path, path_env: str) -> bool:
 
 
 def _wrapper_content(system: str, executable: str, subcmd: str | None) -> str:
+    """Build a platform wrapper that forwards to the bundled executable."""
     sub = f" {subcmd}" if subcmd else ""
     if system == "Windows":
         return f'@echo off\nrem {KT_SHIM_MARKER}\n"{executable}"{sub} %*\n'
@@ -109,10 +112,8 @@ def _wrapper_content(system: str, executable: str, subcmd: str | None) -> str:
 
 
 def _dest_for(target_dir: Path, name: str, system: str) -> Path:
+    """Return the platform-specific destination for a shim name."""
     return target_dir / (f"{name}.cmd" if system == "Windows" else name)
-
-
-# ── planning (pure) ─────────────────────────────────────────────────────
 
 
 def build_plan(
@@ -162,7 +163,6 @@ def build_plan(
             "On Windows, install for the terminal with: pipx install kohakuterrarium",
         )
 
-    # Console install on POSIX: symlink the existing console scripts.
     items = []
     for name in SHIM_SUBCOMMANDS:
         source = scripts_dir / name
@@ -187,9 +187,6 @@ def build_plan(
     return ShimPlan(MODE_CONSOLE, target_dir, system, items, on_path, "")
 
 
-# ── apply (filesystem) ───────────────────────────────────────────────────
-
-
 def apply_plan(plan: ShimPlan) -> list[str]:
     """Create the planned symlinks / wrappers. Returns human-readable lines."""
     messages: list[str] = []
@@ -201,7 +198,7 @@ def apply_plan(plan: ShimPlan) -> list[str]:
         if item.action == "skip":
             messages.append(f"skip {item.name}: {item.reason}")
             continue
-        # Replace any existing entry at dest (ours or a prior install).
+        # Replacement is intentional so reinstalling repairs stale shims.
         if item.dest.is_symlink() or item.dest.exists():
             try:
                 item.dest.unlink()
@@ -237,10 +234,8 @@ def _is_ours(dest: Path) -> bool:
     return False
 
 
-# ── command entry points (also callable in-process by the GUI) ──────────
-
-
 def install_shims() -> int:
+    """Install terminal shims for the current runtime."""
     plan = build_plan()
     for line in apply_plan(plan):
         print(line)
@@ -252,6 +247,7 @@ def install_shims() -> int:
 
 
 def shims_status() -> int:
+    """Print shim installation and PATH status."""
     plan = build_plan()
     print(f"mode:       {plan.mode}")
     print(
@@ -267,6 +263,7 @@ def shims_status() -> int:
 
 
 def shims_uninstall() -> int:
+    """Remove only shims recognized as owned by KohakuTerrarium."""
     plan = build_plan()
     removed = 0
     for name in SHIM_SUBCOMMANDS:
@@ -318,6 +315,7 @@ def add_shims_subparser(subparsers) -> None:
 
 
 def shims_cli(args: argparse.Namespace) -> int:
+    """Dispatch shim management commands."""
     command = getattr(args, "shims_command", None)
     if command == "install":
         return install_shims()

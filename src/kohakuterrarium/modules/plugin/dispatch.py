@@ -1,9 +1,6 @@
 """Low-level plugin-method dispatch primitives.
 
-Split from :mod:`manager` so that file stays under the size cap. Two helpers the
-hook wrappers rely on: :func:`has_override` skips a plugin that has not
-overridden a hook (leaving the ``BasePlugin`` no-op in place), and
-:func:`call_method` invokes a plugin method whether it is sync or async.
+Hook dispatch skips inherited no-ops and accepts synchronous or asynchronous methods.
 """
 
 import inspect
@@ -13,7 +10,7 @@ from kohakuterrarium.modules.plugin.base import BasePlugin
 
 
 def has_override(plugin: BasePlugin, method_name: str) -> bool:
-    """Whether a plugin overrides a method (not the default BasePlugin no-op)."""
+    """Return whether a plugin replaces the base no-op implementation."""
     method = getattr(type(plugin), method_name, None)
     base_method = getattr(BasePlugin, method_name, None)
     return method is not None and method is not base_method

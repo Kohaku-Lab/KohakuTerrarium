@@ -1,9 +1,4 @@
-"""
-Sub-agent manager.
-
-Handles sub-agent lifecycle, spawning, and status tracking.
-Supports both regular (stateless) and interactive (long-lived) sub-agents.
-"""
+"""Manage task and interactive sub-agent lifecycle, jobs, and results."""
 
 import asyncio
 from pathlib import Path
@@ -35,26 +30,7 @@ logger = get_logger(__name__)
 
 
 class SubAgentManager(InteractiveManagerMixin):
-    """
-    Manages sub-agent lifecycle and execution.
-
-    Responsibilities:
-    - Register sub-agent configurations
-    - Spawn sub-agents on demand
-    - Track running sub-agents
-    - Handle results and cleanup
-
-    Usage:
-        manager = SubAgentManager(registry, llm, job_store)
-        manager.register(SubAgentConfig(name="explore", ...))
-
-        # Spawn and run
-        job_id = await manager.spawn("explore", "Find auth code")
-        result = await manager.wait_for(job_id)
-
-        # Or spawn from event
-        job_id = await manager.spawn_from_event(subagent_call_event)
-    """
+    """Register, spawn, track, and clean up task and interactive sub-agents."""
 
     def __init__(
         self,
@@ -67,18 +43,7 @@ class SubAgentManager(InteractiveManagerMixin):
         tool_format: str | None = None,
         default_plugin_specs: list[dict[str, Any]] | None = None,
     ):
-        """
-        Initialize sub-agent manager.
-
-        Args:
-            parent_registry: Parent's registry for tool access
-            llm: LLM provider for sub-agents
-            job_store: Store for job status tracking
-            agent_path: Path to agent folder for prompt loading
-            current_depth: Current nesting depth of this agent
-            max_depth: Maximum allowed sub-agent depth (0 = unlimited)
-            tool_format: Parent's tool_format (inherited by sub-agents)
-        """
+        """Initialize parent resources, depth limits, and job tracking."""
         self.parent_registry = parent_registry
         self.llm = llm
         self.job_store = job_store or JobStore()
@@ -89,45 +54,27 @@ class SubAgentManager(InteractiveManagerMixin):
         self._default_plugin_specs = default_plugin_specs or []
         self._loader = ModuleLoader(agent_path=agent_path)
 
-        # Completion callback (wired by agent to deliver results as events)
         self._on_complete: Callable[[Any], None] | None = None
-        # Callback: (subagent_name, activity_type, tool_name, detail) -> None
         self._on_tool_activity: Callable[[str, str, str, str], None] | None = None
-        # Parent executor (for inheriting tool context builder)
         self._parent_executor: Any = None
-        # Parent's plugin manager. Set by the agent so we can fire
-        # ``post_subagent_run`` at the result-collection site without
-        # mutating any shared object. ``pre_subagent_run`` fires
-        # earlier in the dispatch layer (``agent_pre_dispatch``).
+        # Parent post-run hooks execute at result collection without rebinding jobs.
         self._parent_plugins: Any = None
-        # Parent's shared ``IterationBudget`` (legacy single-axis shim
-        # tied to ``max_iterations``). The runtime ``budget`` plugin owns
-        # its own state and is not propagated through the manager.
+        # The legacy iteration budget is separate from plugin-owned budget state.
         self.iteration_budget: IterationBudget | None = None
-        # Session store for persisting sub-agent conversations
         self._session_store: Any = None
         self._parent_name: str = ""
 
-        # Registered sub-agent configs
         self._configs: dict[str, SubAgentConfig] = {}
 
-        # Running sub-agent jobs (for stateless sub-agents)
         self._jobs: dict[str, SubAgentJob] = {}
         self._tasks: dict[str, asyncio.Task] = {}
         self._results: dict[str, SubAgentResult] = {}
 
-        # Interactive sub-agents (long-lived)
         self._interactive: dict[str, InteractiveSubAgent] = {}
         self._output_callbacks: dict[str, Callable[[InteractiveOutput], None]] = {}
 
     def _resolve_child_budget(self, config: SubAgentConfig) -> IterationBudget | None:
-        """Decide which IterationBudget a new child should run under.
-
-        Precedence:
-        1. ``config.budget_allocation`` is non-None → fresh isolated budget.
-        2. ``config.budget_inherit`` is True and parent has one → reuse it.
-        3. Otherwise → ``None`` (no budget enforcement).
-        """
+        """Select an isolated allocation, inherited budget, or no child budget."""
         allocation = config.budget_allocation
         if allocation is not None:
             return IterationBudget(remaining=int(allocation), total=int(allocation))
@@ -136,17 +83,7 @@ class SubAgentManager(InteractiveManagerMixin):
         return None
 
     def register(self, config: SubAgentConfig) -> None:
-        """
-        Register a sub-agent configuration.
-
-        Validates that all tools in the sub-agent config exist in the parent
-        registry. Missing tools are logged as warnings (not errors) because
-        the parent agent may add tools after registration.
-
-        Args:
-            config: Sub-agent configuration
-        """
-        # Validate tool availability - warn early about missing tools
+        """Register a config, warning about tools that may be added later."""
         missing_tools = [
             t for t in config.tools if self.parent_registry.get_tool(t) is None
         ]
@@ -204,27 +141,11 @@ class SubAgentManager(InteractiveManagerMixin):
         job_id: str | None = None,
         background: bool = True,
     ) -> str:
-        """
-        Spawn a sub-agent to execute a task.
-
-        Args:
-            name: Sub-agent name
-            task: Task description
-            job_id: Optional job ID (generated if not provided)
-            background: If True (default), run as background task.
-                If False, run synchronously and return job_id after completion.
-
-        Returns:
-            Job ID
-
-        Raises:
-            ValueError: If sub-agent not registered
-        """
+        """Spawn a registered sub-agent and optionally await its completion."""
         config = self._configs.get(name)
         if config is None:
             raise ValueError(f"Sub-agent not registered: {name}")
 
-        # Check depth limit before spawning
         if self._max_depth > 0 and self._current_depth >= self._max_depth:
             error_msg = (
                 f"Sub-agent depth limit reached ({self._current_depth}/{self._max_depth}). "
@@ -236,7 +157,6 @@ class SubAgentManager(InteractiveManagerMixin):
                 current_depth=self._current_depth,
                 max_depth=self._max_depth,
             )
-            # Generate job ID and store error result
             if job_id is None:
                 job_id = generate_job_id(f"agent_{name}")
 
@@ -254,11 +174,9 @@ class SubAgentManager(InteractiveManagerMixin):
 
             return job_id
 
-        # Generate job ID
         if job_id is None:
             job_id = generate_job_id(f"agent_{name}")
 
-        # Resolve tool_format: config override > parent inherited
         effective_tool_format = config.tool_format or self._tool_format
 
         plugin_manager = build_plugin_manager(
@@ -267,7 +185,6 @@ class SubAgentManager(InteractiveManagerMixin):
         llm = resolve_llm(self.llm, config)
         compact_manager = build_compact_manager(config, llm)
 
-        # Create sub-agent
         subagent = SubAgent(
             config=config,
             parent_registry=self.parent_registry,
@@ -278,11 +195,10 @@ class SubAgentManager(InteractiveManagerMixin):
             compact_manager=compact_manager,
         )
 
-        # Legacy shared iteration budget remains as a compat fallback.
+        # Preserve the legacy shared-budget contract when configured.
         subagent.iteration_budget = self._resolve_child_budget(config)
         await load_and_wrap_plugins(plugin_manager, subagent, llm, self.agent_path)
 
-        # Forward sub-agent tool activity to parent's callback
         if self._on_tool_activity:
             sa_name = name
             sa_job_id = job_id
@@ -293,11 +209,9 @@ class SubAgentManager(InteractiveManagerMixin):
 
             subagent.on_tool_activity = _forward_activity
 
-        # Inherit parent's tool context builder (working_dir, file guards, etc.)
         if self._parent_executor:
             subagent._build_tool_context = self._parent_executor._build_tool_context
 
-        # Pass session store for conversation persistence
         if self._session_store:
             subagent._session_store = self._session_store
             subagent._parent_name = self._parent_name
@@ -305,11 +219,9 @@ class SubAgentManager(InteractiveManagerMixin):
                 self._parent_name, name
             )
 
-        # Create job wrapper
         job = SubAgentJob(subagent, job_id)
         self._jobs[job_id] = job
 
-        # Register job status
         status = JobStatus(
             job_id=job_id,
             job_type=JobType.SUBAGENT,
@@ -318,12 +230,10 @@ class SubAgentManager(InteractiveManagerMixin):
         )
         self.job_store.register(status)
 
-        # Create asyncio task — caller decides whether to wait (direct) or not
         task_obj = asyncio.create_task(self._run_subagent(job_id, job, task))
         self._tasks[job_id] = task_obj
 
         if not background:
-            # Programmatic API: wait for completion before returning
             await task_obj
 
         logger.info(
@@ -336,17 +246,9 @@ class SubAgentManager(InteractiveManagerMixin):
         return job_id
 
     async def spawn_from_event(self, event: SubAgentCallEvent) -> tuple[str, bool]:
-        """Spawn sub-agent from a parsed event.
-
-        Always starts the sub-agent as a background asyncio task so the
-        caller can decide whether to wait (direct) or not (background).
-
-        Returns:
-            (job_id, is_background) — is_background reflects the model's intent
-        """
+        """Spawn from a parsed call while preserving the model's wait intent."""
         task = event.args.get("task", event.args.get("content", ""))
         is_background = event.args.pop("run_in_background", True)
-        # Always spawn as background task — caller handles waiting for direct
         job_id = await self.spawn(event.name, task, background=True)
         return job_id, is_background
 
@@ -359,12 +261,7 @@ class SubAgentManager(InteractiveManagerMixin):
         """Run sub-agent and update status."""
         try:
             result = await job.run(task)
-            # Fire parent's ``post_subagent_run`` plugin hooks at the
-            # result-collection site. Plugins may transform the result
-            # by returning a new ``SubAgentResult``; ``None`` passes
-            # through. This replaces the old wrap_method-based wiring
-            # which mutated ``self._run_subagent`` and double-fired
-            # ``pre_subagent_run`` after the dispatch-layer call.
+            # Result-site hooks may transform output without mutating shared job methods.
             pm = self._parent_plugins
             if pm is not None:
                 try:
@@ -452,16 +349,7 @@ class SubAgentManager(InteractiveManagerMixin):
         job_id: str,
         timeout: float | None = None,
     ) -> SubAgentResult | None:
-        """
-        Wait for a sub-agent to complete.
-
-        Args:
-            job_id: Job ID to wait for
-            timeout: Maximum wait time
-
-        Returns:
-            SubAgentResult if completed, None if timeout
-        """
+        """Wait for one sub-agent result or return none on timeout."""
         task = self._tasks.get(job_id)
         if task is None:
             return self._results.get(job_id)
@@ -476,15 +364,7 @@ class SubAgentManager(InteractiveManagerMixin):
         self,
         timeout: float | None = None,
     ) -> dict[str, SubAgentResult]:
-        """
-        Wait for all running sub-agents.
-
-        Args:
-            timeout: Maximum total wait time
-
-        Returns:
-            Dict of job_id -> SubAgentResult
-        """
+        """Wait for all tracked tasks within one total timeout."""
         if not self._tasks:
             return {}
 
@@ -509,9 +389,7 @@ class SubAgentManager(InteractiveManagerMixin):
             }
 
     async def cancel_all(self) -> int:
-        """Cancel all running sub-agent tasks and wait them out —
-        returning while they still unwind lets them race the owner's
-        shutdown (closed routers / providers)."""
+        """Cancel and join all children before owner resources can close."""
         pending: list[asyncio.Task] = []
         for job_id, task in list(self._tasks.items()):
             if not task.done():
@@ -521,35 +399,19 @@ class SubAgentManager(InteractiveManagerMixin):
                 pending.append(task)
         if pending:
             await asyncio.gather(*pending, return_exceptions=True)
-        # Also stop all interactive sub-agents
         await self.stop_all_interactive()
         return len(pending)
 
     async def cancel(self, job_id: str) -> bool:
-        """
-        Cancel a running sub-agent.
-
-        Sets the cancelled flag on the SubAgent so its run loop exits
-        at the next checkpoint, then also cancels the asyncio task as
-        a fallback.
-
-        Args:
-            job_id: Job to cancel
-
-        Returns:
-            True if cancelled, False if not found or already done
-        """
+        """Request cooperative cancellation and cancel the backing task."""
         task = self._tasks.get(job_id)
         if task is None or task.done():
             return False
 
-        # Set the cancel flag on the SubAgent instance so the run loop
-        # breaks at the next turn boundary (cooperative cancellation)
         job = self._jobs.get(job_id)
         if job and hasattr(job, "subagent"):
             job.subagent.cancel()
 
-        # Also cancel the asyncio task as a fallback
         task.cancel()
         logger.debug("Cancelled sub-agent", job_id=job_id)
         return True
@@ -571,24 +433,13 @@ class SubAgentManager(InteractiveManagerMixin):
         ]
 
     def cleanup(self, job_id: str) -> None:
-        """
-        Cleanup a completed sub-agent job.
-
-        Args:
-            job_id: Job to cleanup
-        """
+        """Remove completed job and task handles while retaining its result."""
         self._jobs.pop(job_id, None)
         self._tasks.pop(job_id, None)
-        # Keep result for potential later access
         logger.debug("Cleaned up sub-agent", job_id=job_id)
 
     def cleanup_all_completed(self) -> int:
-        """
-        Cleanup all completed sub-agent jobs.
-
-        Returns:
-            Number of jobs cleaned up
-        """
+        """Clean up completed job handles and return their count."""
         completed = [job_id for job_id, task in self._tasks.items() if task.done()]
 
         for job_id in completed:

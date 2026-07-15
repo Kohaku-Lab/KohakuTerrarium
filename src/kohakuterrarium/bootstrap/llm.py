@@ -1,9 +1,5 @@
 """
-LLM provider factory.
-
-Creates the correct LLM provider based on:
-  1. LLM profile (from config, CLI override, or default)
-  2. Inline controller config (backward compat)
+Resolve LLM profiles and legacy inline settings into provider instances.
 """
 
 from dataclasses import MISSING, fields
@@ -24,14 +20,7 @@ logger = get_logger(__name__)
 
 
 def _resolved_base_url(profile: LLMProfile) -> str | None:
-    """Interpolate ``${VAR}`` in a profile's ``base_url`` at consume time.
-
-    Provider config keeps ``${VAR}`` templates raw on disk (see
-    ``llm.backends.load_backends``); they resolve here, when the provider
-    is built, against the live environment. Returns ``None`` for an
-    empty/unset url, and warns if a template resolved to empty (likely a
-    missing env var) so an empty base_url isn't sent silently.
-    """
+    """Resolve a profile URL against the current environment at provider creation."""
     raw = (getattr(profile, "base_url", "") or "").strip()
     if not raw:
         return None
@@ -58,7 +47,7 @@ def _agent_config_default(field_name: str) -> Any:
 
 
 def _is_meaningful_config_value(field_name: str, value: Any) -> bool:
-    """Return True when a config value should override preset/default resolution."""
+    """Return whether an inline value differs meaningfully from its default."""
     if value is None:
         return False
 
@@ -74,25 +63,19 @@ def create_llm_provider(
     config: AgentConfig,
     llm: str | None = None,
 ) -> LLMProvider:
-    """Create an LLM provider from agent config.
-
-    Tries LLM profiles first (centralized config), falls back to
-    inline controller settings (backward compat).
+    """Resolve profiles first, then fall back to legacy inline settings.
 
     Args:
-        config: Agent configuration
-        llm: Override selector — a profile / preset name or
-            ``provider/model[@variations]`` string (the ``--llm`` CLI
-            flag and every ``llm=`` API param land here).
+        config: Agent configuration.
+        llm: Optional profile, preset, or ``provider/model[@variations]`` selector.
     """
-    # Try profile resolution
     controller_data = _extract_controller_data(config)
     profile = resolve_controller_llm(controller_data, llm)
 
     if profile:
         return _create_from_profile(profile)
 
-    # Backward compat: inline config
+    # Inline controller fields remain a compatibility fallback.
     return _create_from_inline(config)
 
 
@@ -100,21 +83,14 @@ def coerce_llm_provider(
     llm: "LLMProvider | LLMProfile | str | None",
     config: AgentConfig,
 ) -> LLMProvider:
-    """Turn any accepted ``llm=`` value into a provider instance.
+    """Normalize every supported ``llm=`` form to a provider instance.
 
-    The single coercion point behind every ``llm=`` parameter
-    (``Agent.build``, ``Terrarium.add_creature``, ``compose.agent``):
-
-    - ``None`` → resolve from the agent config (profiles → inline).
-    - ``str`` → selector: profile / preset name or
-      ``provider/model[@variations]``.
-    - :class:`LLMProfile` → instantiate that profile directly.
-    - provider instance (anything with a ``chat`` coroutine, e.g.
-      ``ScriptedLLM``) → used as-is, no resolution.
+    ``None`` resolves configuration, strings select a profile or model, profiles
+    instantiate directly, and provider-like objects with ``chat`` pass through.
 
     Raises:
         TypeError: For any other type.
-        LLMNotConfiguredError / ValueError: When resolution fails.
+        LLMNotConfiguredError or ValueError: Resolution failed.
     """
     if llm is None:
         return create_llm_provider(config)
@@ -158,7 +134,7 @@ def _extract_controller_data(config: AgentConfig) -> dict[str, Any]:
 
 
 def _create_from_profile(profile: LLMProfile) -> LLMProvider:
-    """Create LLM provider from a resolved profile."""
+    """Instantiate the provider described by a resolved profile."""
     logger.info(
         "Using LLM profile",
         profile=profile.name,
@@ -168,13 +144,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
     )
 
     if profile.backend_type == "fake_test":
-        # Test-only backend — used by the multi-node test harness to
-        # exercise the FULL profile resolution + api-key fetch chain
-        # without performing any real network call.  The api_key value
-        # is *required* (the credential lookup below raises if empty),
-        # so a test using this backend genuinely proves the worker can
-        # reach the host's identity store.  Imported lazily so the
-        # production runtime never loads the ``testing`` package.
+        # This backend validates the full credential path without network access.
         api_key = get_api_key(profile.provider) if profile.provider else ""
         if not api_key and profile.api_key_env:
             api_key = get_api_key(profile.api_key_env)
@@ -197,10 +167,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         return provider
 
     if profile.backend_type == "codex":
-        # OpenAI Responses-API transport. ``base_url`` is the single
-        # discriminator: set -> custom endpoint, API-key auth, NO OAuth
-        # (key required); unset -> ChatGPT-subscription OAuth flow (no key
-        # consulted, so a stray stored ``codex`` key can't hijack it).
+        # A custom base URL requires API-key auth; the default endpoint uses OAuth.
         codex_base_url = _resolved_base_url(profile)
         codex_key: str | None = None
         if codex_base_url:
@@ -230,14 +197,10 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
     api_key = get_api_key(profile.provider) if profile.provider else ""
     if not api_key and profile.api_key_env:
         api_key = get_api_key(profile.api_key_env)
-    # Resolve ``${VAR}`` if the stored key is itself a template.
+    # Stored credentials may themselves reference environment variables.
     api_key = interpolate_env_vars(api_key or "")
     if not api_key:
-        # Worker mode: ``llm.api_keys._resolver`` is set; the controller's
-        # identity store is the only valid source.  Setting the env var
-        # on the worker is explicitly NOT consulted (host-canonical
-        # identity, per management-wiring.md § studio.identity).  Tell
-        # the operator that instead of the generic ``kt login`` hint.
+        # Workers use the controller's identity store as the canonical key source.
         if _api_keys._resolver is not None:
             raise ValueError(
                 f"API key not found for profile '{profile.name}' (worker "
@@ -255,10 +218,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
     retry_policy = getattr(profile, "retry_policy", None)
     if profile.backend_type == "litellm":
-        # LiteLLM is an optional extra (``kohakuterrarium[litellm]``).
-        # Import the provider only when a litellm profile is actually
-        # selected so core package imports / ``kt --help`` keep working
-        # in a minimal install.
+        # Keep the optional LiteLLM dependency out of minimal installations.
         from kohakuterrarium.llm.litellm_provider import LiteLLMProvider
 
         provider = LiteLLMProvider(
@@ -297,12 +257,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             retry_policy=retry_policy,
         )
     provider._profile_max_context = profile.max_context
-    # The backend NAME (``"openrouter"``, ``"openai"``, ``"anthropic"``,
-    # ...) is the api_keys.yaml lookup key used at boot. Stash it on the
-    # provider so ``reload_credentials`` can re-fetch the same way when
-    # the user updates a key via Settings → Providers — built-in
-    # backends leave the native-tool ``provider_name`` empty, so the
-    # native-tool field alone is not enough.
+    # Retain the credential lookup key independently of native-tool identity.
     if profile.provider:
         provider._credential_provider = profile.provider
     _apply_backend_native_identity(provider, profile)
@@ -310,30 +265,18 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
 
 def _apply_backend_native_identity(provider: LLMProvider, profile: LLMProfile) -> None:
-    """Stamp the backend's provider_name and provider_native_tools onto the
-    instance.
-
-    The tool-injection logic in :mod:`bootstrap.agent_init` reads these
-    via ``getattr(llm, "provider_name")`` / ``provider_native_tools``.
-    Class-level defaults on the provider subclass serve as fallbacks:
-    a custom provider that leaves ``provider_name`` empty and declares
-    no native tools inherits the class defaults (empty sets).
-    """
+    """Apply backend-native identity and tool capabilities to a provider."""
     backend_name = getattr(profile, "backend_provider_name", "")
     if backend_name:
         provider.provider_name = backend_name
     backend_tools = getattr(profile, "backend_native_tools", None)
     if backend_tools is not None:
-        # Always respect the backend's list (including the empty list —
-        # an explicit empty list means "opt out of every native tool").
+        # An explicit empty list disables every provider-native tool.
         provider.provider_native_tools = frozenset(backend_tools)
 
 
 def create_llm_from_profile_name(name: str) -> LLMProvider:
-    """Create an LLM provider from a profile/preset name.
-
-    Used for live model switching. Resolves the name to a profile,
-    then creates the appropriate provider.
+    """Resolve and instantiate a profile for live model switching.
 
     Raises:
         ValueError: If profile not found or API key missing.
@@ -345,7 +288,7 @@ def create_llm_from_profile_name(name: str) -> LLMProvider:
 
 
 def _create_from_inline(config: AgentConfig) -> LLMProvider:
-    """Create LLM provider from inline controller config (backward compat)."""
+    """Create a provider from legacy inline controller fields."""
     if not config.model:
         raise ValueError(
             "No LLM model configured and no default model set. "
@@ -367,9 +310,7 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
         )
         return provider
 
-    # Standard API key auth (OpenAI, OpenRouter, etc.). Native Anthropic is
-    # explicit here so legacy inline ``provider: anthropic`` OpenAI-compatible
-    # configs keep using the OpenAI-compatible transport.
+    # Only explicit Anthropic auth selects its native transport for legacy configs.
     api_key = config.get_api_key()
     if not api_key:
         env_hint = (

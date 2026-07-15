@@ -25,11 +25,7 @@ def build_subagent_framework_hints(
     tool_format: str | None,
     parser_format: ToolCallFormat | None = None,
 ) -> str:
-    """Build format-aware framework hints for sub-agents.
-
-    Native mode: no format examples (API handles it).
-    Custom mode: generate examples from the actual ToolCallFormat.
-    """
+    """Build native or parser-specific tool-calling guidance for sub-agents."""
     if tool_format == "native":
         return (
             "## Tool Calling\n\n"
@@ -63,7 +59,7 @@ def build_subagent_framework_hints(
     return "\n".join(lines)
 
 
-# Backward-compatible alias (bracket format)
+# The public constant retains bracket-format behavior for existing callers.
 SUBAGENT_FRAMEWORK_HINTS = build_subagent_framework_hints("bracket", BRACKET_FORMAT)
 
 
@@ -78,13 +74,9 @@ class SubAgentResult:
     cancelled: bool = False
     turns: int = 0
     duration: float = 0.0
-    total_tokens: int = 0  # Total tokens used across all turns
+    total_tokens: int = 0
     prompt_tokens: int = 0
     completion_tokens: int = 0
-    # Prompt-cache hit tokens (Wave B audit finding A). Populated from
-    # the provider's ``last_usage["cached_tokens"]`` by SubAgent and
-    # surfaced through the parent's ``subagent_done`` activity so the
-    # session store can record it.
     cached_tokens: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
 
@@ -96,10 +88,7 @@ class SubAgentResult:
 
 
 class SubAgentJob:
-    """Wrapper for running a sub-agent as a background job.
-
-    Integrates with the executor's job tracking system.
-    """
+    """Adapt a sub-agent run to the shared background-job model."""
 
     def __init__(self, subagent: "SubAgent", job_id: str):
         self.subagent = subagent

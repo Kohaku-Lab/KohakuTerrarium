@@ -1,1 +1,1 @@
-"""Attach routes — workspace files + policy hints."""
+"""Group workspace file routes and runtime attachment-policy hints."""

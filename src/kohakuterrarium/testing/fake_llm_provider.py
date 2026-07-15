@@ -1,31 +1,8 @@
-"""Fake LLM provider routed through the real profile resolution path.
+"""Provide a deterministic LLM that still exercises real profile resolution.
 
-Unlike :class:`kohakuterrarium.testing.llm.ScriptedLLM`, which has to be
-installed via monkeypatching the module-level factory (and therefore
-*bypasses* the entire profile + api-key resolution chain), this fake is
-built via the *real* :func:`bootstrap.llm._create_from_profile`.  That
-means a test using it actually exercises:
-
-- ``resolve_controller_llm`` against the host's profile store;
-- ``get_api_key(profile.provider)`` against the host's identity store
-  (and, in worker mode, the ``IdentityCache`` + ``studio.identity`` RPC);
-- ``_apply_backend_native_identity``.
-
-If anything in that chain is broken the test fails — that is the
-property the unit/integration ``ScriptedLLM`` seam loses by design.
-
-To activate the fake, declare a profile with::
-
-    backend_type: fake_test
-    provider: openai          # any registered provider — its api key is fetched
-    model: fake-echo          # any string; for logs only
-    extra_body:
-      script_path: /abs/path/to/script.json
-
-The JSON file at ``script_path`` has shape ``{"script": ["reply", ...]}``
-and is re-read on every chat turn so tests can rotate the reply between
-turns without rebuilding the provider.  When ``script_path`` is absent
-or unreadable the fake replies with ``"OK"``.
+The provider re-reads ``{"script": [...]}`` from ``script_path`` each turn and
+falls back to ``"OK"`` when absent or invalid. It retains the resolved API key
+so tests can verify identity lookup without making network requests.
 """
 
 import json
@@ -37,13 +14,7 @@ from kohakuterrarium.llm.message import Message
 
 
 class FakeLLMProvider(LLMProvider):
-    """Deterministic LLM provider built via the real profile path.
-
-    Carries the resolved api key on the instance solely so tests can
-    assert the credential resolution actually happened (``self.api_key``
-    is non-empty after construction).  Nothing else uses it — no HTTP
-    is ever performed.
-    """
+    """Return scripted responses while exposing the profile-resolved API key."""
 
     provider_name = "fake_test"
     provider_native_tools: frozenset[str] = frozenset()
@@ -88,7 +59,7 @@ class FakeLLMProvider(LLMProvider):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         text = self._pick()
-        # Stream in two chunks so the streaming code path is exercised.
+        # Two chunks ensure callers exercise incremental response handling.
         mid = max(1, len(text) // 2)
         yield text[:mid]
         if text[mid:]:

@@ -1,11 +1,7 @@
 """Plugin manager — pre/post hook wrapping and callback dispatch.
 
-Hooks use ``wrap_method()`` to decorate a real method at init time: it runs all
-pre_* plugins (by priority), calls the original, then all post_* plugins —
-linear, not recursive. Callbacks use ``notify()`` for fire-and-forget
-notifications. With no plugins registered, ``wrap_method()`` returns the original
-unchanged. User-command collection + runtime refresh live in the
-:class:`~kohakuterrarium.modules.plugin.manager_commands.PluginCommandRefreshMixin`.
+Hooks run linearly by priority around the original method; callbacks and
+runtime contribution refresh share the same applicability rules.
 """
 
 import functools
@@ -30,13 +26,7 @@ logger = get_logger(__name__)
 
 
 def _plugin_applies(plugin: BasePlugin, context: PluginContext | None) -> bool:
-    """Evaluate the plugin's ``should_apply`` gate, swallowing errors.
-
-    A plugin with no context yet (e.g. called before ``load_all``) is
-    treated as applicable — the gate is only meaningful once the agent
-    is wired up. Exceptions are logged and treated as ``True`` (safer
-    to run the plugin than to silently skip it).
-    """
+    """Evaluate applicability, defaulting to enabled when context or evaluation fails."""
     if context is None:
         return True
     try:
@@ -57,23 +47,15 @@ class PluginManager(PluginCommandRefreshMixin):
     def __init__(self) -> None:
         self._plugins: list[BasePlugin] = []
         self._disabled: set[str] = set()
-        self._needs_load: set[str] = set()  # Plugins enabled at runtime needing on_load
-        self._load_context: PluginContext | None = None  # Saved for runtime enable
-        # Wave B additive observability: emit ``plugin_hook_timing``
-        # around every hook invocation. Wired by the agent during
-        # plugin manager setup; staying ``None`` is the zero-overhead
-        # path for tests and agents without a session store.
+        self._needs_load: set[str] = set()
+        self._load_context: PluginContext | None = None
+        # Timing remains optional so sessions without observers pay no callback cost.
         self._on_hook_timing: Callable[[str, str, float, bool], None] | None = None
 
     def set_hook_timing_callback(
         self, cb: Callable[[str, str, float, bool], None] | None
     ) -> None:
-        """Attach a ``plugin_hook_timing`` observer.
-
-        Signature ``cb(hook_name, plugin_name, duration_ms, blocked)``; called
-        fire-and-forget after every plugin hook / callback / vetoable-callback.
-        ``blocked`` is True for a ``PluginBlockError`` raised by a pre-hook.
-        """
+        """Attach an observer receiving hook name, plugin, duration, and block state."""
         self._on_hook_timing = cb
 
     def _emit_hook_timing(
@@ -108,16 +90,8 @@ class PluginManager(PluginCommandRefreshMixin):
             priority=getattr(plugin, "priority", 50),
         )
 
-    # ── Enable / Disable ──
-
     def enable(self, name: str) -> bool:
-        """Enable a plugin. Returns True if found and was disabled.
-
-        The state flip + inventory/prompt refresh is atomic (R1-23): if the
-        refresh raises (a command collision OR a failing prompt rebuild), the flip
-        is rolled back AND both host inventories are rebuilt to the restored
-        membership, so plugin state, commands, and prompt stay consistent.
-        """
+        """Enable a plugin, rolling back state if host inventory refresh fails."""
         if name in self._disabled:
             self._disabled.discard(name)
             self._needs_load.add(name)
@@ -170,11 +144,7 @@ class PluginManager(PluginCommandRefreshMixin):
         return None
 
     def list_plugins_with_options(self) -> list[dict[str, Any]]:
-        """Like :meth:`list_plugins` but include schema + current values.
-
-        Used by the runtime UI to render schema-driven option editors.
-        Plugins without a schema get empty ``schema`` and ``options``.
-        """
+        """List plugins with option schemas and current values for runtime editors."""
         out: list[dict[str, Any]] = []
         for p in self._plugins:
             try:
@@ -210,13 +180,7 @@ class PluginManager(PluginCommandRefreshMixin):
         return out
 
     def set_plugin_options(self, name: str, values: dict[str, Any]) -> dict[str, Any]:
-        """Apply option overrides to a registered plugin.
-
-        Returns the plugin's full post-merge options dict.
-        Raises :class:`KeyError` if no such plugin, or
-        :class:`ValueError` (subclass ``PluginOptionError``) on invalid
-        input.
-        """
+        """Apply validated overrides and return the plugin's merged options."""
         plugin = self.get_plugin(name)
         if plugin is None:
             raise KeyError(name)
@@ -230,12 +194,7 @@ class PluginManager(PluginCommandRefreshMixin):
         ]
 
     def _applicable_plugins(self) -> list[BasePlugin]:
-        """Active plugins that pass ``should_apply(context)``.
-
-        Evaluated before every hook call. Declarative filter on
-        ``applies_to`` is cheap; the method override is the escape
-        hatch. See cluster 2.4 + 2.5 of the extension-point spec.
-        """
+        """Return active plugins whose current context passes applicability checks."""
         ctx = self._load_context
         return [p for p in self._active_plugins() if _plugin_applies(p, ctx)]
 
@@ -256,8 +215,6 @@ class PluginManager(PluginCommandRefreshMixin):
             services.update(contributed)
         return services
 
-    # ── Collectors (aggregated contributions across plugins) ──
-
     def collect_prompt_contributions(self, context: PluginContext) -> list[str]:
         """Collect runtime prompt prose in plugin priority order."""
         out: list[str] = []
@@ -277,13 +234,7 @@ class PluginManager(PluginCommandRefreshMixin):
         return out
 
     def collect_commands(self) -> list[tuple[BasePlugin, dict[str, Any]]]:
-        """Collect ``contribute_commands()`` output from each plugin.
-
-        Returns a list of ``(plugin, commands)`` pairs — the controller
-        validates names and detects collisions itself. Errors in
-        individual ``contribute_commands`` calls are logged and the
-        plugin is skipped.
-        """
+        """Collect command contributions while isolating individual plugin failures."""
         out: list[tuple[BasePlugin, dict[str, Any]]] = []
         for plugin in self._applicable_plugins():
             try:
@@ -303,12 +254,7 @@ class PluginManager(PluginCommandRefreshMixin):
     def collect_termination_checkers(
         self,
     ) -> list[tuple[str, Callable[[Any], Any]]]:
-        """Collect plugin-supplied termination checkers.
-
-        Returns a list of ``(plugin_name, checker_fn)`` pairs. The
-        termination manager calls each checker per turn; any returning
-        ``TerminationDecision(should_stop=True, …)`` stops the run.
-        """
+        """Collect named termination checkers for per-turn evaluation."""
         checkers: list[tuple[str, Callable[[Any], Any]]] = []
         for plugin in self._applicable_plugins():
             try:
@@ -325,8 +271,6 @@ class PluginManager(PluginCommandRefreshMixin):
                 continue
             checkers.append((getattr(plugin, "name", "?"), fn))
         return checkers
-
-    # ── Lifecycle ──
 
     async def load_all(self, context: PluginContext) -> None:
         """Call on_load for enabled plugins only."""
@@ -395,8 +339,6 @@ class PluginManager(PluginCommandRefreshMixin):
                     exc_info=True,
                 )
 
-    # ── Hook wrapping (decorator pattern, linear pre/post) ──
-
     def wrap_method(
         self,
         pre_hook: str,
@@ -406,27 +348,10 @@ class PluginManager(PluginCommandRefreshMixin):
         input_kwarg: str = "",
         extra_kwargs: dict[str, Any] | None = None,
     ) -> Callable:
-        """Wrap a method with pre/post hooks from all plugins.
-
-        Creates one wrapper that runs pre_* on all active plugins (can transform
-        the first arg), calls the original, then runs post_* (can transform the
-        result). Returns the original unchanged if no plugin overrides the hooks.
-
-        Args:
-            pre_hook: Method name for pre-processing (e.g. "pre_llm_call")
-            post_hook: Method name for post-processing (e.g. "post_llm_call")
-            original: The real function to wrap
-            input_kwarg: If set, the first positional arg is also passed to
-                post hooks as this kwarg (e.g. "messages" so post_llm_call
-                receives the messages that were sent)
-
-        Returns:
-            Wrapped function, or original if no plugins apply.
-        """
+        """Wrap a method with linear transforming pre-hooks and post-hooks."""
         if not self._plugins:
             return original
 
-        # Check if any plugin actually overrides these hooks
         has_pre = any(_has_override(p, pre_hook) for p in self._plugins)
         has_post = any(_has_override(p, post_hook) for p in self._plugins)
         if not has_pre and not has_post:
@@ -440,7 +365,6 @@ class PluginManager(PluginCommandRefreshMixin):
             active = manager._applicable_plugins()
             hook_kw = {**kwargs, **injected}
 
-            # Pre hooks: transform first_arg
             if has_pre:
                 for plugin in active:
                     if not _has_override(plugin, pre_hook):
@@ -467,10 +391,8 @@ class PluginManager(PluginCommandRefreshMixin):
                     finally:
                         manager._emit_hook_timing(pre_hook, plugin, start, blocked)
 
-            # Call original
             result = await original(first_arg, *args, **kwargs)
 
-            # Post hooks: observe or transform result
             if has_post:
                 post_kwargs = {**hook_kw}
                 if input_kwarg:
@@ -502,13 +424,8 @@ class PluginManager(PluginCommandRefreshMixin):
 
         return wrapper
 
-    # ── Standalone pre-hook runner (for async generators) ──
-
     async def run_pre_hooks(self, hook_name: str, value: Any, **kwargs: Any) -> Any:
-        """Run pre-hooks linearly, returning the (possibly transformed) value.
-
-        Used where wrap_method can't apply (async generators like run_once).
-        """
+        """Run transforming pre-hooks where method wrapping cannot apply."""
         if not self._plugins:
             return value
         for plugin in self._applicable_plugins():
@@ -535,8 +452,6 @@ class PluginManager(PluginCommandRefreshMixin):
                 self._emit_hook_timing(hook_name, plugin, start, blocked)
         return value
 
-    # ── Callbacks (fire-and-forget) ──
-
     async def notify(self, callback_name: str, **kwargs: Any) -> None:
         """Fire a callback on all active plugins."""
         if not self._plugins:
@@ -558,19 +473,8 @@ class PluginManager(PluginCommandRefreshMixin):
             finally:
                 self._emit_hook_timing(callback_name, plugin, start, blocked=False)
 
-    # ── Vetoable callbacks ──
-
     async def should_proceed(self, callback_name: str, **kwargs: Any) -> bool:
-        """Fire a vetoable callback. Returns True if no plugin vetoed.
-
-        Any plugin returning ``False`` vetoes the action. Other returns
-        (``None``, ``True``, etc.) do not veto. Vetoing plugins are
-        logged at INFO level by name.
-
-        Used by the compact manager to offer ``on_compact_start`` as a
-        veto point: a plugin that just injected critical context can
-        return ``False`` to skip this compaction cycle.
-        """
+        """Return false when any applicable plugin explicitly vetoes an action."""
         if not self._plugins:
             return True
         vetoed: list[str] = []

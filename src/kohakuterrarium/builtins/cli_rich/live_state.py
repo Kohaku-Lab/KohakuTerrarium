@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 _PEEK_BUFFER_MAX = 128
-_TEXT_BUFFER_MAX_CHARS = 8000  # cap so the live region never bloats
+_TEXT_BUFFER_MAX_CHARS = 8000
 
 
 @dataclass
@@ -39,13 +39,7 @@ class FooterState:
 
 @dataclass
 class LiveRegionState:
-    """Per-creature mutable state the live region renders from.
-
-    All fields are owned by ``RichCLIApp`` and mutated only on the
-    asyncio loop thread (event handlers and key bindings). Cross-
-    thread access is not supported and not needed (every output
-    sink is awaited from the same loop).
-    """
+    """Store loop-owned live output state for one creature."""
 
     creature_id: str
     text_buffer: str = ""
@@ -65,7 +59,7 @@ class LiveRegionState:
         self.active_blocks.clear()
 
     def record_event(self, event: Any, now: float | None = None) -> None:
-        """Stamp the event in the peek ring buffer + bump activity counters."""
+        """Record an event for peek history and unread tracking."""
         ts = now if now is not None else time.time()
         self.recent_events.append((ts, event))
         self.last_event_at = ts

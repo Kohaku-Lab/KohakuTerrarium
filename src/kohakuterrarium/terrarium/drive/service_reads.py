@@ -1,10 +1,8 @@
-"""ACL-gated Drive history reads for ``LocalTerrariumService`` (design §12.1).
+"""Authorize Drive history reads for local Terrarium services.
 
-Split out of :mod:`drive.service` (file-size cap): the progress / delivery /
-audit reads share one authorization gate (owner / assignee / admin), so they
-live together in :class:`DriveHistoryReadMixin`. It relies on the host service
-(``DriveServiceMixin``) for ``_drive_runtime`` / ``_find_manager``; both mixins
-are combined on ``LocalTerrariumService``.
+Progress, delivery, and audit reads share one authorization gate for owners,
+assignees, and administrators. The mixin relies on its host service to resolve
+the Drive runtime and owning graph manager.
 """
 
 from typing import Any
@@ -22,8 +20,8 @@ from kohakuterrarium.terrarium.drive.models import (
 )
 from kohakuterrarium.terrarium.drive.policy import DriveCapability
 
-# Capabilities that may read a Drive's evidence/history (owner / assignee /
-# admin). A bare graph member holds only ``READ`` (list rows), never these.
+# Evidence and history require owner, assignee, or administrative capability;
+# basic graph read access is insufficient.
 _HISTORY_READ_CAPS: frozenset[DriveCapability] = frozenset(
     {
         DriveCapability.UPDATE_OWNED,
@@ -34,7 +32,7 @@ _HISTORY_READ_CAPS: frozenset[DriveCapability] = frozenset(
 
 
 class DriveHistoryReadMixin:
-    """Progress / delivery / audit reads behind a single record-ACL gate."""
+    """Gate Drive progress, delivery, and audit history behind one ACL check."""
 
     _drive_runtime: Any
     _find_manager: Any
@@ -42,11 +40,7 @@ class DriveHistoryReadMixin:
     async def _authorize_read(
         self, manager: Any, record: DriveRecord, actor: ActorRef, is_privileged: bool
     ) -> None:
-        """Fail closed unless ``actor`` may read this Drive's evidence/history.
-
-        Owner / current assignee / admin only; a bare graph member is denied
-        (evidence is as sensitive as the detail spec, §12.1).
-        """
+        """Require owner, current assignee, or administrator history access."""
         assignment = await manager.get_assignment(record.drive_id)
         caps = capabilities_for(actor, record, assignment, is_privileged=is_privileged)
         if not (caps & _HISTORY_READ_CAPS):
@@ -57,7 +51,7 @@ class DriveHistoryReadMixin:
     async def _authorized_history(
         self, drive_id: str, actor: ActorRef | None, is_privileged: bool, fetch: Any
     ) -> Any:
-        """Resolve + ACL-gate a history read; ``actor is None`` is trusted local."""
+        """Resolve and authorize a history read, allowing trusted local callers."""
         runtime = self._drive_runtime()
         found = await self._find_manager(runtime, drive_id)
         if found is None:

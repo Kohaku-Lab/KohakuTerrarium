@@ -22,18 +22,10 @@ MAX_VISIBLE = 8
 
 
 class SlashHintBar:
-    """Produces a one-line ANSI string of matching slash commands.
-
-    Typical usage: the app passes the current buffer text + registry
-    each frame and consumes the returned ANSI via a prompt_toolkit
-    ``FormattedTextControl``.
-    """
+    """Render a one-line ANSI list of matching slash commands."""
 
     def __init__(self) -> None:
         self._registry: dict = {}
-        # Console used only to render the hint bar — separate from the
-        # scrollback console so we can set a short fixed width that
-        # matches the terminal.
         self._console = Console(
             file=StringIO(),
             force_terminal=True,
@@ -47,19 +39,10 @@ class SlashHintBar:
     def set_registry(self, registry: dict) -> None:
         self._registry = registry
 
-    # ── Matching ──
-
     def is_active(self, buffer_text: str) -> bool:
-        """Return True if the hint bar should render for *buffer_text*.
-
-        Only active when the buffer starts with ``/`` AND we haven't
-        moved past the command-name phase (no space yet). After the
-        user types ``/model `` we defer to prompt_toolkit's argument
-        completion dropdown.
-        """
+        """Return whether input is still in the slash-command name phase."""
         if not buffer_text.startswith("/"):
             return False
-        # Only show hints during the command-name phase.
         return " " not in buffer_text
 
     def _matches(self, prefix: str) -> list[tuple[str, str]]:
@@ -82,7 +65,6 @@ class SlashHintBar:
             elif prefix and prefix in name:
                 substring.append((name, desc))
             elif not prefix:
-                # Empty prefix ("/") → show everything in registry order.
                 prefixed.append((name, desc))
 
         prefixed.sort(key=lambda item: item[0])
@@ -90,14 +72,12 @@ class SlashHintBar:
         combined = exact + prefixed + substring
         return combined[:MAX_VISIBLE]
 
-    # ── Rendering ──
-
     def render(self, buffer_text: str, width: int) -> str:
         """Return the hint bar as an ANSI-colored string, or empty."""
         if not self.is_active(buffer_text):
             return ""
 
-        prefix = buffer_text[1:].lower()  # strip leading "/"
+        prefix = buffer_text[1:].lower()
         matches = self._matches(prefix)
         if not matches:
             return ""
@@ -106,9 +86,7 @@ class SlashHintBar:
         for i, (name, desc) in enumerate(matches):
             if i:
                 text.append("  ·  ", style="bright_black")
-            # Highlight the matched prefix (first len(prefix) chars) in
-            # bright cyan; tail in normal cyan so users see WHY the
-            # match was picked.
+            # Highlight the matching fragment that caused this result.
             if prefix and name.startswith(prefix):
                 text.append(f"/{name[:len(prefix)]}", style="bold bright_cyan")
                 text.append(name[len(prefix) :], style="cyan")
@@ -120,22 +98,14 @@ class SlashHintBar:
             else:
                 text.append(f"/{name}", style="cyan")
 
-        # Cap width by truncating — ANSI-aware render handles this via
-        # soft_wrap=True inside render(). We pass width to Console so
-        # long hint lines clip instead of wrapping to two lines (the
-        # hint bar is a single-line reservation in the layout).
+        # The layout reserves one line, so overflow must clip rather than wrap.
         self._console.width = max(20, width)
         self._console.file = StringIO()
         self._console.print(text, overflow="ellipsis", no_wrap=True, end="")
         return self._console.file.getvalue()
 
     def render_selected_description(self, buffer_text: str) -> str:
-        """Return the description of the first matched command, or empty.
-
-        Optional companion line — the main hint bar is usually enough,
-        but callers can show the description of the top match in a
-        secondary slot (e.g. as footer text).
-        """
+        """Return the top matching command's description."""
         if not self.is_active(buffer_text):
             return ""
         matches = self._matches(buffer_text[1:].lower())
@@ -143,8 +113,6 @@ class SlashHintBar:
             return ""
         _, desc = matches[0]
         return desc
-
-    # ── Utility for tests / introspection ──
 
     def list_registered(self) -> list[str]:
         return sorted(self._registry.keys())

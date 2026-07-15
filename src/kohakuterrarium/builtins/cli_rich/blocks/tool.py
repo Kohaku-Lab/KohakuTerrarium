@@ -30,61 +30,29 @@ from kohakuterrarium.builtins.cli_rich.theme import (
     fmt_elapsed_compact,
 )
 
-# Aggressive defaults — Claude Code shows ~5-8 lines per tool block.
-# Long output is still in the agent's conversation; the CLI just truncates
-# the visual representation so scrollback doesn't get drowned out.
+# Preview limits preserve conversational scrollback without discarding agent context.
 LIVE_PREVIEW_LINES = 5
 COMMITTED_PREVIEW_LINES = 8
 
-# Max child blocks rendered inside a sub-agent panel — anything older
-# is collapsed into a "… N earlier" line.
+# Older child blocks collapse behind an earlier-count summary.
 LIVE_MAX_CHILDREN = 5
 COMMITTED_MAX_CHILDREN = 12
 
-# Tool-name → lexer / renderer routing now lives in ``tool_renderers``.
-# This module just delegates via ``get_renderer(tool_name)``.
-
-# Tools whose output is already a structured diff — the diff renderer
-# has its own gutter + filename header so we do NOT wrap it in the
-# plain ``⎿ `` gutter, which would double up.
+# Structured diff renderers already provide their own gutter.
 _DIFF_TOOLS = {"edit", "multi_edit", "multiedit", "patch", "apply_patch"}
 
-# Per-tool commit-body line policy.
-#
-#   None  → unlimited, render full body (no overflow hint)
-#   0     → never render a body (header only)
-#   int N → cap at N lines, overflow hint below
-#
-# Tools not listed fall back to ``COMMITTED_PREVIEW_LINES`` (8).
-#
-# Guiding principle (USER-centric, not LLM-centric):
-#
-#   Ask "does the user have this content outside the CLI?"
-#     - YES, trivially (they can open the file, they see the tree) → 0
-#     - NO, it's external / internal-state / a change → a few lines
-#     - NO, and it's STRUCTURED where truncation destroys meaning → None
-#
-# Users are blind to what the LLM saw or generated. We surface what
-# they'd otherwise miss; we skip what they could trivially verify.
+# None means full output, zero means header-only, and integers cap lines.
 _TOOL_COMMIT_POLICY: dict[str, int | None] = {
-    # Diffs — structured; truncating a diff hides real changes. Users
-    # have no other way to know what was modified. Show everything.
     "edit": None,
     "multi_edit": None,
     "multiedit": None,
     "patch": None,
     "apply_patch": None,
-    # Content the user can open themselves — a file path, a directory
-    # listing, a tool's own docs. Panel would repeat what they could
-    # just `cat` / `ls`. Header + ✓ tells them it happened.
     "read": 0,
     "view": 0,
     "cat": 0,
     "info": 0,
     "tree": 0,
-    # External / hidden-state tools: user can't easily see this content
-    # themselves, so we show a few lines. Default 8 is a readable
-    # snippet without burying the conversation.
     "bash": 8,
     "shell": 8,
     "sh": 8,
@@ -102,13 +70,7 @@ def _normalise_tool_name(name: str) -> str:
 
 
 def _commit_line_limit(tool_base: str, default: int) -> int | None:
-    """Resolve the commit-body line cap for *tool_base*.
-
-    Unknown tools use *default* (``COMMITTED_PREVIEW_LINES``). The
-    policy table above is intentionally small — we only add an entry
-    when a tool's reading behaviour differs meaningfully from the
-    default. Most tools are fine at 8 lines.
-    """
+    """Return a tool-specific commit line limit or the default."""
     return _TOOL_COMMIT_POLICY.get(tool_base, default)
 
 
@@ -120,7 +82,7 @@ class ToolCallBlock:
         job_id: str,
         name: str,
         args_preview: str = "",
-        kind: str = "tool",  # "tool" or "subagent"
+        kind: str = "tool",
         parent_job_id: str = "",
     ):
         self.job_id = job_id
@@ -128,26 +90,21 @@ class ToolCallBlock:
         self.args_preview = args_preview
         self.kind = kind
         self.parent_job_id = parent_job_id
-        self.status = "running"  # running | done | error
+        self.status = "running"
         self.output: str = ""
         self.error: str | None = None
         self.started_at = time.monotonic()
         self.finished_at: float | None = None
         self.is_background = False
-        # Sub-agent metadata (final, set on done)
         self.tools_used: list[str] = []
         self.turns: int = 0
         self.total_tokens: int = 0
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
-        # Sub-agent running token tally (updated as it works)
         self.running_prompt_tokens: int = 0
         self.running_completion_tokens: int = 0
         self.running_total_tokens: int = 0
-        # Children (sub-agent's nested tool blocks)
         self.children: list["ToolCallBlock"] = []
-        # When True, the live view skips the preview truncation and
-        # renders the full output. Toggled by Ctrl+O from the composer.
         self.expanded: bool = False
 
     @property
@@ -236,40 +193,18 @@ class ToolCallBlock:
         return Text("  " + "  ·  ".join(parts), style="dim")
 
     def _render_output(self, content: str, max_lines: int) -> RenderableType:
-        """Render output via the per-tool renderer registry.
-
-        The registry routes edit / multi_edit / patch through the unified
-        diff renderer (filename header, gutter, sign column, syntax
-        highlight), bash / python through language-aware Syntax, grep /
-        glob through match-formatted text, and everything else through a
-        plain-text fallback. See ``blocks.tool_renderers``.
-        """
+        """Render output through the tool-specific renderer registry."""
         renderer = get_renderer(self.name)
         try:
             return renderer(content, max_lines)
         except Exception:
-            # Rendering must never raise into the live region — fall back
-            # to plain text so the user still sees the output.
+            # Renderer failures must not hide tool output.
             return Text(content)
 
     def _wrap_body_with_gutter(
         self, body: str, max_lines: int
     ) -> RenderableType | None:
-        """Wrap a plain-text body with the claude-code-style ``⎿`` gutter.
-
-        Shape::
-
-            ⎿  first line of output
-               second line
-               third line
-               … +N more lines
-
-        One ``⎿ `` glyph at the start of the body block, continuation
-        lines indent to match the content column. Produces a single
-        Text renderable — Rich layouts it as multiple lines. This is
-        only used for plain-text tool bodies (bash, read, grep, etc.);
-        structured renderers (diff) keep their own inner layout.
-        """
+        """Wrap plain output with one leading gutter and aligned continuations."""
         if not body:
             return None
         lines = body.splitlines()
@@ -297,21 +232,10 @@ class ToolCallBlock:
         return text
 
     def _summary_hint(self) -> str | None:
-        """Return a one-line metadata hint for tools with no text output.
-
-        e.g. a successful `write` tool produces no stdout but we want
-        the user to know it did something — show ``(wrote N lines)``.
-        """
-        # These hints live in tool result metadata; we don't have that
-        # wired here yet, so we only return one for the most common
-        # case: known-empty-output tools that we nevertheless want to
-        # acknowledge. Extend as needed.
+        """Return an optional metadata summary for empty output."""
         return None
 
     def _live_body(self) -> RenderableType | None:
-        # Collapsed by default: tool calls show only the header line
-        # (status icon + name + args + elapsed). Children of sub-agents
-        # take over as the progress indicator.
         if self.children and not self.expanded:
             return None
         if self.status == "running":
@@ -322,15 +246,11 @@ class ToolCallBlock:
             return None
         if self.status == "error":
             return Text(self.error or "error", style=COLOR_ERROR)
-        # When expanded and we have output already, show it even in the
-        # live view (normally live view keeps tool bodies collapsed).
         if self.expanded and self.output:
-            # 999 lines ≈ "no truncation" for any realistic tool output.
             return self._render_output(self.output, 999)
         return None
 
     def _committed_body(self) -> RenderableType | None:
-        # Errors always get the message, regardless of policy.
         if self.status == "error":
             error_text = Text()
             error_text.append(GUTTER_GLYPH, style="bright_black")
@@ -340,9 +260,6 @@ class ToolCallBlock:
         base = _normalise_tool_name(self.name)
         limit = _commit_line_limit(base, COMMITTED_PREVIEW_LINES)
 
-        # Policy == 0 → header-only, no body at all. Used for tools
-        # whose content the LLM narrates (read/info/tree) — repeating
-        # the content in a panel is just noise.
         if limit == 0:
             return None
 
@@ -355,14 +272,8 @@ class ToolCallBlock:
                 return t
             return None
 
-        # Policy == None → unlimited. We pick a very large cap so the
-        # truncation-notice branch in the renderer / gutter helper is
-        # effectively disabled.
         max_lines = 9_999_999 if limit is None else limit
 
-        # Structured diff tools keep their own gutter; plain-text tools
-        # get wrapped with a single ``⎿ `` gutter glyph at the top of
-        # the body + indented continuation lines.
         if base in _DIFF_TOOLS:
             return self._render_output(self.output, max_lines)
         return self._wrap_body_with_gutter(self.output, max_lines)
@@ -386,8 +297,6 @@ class ToolCallBlock:
         return Padding(Group(*items), (0, 0, 0, 2))
 
     def __rich__(self) -> RenderableType:
-        # Children of a sub-agent (parent_job_id set) render as a single
-        # line, no panel — that's the compact list look inside sub-agents.
         if self.parent_job_id:
             return self._build_header()
 
@@ -398,8 +307,6 @@ class ToolCallBlock:
         items: list[RenderableType] = [header]
         if stats is not None:
             items.append(stats)
-        # Chronological: tool list FIRST (sub-agent ran them), then the
-        # output body appears as they finish.
         if children is not None:
             items.append(Text(""))
             items.append(children)
@@ -415,12 +322,7 @@ class ToolCallBlock:
         )
 
     def build_compact_line(self) -> Text:
-        """One-line compact rendering for the background strip.
-
-        Omits the panel and body — just the status glyph, name, args
-        preview, and elapsed time. Multiple backgrounded tools stack
-        vertically inside the strip.
-        """
+        """Render a background job as one compact status line."""
         icon, color = self._icon()
         line = Text()
         line.append(f"  {icon} ", style=color)
@@ -433,10 +335,7 @@ class ToolCallBlock:
         return line
 
     def build_dispatch_notice(self) -> RenderableType:
-        """Single-line notice committed when this block is dispatched
-        in background. Mirrors a tool-call line but with a distinct
-        icon/color so the user knows the agent ran in bg.
-        """
+        """Render a notice when a job is dispatched in the background."""
         kind_glyph = f"{ICON_SUBAGENT} " if self.is_subagent else ""
         line = Text()
         line.append(f"{ICON_BG} ", style=COLOR_BG)
@@ -453,17 +352,7 @@ class ToolCallBlock:
         )
 
     def to_committed(self) -> RenderableType:
-        """Render full version for scrollback commit.
-
-        Three shapes:
-
-        - **Sub-agent child line** — one-liner, no panel.
-        - **Sub-agent panel** — full Panel with children list + summary
-          body + meta footer. Defer to ``_to_committed_subagent``.
-        - **Direct tool panel** — Panel wrapping a header + ``⎿`` gutter
-          body. No internal blank row (the gutter is the separator).
-          Defer to ``_to_committed_direct``.
-        """
+        """Render the appropriate committed child, tool, or sub-agent shape."""
         if self.parent_job_id:
             return self._build_header()
         if self.is_subagent:
@@ -471,13 +360,7 @@ class ToolCallBlock:
         return self._to_committed_direct()
 
     def _to_committed_direct(self) -> RenderableType:
-        """Header + ``⎿`` gutter body — no Panel, no rules.
-
-        The committer owns the top/bottom rules around tool/sub-agent
-        blocks now (so consecutive blocks can share a single rule
-        between them and save vertical space). The block itself just
-        produces its inner content.
-        """
+        """Render direct-tool inner content; the committer owns outer rules."""
         header = self._build_header()
         body = self._committed_body()
         if body is None:
@@ -485,12 +368,7 @@ class ToolCallBlock:
         return Group(header, body)
 
     def _to_committed_subagent(self) -> RenderableType:
-        """Sub-agent committed content: header + children + body + meta.
-
-        No surrounding rules — the committer adds them, sharing with
-        adjacent tool/sub-agent commits where possible. See
-        ``_to_committed_direct`` for the rationale.
-        """
+        """Render sub-agent header, children, output, and metadata."""
         header = self._build_header()
         body = self._committed_body()
 

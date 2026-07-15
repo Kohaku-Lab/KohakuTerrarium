@@ -57,8 +57,7 @@ from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
-# Slash commands that need the engine + creature_id in their context;
-# dispatched locally by the mixin instead of the agent-level handler.
+# These commands require engine and focused-creature context.
 _TOPOLOGY_COMMANDS = frozenset(
     {"stop", "start", "spawn", "jobs", "channels", "scratchpad", "pad"}
 )
@@ -67,8 +66,7 @@ logger = get_logger(__name__)
 
 
 class AppMultiCreatureMixin:
-    """Per-creature surface for :class:`RichCLIApp` — opt-in via
-    :meth:`setup_multi_creature` from ``run_engine_with_rich_cli``."""
+    """Manage per-creature focus, output routing, and topology changes."""
 
     def setup_multi_creature(self, engine: Any, focus_creature_id: str) -> None:
         self.engine = engine
@@ -78,18 +76,10 @@ class AppMultiCreatureMixin:
         self.focus_controller = FocusController(
             creature_ids=ids, focus_id=focus_creature_id
         )
-        # Per-creature LiveRegion widget so Tab can swap the visible
-        # output buffer + tool blocks. The FIRST creature reuses the
-        # already-constructed ``self.live_region`` (which is wired into
-        # the prompt_toolkit Layout) — swapping its content means
-        # re-pointing ``self.live_region`` at whichever widget belongs
-        # to the focused creature on each focus change.
+        # The focused creature reuses the widget already wired into the layout.
         self.live_region_widgets: dict[str, LiveRegion] = {}
-        # Track previous default_output per creature so dynamic
-        # remove + teardown can restore.  Populated by mount paths.
+        # Preserve replaced sinks so removal and teardown can restore them.
         self._managed_outputs: dict[str, Any] = {}
-        # Engine-subscription task — installed by start_engine_watch();
-        # cancelled by teardown_multi_creature().
         self._engine_watch_task: asyncio.Task | None = None
         for c in creatures:
             self._install_creature_slot(c, is_focus=c.creature_id == focus_creature_id)
@@ -110,18 +100,14 @@ class AppMultiCreatureMixin:
             get_state=lambda cid: self.live_regions.get(cid) if cid else None,
             get_name=lambda cid: self._creature_name(cid),
         )
-        # B2 redraw — pin the committer's capture bucket to the initial
-        # focused creature so its commits start landing in the right log
-        # before the first Tab. ``_handle_creature_event`` briefly flips
-        # this for non-focus dispatch so bob's commits go into bob's
-        # bucket while alice stays focused.
+        # Capture scrollback under the initial focus before the first focus change.
         try:
             self.committer.set_capture_target(focus_creature_id)
         except Exception:
             pass
 
     def _install_creature_slot(self, creature: Any, *, is_focus: bool) -> None:
-        """Set up per-creature state + widget. Used by setup + runtime add."""
+        """Create state and a live widget for a creature."""
         cid = creature.creature_id
         if cid in self.live_regions:
             return
@@ -131,10 +117,7 @@ class AppMultiCreatureMixin:
             self.live_region_widgets[cid] = self.live_region
         else:
             self.live_region_widgets[cid] = LiveRegion()
-        # Seed the per-widget footer from the creature's agent so its
-        # model + context-size show correctly the first time the user
-        # switches to it (otherwise the footer is blank until the agent
-        # emits an event that updates it).
+        # Seed footer identity before the creature emits its first output event.
         widget = self.live_region_widgets[cid]
         agent = getattr(creature, "agent", None)
         if agent is not None:
@@ -237,18 +220,11 @@ class AppMultiCreatureMixin:
         if focus is not None:
             self.agent = focus.agent
             self.composer.creature_name = focus.name or new_focus
-        # Swap the visible LiveRegion widget — Tab now actually
-        # changes what's drawn in the status area, not just the prompt
-        # prefix. ``self.live_region`` is the reference every render
-        # path reads from; pointing it at the focused creature's
-        # widget is the entire context swap.
+        # Render paths follow this pointer, so swapping it changes visible context.
         widget = self.live_region_widgets.get(new_focus)
         if widget is not None:
             self.live_region = widget
-        # Refresh the new widget's footer from the focused agent so
-        # model / context-size / token totals match what the new
-        # creature is actually running (otherwise the per-widget footer
-        # would show whatever it was last set to — usually blank).
+        # Refresh fields that may have changed while the widget was unfocused.
         self._refresh_footer_from_focus()
         state = self.live_regions.get(new_focus)
         if state is not None:
@@ -261,9 +237,7 @@ class AppMultiCreatureMixin:
             self._wire_command_registry()
         except Exception:
             self.composer.set_command_context(agent=self.agent)
-        # B2 redraw — wipe scrollback and re-emit only the focused
-        # creature's captured commits. Then re-point the capture target
-        # so future commits land in the right bucket.
+        # Scrollback is shared, so focus changes replay only the selected log.
         self.redraw_focused()
         try:
             self.committer.set_capture_target(new_focus)
@@ -324,22 +298,13 @@ class AppMultiCreatureMixin:
         if state is None:
             return
         is_focus = creature_id == self.focus_controller.focus_id
-        # Route into the creature's OWN LiveRegion widget by swapping
-        # ``self.live_region`` for the duration of the call. The
-        # existing ``on_text_chunk`` / ``on_processing_*`` /
-        # ``on_activity_with_metadata`` handlers all read
-        # ``self.live_region`` — swapping the reference lets every
-        # event reach the right widget without per-handler refactors.
-        # Non-focused widgets accumulate silently; the user sees their
-        # state when Tab swaps them in.
+        # Existing output handlers route through self.live_region, so swap it only
+        # for this dispatch and let unfocused widgets accumulate silently.
         target = self.live_region_widgets.get(creature_id)
         prev = self.live_region
         if target is not None and target is not prev:
             self.live_region = target
-        # Route scrollback commits emitted DURING this dispatch into
-        # this creature's bucket (not the focused creature's). Without
-        # this swap, bob's tool_done panel would replay under alice
-        # the next time she Tabs back.
+        # Attribute any scrollback commits to the event's creature, not current focus.
         prev_capture_target: str | None = None
         capture_swapped = False
         try:
@@ -430,20 +395,11 @@ class AppMultiCreatureMixin:
             self._scroll_console.print(renderable, end="", width=width)
         return cap.get()
 
-    # ── B2 redraw: clear scrollback + replay focused log ────────────
-
-    # ANSI: clear scrollback (xterm 3J) + home cursor (H) + clear screen (2J).
+    # Clear scrollback, move home, then clear the visible screen.
     _CLEAR_SCROLLBACK = "\x1b[3J\x1b[H\x1b[2J"
 
     def redraw_focused(self) -> None:
-        """Wipe terminal scrollback and re-emit the focused creature's log.
-
-        Used on focus change so the user sees ONLY the focused
-        creature's history (B2 design — single shared terminal, redraw
-        on switch). The replay runs with the committer's ``_replaying``
-        flag set so the re-emitted commits don't get re-captured into
-        the bucket they came from.
-        """
+        """Replace shared scrollback with the focused creature's captured log."""
         if not self.multi_creature_enabled:
             return
         cid = self.focus_controller.focus_id
@@ -453,15 +409,13 @@ class AppMultiCreatureMixin:
             self.committer.ansi(self._CLEAR_SCROLLBACK)
         except Exception:
             pass
-        # Reset whitespace state so the first replayed item gets its
-        # leading blank from a fresh "scrollback is empty" baseline.
+        # Replay starts from the same whitespace state as an empty terminal.
         try:
             self.committer._last_was_blank = True
             self.committer._pending_block_close = False
         except Exception:
             pass
-        # Reprint the banner so the redrawn screen has identity context
-        # (creature name + model) at the top instead of an empty void.
+        # Preserve creature and model identity after clearing scrollback.
         try:
             self._print_banner()
         except Exception:
@@ -487,16 +441,8 @@ class AppMultiCreatureMixin:
         finally:
             self.committer.set_replay_mode(False)
 
-    # ── User-message capture helpers (@name + broadcast) ───────────
-
     def commit_user_message_for(self, creature_id: str, text: str) -> None:
-        """Display ``text`` as a user message and record it under ``creature_id``.
-
-        Used by ``@name`` retargeting so the displayed input lives in
-        the recipient's bucket rather than the focused creature's —
-        otherwise Tab-to-recipient would show only the answer, with
-        the question stranded back in the sender's view.
-        """
+        """Display a message and capture it under the recipient's log."""
         prev: str | None = None
         try:
             prev = self.committer._capture_target
@@ -516,10 +462,8 @@ class AppMultiCreatureMixin:
         if not self.multi_creature_enabled or self.engine is None:
             self._commit_user_message(text)
             return
-        # Visible commit goes through the focused bucket as usual.
         self._commit_user_message(text)
-        # Then record a duplicate into every OTHER creature's bucket
-        # so each redraw shows the broadcast in its own history.
+        # Every creature log must retain the broadcast for later replay.
         focused = self.focus_controller.focus_id
         for c in self.engine.list_creatures():
             cid = c.creature_id
@@ -532,17 +476,8 @@ class AppMultiCreatureMixin:
             except Exception:
                 pass
 
-    # ── Runtime graph change handling ────────────────────────────────
-
     def mount_creature_sink(self, creature: Any) -> None:
-        """Mount the multiplex sink for ``creature``, saving the previous.
-
-        Idempotent — re-mount on a creature already managed by us is a
-        no-op (the saved ``_managed_outputs`` entry from the first mount
-        survives). Called once per creature by
-        ``run_engine_with_rich_cli`` at boot and again by
-        :meth:`_on_creature_started` for runtime spawns.
-        """
+        """Install a multiplexed sink while preserving the previous output."""
         if not self.multi_creature_enabled:
             return
         cid = creature.creature_id
@@ -575,12 +510,7 @@ class AppMultiCreatureMixin:
         router.default_output = prev
 
     def start_engine_watch(self) -> None:
-        """Spawn the engine-subscription task. Idempotent.
-
-        Called from ``run_engine_with_rich_cli`` after the focus
-        creature's ``start()`` so the listener never fires before the
-        app's per-creature dicts are fully populated.
-        """
+        """Start the idempotent engine topology watcher."""
         if not self.multi_creature_enabled or self.engine is None:
             return
         if self._engine_watch_task is not None and not self._engine_watch_task.done():
@@ -639,10 +569,7 @@ class AppMultiCreatureMixin:
         except Exception:
             pass
         widget = self.live_region_widgets.pop(creature_id, None)
-        # If the removed creature owned the active live_region pointer,
-        # repoint at the new focus's widget (or a blank one when the
-        # roster emptied out — keeps ``self.live_region`` non-None so
-        # downstream code never has to None-check it).
+        # Keep self.live_region non-null when removal empties the roster.
         if was_focus and widget is self.live_region:
             if new_focus:
                 self._on_focus_changed(old_focus, new_focus)
@@ -651,12 +578,7 @@ class AppMultiCreatureMixin:
         self._invalidate()
 
     async def teardown_multi_creature(self) -> None:
-        """Cancel the engine watcher and restore every managed sink.
-
-        Called from ``run_engine_with_rich_cli`` in its ``finally``
-        block. Safe to call when never set up — it is a no-op for the
-        single-creature path.
-        """
+        """Cancel topology watching and restore all managed output sinks."""
         task = self._engine_watch_task
         self._engine_watch_task = None
         if task is not None and not task.done():
@@ -671,16 +593,7 @@ class AppMultiCreatureMixin:
             self.restore_creature_sink(cid)
 
     async def dispatch_topology_command(self, name: str, args: str) -> bool:
-        """Run an engine-aware command locally with the right context.
-
-        In an engine-backed single- or multi-creature run, handles the fixed
-        topology commands plus any command that marks itself ``needs_engine``
-        (e.g. a plugin-contributed ``/goal``). Both need the engine + focused
-        creature in ``UserCommandContext.extra``.
-        Returns ``True`` if the command was handled (caller should return)
-        and ``False`` if the caller should fall through to the agent-level
-        dispatcher.
-        """
+        """Run engine-aware commands with focused-creature context."""
         if self.engine is None:
             return False
         cmd = self._command_registry.get(name)
@@ -693,8 +606,7 @@ class AppMultiCreatureMixin:
             return False
         if name not in _TOPOLOGY_COMMANDS and not getattr(cmd, "needs_engine", False):
             return False
-        # Built-in Drive commands cannot import terrarium.service (dep-graph
-        # guard), so the dispatch supplies a ready service in ``extra``.
+        # Dependency boundaries require callers to provide the service instance.
         service = LocalTerrariumService(self.engine)
         ctx = UserCommandContext(
             agent=self.agent,
@@ -704,9 +616,7 @@ class AppMultiCreatureMixin:
                 "engine": self.engine,
                 "creature_id": self.focus_controller.focus_id,
                 "principal": "user:local",
-                # Trusted local single-user console: graph-authority verbs
-                # (/goal set, /drives create) are permitted here (R1-21 — the
-                # command default is now unprivileged, so this must be explicit).
+                # The local single-user console is an explicit operator surface.
                 "is_operator": True,
             },
         )

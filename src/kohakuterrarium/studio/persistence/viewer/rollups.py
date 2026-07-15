@@ -1,16 +1,12 @@
 """Turn-rollup data fallback for the Session Viewer.
 
-The viewer's Trace / Cost / Overview tabs read per-turn rows from the
-``turn_rollup`` KVault table. Sessions that predate ``save_turn_rollup``
-being wired into ``_handle_turn_token_usage`` (or any session whose
-``turn_token_usage`` events haven't fired yet for the current turn)
-have an empty rollup table — the tabs would otherwise look broken.
+The Trace, Cost, and Overview tabs consume per-turn rows from the
+``turn_rollup`` KVault table. Archival or in-progress sessions may lack those
+rows, so this module derives the same shape from persisted events.
 
-This module synthesises the same row shape from the events table so
-the viewer always has data, even for archival sessions. It also folds
-vertical sub-agent token usage (reported on parent ``subagent_result``
-and live ``subagent_token_usage`` events) into the parent turn so
-failed/interrupted sub-agents are reflected in trace/cost totals.
+Vertical sub-agent usage is attributed to the parent turn from
+``subagent_result`` and ``subagent_token_usage`` events. This keeps failed or
+interrupted sub-agents visible in trace and cost totals.
 """
 
 from typing import Any
@@ -18,7 +14,7 @@ from typing import Any
 from kohakuterrarium.session.history import dedupe_adjacent_duplicate_events
 from kohakuterrarium.session.store import SessionStore
 
-# Same set used by the summary endpoint — kept in sync explicitly.
+# Summary and rollup views must classify the same event types as errors.
 ERROR_EVENT_TYPES = frozenset({"tool_error", "subagent_error", "processing_error"})
 _TOKEN_EVENT_TYPES = frozenset({"token_usage", "turn_token_usage"})
 _SUBAGENT_TOKEN_EVENT_TYPES = frozenset({"subagent_token_usage", "subagent_result"})
@@ -173,14 +169,11 @@ def _add_usage_bucket(
 
 
 def derive_own_turns_from_events(events: list[dict], agent: str) -> list[dict]:
-    """Synthesise parent/creature-owned per-turn rows from raw events.
+    """Derive creature-owned per-turn rows from raw events.
 
-    ``turn_token_usage`` is the authoritative per-turn total when
-    present. Older/in-flight sessions may only have per-LLM-call
-    ``token_usage`` events, so those are used only for turns that lack a
-    ``turn_token_usage`` event. Sub-agent result tokens are intentionally
-    excluded here; callers that want the full user-visible turn total
-    should use :func:`rollups_or_derived`.
+    ``turn_token_usage`` is authoritative when present; per-call
+    ``token_usage`` is only a fallback for turns without that total. Sub-agent
+    usage is excluded so callers can merge it exactly once.
     """
     by_turn: dict[int, dict[str, Any]] = {}
     token_usage: dict[int, dict[str, Any]] = {}
@@ -228,15 +221,12 @@ def _subagent_name_from_event(evt: dict) -> str:
 
 
 def derive_subagent_turns_from_events(events: list[dict], parent: str) -> list[dict]:
-    """Return one contribution row per vertical sub-agent job.
+    """Return one usage contribution per vertical sub-agent job.
 
-    Sub-agents do not write their own event namespace in the session DB.
-    Completed runs normally expose final token counters on the parent's
-    ``subagent_result`` event. Interrupted runs may never emit that final
-    result, so the session output also persists live
-    ``subagent_token_usage`` snapshots. Collapse both event types by
-    ``job_id`` and keep the latest snapshot so the parent turn is not
-    double counted when both events exist.
+    Sub-agents do not own session event namespaces. Final usage arrives on
+    the parent's ``subagent_result`` event, while interrupted jobs may only
+    have ``subagent_token_usage`` snapshots. Collapsing both by ``job_id``
+    prevents duplicate attribution when both forms exist.
     """
     pending_updates: dict[str, dict[str, Any]] = {}
     result_rows: list[dict[str, Any]] = []
@@ -356,12 +346,7 @@ def _usage_from_event_for_row(row: dict) -> dict[str, Any]:
 
 
 def derive_turns_from_events(events: list[dict], agent: str) -> list[dict]:
-    """Synthesise per-turn rollup rows from raw events.
-
-    Each turn aggregates parent/creature LLM usage plus vertical
-    sub-agent result usage. This is the read-side fallback for archived
-    sessions and for any turn whose rollup row has not been persisted.
-    """
+    """Derive per-turn rows including creature and vertical sub-agent usage."""
     own_rows = derive_own_turns_from_events(events, agent)
     sub_rows = derive_subagent_turns_from_events(events, agent)
     return _merge_subagents(own_rows, sub_rows, agent)
@@ -386,15 +371,11 @@ def rollups_or_derived(store: SessionStore, agent: str) -> list[dict]:
 
 
 def list_agent_namespaces(store: SessionStore) -> list[tuple[str, str]]:
-    """Return ``[(agent_name, kind), ...]`` for every agent that has
-    written into this store.
+    """Return each event-producing agent namespace and its kind.
 
-    ``kind`` is ``"main"`` for top-level agents (those listed in
-    ``meta.agents`` plus any later-discovered ones), and
-    ``"attached"`` for namespaces under
-    ``<host>:attached:<role>:<seq>`` produced by Wave F attach.
-    The order matches first-seen-in-events so the breakdown lists
-    stay deterministic across requests.
+    ``main`` covers metadata-listed and event-discovered top-level agents;
+    ``attached`` covers ``<host>:attached:<role>:<seq>`` namespaces. First-seen
+    order keeps breakdowns deterministic across requests.
     """
     out: list[tuple[str, str]] = []
     seen: set[str] = set()
@@ -440,12 +421,10 @@ def _iter_rollup_contributions(store: SessionStore, name: str, kind: str):
 
 
 def aggregate_turn_rollups(store: SessionStore) -> list[dict]:
-    """Per-turn rows summed across every controller loop contribution.
+    """Sum each turn across all controller-loop contributions.
 
-    Drives the Cost tab's "all agents combined" view. The breakdown
-    includes main/attached agents plus vertical sub-agent result rows so
-    a failed/interrupted sub-agent's tokens are visible even though it
-    does not own an event namespace.
+    The breakdown includes main, attached, and vertical sub-agent rows so
+    sub-agent usage remains visible without a dedicated event namespace.
     """
     by_turn: dict[int, dict] = {}
     for name, kind in list_agent_namespaces(store):
@@ -498,17 +477,13 @@ def aggregate_turn_rollups(store: SessionStore) -> list[dict]:
 
 
 def _creature_total_usage(events: list[dict], rollups: list[dict]) -> dict[str, Any]:
-    """Turn-agnostic own + sub-agent token/cost total for one creature.
+    """Return turn-agnostic creature and sub-agent usage.
 
-    The turn-bucketed aggregate drops events with no positive turn bucket,
-    hiding channel-driven creatures (they never bump ``turn_index``). This
-    counts every cycle: parent usage is resolved per cycle — per-cycle
-    ``turn_token_usage`` preferred over per-call ``token_usage`` — bucketed
-    by turn INCLUDING the turn-less bucket. Sub-agent cumulative snapshots
-    collapse by ``job_id`` ONCE across ALL turns (highest total wins), so a
-    job whose snapshots straddle the turn-ful/turn-less boundary is counted
-    once. Parent cost comes from the rollup rows (events carry no parent
-    cost); sub-agent cost rides its collapsed event.
+    Channel-driven cycles may have no positive ``turn_index``, so their usage
+    must remain in a turn-less bucket. ``turn_token_usage`` takes precedence
+    over per-call usage within each bucket. Sub-agent snapshots collapse once
+    by ``job_id`` across all buckets, using the highest cumulative total.
+    Parent cost comes from rollups because parent events do not carry it.
     """
     turn_usage: dict[int, dict] = {}
     call_usage: dict[int, dict] = {}
@@ -549,14 +524,11 @@ def _creature_total_usage(events: list[dict], rollups: list[dict]) -> dict[str, 
 
 
 def graph_total_usage(store: SessionStore) -> dict[str, Any]:
-    """Graph-wide token + cost total across every creature loop.
+    """Return graph-wide usage without requiring positive turn indexes.
 
-    The turn-bucketed aggregate omits usage with no positive turn bucket,
-    so a channel-driven creature (never bumps ``turn_index``) would leave
-    the Overview/Cost total counting only the user-driven root. This sums
-    each creature's complete own + sub-agent usage turn-agnostically,
-    collapsing each sub-agent job once across all turns. Matches the
-    turn-bucketed total when every creature is user-driven.
+    This includes channel-driven creature cycles and collapses each vertical
+    sub-agent job once across all turns. When every creature is user-driven,
+    the result matches the turn-bucketed aggregate.
     """
     total = {"tokens_in": 0, "tokens_out": 0, "tokens_cached": 0, "cost_usd": None}
     for name, _kind in list_agent_namespaces(store):

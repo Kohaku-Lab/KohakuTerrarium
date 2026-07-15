@@ -1,4 +1,4 @@
-"""Per-creature model routes — switch."""
+"""Switch the model used by a running creature."""
 
 from fastapi import APIRouter, Depends, HTTPException
 
@@ -25,11 +25,8 @@ async def switch_creature_model(
         raise HTTPException(404, f"creature {creature_id!r} not found")
     except ValueError as e:
         raise HTTPException(400, str(e))
-    # Update the host-side ``_meta`` cache so the next sync read of
-    # ``get_session`` (e.g. a chat-tab reopen that races a worker
-    # disconnect) still surfaces the user's selection. Without this
-    # the model chip flips to "No model" if the worker stops
-    # answering between switch and the next read (B4).
+    # Cache the selection on the host so reads remain accurate if the worker
+    # disconnects before the next metadata refresh.
     _session_lifecycle.update_remote_creature_model_meta(
         service, cid, model=model or "", llm_name=model or ""
     )

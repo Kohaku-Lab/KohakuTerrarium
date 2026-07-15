@@ -9,7 +9,7 @@ from kohakuterrarium.modules.sandbox.profile import SandboxProfile
 def parse_profile(
     value: str | dict[str, Any] | SandboxProfile | None,
 ) -> SandboxProfile:
-    """Parse a profile preset name, inline dict, existing profile, or ``None``."""
+    """Normalize a preset name, mapping, profile instance, or default profile."""
     if isinstance(value, SandboxProfile):
         return value
     if isinstance(value, dict):

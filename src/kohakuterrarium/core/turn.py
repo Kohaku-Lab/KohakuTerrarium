@@ -1,22 +1,4 @@
-"""Typed turn events + results — the programmatic observation surface.
-
-Before this module, a script driving an agent saw a text-only pipe
-(``Creature.chat``) that silently dropped tool activity, errors, and
-usage — a dead provider looked like a clean empty reply.  The typed
-surface fixes that:
-
-- :class:`TurnResult` — what ``Agent.run`` / ``Creature.run`` return:
-  status, full text, the error (if any), tool calls, activities.
-- :class:`TurnEvent` union — what ``run_stream`` / ``attach`` yield:
-  :class:`TextChunk`, :class:`Activity`, :class:`TurnEnded`.
-- :class:`TurnCapture` — the OutputRouter secondary sink that records
-  a live turn (and optionally feeds an ``asyncio.Queue`` for
-  streaming consumers).
-
-Errors are first-class: the agent's internal ``processing_error``
-activity is mapped onto ``TurnResult.error`` and (by default) raised
-as :class:`~kohakuterrarium.errors.TurnError`.
-"""
+"""Typed turn results, streamed events, and non-destructive output capture."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -24,9 +6,7 @@ from typing import Any
 
 from kohakuterrarium.modules.output.base import BaseOutputModule
 
-# Activity kinds that mean "this turn failed".
 _ERROR_KINDS = ("processing_error", "turn_error")
-# Activity kinds describing tool execution.
 _TOOL_KINDS = ("tool_start", "tool_done", "tool_error")
 
 
@@ -39,13 +19,7 @@ class TextChunk:
 
 @dataclass
 class Activity:
-    """A non-text event during a turn (tool / sub-agent / status).
-
-    ``kind`` mirrors the router's activity types: ``tool_start``,
-    ``tool_done``, ``tool_error``, ``subagent_start``, ``subagent_done``,
-    ``processing_start``, ``processing_end``, ``processing_error``,
-    ``session_info``, ``ask_user``, ...
-    """
+    """Represent non-text tool, sub-agent, status, or interaction activity."""
 
     kind: str
     detail: str = ""
@@ -54,15 +28,10 @@ class Activity:
 
 @dataclass
 class TurnResult:
-    """Outcome of one full turn.
+    """Describe one complete turn, including output, activity, usage, and failure.
 
-    ``status`` is one of ``"ok"`` / ``"error"`` / ``"timeout"`` /
-    ``"interrupted"`` / ``"rejected"`` (the last means the event never ran
-    because the agent was stopped — see ``Agent.run_event``).  ``text`` is
-    the concatenated assistant text.  ``error`` carries the failure detail
-    when status != ok.  ``correlation_id`` echoes the driving event's
-    delivery/correlation id (``run_event`` ingress) so an out-of-band
-    consumer can match a settlement to the event it drove.
+    ``correlation_id`` lets out-of-band callers match settlement to the event that
+    initiated the turn. ``rejected`` means the event never ran.
     """
 
     status: str
@@ -82,7 +51,7 @@ class TurnResult:
 
 @dataclass
 class TurnEnded:
-    """Terminal event of a ``run_stream`` / final ``attach`` marker."""
+    """Mark the terminal result of a streamed turn or attachment."""
 
     result: TurnResult
 
@@ -91,13 +60,10 @@ TurnEvent = TextChunk | Activity | TurnEnded
 
 
 class TurnCapture(BaseOutputModule):
-    """OutputRouter secondary sink recording one (or many) turns.
+    """Record router output and optionally mirror it into a typed event queue.
 
-    Receives every text chunk + activity the router fans out.  With a
-    ``queue`` it ALSO pushes each typed event for live streaming —
-    non-destructively: the default output and other secondaries keep
-    receiving everything (unlike the old ``Creature.chat`` pipe, which
-    swallowed out-of-band output).
+    Capture is a secondary sink, so default outputs and other observers continue
+    receiving the same events.
     """
 
     def __init__(self, queue: "asyncio.Queue[TurnEvent] | None" = None) -> None:
@@ -106,8 +72,6 @@ class TurnCapture(BaseOutputModule):
         self.activities: list[Activity] = []
         self.error: str | None = None
         self._queue = queue
-
-    # -- text ----------------------------------------------------------
 
     async def write(self, content: str) -> None:
         await self.write_stream(content)
@@ -118,8 +82,6 @@ class TurnCapture(BaseOutputModule):
         self.chunks.append(chunk)
         if self._queue is not None:
             self._queue.put_nowait(TextChunk(chunk))
-
-    # -- activities ----------------------------------------------------
 
     def on_activity(self, activity_type: str, detail: str) -> None:
         self._record(Activity(kind=activity_type, detail=detail))
@@ -143,8 +105,6 @@ class TurnCapture(BaseOutputModule):
             self.error = activity.detail or activity.kind
         if self._queue is not None:
             self._queue.put_nowait(activity)
-
-    # -- result --------------------------------------------------------
 
     @property
     def text(self) -> str:
@@ -172,12 +132,10 @@ class TurnCapture(BaseOutputModule):
 
 
 class AgentEventStream:
-    """Open-ended typed event stream over an agent's output router.
+    """Observe an agent's typed output until the stream is detached.
 
-    The body behind ``Creature.attach()``: an async context manager
-    whose iterator yields :class:`TurnEvent`\\ s for as long as it stays
-    attached.  Non-destructive — a plain secondary sink; any number of
-    streams can observe the same agent concurrently.
+    Each attachment is an independent secondary sink, allowing concurrent
+    non-destructive observers.
     """
 
     def __init__(self, agent: Any) -> None:
@@ -199,7 +157,7 @@ class AgentEventStream:
         if self._open:
             self._agent.output_router.remove_secondary(self._capture)
             self._open = False
-            # Unblock a pending __anext__.
+            # A sentinel releases an iterator currently blocked on the queue.
             self._queue.put_nowait(TurnEnded(TurnResult(status="ok")))
 
     def __aiter__(self) -> "AgentEventStream":

@@ -19,20 +19,10 @@ logger = get_logger(__name__)
 
 
 class TUIInput(BaseInputModule):
-    """
-    Input module using Textual full-screen TUI.
+    """Read user input from a shared full-screen Textual session."""
 
-    Creates or attaches to a shared TUISession. On start,
-    launches the Textual app as a background task.
-
-    Config:
-        input:
-          type: tui
-          session_key: my_agent  # optional
-          prompt: "You: "        # optional
-    """
-
-    _supports_raw_io = False  # TUI owns the terminal, no print/input
+    # Textual exclusively owns terminal input/output while this module is active.
+    _supports_raw_io = False
 
     def __init__(
         self,
@@ -48,30 +38,21 @@ class TUIInput(BaseInputModule):
         self._exit_requested = False
 
     def set_user_commands(self, commands: dict, context: Any) -> None:
-        """Override to also store command names for TUI hint display.
-
-        Re-invoked at runtime by ``Agent.refresh_user_commands`` when a
-        plugin is toggled, so a plugin-contributed ``/goal`` must appear /
-        disappear from the live completion hints, not just the boot snapshot.
-        """
+        """Register commands and refresh live completion hints."""
         super().set_user_commands(commands, context)
-        # Build command names list (including aliases) for later
         all_names: list[str] = list(commands.keys())
         for cmd in commands.values():
             all_names.extend(getattr(cmd, "aliases", []))
         self._command_hint_names = sorted(set(all_names))
-        # Expose the live agent on the TUI session so screens that
-        # bypass the slash-command pipeline (e.g. the F2 Modules
-        # modal) can talk to it directly.
+        # Native modal screens require direct access to the live agent.
         host_agent = getattr(context, "agent", None) if context else None
         if self._tui is not None and host_agent is not None:
             self._tui.host_agent = host_agent
-        # If the app is already running, push the refreshed hints to the
-        # live input box (boot-time application happens in ``_on_start``).
+        # Runtime plugin changes must update the mounted input immediately.
         self._apply_command_hints()
 
     def _apply_command_hints(self) -> None:
-        """Push the current command-hint names to the live ChatInput."""
+        """Apply current command names to the mounted chat input."""
         tui = self._tui
         app = getattr(tui, "_app", None) if tui is not None else None
         hint_names = getattr(self, "_command_hint_names", [])
@@ -84,16 +65,7 @@ class TUIInput(BaseInputModule):
             logger.debug("Deferred command-hint refresh skipped", error=str(e))
 
     async def try_user_command(self, text: str) -> UserCommandResult | None:
-        """Intercept ``/module`` and ``/model`` for native modal screens.
-
-        For these commands the text/$EDITOR rendering inherited from
-        :class:`BaseInputModule` either looks wrong (text list when a
-        scrollable picker is appropriate) or is actively broken
-        (``$EDITOR`` would fight Textual for the terminal). We detect
-        the relevant subcommands here and dispatch to native Textual
-        modals; everything else falls through to the standard
-        slash-command pipeline.
-        """
+        """Route terminal-conflicting or picker-oriented commands to TUI modals."""
         if text.startswith("/") and self._user_commands:
             name, args = parse_slash_command(text)
             canonical = self._command_alias_map.get(name, name)
@@ -108,14 +80,7 @@ class TUIInput(BaseInputModule):
         return await super().try_user_command(text)
 
     async def _intercept_module(self, args: str) -> UserCommandResult | None:
-        """Open the Modules modal (or the Edit modal) instead of text.
-
-        Returns a consumed ``UserCommandResult`` for subcommands the
-        TUI handles natively, or ``None`` to fall through to the
-        regular text dispatch (set / show / enable / disable / reset
-        / toggle remain text-based — they're single-shot operations
-        that don't benefit from a modal).
-        """
+        """Open the module list or editor for supported subcommands."""
         if self._tui is None or self._user_command_context is None:
             return None
         agent = getattr(self._user_command_context, "agent", None)
@@ -133,17 +98,11 @@ class TUIInput(BaseInputModule):
             opened = await self._tui.show_module_edit_modal(agent, tokens[1])
             if opened:
                 return UserCommandResult(output="", consumed=True)
-            # Fall through if the name didn't resolve — let the text
-            # command print the "not found" / "ambiguous" error.
+            # Text dispatch retains detailed unresolved-name errors.
         return None
 
     async def _intercept_model(self, args: str) -> UserCommandResult | None:
-        """Open the model-picker modal for ``/model`` with no args.
-
-        ``/model <ident>`` (explicit switch) falls through to the
-        text-mode handler so users can paste a fully-qualified
-        identifier and skip the picker.
-        """
+        """Open the model picker when no explicit model is supplied."""
         if (args or "").strip():
             return None
         if self._tui is None or self._user_command_context is None:
@@ -157,7 +116,7 @@ class TUIInput(BaseInputModule):
     async def render_command_data(
         self, result: UserCommandResult, command_name: str
     ) -> UserCommandResult | None:
-        """TUI rendering: show native modal screens for select and confirm."""
+        """Render selection and confirmation command data as native modals."""
         data = result.data
         data_type = data.get("type", "")
 
@@ -194,11 +153,11 @@ class TUIInput(BaseInputModule):
 
     @property
     def exit_requested(self) -> bool:
-        """Check if exit was requested."""
+        """Return whether the user requested exit."""
         return self._exit_requested
 
     async def _on_start(self) -> None:
-        """Initialize TUI and launch the Textual app."""
+        """Initialize the session and launch its Textual application."""
         session = get_session(self._session_key)
         if session.tui is None:
             session.tui = TUISession(
@@ -206,26 +165,23 @@ class TUIInput(BaseInputModule):
             )
         self._tui = session.tui
 
-        # Configure terrarium tabs if available
         terrarium_tabs = session.extra.get("terrarium_tui_tabs")
         if terrarium_tabs:
             self._tui.set_terrarium_tabs(terrarium_tabs)
 
-        # Suppress framework logs (captured by SessionOutput to session DB)
+        # The TUI owns the terminal while session output retains framework logs.
         suppress_logging()
 
-        # Build and launch the Textual app
         await self._tui.start(self._prompt)
         self._app_task = asyncio.create_task(self._tui.run_app())
         await self._tui.wait_ready()
 
-        # Apply command hint names to ChatInput (now that app is ready)
         self._apply_command_hints()
 
         logger.debug("TUI input started", session_key=self._session_key)
 
     async def _on_stop(self) -> None:
-        """Stop the Textual app and restore stderr logging."""
+        """Stop the Textual application and restore stderr logging."""
         if self._tui:
             self._tui.stop()
         if self._app_task and not self._app_task.done():
@@ -239,23 +195,19 @@ class TUIInput(BaseInputModule):
         logger.debug("TUI input stopped")
 
     async def get_input(self) -> TriggerEvent | None:
-        """
-        Wait for user input from the Textual app.
-
-        Returns:
-            TriggerEvent with user input, or None on exit/error
-        """
+        """Wait for TUI input and convert it to a trigger event."""
         if not self._running or not self._tui:
             return None
 
         try:
             text = await self._tui.get_input(self._prompt)
 
+            # Empty input is the app/session shutdown sentinel.
             if not text:
                 self._exit_requested = True
                 return None
 
-            # Legacy exit fallback (if command system not wired)
+            # Plain exit commands remain available when user commands are absent.
             if not self._user_commands and text.lower() in (
                 "exit",
                 "quit",
@@ -265,7 +217,6 @@ class TUIInput(BaseInputModule):
                 self._exit_requested = True
                 return None
 
-            # Try slash command
             if text.startswith("/"):
                 cmd_name = (
                     text.lstrip("/").split()[0].lower() if text.strip("/") else ""

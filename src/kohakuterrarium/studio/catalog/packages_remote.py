@@ -1,9 +1,7 @@
 """Studio catalog — bundled remote registry reader.
 
-Reads ``src/kohakuterrarium/registry.json`` (the bundled
-"known good" remote package index). Future remote-registry sources
-will plug in here without callers having to learn a new module
-location.
+Loads the bundled known-good package index behind a stable catalog boundary so
+additional registry sources can be introduced without changing consumers.
 """
 
 import json
@@ -13,17 +11,15 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# ``src/kohakuterrarium/registry.json`` lives next to ``__init__.py``
-# of the top-level package (``studio/catalog/`` is two levels deeper).
+# The bundled registry is rooted at the top-level package rather than the Studio
+# subpackage.
 _REGISTRY_JSON = Path(__file__).resolve().parent.parent.parent / "registry.json"
 
 
 def load_remote_registry() -> dict:
-    """Return the bundled remote-package index.
+    """Return the bundled index with a stable empty fallback shape.
 
-    Returns ``{"repos": []}`` when the file is missing or unreadable
-    so callers always see the same shape. Verbatim port of the body
-    of ``api.routes.registry.list_remote``.
+    Missing or malformed package data must not make registry browsing fail.
     """
     if not _REGISTRY_JSON.exists():
         return {"repos": []}

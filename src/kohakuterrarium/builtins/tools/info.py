@@ -1,4 +1,4 @@
-"""Info tool - load full documentation for a tool or sub-agent on demand."""
+"""Load detailed tool, sub-agent, or skill documentation on demand."""
 
 from pathlib import Path
 from typing import Any
@@ -52,20 +52,17 @@ class InfoTool(BaseTool):
                 error="Provide the name of a tool, sub-agent, or procedural skill."
             )
 
-        # 1. Try builtin tool docs
         doc = get_builtin_tool_doc(name)
         if doc:
             logger.debug("Loaded tool doc", tool_name=name)
             self._mark_manual_read(name, context)
             return ToolResult(output=doc, exit_code=0)
 
-        # 2. Try builtin sub-agent docs
         doc = get_builtin_subagent_doc(name)
         if doc:
             logger.debug("Loaded subagent doc", subagent_name=name)
             return ToolResult(output=doc, exit_code=0)
 
-        # 3. Try agent-local docs
         if context and hasattr(context, "working_dir"):
             for subdir in ["prompts/tools", "prompts/subagents"]:
                 doc_path = Path(context.working_dir) / subdir / f"{name}.md"
@@ -74,7 +71,6 @@ class InfoTool(BaseTool):
                     if body is not None:
                         return ToolResult(output=body, exit_code=0)
 
-        # 4. Try tool's own get_full_documentation from the agent's registry
         if context and context.agent:
             registry = context.agent.registry
             tool = registry.get_tool(name)
@@ -86,13 +82,11 @@ class InfoTool(BaseTool):
                     self._mark_manual_read(name, context)
                     return ToolResult(output=doc, exit_code=0)
 
-            # 5. Try sub-agent config
             subagent = registry.get_subagent(name)
             if subagent:
                 desc = getattr(subagent, "description", "") or f"Sub-agent: {name}"
                 return ToolResult(output=desc, exit_code=0)
 
-        # 6. Try runtime procedural skills.
         skill_doc = _render_skill_info(context, name)
         if skill_doc is not None:
             logger.debug("Loaded procedural skill doc", skill_name=name)
@@ -105,7 +99,7 @@ class InfoTool(BaseTool):
 
     @staticmethod
     def _mark_manual_read(name: str, context: ToolContext | None) -> None:
-        """Mark a tool as having its manual read (unlocks require_manual_read)."""
+        """Unlock tools that require an explicit manual read before use."""
         if not context or not context.agent:
             return
         tool = context.agent.registry.get_tool(name)

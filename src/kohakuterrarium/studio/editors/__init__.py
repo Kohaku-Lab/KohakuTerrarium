@@ -1,1 +1,1 @@
-"""Studio editors — codegen, workspace FS, validators, templates (Phase 0 skeleton)."""
+"""Studio code generation, workspace editing, validation, and templates."""

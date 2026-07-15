@@ -1,14 +1,11 @@
 """Studio catalog view of Drive registrations (design §8.2).
 
-Aggregates the builtin ``generic`` registration and every installed package's
-``drive_registrations:`` manifest slot into read-only catalog DTOs. Listing is
-**discovery, not enablement** (§8.2): it reports what is *available* plus any
-collisions, without importing implementation modules. Actual enablement is a
-Phase G settings concern; a caller may request an explicit
-:func:`validate_drive_registration` to resolve one registration's import target
-and learn its load status.
+Aggregates built-in and package-declared Drive registrations into read-only
+catalog payloads. Discovery remains import-free so merely listing available
+registrations cannot execute package code; explicit validation or instantiation
+crosses the import boundary.
 
-Collision rules (design §8.2):
+Collision invariants:
 
 - a duplicate registration ``name`` (across packages, or builtin vs package) is
   a hard validation error;
@@ -38,9 +35,11 @@ logger = get_logger(__name__)
 
 
 def _builtin_registrations() -> list[DriveRegistration]:
-    """The framework's in-tree registrations: always-on ``generic`` plus the
-    available-but-disabled ``goal``. Constructed fresh per call (both stateless);
-    a settings selection decides which are actually enabled."""
+    """Construct fresh stateless instances of the built-in registrations.
+
+    Availability does not imply enablement; runtime settings select which
+    registrations participate.
+    """
     return [GenericDriveRegistration(), GoalDriveRegistration()]
 
 
@@ -50,13 +49,11 @@ def builtin_descriptors() -> list[DriveRegistrationDescriptor]:
 
 
 def installed_descriptors() -> list[DriveRegistrationDescriptor]:
-    """Descriptors scanned from installed packages' manifest slots.
+    """Scan package manifests into provenance-aware descriptors.
 
-    Provenance-aware (each descriptor carries its ``source_package``) and
-    enforces the design §8.2 hard error on a duplicate name across packages.
-    Malformed entries are logged and skipped so one bad manifest does not blank
-    the whole catalog; :func:`validate_drive_registration` surfaces hard load
-    errors on explicit request.
+    Duplicate names are ambiguous and therefore fail the catalog. Malformed
+    individual entries are logged and skipped so one package cannot hide every
+    valid registration; explicit validation reports implementation load errors.
     """
     out: list[DriveRegistrationDescriptor] = []
     seen: dict[str, str] = {}
@@ -132,11 +129,11 @@ def get_drive_registration(name: str) -> dict | None:
 
 
 def validate_drive_registration(name: str) -> dict | None:
-    """Resolve one registration's import target and report its load status.
+    """Explicitly import one registration and report whether it loads.
 
-    This is the only place the catalog imports implementation code (design §8.2:
-    "during an explicit validate/apply action"). Returns ``None`` if ``name`` is
-    unknown; otherwise a DTO with ``loaded`` + ``error``.
+    Catalog discovery stays import-free; this validation call is the deliberate
+    boundary where package implementation code may execute. Unknown names return
+    ``None``.
     """
     for d in builtin_descriptors():
         if d.name == name:
@@ -157,12 +154,11 @@ def validate_drive_registration(name: str) -> dict | None:
 
 
 def _resolve_installed(descriptor: DriveRegistrationDescriptor) -> DriveRegistration:
-    """Prepare the package import path, then import the enabled implementation.
+    """Make the owning package importable before resolving its implementation.
 
-    R1-19: an installed package root may sit outside ``sys.path`` (disabled
-    catalog scans stay import-free), so the enable/validate boundary must make
-    the module importable before :func:`resolve_registration` imports it — the
-    same precedent as ``bootstrap.agent_init`` for package user commands.
+    Installed package roots need not already be on ``sys.path`` because discovery
+    is import-free. Validation and enablement must establish that path before the
+    descriptor's module can be imported.
     """
     if descriptor.source_package:
         ensure_package_importable(descriptor.source_package)
@@ -172,15 +168,12 @@ def _resolve_installed(descriptor: DriveRegistrationDescriptor) -> DriveRegistra
 def instantiate_registration(
     name: str, options: dict | None = None
 ) -> DriveRegistration:
-    """Import + instantiate one registration by ``name``, injecting ``options``.
+    """Instantiate a named registration with descriptor-validated options.
 
-    A builtin (``generic`` / ``goal``) is constructed directly; a package
-    registration is resolved through :func:`resolve_registration` after its
-    package root is made importable (import on enable only, design §8.2, R1-19).
-    ``options`` are validated against the registration's descriptor and injected
-    via its ``configure`` hook (R1-17); an unknown/invalid option or options for
-    a registration that cannot accept them raises :class:`DriveValidationError`.
-    Raises :class:`DriveRegistrationNotFoundError` for an unknown name.
+    Built-ins are constructed directly; package registrations are imported only
+    when selected. Unsupported or invalid options raise
+    :class:`DriveValidationError`, and unknown names raise
+    :class:`DriveRegistrationNotFoundError`.
     """
     for registration in _builtin_registrations():
         if registration.name == name:
@@ -199,12 +192,11 @@ def instantiate_registration(
 def list_drive_registrations_status(
     enabled_names: set[str], options_by_name: dict[str, dict] | None = None
 ) -> list[dict]:
-    """Catalog DTOs annotated with per-registration ``enabled`` + load status.
+    """Annotate discovered registrations with runtime selection and load status.
 
-    Discovery for every available registration (never importing disabled code);
-    each entry in ``enabled_names`` is additionally resolved with its configured
-    ``options`` so its ``loaded`` / ``error`` / ``effective_options`` reflect the
-    real import + option-validation result on this node (design §8.2, §8.4, R1-17).
+    Disabled registrations remain import-free. Enabled entries are instantiated
+    with node-specific options so ``loaded``, ``error``, and
+    ``effective_options`` reflect the actual runtime configuration.
     """
     options_by_name = options_by_name or {}
     entries = list_drive_registrations()
@@ -227,11 +219,6 @@ def list_drive_registrations_status(
         entry["kind"] = registration.kind
         entry["effective_options"] = effective_options(registration)
     return entries
-
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
 
 
 def _provenance(descriptor: DriveRegistrationDescriptor) -> str:

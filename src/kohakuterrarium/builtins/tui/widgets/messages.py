@@ -1,8 +1,5 @@
 from textual.widgets import Collapsible, Static
 
-# ── Message Widgets ─────────────────────────────────────────────
-
-
 class UserMessage(Static):
     DEFAULT_CSS = """
     UserMessage {
@@ -21,7 +18,7 @@ class UserMessage(Static):
 
 
 class QueuedMessage(Static):
-    """User message queued while agent is processing. Visually distinct (dashed border)."""
+    """Display user input queued during active processing."""
 
     DEFAULT_CSS = """
     QueuedMessage {
@@ -41,7 +38,7 @@ class QueuedMessage(Static):
         self.message_text = text
 
     def promote(self) -> None:
-        """Convert to a normal UserMessage (when agent picks it up)."""
+        """Restyle the queued message as accepted user input."""
         self.border_title = "You"
         self.remove_class("-queued")
         self.styles.border = ("round", "#5A4FCF")
@@ -50,11 +47,7 @@ class QueuedMessage(Static):
 
 
 class SystemNotice(Static):
-    """Non-collapsible system notice for command results.
-
-    Visually distinct from chat messages — dimmed with a left border
-    and command label, clearly not part of the LLM conversation context.
-    """
+    """Display a command or system result outside the conversation."""
 
     DEFAULT_CSS = """
     SystemNotice {
@@ -81,11 +74,7 @@ class SystemNotice(Static):
 
 
 class TriggerMessage(Collapsible):
-    """Channel/trigger message as a collapsible accordion.
-
-    Title shows the label (channel + sender), body shows the full content.
-    Amber color scheme to match trigger theme.
-    """
+    """Display a channel or trigger message in a collapsible block."""
 
     DEFAULT_CSS = """
     TriggerMessage {
@@ -133,6 +122,8 @@ class TriggerMessage(Collapsible):
 
 
 class StreamingText(Static):
+    """Accumulate plain chunks until the session replaces them with Markdown."""
+
     DEFAULT_CSS = """
     StreamingText {
         height: auto;

@@ -1,12 +1,9 @@
 """Spawnable creature catalog — what a privileged creature can spawn.
 
-Unions a workspace's local ``creatures/`` folder with every installed
-package's ``creatures: [...]`` manifest entries. Returns a list of
-``{ref, name, description, source}`` records suitable for inclusion in
-``group_status.spawnable[]`` and the Studio UI.
-
-Unrestricted in v1 — every workspace + package creature is reachable.
-Allowlist hardening is a follow-up.
+Combines workspace and installed-package creature declarations into
+``{ref, name, description, source}`` records used by group status and Studio
+selection surfaces. The catalog describes all currently reachable creatures;
+spawn authorization is enforced elsewhere.
 """
 
 from typing import Any
@@ -15,10 +12,10 @@ from kohakuterrarium.packages.walk import list_packages
 
 
 def list_spawnable_creatures(workspace: Any | None = None) -> list[dict]:
-    """Return the union of workspace creatures and package creatures.
+    """Return workspace and package creatures as spawnable references.
 
-    ``workspace`` is a :class:`WorkspaceFs` (or any object exposing
-    ``list_creatures()``) — when ``None``, only package creatures appear.
+    ``workspace`` may be any object exposing ``list_creatures``; when absent,
+    only installed package declarations are included.
     """
     out: list[dict] = []
     if workspace is not None:
@@ -33,9 +30,8 @@ def list_spawnable_creatures(workspace: Any | None = None) -> list[dict]:
                     }
                 )
         except Exception:
-            # Workspace failures shouldn't break tool calls; the model
-            # gets an empty list and continues. The actual spawn call
-            # surfaces a clean error if the path doesn't resolve.
+            # Catalog enrichment is best-effort. A later spawn still performs
+            # authoritative path resolution and reports a concrete failure.
             pass
 
     for pkg in list_packages():

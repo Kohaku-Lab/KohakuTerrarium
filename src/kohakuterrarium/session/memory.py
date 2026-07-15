@@ -1,24 +1,6 @@
-"""
-Session memory: indexing and search over session event history.
+"""Index session history for keyword, semantic, and hybrid search.
 
-Indexes session events into searchable blocks with FTS5 (keyword)
-and vector (semantic) search. Two-level hierarchy:
-
-  Round: one processing cycle (user input -> agent response)
-  Block: a segment within a round (text paragraph, tool call, trigger)
-
-Usage::
-
-    from kohakuterrarium.session.embedding import create_embedder
-    from kohakuterrarium.session.memory import SessionMemory
-    from kohakuterrarium.session.store import SessionStore
-
-    store = SessionStore.open_readonly("run.kohakutr")
-    memory = SessionMemory(
-        "run.kohakutr", embedder=create_embedder({"provider": "auto"})
-    )
-    memory.index_events("alice", store.get_events("alice"))
-    results = memory.search("auth bug", mode="hybrid", k=5)
+Events are grouped into rounds and searchable text, tool, trigger, or user blocks.
 """
 
 import time
@@ -44,10 +26,9 @@ class Block:
     round_num: int
     block_num: int
     agent: str
-    block_type: str  # "text", "tool", "trigger", "user"
-    content: str  # text content for indexing
+    block_type: str
+    content: str
     ts: float = 0.0
-    # Extra metadata
     tool_name: str = ""
     tool_args: dict[str, Any] = field(default_factory=dict)
     channel: str = ""
@@ -69,7 +50,7 @@ class SearchResult:
 
     @property
     def age_str(self) -> str:
-        """Human-readable time ago string."""
+        """Return a compact elapsed-time label for the result timestamp."""
         if self.ts <= 0:
             return ""
         elapsed = time.time() - self.ts
@@ -96,17 +77,13 @@ class SessionMemory:
         self._embedder = embedder or NullEmbedder()
         self._has_vectors = not isinstance(self._embedder, NullEmbedder)
 
-        # FTS index (always available)
         self._fts = TextVault(db_path, table="memory_fts")
         self._fts.enable_auto_pack()
 
-        # Index state tracking
         self._state = KVault(db_path, table="memory_state")
         self._state.enable_auto_pack()
 
-        # Vector index (only if embedder is configured)
-        # Table name includes dimensions to avoid mismatch on model change.
-        # Dimensions are saved in memory_state for discovery by search.
+        # Dimension-specific tables prevent incompatible embedding models from mixing.
         self._vec: VectorKVault | None = None
         if self._has_vectors and self._embedder.dimensions > 0:
             dims = self._embedder.dimensions
@@ -115,7 +92,7 @@ class SessionMemory:
             )
             self._state["vec_dimensions"] = dims
         elif not self._has_vectors:
-            # No embedder: try to open existing vector table (for search-only)
+            # Existing vector tables remain queryable without a configured embedder.
             try:
                 saved_dims = self._state["vec_dimensions"]
                 if saved_dims and saved_dims > 0:
@@ -134,20 +111,15 @@ class SessionMemory:
     def close(self) -> None:
         """Release the native SQLite handles this index opened.
 
-        ``SessionMemory`` opens its own ``TextVault`` / ``KVault`` /
-        ``VectorKVault`` against the ``.kohakutr`` file — separate from
-        the ``SessionStore``'s handles. ``KVault.close()`` flushes +
-        checkpoints but never releases its native ``_inner``, and
-        ``TextVault`` / ``VectorKVault`` have no ``close()`` at all, so
-        without this the handles linger until GC and (on Windows) keep
-        the file locked — blocking a later delete with WinError 32.
-        Drop the native references so refcounting frees them now.
+        These indexes own handles separate from ``SessionStore``. Native references
+        are dropped explicitly because public vault close paths can retain Windows
+        file locks until garbage collection.
         """
         state = getattr(self, "_state", None)
         if state is not None and hasattr(state, "close"):
             try:
                 state.close()
-            except Exception as e:  # pragma: no cover - defensive
+            except Exception as e:  # pragma: no cover - cleanup continues per handle
                 logger.warning("memory state close failed", error=str(e), exc_info=True)
         for table, attr in (
             (getattr(self, "_state", None), "_inner"),
@@ -185,34 +157,25 @@ class SessionMemory:
         except Exception as e:
             logger.warning("Failed to clear FTS", error=str(e))
 
-    # ── Indexing ───────────────────────────────────────────────
-
     def index_events(
         self,
         agent: str,
         events: list[dict],
         start_from: int = 0,
     ) -> int:
-        """Index session events into FTS + vector search.
+        """Index new event blocks and return the number added.
 
-        Args:
-            agent: Agent name
-            events: List of event dicts from SessionStore
-            start_from: Skip first N events (for incremental indexing)
-
-        Returns:
-            Number of new blocks indexed
+        ``start_from`` supports incremental indexing and is advanced past the
+        persisted per-agent watermark when necessary.
         """
         already_indexed = self._get_indexed_count(agent)
 
-        # If vectors are enabled but empty, force full re-index
-        # (previous indexing may have been FTS-only)
+        # Rebuild both indexes when vector support is added after FTS-only indexing.
         vec_needs_rebuild = (
             self._vec is not None and self._vec.count() == 0 and already_indexed > 0
         )
         if vec_needs_rebuild:
             already_indexed = 0
-            # Clear stale FTS entries to avoid duplicates
             self._clear_fts(agent)
 
         if start_from < already_indexed:
@@ -228,13 +191,11 @@ class SessionMemory:
             self._set_indexed_count(agent, len(events))
             return 0
 
-        # Index into FTS (text is key, metadata points to round/block)
         for block in blocks:
             if block.content.strip():
                 metadata = _block_metadata(block)
                 self._fts[block.content] = metadata
 
-        # Index into vectors (batch)
         if self._has_vectors and self._vec is not None:
             vec_texts = [b.content for b in blocks if b.content.strip()]
             vec_metas = [
@@ -261,8 +222,6 @@ class SessionMemory:
         )
         return len(blocks)
 
-    # ── Search ─────────────────────────────────────────────────
-
     def search(
         self,
         query: str,
@@ -270,19 +229,12 @@ class SessionMemory:
         k: int = 10,
         agent: str | None = None,
     ) -> list[SearchResult]:
-        """Search session memory.
+        """Return relevance-ranked search results with an optional agent filter.
 
-        Args:
-            query: Search query text
-            mode: "fts" (keyword), "semantic" (vector), "hybrid", or "auto"
-            k: Max results
-            agent: Filter by agent name (optional)
-
-        Returns:
-            List of SearchResult, sorted by relevance
+        ``auto`` selects hybrid search when embeddings are configured and keyword
+        search otherwise. Explicit semantic search requires embeddings.
         """
         if mode == "auto":
-            # Short queries with identifiers -> fts, natural language -> hybrid
             mode = "hybrid" if self._has_vectors else "fts"
 
         match mode:
@@ -290,10 +242,7 @@ class SessionMemory:
                 return self._search_fts(query, k, agent)
             case "semantic":
                 if not self._has_vectors:
-                    # E4: an EXPLICIT semantic request without an
-                    # embedder used to silently degrade to FTS — the
-                    # caller asked for vectors, tell them why they
-                    # can't have them.
+                    # Explicit semantic mode must not silently degrade to keywords.
                     raise ValueError(
                         "semantic search needs an embedding model — "
                         "pass embedder= (see session.embedding."
@@ -313,12 +262,11 @@ class SessionMemory:
 
     def _search_fts(self, query: str, k: int, agent: str | None) -> list[SearchResult]:
         """FTS5 keyword search."""
-        results = self._fts.search(query, k=k * 2)  # over-fetch for filtering
+        results = self._fts.search(query, k=k * 2)  # Agent filtering may discard rows.
         out = []
         for row_id, score, meta in results:
             if agent and meta.get("agent") != agent:
                 continue
-            # Get the actual text content via get_by_id
             text, _ = self._fts.get_by_id(row_id)
             out.append(
                 SearchResult(
@@ -375,7 +323,6 @@ class SessionMemory:
         fts_results = self._search_fts(query, k=k * 2, agent=agent)
         sem_results = self._search_semantic(query, k=k * 2, agent=agent)
 
-        # Reciprocal Rank Fusion (RRF)
         scores: dict[str, float] = {}
         result_map: dict[str, SearchResult] = {}
 
@@ -410,14 +357,10 @@ class SessionMemory:
         }
 
 
-# ── Block extraction ───────────────────────────────────────────
-
-
 def _block_metadata(block: Block, include_content: bool = False) -> dict[str, Any]:
     """Build metadata dict for a block.
 
-    FTS: no content needed (text is the key).
-    Vector: include content (needed for display, since vectors have no text key).
+    FTS stores text as the key, while vector metadata must include display text.
     """
     meta: dict[str, Any] = {
         "round": block.round_num,
@@ -436,18 +379,8 @@ def _block_metadata(block: Block, include_content: bool = False) -> dict[str, An
 def _content_to_text(content: Any) -> str:
     """Flatten an event's ``content`` to a single searchable string.
 
-    Multimodal events store ``content`` as a list of parts
-    (``[{"type":"text","text":"..."}, {"type":"image_url",...}]``).
-    Older single-modal events use a bare string.  Tool-result events
-    occasionally surface a dict.  This helper normalises all three so
-    downstream FTS / embedding callers can always ``.strip()``,
-    ``.split()``, slice, etc.
-
-    Without this, ``user_input`` events with multimodal content (an
-    image attached to a message) blew up the entire memory-search
-    pipeline with ``AttributeError: 'list' object has no attribute
-    'strip'`` because we tried to call ``.strip()`` directly on the
-    list, taking down search across the whole session.
+    Strings pass through, multimodal parts contribute searchable text or stable
+    attachment markers, and dictionaries are handled as single parts.
     """
     if isinstance(content, str):
         return content
@@ -531,12 +464,9 @@ def _extract_blocks(
                 block_num += 1
 
         elif etype in ("text", "text_chunk") and in_round:
-            # ``text_chunk`` is Wave C's per-chunk streaming format.
-            # Index the same way; FTS treats consecutive chunks as
-            # separate blocks (callers can reassemble via event_id
-            # ordering if needed).
+            # Stream chunks remain separate searchable blocks in event order.
             content = _content_to_text(evt.get("content", ""))
-            # Split long text on double newlines for finer-grained blocks
+            # Paragraph splits improve retrieval precision for long responses.
             paragraphs = content.split("\n\n") if len(content) > 300 else [content]
             for para in paragraphs:
                 if para.strip():
@@ -555,7 +485,6 @@ def _extract_blocks(
         elif etype == "tool_call" and in_round:
             name = evt.get("name", "")
             args = evt.get("args", {})
-            # Build searchable text from tool call
             args_text = " ".join(
                 f"{k}={v}" for k, v in args.items() if k != "_tool_call_id"
             )

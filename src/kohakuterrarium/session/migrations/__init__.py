@@ -1,28 +1,7 @@
-"""Session format migration registry.
+"""Discover and non-destructively migrate versioned session files.
 
-Wave D — non-destructive, chained, lazy migration from older
-``.kohakutr`` formats to the current :data:`FORMAT_VERSION`.
-
-File naming
------------
-
-* ``alice.kohakutr`` — bare path. Treated as v1 implicit unless its
-  ``meta["format_version"]`` says otherwise. Never rewritten by a
-  migrator; the original stays on disk so users can downgrade.
-* ``alice.kohakutr.v2`` — explicit v2, produced by migration (or by a
-  future user importing a v2 file).
-* ``alice.kohakutr.v<N>`` — same convention for later formats.
-
-Usage
------
-
-``ensure_latest_version(path)`` discovers every version file sharing a
-basename, picks the newest readable one, and (if necessary) migrates
-it up to :data:`MAX_SUPPORTED_VERSION`. Returns the path the caller
-should open. The original v1 file is *never* modified.
-
-Registering a new migrator only requires adding one entry to
-:data:`MIGRATORS` and bumping :data:`MAX_SUPPORTED_VERSION`.
+Bare files retain their detected version, while migrated versions use ``.vN``
+suffixes so source files remain available.
 """
 
 import re
@@ -36,27 +15,21 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Highest format version this framework can produce. Bumping this
-# requires registering the ``(MAX - 1, MAX)`` migrator below.
+# Every supported version increment requires a registered migration path.
 MAX_SUPPORTED_VERSION: int = FORMAT_VERSION
 
-# Registry of version migrators. Each value is a callable
-# ``(src_path: str, dst_path: str) -> None`` that reads ``src`` and
-# writes a freshly-built store at ``dst``. Migrators MUST NOT modify
-# the source file.
+# Migrators build a fresh destination and must never modify their source.
 MIGRATORS: dict[tuple[int, int], Callable[[str, str], None]] = {
     (1, 2): v1_to_v2.migrate,
 }
 
-# Matches the ``.vN`` suffix at the end of a kohakutr path.
 _VERSION_SUFFIX_RE = re.compile(r"\.v(\d+)$")
 
 
 def _strip_version_suffix(path: Path) -> Path:
     """Return the bare ``.kohakutr`` path for a versioned file.
 
-    ``alice.kohakutr.v2`` → ``alice.kohakutr``. Paths that already
-    lack a version suffix are returned unchanged.
+    Paths without a version suffix are returned unchanged.
     """
     match = _VERSION_SUFFIX_RE.search(path.name)
     if match is None:
@@ -78,8 +51,7 @@ def _version_from_suffix(path: Path) -> int | None:
 def path_for_version(base_path: str | Path, version: int) -> Path:
     """Return the on-disk path for a specific format version.
 
-    v1 uses the bare path (no suffix). v2+ uses the ``.v<N>`` suffix
-    so the original file is never overwritten.
+    Version 1 uses the bare path; later versions use ``.vN`` suffixes.
     """
     bare = _strip_version_suffix(Path(base_path))
     if version <= 1:
@@ -90,13 +62,8 @@ def path_for_version(base_path: str | Path, version: int) -> Path:
 def discover_versions(base_path: str | Path) -> list[tuple[int, Path]]:
     """Return every version file sharing ``base_path``'s basename.
 
-    Output is sorted descending by version. The bare ``.kohakutr``
-    file's version is read from its ``meta["format_version"]`` (so a
-    freshly-written v2 bare file reports as v2 here). Files with a
-    ``.v<N>`` suffix are trusted to encode their version in the name.
-
-    Missing files are skipped silently; this is a read probe, not a
-    guarantee that any file exists.
+    Results are descending by version. Bare-file versions come from metadata;
+    suffixed files trust their filename. Missing candidates are ignored.
     """
     bare = _strip_version_suffix(Path(base_path))
     parent = bare.parent if bare.parent != Path("") else Path(".")
@@ -115,17 +82,14 @@ def discover_versions(base_path: str | Path) -> list[tuple[int, Path]]:
                     exc_info=True,
                 )
                 version = 1
-            # Prefer the bare path entry only when no suffix file has
-            # claimed this version already (avoids shadowing an
-            # explicit ``.v2`` that matches meta of the bare file).
+            # An explicit suffixed file takes precedence over an equivalent bare file.
             result.setdefault(version, candidate)
             continue
 
         suffix_version = _version_from_suffix(candidate)
         if suffix_version is None:
             continue
-        # ``.v1`` files should not exist (v1 uses the bare path), but
-        # if someone creates one, treat them the same as the bare v1.
+        # Tolerate explicit v1 suffixes even though version 1 is normally bare.
         result[suffix_version] = candidate
 
     return sorted(result.items(), key=lambda pair: pair[0], reverse=True)
@@ -134,8 +98,8 @@ def discover_versions(base_path: str | Path) -> list[tuple[int, Path]]:
 def _chain(src_version: int, dst_version: int) -> list[tuple[int, int]]:
     """Build a chain of registered migrators from ``src`` to ``dst``.
 
-    Walks the registry picking the smallest next-step each time. Raises
-    ``ValueError`` if the chain cannot be completed.
+    Choose the smallest registered upward step at each version and raise when
+    the target is unreachable.
     """
     chain: list[tuple[int, int]] = []
     current = src_version
@@ -157,17 +121,8 @@ def _chain(src_version: int, dst_version: int) -> list[tuple[int, int]]:
 def migrate(source_path: str | Path, target_version: int) -> Path:
     """Migrate ``source_path`` upward until its version ≥ ``target_version``.
 
-    Returns the path of the final migrated file. The source file is
-    preserved on disk; each intermediate step writes a new file at
-    ``path_for_version(source_path, step_dst)``.
-
-    If the final destination file already exists, it is reused (the
-    migration is treated as idempotent — the prior migration already
-    produced it).
-
-    On failure, any partial destination file created during this call
-    is removed and the exception is re-raised with the source path in
-    the message so the caller can recover.
+    Each step writes a separate versioned file and reuses an existing destination.
+    Failed steps remove only their partial output and preserve valid earlier files.
     """
     src = Path(source_path)
     if not src.exists():
@@ -202,9 +157,7 @@ def migrate(source_path: str | Path, target_version: int) -> Path:
         try:
             migrator(str(current_path), str(dst_path))
         except Exception as exc:
-            # Clean up only the partial file from *this* step — leave
-            # any earlier intermediate files alone; they are valid on
-            # their own and the user may want them for diagnostics.
+            # Earlier migration products remain valid independent session files.
             if dst_path.exists():
                 try:
                     dst_path.unlink()
@@ -225,22 +178,17 @@ def migrate(source_path: str | Path, target_version: int) -> Path:
 def ensure_latest_version(base_path: str | Path) -> Path:
     """Pick the newest readable version for ``base_path``, migrating if needed.
 
-    Walks :func:`discover_versions`, chooses the highest-version file
-    that the current framework can read (``version ≤
-    MAX_SUPPORTED_VERSION``), and migrates it up if it is below
-    :data:`MAX_SUPPORTED_VERSION`. Returns the path the caller should
-    open.
+    Select the newest readable candidate and migrate it to the framework's
+    maximum supported version when necessary.
     """
     candidates = discover_versions(base_path)
     if not candidates:
-        # Caller asked for a file that doesn't exist. Return the input
-        # path so the caller gets a normal FileNotFound at open time.
+        # Preserve normal file-not-found behavior at the eventual open call.
         return Path(base_path)
 
     readable = [c for c in candidates if c[0] <= MAX_SUPPORTED_VERSION]
     if not readable:
-        # Every on-disk version is newer than us. Fall back to the
-        # user-provided path (probably an error downstream).
+        # Return the newest candidate so the downstream reader reports incompatibility.
         logger.warning(
             "All session files exceed supported format",
             base_path=str(base_path),

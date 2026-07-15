@@ -1,9 +1,4 @@
-"""
-Glob tool - find files matching patterns.
-
-Respects ``.gitignore`` by default and caps collection to avoid
-materialising the entire directory tree on large projects.
-"""
+"""Find files with gitignore-aware, bounded glob traversal."""
 
 import asyncio
 from pathlib import Path
@@ -24,11 +19,7 @@ logger = get_logger(__name__)
 
 @register_builtin("glob")
 class GlobTool(BaseTool):
-    """
-    Tool for finding files by pattern.
-
-    Supports glob patterns like **/*.py
-    """
+    """Find files by glob pattern and sort them by modification time."""
 
     needs_context = True
 
@@ -52,11 +43,9 @@ class GlobTool(BaseTool):
         if not pattern:
             return ToolResult(error="No pattern provided")
 
-        # Get base path
         base_path = args.get("path", ".")
         base = resolve_tool_path(base_path, context)
 
-        # Path boundary guard
         if context and context.path_guard:
             msg = context.path_guard.check(str(base))
             if msg:
@@ -65,7 +54,6 @@ class GlobTool(BaseTool):
         if not base.exists():
             return ToolResult(error=f"Path not found: {base_path}")
 
-        # Get options
         limit = int(args.get("limit", 100))
         follow_gitignore = str(args.get("gitignore", "true")).lower() not in (
             "false",
@@ -74,7 +62,6 @@ class GlobTool(BaseTool):
         )
 
         try:
-            # Run blocking walk/stat in thread pool
             result = await asyncio.to_thread(
                 self._find_files, base, pattern, limit, follow_gitignore
             )
@@ -91,9 +78,9 @@ class GlobTool(BaseTool):
         limit: int,
         follow_gitignore: bool,
     ) -> ToolResult:
-        """Synchronous file finding (runs in thread pool)."""
-        # Collect files with a cap to avoid materialising enormous trees.
-        # Cap at 10× the display limit (or 5 000), whichever is larger.
+        """Collect and order matching files without blocking the event loop."""
+        # Collection exceeds the display limit to preserve useful recency sorting,
+        # while retaining an upper bound for large trees.
         cap = max(limit * 10, 5_000) if limit > 0 else 50_000
 
         matches: list[Path] = list(
@@ -106,16 +93,13 @@ class GlobTool(BaseTool):
         )
         hit_cap = len(matches) >= cap
 
-        # Sort by modification time (newest first).
-        # stat() only runs on the capped subset, not every file on disk.
+        # Stat only the capped subset before sorting newest first.
         matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
-        # Apply display limit
         total = len(matches)
         if limit > 0 and total > limit:
             matches = matches[:limit]
 
-        # Format output
         output_lines = []
         for match in matches:
             try:

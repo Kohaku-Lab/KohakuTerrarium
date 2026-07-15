@@ -78,7 +78,7 @@ class ChannelObserver:
         (use ``record()`` from the API layer).
         """
         if channel_name in self._subscriptions:
-            return  # already observing
+            return  # Each channel needs at most one observer subscription.
 
         channel = self._session.channels.get(channel_name)
         if channel is None:

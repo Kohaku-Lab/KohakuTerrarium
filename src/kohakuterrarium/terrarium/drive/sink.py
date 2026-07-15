@@ -1,10 +1,9 @@
-"""The Phase E delivery seam: sink contract, outcomes, and the observer type.
+"""Define Drive delivery admission, settlement, and observation contracts.
 
-Physical admission is separated from turn settlement (design §5.2): a
-:class:`DriveDeliverySink` admits (or rejects-because-stopped) an event and, when
-admitted, yields a settlement source resolved later. This module is the small,
-stable surface Phase E implements over ``Creature.inject_event`` and maps back to
-``EngineEvent`` — the dispatcher in :mod:`drive.delivery` builds on it.
+Physical admission is separate from eventual turn settlement. A
+:class:`DriveDeliverySink` admits or defers an event and, when admitted, returns
+a settlement source that resolves later. The dispatcher builds on this stable
+boundary without depending on creature internals.
 """
 
 from collections.abc import Awaitable, Callable
@@ -19,7 +18,7 @@ logger = get_logger(__name__)
 
 
 class SettlementStatus(str, Enum):
-    """How an admitted Drive turn ended (design §5.2)."""
+    """Classify how an admitted Drive turn ended."""
 
     OK = "ok"
     ERROR = "error"
@@ -34,20 +33,13 @@ class Settlement:
     detail: dict[str, Any] = field(default_factory=dict)
 
 
-# A settlement source is either the awaitable itself or a zero-arg callable that
-# returns one; the dispatcher resolves both. ``None`` means fire-and-forget.
+# Settlement may be supplied directly or lazily; null means no settlement signal.
 SettlementSource = Awaitable[Settlement] | Callable[[], Awaitable[Settlement]] | None
 
 
 @dataclass
 class DeliveryOutcome:
-    """The sink's response to one ``deliver`` call (design §5.2).
-
-    ``admitted=False`` is the *rejected-because-stopped* case: the creature is
-    not running and the delivery is deferred with no failure count. ``admitted``
-    means the event entered the creature; ``settlement`` (when present) resolves
-    to the turn's terminal :class:`Settlement`.
-    """
+    """Describe whether delivery was admitted and how its turn will settle."""
 
     admitted: bool
     settlement: SettlementSource = None
@@ -62,12 +54,7 @@ class DeliveryOutcome:
 
 
 class DriveDeliverySink(Protocol):
-    """Physical delivery target implemented by Phase E over ``Creature``.
-
-    ``deliver`` admits (or rejects-because-stopped) an event and, when admitted,
-    yields a settlement source. ``has_queued_foreign_work`` is the fairness probe
-    (§5.5): whether the creature has queued non-Drive work waiting.
-    """
+    """Define physical Drive delivery and fairness checks for a creature target."""
 
     async def deliver(
         self, creature_id: str, event: TriggerEvent, *, delivery_id: str
@@ -76,14 +63,9 @@ class DriveDeliverySink(Protocol):
     def has_queued_foreign_work(self, creature_id: str) -> bool: ...
 
 
-# ---------------------------------------------------------------------------
-# Observer (optional, fail-open) — Phase E maps these to EngineEvents
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveObservation:
-    """A structural Drive notification for the optional observer (design §9.4)."""
+    """Carry a structural Drive notification to an optional observer."""
 
     kind: str
     drive_id: str | None = None
@@ -99,12 +81,13 @@ def emit_observation(
     drive_id: str | None,
     payload: dict[str, Any] | None = None,
 ) -> None:
-    """Notify the observer, swallowing any error (design §8.8 observers fail open)."""
+    """Notify the observer without allowing it to affect committed state."""
     if observer is None:
         return
     try:
         observer(
             DriveObservation(kind=kind, drive_id=drive_id, payload=dict(payload or {}))
         )
-    except Exception as exc:  # observers never roll back a committed mutation
+    except Exception as exc:
+        # Observer failures cannot roll back a committed mutation.
         logger.warning("drive observer failed", obs_kind=kind, error=str(exc))

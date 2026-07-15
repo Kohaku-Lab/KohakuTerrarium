@@ -1,17 +1,6 @@
 """User-command aggregation + collision policy (design §8.9, §11.5).
 
-The Agent's live slash-command registry is the union of four sources:
-built-ins, package ``user_commands:`` manifest entries, constructor-injected
-commands, and the commands active plugins contribute through
-``contribute_user_commands()``. This leaf module holds the pure merge: it takes
-provenance-tagged contributions and returns one ``name -> command`` mapping,
-raising a provenance-carrying error on an unresolved duplicate.
-
-Collision rule: a name provided by more than one source is a hard configuration
-error UNLESS exactly one contribution carries ``override=True`` — that one wins
-(design §8.9: "duplicate command name = hard configuration error UNLESS an
-explicit override policy names the winner"). Zero or two-plus overriders is
-still an error. No Agent / LLM / plugin-manager imports.
+A duplicate name is valid only when exactly one contribution explicitly overrides.
 """
 
 from collections.abc import Iterable
@@ -21,12 +10,7 @@ from typing import Any
 
 @dataclass(frozen=True)
 class CommandProvenance:
-    """Where a contributed command came from, for collision reporting.
-
-    ``source`` is one of ``builtin`` / ``package`` / ``constructor`` /
-    ``plugin``; ``origin`` names the owning package or plugin (empty for
-    built-in / constructor).
-    """
+    """Identify a command's source for deterministic collision reporting."""
 
     source: str
     origin: str = ""
@@ -52,13 +36,7 @@ class UserCommandCollisionError(ValueError):
 def aggregate_user_commands(
     contributions: Iterable[CommandContribution],
 ) -> tuple[dict[str, Any], dict[str, CommandProvenance]]:
-    """Merge provenance-tagged contributions into one command registry.
-
-    Returns ``(commands, provenance)`` mapping each surviving name to its
-    command instance and to the provenance of the source that supplied it.
-    Raises :class:`UserCommandCollisionError` when a name is contributed by
-    more than one source and the override policy does not name a single winner.
-    """
+    """Merge commands and provenance, requiring one explicit winner per collision."""
     grouped: dict[str, list[CommandContribution]] = {}
     for contribution in contributions:
         grouped.setdefault(contribution.name, []).append(contribution)
@@ -79,16 +57,8 @@ def _validate_aliases(
     winners: dict[str, CommandContribution],
     provenance: dict[str, CommandProvenance],
 ) -> None:
-    """Fold each winning command's aliases into the single command namespace.
-
-    An alias that lands on another command's canonical name or on a second
-    command's alias is a hard configuration error (R1-24): aliases are validated
-    in the SAME namespace as canonical names, not silently overwritten by a later
-    alias-map build. Only winning contributions contribute aliases, so a command
-    that lost the canonical collision cannot leak its aliases.
-    """
-    # token -> (owner label, is that claim an alias?). Canonical names claimed
-    # first so an alias can never displace a real command name.
+    """Validate winning aliases in the same namespace as canonical names."""
+    # Canonical names claim the namespace before aliases can enter it.
     claimed: dict[str, tuple[str, bool]] = {
         name: (provenance[name].label(), False) for name in winners
     }

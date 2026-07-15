@@ -1,12 +1,4 @@
-"""
-Interactive sub-agent - stays alive and receives context updates.
-
-Unlike regular sub-agents that complete after a task, interactive sub-agents:
-- Stay running continuously
-- Receive context updates from parent controller
-- Handle context updates based on configured mode
-- Can stream output externally or return to parent as context
-"""
+"""Run long-lived sub-agents that react to parent context updates."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -26,7 +18,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class ContextUpdate:
-    """A context update for interactive sub-agent."""
+    """Timestamp one context update for an interactive sub-agent."""
 
     context: dict[str, Any]
     timestamp: datetime = field(default_factory=datetime.now)
@@ -34,7 +26,7 @@ class ContextUpdate:
 
 @dataclass
 class InteractiveOutput:
-    """Output chunk from interactive sub-agent."""
+    """Represent a streamed or completed interactive output chunk."""
 
     text: str
     is_complete: bool = False
@@ -42,36 +34,7 @@ class InteractiveOutput:
 
 
 class InteractiveSubAgent(SubAgent):
-    """
-    Interactive sub-agent that stays alive and handles context updates.
-
-    Unlike regular SubAgent, this:
-    - Runs continuously until explicitly stopped
-    - Receives context updates from parent controller
-    - Handles updates based on context_mode configuration
-    - Can stream output to external output module
-
-    Usage:
-        config = SubAgentConfig(
-            name="output",
-            interactive=True,
-            context_mode=ContextUpdateMode.INTERRUPT_RESTART,
-            output_to=OutputTarget.EXTERNAL,
-        )
-        agent = InteractiveSubAgent(config, registry, llm)
-
-        # Start the agent
-        await agent.start()
-
-        # Push context updates
-        await agent.push_context({"user_input": "Hello!"})
-
-        # Receive output via callback
-        agent.on_output = lambda chunk: print(chunk.text)
-
-        # Stop when done
-        await agent.stop()
-    """
+    """Keep a sub-agent alive and process updates under a configurable mode."""
 
     def __init__(
         self,
@@ -83,23 +46,18 @@ class InteractiveSubAgent(SubAgent):
     ):
         super().__init__(config, parent_registry, llm, agent_path, tool_format)
 
-        # Interactive state
         self._active = False
         self._current_task: asyncio.Task | None = None
 
-        # Asyncio primitives - initialized lazily in start() to avoid
-        # creating them outside an async context (no running event loop)
+        # Async primitives are created only after an event loop is running.
         self._context_queue: asyncio.Queue[ContextUpdate] | None = None
         self._stop_event: asyncio.Event | None = None
         self._generation_lock: asyncio.Lock | None = None
 
-        # Current context being processed
         self._current_context: dict[str, Any] = {}
 
-        # Output callback
         self.on_output: Callable[[InteractiveOutput], None] | None = None
 
-        # For return_as_context - collected output to return to parent
         self._output_buffer: list[str] = []
 
         logger.debug(
@@ -114,19 +72,13 @@ class InteractiveSubAgent(SubAgent):
         return self._active
 
     async def start(self) -> None:
-        """
-        Start the interactive sub-agent.
-
-        Begins listening for context updates.
-        Creates asyncio primitives here (inside async context).
-        """
+        """Start listening for context updates and initialize async primitives."""
         if self._active:
             logger.warning(
                 "InteractiveSubAgent already active", agent_name=self.config.name
             )
             return
 
-        # Create asyncio primitives inside async context
         self._context_queue = asyncio.Queue()
         self._stop_event = asyncio.Event()
         self._generation_lock = asyncio.Lock()
@@ -134,22 +86,16 @@ class InteractiveSubAgent(SubAgent):
         self._active = True
         self._stop_event.clear()
 
-        # Initialize conversation with system prompt
         self.conversation = Conversation()
         system_prompt = self.config.load_prompt(self.agent_path)
         self.conversation.append("system", system_prompt)
 
-        # Start the main loop
         self._current_task = asyncio.create_task(self._run_loop())
 
         logger.info("InteractiveSubAgent started", agent_name=self.config.name)
 
     async def stop(self) -> None:
-        """
-        Stop the interactive sub-agent.
-
-        Cancels any current generation and stops listening.
-        """
+        """Cancel the current generation and stop listening for updates."""
         if not self._active:
             return
 
@@ -168,17 +114,7 @@ class InteractiveSubAgent(SubAgent):
         logger.info("InteractiveSubAgent stopped", agent_name=self.config.name)
 
     async def push_context(self, context: dict[str, Any]) -> None:
-        """
-        Push a context update to the sub-agent.
-
-        How the update is handled depends on context_mode:
-        - INTERRUPT_RESTART: Cancel current, start new with this context
-        - QUEUE_APPEND: Add to queue, process after current completes
-        - FLUSH_REPLACE: Flush current output, replace context immediately
-
-        Args:
-            context: New context data
-        """
+        """Apply a context update according to the configured update mode."""
         if not self._active:
             logger.warning(
                 "Cannot push context to inactive agent", agent_name=self.config.name
@@ -203,7 +139,6 @@ class InteractiveSubAgent(SubAgent):
             context_keys=list(update.context.keys()),
         )
 
-        # Cancel any current generation
         if self._current_task and not self._current_task.done():
             self._current_task.cancel()
             try:
@@ -211,10 +146,8 @@ class InteractiveSubAgent(SubAgent):
             except asyncio.CancelledError:
                 pass
 
-        # Clear output buffer for new generation
         self._output_buffer.clear()
 
-        # Update context and restart
         self._current_context = update.context.copy()
         self._current_task = asyncio.create_task(
             self._generate_response(update.context)
@@ -237,7 +170,6 @@ class InteractiveSubAgent(SubAgent):
             context_keys=list(update.context.keys()),
         )
 
-        # Emit any buffered output as complete
         if self._output_buffer:
             output = InteractiveOutput(
                 text="".join(self._output_buffer),
@@ -247,7 +179,6 @@ class InteractiveSubAgent(SubAgent):
             self._emit_output(output)
             self._output_buffer.clear()
 
-        # Update context for next iteration
         self._current_context = update.context.copy()
         await self._context_queue.put(update)
 
@@ -255,22 +186,15 @@ class InteractiveSubAgent(SubAgent):
         """Main event loop for interactive sub-agent."""
         try:
             while self._active and not self._stop_event.is_set():
-                # Wait for context update
                 try:
                     update = await asyncio.wait_for(
                         self._context_queue.get(),
-                        timeout=0.1,  # Short timeout to check stop condition
+                        timeout=0.1,
                     )
                 except asyncio.TimeoutError:
                     continue
 
-                # Process the update. Both QUEUE_APPEND and FLUSH_REPLACE
-                # arrive here via the queue and must generate a response —
-                # FLUSH_REPLACE has already flushed prior output in
-                # ``_handle_flush_replace``, so the remaining work is just
-                # generating against the (replaced) context. Without
-                # FLUSH_REPLACE in this guard the dequeued update was
-                # silently dropped and the sub-agent never responded.
+                # Both queued modes must generate after any prior flush is complete.
                 if self.config.context_mode in (
                     ContextUpdateMode.QUEUE_APPEND,
                     ContextUpdateMode.FLUSH_REPLACE,
@@ -282,26 +206,16 @@ class InteractiveSubAgent(SubAgent):
             raise
 
     async def _generate_response(self, context: dict[str, Any]) -> SubAgentResult:
-        """
-        Generate a response for the given context.
-
-        Args:
-            context: Context data for generation
-
-        Returns:
-            SubAgentResult with generated output
-        """
+        """Generate and stream one response for the supplied context."""
         async with self._generation_lock:
             self._turns = 0
             self._start_time = datetime.now()
             output_parts: list[str] = []
 
             try:
-                # Build user message from context
                 user_message = self._format_context_as_message(context)
                 self.conversation.append("user", user_message)
 
-                # Run conversation loop
                 while self._turns < self.config.max_turns:
                     self._turns += 1
 
@@ -311,7 +225,6 @@ class InteractiveSubAgent(SubAgent):
 
                     tool_calls: list[ToolCallEvent] = []
 
-                    # Stream response
                     async for chunk in self.llm.chat(messages, stream=True):
                         if not self._active:
                             raise asyncio.CancelledError()
@@ -325,7 +238,6 @@ class InteractiveSubAgent(SubAgent):
                                 output_parts.append(event.text)
                                 self._output_buffer.append(event.text)
 
-                                # Emit streaming output
                                 chunk_output = InteractiveOutput(
                                     text=event.text,
                                     is_complete=False,
@@ -333,7 +245,6 @@ class InteractiveSubAgent(SubAgent):
                                 )
                                 self._emit_output(chunk_output)
 
-                    # Flush parser
                     for event in self._parser.flush():
                         if isinstance(event, ToolCallEvent):
                             tool_calls.append(event)
@@ -343,19 +254,16 @@ class InteractiveSubAgent(SubAgent):
 
                     self.conversation.append("assistant", assistant_content)
 
-                    # No more tool calls = generation complete
                     if not tool_calls:
                         break
 
-                    # Execute tools
                     tool_results = await self._execute_tools(tool_calls)
                     if tool_results:
                         self.conversation.append("user", tool_results)
 
-                # Emit completion
                 final_output = "".join(output_parts).strip()
                 complete_output = InteractiveOutput(
-                    text="",  # Empty since we already streamed
+                    text="",
                     is_complete=True,
                     context=context,
                 )
@@ -384,7 +292,6 @@ class InteractiveSubAgent(SubAgent):
 
     def _format_context_as_message(self, context: dict[str, Any]) -> str:
         """Format context dict as a user message."""
-        # Look for common context keys
         if "message" in context:
             return str(context["message"])
         if "input" in context:
@@ -392,7 +299,6 @@ class InteractiveSubAgent(SubAgent):
         if "text" in context:
             return str(context["text"])
 
-        # Format as key-value pairs
         parts = []
         for key, value in context.items():
             parts.append(f"{key}: {value}")
@@ -411,25 +317,13 @@ class InteractiveSubAgent(SubAgent):
                 )
 
     def get_buffered_output(self) -> str:
-        """
-        Get and clear the output buffer.
-
-        Used for return_as_context functionality.
-
-        Returns:
-            Accumulated output text
-        """
+        """Return and clear output accumulated for parent context."""
         output = "".join(self._output_buffer)
         self._output_buffer.clear()
         return output
 
     def clear_conversation(self) -> None:
-        """
-        Clear conversation history.
-
-        Keeps system prompt but removes all user/assistant messages.
-        Useful for sliding window context management.
-        """
+        """Clear conversation history while retaining the system prompt."""
         self.conversation.clear(keep_system=True)
 
         logger.debug("Conversation cleared", agent_name=self.config.name)

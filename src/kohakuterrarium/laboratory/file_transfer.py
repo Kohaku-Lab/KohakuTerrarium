@@ -1,18 +1,7 @@
-"""Host-side driver for the chunked ``terrarium.files`` write_stream.
+"""Host-side driver for chunked ``terrarium.files`` writes.
 
-The worker-side handler lives in
-:mod:`kohakuterrarium.laboratory.adapters.terrarium_files`
-(``write_begin`` / ``write_chunk`` / ``write_commit`` / ``write_abort``).
-This module is the *other half* — the code a host (or any Lab node)
-runs to push an arbitrarily-large payload across the link without any
-single APP message approaching the transport frame ceiling.
-
-Why this exists: a one-shot ``terrarium.files.write`` of a large
-``.kohakutr`` (resume-onto-worker) or a creature bundle would overflow
-the websocket frame and silently drop the connection.  Chunking is the
-"pack system" — the payload is split into bounded sequential slices,
-reassembled into a staging file on the worker, hash-verified, then
-atomically committed.
+Large payloads are split below the transport frame limit, reassembled in a
+worker staging file, hash-verified, and atomically committed.
 """
 
 import base64
@@ -41,7 +30,7 @@ def _sha256_hex(data: bytes) -> str:
 async def _stream_request(
     sender: Any, to_node: str, type_: str, body: dict[str, Any], timeout: float
 ) -> dict[str, Any]:
-    """One ``terrarium.files`` RPC, raising on the structured error envelope."""
+    """Issue one file RPC and raise errors returned in its response envelope."""
     resp = await sender.request(
         to_node=to_node,
         namespace=NAMESPACE,
@@ -67,17 +56,11 @@ async def stream_write_file(
     chunk_size: int = STREAM_CHUNK_BYTES,
     timeout: float = 60.0,
 ) -> dict[str, Any]:
-    """Push ``data`` to ``to_node`` as a chunked ``write_stream``.
+    """Write data to a remote file through the chunked transfer handshake.
 
-    Drives the ``write_begin`` / ``write_chunk`` / ``write_commit``
-    handshake — no single APP message carries more than one
-    ``chunk_size`` slice, so an arbitrarily large payload crosses the
-    Lab link without ever approaching the transport frame ceiling.
-    ``sender`` is any object exposing the Lab ``request`` coroutine
-    (a ``HostEngine`` or a ``ClientConnector``).  On any mid-stream
-    failure the transfer is aborted so the worker never keeps an orphan
-    staging file.  Returns the ``write_commit`` response
-    (``{"written", "sha256"}``).
+    Each message carries at most one chunk. Failures trigger a best-effort abort
+    to discard the worker's staging file. The commit response contains
+    ``written`` and ``sha256``.
     """
     begin = await _stream_request(
         sender,
@@ -95,7 +78,7 @@ async def stream_write_file(
     transfer_id = begin.get("transfer_id")
     if not isinstance(transfer_id, str) or not transfer_id:
         raise RuntimeError("write_begin returned no transfer_id")
-    # Honour the worker's advertised chunk size if it is smaller.
+    # The worker's lower limit governs to keep every chunk acceptable.
     step = chunk_size
     server_chunk = begin.get("chunk_size")
     if isinstance(server_chunk, int) and 0 < server_chunk < step:
@@ -117,12 +100,12 @@ async def stream_write_file(
                 timeout,
             )
             seq += 1
-        # An empty payload sends zero chunks — commit still closes it.
+        # Empty transfers have no chunks but still require commit.
         return await _stream_request(
             sender, to_node, "write_commit", {"transfer_id": transfer_id}, timeout
         )
     except Exception:
-        # Best-effort abort so the worker drops the staging file.
+        # Preserve the original failure even if staging cleanup also fails.
         try:
             await sender.request(
                 to_node=to_node,

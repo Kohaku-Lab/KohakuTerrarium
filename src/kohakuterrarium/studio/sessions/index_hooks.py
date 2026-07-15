@@ -1,15 +1,7 @@
-"""SessionIndexHook lifecycle wiring.
+"""Keep saved-session index sidecars synchronized with live stores.
 
-Attaches a debounced :class:`SessionIndexHook` to every live
-``SessionStore`` so updates flow into the session-index sidecar as
-events arrive — without this the sidecar would only refresh via the
-process-startup reconcile / explicit ``?refresh=true``, leaving
-in-flight sessions with stale ``last_active`` / ``preview`` / ``status``
-fields.
-
-Lives in its own module so :mod:`studio.sessions.lifecycle` stays
-under the 1000-line hard cap.  The registry below is module-private;
-``lifecycle`` reaches it via the public functions in this module.
+Each live SessionStore receives a debounced :class:`SessionIndexHook`, allowing
+activity, preview, and status fields to update without explicit reconciliation.
 """
 
 from pathlib import Path
@@ -25,9 +17,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Per-session live SessionIndexHook keyed by ``session_id``.
-# Detached on session stop (see ``studio.sessions.stop.stop_session``
-# which receives this dict via the ``index_hooks`` kwarg).
+# Session stop receives this registry to flush and detach each live hook.
 _session_index_hooks: dict[str, SessionIndexHook] = {}
 
 

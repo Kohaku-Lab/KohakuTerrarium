@@ -1,10 +1,7 @@
-"""Manifest sync route — append a workspace-authored module into
-``kohaku.yaml`` so other creatures (and the catalog) can discover it.
+"""Register workspace modules in ``kohaku.yaml`` for catalog discovery.
 
-Idempotent: calling the endpoint twice for the same ``(kind, name)``
-is a no-op on the second call. The implementation lives on
-:class:`LocalWorkspace` so the workspace protocol stays the single
-home for round-trip YAML writes.
+Sync is idempotent for each ``(kind, name)``, and the workspace owns the YAML
+round trip so manifest writes remain centralized.
 """
 
 from fastapi import APIRouter, Depends, HTTPException

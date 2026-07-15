@@ -41,8 +41,7 @@ def embedding_cli(
 
     print(f"Session: {path.name}")
     print(f"Agents: {', '.join(result['agents'])}")
-    # Print the resolved provider (build_index turns "auto" into
-    # "model2vec") so the user sees what actually ran.
+    # Report the resolved provider because automatic selection may change it.
     print(
         f"Embedding: {result.get('provider', provider)}"
         + (f" ({model})" if model else "")
@@ -82,7 +81,7 @@ def search_cli(
     # Read-only: searching must not bump the session's last_active.
     store = SessionStore.open_readonly(path)
     try:
-        # Try to create embedder for query encoding (semantic/hybrid)
+        # Semantic modes can fall back when no query embedder is available.
         embedder = None
         if mode in ("semantic", "hybrid", "auto"):
             try:
@@ -92,7 +91,7 @@ def search_cli(
                     "Failed to create embedder for search", error=str(e), exc_info=True
                 )
 
-        # SessionMemory discovers existing vector tables via saved dimensions
+        # Saved dimensions let SessionMemory discover existing vector tables.
         memory = SessionMemory(str(path), embedder=embedder)
 
         if mode in ("semantic", "hybrid") and not memory.has_vectors:

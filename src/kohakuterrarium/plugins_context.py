@@ -1,15 +1,9 @@
 """High-level plugin context helpers.
 
-The core plugin protocol lives in :mod:`kohakuterrarium.modules.plugin.base`.
-Helpers that need to construct full Agent/session objects live here so the
-low-level plugin module does not import high-level core modules at runtime.
-
-``core.agent`` imports this module at top level (and ``modules.plugin.base``
-imports it transitively before ``Agent`` is defined). To avoid a hard cycle
-without resorting to function-local ``import`` statements, ``Agent`` is
-reached via ``sys.modules["kohakuterrarium.core.agent"].Agent`` at call time
-— attribute lookup on a fully-initialized module entry, not an import
-statement, so the dep-graph linter does not see it as an in-function import.
+Helpers that construct agents and sessions live outside the low-level plugin
+protocol to prevent a runtime dependency cycle. Agent classes are resolved
+from initialized ``sys.modules`` entries at call time because ``core.agent``
+imports this module before defining ``Agent``.
 """
 
 import sys
@@ -24,7 +18,7 @@ def spawn_child_agent(
     config_path_or_dict: str | dict[str, Any],
     role: str = "child",
 ) -> Any:
-    """Build a child ``Agent`` and attach it to the host session."""
+    """Build a child agent and attach it to the plugin host's session."""
     host = context._host_agent
     if host is None:
         raise RuntimeError(

@@ -1,8 +1,6 @@
 """Anthropic-compatible Messages API provider using the official SDK.
 
-KohakuTerrarium stores conversation history in an OpenAI-shaped internal
-format. This provider is the translation boundary to Anthropic's native
-Messages API while preserving Anthropic content blocks for later round-trip.
+Translate internal conversations to Anthropic Messages while preserving blocks.
 """
 
 import asyncio
@@ -12,7 +10,7 @@ try:
     from anthropic import AsyncAnthropic, Omit
 
     HAS_ANTHROPIC = True
-except ImportError:  # pragma: no cover - exercised when dependency absent
+except ImportError:  # pragma: no cover - optional dependency path
     AsyncAnthropic = None  # type: ignore[assignment,misc]
     Omit = None  # type: ignore[assignment,misc]
     HAS_ANTHROPIC = False
@@ -177,22 +175,7 @@ class AnthropicProvider(BaseLLMProvider):
         return clone
 
     def reload_credentials(self) -> bool:
-        """Re-resolve the API key + rebuild the SDK client in place.
-
-        Mirrors :meth:`OpenAIProvider.reload_credentials` for the
-        native Anthropic Messages path. Honours the same bearer-vs-
-        x-api-key wiring decision the constructor made — we keep
-        ``self.auth_as_bearer`` and re-emit ``X-Api-Key: Omit()`` on
-        the bearer route so the rebuilt client matches the original
-        auth shape.
-
-        Credential lookup uses :attr:`_credential_provider` (the
-        backend NAME — same key the boot path used) when set, falling
-        back to :attr:`provider_name`. Built-in backends leave
-        ``provider_name`` empty, so the credential field is what
-        actually rotates keys for the common openrouter/anthropic
-        paths.
-        """
+        """Rotate credentials while preserving the endpoint's original auth shape."""
         lookup_key = getattr(self, "_credential_provider", "") or self.provider_name
         if not lookup_key:
             return False
@@ -231,7 +214,7 @@ class AnthropicProvider(BaseLLMProvider):
         provider_native_tools: list[Any] | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[str]:
-        """Stream a native Anthropic Messages response with KT retries."""
+        """Stream Anthropic output with classified retries and overflow recovery."""
         current = messages
         attempt = 0
         overflow_state = OverflowRecoveryState()

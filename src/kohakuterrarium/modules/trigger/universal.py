@@ -13,7 +13,7 @@ UNIVERSAL_TRIGGER_CLASSES: tuple[type[BaseTrigger], ...] = (
 
 
 def list_universal_trigger_classes() -> list[type[BaseTrigger]]:
-    """Return built-in trigger classes that expose setup tools."""
+    """Return built-in trigger classes that expose valid setup tools."""
     return [
         cls
         for cls in UNIVERSAL_TRIGGER_CLASSES

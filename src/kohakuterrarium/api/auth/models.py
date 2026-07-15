@@ -1,8 +1,7 @@
-"""Lightweight dataclasses for the auth tables.
+"""Convert authentication rows into immutable application-facing records.
 
-No ORM — raw sqlite tuples are converted via these helpers.  Frozen
-so handlers can pass them around without worrying about accidental
-mutation.
+The records intentionally omit stored credential hashes so database-only secrets do
+not cross into route and dependency layers.
 """
 
 import sqlite3
@@ -11,13 +10,7 @@ from dataclasses import dataclass
 
 @dataclass(frozen=True)
 class User:
-    """Application-facing user dataclass.
-
-    Mirrors the ``users`` table but EXCLUDES ``password_hash`` — that
-    field never leaves the DB layer.  Routes / dependencies hand off a
-    ``User`` to handlers; nobody outside :mod:`api.auth.users` should
-    see the password hash.
-    """
+    """Expose user identity and status without the stored password hash."""
 
     id: int
     username: str
@@ -28,7 +21,7 @@ class User:
 
 
 def user_from_row(row: sqlite3.Row | None) -> User | None:
-    """Translate a sqlite Row → :class:`User`; ``None`` passes through."""
+    """Convert a SQLite row to a user while preserving a missing result."""
     if row is None:
         return None
     return User(
@@ -45,7 +38,7 @@ def user_from_row(row: sqlite3.Row | None) -> User | None:
 
 @dataclass(frozen=True)
 class ApiToken:
-    """API-token row WITHOUT the hash — same hiding rule as :class:`User`."""
+    """Expose API-token metadata without the stored token digest."""
 
     id: int
     user_id: int

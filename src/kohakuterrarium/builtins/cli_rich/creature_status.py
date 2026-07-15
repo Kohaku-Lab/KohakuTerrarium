@@ -44,21 +44,13 @@ class CreatureStatus:
     state: StatusState
     activity: str
     duration_seconds: int = 0
-    # Phase H — number of events since the user last focused this
-    # creature. Rendered as ``●N`` next to non-focused creatures with
-    # unread > 0. Populated by the app from
-    # ``LiveRegionState.unread_since_focus``; default 0 keeps the
-    # field optional for callers that don't track unread.
+    # Unread events are tracked only for unfocused creatures.
     unread: int = 0
-    # Canonical ``provider/name[@variations]`` for the creature's LLM
-    # (best-effort; "" when unresolvable). Shown in the Ctrl+A agent
-    # overlay so per-creature models are visible without focusing
-    # each creature one by one.
+    # Canonical profile name is empty when the model cannot be resolved.
     model: str = ""
 
 
-# Priority order for the roster compression algorithm — lower number
-# wins when slots have to be hidden.
+# Lower values survive first when narrow layouts hide roster slots.
 STATE_PRIORITY: dict[StatusState, int] = {
     "waiting": 0,
     "working": 1,
@@ -91,11 +83,7 @@ def _format_duration(seconds: int) -> str:
 
 
 def _model_identifier(agent: Any) -> str:
-    """Canonical ``provider/name[@variations]`` for ``agent``'s LLM.
-
-    Best-effort and cheap: ``llm_identifier`` caches after first
-    resolution, and the raw model id is the fallback.
-    """
+    """Return the canonical LLM identifier with a raw-model fallback."""
     if agent is None:
         return ""
     ident = getattr(agent, "llm_identifier", None)
@@ -132,19 +120,11 @@ def _last_event_time(agent: Any) -> float | None:
 
 
 def _running_job_summary(agent: Any) -> str:
-    """Short string describing the current direct job, if any.
-
-    Reads ``agent._active_handles`` — the dict the interrupt path
-    walks at ``core/agent.py:571``. Picks the most-recent handle's
-    name + first arg preview.
-    """
+    """Summarize the most recently added active job."""
     handles = getattr(agent, "_active_handles", None)
     if not handles:
         return ""
-    # ``_active_handles`` is dict-like; the last-added value tends to
-    # be the visible job. Don't rely on ordering for correctness; if
-    # the iteration surfaces a stale entry the worst case is an
-    # outdated string for one frame.
+    # A stale ordering can only affect one frame of best-effort status text.
     try:
         handle = next(reversed(list(handles.values())))
     except (StopIteration, TypeError):
@@ -152,7 +132,6 @@ def _running_job_summary(agent: Any) -> str:
     name = getattr(handle, "name", None) or getattr(handle, "tool_name", "") or "?"
     args = getattr(handle, "args", None) or getattr(handle, "args_preview", "")
     if isinstance(args, dict):
-        # Pick the first stringable value.
         for value in args.values():
             if isinstance(value, str) and value:
                 return _truncate(f"{name}: {value}")
@@ -168,8 +147,7 @@ def _pending_reply_summary(replies: list[Any]) -> str:
     if not replies:
         return "needs input"
     reply = replies[0]
-    # The pending entry is whatever ``router.emit_and_wait`` stashed;
-    # try the common fields without crashing on shape drift.
+    # Pending reply shapes vary across interactive event types.
     for attr in ("prompt", "question", "detail", "message"):
         text = getattr(reply, attr, "")
         if isinstance(text, str) and text:
@@ -179,12 +157,7 @@ def _pending_reply_summary(replies: list[Any]) -> str:
 
 
 def derive_status(creature: Any, now: float | None = None) -> CreatureStatus:
-    """Return a fresh :class:`CreatureStatus` for ``creature``.
-
-    Pure function. Does NOT touch ``creature`` mutable state. Safe to
-    call from any thread (it only reads attributes); the roster
-    invokes it per render tick.
-    """
+    """Derive a read-only roster snapshot from current creature state."""
     now = now if now is not None else time.time()
     cid = getattr(creature, "creature_id", "") or ""
     name = getattr(creature, "name", "") or cid or "creature"

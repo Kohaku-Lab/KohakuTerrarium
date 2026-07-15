@@ -1,21 +1,8 @@
-"""Laboratory APP extension adapters.
+"""Expose adapters between Laboratory APP namespaces and local subsystems.
 
-Each adapter binds a local-process subsystem (the terrarium engine,
-the session store, the studio identity layer) to an APP namespace
-on a Laboratory node (client or host). The adapter's only job is to
-translate AppMessages into local Python calls and pack results back.
-
-Adapters live here, not in their subsystem packages, because:
-
-- Single-host mode imports zero Laboratory modules. Adapters live
-  under :mod:`kohakuterrarium.laboratory` so the runtime and studio
-  packages stay laboratory-free.
-- Each adapter is a thin shim — no business logic. Keeping them
-  together makes the dispatch surface easy to audit.
-
-Naming convention: ``<NamespaceUnderscored>Adapter`` for the class
-binding namespace ``<namespace.dotted>``. E.g.
-``TerrariumRuntimeAdapter`` registers ``terrarium.runtime``.
+Adapters remain under :mod:`kohakuterrarium.laboratory` so local-only runtime
+and studio code does not depend on Laboratory. They translate APP messages at
+the transport boundary and intentionally contain no subsystem business logic.
 """
 
 from kohakuterrarium.laboratory.adapters.studio_catalog import (

@@ -1,13 +1,8 @@
-"""Authentication / authorization for the FastAPI server.
+"""Expose the FastAPI server's authentication and authorization surface.
 
-Public surface — what other modules under :mod:`kohakuterrarium.api`
-import.  Nothing outside ``src/kohakuterrarium/api/`` imports from
-here; the auth concern is scoped to the API server, not the
-framework.
-
-Phase A exports: ``router`` (carrying ``/capabilities``),
-``AuthConfig`` + ``load_auth_config`` (config snapshot for boot
-plumbing), and ``get_auth_config`` (FastAPI dependency).
+Authentication remains an API adapter concern rather than part of the core agent
+framework. This module centralizes the router, configuration, user dependencies,
+and public user model consumed by sibling API modules.
 """
 
 from kohakuterrarium.api.auth.config import AuthConfig, load_auth_config

@@ -1,24 +1,8 @@
-"""Migrate a v1 ``.kohakutr`` session file to format v2.
+"""Migrate v1 sessions to an event-sourced v2 representation.
 
-v1 stored the conversation primarily as a snapshot written by
-``SessionOutput.on_processing_end``; events were observability-only.
-v2 (Wave C) promotes the event log to the source of truth via
-state-bearing event types (``user_message``, ``text_chunk``,
-``assistant_tool_calls``, ``tool_result``, ``system_prompt_set``,
-``compact_replace``).
-
-The migrator walks the v1 *event log* in order and rewrites each event
-as the matching v2 state-bearing event with proper ``turn_index`` /
-``branch_id`` metadata. The v1 snapshot is used only as a fallback
-when the v1 event log is empty (e.g. a paused session that never
-streamed). This is a deliberate change from the earlier design that
-synthesised events from the snapshot — the snapshot is post-compact,
-so all pre-compact history was being lost.
-
-Compaction is preserved: each v1 ``compact_complete`` event becomes a
-v2 ``compact_replace`` that covers the prior turn range, and the
-summary text is carried across so the frontend renders it as a compact
-event rather than a plain assistant message.
+The ordered v1 event log is preferred over its post-compaction snapshot. Snapshot
+messages are used only when no events exist. Compaction becomes explicit replace
+ranges, and migrated events receive turn and branch attribution.
 """
 
 import json
@@ -41,11 +25,6 @@ def _iter_agents(source: SessionStore, meta: dict[str, Any]) -> list[str]:
         if name and name not in names:
             names.append(name)
     return names
-
-
-# ---------------------------------------------------------------------
-# Event-log driven migration (preferred path).
-# ---------------------------------------------------------------------
 
 
 def _coerce_args(args: Any) -> str:
@@ -85,24 +64,11 @@ def _flush_pending_tool_calls(
 def _translate_v1_events(
     v1_events: list[dict[str, Any]],
 ) -> list[tuple[str, dict[str, Any], int]]:
-    """Walk a v1 event stream and emit ``(type, data, turn_index)`` triples
-    for the matching v2 state-bearing events.
+    """Translate ordered v1 events into v2 event triples.
 
-    Rules:
-
-    * ``user_input`` opens a new turn and emits ``user_message``.
-    * ``text`` / ``text_chunk`` accumulate into per-turn ``text_chunk``
-      events with monotonic ``chunk_seq``.
-    * ``tool_call`` events are buffered until the next ``tool_result``,
-      ``processing_end``, or ``user_input`` flushes them as one
-      ``assistant_tool_calls`` event (matching live Wave C semantics).
-    * ``tool_result`` flushes pending tool_calls then emits
-      ``tool_result`` carrying ``output``/``error``.
-    * ``compact_complete`` emits ``compact_replace`` covering the
-      session's prior event range, preserving the summary text.
-    * ``processing_start`` / ``processing_end`` / ``processing_error``
-      are kept as-is so the frontend can render turn boundaries; they
-      are non-state and replay_conversation ignores them.
+    User input opens turns, text receives monotonic chunk sequences, pending tool
+    calls become assistant announcements, and compaction becomes replacement
+    ranges. Observability events remain available for viewers.
     """
     out: list[tuple[str, dict[str, Any], int]] = []
     turn_index = 0
@@ -110,8 +76,7 @@ def _translate_v1_events(
     pending_tool_calls: list[dict[str, Any]] = []
 
     def _flush_text() -> None:
-        # text_chunk is appended directly; nothing to flush. Kept as a
-        # symmetry hook in case the dispatch table grows.
+        # Text chunks are emitted immediately; this hook preserves dispatch symmetry.
         return None
 
     for evt in v1_events:
@@ -156,9 +121,7 @@ def _translate_v1_events(
                 )
             )
         elif etype == "subagent_call":
-            # Sub-agents are not state-bearing for replay_conversation
-            # but the frontend renders them; keep as-is so resume display
-            # stays intact.
+            # Sub-agent events remain for viewers even though replay ignores them.
             out.append((etype, dict(evt), turn_index))
         elif etype == "subagent_result":
             out.append((etype, dict(evt), turn_index))
@@ -184,7 +147,7 @@ def _translate_v1_events(
                     turn_index,
                 )
             )
-            # Also emit a compact_complete for frontend display.
+            # Retain the observability event alongside the state-bearing replacement.
             out.append(
                 (
                     "compact_complete",
@@ -205,9 +168,7 @@ def _translate_v1_events(
         elif etype == "token_usage":
             out.append((etype, dict(evt), turn_index))
         else:
-            # Unknown / observability-only event — keep as-is so audit
-            # tools still see it. ``replay_conversation`` ignores
-            # unrecognised types so this is safe.
+            # Preserve unknown observability events; conversation replay ignores them.
             out.append((etype, dict(evt), turn_index))
 
     tc = _flush_pending_tool_calls(pending_tool_calls)
@@ -215,11 +176,6 @@ def _translate_v1_events(
         out.append((tc[0], tc[1], turn_index))
 
     return out
-
-
-# ---------------------------------------------------------------------
-# Snapshot-driven migration (fallback when v1 events are absent).
-# ---------------------------------------------------------------------
 
 
 def _synth_events_from_message(msg: dict[str, Any]) -> list[tuple[str, dict]]:
@@ -266,7 +222,7 @@ def _synth_events_from_message(msg: dict[str, Any]) -> list[tuple[str, dict]]:
 def _synth_events_from_snapshot(
     messages: list[dict[str, Any]],
 ) -> list[tuple[str, dict[str, Any], int]]:
-    """Fallback: derive v2 events from a v1 conversation snapshot."""
+    """Derive v2 event triples from a snapshot when the v1 log is empty."""
     out: list[tuple[str, dict[str, Any], int]] = []
     turn_index = 0
     for msg in messages:
@@ -277,11 +233,6 @@ def _synth_events_from_snapshot(
         for event_type, data in synth:
             out.append((event_type, data, max(turn_index, 1)))
     return out
-
-
-# ---------------------------------------------------------------------
-# Top-level write path.
-# ---------------------------------------------------------------------
 
 
 def _write_migrated_events(
@@ -314,11 +265,8 @@ def _backfill_assistant_tool_call_content(
     """Copy the most recent ``text_chunk`` content into following
     ``assistant_tool_calls`` events on the same turn.
 
-    v1 emitted assistant text and tool calls as separate events; v2
-    ``replay_conversation`` attaches ``tool_calls`` onto the pending
-    assistant message so they share content. Without this back-fill,
-    the replayed assistant message's content would be empty whenever
-    tool_calls were present, drifting from the v1 snapshot.
+    v2 replay attaches tool calls to the preceding assistant message. Backfilling
+    preserves the v1 assistant text when calls were emitted separately.
     """
     out: list[tuple[str, dict[str, Any], int]] = []
     last_text_per_turn: dict[int, str] = {}
@@ -337,9 +285,7 @@ def _backfill_assistant_tool_call_content(
 def _highest_synthetic_event_id(dest: SessionStore, agent: str) -> int:
     """Return the largest ``event_id`` carrying ``synthetic: true``.
 
-    Falls back to the global max event_id when no event in the stream
-    carries the marker (legacy migrator output, or a stream that
-    contains only translated events without the synthetic flag).
+    The largest event identifier is used when no explicit synthetic marker exists.
     """
     last = 0
     for evt in dest.get_events(agent):
@@ -442,8 +388,8 @@ def _copy_artifacts(source_path: Path, dest_path: Path) -> None:
 def migrate(source_path: str, target_path: str) -> None:
     """Produce a v2 session at ``target_path`` from the v1 ``source_path``.
 
-    Migration uses the v1 event log as the source of truth. The
-    snapshot is consulted only when the event log is empty.
+    The v1 event log is authoritative; snapshots are fallback input and a resume
+    cache.
     """
     src_path = Path(source_path)
     dst_path = Path(target_path)
@@ -488,10 +434,7 @@ def migrate(source_path: str, target_path: str) -> None:
                     triples = _synth_events_from_snapshot(snapshot)
                     used_path = "snapshot"
 
-                # The v1 event log does not carry the system prompt —
-                # it lived only in the conversation snapshot. Prepend a
-                # ``system_prompt_set`` event so backend ``replay_conversation``
-                # can rebuild a complete OpenAI-shape message list.
+                # System prompts existed only in snapshots and must seed event replay.
                 if snapshot and (snapshot[0].get("role") or "").lower() == "system":
                     sys_evt = (
                         "system_prompt_set",
@@ -500,22 +443,15 @@ def migrate(source_path: str, target_path: str) -> None:
                     )
                     triples = [sys_evt, *triples]
 
-                # ``assistant_tool_calls`` events emitted by the
-                # translator carry an empty ``content`` field. Backfill
-                # the assistant text from the previous ``text_chunk``
-                # in the same turn so the OpenAI-shape message produced
-                # by replay matches the v1 snapshot's assistant content.
+                # Tool announcements inherit same-turn assistant text for faithful replay.
                 triples = _backfill_assistant_tool_call_content(triples)
 
                 written = _write_migrated_events(dest, agent, triples, migrated_at)
 
-                # Save snapshot as cache for fast resume.
                 if snapshot:
                     dest.save_conversation(agent, snapshot)
 
-                # Snapshot points to the LAST migrated event id so resume's
-                # fast path is in sync with what the migrator wrote. This
-                # is the highest event_id on dest.
+                # The snapshot watermark must match the destination event stream.
                 try:
                     dest.state[f"{agent}:snapshot_event_id"] = (
                         _highest_synthetic_event_id(dest, agent)

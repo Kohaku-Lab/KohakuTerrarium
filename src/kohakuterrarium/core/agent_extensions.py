@@ -1,15 +1,8 @@
 """Runtime extension injection — ``add_tool`` / ``add_plugin`` /
-``add_subagent`` / ``refresh_system_prompt`` (E7).
+``add_subagent`` / ``refresh_system_prompt``.
 
-Before this mixin, registering a tool after construction took TWO
-undocumented writes (registry + executor) and the tool never entered
-the frozen system prompt; a plugin registered after ``start()`` never
-received ``on_load``.  Each ``add_*`` here does the FULL bookkeeping.
-
-Constructor-time injection (``Agent.build(tools=[...], plugins=[...],
-subagents=[...], user_commands={...}, outputs={...})``) lands the
-instances before the prompt is aggregated, so they appear in the
-initial system prompt with zero extra calls.
+Each runtime registration method performs the associated registry, lifecycle,
+and prompt bookkeeping needed to make an extension immediately usable.
 """
 
 from typing import Any
@@ -55,9 +48,7 @@ class AgentExtensionsMixin:
                 self.controller.plugins = self.plugins
                 self._apply_plugin_hooks()
         name = getattr(plugin, "name", "")
-        # Replace any same-named instance so a re-add is idempotent and a
-        # plugin a package registered *disabled* becomes this enabled instance
-        # instead of a stale duplicate that stays in ``_disabled``.
+        # Replacement keeps re-addition idempotent and removes stale disabled state.
         if name:
             self.plugins.unregister(name)
         self.plugins.register(plugin)
@@ -67,10 +58,7 @@ class AgentExtensionsMixin:
             # load_all already ran at start() — queue + drain on_load now.
             self.plugins._needs_load.add(name)
             await self.plugins.load_pending()
-        # A plugin contributes both a bounded prompt fragment and possibly user
-        # (slash) commands; rebuild BOTH so they appear together. If the command
-        # aggregation collides, roll the partial install back so a failed add
-        # leaves plugin state, prompt, and registry unchanged (R1-23).
+        # Prompt and command updates are atomic so collisions leave no partial install.
         try:
             self.refresh_system_prompt()
             refresh_commands = getattr(self, "refresh_user_commands", None)
@@ -135,7 +123,7 @@ class AgentExtensionsMixin:
         if isinstance(trigger_id_or_trigger, str):
             return await self.trigger_manager.remove(trigger_id_or_trigger)
 
-        # Backward compat: find by instance identity
+        # Legacy callers may pass an instance, which has no stable lookup key.
         for tid, t in self.trigger_manager._triggers.items():
             if t is trigger_id_or_trigger:
                 return await self.trigger_manager.remove(tid)

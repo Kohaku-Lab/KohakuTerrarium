@@ -1,4 +1,4 @@
-"""Explore sub-agent - read-only codebase search."""
+"""Built-in read-only codebase exploration sub-agent configuration."""
 
 from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig

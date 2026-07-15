@@ -1,7 +1,6 @@
 """Agent lifecycle helpers.
 
-Split out of :mod:`agent` to keep the main orchestrator file below the
-repository file-size guard while keeping shutdown behavior centralized.
+Centralizes warm-pause and orderly shutdown behavior for agents.
 """
 
 import asyncio
@@ -14,7 +13,7 @@ logger = get_logger(__name__)
 
 
 class AgentLifecycleMixin:
-    """Mixin providing agent shutdown + warm-pause behavior."""
+    """Provide warm-pause and orderly shutdown behavior for an agent."""
 
     plugins: Any
     compact_manager: Any
@@ -30,15 +29,11 @@ class AgentLifecycleMixin:
 
     @property
     def paused(self) -> bool:
-        """Whether the agent is warm-paused (admitting no new turns)."""
+        """Return whether the agent is warm-paused and rejecting new turns."""
         return getattr(self, "_paused", False)
 
     def pause(self) -> None:
-        """Warm-pause the agent (UXI-11): stop admitting new turns and
-        suspend triggers while the runtime (LLM, providers, session)
-        stays live so :meth:`resume` reopens instantly. Events arriving
-        while paused queue on the inbox and drain on resume; the consumer
-        parks on the resume gate so nothing is processed. Idempotent."""
+        """Idempotently pause admission and triggers while queued events remain pending."""
         if getattr(self, "_paused", False):
             return
         self._paused = True
@@ -47,22 +42,18 @@ class AgentLifecycleMixin:
         logger.info("Agent paused", agent_name=self.config.name)
 
     def resume(self) -> None:
-        """Undo :meth:`pause`: re-admit turns, resume triggers, and let the
-        consumer drain everything queued while paused in one wake.
-        Idempotent."""
+        """Idempotently resume triggers and drain events queued during the pause."""
         if not getattr(self, "_paused", False):
             return
         self._paused = False
         self.trigger_manager.resume_all()
-        # Release the consumer's resume gate; it wakes and claims the whole
-        # inbox (everything queued while paused drains together).
+        # One wake releases the gate and lets the consumer claim the full queued batch.
         self._consumer_resume.set()
         self._event_inbox.wake()
         logger.info("Agent resumed", agent_name=self.config.name)
 
     async def stop(self) -> None:
-        """Stop all agent modules. Safe to call concurrently / twice —
-        the second caller waits for the first teardown and returns."""
+        """Stop all agent modules once, serializing concurrent callers."""
         stop_lock = getattr(self, "_stop_lock", None)
         if stop_lock is None:
             stop_lock = self._stop_lock = asyncio.Lock()
@@ -79,8 +70,7 @@ class AgentLifecycleMixin:
             await self.plugins.notify("on_agent_stop")
             await self.plugins.unload_all()
 
-        # Must run before ``_running`` flips and the router stops —
-        # the cancel paths cannot persist job terminals after that.
+        # Job terminals require both the running state and output router to remain live.
         self._finalize_inflight_jobs_for_stop()
 
         self._running = False
@@ -95,10 +85,7 @@ class AgentLifecycleMixin:
         if inbox is not None:
             inbox.wake()
 
-        # A live turn must be fully unwound BEFORE the router stops and
-        # the providers close — otherwise processing continues against
-        # closed sinks after stop() returns. Skip when stop() is called
-        # from inside the turn itself (self-cancel would kill stop()).
+        # Unwind a live turn before closing its sinks, but never self-cancel stop().
         processing = getattr(self, "_processing_task", None)
         if (
             processing is not None
@@ -107,10 +94,7 @@ class AgentLifecycleMixin:
         ):
             processing.cancel()
             await asyncio.gather(processing, return_exceptions=True)
-        # The inner loop is down; the OUTER turn (finalization: output
-        # flush, wiring, session bookkeeping) still runs under the
-        # processing lock — join it too, unless stop() was called from
-        # inside the turn itself.
+        # The processing lock also covers output, wiring, and session finalization.
         turn_lock = getattr(self, "_processing_lock", None)
         if (
             turn_lock is not None
@@ -125,9 +109,7 @@ class AgentLifecycleMixin:
                     agent_name=self.config.name,
                 )
 
-        # The turn is unwound; stop the single event consumer. Its
-        # ``finally`` rejects every leftover awaiting future so no
-        # ``run`` / ``run_event`` caller hangs after shutdown.
+        # Consumer cancellation rejects pending futures so callers cannot hang on shutdown.
         consumer = getattr(self, "_consumer_task", None)
         if (
             consumer is not None
@@ -161,11 +143,7 @@ class AgentLifecycleMixin:
         await self.llm.close()
 
     def _finalize_inflight_jobs_for_stop(self) -> None:
-        """Emit a genuine interrupted terminal for every still-running
-        job so the session log terminates cleanly. Each swept job's
-        status transitions to CANCELLED, so a repeat sweep finds
-        nothing — one terminal per job, no matter how often stop()
-        runs."""
+        """Finalize each running job as interrupted exactly once during shutdown."""
         router = getattr(self, "output_router", None)
         if router is None or not hasattr(router, "notify_activity"):
             return
@@ -198,14 +176,7 @@ class AgentLifecycleMixin:
             }
             if is_subagent:
                 metadata["result"] = error
-            # A native-mode job has an unanswered assistant.tool_calls
-            # announcement in the conversation — pair it with an
-            # interrupted result NOW, or the processing-end snapshot's
-            # provider-safe serialization drops the whole round and the
-            # resumed model never learns the call happened. Text-mode
-            # jobs have no announcement (meta defaults tool_call_id to
-            # job_id) — appending would create an orphan, so only pair
-            # ids the conversation actually announces.
+            # Pair only announced native calls; an orphan result would invalidate text-mode history.
             meta = getattr(self, "_direct_job_meta", {}).get(job_id) or {}
             tool_call_id = meta.get("tool_call_id")
             controller = getattr(self, "controller", None)

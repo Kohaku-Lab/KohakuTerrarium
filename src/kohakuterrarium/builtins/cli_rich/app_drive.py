@@ -14,7 +14,6 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Drive structural events the record overlay reloads on while it is open.
 _DRIVE_EVENT_KINDS = frozenset(
     {
         EventKind.DRIVE_CREATED,
@@ -33,10 +32,10 @@ _DRIVE_EVENT_KINDS = frozenset(
 
 
 class AppDriveMixin:
-    """Starts/stops a Drive-event subscription that live-refreshes the overlay."""
+    """Manage the Drive-event subscription for live overlay refreshes."""
 
     def _drive_focus_id(self) -> str:
-        """Creature id the Drive overlay scopes ``assigned to me`` to."""
+        """Return the creature used for the overlay's assigned-to-me scope."""
         return getattr(self.focus_controller, "focus_id", "") or ""
 
     def _start_drive_watch(self) -> None:
@@ -64,7 +63,7 @@ class AppDriveMixin:
                 self.drive_overlay.note_event()
         except asyncio.CancelledError:
             return
-        except Exception as e:  # pragma: no cover — defensive
+        except Exception as e:  # pragma: no cover - defensive event watcher
             logger.warning("drive event watch crashed", error=str(e), exc_info=True)
 
 

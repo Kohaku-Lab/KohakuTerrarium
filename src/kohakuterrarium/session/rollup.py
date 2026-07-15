@@ -1,13 +1,4 @@
-"""Per-turn rollup helpers (Wave B §3.3).
-
-Denormalised cache keyed by ``<agent>:turn:<turn_index:06d>``. Stores
-per-turn counters (tokens, duration, cost) so viewers such as Studio
-and the TUI cost panel can fetch a summary for a given turn without
-reducing over the raw event log.
-
-Kept in a separate module so ``session/store.py`` stays under the
-600-line soft cap enforced by ``tests/unit/test_file_sizes.py``.
-"""
+"""Store and retrieve denormalized per-turn session summaries."""
 
 from typing import Any
 
@@ -19,11 +10,7 @@ logger = get_logger(__name__)
 
 
 def turn_rollup_key(agent: str, turn_index: int) -> str:
-    """Build a rollup key. Shape: ``<agent>:turn:<turn_index:06d>``.
-
-    Exposed so tests can probe the table directly and so other
-    helpers (resume, migration) can scan by prefix.
-    """
+    """Build a sortable ``<agent>:turn:<turn_index>`` rollup key."""
     return f"{agent}:turn:{turn_index:06d}"
 
 
@@ -32,11 +19,8 @@ def save_turn_rollup(
 ) -> None:
     """Write a per-turn rollup row.
 
-    The payload is a free-form dict; today's callers fill in
-    ``started_at``, ``ended_at``, ``tokens_in``, ``tokens_out``,
-    ``tokens_cached``, and optionally ``cost_usd`` (nullable for now).
-    ``agent`` and ``turn_index`` are added automatically if missing so
-    readers can round-trip without the caller knowing the key layout.
+    Agent and turn identifiers are populated when absent, and ``cost_usd``
+    defaults to ``None`` so readers receive a stable shape.
     """
     key = turn_rollup_key(agent, turn_index)
     merged = dict(data)

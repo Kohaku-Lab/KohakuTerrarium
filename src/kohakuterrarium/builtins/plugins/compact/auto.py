@@ -1,4 +1,4 @@
-"""Automatic compaction plugin."""
+"""Trigger context compaction after high-token model calls."""
 
 from typing import Any
 

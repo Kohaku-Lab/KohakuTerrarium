@@ -1,10 +1,4 @@
-"""``/env`` slash command — read-only view of the agent's environment.
-
-Same redaction logic as :func:`creature_state._redacted_env`: we strip
-keys whose name (case-insensitive) contains any of the standard
-credential substrings (``key``, ``token``, ``secret``, ``password``,
-``credential``).
-"""
+"""Show process environment variables after filtering credential-like keys."""
 
 import os
 from typing import Any
@@ -63,6 +57,7 @@ class EnvCommand(BaseUserCommand):
 
 
 def _redacted_env() -> dict[str, Any]:
+    """Return environment variables whose names do not indicate credentials."""
     out: dict[str, Any] = {}
     for k, v in os.environ.items():
         lk = k.lower()

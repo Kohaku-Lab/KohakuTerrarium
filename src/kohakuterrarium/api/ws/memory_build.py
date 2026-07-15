@@ -29,21 +29,17 @@ router = APIRouter()
 
 _VALID_EMBEDDERS = {"auto", "model2vec", "sentence-transformer", "api"}
 
-# Module-level guard: at most one in-flight build per session_name. A
-# concurrent build on the same session is rejected at WS-accept time
-# with a terminal "failed" frame so the second client gets a clean
-# error instead of racing the first build through SessionMemory's
-# clear-and-reindex path (BUG: integrity audit Phase K).
+# Each session permits one build at a time because concurrent
+# clear-and-reindex operations could leave its search index inconsistent.
 _INFLIGHT_BUILDS: set[str] = set()
 _INFLIGHT_LOCK = asyncio.Lock()
 
 
 def _parse_query(ws: WebSocket) -> dict[str, Any]:
-    """Pull build args off the WS query string; tolerate omission.
+    """Parse optional build arguments from the WebSocket query string.
 
-    The HTTP ``POST`` returns the canonical body — but URL handshake
-    is the simplest way to attach params to a WS without a separate
-    claim-ticket round-trip. Mirrors the app-update pattern.
+    Handshake parameters avoid a separate claim-ticket exchange after the
+    HTTP endpoint returns the canonical build request.
     """
     q = dict(ws.query_params)
     embedder = q.get("embedder", "auto")
@@ -71,29 +67,22 @@ def _parse_query(ws: WebSocket) -> dict[str, Any]:
 async def _stream_progress(
     ws: WebSocket, session_name: str, args: dict[str, Any]
 ) -> None:
-    """Run the build on a thread; relay frames over the WS.
-
-    Producer (the build's progress callback) drops dicts into a
-    bounded queue; consumer awaits them and ``ws.send_text``s. When
-    the worker thread finishes (success, failure, or cancellation),
-    we send the terminal frame and return.
-    """
+    """Run a memory build in a worker thread and stream its progress frames."""
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue(maxsize=128)
 
     def progress(frame: dict[str, Any]) -> None:
-        # Called from the worker thread — bounce the dict onto the
-        # event loop. ``call_soon_threadsafe`` + ``put_nowait`` keeps
-        # the producer non-blocking; if the consumer is slow we drop
-        # the frame rather than stalling the build.
+        """Transfer worker-thread progress without blocking the build."""
+        # Slow consumers lose intermediate progress rather than stalling the
+        # indexing thread.
         try:
             loop.call_soon_threadsafe(_queue_put_nowait, queue, frame)
         except RuntimeError:
-            # Loop closed mid-build (client disconnected); the worker
-            # thread will finish naturally.
+            # A disconnected client may close the loop while the worker finishes.
             pass
 
     async def run_build() -> dict[str, Any]:
+        """Execute the synchronous indexer outside the event loop."""
         return await asyncio.to_thread(
             run_build_sync,
             session_name,
@@ -108,6 +97,7 @@ async def _stream_progress(
     sender_done = asyncio.Event()
 
     async def sender() -> None:
+        """Forward queued progress frames until the sentinel arrives."""
         try:
             while True:
                 frame = await queue.get()
@@ -124,7 +114,7 @@ async def _stream_progress(
 
     try:
         result = await build_task
-        # Drain any in-flight progress frames before terminal.
+        # Yield once so callbacks already scheduled on the loop reach the queue.
         await asyncio.sleep(0)
         terminal = {
             "status": "ok",
@@ -141,7 +131,7 @@ async def _stream_progress(
         logger.exception("memory build failed")
         terminal = {"status": "failed", "error": str(e), "stats": None}
     finally:
-        # Stop the sender — sentinel ``None`` ends its loop cleanly.
+        # The sentinel lets the sender finish after all queued progress frames.
         try:
             await queue.put(None)
         except Exception:
@@ -158,13 +148,11 @@ async def _stream_progress(
 
 
 def _queue_put_nowait(queue: asyncio.Queue, frame: dict[str, Any] | None) -> None:
-    """Drop the frame if the queue is full — back-pressure, not stall."""
+    """Queue progress without blocking, preferring the newest frame."""
     try:
         queue.put_nowait(frame)
     except asyncio.QueueFull:
-        # Drop oldest, then push the new frame so the latest progress
-        # always wins — a stale 30% frame is less useful than the
-        # current 65%.
+        # The newest progress state is more useful than a stale intermediate one.
         try:
             _ = queue.get_nowait()
         except asyncio.QueueEmpty:
@@ -177,9 +165,9 @@ def _queue_put_nowait(queue: asyncio.Queue, frame: dict[str, Any] | None) -> Non
 
 @router.websocket("/ws/sessions/{session_name}/memory/build")
 async def ws_memory_build(ws: WebSocket, session_name: str) -> None:
+    """Stream one guarded memory-index build for a session."""
     await accept_with_auth_echo(ws)
-    # Reject overlapping builds for the same session — they'd race
-    # SessionMemory's clear-and-reindex path and produce torn FTS rows.
+    # Overlapping clear-and-reindex operations could produce inconsistent FTS rows.
     async with _INFLIGHT_LOCK:
         already = session_name in _INFLIGHT_BUILDS
         if not already:

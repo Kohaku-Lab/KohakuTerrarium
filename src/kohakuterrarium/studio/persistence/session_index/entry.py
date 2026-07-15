@@ -1,18 +1,9 @@
 """SessionIndexEntry — one row of the central session-listing sidecar.
 
-Carries the listing-shape fields plus the bookkeeping the sidecar
-cache needs:
-
-  * ``file_mtime`` / ``file_size`` — fingerprint compared on
-    :func:`reconcile` so unchanged files skip the per-session
-    SQLite open.
-  * ``_search_rowid`` — TextVault rowid we kept around for an
-    in-place FTS5 update without a second reverse-map lookup.
-
-The dataclass is purposefully flat: ``asdict()`` produces a payload
-KohakuVault's KVault can store as a single msgpack value, and the
-TextVault columns are pulled out of it for the FTS index without a
-separate "search document" representation.
+The flat dataclass stores listing fields, the file fingerprint used to skip
+unchanged sessions, and the TextVault row ID used for in-place FTS updates.
+``asdict`` therefore produces both the KVault value and the source for search
+columns without a separate document model.
 """
 
 import os
@@ -24,15 +15,10 @@ from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_st
 
 
 def _max_mtime_with_wal(path: Path) -> float:
-    """Most-recent mtime across the session file + its WAL/SHM sidecars.
+    """Return the newest mtime across a session file and SQLite sidecars.
 
-    SQLite WAL mode writes most data to ``foo.kohakutr-wal`` and
-    ``foo.kohakutr-shm`` *before* checkpointing back to the main
-    file.  A reconcile that only stats the main file would mark a
-    busy session as unchanged for hours.  This helper matches what
-    the legacy listing used to do (``store._max_mtime``) before the
-    sidecar replaced it — fingerprint = ``(max_mtime, main_size)``
-    so any append-only WAL growth invalidates the cache.
+    WAL writes precede main-file checkpoints, so the fingerprint must include
+    sidecars to invalidate active sessions promptly.
     """
     try:
         best = path.stat().st_mtime
@@ -51,15 +37,9 @@ def _max_mtime_with_wal(path: Path) -> float:
     return best
 
 
-# Bump on any schema change.  ``SessionIndex._ensure_schema`` clears
-# the sidecar when the stored version doesn't match — cheap because
-# the sidecar is a derived cache and the next ``reconcile()`` rebuilds
-# it from disk.
-#
-# Version history:
-#   1 — initial release.
-#   2 — added ``terrarium_name`` + ``config_type`` to FTS columns and
-#       included WAL/SHM mtime in the file fingerprint.
+# Bump for any stored or FTS schema change; the derived sidecar is rebuilt on
+# mismatch. Version 2 added terrarium/config search fields and WAL-aware
+# fingerprints.
 SCHEMA_VERSION = 2
 
 
@@ -67,21 +47,17 @@ SCHEMA_VERSION = 2
 class SessionIndexEntry:
     """One row of the session-listing sidecar."""
 
-    # Identity (sidecar primary key)
     filename: str
     name: str
 
-    # File fingerprint (cache invalidation on reconcile)
     file_mtime: float
     file_size: int
 
-    # Searchable text fields (also denormalised into TextVault columns)
     preview: str
     config_path: str
     agents: list[str]
     pwd: str
 
-    # Filter / sort fields
     config_type: str
     status: str
     last_active: str
@@ -89,7 +65,6 @@ class SessionIndexEntry:
     format_version: int
     node_id: str
 
-    # Pass-through fields (rendered but not searched / sorted)
     terrarium_name: str = ""
     has_vector_index: bool = False
     parent_session_id: str | None = None
@@ -97,7 +72,6 @@ class SessionIndexEntry:
     forked_children: list[str] = field(default_factory=list)
     migrated_from_version: int | None = None
 
-    # Internal — never returned to the API.
     _search_rowid: int = 0
 
     @classmethod
@@ -111,11 +85,10 @@ class SessionIndexEntry:
         file_mtime: float | None = None,
         file_size: int | None = None,
     ) -> "SessionIndexEntry":
-        """Build an entry from a session's loaded meta dict.
+        """Build an entry from loaded metadata and an optional fingerprint.
 
-        ``file_mtime`` / ``file_size`` are optional because tests
-        often want to pin them rather than re-stat.  Production
-        callers pass ``None`` and let us stat the file once.
+        Missing fingerprint components are read from disk; supplied values let
+        callers reuse an earlier stat and keep the indexed snapshot coherent.
         """
         if file_mtime is None or file_size is None:
             st = path.stat()
@@ -167,14 +140,12 @@ class SessionIndexEntry:
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> "SessionIndexEntry":
-        """Inverse of :func:`asdict` — recreate an entry from a stored row.
+        """Recreate an entry from a stored row.
 
-        Tolerant of missing keys (older schema rows): each field falls
-        back to its dataclass default.  Callers that need strict
-        validation should run :func:`_ensure_schema` first.
+        Optional fields may be absent in older rows; required fields remain
+        required by the dataclass constructor.
         """
         kwargs: dict[str, Any] = {}
-        # Required positional-style fields — fail loud if missing.
         for f in (
             "filename",
             "name",
@@ -193,7 +164,6 @@ class SessionIndexEntry:
         ):
             if f in d:
                 kwargs[f] = d[f]
-        # Optional / pass-through.
         for f in (
             "terrarium_name",
             "has_vector_index",
@@ -208,11 +178,7 @@ class SessionIndexEntry:
         return cls(**kwargs)
 
     def to_search_columns(self) -> dict[str, str]:
-        """The denormalised text columns the FTS index keeps in sync.
-
-        Keys must match the ``columns=`` arg passed to ``TextVault``
-        in :class:`SessionIndex`.
-        """
+        """Return denormalized FTS text using ``SessionIndex`` column names."""
         return {
             "name": self.name,
             "preview": self.preview,
@@ -224,11 +190,11 @@ class SessionIndexEntry:
         }
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialise for storage.  Internal fields included."""
+        """Serialize all fields for sidecar storage."""
         return asdict(self)
 
     def to_listing_dict(self) -> dict[str, Any]:
-        """Serialise for the HTTP listing payload.  Strips internal fields."""
+        """Serialize public listing fields without the FTS row ID."""
         d = asdict(self)
         d.pop("_search_rowid", None)
         return d

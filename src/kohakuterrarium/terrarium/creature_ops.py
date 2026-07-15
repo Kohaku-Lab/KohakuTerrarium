@@ -518,15 +518,15 @@ async def agent_execute_command(
     principal: str = "user:local",
     is_operator: bool = False,
 ) -> dict[str, Any]:
-    """Run a slash command against ``agent`` with a trusted context (R1-20).
+    """Run a slash command against ``agent`` with a trusted context.
 
     Resolves a built-in first, then the agent's LIVE aggregated registry so
     plugin-contributed commands (e.g. ``/goal``) are reachable over web/Lab.
     The trusted context DTO (service / engine / focused creature / principal /
     operator) rides in ``UserCommandContext.extra`` so Drive-aware commands can
     act; the caller derives ``principal`` / ``is_operator`` from its authenticated
-    context and MUST pass ``is_operator`` explicitly (missing means unprivileged,
-    R1-21). Raises ``ValueError`` for an unknown command name.
+    context and MUST pass ``is_operator`` explicitly; omission means unprivileged.
+    Raises ``ValueError`` for an unknown command name.
     """
     cmd = get_builtin_user_command(command)
     if cmd is None:

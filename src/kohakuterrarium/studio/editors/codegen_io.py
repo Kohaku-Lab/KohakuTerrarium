@@ -1,9 +1,8 @@
 """Codegen for input / output modules.
 
-Inputs and outputs are thin shells over stdin/ASR/TTS/etc. — the
-studio v1 scope is scaffold + raw mode. The form surface is tiny
-(class_name + description + body of the single protocol method)
-and we simply pass through on update_existing without libcst.
+Input and output modules expose a small editable surface: class identity and the
+body of one protocol method. LibCST updates the canonical method while preserving
+other source; unsupported shapes fall back to raw mode.
 """
 
 from kohakuterrarium.studio.editors.codegen_common import (
@@ -33,11 +32,9 @@ def render_new(form: dict) -> str:
 
 
 def update_existing(source: str, form: dict, execute_body: str) -> str:
-    """Replace the body of the protocol method if provided.
+    """Replace the first recognized input or output protocol method body.
 
-    Which method depends on the file: we search the class for one of
-    the framework's canonical method names (``get_input`` for inputs,
-    ``write`` for outputs) and rewrite whichever is present.
+    Canonical methods take precedence over legacy scaffold names.
     """
     body = execute_body or form.get("body") or ""
     if not body:
@@ -49,9 +46,7 @@ def update_existing(source: str, form: dict, execute_body: str) -> str:
     if klass is None:
         raise RoundTripError("no class found in source")
 
-    # Framework abstract methods, in priority order. ``read_input`` /
-    # ``write_output`` are accepted for historical compatibility with
-    # legacy scaffolds.
+    # Legacy method names remain readable after the canonical protocol names.
     for method in ("get_input", "write", "read_input", "write_output"):
         if read_method_body(klass, method) is not None:
             klass = replace_method_body(klass, method, body)
@@ -94,9 +89,6 @@ def parse_back(source: str) -> dict:
         "execute_body": body,
         "warnings": [],
     }
-
-
-# ---- helpers --------------------------------------------------------
 
 
 def _to_class_name(name: str, kind: str) -> str:

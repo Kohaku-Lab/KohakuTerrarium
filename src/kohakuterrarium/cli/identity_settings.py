@@ -8,12 +8,15 @@ from kohakuterrarium.studio.identity.settings import (
 
 
 def show_cli() -> int:
+    """Print all configuration file paths."""
     return show_paths()
 
 
 def path_cli(name: str | None) -> int:
+    """Print one named configuration path."""
     return show_path(name)
 
 
 def edit_cli(name: str | None) -> int:
+    """Open one named configuration file in the editor."""
     return edit_config(name)

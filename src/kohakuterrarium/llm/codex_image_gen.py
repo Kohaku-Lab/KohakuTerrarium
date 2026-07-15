@@ -1,8 +1,6 @@
 """Codex image_generation translation + stream handling.
 
-Kept out of ``codex_provider.py`` to hold the main provider under
-the project-wide 600-line file budget. Everything here is pure
-helpers — no Codex client state lives in this module.
+Translate Codex image-generation tools and decode their streamed results.
 """
 
 from typing import Any
@@ -10,8 +8,7 @@ from typing import Any
 from kohakuterrarium.core.native_tool_validation import validate_native_tool_options
 from kohakuterrarium.llm.message import ImagePart
 
-# Mapping used when decoding ``image_generation_call.result`` into a
-# usable data URL. Default to PNG when the provider didn't tell us.
+# Unknown output formats use PNG so the resulting data URL remains valid.
 _MIME_BY_EXT: dict[str, str] = {
     "png": "image/png",
     "webp": "image/webp",
@@ -21,16 +18,7 @@ _MIME_BY_EXT: dict[str, str] = {
 
 
 def translate_image_gen_tool(tool: Any) -> dict[str, Any] | None:
-    """Return the wire-format Codex image-generation tool spec.
-
-    Called by ``CodexOAuthProvider.translate_provider_native_tool``
-    when the tool name is ``image_gen``. Merges the tool's declared
-    per-instance knobs (``output_format``, ``size``, ``quality``,
-    ``action``, ``background``) into the base
-    ``{"type":"image_generation"}`` dict. Returns ``None`` if the
-    input isn't an image-gen tool — the caller handles that
-    by delegating to other translators.
-    """
+    """Translate an image-generation tool into a validated Codex wire schema."""
     name = getattr(tool, "tool_name", None) or getattr(tool, "name", None)
     if name != "image_gen":
         return None
@@ -42,19 +30,13 @@ def translate_image_gen_tool(tool: Any) -> dict[str, Any] | None:
         options = validate_native_tool_options("image_gen", options, schema)
         spec.update(options)
     else:
-        # Minimal fallback if someone subclassed without the helper.
+        # Subclasses without option helpers still need a deterministic media type.
         spec["output_format"] = "png"
     return spec
 
 
 def build_image_part(item: Any, output_format: str) -> ImagePart | None:
-    """Build an ImagePart from a Codex ``image_generation_call`` item.
-
-    Returns ``None`` when the item carries no usable ``result``
-    payload (e.g. a partial / in-progress event slipped through).
-    The returned part has a ``data:`` URL; the controller will move
-    it to disk and rewrite the URL before persisting to conversation.
-    """
+    """Decode a completed image result into an inline image part."""
     result = getattr(item, "result", None)
     if not result:
         return None
@@ -68,8 +50,6 @@ def build_image_part(item: Any, output_format: str) -> ImagePart | None:
     )
     revised = getattr(item, "revised_prompt", None)
     if revised:
-        # Not part of the dataclass — attach dynamically so the
-        # controller / session-output layer can surface it without
-        # forcing every ImagePart to carry the field.
+        # Revised prompts are image-generation metadata, not a field shared by all images.
         setattr(part, "revised_prompt", revised)
     return part

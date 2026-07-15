@@ -1,9 +1,8 @@
 """WebSocket endpoint — single IO attach.
 
 Mounts at ``/ws/sessions/{session_id}/creatures/{creature_id}/chat``.
-Replaces the legacy ``/ws/agents/{id}/chat``,
-``/ws/terrariums/{id}``, and ``/ws/creatures/{id}`` endpoints with one
-URL shape per the Phase 2 plan.
+Provides the unified replacement for the legacy agent, terrarium, and
+creature chat endpoint shapes.
 """
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -24,11 +23,8 @@ async def session_creature_chat(
 ):
     """Bidirectional engine-backed chat for one creature."""
     await accept_with_auth_echo(websocket)
-    # Per-user routing for WS chat is a future enhancement; today the
-    # WS uses the global legacy service so the standalone path and
-    # multi-user path both remain consistent with the existing chat
-    # session id contract.  Tests can still monkeypatch ``get_service``
-    # on this module — the alias keeps that seam working.
+    # The global service preserves the existing chat session-id contract across
+    # standalone and multi-user deployments; the local alias remains a test seam.
     service = get_service()
 
     try:

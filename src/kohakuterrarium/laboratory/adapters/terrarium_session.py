@@ -1,25 +1,7 @@
-"""APP extension adapter for ``terrarium.session``.
+"""Expose a worker's live session stores through ``terrarium.session``.
 
-Worker-side handler exposing session operations on the worker's
-local :class:`SessionStore`.  Live sessions live in
-``engine._session_stores`` (keyed by graph_id); on-disk sessions can
-be opened on demand from the worker's session dir.
-
-Ops shipped:
-
-- ``history``  — paginated event read for one session/agent
-- ``search``   — FTS5 / vector query
-- ``stores``   — list known session ids on the worker
-- ``resume``   — adopt a previously-pushed ``.kohakutr`` file at a
-  worker-side path and bring its session live on the worker's engine.
-  The controller drives the workflow: read the .kohakutr bytes from
-  its mirror, push via ``terrarium.files.write`` to the worker's
-  ``config://`` scope, then call this op with the resulting path.
-
-Fork stays deferred: it's a file-only op the controller can perform
-on its mirror directly without round-tripping.
-
-Errors translate to the standard structured envelope.
+The adapter supports history, search, store discovery, and adoption of a
+``.kohakutr`` file that the controller has already copied to the worker.
 """
 
 import os
@@ -79,10 +61,6 @@ class TerrariumSessionAdapter:
                     }
                 }
 
-    # ------------------------------------------------------------------
-    # Ops
-    # ------------------------------------------------------------------
-
     def _op_history(self, body: dict[str, Any]) -> dict[str, Any]:
         session_id = body.get("session_id")
         agent = body.get("agent")
@@ -113,31 +91,12 @@ class TerrariumSessionAdapter:
         return {"hits": hits}
 
     def _op_stores(self, body: dict[str, Any]) -> dict[str, Any]:
-        # Returns the session_ids of currently-attached live stores on
-        # the engine.  Useful for the controller's mirror to discover
-        # what sessions the worker thinks it owns.
+        # Only attached stores are authoritative for sessions owned by this worker.
         stores = getattr(self._engine, "_session_stores", {}) or {}
         return {"session_ids": sorted(stores.keys())}
 
     async def _op_resume(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Adopt a previously-pushed ``.kohakutr`` file on this worker.
-
-        The controller pushes the file bytes via
-        ``terrarium.files.write`` to a known worker-side path (under
-        ``config://`` scope), then calls this op with that path.  This
-        side just calls ``engine.adopt_session`` — which reads the
-        recipe + config snapshot, runs ``add_creature``, and replays
-        events from the file.  The resulting graph_id is returned so
-        the controller can register it in its ``_meta`` map.
-
-        Body shape::
-
-            {
-                "path": "<worker-side absolute path to .kohakutr>",
-                "pwd_override": str | None,
-                "llm": str | None,
-            }
-        """
+        """Adopt a session file already present on the worker."""
         path = body.get("path")
         if not isinstance(path, str) or not path:
             raise ValueError("path is required")
@@ -151,19 +110,14 @@ class TerrariumSessionAdapter:
         )
         store = getattr(self._engine, "_session_stores", {}).get(sid)
         meta = store.load_meta() if store is not None else {}
-        # Evaluated on THIS worker's filesystem — the controller cannot
-        # stat a worker-side path, so its handle-level check is wrong
-        # for remote sessions.
+        # Path validity must be evaluated here; the controller cannot stat the
+        # worker's filesystem.
         saved_pwd = str(meta.get("pwd", "") or "")
         return {
             "session_id": sid,
             "meta": dict(meta),
             "pwd_exists": (not saved_pwd) or os.path.isdir(saved_pwd),
         }
-
-    # ------------------------------------------------------------------
-    # Store lookup
-    # ------------------------------------------------------------------
 
     def _resolve_store(self, session_id: str) -> SessionStore:
         stores = getattr(self._engine, "_session_stores", {}) or {}

@@ -1,10 +1,9 @@
-"""Engine-backed topology operations — channels + connect/disconnect.
+"""Manage session channels, connections, and per-creature wiring.
 
-Channels live inside a graph (== session). ``connect`` / ``disconnect``
-operate at the engine layer and may merge / split graphs as a side
-effect (the engine handles topology bookkeeping). Graph topology
-channels are always broadcast — channel-kind variants are sub-agent
-private comms only and live in :mod:`core.channel`.
+Channels belong to session graphs and are always broadcast. Connecting or
+disconnecting creatures may merge or split graphs; the engine owns that
+topology bookkeeping. Channel variants in :mod:`core.channel` are private to
+sub-agent communication.
 """
 
 from typing import Any
@@ -16,11 +15,6 @@ from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-# ---------------------------------------------------------------------------
-# Channels
-# ---------------------------------------------------------------------------
 
 
 async def add_channel(
@@ -54,10 +48,7 @@ async def remove_channel(
     session_id: str,
     name: str,
 ) -> dict[str, Any]:
-    """Remove a channel from a session, returning the topology delta.
-
-    Service-routed: works for remote-hosted graphs.
-    """
+    """Remove a channel through the service and return its topology delta."""
     delta = await service.remove_channel(session_id, name)
     return {
         "removed": name,
@@ -73,13 +64,7 @@ async def remove_channel(
 async def list_channels(
     service: "TerrariumService", session_id: str
 ) -> list[dict[str, Any]]:
-    """List shared channels in a session.
-
-    Routes through the :class:`TerrariumService` Protocol — a worker
-    session's channels live on the worker, NOT the host engine, so an
-    ``as_engine`` reach-in would 404 every worker session even right
-    after a successful ``add_channel``.
-    """
+    """List shared channels through the service that owns the session graph."""
     channels = await service.list_channels(session_id)
     return [
         {
@@ -113,11 +98,8 @@ async def channel_info(
             break
     if target is None:
         return None
-    # Best effort: pull history from the service.  A service that
-    # doesn't host the channel raises KeyError; surface that to the
-    # caller so the HTTP layer can decide the right status code.  For
-    # everything else (e.g. a backend that returns "channel exists but
-    # history unsupported"), degrade to an empty list.
+    # History is optional service data; preserve a stable empty-list response
+    # when the owning backend cannot provide it.
     history: list[dict[str, Any]] = []
     try:
         history = await service.channel_history(session_id, channel)
@@ -158,25 +140,12 @@ async def send_to_channel(
     """
     engine = host_engine_or_none(service)
     if engine is None:
-        # Lab-host mode — go through the service so the call lands on
-        # the graph's home worker.
+        # Lab-hosted channels must be routed to the graph's home worker.
         return await service.send_channel_message(
             session_id, channel, content, sender=sender
         )
-    # CF-3 — host engine present but the channel may not live on it.
-    # Two scenarios force a service-routed send instead of the direct
-    # engine path:
-    #
-    # 1. ``session_id`` is a cluster member (recorded in
-    #    ``service._cluster_links``).  Cluster channels are replicated
-    #    on worker engines, not on the host's coordination engine; the
-    #    legacy engine reach-in would 404 every cluster-side send.
-    # 2. The channel does not exist in the host engine's environments.
-    #    Defensive fallback for any future code path where the host
-    #    engine is exposed but the session lives elsewhere — without
-    #    this, the unconditional engine walk surfaces a ``KeyError``
-    #    even though ``service.send_channel_message`` could route to
-    #    the worker that actually owns the channel.
+    # A visible host engine does not imply that it owns the channel. Cluster
+    # members and absent local environments must still route through the service.
     cluster_map = cluster_fold.sid_to_primary(service)
     env = engine._environments.get(session_id)
     channel_obj = env.shared_channels.get(channel) if env is not None else None
@@ -184,12 +153,8 @@ async def send_to_channel(
         send_fn = getattr(service, "send_channel_message", None)
         if send_fn is not None:
             return await send_fn(session_id, channel, content, sender=sender)
-    # Single-host / local mode — keep the direct engine path so the
-    # behaviour is identical to before (in particular, ``KeyError``
-    # surfaces with the session_id-shaped message the existing HTTP
-    # route maps to 404).  Unit tests pass a raw engine in for
-    # ``service`` here; the direct path keeps them green without
-    # requiring them to add a ``send_channel_message`` method.
+    # The local path preserves the exception shapes consumed by HTTP routes and
+    # supports callers that provide a raw engine instead of a service wrapper.
     if env is None:
         raise KeyError(f"session {session_id!r} not found")
     if channel_obj is None:
@@ -198,11 +163,6 @@ async def send_to_channel(
     msg = ChannelMessage(sender=sender, content=content)
     await channel_obj.send(msg)
     return msg.message_id
-
-
-# ---------------------------------------------------------------------------
-# Connect / disconnect
-# ---------------------------------------------------------------------------
 
 
 async def connect(
@@ -247,11 +207,6 @@ async def disconnect(
     return _disconnection_result_to_dict(result)
 
 
-# ---------------------------------------------------------------------------
-# Hot-plug per-creature wire
-# ---------------------------------------------------------------------------
-
-
 async def wire_creature(
     service: "TerrariumService",
     session_id: str,
@@ -275,11 +230,6 @@ async def wire_creature(
     await service.wire_creature(
         session_id, creature_id, channel, direction, enabled=enabled
     )
-
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
 
 
 def _connection_result_to_dict(result: Any) -> dict[str, Any]:

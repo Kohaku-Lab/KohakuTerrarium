@@ -6,10 +6,9 @@ together with its live assignment summary, derived availability, durability, and
 the actor-scoped ``allowed_actions`` (design §9.4). :class:`DriveRuntimeStatus`
 is the running-runtime snapshot for the Settings/Drives UI.
 
-These are the DTOs that cross the Laboratory wire in Phase H; the packers here
-reuse the record/assignment primitives in :mod:`drive.wire` and wrap the extra
-service fields in the same versioned envelope, so no Python object ever travels
-and an unknown/extra field can never overwrite a framework identity field.
+These DTOs cross worker boundaries through the versioned envelopes in
+:mod:`drive.wire`, so live Python objects never travel and unknown fields cannot
+overwrite framework identity.
 """
 
 import hashlib
@@ -24,14 +23,9 @@ from kohakuterrarium.terrarium.drive.wire import (
     unpack_drive_record,
 )
 
-# ---------------------------------------------------------------------------
-# DTOs
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveView:
-    """A record folded with its live assignment + actor-scoped actions (§9.4)."""
+    """Combine a Drive record with assignment, availability, and allowed actions."""
 
     record: DriveRecord
     assignee_creature_id: str | None
@@ -74,7 +68,7 @@ class DriveView:
 
 @dataclass(frozen=True)
 class DriveRuntimeStatus:
-    """Running Drive-runtime snapshot for the Settings/Drives UI (design §12)."""
+    """Summarize the running Drive runtime for management surfaces."""
 
     enabled: bool
     durability: str | None = None
@@ -90,11 +84,6 @@ class DriveRuntimeStatus:
             "counts": dict(self.counts),
             "running_revision": self.running_revision,
         }
-
-
-# ---------------------------------------------------------------------------
-# runtime-status assembly (from a live DriveRuntime's enabled snapshot)
-# ---------------------------------------------------------------------------
 
 
 def registration_dtos(runtime: Any) -> tuple[dict[str, Any], ...]:
@@ -115,11 +104,6 @@ def running_revision(runtime: Any) -> str:
     """Opaque content hash of the runtime's enabled registration names."""
     names = sorted(entry.descriptor.name for entry in runtime.snapshot.entries)
     return hashlib.sha256(repr(names).encode("utf-8")).hexdigest()
-
-
-# ---------------------------------------------------------------------------
-# envelope helpers (mirror drive.wire so the schema version travels)
-# ---------------------------------------------------------------------------
 
 
 def _envelope(wire_type: str, data: dict[str, Any]) -> dict[str, Any]:
@@ -151,11 +135,6 @@ def _str_list(value: object, name: str) -> list[str]:
     return [str(v) for v in value]
 
 
-# ---------------------------------------------------------------------------
-# DriveView
-# ---------------------------------------------------------------------------
-
-
 def pack_drive_view(view: DriveView) -> dict[str, Any]:
     return _envelope(
         "drive_view",
@@ -182,11 +161,6 @@ def unpack_drive_view(payload: object) -> DriveView:
     )
 
 
-# ---------------------------------------------------------------------------
-# DriveRuntimeStatus
-# ---------------------------------------------------------------------------
-
-
 def pack_runtime_status(status: DriveRuntimeStatus) -> dict[str, Any]:
     return _envelope("drive_runtime_status", status.to_dict())
 
@@ -208,11 +182,7 @@ def unpack_runtime_status(payload: object) -> DriveRuntimeStatus:
     )
 
 
-# ---------------------------------------------------------------------------
-# settings status (a plain JSON-safe dict) — wrapped so the schema travels
-# ---------------------------------------------------------------------------
-
-
+# Settings status also uses a versioned envelope despite its plain dict payload.
 def pack_settings_status(status: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(status, dict):
         raise DriveValidationError("settings status must be a dict")

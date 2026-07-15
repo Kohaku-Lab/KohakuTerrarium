@@ -1,9 +1,4 @@
-"""
-Grep tool - search file contents.
-
-Respects ``.gitignore`` by default and stops early once enough matches
-are found, avoiding full-tree scans on large projects.
-"""
+"""Regex search over text files with gitignore-aware traversal."""
 
 import re
 from pathlib import Path
@@ -27,11 +22,7 @@ logger = get_logger(__name__)
 
 @register_builtin("grep")
 class GrepTool(BaseTool):
-    """
-    Tool for searching file contents.
-
-    Supports regex patterns and file type filtering.
-    """
+    """Search text files with a regular expression and optional glob filter."""
 
     needs_context = True
 
@@ -55,11 +46,9 @@ class GrepTool(BaseTool):
         if not pattern:
             return ToolResult(error="No pattern provided")
 
-        # Get base path
         base_path = args.get("path", ".")
         base = resolve_tool_path(base_path, context)
 
-        # Path boundary guard
         if context and context.path_guard:
             msg = context.path_guard.check(str(base))
             if msg:
@@ -68,7 +57,6 @@ class GrepTool(BaseTool):
         if not base.exists():
             return ToolResult(error=f"Path not found: {base_path}")
 
-        # Get options
         file_pattern = args.get("glob", "**/*")
         limit = int(args.get("limit", 50))
         case_insensitive = args.get("ignore_case", False)
@@ -78,7 +66,6 @@ class GrepTool(BaseTool):
             "0",
         )
 
-        # Compile regex
         try:
             flags = re.IGNORECASE if case_insensitive else 0
             regex = re.compile(pattern, flags)
@@ -91,7 +78,6 @@ class GrepTool(BaseTool):
             files_searched = 0
             hit_cap = False
 
-            # Find files to search — gitignore-aware, early-terminating
             if base.is_file():
                 files_iter = iter([base])
             else:
@@ -103,7 +89,6 @@ class GrepTool(BaseTool):
                 if not file_path.is_file():
                     continue
 
-                # Skip binary files
                 if is_binary_file(file_path):
                     continue
 
@@ -117,14 +102,12 @@ class GrepTool(BaseTool):
                     if len(matches) < limit:
                         matches.append(m)
 
-                # Early termination: once we have limit matches, stop
-                # scanning more files.  We sacrifice the exact total count
-                # but avoid reading thousands of irrelevant files.
+                # The reported total becomes a lower bound at the cap, trading
+                # exhaustive counts for bounded traversal on large repositories.
                 if total_matches >= limit:
                     hit_cap = True
                     break
 
-            # Format output
             output_lines = []
             for match in matches:
                 output_lines.append(
@@ -162,12 +145,7 @@ async def _search_single_file(
     base: Path,
     remaining_limit: int,
 ) -> list[dict[str, Any]]:
-    """Search a single file for regex matches.
-
-    Returns a list of match dicts with 'file', 'line', and 'content' keys.
-    Only collects up to ``remaining_limit`` detailed matches, but counts
-    all occurrences for the total.
-    """
+    """Return line-oriented regex matches from one text file."""
     matches: list[dict[str, Any]] = []
     try:
         async with aiofiles.open(path, encoding="utf-8", errors="replace") as f:
@@ -177,8 +155,7 @@ async def _search_single_file(
                 if not regex.search(line):
                     continue
 
-                # Always append a match entry (caller counts total_matches
-                # from len); but only include full content up to the limit.
+                # Individual lines are bounded independently of the result-count cap.
                 content = line.rstrip()
                 if len(content) > 2000:
                     content = content[:2000] + " ... (truncated)"

@@ -1,16 +1,8 @@
-"""The five self-service Drive tools injected into Drive-enabled creatures.
+"""Expose identity-safe self-service Drive tools to creatures.
 
-``drive_create`` / ``drive_status`` / ``drive_update`` / ``drive_report`` /
-``drive_transition`` are thin wrappers over the engine's :class:`DriveManager`
-(design §9.3). Each derives its :class:`ActorRef` as ``creature:<caller_id>`` from
-the trusted :class:`ToolContext` — NEVER from tool arguments — and forces caller
-ownership/scope on create. Tool presence is not authorization: the manager
-re-checks owner/assignee/scope/registration on every call (rule §4.15), so these
-are safe on non-privileged creatures. ``group_drive`` (privileged) is Phase G.
-
-Conflicts (stale ``expected_revision``), permission denials, and disabled/unknown
-registrations surface as distinct, model-shaped errors. Output is concise text with
-its structured payload retained in :attr:`ToolResult.metadata`.
+Each tool derives its actor from trusted execution context and delegates
+authorization to the graph's Drive manager. Concise text is returned to the
+model while structured payloads remain available in :class:`ToolResult` metadata.
 """
 
 from typing import Any
@@ -43,8 +35,8 @@ from kohakuterrarium.terrarium.group_tool_context import (
     resolve_group_context,
 )
 
-# Terminal targets go through the propose/verify pipeline; the rest are direct
-# control transitions (design §4.2). RETIRED is admin-only, not exposed here.
+# Terminal states require proposal verification; administrative retirement is
+# intentionally absent from the self-service surface.
 _TERMINAL_TARGETS = frozenset({DriveStatus.COMPLETED, DriveStatus.FAILED})
 _TRANSITION_TARGETS = frozenset(
     {
@@ -59,7 +51,7 @@ _TRANSITION_TARGETS = frozenset(
 
 
 class _DriveCall:
-    """Resolved, trusted context for one Drive tool call."""
+    """Hold the trusted runtime context for one Drive tool invocation."""
 
     __slots__ = (
         "manager",
@@ -82,8 +74,7 @@ class _DriveCall:
 
 
 def _resolve_call(ctx: ToolContext | None) -> _DriveCall:
-    """Resolve the caller creature + engine + DriveManager, or raise
-    :class:`GroupToolError` with a model-shaped message."""
+    """Resolve the caller, engine, and graph-scoped Drive manager."""
     gctx = resolve_group_context(ctx, require_privileged=False)
     runtime = ctx.environment.get(DRIVE_SERVICE_KEY) if ctx.environment else None
     if runtime is None:
@@ -183,10 +174,7 @@ def _drive_error_result(exc: DriveError) -> ToolResult:
 
 
 def _record_summary(call: _DriveCall, record: DriveRecord) -> dict[str, Any]:
-    """Bounded, authorized-view summary of a Drive record (no raw spec dump).
-
-    The assignee is added by :func:`_summary_with_actions`, which resolves the
-    live assignment."""
+    """Build a bounded authorized summary without exposing the raw Drive spec."""
     return {
         "drive_id": record.drive_id,
         "kind": record.kind,
@@ -197,9 +185,8 @@ def _record_summary(call: _DriveCall, record: DriveRecord) -> dict[str, Any]:
         "scope_id": record.scope_id,
         "owner": record.owner.format(),
         "priority": record.priority,
-        # Per-record durability for THIS record's graph, not the mixed-engine
-        # aggregate (R1-41): the manager is graph-scoped, so every record it
-        # returns belongs to ``call.graph_id``.
+        # Durability must describe the record's graph rather than a possibly
+        # mixed aggregate across the engine.
         "durability": call.runtime.durability_for(call.graph_id),
     }
 
@@ -276,8 +263,8 @@ class DriveCreateTool(_BaseDriveTool):
         priority = args.get("priority", 0)
         if not isinstance(priority, int) or isinstance(priority, bool):
             return _err("'priority' must be an integer")
-        # Force caller ownership/scope/assignment — never trust actor/owner/scope
-        # from tool arguments (design §9.3, rule §4.15).
+        # Ownership, scope, and assignment come only from trusted caller context;
+        # tool arguments cannot claim another identity.
         request = CreateDriveRequest(
             kind=kind,
             title=title,
@@ -554,7 +541,6 @@ class DriveTransitionTool(_BaseDriveTool):
             summary = await _summary_with_actions(call, result)
             summary["proposal"] = "accepted"
             return _ok(summary)
-        # A pending proposal awaiting a distinct approver (actor/two_party).
         return _ok(
             {
                 "proposal_id": result.proposal_id,
@@ -566,7 +552,7 @@ class DriveTransitionTool(_BaseDriveTool):
 
 
 def build_self_service_tools() -> list[BaseTool]:
-    """Instantiate the five self-service Drive tools (injection order)."""
+    """Create the self-service Drive tools in prompt injection order."""
     return [
         DriveCreateTool(),
         DriveStatusTool(),

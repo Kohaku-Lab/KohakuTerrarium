@@ -1,17 +1,14 @@
 """Resolve a LIVE session to its engine-attached, already-open store.
 
-The viewer / history frontend addresses a live session by its graph_id
-(``graph_<uuid>``) or by its on-disk file stem, but the autosession file
-is named by creature_id, so plain on-disk name resolution
-(``resolve_session_path_default``) misses the graph_id form. The engine
-holds the live ``SessionStore`` keyed by graph_id; these helpers return
-that store so read-only viewer / history routes can REUSE its open
-handles instead of opening the same SQLite file a second time — a
-second open of an actively-written store is unreliable on POSIX
-(``SQLITE_IOERR`` on the tables the live writer touched).
+Viewer and history routes may address a live session by graph ID or by its
+file stem. Autosession files are named by creature ID, so ordinary on-disk name
+resolution cannot find the graph-ID form. These helpers locate the engine-owned
+``SessionStore`` and let read-only routes reuse it instead of opening a second
+connection to an actively written SQLite file, which can raise ``SQLITE_IOERR``
+on POSIX.
 
-Multi-node / lab-host has no host-local engine, so every lookup returns
-``None`` and callers fall through to on-disk resolution (never crash).
+Lab hosts have no local engine; lookups return ``None`` so callers can use their
+on-disk fallback.
 """
 
 from pathlib import Path
@@ -21,11 +18,10 @@ from kohakuterrarium.studio._runtime import host_engine_or_none
 
 
 def live_store_entry(service, session_name: str) -> tuple[str, SessionStore] | None:
-    """Return ``(graph_id, store)`` for the live store behind ``session_name``.
+    """Return the open ``(graph_id, store)`` matching a live session name.
 
-    Matches the engine's graph_id key first, then any attached store whose
-    on-disk file stem equals ``session_name`` (the saved-listing name of a
-    still-running session). Closed stores never match.
+    Graph-ID lookup takes precedence. File-stem matching supports saved-listing
+    names for sessions that are still running, and closed stores are excluded.
     """
     engine = host_engine_or_none(service)
     if engine is None:
@@ -44,13 +40,13 @@ def live_store_entry(service, session_name: str) -> tuple[str, SessionStore] | N
 
 
 def live_store_for(service, session_name: str) -> SessionStore | None:
-    """The live store attached under ``session_name``, or ``None``."""
+    """Return the live store matching ``session_name``, if one is attached."""
     entry = live_store_entry(service, session_name)
     return entry[1] if entry is not None else None
 
 
 def live_store_path(service, session_name: str) -> Path | None:
-    """The on-disk file of the live store, or ``None`` when not live."""
+    """Return the attached live store's on-disk path when available."""
     store = live_store_for(service, session_name)
     if store is None:
         return None

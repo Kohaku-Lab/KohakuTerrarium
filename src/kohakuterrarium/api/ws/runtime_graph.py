@@ -27,18 +27,10 @@ router = APIRouter()
 async def runtime_graph_stream(websocket: WebSocket):
     """Stream runtime graph events for graph-editor data wiring."""
     await accept_with_auth_echo(websocket)
-    # The snapshot and engine-event stream both route through the
-    # ``TerrariumService`` Protocol, so they aggregate across workers
-    # in lab-host mode.  The per-channel ``on_send`` observer hooks
-    # still need a host engine's internal channel registry — in
-    # lab-host mode there is none (``host_engine_or_none`` → ``None``),
-    # so channel-message frames fall back to the generic engine-event
-    # stream rather than the richer callback shape.
-    # WebSocket runtime-graph stream is a long-lived global view; it
-    # does not scope to a user.  The legacy non-request service
-    # accessor (re-exported here as ``get_service``) provides this —
-    # multi-user per-engine isolation is enforced on creature-scoped
-    # routes, not the global graph snapshot.
+    # The service aggregates snapshots and engine events across workers, while
+    # rich per-channel callbacks are available only when a host engine exists.
+    # This global stream is intentionally not user-scoped; isolation applies to
+    # creature-scoped routes rather than the shared topology view.
     service = get_service()
     engine = host_engine_or_none(service)
     queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue(maxsize=1000)
@@ -47,12 +39,15 @@ async def runtime_graph_stream(websocket: WebSocket):
     known_channels: set[tuple[str, str]] = set()
 
     async def enqueue(payload: dict[str, Any]) -> None:
+        """Queue an event without allowing slow clients to block producers."""
         try:
             queue.put_nowait(payload)
         except asyncio.QueueFull:
             logger.debug("Runtime graph WS queue full - dropping event")
 
     def enqueue_threadsafe(payload: dict[str, Any]) -> None:
+        """Schedule event delivery from channel callbacks on any thread."""
+
         def put() -> None:
             try:
                 queue.put_nowait(payload)
@@ -65,9 +60,9 @@ async def runtime_graph_stream(websocket: WebSocket):
             logger.debug("Runtime graph WS loop closed - dropping event")
 
     async def sync_channel_observers() -> None:
-        # Channel ``on_send`` hooks need a host engine's channel
-        # registry.  Lab-host has none — skip; the generic engine-event
-        # stream still carries channel_message events.
+        """Attach callbacks to newly discovered host-local channels."""
+        # Lab hosts lack the local registry required by ``on_send`` hooks, but
+        # their service-level event stream still carries channel messages.
         if engine is None:
             return
         for graph in engine.list_graphs():
@@ -90,20 +85,14 @@ async def runtime_graph_stream(websocket: WebSocket):
                 known_channels.add(key)
 
     async def engine_events() -> None:
-        # Service-routed: fans out across workers in lab-host mode.
+        """Normalize service events and feed the client queue."""
+        # Service subscription fans in events from every worker in lab mode.
         async for event in service.subscribe():
             kind = event.kind.value if hasattr(event.kind, "value") else str(event.kind)
-            # CHANNEL_MESSAGE events are normally delivered by the
-            # endpoint-local ``_make_channel_callback`` hook, which
-            # produces the richer flat shape the graph editor consumes
-            # (sender / content / content_preview / message_id) —
-            # forwarding the generic copy too would double-deliver
-            # (B-api-1). BUT in lab-host mode ``engine`` is ``None``,
-            # so ``sync_channel_observers`` registers NO local callbacks
-            # and the only source of channel_message frames is the
-            # service-routed engine-event stream itself (CF-8). In that
-            # mode synthesize the rich flat shape from the engine event
-            # payload and forward it; otherwise drop to avoid the dup.
+            # Host-local channel callbacks already emit the graph editor's flat
+            # message shape, so forwarding service copies would duplicate them.
+            # Lab hosts have no callback registry and must synthesize that shape
+            # from service events instead.
             if kind == "channel_message":
                 if engine is None:
                     payload = event.payload or {}
@@ -135,16 +124,12 @@ async def runtime_graph_stream(websocket: WebSocket):
                 )
             await sync_channel_observers()
 
-    # Build + send the initial snapshot BEFORE subscribing to engine
-    # events. Otherwise the engine_task pump can enqueue events with a
-    # ``version`` timestamp pre-dating the snapshot's ``version``; the
-    # client's patch logic uses that timestamp for ordering and would
-    # drop the earlier events as stale.
+    # The snapshot must precede event subscription because clients order patches
+    # by version and would discard events timestamped before the snapshot.
     engine_task: asyncio.Task | None = None
     try:
         await sync_channel_observers()
-        # Service-routed snapshot — host-local in standalone, fanned
-        # out across workers in lab-host mode.
+        # The service returns a local snapshot standalone and a merged one in lab mode.
         snapshot = await service.runtime_graph_snapshot()
         await websocket.send_json(
             {"type": "subscribed", "version": snapshot["version"]}
@@ -173,6 +158,8 @@ async def runtime_graph_stream(websocket: WebSocket):
 
 
 def _make_channel_callback(graph_id: str, enqueue):
+    """Build a callback that serializes channel messages for the graph client."""
+
     def on_channel_send(channel_name: str, message: Any) -> None:
         enqueue(
             {
@@ -192,10 +179,12 @@ def _make_channel_callback(graph_id: str, enqueue):
 
 
 def _version() -> int:
+    """Return a millisecond wall-clock version for client patch ordering."""
     return int(time.time() * 1000)
 
 
 def _jsonable(value: Any) -> Any:
+    """Preserve JSON values and stringify unsupported objects."""
     try:
         json.dumps(value)
         return value
@@ -204,6 +193,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _preview(value: Any, limit: int = 160) -> str:
+    """Render a compact single-line preview of channel content."""
     if isinstance(value, str):
         text = value
     else:
@@ -218,6 +208,7 @@ def _preview(value: Any, limit: int = 160) -> str:
 
 
 def _timestamp_to_string(value: Any) -> str:
+    """Serialize optional timestamp-like values for WebSocket frames."""
     if value is None:
         return ""
     isoformat = getattr(value, "isoformat", None)

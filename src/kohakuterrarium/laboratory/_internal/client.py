@@ -1,19 +1,8 @@
 """Client connector — connects out to a Laboratory host, runs envelope loops.
 
-A :class:`ClientConnector` instance owns:
-
-- the outbound :class:`~kohakuterrarium.laboratory._internal.transport_base.Connection`
-- the Hello/Welcome handshake state (assigned ``client_id``, host's
-  declared capabilities, etc.)
-- read / write / heartbeat tasks once connected
-- an outbound :class:`BoundedSendBuffer` so callers can ``send()``
-  without blocking on slow I/O
-- auto-reconnect with exponential backoff when the transport drops
-
-Permanent rejections (auth failed, protocol mismatch) raise
-:class:`AuthFailedError` or :class:`ProtocolMismatchError` from
-:meth:`start` and stop the connector. Transient failures (transport
-refused, peer reset) trigger reconnect.
+Manage a client's handshake, framed I/O, heartbeats, APP requests, and
+reconnection. Permanent handshake rejections stop the connector; transient
+transport failures trigger exponential-backoff reconnects.
 """
 
 import asyncio
@@ -77,13 +66,10 @@ class RequestTimeoutError(TimeoutError):
 
 
 class RequestAbortedError(RequestTimeoutError):
-    """Raised when a pending request cannot complete because the target
-    client disconnected or the host stopped.
+    """Indicate that a request was interrupted by disconnection.
 
-    Subclasses :class:`RequestTimeoutError` so legacy ``except`` blocks
-    continue to handle the case; new code may catch the more specific
-    subclass to distinguish "wait timed out" from "link gone before
-    response".
+    This remains a :class:`RequestTimeoutError` subtype for compatibility with
+    callers that handle all incomplete requests as timeouts.
     """
 
 
@@ -91,20 +77,7 @@ InboundHandler = Callable[[Envelope], Awaitable[None]]
 
 
 class ClientConnector:
-    """Outbound client connector to a Laboratory host.
-
-    Lifecycle:
-
-    .. code-block:: python
-
-        client = ClientConnector(config, transport)
-        client.on_envelope(my_handler)
-        await client.start()
-        ...
-        await client.send(envelope)
-        ...
-        await client.stop()
-    """
+    """Maintain an outbound connection to a Laboratory host."""
 
     def __init__(
         self,
@@ -131,12 +104,8 @@ class ClientConnector:
         self._first_connect_error: Exception | None = None
         self._app_extensions: dict[str, ExtensionHandler] = {}
         self._pending_requests: dict[str, asyncio.Future[Any]] = {}
-        # Callbacks invoked when the host link goes away.  Used by
-        # :class:`StreamDemux` (and similar consumers) so streams whose
-        # producer is the host get drained on disconnect rather than
-        # hanging on ``queue.get()``.  Each callback is sync, receives
-        # the departed node id (``HOST_NODE_ID`` here), and runs in the
-        # client's tear-down path.
+        # Synchronous callbacks let stream consumers unblock when the host link
+        # disappears; each receives the host node ID during teardown.
         self._disconnect_callbacks: list[Callable[[str], None]] = []
 
     # ------------------------------------------------------------------
@@ -230,13 +199,10 @@ class ClientConnector:
         return self._app_extensions.pop(namespace, None) is not None
 
     def on_node_disconnect(self, callback: Callable[[str], None]) -> None:
-        """Register a sync callback fired when the host link drops.
+        """Register a synchronous callback for host disconnection.
 
-        Mirrors :meth:`HostEngine.on_node_disconnect`; used by stream
-        demuxes installed client-side so their queues are drained when
-        the host disappears.  The callback receives ``HOST_NODE_ID`` —
-        the only "node" a client can lose a direct connection to.
-        Exceptions are logged and swallowed.
+        The callback receives ``HOST_NODE_ID``. Exceptions are logged and
+        suppressed so one listener cannot interrupt teardown.
         """
         self._disconnect_callbacks.append(callback)
 
@@ -304,11 +270,8 @@ class ClientConnector:
             )
             return result
         except asyncio.TimeoutError as exc:
-            # ``RequestAbortedError`` is a TimeoutError subclass — when
-            # ``_tear_down_connection`` ``set_exception``s the future
-            # with it, ``wait_for`` propagates it through this same
-            # except.  Re-raise typed errors as-is rather than wrapping
-            # them back into a plain RequestTimeoutError.
+            # wait_for routes RequestAbortedError here because it subclasses
+            # TimeoutError; preserve the more specific teardown failure.
             if isinstance(exc, RequestTimeoutError):
                 raise
             _log.warning(
@@ -336,10 +299,8 @@ class ClientConnector:
         reconnect_attempt = 0
         try:
             while not self._stopped:
-                # Always start each connect attempt with the disconnect
-                # event cleared. The previous tear_down may have set it
-                # again via the write_task's finally; clearing here means
-                # the new connection's wait() blocks correctly.
+                # Teardown tasks may set this event after cleanup; clear it for
+                # every attempt so a new connection waits for its own failure.
                 self._disconnect_event.clear()
                 try:
                     await self._connect_once()
@@ -354,14 +315,12 @@ class ClientConnector:
                     if first_attempt:
                         first_attempt = False
                         self._first_connect_done.set()
-                    # Wait until current connection drops.
                     await self._disconnect_event.wait()
                     _log.info(
                         "lab client connection dropped; will reconnect",
                         client_name=self._config.client_name,
                     )
                 except (AuthFailedError, ProtocolMismatchError) as exc:
-                    # Permanent failures: don't retry.
                     _log.error(
                         "lab client permanent rejection",
                         client_name=self._config.client_name,
@@ -373,10 +332,8 @@ class ClientConnector:
                         self._first_connect_done.set()
                     return
                 except NameConflictError as exc:
-                    # On the very first attempt, name was actually taken
-                    # — fatal. On subsequent attempts, this is almost
-                    # always a race with the previous session's cleanup
-                    # on the host; retry with backoff.
+                    # An initial conflict is permanent, but during reconnect it
+                    # can be a race with host cleanup of the previous session.
                     if first_attempt:
                         _log.error(
                             "lab client rejected: name conflict",
@@ -395,7 +352,6 @@ class ClientConnector:
                 if self._stopped:
                     break
                 await self._tear_down_connection()
-                # Wait, then retry.
                 reconnect_attempt += 1
                 _log.warning(
                     "lab client reconnect attempt",
@@ -416,7 +372,6 @@ class ClientConnector:
         conn = await self._transport.connect(self._config.host_url)
         self._connection = conn
 
-        # Send Hello
         hello = HelloPayload(
             protocol_version=LAB_PROTOCOL_VERSION,
             framework_version=self._framework_version,
@@ -434,7 +389,6 @@ class ClientConnector:
             protocol_version=LAB_PROTOCOL_VERSION,
         )
 
-        # Receive Welcome or Reject
         try:
             raw = await conn.recv_frame()
         except ConnectionClosed as exc:
@@ -492,9 +446,8 @@ class ClientConnector:
 
     async def _tear_down_connection(self) -> None:
         self._connected_event.clear()
-        # Notify disconnect listeners (e.g. ``StreamDemux``) BEFORE
-        # failing pending requests so streams drain first.  Sync,
-        # best-effort: a buggy callback can't prevent tear-down.
+        # Drain stream consumers before failing requests. Listener failures must
+        # not prevent the remaining teardown steps.
         for cb in list(self._disconnect_callbacks):
             try:
                 cb(HOST_NODE_ID)
@@ -502,10 +455,8 @@ class ClientConnector:
                 _log.exception(
                     "client disconnect callback raised",
                 )
-        # Fail any in-flight ``request()`` callers with a structured
-        # abort instead of leaving them blocked until ``asyncio.wait_for``
-        # times out.  Iterates a snapshot because ``request()``'s
-        # ``finally`` clause pops entries on resolution.
+        # Fail requests immediately rather than awaiting their timeouts. Iterate
+        # a snapshot because each request removes itself when resolved.
         aborted = 0
         for request_id, future in list(self._pending_requests.items()):
             if not future.done():
@@ -619,10 +570,8 @@ class ClientConnector:
             )
 
     async def _dispatch_inbound(self, env: Envelope) -> None:
-        # APP envelopes get special-cased: responses resolve pending
-        # requests; non-response APP envelopes go to the registered
-        # extension. We still fire generic on_envelope handlers for
-        # observability and for callers that want raw access.
+        # APP-specific handling resolves requests or invokes extensions before
+        # generic handlers receive the same envelope for raw observation.
         if env.kind is EnvelopeKind.APP:
             await self._handle_app(env)
         for handler in list(self._inbound_handlers):
@@ -637,13 +586,11 @@ class ClientConnector:
         except AppMessageError as exc:
             _log.warning("client got malformed APP envelope: %s", exc)
             return
-        # Response to one of our outstanding requests?
         if msg.in_reply_to is not None:
             future = self._pending_requests.get(msg.in_reply_to)
             if future is not None and not future.done():
                 future.set_result(msg.body)
             return
-        # Inbound message — dispatch to the namespace's extension.
         handler = self._app_extensions.get(msg.namespace)
         if handler is None:
             _log.debug(
@@ -659,13 +606,8 @@ class ClientConnector:
             msg_type=msg.type,
             request_id=msg.request_id,
         )
-        # Spawn the handler in a background task so the read loop keeps
-        # processing inbound frames.  Nested requests (a handler that
-        # issues its own ``request`` and awaits the response) deadlock
-        # otherwise: the read loop is blocked on ``await handler``, so
-        # the response envelope for the nested request never reaches
-        # the pending-futures table.  The dispatcher returns ``None``
-        # — the read loop iterates immediately.
+        # Run handlers separately so the read loop can resolve responses to
+        # nested requests made by a handler; awaiting here would deadlock.
         asyncio.create_task(
             self._run_handler_and_reply(msg, handler),
             name=f"app_handler_{msg.namespace}_{msg.type}",
@@ -676,12 +618,10 @@ class ClientConnector:
         msg: Any,
         handler: Any,
     ) -> None:
-        """Run a namespace handler and send its result back as a response.
+        """Run an APP handler and reply with its result.
 
-        Spawned as a task by :meth:`_handle_app` so the read loop
-        isn't held while the handler awaits.  Errors are logged and
-        swallowed (the original sender's request will time out, which
-        is the correct surface for an extension failure).
+        Handler failures are logged and suppressed, leaving the sender's request
+        to time out.
         """
         try:
             result = await handler(msg)

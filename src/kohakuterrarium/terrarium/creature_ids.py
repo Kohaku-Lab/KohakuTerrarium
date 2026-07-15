@@ -1,9 +1,8 @@
 """Pure creature-id helpers (mint / clean / decode).
 
-A leaf module — stdlib only — so both :mod:`terrarium.creature_host` (which
-mints ids) and :mod:`terrarium.drive.runtime` (which decodes a persisted id back
-to a name for the resume assignee remap, R1-43) can share them without either
-dragging the heavy Agent/builtins import graph into the other.
+This stdlib-only leaf lets :mod:`terrarium.creature_host` mint ids and
+:mod:`terrarium.drive.runtime` decode persisted ids for resume remapping without
+coupling either module to the other's heavier import graph.
 """
 
 import re
@@ -34,7 +33,6 @@ def _decode_creature_name(creature_id: str) -> str:
 
     Strips exactly one trailing ``_<8 hex>`` suffix; an id minted some other way
     (an explicit ``creature_id=``) is returned unchanged. Used by resume to match
-    a persisted (old-runtime-id) assignee to a resumed creature by name
-    (design §6.5 stable-identity remap, R1-43).
+    a persisted (old-runtime-id) assignee to a resumed creature by stable name.
     """
     return _ID_SUFFIX_RE.sub("", creature_id)

@@ -1,19 +1,8 @@
-"""Orchestration of first-launch + update + rollback.
+"""Orchestrate first installation, updates, rollback, and reset.
 
-Glue layer over :mod:`launcher.settings`, :mod:`launcher.feeds`,
-:mod:`launcher.downloader`, and :mod:`launcher.tree_ops`. Callers
-(bootloader, API, CLI verb) drive one of:
-
-- :func:`first_install`  — no active pointer; install from bundled
-  release if present, else from the configured feed.
-- :func:`run_update`     — user-triggered: probe feed, download
-  newer release, smoke, atomic-pointer-swap.
-- :func:`maybe_update`   — honour ``update.mode`` on launch.
-- :func:`rollback`       — revert pointer to the previous version.
-- :func:`reset`          — wipe ``versions/`` and re-run first_install.
-
-All entry points produce :class:`UpdateResult` so callers can render
-the outcome consistently (CLI, API, splash UI).
+Operations coordinate feed resolution, archive handling, structural validation,
+and atomic active-pointer changes under a shared update lock. Public entry
+points return :class:`UpdateResult` for consistent CLI, API, and splash output.
 """
 
 import datetime as _dt
@@ -54,7 +43,7 @@ from kohakuterrarium.launcher.tree_ops import (
 
 @dataclass
 class UpdateResult:
-    """Outcome of a runner entry point."""
+    """Describe the outcome and launch implications of an update operation."""
 
     ok: bool
     version: str | None = None
@@ -64,8 +53,7 @@ class UpdateResult:
     skipped_reason: str | None = None
 
 
-# Progress callback: (phase, percent, message). Fire-and-forget;
-# exceptions inside it are swallowed.
+# Progress reporting must not change the outcome of an update operation.
 ProgressCallback = Callable[[str, float, str], None]
 
 
@@ -80,11 +68,8 @@ def _iso_now() -> str:
 def _safe_progress(cb: ProgressCallback, phase: str, percent: float, msg: str) -> None:
     try:
         cb(phase, percent, msg)
-    except Exception as e:  # pragma: no cover - defensive
+    except Exception as e:  # pragma: no cover - callback isolation
         get_logger().debug("progress callback raised: %s", e)
-
-
-# ── Bundled-release first-install ───────────────────────────────────
 
 
 def _pick_bundled_tarball() -> Path | None:
@@ -97,9 +82,9 @@ def _pick_bundled_tarball() -> Path | None:
 
 
 def _bundled_version_from_filename(tarball: Path) -> str:
-    """Parse ``kohakuterrarium-<version>-<plat>-py<X.Y>.tar.<ext>`` for the version."""
+    """Parse the release version from a bundled archive filename."""
     stem = tarball.name
-    # Strip trailing ``.tar.<ext>``
+    # Extensions are removed before splitting because platform tags contain dashes.
     for ext in (".tar.zst", ".tar.gz", ".tgz", ".tzst", ".tar"):
         if stem.endswith(ext):
             stem = stem[: -len(ext)]
@@ -111,7 +96,7 @@ def _bundled_version_from_filename(tarball: Path) -> str:
 
 
 def _install_from_bundled(progress: ProgressCallback) -> UpdateResult:
-    """Extract the offline tarball into ``versions/<v>/`` and point at it."""
+    """Validate and activate the bundled offline release archive."""
     log = get_logger()
     tarball = _pick_bundled_tarball()
     if tarball is None:
@@ -145,20 +130,16 @@ def _install_from_bundled(progress: ProgressCallback) -> UpdateResult:
     return UpdateResult(ok=True, version=version, build_id="bundled")
 
 
-# ── Feed-driven install / update ────────────────────────────────────
-
-
 def _install_from_feed(
     cfg: _settings.AppSettings,
     progress: ProgressCallback,
     *,
     is_update: bool,
 ) -> UpdateResult:
-    """Resolve feed → download → smoke → swap pointer.
+    """Resolve and install a feed release unless an update is current.
 
-    Used by both first_install (when no bundled tarball) and run_update.
-    Skips re-install when the resolved version equals the active one
-    (``is_update=True`` only).
+    First installation always proceeds. Update mode returns a successful
+    ``up-to-date`` result when the resolved version is already active.
     """
     _safe_progress(progress, "resolve", 5.0, "Checking for updates")
     try:
@@ -182,6 +163,7 @@ def _install_from_feed(
 def _download_smoke_swap(
     target: ReleaseTarget, progress: ProgressCallback
 ) -> UpdateResult:
+    """Download, validate, promote, and activate a release target."""
     log = get_logger()
     partial = partial_dir_for(target.version)
     cache_dir = runtime_dir() / "downloads"
@@ -233,11 +215,8 @@ def _download_smoke_swap(
     )
 
 
-# ── Public entry points ─────────────────────────────────────────────
-
-
 def _first_install_locked(progress: ProgressCallback) -> UpdateResult:
-    """First-install body — caller must already hold the update flock."""
+    """Install the initial release while the caller holds the update lock."""
     cfg = _settings.load()
     sweep_stale_partials()
     if bundled_release_dir() is not None:
@@ -267,11 +246,10 @@ def _first_install_locked(progress: ProgressCallback) -> UpdateResult:
 
 
 def first_install(progress: ProgressCallback | None = None) -> UpdateResult:
-    """Build ``versions/<v>/`` + write pointer. Called when no pointer.
+    """Install and activate the initial release under the update lock.
 
-    Prefers the bundled-release tarball when the briefcase shell
-    shipped one; falls back to the configured feed when not (dev
-    install / minimal bundle).
+    A bundled archive is preferred for offline startup; feed installation is
+    used when no bundle exists or the bundled release fails validation.
     """
     progress = progress or _noop_progress
     try:
@@ -282,7 +260,7 @@ def first_install(progress: ProgressCallback | None = None) -> UpdateResult:
 
 
 def run_update(progress: ProgressCallback | None = None) -> UpdateResult:
-    """User-triggered update via the active feed."""
+    """Install a newer release from the active feed and persist the result."""
     progress = progress or _noop_progress
     cfg = _settings.load()
     try:
@@ -294,7 +272,7 @@ def run_update(progress: ProgressCallback | None = None) -> UpdateResult:
                 cfg.runtime.active_version = result.version
                 cfg.runtime.active_build_id = result.build_id
                 cfg.runtime.last_check_error = None
-                # GC after successful promote.
+                # Collection runs only after activation so the live release is retained.
                 ptr = read_active_pointer()
                 installed = []
                 if ptr is not None:
@@ -314,18 +292,17 @@ def run_update(progress: ProgressCallback | None = None) -> UpdateResult:
 
 
 def maybe_update(progress: ProgressCallback | None = None) -> UpdateResult:
-    """Honour ``update.mode`` on launch."""
+    """Apply the configured launch-time update policy."""
     cfg = _settings.load()
     if cfg.update.mode == "manual":
         return UpdateResult(ok=True, skipped_reason="manual")
     if cfg.update.mode == "notify-on-launch":
         return UpdateResult(ok=True, skipped_reason="notify-only")
-    # auto-on-launch
     return run_update(progress)
 
 
 def rollback() -> UpdateResult:
-    """Revert pointer to the previous installed version."""
+    """Activate the most recent non-active release and require a restart."""
     try:
         with UpdateLock(lock_path()):
             try:
@@ -348,7 +325,7 @@ def rollback() -> UpdateResult:
 
 
 def reset(progress: ProgressCallback | None = None) -> UpdateResult:
-    """Wipe ``versions/`` and re-run first_install."""
+    """Remove all managed releases and perform a locked initial install."""
     progress = progress or _noop_progress
     try:
         with UpdateLock(lock_path()):
@@ -362,10 +339,7 @@ def reset(progress: ProgressCallback | None = None) -> UpdateResult:
 
 
 def probe_only() -> UpdateResult:
-    """Resolve the feed without installing; report what would be installed.
-
-    Used by ``kt self-update --check-only`` and the API's status endpoint.
-    """
+    """Resolve the latest feed target without downloading or activating it."""
     cfg = _settings.load()
     try:
         target = resolve_feed(cfg, force_refresh=True)
@@ -381,7 +355,6 @@ def probe_only() -> UpdateResult:
     )
 
 
-# Re-export Path import name for type hints in tests
 __all__ = [
     "UpdateResult",
     "ProgressCallback",

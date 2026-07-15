@@ -1,16 +1,9 @@
-"""SQLite-backed durable Drive repository (design §7, Phase 0 decision).
+"""SQLite-backed durable Drive repository.
 
-:class:`SqliteDriveRepository` owns a single dedicated ``sqlite3`` connection
-holding the eight ``drive_*`` tables. When session-attached that connection lives
-in a dedicated sidecar file paired with the session (``<name>.kohakutr.drives``,
-see :func:`drive_sidecar_path`), so Drive writes never share a lock with
-KohakuVault's ``save_state`` on the ``.kohakutr``. Legacy same-file sessions
-migrate into the sidecar once.
+SQLite-backed Drive storage using a dedicated sidecar and worker thread.
 
-sqlite3 is synchronous, so every DB call runs on a single dedicated worker thread
-while the public surface stays async; the base class's asyncio lock serializes
-whole transactions (a real ``BEGIN IMMEDIATE ... COMMIT`` per operation, any
-exception rolling it back). Close via :meth:`close_blocking` (WinError 32).
+Separating Drive data from the session database prevents lock contention, while
+serializing calls on one worker preserves connection and transaction ordering.
 """
 
 import asyncio
@@ -79,11 +72,10 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Saved-viewer reads refuse fast (409) on a live-writer lock, not the 5s default.
+# Saved reads use a short timeout so a live-writer lock fails promptly.
 _READONLY_BUSY_TIMEOUT_MS = 1000
 
-# Tables carrying a ``drive_id`` column, cascaded when a Drive is pruned (R1-10).
-# drive_idempotency is (actor,key)-keyed, not per-drive, and is excluded.
+# Pruning cascades through Drive-scoped tables but preserves the global ledger.
 _DRIVE_PER_DRIVE_TABLES = (
     "drives",
     "drive_assignments",
@@ -107,13 +99,7 @@ __all__ = [
 
 
 class DriveRepositoryClosedError(DriveError):
-    """A repository op was attempted after :meth:`SqliteDriveRepository.close_blocking`.
-
-    Fail-first: once the dedicated executor is shut, a late dispatcher/reconcile
-    call would otherwise leak a bare ``RuntimeError: cannot schedule new futures
-    after shutdown`` from :func:`asyncio.loop.run_in_executor`. Surfacing a typed
-    Drive error lets callers distinguish "repository is gone" from a real fault.
-    """
+    """Raised when an operation targets a closed SQLite Drive repository."""
 
 
 def _dump(data: dict[str, Any]) -> str:
@@ -132,8 +118,7 @@ class _SqliteDriveTransaction:
 
     async def begin(self) -> None:
         await self._repo._ensure_open()
-        # A read-only (immutable) sidecar open can take no write lock, so a
-        # listing must use a deferred BEGIN, never BEGIN IMMEDIATE.
+        # Read-only sidecars require a deferred transaction because they cannot lock writes.
         stmt = "BEGIN" if self._repo._read_only else "BEGIN IMMEDIATE"
         await self._repo._run(lambda c: c.execute(stmt))
 
@@ -148,7 +133,7 @@ class _SqliteDriveTransaction:
         try:
             conn.execute("ROLLBACK")
         except sqlite3.OperationalError:
-            # No active transaction (e.g. commit already ran) — nothing to undo.
+            # A completed or absent transaction has nothing left to roll back.
             pass
 
     async def apply(self, mutation: Mutation) -> None:
@@ -231,8 +216,7 @@ class _SqliteDriveTransaction:
                 "DELETE FROM drive_proposals WHERE proposal_id = ?", (proposal_id,)
             )
         for drive_id in m.deleted_drives:
-            # Cascade a pruned Drive across every per-drive table (R1-10); the
-            # (actor,key)-keyed idempotency ledger is left intact by design.
+            # The actor-keyed idempotency ledger is global and must survive Drive pruning.
             for table in _DRIVE_PER_DRIVE_TABLES:
                 conn.execute(f"DELETE FROM {table} WHERE drive_id = ?", (drive_id,))
 
@@ -393,7 +377,7 @@ class SqliteDriveRepository(BaseDriveRepository):
         self._conn: sqlite3.Connection | None = None
         self._opened = False
         self._closed = False
-        # A read-only open never creates anything, not even the parent directory.
+        # Read-only access must not create the database or its parent directory.
         if self._path != ":memory:" and not read_only:
             Path(self._path).parent.mkdir(parents=True, exist_ok=True)
 
@@ -413,9 +397,7 @@ class SqliteDriveRepository(BaseDriveRepository):
         try:
             return await loop.run_in_executor(self._executor, lambda: fn(self._conn))
         except RuntimeError as exc:
-            # A concurrent close_blocking() can shut the executor between the
-            # check above and the schedule below; convert the bare executor
-            # RuntimeError into the typed closed error.
+            # Closing can race with scheduling, so normalize executor shutdown errors.
             if self._closed or "after shutdown" in str(exc):
                 raise DriveRepositoryClosedError(
                     "Drive repository closed while an operation was in flight"
@@ -435,11 +417,8 @@ class SqliteDriveRepository(BaseDriveRepository):
         conn = sqlite3.connect(
             self._path, check_same_thread=False, isolation_level=None
         )
-        # ``busy_timeout`` is a per-connection setting (no file write), so it is
-        # safe before validation. Validate a PRE-EXISTING store's schema version
-        # READ-ONLY — no WAL pragma, no ``_SCHEMA`` DDL — BEFORE any mutation, so a
-        # future/invalid-version file written by a newer build is rejected without
-        # v1 code touching it (R1-14).
+        # Set the connection-only timeout before read-only schema validation.
+        # Validation must precede WAL or DDL so unsupported stores remain untouched.
         conn.execute(f"PRAGMA busy_timeout = {self._busy_timeout_ms}")
         self._validate_existing_schema(conn)
         conn.execute("PRAGMA journal_mode = WAL")
@@ -474,12 +453,11 @@ class SqliteDriveRepository(BaseDriveRepository):
         self._conn = conn
 
     def _validate_existing_schema(self, conn: sqlite3.Connection) -> None:
-        """Reject a pre-existing future/invalid-version store READ-ONLY (R1-14).
+        """Validate an existing schema without mutating the database.
 
-        Runs only reads against ``sqlite_master`` + ``drive_meta`` and closes the
-        connection on rejection. A fresh file (no ``drive_meta`` table) or an
-        unseeded/interrupted one (no ``schema_version`` row) is left for the
-        caller to create/seed; it is never mutated here."""
+        Fresh or unseeded databases are left for the caller to initialize. Invalid
+        or unsupported versions close the connection before raising.
+        """
         has_meta = conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='drive_meta'"
         ).fetchone()
@@ -507,9 +485,9 @@ class SqliteDriveRepository(BaseDriveRepository):
             )
 
     def close_blocking(self) -> None:
-        """Close the connection + worker thread (synchronous). Idempotent.
+        """Synchronously and idempotently close the connection and worker thread.
 
-        The handle MUST drop or a later file move/delete fails (WinError 32).
+        Dropping the handle before file operations is required on Windows.
         """
         if self._closed:
             return
@@ -520,7 +498,7 @@ class SqliteDriveRepository(BaseDriveRepository):
             try:
                 closer = snapshot.close if snapshot is not None else conn.close
                 self._executor.submit(closer).result()
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:  # pragma: no cover - close failures are non-recoverable here
                 logger.warning("Drive connection close failed", error=str(exc))
         self._snapshot = None
         self._conn = None
@@ -571,6 +549,7 @@ def _readonly_open_error(path: str, exc: sqlite3.Error) -> DriveError:
 
 
 def open_drive_repository_readonly(sidecar_path, *, session_path):
+    """Open a saved-session Drive sidecar for offline reads."""
     return SqliteDriveRepository(
         sidecar_path,
         read_only=True,
@@ -582,14 +561,10 @@ def open_drive_repository_readonly(sidecar_path, *, session_path):
 def open_session_drive_repository(
     session_store: Any, *, read_only: bool = False
 ) -> SqliteDriveRepository:
-    """Open a Drive repository over a session store's sidecar and wire its closer.
+    """Open a session's Drive sidecar and register its blocking closer.
 
-    Terrarium opens the ``sqlite3`` connection against a dedicated sidecar file
-    (:func:`drive_sidecar_path`), NOT the ``.kohakutr`` itself, so Drive writes
-    never contend with KohakuVault on one file's lock. Legacy same-file sessions
-    migrate into the sidecar once; the repo's ``close_blocking`` is registered via
-    ``register_companion_closer`` so ``close()`` drops the handle before any file
-    move (WinError 32). The dependency points downward — terrarium -> session.
+    Legacy same-file Drive tables migrate once. Registering the closer ensures the
+    sidecar handle is released before the session performs file operations.
     """
     sidecar = drive_sidecar_path(session_store.path)
     if read_only:

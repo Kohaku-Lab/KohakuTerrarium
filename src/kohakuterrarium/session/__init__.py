@@ -1,4 +1,4 @@
-"""Session persistence: store, resume, and search conversation history."""
+"""Persist, resume, and search session history."""
 
 from kohakuterrarium.session.store import SessionStore
 

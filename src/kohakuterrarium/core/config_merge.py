@@ -51,7 +51,6 @@ def merge_configs(base_data: dict[str, Any], child_data: dict[str, Any]) -> dict
     drop_prompt_chain = "system_prompt_file" in no_inherit or prompt_mode == "replace"
     drop_inline_prompt = "system_prompt" in no_inherit or prompt_mode == "replace"
 
-    # Seed the result from base, dropping anything the child has opted out of.
     result: dict[str, Any] = {}
     for k, v in base_data.items():
         if k in no_inherit:
@@ -70,9 +69,11 @@ def merge_configs(base_data: dict[str, Any], child_data: dict[str, Any]) -> dict
 
     for key, value in child_data.items():
         if key in ("base_config", "no_inherit", "prompt_mode"):
-            continue  # Metadata, don't propagate
+            # Merge directives control inheritance but are not runtime config.
+            continue
         if value is None:
-            continue  # Only override if child explicitly sets a value
+            # None means unspecified rather than an explicit override.
+            continue
 
         identity = _LIST_IDENTITY.get(key)
         if (
@@ -85,12 +86,10 @@ def merge_configs(base_data: dict[str, Any], child_data: dict[str, Any]) -> dict
         elif (
             isinstance(value, dict) and key in result and isinstance(result[key], dict)
         ):
-            # Shallow merge for dicts.
             merged_dict = dict(result[key])
             merged_dict.update(value)
             result[key] = merged_dict
         else:
-            # Scalars and lists without identity: child replaces base.
             result[key] = value
     return result
 

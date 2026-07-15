@@ -1,4 +1,4 @@
-"""Worker sub-agent - general-purpose implementation worker."""
+"""Built-in read-write implementation sub-agent configuration."""
 
 from kohakuterrarium.builtins.subagents._prompt_loader import render_subagent_prompt
 from kohakuterrarium.modules.subagent.config import SubAgentConfig

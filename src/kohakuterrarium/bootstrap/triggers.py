@@ -1,15 +1,8 @@
 """
-Trigger initialization factory.
+Create configured triggers and register them without starting them.
 
-Creates trigger instances from agent config and registers them
-with the trigger manager.
-
-Bare-name trigger types (anything that is not ``timer``/``context``/
-``channel``/``custom``/``package``) are looked up in installed package
-manifests via :func:`kohakuterrarium.packages.resolve_package_trigger`.
-This wires the ``triggers:`` entries of ``kohaku.yaml`` through bootstrap
-so users can reference packaged triggers by short name instead of
-spelling out ``module:`` + ``class:`` in every creature config.
+Unknown type names resolve through installed package manifests, allowing
+packaged triggers to be referenced without repeating module and class paths.
 """
 
 from datetime import datetime
@@ -36,11 +29,7 @@ def create_trigger(
     session: Session | None,
     loader: ModuleLoader | None,
 ) -> BaseTrigger | None:
-    """Create a single trigger from a trigger config entry.
-
-    Handles builtin types (timer, context, channel) and custom/package
-    triggers. Returns None if the trigger could not be created.
-    """
+    """Create one built-in, custom, or package-resolved trigger."""
     match trigger_config.type:
         case "timer":
             return TimerTrigger(
@@ -88,8 +77,7 @@ def create_trigger(
                 return None
 
         case _:
-            # Bare name — try to resolve through installed package manifests
-            # before giving up. Mirrors the `io:` lookup in `bootstrap/io.py`.
+            # Bare names resolve through package manifests before being rejected.
             package_match = resolve_package_trigger(trigger_config.type)
             if package_match is None:
                 logger.warning("Unknown trigger type", trigger_type=trigger_config.type)
@@ -126,22 +114,16 @@ def init_triggers(
     session: Session | None,
     loader: ModuleLoader | None,
 ) -> None:
-    """Register all triggers from agent config into the trigger manager.
-
-    Creates triggers and registers them (without starting) so they
-    can be started later via trigger_manager.start_all().
-    """
+    """Register configured triggers for later manager-controlled startup."""
     for trigger_config in config.triggers:
         trigger = create_trigger(trigger_config, session, loader)
         if trigger:
-            # Prefer an explicit user-provided name as the stable trigger_id
-            # (used for inheritance identity, resume, /stop, etc.). Fall back
-            # to the auto-generated shape for triggers without a name.
+            # Explicit names provide stable identity across inheritance and resume.
             trigger_id = (
                 trigger_config.name
                 or f"{trigger_config.type}_{trigger_config.class_name or 'builtin'}"
             )
-            # Use sync add via internal dict (not started yet)
+            # Direct registration is safe because startup occurs later.
             trigger_manager._triggers[trigger_id] = trigger
             trigger_manager._created_at[trigger_id] = datetime.now()
             logger.debug(

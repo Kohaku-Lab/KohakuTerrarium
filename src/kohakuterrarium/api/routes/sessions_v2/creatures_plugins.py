@@ -1,9 +1,4 @@
-"""Per-creature plugin routes — list + toggle.
-
-Accepts the display ``name`` or the engine's ``creature_id`` in the
-URL slot via :func:`resolve_creature_id` — the frontend stores
-names, so without this resolver every plugin-panel hit 404s.
-"""
+"""List and toggle plugins for a session-scoped creature."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,13 +11,7 @@ router = APIRouter()
 
 
 class TogglePluginRequest(BaseModel):
-    """Optional body for the toggle endpoint.
-
-    Frontend posts ``{"enabled": <bool>}``.  Absent body or an empty
-    object defaults to ``True`` — matches the legacy behaviour where
-    the route had no body parser at all and effectively flipped the
-    plugin on.
-    """
+    """Select the plugin state, defaulting to enabled for compatibility."""
 
     enabled: bool = True
 

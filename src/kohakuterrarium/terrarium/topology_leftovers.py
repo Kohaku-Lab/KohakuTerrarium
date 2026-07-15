@@ -1,9 +1,7 @@
 """Unresolved-replay-remnant bookkeeping shared by snapshot + merge/split.
 
-Leaf module: ``topology_snapshot`` (imports channels) and
-``session_coord`` (imported by channels) both need these helpers, so
-they must not live in either — importing across that pair closes a
-runtime import cycle.
+This leaf module keeps shared helpers out of ``topology_snapshot`` and
+``session_coord``, which would otherwise form a runtime import cycle.
 """
 
 import copy

@@ -1,8 +1,5 @@
 """
-Commands module - framework commands for controller.
-
-Commands are special actions the legacy/custom text-format controller
-path can use to interact with the framework.
+Public command types for legacy text-format controller integration.
 """
 
 from kohakuterrarium.commands.base import (
@@ -19,12 +16,10 @@ from kohakuterrarium.commands.read import (
 )
 
 __all__ = [
-    # Protocol and base
     "Command",
     "BaseCommand",
     "CommandResult",
     "parse_command_args",
-    # Implementations
     "ReadCommand",
     "InfoCommand",
     "JobsCommand",

@@ -1,31 +1,4 @@
-"""APP extension adapter for ``terrarium.attach`` — WS-frame proxy.
-
-Subclass of :class:`WSProxyAdapter` (the unified ws-forwarder in
-``laboratory/ws_proxy.py``).  Mirrors the host-side
-``studio.attach.io.attach_io`` behaviour over the Lab transport: the
-controller's frontend WebSocket gets the FULL event stream from a
-remote creature — tokens, tool calls, sub-agent events, channel
-messages, processing markers, interactive UI events.
-
-Lifecycle for a single attach session (``stream_id``):
-
-1. Controller opens the lab stream via ``terrarium.attach.start``
-   with body ``{creature_id, session_id}``.  This adapter resolves
-   the creature, attaches a :class:`StreamOutput` to its
-   ``output_router``, subscribes siblings in the same graph, and
-   registers shared-channel callbacks.  All four sinks pump frames
-   into the same ``WSFrameSink``.  Returns the initial
-   ``session_info`` frame under the ``setup`` key so the controller
-   forwards it BEFORE the first streamed frame.
-2. Controller forwards every WS frame to
-   ``terrarium.attach.input``; a consumer task on this side awaits
-   ``sink.receive_json()`` and dispatches by ``frame.type``:
-   ``input`` → fire-and-forget ``agent.inject_input``, ``ui_reply`` →
-   ``output_router.submit_reply_with_status`` + echo ``ui_reply_ack``,
-   ``ui_dismiss`` → noop.
-3. ``terrarium.attach.cancel`` (or RemoteStream.aclose) tears down
-   every sink, removes channel callbacks, and stops the consumer.
-"""
+"""Bridge remote creature attach sessions to WebSocket frame streams."""
 
 import asyncio
 import time
@@ -124,7 +97,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
         primary = StreamOutput(creature.name, queue_shim, log, agent=agent)  # type: ignore[arg-type]
         agent.output_router.add_secondary(primary)
 
-        # Sibling subscribe — mirrors the host attach for terrarium graphs.
+        # A graph attach includes sibling output so the remote view matches a local attach.
         sibling_modules: list[tuple[Any, Any]] = []
         if creature.graph_id and creature.graph_id in self._engine._topology.graphs:
             graph = self._engine._topology.graphs[creature.graph_id]
@@ -141,7 +114,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                 sibling.agent.output_router.add_secondary(sib_module)
                 sibling_modules.append((sibling.agent, sib_module))
 
-        # Channel callbacks + history replay.
+        # Replay precedes live delivery so an attach starts with a coherent channel view.
         channel_cbs = self._register_channel_callbacks(creature.graph_id, sink)
         self._replay_channel_history(creature.graph_id, sink)
 
@@ -169,10 +142,6 @@ class TerrariumAttachAdapter(WSProxyAdapter):
         session = self._sessions.get(stream_id)
         if session is not None:
             session.teardown()
-
-    # ------------------------------------------------------------------
-    # Consumer — pulls inbound frames from the sink and dispatches.
-    # ------------------------------------------------------------------
 
     async def _consume_input(
         self,
@@ -227,10 +196,6 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                 )
         except asyncio.CancelledError:
             raise
-
-    # ------------------------------------------------------------------
-    # Helpers
-    # ------------------------------------------------------------------
 
     def _register_channel_callbacks(
         self, graph_id: str, sink: WSFrameSink
@@ -316,11 +281,9 @@ class TerrariumAttachAdapter(WSProxyAdapter):
         event_id = frame.get("event_id")
         if not isinstance(event_id, str) or not event_id:
             return
-        # Resolve the target creature the SAME way an input frame does — a
-        # non-bound SIBLING may have raised the prompt, so submitting to the
-        # bound agent's router only would leave the sibling's pending Future
-        # unresolved and hang its interactive tool forever (UXI-09 lab-path
-        # fix). Fall back to the bound creature when target is absent/unknown.
+        # Replies must reach the creature that raised the prompt; otherwise its
+        # pending interaction remains unresolved. Unknown targets fall back to
+        # the attached creature for compatibility with untargeted clients.
         target = creature
         target_name = (frame.get("target") or "").strip()
         if target_name and target_name != creature.name:

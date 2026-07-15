@@ -5,11 +5,8 @@ from textual.widgets import Static
 
 from kohakuterrarium.builtins.tui.widgets.helpers import _fmt_tokens
 
-# ── Status Panels ───────────────────────────────────────────────
-
-
 class RunningPanel(Static):
-    """Live list of running tools/sub-agents. Click to cancel or promote."""
+    """Display running jobs and emit cancellation or promotion requests."""
 
     class CancelRequested(Message):
         def __init__(self, job_id: str, job_name: str) -> None:
@@ -18,7 +15,7 @@ class RunningPanel(Static):
             self.job_name = job_name
 
     class PromoteRequested(Message):
-        """Posted when the user clicks [→bg] to promote a task."""
+        """Request background promotion for a running task."""
 
         def __init__(self, job_id: str) -> None:
             super().__init__()
@@ -38,13 +35,13 @@ class RunningPanel(Static):
     }
     """
 
-    # Threshold (seconds) before showing [→bg] indicator
+    # Promotion appears only after a task has run long enough to benefit from it.
     PROMOTE_THRESHOLD = 1.0
 
     def __init__(self, **kwargs):
         super().__init__("(idle)", **kwargs)
         self.border_title = "Running"
-        # (label, start_time, promotable)
+        # Values carry label, start time, and whether the job supports promotion.
         self._items: dict[str, tuple[str, float, bool]] = {}
         self._ordered_ids: list[str] = []
 
@@ -74,7 +71,7 @@ class RunningPanel(Static):
         self._ordered_ids = list(self._items.keys())
 
     def on_click(self, event) -> None:
-        """Click handler: right side [→bg] = promote, left side = cancel."""
+        """Promote eligible right-side clicks; cancel all other clicks."""
         if not self._items:
             return
 
@@ -89,7 +86,6 @@ class RunningPanel(Static):
         label, start, promotable = self._items[job_id]
         elapsed = time.monotonic() - start
 
-        # Right side of the line → promote (if eligible)
         if promotable and elapsed >= self.PROMOTE_THRESHOLD and event.x > 35:
             self.post_message(self.PromoteRequested(job_id))
         else:
@@ -171,12 +167,7 @@ class SessionInfoPanel(Static):
         self._refresh()
 
     def set_model(self, model: str) -> None:
-        """Partial update — only the ``Model:`` line.
-
-        Used by the per-tab model registry so switching tabs (or a
-        creature switching its own model) doesn't clobber the
-        session-id / agent-name lines.
-        """
+        """Update the model without replacing session identity details."""
         self._model = model
         self._refresh()
 
@@ -196,7 +187,7 @@ class SessionInfoPanel(Static):
     def restore_usage(
         self, total_in: int, total_out: int, last_prompt: int, total_cached: int = 0
     ) -> None:
-        """Set cumulative totals from session history (on resume)."""
+        """Restore cumulative token totals from session history."""
         self._input_tokens = total_in
         self._output_tokens = total_out
         self._cached_tokens = total_cached
@@ -204,7 +195,7 @@ class SessionInfoPanel(Static):
         self._refresh()
 
     def add_tokens(self, count: int) -> None:
-        """Backward compat: treat as total input tokens."""
+        """Add legacy token counts to the input total."""
         self._input_tokens += count
         self._refresh()
 
@@ -214,7 +205,7 @@ class SessionInfoPanel(Static):
         self._refresh()
 
     def set_compact_threshold(self, threshold_tokens: int) -> None:
-        """Backward compat — prefer set_context_limits()."""
+        """Set the compaction threshold for compatibility callers."""
         self._compact_threshold = threshold_tokens
         self._refresh()
 
@@ -257,7 +248,7 @@ class SessionInfoPanel(Static):
 
 
 class TerrariumPanel(Static):
-    """Creature and channel overview for terrarium mode."""
+    """Display creatures and channels in terrarium mode."""
 
     DEFAULT_CSS = """
     TerrariumPanel {
@@ -277,11 +268,7 @@ class TerrariumPanel(Static):
         self._channels: list[dict] = []
 
     def set_topology(self, creatures: list[dict], channels: list[dict]) -> None:
-        """Update creature/channel display.
-
-        creatures: [{"name": "swe", "running": True, "listen": [...], "send": [...]}]
-        channels: [{"name": "tasks", "type": "queue", "description": "..."}]
-        """
+        """Replace the displayed creature and channel topology."""
         self._creatures = creatures
         self._channels = channels
         self._refresh()
@@ -309,11 +296,8 @@ class TerrariumPanel(Static):
         self.update("\n".join(lines) if lines else "(no topology)")
 
 
-# ── Load Older Button ──────────────────────────────────────────
-
-
 class LoadOlderButton(Static):
-    """Clickable button to load earlier messages that were culled."""
+    """Request a batch of hidden earlier messages."""
 
     DEFAULT_CSS = """
     LoadOlderButton {

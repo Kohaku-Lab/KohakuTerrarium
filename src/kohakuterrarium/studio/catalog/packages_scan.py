@@ -1,34 +1,12 @@
 """Canonical creature/terrarium catalog scanner.
 
-This module is the single source of truth for "what creatures and
-terrariums are visible to this kt install?". Phase 1 of the
-studio-cleanup refactor (P1) collapses four previously-duplicated
-scanners into ``scan_catalog()``:
+Defines the shared discovery rules for creatures and terrariums visible to the
+current installation. Installed package manifests and optional local directories
+are projected into common :class:`CatalogEntry` records, from which CLI and HTTP
+adapters derive their required payload shapes.
 
-- ``cli.packages.list_cli`` — printed package summary + local creatures.
-- ``api.routes.registry._scan_all_configs`` — installed packages +
-  local cwd creatures/terrariums for the registry browser.
-- ``api.routes.configs._scan_creature_configs`` /
-  ``_scan_terrarium_configs`` — configured base dirs only.
-- ``api.studio.routes.packages`` — installed packages summary.
-
-All four readers project from ``CatalogEntry`` instances produced
-here. The dataclass intentionally carries every field any caller has
-historically wanted; projection helpers below produce the legacy
-shapes 1:1 so HTTP / CLI behavior is preserved verbatim.
-
-Scanning is two-phase:
-
-1. ``list_packages()`` from the low-tier ``packages/`` library walks
-   every installed kt package (handles ``.link`` editable installs).
-   For each package, every entry under ``creatures/`` and
-   ``terrariums/`` is parsed.
-2. Optional ``base_dirs`` (e.g. ``cwd/creatures``) are scanned the
-   same way and tagged ``source="local"``.
-
-Path-deduplication uses the resolved absolute path of the config
-directory, so a package + local-symlink combo never produces two
-entries.
+Resolved absolute paths are the identity boundary, preventing editable package
+links or overlapping local directories from producing duplicate entries.
 """
 
 import time
@@ -41,11 +19,8 @@ from kohakuterrarium.core.config import load_agent_config
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
 
-# In-memory TTL cache for the configured-base-dir scanners. The
-# Dashboard's "+ Creature" / "+ Terrarium" modals call these on every
-# open; without the cache, every click re-reads + re-parses every
-# YAML on disk. 10s is short enough that newly-scaffolded creatures
-# show up promptly without forcing the user to refresh.
+# Repeated dashboard discovery should not reparse every YAML file. A short TTL
+# limits that cost while explicit mutation paths invalidate caches immediately.
 _SCAN_CACHE_TTL = 10.0
 _creatures_cache: tuple[list[dict], float, tuple[str, ...]] | None = None
 _terrariums_cache: tuple[list[dict], float, tuple[str, ...]] | None = None
@@ -56,11 +31,7 @@ def _cache_key(base_dirs: list[Path]) -> tuple[str, ...]:
 
 
 def invalidate_scan_caches() -> None:
-    """Force the next ``scan_*_in_dirs`` call to re-read disk.
-
-    Call after creating / deleting / renaming a creature or terrarium
-    on disk so the catalog reflects the change immediately.
-    """
+    """Invalidate cached directory scans after catalog-affecting mutations."""
     global _creatures_cache, _terrariums_cache
     _creatures_cache = None
     _terrariums_cache = None
@@ -68,28 +39,19 @@ def invalidate_scan_caches() -> None:
 
 @dataclass
 class CatalogEntry:
-    """A single discovered creature or terrarium.
-
-    Carries every field historically projected by either the legacy
-    ``/api/registry``, ``/api/configs/*``, ``/api/studio/packages*``,
-    or the CLI ``kt list`` formatter.
-    """
+    """Canonical discovery record from which consumer payloads are projected."""
 
     name: str
-    type: str  # "creature" | "terrarium"
+    type: str  # Restricted to the two catalog entity kinds.
     path: Path
     description: str = ""
     model: str = ""
     tools: list[str] = field(default_factory=list)
-    creatures: list[str] = field(default_factory=list)  # terrarium-only
-    source: str = ""  # package name or "local"
+    creatures: list[str] = field(default_factory=list)  # Populated for terrariums.
+    source: str = ""  # Originating package name or the local workspace.
 
     def as_registry_dict(self) -> dict:
-        """Shape historically returned by ``/api/registry``.
-
-        ``_scan_all_configs`` callers expect this shape: rich detail
-        plus a ``source`` field tagging the origin.
-        """
+        """Project the rich registry payload, including discovery origin."""
         d: dict = {
             "name": self.name,
             "type": self.type,
@@ -105,25 +67,11 @@ class CatalogEntry:
 
 
 def manifest_entry_rel_path(entry, kind: str) -> str | None:
-    """Relative path of a manifest ``creatures:`` / ``terrariums:`` entry.
+    """Normalize supported manifest entry forms to a relative path.
 
-    ``kohaku.yaml`` accepts three spellings for these lists (all of
-    which appear in docs / shipped packages):
-
-    - ``{name: x, path: creatures/x}`` — canonical (kt-biome style).
-    - ``{name: x}`` — docs shorthand; the folder is ``<kind>/<x>``
-      by convention (``docs/en/guides/packages.md``).
-    - ``"creatures/x"`` / ``"x"`` — bare string; treated as a path
-      when it contains ``/``, else as a name.
-
-    Returns ``None`` for entries that carry neither a usable path nor
-    a name — callers skip those instead of crashing the whole scan
-    (a single malformed entry must not 500 the catalog endpoints).
-
-    Args:
-        entry: One element of the manifest list (dict or str).
-        kind: ``"creatures"`` or ``"terrariums"`` — the conventional
-            folder used to derive a path from a bare name.
+    Entries may provide an explicit path, a name resolved under the conventional
+    kind directory, or a bare string interpreted as either form. Malformed entries
+    return ``None`` so one bad declaration cannot invalidate the entire catalog.
     """
     if isinstance(entry, dict):
         rel = entry.get("path")
@@ -139,11 +87,7 @@ def manifest_entry_rel_path(entry, kind: str) -> str | None:
 
 
 def _build_package_root_map() -> dict[str, str]:
-    """Return ``{resolved_pkg_root_str: pkg_name}`` for installed packages.
-
-    Used by ``_to_ref`` to convert a creature/terrarium absolute path
-    back into an ``@package/...`` reference.
-    """
+    """Map resolved package roots to names for portable reference rendering."""
     mapping: dict[str, str] = {}
     if not packages_dir().exists():
         return mapping
@@ -155,11 +99,9 @@ def _build_package_root_map() -> dict[str, str]:
 
 
 def to_ref(path: Path, package_roots: dict[str, str]) -> str:
-    """Convert absolute ``path`` to ``@pkg/...`` if inside a package.
+    """Render package-contained paths as portable ``@pkg/...`` references.
 
-    Returns the absolute path string for paths outside any package.
-    Mirrors ``api.routes.configs._to_ref`` byte-for-byte so the URL
-    payload layout is unchanged.
+    Paths outside installed packages remain filesystem paths.
     """
     resolved = str(path.resolve())
     for root, name in package_roots.items():
@@ -169,17 +111,11 @@ def to_ref(path: Path, package_roots: dict[str, str]) -> str:
     return str(path)
 
 
-# ---------------------------------------------------------------------------
-# Per-config parsing — kept verbatim from the four legacy scanners.
-# ---------------------------------------------------------------------------
-
-
 def _parse_creature_detail(config_dir: Path) -> CatalogEntry | None:
-    """Parse a creature config dir and return a ``CatalogEntry`` or ``None``.
+    """Parse a creature directory, falling back to basic YAML metadata.
 
-    Verbatim port of ``api.routes.registry._parse_creature_detail`` —
-    full ``load_agent_config`` first, fallback to raw YAML if that
-    fails.
+    Full config loading provides normalized model and tool data. Raw YAML keeps a
+    partially valid creature discoverable when deeper validation fails.
     """
     config_file = config_dir / "config.yaml"
     if not config_file.exists():
@@ -199,8 +135,9 @@ def _parse_creature_detail(config_dir: Path) -> CatalogEntry | None:
             tools=tools_list,
         )
     except Exception as e:
-        # Fallback: parse raw YAML for basic info.
-        _ = e  # full config parse failed, try raw YAML
+        # Discovery tolerates validation failures when basic manifest metadata is
+        # still readable.
+        _ = e  # Retain the broad failure for the fallback boundary.
         try:
             data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
             return CatalogEntry(
@@ -216,15 +153,12 @@ def _parse_creature_detail(config_dir: Path) -> CatalogEntry | None:
                 ],
             )
         except Exception as e:
-            _ = e  # config unreadable, skip
+            _ = e  # An unreadable config is not a discoverable entry.
             return None
 
 
 def _parse_terrarium_detail(config_dir: Path) -> CatalogEntry | None:
-    """Parse a terrarium config dir and return a ``CatalogEntry`` or ``None``.
-
-    Verbatim port of ``api.routes.registry._parse_terrarium_detail``.
-    """
+    """Parse a terrarium directory into a catalog entry when readable."""
     config_file = config_dir / "terrarium.yaml"
     if not config_file.exists():
         config_file = config_dir / "terrarium.yml"
@@ -244,17 +178,14 @@ def _parse_terrarium_detail(config_dir: Path) -> CatalogEntry | None:
             creatures=creature_names,
         )
     except Exception as e:
-        _ = e  # config unreadable, skip
+        _ = e  # An unreadable terrarium is not a discoverable entry.
         return None
 
 
 def _parse_creature_minimal(config_dir: Path) -> dict:
-    """Raw-YAML-only creature parse used by ``api.routes.configs``.
+    """Read minimal creature metadata without validating the full agent config.
 
-    Returns a minimal ``{name, description}`` dict (no model/tools);
-    the configs route historically does not load the full agent
-    config, only the raw YAML. Falls back to the directory name on
-    parse failure (also verbatim from the legacy scanner).
+    The directory name is a stable fallback when YAML is absent or malformed.
     """
     config_file = config_dir / "config.yaml"
     if not config_file.exists():
@@ -268,7 +199,7 @@ def _parse_creature_minimal(config_dir: Path) -> dict:
             "description": data.get("description", ""),
         }
     except Exception as e:
-        _ = e  # fallback: creature config parse failed, return minimal entry
+        _ = e  # Preserve discoverability through the directory-name fallback.
         return {"name": config_dir.name, "description": ""}
 
 
@@ -287,25 +218,15 @@ def _parse_terrarium_minimal(config_dir: Path) -> dict:
             "description": terrarium.get("description", ""),
         }
     except Exception as e:
-        _ = e  # fallback: terrarium config parse failed, return minimal entry
+        _ = e  # Preserve discoverability through the directory-name fallback.
         return {"name": config_dir.name, "description": ""}
 
 
-# ---------------------------------------------------------------------------
-# Scanners
-# ---------------------------------------------------------------------------
-
-
 def scan_catalog() -> list[CatalogEntry]:
-    """Return every visible creature + terrarium across packages and cwd.
+    """Return visible package and workspace creatures and terrariums.
 
-    Verbatim merge of:
-    - ``list_packages()`` (handles ``.link`` editable installs).
-    - ``cwd/creatures`` and ``cwd/terrariums``.
-
-    Resolved paths are de-duplicated, so a package + symlinked-local
-    pair never produces two entries. Entries with empty ``name``
-    (broken configs) are filtered, matching the legacy behavior.
+    Resolved-path deduplication collapses editable links and overlapping local
+    scans. Entries without a usable name are excluded.
     """
     results: list[CatalogEntry] = []
     seen_paths: set[str] = set()
@@ -330,7 +251,7 @@ def scan_catalog() -> list[CatalogEntry]:
             entry.source = source
             results.append(entry)
 
-    # Scan installed packages (handles .link editable installs)
+    # Manifest declarations define package visibility, including editable installs.
     for pkg in list_packages():
         pkg_path = Path(pkg["path"])
         pkg_name = pkg["name"]
@@ -343,7 +264,7 @@ def scan_catalog() -> list[CatalogEntry]:
             if rel:
                 _add_terrarium(pkg_path / rel, source=pkg_name)
 
-    # Scan local project directories
+    # Conventional workspace directories supplement installed package entries.
     cwd = Path.cwd()
     for creatures_dir in [cwd / "creatures"]:
         if creatures_dir.is_dir():
@@ -357,39 +278,17 @@ def scan_catalog() -> list[CatalogEntry]:
                 if child.is_dir():
                     _add_terrarium(child, source="local")
 
-    # Filter out entries with empty names (broken configs)
     return [r for r in results if r.name]
 
 
 def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
-    """Discover creature configs for the ``/api/configs/creatures`` endpoint.
+    """Discover creature configs from package manifests and extra directories.
 
-    Returns the legacy ``{name, path, description}`` shape; ``path``
-    is rendered as an ``@pkg/...`` ref when the directory lives
-    inside a package, matching ``api.routes.configs._to_ref``.
-
-    Discovery now matches ``scan_catalog`` exactly: every installed
-    package's manifest-declared creatures (read at request time via
-    ``list_packages()``) PLUS any extra ``base_dirs`` the caller
-    passes in (env-var overrides + cwd creature dirs, when wired).
-
-    Earlier versions of this scanner only walked ``base_dirs`` —
-    which were captured ONCE at API-server boot via
-    ``set_creatures_dirs``.  On Android the launcher never wires the
-    base dirs (packages can only be installed at runtime via the
-    frontend, so there's nothing to capture at boot), and on desktop
-    a package installed mid-session never showed up in the New-
-    creature modal because ``_creatures_dirs`` was frozen at startup.
-    Driving discovery from ``list_packages()`` at request time fixes
-    both — the modal now reflects whatever the catalog reflects, with
-    no boot-time wiring required.
-
-    Cached for ``_SCAN_CACHE_TTL`` seconds keyed by the resolved
-    base-dir tuple — the dashboard quick-start modal otherwise pays
-    the YAML-parse cost every time it opens.  The 10s TTL is short
-    enough that newly-scaffolded creatures show up promptly; the
-    package install / uninstall / update ops explicitly call
-    :func:`invalidate_scan_caches` for immediate visibility.
+    Package discovery occurs at call time so runtime installs become visible
+    without restart. Paths inside packages are rendered as ``@pkg/...`` refs, and
+    resolved-path deduplication handles overlapping roots. Results are cached
+    briefly by directory tuple; mutation paths invalidate the cache for immediate
+    consistency.
     """
     global _creatures_cache
     key = _cache_key(base_dirs)
@@ -404,8 +303,8 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
     package_roots = _build_package_root_map()
 
     def _emit(config_dir: Path) -> None:
-        # Resolved-path dedup so a base_dir that overlaps a package
-        # directory doesn't produce two entries for the same creature.
+        # Resolved paths unify package declarations, symlinks, and overlapping
+        # configured roots under one identity.
         try:
             resolved = str(config_dir.resolve())
         except OSError:
@@ -427,9 +326,8 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
             }
         )
 
-    # 1. Manifest-declared creatures from every installed package.
-    #    This is the source of truth ``scan_catalog`` uses; matching
-    #    it here keeps the two endpoints from diverging.
+    # Package manifests are the authoritative package discovery source shared
+    # with the full catalog.
     for pkg in list_packages():
         pkg_path = Path(pkg["path"])
         for c in pkg.get("creatures", []):
@@ -438,9 +336,8 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
                 continue
             _emit(pkg_path / rel)
 
-    # 2. Configured base dirs — env-var overrides + cwd/creatures,
-    #    when the API-server boot path wired them.  Each subdir of a
-    #    base_dir is treated as a creature config dir.
+    # Additional roots support workspace and environment-specific discovery;
+    # each direct child is a candidate creature directory.
     for base_dir in base_dirs:
         if not base_dir.is_dir():
             continue
@@ -453,15 +350,10 @@ def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:
 
 
 def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
-    """Discover terrarium configs for the ``/api/configs/terrariums`` endpoint.
+    """Discover terrarium configs from package manifests and extra directories.
 
-    Mirror of :func:`scan_creatures_in_dirs` — see that function's
-    docstring for the rationale.  Discovery walks every installed
-    package's manifest-declared terrariums via ``list_packages()``
-    plus any extra ``base_dirs`` the caller supplies.
-
-    Cached for ``_SCAN_CACHE_TTL`` seconds; the package install /
-    uninstall / update ops bust the cache for immediate visibility.
+    This follows the same current-install visibility, path rendering,
+    deduplication, and cache invalidation rules as creature discovery.
     """
     global _terrariums_cache
     key = _cache_key(base_dirs)
@@ -497,7 +389,7 @@ def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
             }
         )
 
-    # 1. Manifest-declared terrariums from every installed package.
+    # Package manifests are the authoritative package discovery source.
     for pkg in list_packages():
         pkg_path = Path(pkg["path"])
         for t in pkg.get("terrariums", []):
@@ -506,7 +398,7 @@ def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
                 continue
             _emit(pkg_path / rel)
 
-    # 2. Configured base dirs (env-var overrides + cwd/terrariums).
+    # Additional roots supplement package discovery with local terrariums.
     for base_dir in base_dirs:
         if not base_dir.is_dir():
             continue
@@ -519,10 +411,7 @@ def scan_terrariums_in_dirs(base_dirs: list[Path]) -> list[dict]:
 
 
 def dedupe_dirs(dirs: list[str]) -> list[Path]:
-    """Resolve + deduplicate a list of directory paths.
-
-    Mirrors the dedup logic in ``api.routes.configs.set_config_dirs``.
-    """
+    """Resolve directory paths and preserve the first occurrence of each."""
     seen: set[str] = set()
     out: list[Path] = []
     for d in dirs:

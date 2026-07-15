@@ -19,22 +19,12 @@ from rich.console import Console, Group, RenderableType
 from rich.panel import Panel
 from rich.text import Text
 
-# How many rows the picker shows inside its panel. Enough to be useful,
-# small enough that the panel doesn't eat the whole terminal even with a
-# long preset list. Cursor auto-scrolls the viewport to keep itself in
-# range.
+# Bound panel height while keeping the cursor inside a scrolling viewport.
 VISIBLE_ROWS = 12
 
 
 class ModelPicker:
-    """Stateful model picker renderable.
-
-    The RichCLIApp holds a single instance. When `open()` is called,
-    `visible` flips True and the app routes rendering through
-    `render(width)` instead of the normal live region content. Key
-    events are delivered via `handle_key(name)` which returns True if
-    the event was consumed.
-    """
+    """Select a model preset and its variation options."""
 
     def __init__(
         self,
@@ -46,28 +36,17 @@ class ModelPicker:
         self.visible = False
         self._entries: list[dict[str, Any]] = []
         self._cursor = 0
-        # Per-model variation state: keyed by model name → group → option.
-        # Initialised from each model's `selected_variations` at open().
         self._selections: dict[str, dict[str, str]] = {}
-        # Which variation group the Left/Right arrows cycle on the
-        # currently-selected row. Empty string means "none".
         self._group_cursor: dict[str, int] = {}
-
-    # ── Lifecycle ──
 
     def open(self) -> None:
         self._entries = list(self._load())
-        # Selection state keyed by ``provider/name`` — bare names collide
-        # across providers under the (provider, name) hierarchy (e.g.
-        # ``gpt-5.4`` exists on codex, openai, openrouter and possibly a
-        # user's custom provider), so we need the full identifier as the
-        # dict key.
+        # Provider-qualified keys prevent collisions between same-named presets.
         self._selections = {
             self._entry_key(e): dict(e.get("selected_variations") or {})
             for e in self._entries
         }
         self._group_cursor = {self._entry_key(e): 0 for e in self._entries}
-        # Default cursor to current / default model when present.
         self._cursor = 0
         for i, e in enumerate(self._entries):
             if e.get("is_default"):
@@ -84,14 +63,8 @@ class ModelPicker:
     def close(self) -> None:
         self.visible = False
 
-    # ── Keyboard ──
-
     def handle_key(self, key: str) -> bool:
-        """Process a key while the picker is open.
-
-        Returns True if the key was consumed (and the app should
-        invalidate to redraw).
-        """
+        """Handle a picker key and report whether it was consumed."""
         if not self.visible:
             return False
 
@@ -184,21 +157,11 @@ class ModelPicker:
         try:
             self._on_apply(selector)
         except Exception:
-            # The app's command dispatcher will surface errors via
-            # scrollback; swallowing here keeps the picker closure
-            # atomic even if the downstream command fails.
+            # Picker closure remains atomic; command dispatch reports downstream errors.
             pass
 
     def _compose_selector(self, entry: dict[str, Any]) -> str:
-        """Build the ``provider/name[@group=option,g2=o2]`` selector string.
-
-        The ``provider/`` prefix is mandatory under the (provider, name)
-        hierarchy: bare names are ambiguous when the same model is
-        available through multiple providers (``gpt-5.4`` → codex,
-        openai, openrouter, …), so the picker always emits the full
-        identifier. Mirrors the same shorthand used by the web
-        ModelSwitcher and ``resolve_controller_llm``.
-        """
+        """Build a provider-qualified selector with chosen variations."""
         identifier = self._entry_key(entry)
         key = identifier
         selection = self._selections.get(key) or {}
@@ -206,8 +169,6 @@ class ModelPicker:
         if not parts:
             return identifier
         return f"{identifier}@" + ",".join(parts)
-
-    # ── Rendering ──
 
     def render(self, width: int) -> str:
         """Render the picker to ANSI text of *width* columns."""
@@ -228,13 +189,7 @@ class ModelPicker:
         return buf.getvalue().rstrip("\n")
 
     def _viewport_bounds(self) -> tuple[int, int]:
-        """Return (start, end) indexes for the visible window.
-
-        We keep the cursor inside the window by scrolling whenever it
-        would leave. Without this, a 40-preset list would render all 40
-        rows inside the panel and eat the whole terminal on small
-        screens.
-        """
+        """Return viewport bounds that keep the cursor visible."""
         total = len(self._entries)
         if total <= VISIBLE_ROWS:
             return 0, total
@@ -305,8 +260,7 @@ class ModelPicker:
             name_style = "dim"
         line.append(entry["name"], style=name_style)
 
-        # Variation chips — chosen option shown with group label, current
-        # cycling group highlighted cyan.
+        # Highlight the variation group currently controlled by Left/Right.
         groups = self._current_group_names(entry)
         if groups:
             key = self._entry_key(entry)
@@ -327,8 +281,6 @@ class ModelPicker:
         if not entry.get("available", True):
             line.append("  (unavailable)", style="dim yellow")
         return line
-
-    # ── Introspection for tests ──
 
     def current_selector(self) -> str:
         current = self._current()

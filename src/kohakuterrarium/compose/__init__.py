@@ -4,19 +4,19 @@ Usage::
 
     from kohakuterrarium.compose import agent, factory, Pure
 
-    # Persistent agent (reused across calls)
+    # Persistent session with conversation carry-over.
     async with await agent("@kt-biome/creatures/swe") as swe:
         result = await (swe >> extract_code >> reviewer)(task)
 
-    # Ephemeral agent (fresh per call)
+    # Isolated session per invocation.
     specialist = factory(make_config("coder"))
     result = await specialist("implement this feature")
 
-    # Operators: >> (sequence), & (parallel), | (fallback), * (retry)
+    # Compose sequence, parallel work, fallback, and retries.
     pipeline = (expert * 2) | generalist
     results = await (analyst & writer & designer)(task)
 
-    # Iterate (loop with native control flow)
+    # Feed each result back until native control flow stops iteration.
     async for result in (writer >> reviewer).iterate(task):
         if "APPROVED" in result:
             break

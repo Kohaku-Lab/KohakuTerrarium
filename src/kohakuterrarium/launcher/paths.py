@@ -1,29 +1,8 @@
-"""Path constants the launcher reads / writes.
+"""Resolve launcher settings, runtime, release, and bundle paths.
 
-Centralised so test fixtures can monkey-patch ``CONFIG_HOME`` and the
-rest of the launcher consults the patched value. Every helper here is
-pure — no side effects on import.
-
-Layout (see ``plans/1.5.0-roadmap/06b-release-bundle-update/design.md`` §1)::
-
-    ~/.kohakuterrarium/
-    ├── app-settings.json
-    └── runtime/
-        ├── active                       pointer JSON
-        ├── .update.lock
-        ├── versions/
-        │   ├── 1.5.0/
-        │   ├── 1.5.1/
-        │   └── 1.5.0.partial/           in-flight extraction
-        └── manifest-cache/
-            ├── stable.json
-            ├── beta.json
-            └── nightly.json
-
-The briefcase shell additionally bundles one offline-fallback
-tarball at ``<bundle-root>/bundled-release/`` for first-launch without
-network. ``bundled_release_dir()`` probes the candidates and returns
-the first that contains a ``.tar.*`` artifact.
+Helpers are side-effect free and derive their results at call time so tests and
+embedded hosts can redirect configuration through ``KT_CONFIG_DIR``. Briefcase
+bundle probing returns the first candidate containing a release archive.
 """
 
 import os
@@ -32,11 +11,7 @@ from pathlib import Path
 
 
 def config_home() -> Path:
-    """Resolve the user's KohakuTerrarium config dir.
-
-    Honours ``KT_CONFIG_DIR`` so the launcher + the framework agree
-    on where settings + runtime state live.
-    """
+    """Return the shared launcher and framework configuration directory."""
     env = os.environ.get("KT_CONFIG_DIR")
     if env:
         return Path(env).expanduser()
@@ -44,12 +19,12 @@ def config_home() -> Path:
 
 
 def runtime_dir() -> Path:
-    """Where the launcher keeps its managed versions + lockfile."""
+    """Return the directory containing managed releases and launcher state."""
     return config_home() / "runtime"
 
 
 def versions_dir() -> Path:
-    """Parent dir for every installed version's side-by-side tree."""
+    """Return the parent directory for side-by-side release trees."""
     return runtime_dir() / "versions"
 
 
@@ -78,28 +53,16 @@ def lock_path() -> Path:
     return runtime_dir() / ".update.lock"
 
 
-# ── Legacy 06 layout (kept for migration detection only) ────────────
-
-
 def legacy_venv_dir() -> Path:
-    """Where 06 (pre-superseded) kept the managed venv. We probe for it
-    on startup and wipe if found — the 06 venv is broken on the
-    briefcase shell anyway (missing ``venv`` module)."""
+    """Return the obsolete managed-venv path used for migration cleanup."""
     return runtime_dir() / "venv"
 
 
-# ── Bundled-release probe ───────────────────────────────────────────
-
-
 def _candidate_bundled_release_dirs() -> list[Path]:
-    """Where the briefcase shell might have laid down the offline tarball.
+    """Return offline-release locations in first-match precedence order.
 
-    Candidate order (first-match-wins):
-
-    1. Sibling of ``kohakuterrarium/`` in the briefcase ``app/`` layout.
-    2. Sibling of ``sys.executable`` (briefcase windows layout).
-    3. Parent of ``sys.executable``'s directory (briefcase macOS legacy).
-    4. Repo root for dev installs that ran the build helper locally.
+    Candidates cover the Briefcase application layout, executable-relative
+    Windows and legacy macOS layouts, and the repository development layout.
     """
     here = Path(__file__).resolve()
     exe = Path(sys.executable)
@@ -112,33 +75,22 @@ def _candidate_bundled_release_dirs() -> list[Path]:
 
 
 def _has_release_tarball(path: Path) -> bool:
-    """A bundled-release dir is valid only when it carries at least one
-    ``kohakuterrarium-*.tar.*`` artifact."""
+    """Return whether a directory contains a framework release archive."""
     if not path.is_dir():
         return False
     return any(path.glob("kohakuterrarium-*.tar.*"))
 
 
 def bundled_release_dir() -> Path | None:
-    """Return the bundled-release directory inside the briefcase artifact,
-    or ``None`` for dev installs without one."""
+    """Return the first valid bundled-release directory, if one exists."""
     for candidate in _candidate_bundled_release_dirs():
         if _has_release_tarball(candidate):
             return candidate
     return None
 
 
-# ── Per-version layout ──────────────────────────────────────────────
-
-
 def site_packages_dir(version_root: Path) -> Path:
-    """The flat ``site-packages/`` tree inside a version directory.
-
-    This is the only directory the launcher cares about at exec time —
-    it points ``PYTHONPATH`` at this path and the bundled briefcase
-    Python imports the framework from there. No shim scripts, no
-    per-platform entrypoint trampolines.
-    """
+    """Return the release's flat site-packages directory used at handoff."""
     return version_root / "site-packages"
 
 
@@ -148,13 +100,10 @@ def manifest_path(version_root: Path) -> Path:
 
 
 def python_for(version_root: Path) -> Path:
-    """The Python interpreter the launcher uses for this version.
+    """Return the ABI-matched interpreter used for a release.
 
-    Always ``sys.executable`` — the briefcase-shell-provided Python is
-    the one bundled with this exact site-packages tree (ABI-matched at
-    build time by CI). ``version_root`` is unused but kept in the
-    signature for API symmetry / future-proofing if we ever decide to
-    ship per-version pythons.
+    Releases currently share the embedding interpreter, so ``version_root`` is
+    accepted for API symmetry but does not affect the result.
     """
     _ = version_root
     return Path(sys.executable)

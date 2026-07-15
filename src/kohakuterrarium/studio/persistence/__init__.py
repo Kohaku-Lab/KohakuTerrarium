@@ -1,1 +1,1 @@
-"""Studio persistence — saved sessions, resume, fork, history, viewer (Phase 0 skeleton)."""
+"""Studio persistence for saved sessions, resume, forks, history, and views."""

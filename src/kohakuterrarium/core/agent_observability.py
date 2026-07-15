@@ -1,9 +1,6 @@
 """Wave B observability wiring for the Agent class.
 
-Routes scratchpad writes and plugin hook timings through the
-``output_router`` so SessionOutput can persist them as
-``scratchpad_write`` / ``plugin_hook_timing`` events. Factored out of
-``core/agent.py`` so that file stays under the 1000-line hard cap.
+Route scratchpad writes and plugin timings through agent observability sinks.
 """
 
 from typing import Any
@@ -18,14 +15,7 @@ _TOKEN_KEYS = ("prompt_tokens", "completion_tokens", "cached_tokens", "total_tok
 
 
 def init_branch_state(agent: Any) -> None:
-    """Initialise per-agent branch lineage + per-turn token accumulator.
-
-    Lives here (instead of inline in ``Agent.__init__``) because the
-    agent constructor sits at the file-size hard cap. Side-effecting
-    by design: writes ``_turn_index``, ``_branch_id``,
-    ``_parent_branch_path``, ``_last_turn_text``, and
-    ``_turn_usage_accum`` onto the agent.
-    """
+    """Initialize output wiring, branch lineage, turn text, and token state."""
     agent._wiring_resolver = None
     agent._turn_index = 0
     agent._branch_id = 0
@@ -69,10 +59,9 @@ def wire_scratchpad_observer(agent: Any) -> None:
 
 
 def wire_plugin_hook_timing(agent: Any) -> None:
-    """Route plugin hook timings to the agent's output router AND
-    forward into the process-metrics hook.
+    """Route plugin hook timings to agent output and process metrics.
 
-    No-op when plugins / callback hook is missing.
+    No-op when the plugin callback hook is unavailable.
     """
     plugins = getattr(agent, "plugins", None)
     if plugins is None or not hasattr(plugins, "set_hook_timing_callback"):
@@ -109,18 +98,11 @@ def wire_plugin_hook_timing(agent: Any) -> None:
     plugins.set_hook_timing_callback(_observe)
 
 
-# ─── Wave G session_info helper ───────────────────────────────────────
-
-
 def build_session_info(agent: Any, tokens_view: str) -> dict[str, Any]:
-    """Build the ``session_info`` payload for :meth:`Agent.session_info`.
+    """Build agent and token-usage data for a ``session_info`` payload.
 
-    Kept in this module so ``core/agent.py`` stays under the 1000-line
-    hard cap while exposing the Wave G ``tokens_view`` knob. Returns
-    ``{"agent": <name>, "tokens": <own|all_loops payload>}``; when no
-    session store is attached the ``tokens`` slot falls back to the
-    shape expected by the chosen view (empty dict for ``"own"``, empty
-    list for ``"all_loops"``).
+    Without a session store, the token value retains the selected view's shape:
+    a mapping for ``"own"`` or a list for ``"all_loops"``.
     """
     info: dict[str, Any] = {"agent": agent.config.name}
     store = getattr(agent, "session_store", None)

@@ -16,6 +16,7 @@ from kohakuterrarium.utils.logging import configure_utf8_stdio
 
 
 def main() -> int:
+    """Run the standalone TUI entry point."""
     configure_utf8_stdio(log=True)
     args = parse_standalone_args(prog="kt-tui")
     if args.resume:

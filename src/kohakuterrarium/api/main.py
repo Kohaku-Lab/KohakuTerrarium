@@ -1,4 +1,4 @@
-"""Entry point for the KohakuTerrarium HTTP API server."""
+"""Construct and optionally run the KohakuTerrarium HTTP API application."""
 
 import uvicorn
 

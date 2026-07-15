@@ -1,34 +1,7 @@
-"""Permission-gate plugin — Phase B canonical exemplar.
+"""Require interactive approval before selected tool calls execute.
 
-Pauses tool execution and asks the user to approve via a Phase B
-``confirm`` :class:`OutputEvent`. Pluggable into any agent via the
-standard plugin loader (``plugins: [{name: permgate, options: {...}}]``
-in agent config).
-
-The plugin uses **only** the output-event bus + the standard plugin
-hook protocol. The bus has zero permgate-specific knowledge: this file
-is the textbook for "how to build a plugin that interacts with the
-user."
-
-Configuration::
-
-    plugins:
-      - name: permgate
-        options:
-          # List of tool names that require approval. Empty list →
-          # gate every tool. Special value ``"*"`` matches all tools.
-          gated_tools: ["bash", "write", "edit"]
-          # Tools that never require approval, even if listed in
-          # gated_tools or matched by a pattern. Useful for CI
-          # tools you want unconditionally allowed.
-          allowlist: ["read", "glob", "grep"]
-          # Seconds to wait for the user. Default ``None`` waits
-          # forever — humans walking away from the keyboard is the
-          # common case. Set a finite value for budget-sensitive
-          # workflows where blocking forever is unacceptable.
-          timeout_s: null
-          # Surface for the prompt: "modal" (urgent) or "chat".
-          surface: "modal"
+The plugin is implemented entirely through standard plugin hooks and the
+output-event bus. Empty ``gated_tools`` means every non-allowlisted tool.
 """
 
 from typing import Any
@@ -51,7 +24,7 @@ class PermGatePlugin(BasePlugin):
         "dialog. Default config gates every tool with a never-timeout "
         "wait — configure ``gated_tools`` / ``allowlist`` to scope it."
     )
-    priority = 100  # late — runs after argument-rewriting plugins
+    priority = 100  # Approval sees the arguments after earlier plugins rewrite them.
 
     @classmethod
     def option_schema(cls) -> dict[str, dict[str, Any]]:
@@ -107,13 +80,9 @@ class PermGatePlugin(BasePlugin):
             "surface": surface if surface in ("modal", "chat") else "modal",
         }
         self.refresh_options()
-        # Cache of tools the user has approved "always" in this
-        # session. The default flow ships only "allow once" / "deny",
-        # but extending to remember choices is a one-liner change.
+        # Session approvals intentionally disappear when the plugin instance ends.
         self._session_approvals: set[str] = set()
         self._context: PluginContext | None = None
-
-    # ── Options ──
 
     def refresh_options(self) -> None:
         """Re-derive cached fields from :attr:`options`."""
@@ -124,19 +93,15 @@ class PermGatePlugin(BasePlugin):
         surface = self.options.get("surface", "modal")
         self._surface = surface if surface in ("modal", "chat") else "modal"
 
-    # ── Lifecycle ──
-
     async def on_load(self, context: PluginContext) -> None:
         self._context = context
 
-    # ── Tool gating ──
-
     def _gates_tool(self, tool_name: str) -> bool:
-        """Return True if this tool must go through the gate."""
+        """Return whether a tool requires interactive approval."""
         if tool_name in self._allowlist:
             return False
         if not self._gated:
-            return True  # empty gated list = gate everything
+            return True  # An empty selection gates every non-allowlisted tool.
         if "*" in self._gated:
             return True
         return tool_name in self._gated
@@ -151,7 +116,7 @@ class PermGatePlugin(BasePlugin):
 
         ctx = self._context
         if ctx is None or ctx.host_agent is None:
-            # Plugin not yet bound — pass through silently.
+            # Lifecycle races must not block tools before a host can render consent.
             return None
 
         event_id = f"permgate_{uuid4().hex[:12]}"
@@ -188,8 +153,7 @@ class PermGatePlugin(BasePlugin):
         try:
             reply = await ctx.emit_and_wait(event, timeout_s=self._timeout_s)
         except Exception as e:
-            # Bus unavailable — fail safe: block the tool. A real
-            # deployment may want a fail-open mode behind a flag.
+            # Approval failures are fail-closed so tools never execute implicitly.
             raise PluginBlockError(
                 f"permgate: bus error while gating {tool_name}: {e}"
             ) from e
@@ -207,7 +171,7 @@ class PermGatePlugin(BasePlugin):
                 f"permgate: no response for {tool_name} within "
                 f"{timeout_label} — denied."
             )
-        # action ∈ {"deny", "cancel", "__superseded__", ...}
+        # Every non-allow action, including cancellation or supersession, denies.
         raise PluginBlockError(
             f"permgate: tool {tool_name} blocked by user ({action})."
         )

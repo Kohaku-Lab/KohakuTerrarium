@@ -88,8 +88,7 @@ def _resolve_base_config_path(base_config: str, child_dir: Path) -> Path | None:
        (walk up from child_dir until we find a directory containing 'creatures/')
     3. Otherwise resolve relative to child config's parent directory
     """
-    # Package reference: @package-name/creatures/swe
-    # Strip quotes first (YAML may quote the @ as "@...")
+    # YAML may quote the leading @ in package references.
     clean = base_config.strip('"').strip("'")
     if clean.startswith("@"):
         try:
@@ -101,9 +100,9 @@ def _resolve_base_config_path(base_config: str, child_dir: Path) -> Path | None:
             return None
 
     if base_config.startswith("creatures/"):
-        # Walk up from child_dir to find project root (containing creatures/)
         search = child_dir
-        for _ in range(10):  # safety limit
+        # Bound malformed lookups even on unusually deep directory trees.
+        for _ in range(10):
             candidate = search / base_config
             if candidate.is_dir():
                 return candidate
@@ -144,7 +143,6 @@ def _load_base_config_data(base_path: Path) -> dict[str, Any] | None:
     raw = _load_config_file(config_file)
     data = _interpolate_env_vars(raw)
 
-    # Recursively resolve base_config if the base also has one
     if "base_config" in data and data["base_config"]:
         grandparent_path = _resolve_base_config_path(data["base_config"], base_path)
         if grandparent_path:
@@ -152,7 +150,6 @@ def _load_base_config_data(base_path: Path) -> dict[str, Any] | None:
             if grandparent_data:
                 data = _merge_configs(grandparent_data, data)
 
-    # Track prompt files with their resolved paths for append chain
     prompt_file = data.get("system_prompt_file")
     if prompt_file:
         prompt_path = base_path / prompt_file
@@ -223,7 +220,6 @@ def _parse_output_config(data: dict[str, Any] | None) -> OutputConfig:
     if data is None:
         return OutputConfig()
 
-    # Parse named outputs if present
     named_outputs: dict[str, OutputConfigItem] = {}
     if "named_outputs" in data:
         for name, item_data in data["named_outputs"].items():
@@ -244,7 +240,6 @@ def _parse_subagent_config(data: dict[str, Any] | str) -> SubAgentConfigItem:
     """Parse sub-agent configuration."""
     if isinstance(data, str):
         return SubAgentConfigItem(name=data)
-    # Fields that are handled explicitly
     reserved = {
         "name",
         "type",
@@ -255,8 +250,7 @@ def _parse_subagent_config(data: dict[str, Any] | str) -> SubAgentConfigItem:
         "can_modify",
         "interactive",
     }
-    # All other fields (prompt_file, output_to, context_mode, max_turns, etc.)
-    # go into options for inline custom sub-agent configs
+    # Preserve extension fields as constructor options for custom sub-agents.
     return SubAgentConfigItem(
         name=data.get("name", ""),
         type=data.get("type", "builtin"),
@@ -309,7 +303,6 @@ def load_agent_config(agent_path: str | Path) -> AgentConfig:
     logger.debug("Loading config", path=str(config_file))
     raw_config = _load_config_file(config_file)
 
-    # Interpolate environment variables
     config_data = _interpolate_env_vars(raw_config)
 
     return build_agent_config(config_data, agent_path)
@@ -476,7 +469,6 @@ def _load_prompt_chain(config: AgentConfig, config_data: dict[str, Any]) -> None
     inline_prompt: str | None = config_data.get("_inline_system_prompt")
     prompt_parts: list[str] = []
 
-    # Load all base prompt files from the inheritance chain
     for chain_path in prompt_chain:
         chain_file = Path(chain_path)
         if chain_file.exists():
@@ -484,13 +476,12 @@ def _load_prompt_chain(config: AgentConfig, config_data: dict[str, Any]) -> None
                 prompt_parts.append(f.read())
             logger.debug("Loaded chain prompt", path=str(chain_file))
 
-    # Load child's own system prompt (from agent_path or base_path fallback)
     if config.system_prompt_file and config.agent_path:
         prompt_path = config.agent_path / config.system_prompt_file
         if not prompt_path.exists() and base_path:
             prompt_path = base_path / config.system_prompt_file
         if prompt_path.exists():
-            # Only add if not already in chain (avoid duplicates)
+            # A child's inherited file may already be recorded in the chain.
             resolved = str(prompt_path.resolve())
             chain_resolved = [str(Path(p).resolve()) for p in prompt_chain]
             if resolved not in chain_resolved:
@@ -498,7 +489,6 @@ def _load_prompt_chain(config: AgentConfig, config_data: dict[str, Any]) -> None
                     prompt_parts.append(f.read())
                 logger.debug("Loaded child prompt", path=str(prompt_path))
 
-    # Append inline system_prompt from child (e.g. terrarium creature override)
     if inline_prompt:
         prompt_parts.append(inline_prompt)
         logger.debug("Appended inline system_prompt to chain")

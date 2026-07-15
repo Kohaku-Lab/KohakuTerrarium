@@ -1,12 +1,6 @@
-"""Engine-owned session persistence (E2).
+"""Manage engine-owned session stores and their metadata.
 
-Before this module, persisting a session programmatically meant
-hand-copying a 3-step ceremony out of ``cli/run.py`` internals
-(``SessionStore(path)`` + ``store.init_meta(<magic strings>)`` +
-``engine.attach_session(...)``) — and a typo in ``config_type``
-silently produced an unresumable file.
-
-Now the engine owns the whole flow:
+The engine owns session-store creation and metadata initialization:
 
 - ``Terrarium(session_dir=...)`` → autosession: every new graph gets
   ``<session_dir>/<graph_id>.kohakutr`` automatically.

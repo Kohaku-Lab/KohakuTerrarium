@@ -19,17 +19,16 @@ def get_default() -> str:
 
 
 def set_default(identifier: str) -> str:
-    """Set the default model. Empty string clears it."""
+    """Set the default model identifier, or clear it with an empty string."""
     set_default_model(identifier)
     return identifier
 
 
 def resolve_and_set_default(name: str) -> tuple[str, str | None]:
-    """Resolve ``name`` (bare or qualified) and set it as the default.
+    """Resolve a bare or qualified model name and make it the default.
 
-    Returns ``(canonical_identifier, None)`` on success. On failure returns
-    ``("", error_message)`` where the message is suitable for direct
-    surfacing to the CLI/HTTP caller.
+    Success returns the canonical identifier with no error. Failure returns an
+    empty identifier and a caller-facing message.
     """
     _ = split_identifier(name)
     try:
@@ -44,5 +43,5 @@ def resolve_and_set_default(name: str) -> tuple[str, str | None]:
 
 
 def list_all_models_combined() -> list[dict[str, Any]]:
-    """Return the combined view of user + built-in models (HTTP shape)."""
+    """Return the HTTP-facing combined view of user and built-in models."""
     return list_all()

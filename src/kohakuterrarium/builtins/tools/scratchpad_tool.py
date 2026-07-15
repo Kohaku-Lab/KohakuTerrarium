@@ -1,4 +1,4 @@
-"""Scratchpad tool - read/write session working memory."""
+"""Session-scoped key-value working memory operations."""
 
 from typing import Any
 
@@ -34,7 +34,7 @@ class ScratchpadTool(BaseTool):
     async def _execute(
         self, args: dict[str, Any], context: ToolContext | None = None
     ) -> ToolResult:
-        """Execute scratchpad action."""
+        """Apply one scratchpad operation to the current session."""
         action = args.get("action", "get")
         key = args.get("key", "")
         value = args.get("value", "")

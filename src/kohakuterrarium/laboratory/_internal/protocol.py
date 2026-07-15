@@ -1,8 +1,7 @@
 """Laboratory wire protocol version + Hello/Welcome/Reject handshake.
 
-Protocol version is independent of the KohakuTerrarium framework
-version (see `Locked decisions` in the 1.5.0 implementation plan):
-two framework releases that speak the same protocol version interop.
+The protocol version is independent of the KohakuTerrarium framework
+version, so framework releases using the same protocol can interoperate.
 
 The handshake sequence on every client connection is:
 
@@ -44,12 +43,7 @@ messages.
 
 
 class ProtocolError(ValueError):
-    """Raised on protocol-level violations.
-
-    Examples: wrong envelope kind for a parse helper, missing required
-    field in a Hello/Welcome/Reject payload, malformed JSON inside the
-    envelope payload.
-    """
+    """Raised when an envelope or handshake payload violates the protocol."""
 
 
 def protocol_compatible(
@@ -58,10 +52,8 @@ def protocol_compatible(
 ) -> bool:
     """Return whether this implementation can speak ``remote_version``.
 
-    Compatibility is currently strict equality membership: the remote
-    version must appear in the local supported set. Future versions may
-    relax this to range-based compatibility once we have more than one
-    version to consider.
+    Compatibility requires the remote version to appear exactly in the
+    local supported set.
     """
     return remote_version in set(local_supported)
 
@@ -144,8 +136,7 @@ class WelcomePayload:
         assigned_client_id: NodeId the host has assigned to this client.
             May equal the client's requested name, or may be uniquified
             on name conflicts.
-        supported_verbs: L4 verbs this host supports. 1.5.0 ships
-            ``["send", "broadcast"]``; later releases add ``"replicate"``.
+        supported_verbs: L4 verbs supported by the host.
         cluster_info: Free-form extensible metadata (other nodes,
             capabilities, etc.).
     """
@@ -241,11 +232,6 @@ class RejectPayload:
                 f"Reject.detail must be a string, got " f"{type(detail).__name__}"
             )
         return cls(reason=data["reason"], detail=detail)
-
-
-# ----------------------------------------------------------------------
-# Envelope-level helpers
-# ----------------------------------------------------------------------
 
 
 def build_hello(
@@ -359,7 +345,7 @@ def _decode_payload(env: Envelope) -> dict[str, Any]:
 
 
 def _parse_payload(env: Envelope, cls):
-    """Decode envelope payload and route to the dataclass's from_dict."""
+    """Decode an envelope payload into the requested payload class."""
     return cls.from_dict(_decode_payload(env))
 
 

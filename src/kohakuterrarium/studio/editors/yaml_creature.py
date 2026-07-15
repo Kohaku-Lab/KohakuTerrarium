@@ -1,10 +1,8 @@
 """Round-trip YAML IO for creature configs.
 
-Uses ruamel.yaml in round-trip mode so comments + key order on
-existing files survive re-saves. ``save_creature_merged`` deep-
-merges an incoming patch into the existing document, replacing
-scalars and lists wholesale but recursing into mappings so
-preserved comments stay anchored to their keys.
+Uses ruamel.yaml round-trip mode to preserve comments, quoting, and key order.
+Merged saves recurse into mappings while replacing scalar and list values, which
+keeps existing comments anchored to their keys.
 """
 
 from pathlib import Path
@@ -15,7 +13,7 @@ from ruamel.yaml.comments import CommentedMap
 
 
 def _yaml() -> YAML:
-    """Fresh YAML instance configured for creature configs."""
+    """Return a fresh round-trip YAML serializer for creature configs."""
     y = YAML(typ="rt")
     y.indent(mapping=2, sequence=4, offset=2)
     y.width = 120
@@ -25,10 +23,9 @@ def _yaml() -> YAML:
 
 
 def load_creature_file(path: Path) -> dict:
-    """Load a YAML creature config as a ruamel CommentedMap.
+    """Load a creature config while preserving round-trip metadata.
 
-    Returns ``{}`` on empty file. Raises ``FileNotFoundError`` if
-    the path doesn't exist — callers decide how to react.
+    Empty files return ``{}``; missing files propagate ``FileNotFoundError``.
     """
     y = _yaml()
     with path.open("r", encoding="utf-8") as f:
@@ -37,10 +34,10 @@ def load_creature_file(path: Path) -> dict:
 
 
 def save_creature_file(path: Path, data: dict[str, Any]) -> None:
-    """Overwrite the file with *data*.
+    """Atomically overwrite a creature config with the supplied mapping.
 
-    Loses comments the incoming dict doesn't carry. Prefer
-    ``save_creature_merged`` when a file already exists.
+    Comments absent from ``data`` are not preserved; existing documents should
+    use :func:`save_creature_merged` when comment retention matters.
     """
     y = _yaml()
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -50,11 +47,10 @@ def save_creature_file(path: Path, data: dict[str, Any]) -> None:
 
 
 def save_creature_merged(path: Path, incoming: dict) -> None:
-    """Merge *incoming* into the document at *path*, preserving comments.
+    """Merge a patch into a creature config while preserving comments.
 
-    If the file doesn't exist, writes *incoming* verbatim (no
-    comments to preserve). Deep-merges mappings, replaces lists
-    and scalars wholesale.
+    Mappings merge recursively, while lists and scalars are replaced. Missing
+    files begin as empty round-trip mappings.
     """
     y = _yaml()
     if path.exists():
@@ -74,9 +70,8 @@ def save_creature_merged(path: Path, incoming: dict) -> None:
 def _deep_merge(target: Any, incoming: Any) -> None:
     """Recursively merge *incoming* into *target* in place."""
     if isinstance(target, CommentedMap) and isinstance(incoming, dict):
-        # Remove keys present in target but not in incoming? No —
-        # incoming is a patch, not a replacement. Callers that
-        # want full replacement call save_creature_file instead.
+        # Omitted keys remain because ``incoming`` is a patch; full replacement
+        # uses ``save_creature_file``.
         for k, v in incoming.items():
             if (
                 k in target
@@ -87,7 +82,6 @@ def _deep_merge(target: Any, incoming: Any) -> None:
             else:
                 target[k] = v
     elif isinstance(target, list) and isinstance(incoming, list):
-        # Lists are replaced wholesale — merging by index or by a
-        # "name" field is ambiguous and differs per section.
-        # Callers send the full desired list.
+        # List identity is section-dependent, so callers provide the complete
+        # replacement list rather than relying on positional or name-based merges.
         target[:] = incoming

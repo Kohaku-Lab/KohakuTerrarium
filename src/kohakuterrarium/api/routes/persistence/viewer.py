@@ -1,29 +1,21 @@
 """Persistence viewer — tree / summary / turns / events / diff / export.
 
-Read-only endpoints for the Session Viewer (V1+V6 waves). Paths are
-``/{session_name}/<noun>`` so the router can be mounted under
-``/api/sessions`` for URL preservation.
+Read-only Session Viewer endpoints. Paths use
+``/{session_name}/<noun>`` so mounting the router under ``/api/sessions``
+preserves the public URLs.
 
-All handlers open the store read-only (``close(update_status=False)``)
-so browsing never bumps ``last_active``. Every payload builder is
-sync (SQLite + filesystem), so each route dispatches the open +
-build + close sequence to a worker thread via ``asyncio.to_thread`` —
-the event loop stays free for concurrent API traffic. The exception is
-a LIVE session (still attached to the engine): its reads reuse the
-engine's open store on the event loop instead of opening the file a
-second time — see :func:`_build_single`.
+Handlers close saved stores with ``update_status=False`` so browsing never
+changes ``last_active``. Payload builders perform synchronous SQLite and
+filesystem work, so saved-store open, build, and close operations run as one
+``asyncio.to_thread`` unit. Live sessions instead reuse the engine's attached
+store on the event loop because a second same-file SQLite connection is not
+reliable while the store is being written.
 
-CF-5 follow-up — cluster fan-out. In multi-node mode each cluster
-member writes events to its OWN per-worker store, mirrored host-side
-as ``<session_dir>/mirror/<member_sid>.kohakutr``. Opening only the
-primary's mirror surfaces a one-sided view (memory search hit this
-in CF-5; the viewer routes share the blind spot). The viewer routes
-resolve the requested sid via :func:`_resolve_cluster_paths` (same
-helper memory search uses post-CF-5), fan out across every member's
-store, and merge per the endpoint's payload shape. Standalone mode
-returns a single-entry list — the routes take the existing scalar
-fast path (one ``_run_with_store`` call) so unit tests that stub it
-keep working.
+In multi-node mode, each cluster member writes to a per-worker store mirrored
+at ``<session_dir>/mirror/<member_sid>.kohakutr``. Viewer routes resolve every
+member store and merge payloads according to each endpoint's response shape;
+reading only the primary mirror would omit peer activity. Standalone sessions
+retain the single-store path so their reads avoid unnecessary fan-out.
 """
 
 import asyncio
@@ -54,10 +46,10 @@ router = APIRouter()
 
 
 async def _resolve_or_404(session_name: str, service: TerrariumService | None = None):
-    """Resolve a session path off-loop; raise 404 if missing.
+    """Resolve a session path off-loop or raise 404 when it is unavailable.
 
-    A live session's graph_id resolves to its attached store first (its
-    on-disk file is named by creature_id, so name resolution misses it).
+    Live graph IDs resolve through the attached store because their on-disk
+    filenames use creature IDs and cannot be found by graph-ID lookup.
     """
     if service is not None:
         live = live_store_path(service, session_name)
@@ -72,22 +64,16 @@ async def _resolve_or_404(session_name: str, service: TerrariumService | None = 
 def _resolve_cluster_paths(
     session_name: str, service: TerrariumService
 ) -> list[tuple[str, Path]]:
-    """Cluster-aware on-disk path resolution for the viewer routes.
+    """Resolve the available store paths for a standalone or clustered session.
 
-    Mirrors :func:`studio.sessions.cluster_paths.resolve_cluster_member_paths`
-    but uses the *module-level* ``resolve_session_path_default`` binding
-    so unit tests can still monkeypatch ``viewer_mod.resolve_session_path_default``
-    and have it affect the route's path lookup.
+    The module-level ``resolve_session_path_default`` binding is intentional:
+    callers may replace this route-local resolution seam independently of the
+    Studio helper. Standalone sessions produce one entry, while an unknown
+    session produces none. Cluster members without a materialized mirror are
+    omitted so available members remain viewable.
 
-    Standalone mode (no cluster links): returns a single-entry list with
-    ``session_name``'s own resolved path — routes take the existing
-    scalar fast path. Empty list means the sid is unknown on disk and
-    the caller raises 404. Members whose mirror has not yet
-    materialised are silently skipped (matching memory search).
-
-    A live session is addressed by its graph_id, whose on-disk file is
-    named by creature_id — so it is resolved from the engine's attached
-    store first, before the on-disk name fallback.
+    Live graph IDs resolve through the engine's attached store before the
+    on-disk fallback because their files are named by creature ID.
     """
     live = live_store_path(service, session_name)
     if live is not None:
@@ -106,7 +92,7 @@ def _resolve_cluster_paths(
 async def _resolve_cluster_or_404(
     session_name: str, service: TerrariumService
 ) -> list[tuple[str, Path]]:
-    """Off-loop cluster path resolution; raise 404 if no member resolves."""
+    """Resolve cluster paths off-loop or raise 404 when no member is available."""
     members = await asyncio.to_thread(_resolve_cluster_paths, session_name, service)
     if not members:
         raise HTTPException(404, f"Session not found: {session_name}")
@@ -114,10 +100,10 @@ async def _resolve_cluster_or_404(
 
 
 def _run_with_store(path, builder: Callable[[SessionStore, str], Any]) -> Any:
-    """Open store, run builder, close — all on the calling thread.
+    """Open, read, and close a saved store as one calling-thread operation.
 
-    Designed to be wrapped in :func:`asyncio.to_thread` so the SQLite
-    open + the payload build + the close happen as one off-loop unit.
+    Keeping the complete SQLite lifecycle together lets callers move the unit
+    off the event loop without transferring a connection between threads.
     """
     store = SessionStore(path)
     try:
@@ -132,13 +118,12 @@ async def _build_single(
     path: Path,
     builder: Callable[[SessionStore, str], Any],
 ) -> Any:
-    """Build one session's payload, reusing the live store when attached.
+    """Build one session payload, reusing an attached live store when possible.
 
-    A second same-file open of an actively-written store is unreliable on
-    POSIX (``SQLITE_IOERR`` on the tables the live writer touched), so a
-    live session's reads go through the engine's open store on the event
-    loop — serialized with the writer. Saved sessions keep the off-loop
-    open/build/close unit.
+    Opening a second connection to an actively written store can raise
+    ``SQLITE_IOERR`` on POSIX. Live reads therefore use the engine-owned store
+    on the event loop, serialized with its writer, while saved-store reads run
+    as an off-loop open/build/close unit.
     """
     store = live_store_for(service, session_name)
     if store is not None and str(getattr(store, "_path", "")) == str(path):
@@ -150,43 +135,31 @@ def _run_per_member(
     members: list[tuple[str, Path]],
     builder: Callable[[SessionStore, str], Any],
 ) -> list[tuple[str, Any]]:
-    """Open each member's store in sequence, run builder, close.
+    """Build payloads from available member stores in input order.
 
-    Returns ``[(member_sid, payload), ...]`` in the same order as
-    ``members``. Failures on a single member (corrupted mirror, schema
-    mismatch, or the agent default lookup raising 404) are swallowed
-    and that member is omitted — without this, one bad worker mirror
-    could 500 the whole cluster view, AND the per-member ``_build``
-    closures call ``build_*_payload`` which itself raises
-    ``HTTPException(404)`` when the requested agent is missing in
-    *that* member's meta (perfectly normal for cluster fan-out).
+    A corrupt mirror, incompatible schema, or member-local missing agent must
+    not make the entire cluster view fail. Such members are omitted because a
+    requested agent may legitimately exist in only part of the cluster.
     """
     out: list[tuple[str, Any]] = []
     for member_sid, path in members:
         try:
             payload = _run_with_store(path, builder)
-        except Exception:  # noqa: BLE001 — see docstring
+        except Exception:  # noqa: BLE001 - member isolation is required
             continue
         out.append((member_sid, payload))
     return out
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Cluster-aware merge helpers — one per endpoint's payload shape.
-# ─────────────────────────────────────────────────────────────────────
-
-
 def _merge_tree(
     per_member: list[tuple[str, dict[str, Any]]], session_name: str
 ) -> dict[str, Any]:
-    """Union ``nodes`` + ``edges`` across members, deduplicated by id.
+    """Merge cluster tree nodes and edges without duplicate identities.
 
-    The viewer's tree pane shows fork lineage + attached agents. In a
-    cluster each member contributes its own attached-agent slice; fork
-    lineage is per-member but usually disjoint (each worker forks its
-    own sub-tree). De-dup nodes by ``id`` (first-write-wins, primary
-    first via lex order) so a creature attached to multiple members
-    doesn't appear twice. Edges de-dup by ``(from, to, type)``.
+    Each member contributes its attached-agent slice and normally disjoint fork
+    lineage. Nodes use first-write-wins deduplication by ``id`` so a creature
+    attached to multiple members appears once; edges are unique by
+    ``(from, to, type)``.
     """
     nodes: list[dict[str, Any]] = []
     seen_node_ids: set[str] = set()
@@ -221,14 +194,12 @@ def _merge_tree(
 def _merge_summary(
     per_member: list[tuple[str, dict[str, Any]]], session_name: str
 ) -> dict[str, Any]:
-    """Aggregate Overview-tab stats across cluster members.
+    """Aggregate Overview statistics across cluster members.
 
-    Numerical fields (turns, tokens, tool_calls, errors, compacts,
-    forks, attached_agents) sum. Lists (``agents``, ``error_turns``,
-    ``compact_turns``, ``hot_turns``) union; hot_turns truncates to 5
-    by cost / token volume. Identity-ish fields (``created_at``,
-    ``status``, ``config_path``, ``config_type``, ``format_version``)
-    come from the primary's payload (first in sorted order).
+    Counts and token totals are additive. Agent and classified-turn lists are
+    unions, while hot turns are ranked by cost or token volume and limited to
+    five. Session identity and configuration fields come from the first
+    resolved member to keep one stable overview identity.
     """
     if not per_member:
         return {"session_name": session_name, "agents": [], "totals": {}}
@@ -328,12 +299,11 @@ def _merge_turns(
     from_turn: int | None,
     to_turn: int | None,
 ) -> dict[str, Any]:
-    """Chronological merge of paginated turn rows across cluster members.
+    """Merge cluster turn rows into a stable paginated sequence.
 
-    Each turn row carries ``turn_index`` (per-agent) and ``agent`` (in
-    aggregate mode) / inferred from member-sid. Sort by ``turn_index``
-    asc then ``agent`` asc for stable ordering, then re-apply the
-    requested ``offset``/``limit`` window over the merged total.
+    Turn indices are member-local, so agent or member identity breaks ties.
+    Pagination is applied after merging to make ``offset`` and ``limit`` refer
+    to the combined result rather than to each member independently.
     """
     rows: list[dict[str, Any]] = []
     for member_sid, payload in per_member:
@@ -368,14 +338,11 @@ def _merge_events(
     *,
     limit: int,
 ) -> dict[str, Any]:
-    """Chronological merge of paginated event rows across cluster members.
+    """Merge cluster event rows into a stable chronological sequence.
 
-    Each event row has ``event_id`` (per-store), ``ts`` (wall-clock),
-    and ``type``. Sort by ``ts`` asc then by ``(member_sid, event_id)``
-    for stability across members whose event_ids reset to 0
-    independently. De-dup by ``(member_sid, event_id)`` — each member's
-    store assigns its own monotonic event_id, so the tuple is unique
-    even when two members happen to share a numeric id.
+    Event IDs are monotonic only within one store, so member identity is part
+    of both the deduplication key and the timestamp tie-breaker. The requested
+    limit applies to the combined sequence.
     """
     rows: list[dict[str, Any]] = []
     seen: set[tuple[str, int]] = set()
@@ -413,11 +380,6 @@ def _merge_events(
     }
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Routes
-# ─────────────────────────────────────────────────────────────────────
-
-
 @router.get("/{session_name}/tree")
 async def get_session_tree(
     session_name: str,
@@ -425,7 +387,7 @@ async def get_session_tree(
 ) -> dict[str, Any]:
     members = await _resolve_cluster_or_404(session_name, service)
     if len(members) == 1:
-        # Standalone fast path — preserves single-store unit-test stubs.
+        # A standalone session needs no cross-store merge.
         return await _build_single(
             service, members[0][0], members[0][1], build_tree_payload
         )
@@ -464,11 +426,9 @@ async def get_session_turns(
     members = await _resolve_cluster_or_404(session_name, service)
     clamped_limit = max(1, min(limit, 1000))
     clamped_offset = max(0, offset)
-    # Cluster fan-out forces per-member aggregation: each member has
-    # its own agents and ``build_turns_payload`` with ``aggregate=False``
-    # would 404 a member whose agent list doesn't include the requested
-    # ``agent``. The outer ``_merge_turns`` unions the per-member
-    # aggregate windows. Standalone keeps the caller's flag.
+    # Cluster members have independent agent lists. Aggregate member payloads
+    # to avoid rejecting members that do not contain the requested agent; the
+    # outer merge restores one cross-cluster window.
     fanout_aggregate = aggregate or len(members) > 1
 
     def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
@@ -503,12 +463,10 @@ async def get_session_export(
     agent: str | None = None,
     service: TerrariumService = Depends(get_service),
 ) -> Response:
-    """Stream a session transcript in ``md`` / ``html`` / ``jsonl``.
+    """Stream a session transcript in ``md``, ``html``, or ``jsonl``.
 
-    CF-5 deferred: cluster bundles. Today returns ONLY the primary
-    member's transcript — multi-member export needs a per-format
-    concat strategy (md headers per member, html details blocks,
-    jsonl interleave).
+    Cluster exports contain only the first resolved member. Combining members
+    requires format-specific framing rather than raw concatenation.
     """
     members = await _resolve_cluster_or_404(session_name, service)
     path = members[0][1]
@@ -533,11 +491,10 @@ async def get_session_diff(
     agent: str | None = None,
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, Any]:
-    """Structured diff against another saved session.
+    """Return a structured diff against another saved session.
 
-    CF-5 deferred: cluster diff. Today diffs ONLY the primary member's
-    store; multi-member diff needs a per-pair strategy (likely
-    per-member-pair diff with caller choosing).
+    Cluster sessions compare only their first resolved member because a
+    multi-member diff requires an explicit member-pair selection policy.
     """
     a_store = live_store_for(service, session_name)
     a_path = await _resolve_or_404(session_name, service)
@@ -549,7 +506,7 @@ async def get_session_diff(
         if b_path is None:
             raise HTTPException(404, f"Other session not found: {other}")
     if a_store is not None or b_store is not None:
-        # Live-store reads stay on the loop (see _build_single).
+        # Engine-owned stores must remain on their event-loop thread.
         return build_diff_payload(
             a_path, b_path, agent=agent, a_store=a_store, b_store=b_store
         )
@@ -587,10 +544,8 @@ async def get_session_events(
     if len(members) == 1:
         return await _build_single(service, members[0][0], members[0][1], _build)
 
-    # In cluster fan-out each member's payload is built for whatever
-    # ``agent`` defaulting that member's meta picks. Errors from one
-    # member (e.g. that member doesn't have ``agent``) drop that member
-    # from the merge rather than 404-ing the whole request — the merge
-    # over the others still surfaces a coherent cross-cluster view.
+    # Agent defaults are member-local, so one member may reject an agent that
+    # is valid elsewhere. Member isolation keeps the remaining cluster view
+    # available.
     per_member = await asyncio.to_thread(_run_per_member, members, _build)
     return _merge_events(per_member, session_name, limit=clamped_limit)

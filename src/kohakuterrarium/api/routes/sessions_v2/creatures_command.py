@@ -16,12 +16,10 @@ router = APIRouter()
 def _command_principal(
     conn_info: HTTPConnection, user: User | None
 ) -> tuple[str, bool]:
-    """``(principal, is_operator)`` for a slash command from the auth context.
+    """Derive the slash-command principal and operator flag.
 
-    Mirrors the Drive route's principal derivation (R1-03/R1-20): L4-disabled is
-    the trusted local operator console; an anonymous optional-L4 caller is an
-    unprivileged principal; an authenticated user gets operator only for admins.
-    Missing authority is never elevated (R1-21).
+    The single-tenant console is trusted, anonymous multi-user callers remain
+    unprivileged, and only authenticated administrators receive operator authority.
     """
     cfg = get_auth_config(conn_info)
     if user is None:

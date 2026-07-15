@@ -1,10 +1,4 @@
-"""Creature CRUD + prompt file routes.
-
-Workspace methods walk the filesystem (yaml read, prompt-file IO,
-config validation) — every read goes through ``asyncio.to_thread``
-so the studio editor doesn't block the runtime API while the user
-edits configs side-by-side.
-"""
+"""Manage workspace creatures and prompt files without blocking the event loop."""
 
 import asyncio
 

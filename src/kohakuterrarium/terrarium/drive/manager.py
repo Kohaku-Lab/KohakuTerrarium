@@ -1,13 +1,12 @@
 """DriveManager: the public Drive orchestration façade (design §4, §5, §8.8).
 
-Every mutation runs the §8.8 pipeline: derive/accept a trusted ``ActorRef`` (the
-manager never parses an actor from a payload), :func:`drive.acl.authorize`,
-registration spec/transition validators (fail closed), the atomic repository
-commit, then observers (fail open). Delivery scheduling is delegated to the
-:class:`~kohakuterrarium.terrarium.drive.delivery.DriveDispatcher` this manager
-owns; enqueue happens only at readiness events (create/wake/reassign/reconcile/
-scan), never on plain updates, so a generic Drive is delivered once per readiness
-generation rather than looping. No LLM call and no ``spec`` interpretation.
+Mutations accept a trusted ``ActorRef`` rather than deriving identity from
+payload data. Authorization and registration validation fail closed before the
+atomic repository commit; observers run afterward and fail open. The owned
+:class:`~kohakuterrarium.terrarium.drive.delivery.DriveDispatcher` schedules
+work only at readiness events such as creation, wake, reassignment,
+reconciliation, and scanning. Plain updates never enqueue, which prevents a
+generic drive from looping within one readiness generation.
 """
 
 import random
@@ -56,16 +55,15 @@ from kohakuterrarium.terrarium.drive.requests import (
 )
 from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
 
-# transition() is for control states only: completion/failure go through the
-# §4.2 verifier pipeline (propose_transition) and retirement through the admin
-# path (retire_drive), never a direct status write.
+# Direct transition is limited to control states. Completion and failure require
+# verifier approval, while retirement uses its separately authorized operation.
 _TRANSITION_FORBIDDEN_TARGETS = frozenset(
     {DriveStatus.COMPLETED, DriveStatus.FAILED, DriveStatus.RETIRED}
 )
 
 
 class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadinessMixin):
-    """Orchestration façade over a graph-scoped repository + dispatcher."""
+    """Coordinate authorized drive mutations, readiness, and delivery."""
 
     def __init__(
         self,
@@ -91,8 +89,8 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._rng = rng or random.Random()
         self._mint = id_factory or (lambda: uuid.uuid4().hex)
-        # Trusted live-topology check for a persisted assignment (R1-06): valid
-        # member -> True, invalid -> orphan+block on reconcile; None disables it.
+        # Persisted assignments are valid only while their assignee remains in
+        # live topology. Reconciliation orphans invalid assignments when enabled.
         self._topology_validator = topology_validator
         self._readiness_gen: dict[str, int] = {}
         self._pending_proposals: dict[str, DriveTransitionProposal] = {}
@@ -112,26 +110,28 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
             scan_interval=scan_interval,
         )
 
-    # -- lifecycle -----------------------------------------------------------
-
     async def start(self) -> None:
         await self._rebuild_readiness_generations()
         await self._rebuild_pending_proposals()
         await self._dispatcher.start()
 
     async def _rebuild_pending_proposals(self) -> None:
-        """Rebuild the in-memory pending-proposal index from the durable store so
-        a cold resume can still approve a proposal made before the restart, and
-        two-party distinct-actor checks keep working (design §4.2, R1-08)."""
+        """Restore pending proposals needed for approval after cold resume.
+
+        Retaining the original proposer also preserves distinct-actor checks for
+        two-party verification.
+        """
         self._pending_proposals = {
             proposal.proposal_id: proposal
             for proposal in await self._repo.list_proposals()
         }
 
     async def _on_delivery_acknowledged(self, drive_id: str) -> None:
-        """Dispatcher ack hook: re-evaluate readiness for a just-settled Drive so
-        a re-arming registration continues without waiting for the periodic scan
-        (design §4.4)."""
+        """Re-evaluate a settled drive immediately after acknowledgement.
+
+        Re-arming registrations can continue without waiting for the periodic
+        readiness scan.
+        """
         record = await self._repo.get(drive_id)
         if record is not None:
             await self._reevaluate_readiness(record)
@@ -155,11 +155,8 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         return self._clock()
 
     def set_snapshot(self, snapshot: EnabledRegistrySnapshot | None) -> None:
-        """Publish a new enabled-registry snapshot (Phase E reconfigure). The
-        dispatcher reads it lazily, so a swap is observed on the next round."""
+        """Publish registry changes for the dispatcher to observe on its next pass."""
         self._snapshot = snapshot
-
-    # -- reads ---------------------------------------------------------------
 
     async def get_drive(self, drive_id: str) -> DriveRecord | None:
         return await self._repo.get(drive_id)
@@ -193,8 +190,6 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
             is_privileged=is_privileged,
             extra_grants=extra_grants,
         )
-
-    # -- create / update -----------------------------------------------------
 
     async def create_drive(
         self,
@@ -284,8 +279,6 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         self._emit("drive_updated", drive_id, {"revision": record.revision})
         return record
 
-    # -- assignment ----------------------------------------------------------
-
     async def assign(
         self,
         drive_id: str,
@@ -342,8 +335,7 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         is_privileged: bool = False,
         operator: bool = False,
     ) -> DriveRecord:
-        """Reassign to a new creature: bumps the lifecycle epoch and supersedes
-        every old-assignment delivery (design §6.3)."""
+        """Reassign to a creature, fencing all deliveries from the prior epoch."""
         return await self.assign(
             drive_id,
             assignee_creature_id,
@@ -382,8 +374,6 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         )
         self._emit("drive_unassigned", drive_id, {"revision": record.revision})
         return record
-
-    # -- transitions ---------------------------------------------------------
 
     async def transition(
         self,
@@ -442,9 +432,10 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         expected_revision: int | None = None,
         is_privileged: bool = False,
     ) -> DriveRecord:
-        """Manual readiness (§4.4): a WAITING Drive is woken to ACTIVE and
-        enqueued; an already-active Drive is re-enqueued if it has no live
-        delivery."""
+        """Wake a waiting drive or re-enqueue an active drive with no live work.
+
+        Manual wake is an authorized readiness override.
+        """
         current = await self._require(drive_id)
         assignment = await self._repo.get_assignment(drive_id)
         authorize(
@@ -478,11 +469,12 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         return record
 
     async def _ensure_wake_generation(self, record: DriveRecord) -> None:
-        """A manual wake on a Drive whose current generation already settled must
-        mint a fresh generation, else the new delivery shares the §5.3 logical key
-        of the acknowledged one and is superseded before admission. Only a settled
-        (acknowledged) generation is advanced — an in-flight one still blocks a new
-        delivery via ``_has_live_delivery`` and must not skip a generation."""
+        """Advance generation when manual wake follows acknowledged work.
+
+        Reusing the acknowledged generation would duplicate its logical key and
+        cause dispatch to supersede the new delivery. In-flight work still blocks
+        admission and therefore must not skip a generation.
+        """
         gen = self._current_readiness_generation(record.drive_id)
         for delivery in await self._repo.list_deliveries(record.drive_id):
             if (
@@ -521,8 +513,6 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         self._emit("drive_retired", drive_id, {"revision": record.revision})
         return record
 
-    # -- progress ------------------------------------------------------------
-
     async def report_progress(
         self,
         drive_id: str,
@@ -554,8 +544,6 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         self._emit("drive_progress", drive_id, {"progress_id": progress.progress_id})
         return progress
 
-    # -- creature lifecycle delegation (§6.1-6.3) ----------------------------
-
     async def on_creature_stopped(self, creature_id: str) -> None:
         await lifecycle.on_creature_stopped(self, creature_id)
 
@@ -567,22 +555,24 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
     async def on_creature_restoration_ready(self, creature_id: str) -> None:
         await lifecycle.on_creature_restoration_ready(self, creature_id)
 
-    # -- internal helpers ----------------------------------------------------
-
     @staticmethod
     def _operator_grants(operator: bool) -> frozenset[DriveCapability]:
-        """Explicit operator elevation (design §3.6, §13): the audited widening a
-        TRUSTED service context passes as ``extra_grants``. Never derived from a
-        request payload — the caller supplies the flag, not the Drive fields."""
+        """Return explicit grants supplied by a trusted operator context.
+
+        Elevation is caller-provided and audited; drive payload fields can never
+        request these capabilities.
+        """
         return OPERATOR_GRANTS if operator else frozenset()
 
     @staticmethod
     def _operator_grant_details(
         operator: bool, operation: str
     ) -> dict[str, Any] | None:
-        """The operator-grant audit ``details`` for an elevated mutation, or None
-        when not elevated. The elevated mutation appends this row in the SAME
-        transaction so it never commits without its audit proof (§13, R1-40)."""
+        """Build audit details for an operator-elevated mutation.
+
+        The repository commits these details in the same transaction as the
+        elevated change so authorization evidence cannot be omitted.
+        """
         if not operator:
             return None
         return {

@@ -1,14 +1,7 @@
-"""Per-creature control routes — interrupt + jobs + cancel + promote.
+"""Interrupt creatures and manage their background jobs.
 
-Mounted at ``/api/sessions``; URLs land at
-``/api/sessions/{session_id}/creatures/{creature_id}/...``.
-
-Service-driven: the underlying ``creature_ctl.*`` helpers now go
-through the :class:`TerrariumService` Protocol, so in lab-host mode
-these routes correctly reach a remote creature on its home node.
-``MultiNodeTerrariumService._route_per_creature`` keeps the
-``_home`` registry fresh and retries once on stale routing — the
-route handler doesn't need to know about it.
+Service routing reaches remote home workers and retries once when home-node routing
+is stale.
 """
 
 from fastapi import APIRouter, Depends, HTTPException

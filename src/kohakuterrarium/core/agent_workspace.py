@@ -50,8 +50,6 @@ class WorkspaceController:
     def __init__(self, agent: "Agent") -> None:
         self._agent = agent
 
-    # ── Read ────────────────────────────────────────────────────
-
     def get(self) -> str:
         """Return the agent's current resolved cwd as a string."""
         executor = getattr(self._agent, "executor", None)

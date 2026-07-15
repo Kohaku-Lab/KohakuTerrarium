@@ -1,6 +1,6 @@
 """CLI package management commands — list, info, install, uninstall, edit.
 
-This module is now a thin formatter around
+This module is a thin formatter around
 ``studio.catalog.packages``. All scan / operation logic lives there
 so the HTTP API and the CLI cannot drift.
 """
@@ -44,7 +44,6 @@ def list_cli(agents_path: str = "agents") -> int:
         print(f"No packages installed in {packages_dir()}")
         print()
 
-    # Also show local agents if directory exists
     path = Path(agents_path)
     if path.exists():
         print(f"Local agents in {agents_path}:")
@@ -165,4 +164,4 @@ def edit_cli(target: str) -> int:
     config_file: Path = payload  # type: ignore[assignment]
     print(f"Opening: {config_file}")
     open_in_editor(config_file)
-    return 0  # unreachable after execvp
+    return 0
