@@ -1,5 +1,4 @@
-"""
-Discord Client - Shared Discord client for input/output modules.
+"""Bridge discord.py messages and media into shared Terrarium I/O state.
 
 This module contains the core Discord client that bridges discord.py
 with the KohakuTerrarium framework.
@@ -22,25 +21,20 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger("kohakuterrarium.custom.discord_client")
 
 
-# =============================================================================
-# Media Data Classes
-# =============================================================================
-
-
 @dataclass
 class MediaAttachment:
-    """Represents a Discord attachment (image/file)."""
+    """Store normalized metadata for a Discord file attachment."""
 
     url: str
     filename: str
     content_type: str | None
     size: int
     is_image: bool
-    is_animated: bool = False  # For GIFs
+    is_animated: bool = False  # Discord serves animated image attachments as GIFs.
 
     @classmethod
     def from_discord(cls, attachment: discord.Attachment) -> "MediaAttachment":
-        """Create from discord.py Attachment object."""
+        """Normalize a discord.py attachment."""
         content_type = attachment.content_type or ""
         is_image = content_type.startswith("image/")
         is_animated = content_type == "image/gif"
@@ -56,7 +50,7 @@ class MediaAttachment:
 
 @dataclass
 class MediaSticker:
-    """Represents a Discord sticker."""
+    """Store normalized metadata for a Discord sticker."""
 
     name: str
     sticker_id: int
@@ -66,8 +60,7 @@ class MediaSticker:
 
     @classmethod
     def from_discord(cls, sticker: discord.StickerItem) -> "MediaSticker":
-        """Create from discord.py StickerItem object."""
-        # Determine format and animation status
+        """Normalize a discord.py sticker and its animation format."""
         format_type = "png"
         is_animated = False
         if hasattr(sticker, "format"):
@@ -95,7 +88,7 @@ class MediaSticker:
 
 @dataclass
 class CustomEmoji:
-    """Represents a custom Discord emoji found in message content."""
+    """Store a custom emoji parsed from Discord message markup."""
 
     name: str
     emoji_id: int
@@ -104,7 +97,7 @@ class CustomEmoji:
 
     @classmethod
     def from_match(cls, name: str, emoji_id: int, animated: bool) -> "CustomEmoji":
-        """Create from regex match components."""
+        """Build emoji metadata from parsed markup fields."""
         ext = "gif" if animated else "png"
         url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}"
         return cls(
@@ -115,59 +108,59 @@ class CustomEmoji:
         )
 
 
-# Pattern to match custom emoji: <:name:id> or <a:name:id> (animated)
+# Discord encodes static and animated custom emoji as <:name:id> and <a:name:id>.
 CUSTOM_EMOJI_PATTERN = re.compile(r"<(a?):(\w+):(\d+)>")
 
 
-# Module-level registry for sharing Discord client between input/output
+# Custom modules are instantiated independently, so the registry shares one connection.
 _shared_clients: dict[str, "DiscordClient"] = {}
 
-# Module-level tool history (sliding window)
+# Bound tool history so prompt context cannot grow without limit.
 _tool_history: deque[str] = deque(maxlen=10)
 
 
 def register_client(name: str, client: "DiscordClient") -> None:
-    """Register a Discord client for sharing."""
+    """Register a client for use by independently loaded custom modules."""
     _shared_clients[name] = client
 
 
 def get_client(name: str) -> "DiscordClient | None":
-    """Get a registered Discord client."""
+    """Return the shared client registered under a module name."""
     return _shared_clients.get(name)
 
 
 def add_tool_history(entry: str) -> None:
-    """Add a tool call entry to history."""
+    """Append a tool-call summary to the bounded shared history."""
     _tool_history.append(entry)
 
 
 def get_tool_history() -> list[str]:
-    """Get recent tool history."""
+    """Return a snapshot of recent tool-call summaries."""
     return list(_tool_history)
 
 
 def clear_tool_history() -> None:
-    """Clear tool history."""
+    """Clear all shared tool-call summaries."""
     _tool_history.clear()
 
 
 def short_id(full_id: int) -> str:
-    """Convert full ID to short form (first 4 + last 4 digits)."""
+    """Abbreviate long Discord IDs while preserving recognizable edges."""
     s = str(full_id)
     if len(s) <= 8:
         return s
     return f"{s[:4]}..{s[-4:]}"
 
 
-# Pattern to match Discord mentions: <@123456> or <@!123456> (nickname mention)
+# User mentions may include Discord's optional nickname marker: <@id> or <@!id>.
 DISCORD_MENTION_PATTERN = re.compile(r"<@!?(\d+)>")
 
 
 def parse_custom_emojis(content: str) -> list[CustomEmoji]:
-    """Extract custom emojis from message content."""
+    """Extract custom emoji metadata from Discord markup."""
     emojis = []
     for match in CUSTOM_EMOJI_PATTERN.finditer(content):
-        animated = bool(match.group(1))  # "a" or ""
+        animated = bool(match.group(1))  # The optional "a" prefix marks animation.
         name = match.group(2)
         emoji_id = int(match.group(3))
         emojis.append(CustomEmoji.from_match(name, emoji_id, animated))
@@ -176,7 +169,7 @@ def parse_custom_emojis(content: str) -> list[CustomEmoji]:
 
 @dataclass
 class DiscordMessage:
-    """Represents a Discord message with metadata and multimodal content."""
+    """Represent one Discord message with reply and multimodal metadata."""
 
     content: str
     author_id: int
@@ -198,7 +191,6 @@ class DiscordMessage:
     short_msg_id: str = ""
     short_author_id: str = ""
 
-    # Multimodal content
     attachments: list[MediaAttachment] = field(default_factory=list)
     stickers: list[MediaSticker] = field(default_factory=list)
     custom_emojis: list[CustomEmoji] = field(default_factory=list)
@@ -208,15 +200,15 @@ class DiscordMessage:
         self.short_author_id = short_id(self.author_id)
 
     def has_media(self) -> bool:
-        """Check if message has any media content."""
+        """Return whether the message contains any supported media."""
         return bool(self.attachments or self.stickers or self.custom_emojis)
 
     def get_image_attachments(self) -> list[MediaAttachment]:
-        """Get only image attachments."""
+        """Return attachments classified as images."""
         return [a for a in self.attachments if a.is_image]
 
     def has_animated_content(self) -> bool:
-        """Check if message has animated content (GIFs, animated stickers/emojis)."""
+        """Return whether any attachment, sticker, or emoji is animated."""
         if any(a.is_animated for a in self.attachments):
             return True
         if any(s.is_animated for s in self.stickers):
@@ -226,7 +218,7 @@ class DiscordMessage:
         return False
 
     def to_context(self) -> dict[str, Any]:
-        """Convert to context dict for TriggerEvent."""
+        """Build the serializable metadata attached to a trigger event."""
         return {
             "source": "discord",
             "author_id": self.author_id,
@@ -249,7 +241,7 @@ class DiscordMessage:
 
 @dataclass
 class RecentMessage:
-    """Lightweight record of recent message for reference."""
+    """Retain the minimal message metadata needed for later references."""
 
     message_id: int
     short_id: str
@@ -260,11 +252,7 @@ class RecentMessage:
 
 
 class DiscordClient(discord.Client):
-    """
-    Custom Discord client that bridges discord.py with KohakuTerrarium.
-
-    Handles message receiving and sending while maintaining Discord state.
-    """
+    """Bridge Discord I/O while retaining lookup and reply context."""
 
     def __init__(
         self,
@@ -274,8 +262,7 @@ class DiscordClient(discord.Client):
         timezone: str | None = None,
         **kwargs: Any,
     ):
-        """
-        Initialize Discord client.
+        """Initialize channel policy, bounded history, and lookup caches.
 
         Args:
             channel_ids: List of channel IDs to listen to
@@ -297,7 +284,6 @@ class DiscordClient(discord.Client):
         self.history_limit = history_limit
         self._message_queue: asyncio.Queue[DiscordMessage] = asyncio.Queue()
 
-        # Timezone configuration
         if timezone:
             try:
                 self._timezone = ZoneInfo(timezone)
@@ -305,33 +291,32 @@ class DiscordClient(discord.Client):
                 logger.warning(
                     f"Unknown timezone '{timezone}', using system local timezone"
                 )
-                self._timezone = None  # Will use local timezone
+                self._timezone = None  # astimezone() then uses the system zone.
         else:
-            self._timezone = None  # Use local timezone
+            self._timezone = None  # astimezone() then uses the system zone.
 
-        # Track current channel for output
+        # Output follows the channel of the most recently consumed input.
         self._current_channel_id: int | None = None
 
-        # Recent messages buffer per channel
+        # Per-channel buffers resolve compact reply references without API calls.
         self._recent_messages: dict[int, deque[RecentMessage]] = {}
         self._max_recent = max(50, history_limit)
 
-        # User lookup cache (name -> id)
+        # Cache both account and display names for mention generation.
         self._user_cache: dict[str, int] = {}
 
-        # Track which channels have been initialized with history
+        # Record channels whose history has been fetched for coordinating callers.
         self._history_fetched: set[int] = set()
 
     async def on_ready(self) -> None:
-        """Called when bot is connected and ready."""
+        """Log the established Discord identity and guild count."""
         logger.info(
             "Discord client ready",
             extra={"bot_user": str(self.user), "guilds": len(self.guilds)},
         )
 
     def _format_timestamp(self, dt: datetime) -> str:
-        """
-        Format a datetime to string, converting to configured timezone.
+        """Format a Discord timestamp in the configured or system timezone.
 
         Discord returns UTC timezone-aware datetimes. This method converts
         to the configured timezone (or system local if not configured).
@@ -343,15 +328,13 @@ class DiscordClient(discord.Client):
             Formatted timestamp string in "YYYY-MM-DD HH:MM" format
         """
         if self._timezone:
-            # Convert to configured timezone
             local_dt = dt.astimezone(self._timezone)
         else:
-            # Convert to system local timezone
             local_dt = dt.astimezone()
         return local_dt.strftime("%Y-%m-%d %H:%M")
 
     def get_bot_identity(self) -> str:
-        """Get bot's identity string for prompts."""
+        """Return a compact bot identity suitable for prompt context."""
         if self.user:
             return f"{self.user.display_name}({short_id(self.user.id)})"
         return "Bot(unknown)"
@@ -361,7 +344,7 @@ class DiscordClient(discord.Client):
         channel: discord.TextChannel | discord.Thread,
         force: bool = False,
     ) -> list[str]:
-        """Fetch recent message history from a channel."""
+        """Fetch and format recent channel history while warming lookup caches."""
         if self.history_limit <= 0:
             return []
 
@@ -391,7 +374,6 @@ class DiscordClient(discord.Client):
 
                 msg_time = self._format_timestamp(msg.created_at)
                 parsed_content = self.parse_mentions(msg.content, msg.guild)
-                # Mark self messages clearly
                 if is_self:
                     self_marker = "[SELF] "
                 else:
@@ -420,10 +402,7 @@ class DiscordClient(discord.Client):
         channel: discord.TextChannel | discord.Thread,
         limit: int | None = None,
     ) -> list[DiscordMessage]:
-        """
-        Fetch recent message history as DiscordMessage objects (with media info).
-
-        Used for including images from recent context.
+        """Fetch recent media-bearing messages for multimodal context.
 
         Args:
             channel: Discord channel to fetch from
@@ -439,22 +418,18 @@ class DiscordClient(discord.Client):
         try:
             messages: list[DiscordMessage] = []
             async for msg in channel.history(limit=fetch_limit):
-                # Skip bot's own messages
                 if msg.author == self.user:
                     continue
 
-                # Parse attachments
                 attachments = [
                     MediaAttachment.from_discord(att) for att in msg.attachments
                 ]
 
-                # Parse stickers
                 stickers = [MediaSticker.from_discord(s) for s in msg.stickers]
 
-                # Parse custom emojis from content
                 custom_emojis = parse_custom_emojis(msg.content)
 
-                # Only include if has media
+                # Text-only history is supplied separately and must not be duplicated.
                 if not attachments and not stickers and not custom_emojis:
                     continue
 
@@ -498,7 +473,7 @@ class DiscordClient(discord.Client):
             return []
 
     async def on_message(self, message: discord.Message) -> None:
-        """Handle incoming messages."""
+        """Normalize an allowed incoming message and enqueue it for input."""
         if message.author == self.user:
             return
 
@@ -531,7 +506,7 @@ class DiscordClient(discord.Client):
         is_mention = self.user in message.mentions if self.user else False
         mentioned_users = [u.id for u in message.mentions]
 
-        # Get reply reference
+        # Resolve replies from Discord's cache, local history, then the API.
         reply_to_id = None
         reply_to_author = None
         reply_to_content = None
@@ -566,13 +541,10 @@ class DiscordClient(discord.Client):
         parsed_content = self.parse_mentions(message.content, message.guild)
         msg_time = self._format_timestamp(message.created_at)
 
-        # Parse attachments
         attachments = [MediaAttachment.from_discord(att) for att in message.attachments]
 
-        # Parse stickers
         stickers = [MediaSticker.from_discord(s) for s in message.stickers]
 
-        # Parse custom emojis from content
         custom_emojis = parse_custom_emojis(message.content)
 
         discord_msg = DiscordMessage(
@@ -613,19 +585,19 @@ class DiscordClient(discord.Client):
         )
 
     async def get_message(self) -> DiscordMessage:
-        """Get next message from queue."""
+        """Wait for and return the next normalized Discord message."""
         return await self._message_queue.get()
 
     def set_output_context(self, channel_id: int) -> None:
-        """Set the target channel for output."""
+        """Set the channel that subsequent output should target."""
         self._current_channel_id = channel_id
 
     def is_readonly_channel(self, channel_id: int) -> bool:
-        """Check if channel is read-only."""
+        """Return whether channel policy forbids bot output."""
         return channel_id in self.readonly_channel_ids
 
     def find_message_id(self, reference: str, channel_id: int) -> int | None:
-        """Find message ID from reference string."""
+        """Resolve a positional, abbreviated-ID, or author reference."""
         if channel_id not in self._recent_messages:
             return None
 
@@ -651,11 +623,11 @@ class DiscordClient(discord.Client):
         return None
 
     def find_user_id(self, name: str) -> int | None:
-        """Find user ID from name."""
+        """Resolve a cached account or display name to a user ID."""
         return self._user_cache.get(name.lower())
 
     def parse_mentions(self, content: str, guild: discord.Guild | None) -> str:
-        """Convert Discord mention format to readable @Username."""
+        """Replace Discord user markup with readable cached display names."""
         if not content:
             return content
 
@@ -687,7 +659,7 @@ class DiscordClient(discord.Client):
         reply_to_id: int | None = None,
         mentions: list[int] | None = None,
     ) -> discord.Message | None:
-        """Send a message to Discord."""
+        """Send content to an allowed text channel with optional reply metadata."""
         target_channel_id = channel_id or self._current_channel_id
 
         if not target_channel_id:
@@ -749,13 +721,13 @@ class DiscordClient(discord.Client):
             return None
 
     def get_bot_user_id(self) -> int | None:
-        """Get the bot's user ID."""
+        """Return the connected bot's user ID when available."""
         return self.user.id if self.user else None
 
     def has_pending_messages(self) -> bool:
-        """Check if there are messages waiting in the queue."""
+        """Return whether normalized input is waiting in the queue."""
         return not self._message_queue.empty()
 
     def pending_message_count(self) -> int:
-        """Get the number of pending messages in queue."""
+        """Return the number of normalized messages awaiting input."""
         return self._message_queue.qsize()

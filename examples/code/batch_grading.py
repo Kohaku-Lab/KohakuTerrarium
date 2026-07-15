@@ -12,9 +12,9 @@ from pathlib import Path
 from kohakuterrarium import Terrarium
 
 SUBMISSIONS = Path(__file__).resolve().parent / "submissions"
-AGENT = "@kt-biome/creatures/general"  # any config path / @ref works
+AGENT = "@kt-biome/creatures/general"  # Config paths and installed package refs both work.
 PROMPT = "Read ./report.pdf and ./src, then write score.json with your grade."
-MODEL = "default"  # LLM profile name — a typo raises at add_creature time
+MODEL = "default"  # Profiles resolve before the creature is added.
 CONCURRENCY = 8
 
 
@@ -23,8 +23,8 @@ async def grade_one(engine: Terrarium, folder: Path, gate: asyncio.Semaphore):
         creature = await engine.add_creature(
             AGENT,
             llm=MODEL,
-            pwd=folder,  # per-creature cwd — no global os.chdir
-            session=folder / "scoring_session.kohakutr",  # resumable later
+            pwd=folder,  # Working directories remain isolated per creature.
+            session=folder / "scoring_session.kohakutr",  # Persist each submission independently.
         )
         try:
             result = await creature.run(PROMPT, timeout=1800, raise_on_error=False)

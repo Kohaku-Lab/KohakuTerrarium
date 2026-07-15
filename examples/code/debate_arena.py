@@ -11,12 +11,10 @@ Uses the composition algebra:
   - ``>>`` to pipe output through transforms
   - ``async for`` to loop rounds with native control flow
 
-Why code, not terrarium?
-  Terrarium channels are event-driven queues — any creature can send
-  at any time. A debate requires STRICT ORDERING: proposer speaks,
-  then opponent responds to exactly that, then judge scores both.
-  Channels can't express "wait for exactly 2 inputs then process."
-  Your code enforces the protocol.
+Why code, not a terrarium recipe?
+  Terrarium channels broadcast peer events, while this debate requires
+  strict proposer → opponent → judge sequencing. Native control flow
+  makes that turn protocol explicit.
 
 Usage:
     python debate_arena.py "AI will replace most white-collar jobs within 10 years"
@@ -28,10 +26,8 @@ import sys
 from kohakuterrarium.compose import agent
 from kohakuterrarium.core.config import load_agent_config
 
-# ── Config builders ──────────────────────────────────────────────────
-
-
 def make_debater_config(name: str, stance: str, topic: str):
+    """Build a tool-free persistent debater configuration for one stance."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = f"debater-{name.lower()}"
     config.tools = []
@@ -51,6 +47,7 @@ def make_debater_config(name: str, stance: str, topic: str):
 
 
 def make_judge_config(topic: str):
+    """Build a concise impartial judge configuration for the debate topic."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = "judge"
     config.tools = []
@@ -71,6 +68,7 @@ def make_judge_config(topic: str):
 
 
 def parse_score(judge_text: str) -> str:
+    """Extract the judge's terminal score, defaulting malformed output to a tie."""
     for line in reversed(judge_text.splitlines()):
         line = line.strip().upper()
         if "SCORE:" in line:
@@ -83,15 +81,13 @@ def parse_score(judge_text: str) -> str:
     return "TIE"
 
 
-# ── Main ─────────────────────────────────────────────────────────────
-
-
 async def run_debate(topic: str, max_rounds: int = 4) -> None:
+    """Run a strictly ordered persistent-agent debate and print round scores."""
     print(f'\n{"=" * 60}')
     print(f"DEBATE: {topic}")
     print(f'{"=" * 60}\n')
 
-    # Create persistent agents — they accumulate conversation context
+    # Persistent agents retain prior arguments across rounds.
     async with (
         await agent(
             make_debater_config("Proposer", "ARGUE IN FAVOR OF", topic)
@@ -104,14 +100,13 @@ async def run_debate(topic: str, max_rounds: int = 4) -> None:
 
         scores = {"PROPOSER": 0, "OPPONENT": 0, "TIE": 0}
 
-        # Build the proposer >> bridge >> opponent pipeline
+        # The transform makes the proposer's output the opponent's next prompt.
         debate_round = (
             proposer
             >> (lambda prop_arg: f"Your opponent argued:\n\n{prop_arg}\n\nRespond:")
             >> opponent
         )
 
-        # Iterate rounds using async for
         prompt = f"The debate begins. State your opening argument for: {topic}"
         round_num = 0
 
@@ -120,7 +115,7 @@ async def run_debate(topic: str, max_rounds: int = 4) -> None:
             print(f"\n--- Round {round_num} ---\n")
             print(f"OPPONENT: {opp_arg}\n")
 
-            # Judge scores — use >> to parse the score
+            # Pipe the judge's prose through a deterministic score parser.
             judge_prompt = (
                 f"Round {round_num}:\n\n" f"OPPONENT: {opp_arg}\n\n" "Score this round."
             )
@@ -131,12 +126,11 @@ async def run_debate(topic: str, max_rounds: int = 4) -> None:
             if round_num >= max_rounds:
                 break
 
-            # Feed opponent's argument back to proposer for next round
+            # This constructor call is a no-op; the active iterator already advances.
             debate_round.iterate(
                 prompt
-            )  # reset not needed — persistent agents remember
+            )  # Persistent debaters retain context independently.
 
-        # Final verdict
         print(f'\n{"=" * 60}')
         print("FINAL SCORES")
         print(f"  Proposer: {scores['PROPOSER']} rounds")

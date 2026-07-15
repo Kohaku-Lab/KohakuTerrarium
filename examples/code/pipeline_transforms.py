@@ -25,6 +25,7 @@ from kohakuterrarium.core.config import load_agent_config
 
 
 def make_extractor_config():
+    """Build a tool-free agent configuration that emits person-role JSON."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = "extractor"
     config.tools = []
@@ -39,6 +40,7 @@ def make_extractor_config():
 
 
 def make_enricher_config():
+    """Build a tool-free agent configuration that describes one role."""
     config = load_agent_config("@kt-biome/creatures/general")
     config.name = "enricher"
     config.tools = []
@@ -52,7 +54,7 @@ def make_enricher_config():
 
 
 def parse_json(text: str) -> list[dict]:
-    """Parse JSON from potentially messy LLM output."""
+    """Parse JSON after removing an optional Markdown code fence."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = "\n".join(cleaned.split("\n")[1:])
@@ -62,7 +64,7 @@ def parse_json(text: str) -> list[dict]:
 
 
 def format_report(enriched: list[dict]) -> str:
-    """Format enriched data as a readable report."""
+    """Format enriched person records as a Markdown report."""
     lines = ["# Extracted People\n"]
     for item in enriched:
         lines.append(f"**{item['name']}** — {item['role']}")
@@ -73,6 +75,7 @@ def format_report(enriched: list[dict]) -> str:
 
 
 async def main() -> None:
+    """Extract, enrich, and format people mentioned in a sample document."""
     document = (
         "The project is led by Alice Chen, the CTO, who oversees the technical "
         "direction. Bob Martinez serves as the lead architect, responsible for "
@@ -86,10 +89,7 @@ async def main() -> None:
     extractor = factory(make_extractor_config())
     enricher = factory(make_enricher_config())
 
-    # Pipeline: extract → parse JSON → enrich each person → format report
-    #
-    # The >> operator auto-wraps parse_json (a plain function) as Pure.
-    # This mix of agents and functions in one pipeline is the key power.
+    # ``>>`` lifts the plain JSON parser into the agent pipeline.
 
     extract_pipeline = extractor >> parse_json
 
@@ -97,14 +97,12 @@ async def main() -> None:
     people = await extract_pipeline(document)
     print(f"Found {len(people)} people\n")
 
-    # Enrich each person — using the enricher agent with .map()
     print("Enriching...")
     for person in people:
         description = await enricher(f"{person['name']}, {person['role']}")
         person["description"] = description.strip()
         print(f"  {person['name']}: {person['description'][:80]}...")
 
-    # Format the final report
     report = format_report(people)
     print(f"\n{report}")
 

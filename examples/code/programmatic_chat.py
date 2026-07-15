@@ -13,17 +13,18 @@ from kohakuterrarium import Agent, TextChunk, TurnEnded
 
 
 async def main() -> None:
+    """Run one buffered and one streamed turn against a single agent."""
     agent = await Agent.build("@kt-biome/creatures/general")
     await agent.start()
 
     try:
-        # One buffered turn: TurnResult carries status / text / usage.
+        # Buffered turns return status, text, activity, and usage together.
         result = await agent.run("What is a terrarium?", timeout=300)
         print(f"Q: What is a terrarium?\nA: {result.text}")
         if result.usage:
             print(f"   [{result.usage.get('total_tokens', '?')} tokens]")
 
-        # One streamed turn: typed events as they happen.
+        # Streamed turns expose typed text and terminal events as they arrive.
         print("\nQ: How would you build one for tropical plants?\nA: ", end="")
         async for event in agent.run_stream(
             "How would you build one for tropical plants?"

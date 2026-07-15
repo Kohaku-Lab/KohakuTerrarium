@@ -29,8 +29,10 @@ logger = get_logger(__name__)
 
 
 class ResponseLoggerPlugin(BasePlugin):
+    """Append LLM, event, interrupt, and compaction observations to a file."""
+
     name = "response_logger"
-    priority = 95  # Run last — observe final state
+    priority = 95  # Late observation captures prior plugin transformations.
 
     def __init__(self, options: dict[str, Any] | None = None):
         opts = options or {}
@@ -40,17 +42,20 @@ class ResponseLoggerPlugin(BasePlugin):
         self._file: TextIO | None = None
 
     def _write(self, line: str) -> None:
+        """Append and flush one timestamped line when the log is open."""
         if self._file:
             ts = time.strftime("%H:%M:%S")
             self._file.write(f"[{ts}] {line}\n")
             self._file.flush()
 
     async def on_load(self, context: PluginContext) -> None:
+        """Open the append-only response log and mark session start."""
         self._log_path.parent.mkdir(parents=True, exist_ok=True)
         self._file = open(self._log_path, "a", encoding="utf-8")
         self._write(f"=== Session started: {context.agent_name} ===")
 
     async def on_unload(self) -> None:
+        """Mark session end and close the response log."""
         self._write("=== Session ended ===")
         if self._file:
             self._file.close()
@@ -59,14 +64,7 @@ class ResponseLoggerPlugin(BasePlugin):
     async def post_llm_call(
         self, messages: list[dict], response: str, usage: dict, **kwargs
     ) -> None:
-        """Called after every LLM response. Observation only — cannot modify.
-
-        Args:
-            messages: the conversation that was sent
-            response: the raw text response from the LLM
-            usage: dict with prompt_tokens, completion_tokens, cached_tokens
-            **kwargs: model (str)
-        """
+        """Log model usage and a bounded or complete response preview."""
         model = kwargs.get("model", "unknown")
         prompt_tok = usage.get("prompt_tokens", 0)
         completion_tok = usage.get("completion_tokens", 0)
@@ -80,16 +78,16 @@ class ResponseLoggerPlugin(BasePlugin):
         )
 
     async def on_event(self, event: Any = None) -> None:
-        """Called on every incoming trigger event (user input, tool result, etc.)."""
+        """Log the type of each incoming trigger event."""
         event_type = getattr(event, "type", "unknown") if event else "unknown"
         self._write(f"EVENT {event_type}")
 
     async def on_interrupt(self) -> None:
-        """Called when the user interrupts (Escape / Ctrl+C)."""
+        """Record that the current operation was interrupted by the user."""
         self._write("INTERRUPT — user cancelled current operation")
 
     async def on_compact_end(self, summary: str, messages_removed: int) -> None:
-        """Called after context compaction finishes."""
+        """Record compaction size and a bounded summary preview."""
         self._write(
             f"COMPACT removed {messages_removed} messages | "
             f"summary: {summary[:200]}"

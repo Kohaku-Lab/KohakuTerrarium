@@ -32,6 +32,7 @@ BUNDLED_DIR = REPO_ROOT / "bundled-release"
 
 
 def current_platform_tag() -> str:
+    """Return the launcher platform tag for the current host."""
     sysname = sys.platform
     machine = _platform.machine().lower()
     is_arm = machine in ("arm64", "aarch64")
@@ -45,11 +46,13 @@ def current_platform_tag() -> str:
 
 
 def current_py_abi_tag() -> str:
+    """Return the compact interpreter ABI tag for the current Python."""
     impl = "cp" if sys.implementation.name == "cpython" else sys.implementation.name
     return f"{impl}{sys.version_info[0]}{sys.version_info[1]}"
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse local Briefcase release-tree preparation options."""
     p = argparse.ArgumentParser(
         description=(
             "Build a release-tree tarball for the local checkout + "
@@ -89,6 +92,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _read_local_version() -> str:
+    """Read the project version used as the local artifact base."""
     pyproject = REPO_ROOT / "pyproject.toml"
     for line in pyproject.read_text(encoding="utf-8").splitlines():
         s = line.strip()
@@ -98,6 +102,7 @@ def _read_local_version() -> str:
 
 
 def _existing_artifact() -> Path | None:
+    """Return any existing bundled runtime archive."""
     if not BUNDLED_DIR.is_dir():
         return None
     for f in BUNDLED_DIR.iterdir():
@@ -107,6 +112,7 @@ def _existing_artifact() -> Path | None:
 
 
 def main() -> int:
+    """Build a host-matched runtime archive and stage it for Briefcase."""
     args = parse_args()
 
     if args.keep_existing:
@@ -148,10 +154,9 @@ def main() -> int:
     print(f"[prep] $ {' '.join(cmd)}", flush=True)
     subprocess.run(cmd, check=True)
 
-    # Move every produced tarball + sidecar into bundled-release/.
+    # Briefcase sources require the archive and publish sidecar together.
     BUNDLED_DIR.mkdir(parents=True, exist_ok=True)
-    # Clean stale tarballs so the launcher's probe doesn't grab an
-    # older artifact when multiple coexist.
+    # Keep one candidate so launcher probing cannot select a stale archive.
     for stale in BUNDLED_DIR.glob("kohakuterrarium-*.tar.*"):
         stale.unlink()
     for stale in BUNDLED_DIR.glob("kohakuterrarium-*.manifest.json"):

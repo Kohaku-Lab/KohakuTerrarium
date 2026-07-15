@@ -1,12 +1,4 @@
-"""
-Discord Input/Output Module - Re-exports from split modules.
-
-This file maintains backward compatibility by re-exporting all classes
-from the split modules:
-- discord_client.py - Shared Discord client
-- discord_input.py - Input module
-- discord_output.py - Output module
-"""
+"""Preserve the original Discord I/O import surface after module splitting."""
 
 from discord_client import (
     DiscordClient,

@@ -14,12 +14,13 @@ from kohakuterrarium.core.channel import ChannelMessage
 
 
 async def main() -> None:
+    """Load a recipe, seed a channel, and observe representative engine events."""
     engine = await Terrarium.from_recipe("@kt-biome/terrariums/swe_team")
     try:
         graph_id = next(iter(engine.list_graphs())).graph_id
         print(f"[recipe] graph {graph_id[:14]} hosts " f"{len(engine)} creatures")
 
-        # Inject a seed task into the "tasks" channel.
+        # Recipe-declared channels are available through the live graph handle.
         tasks = engine.channel(graph_id, "tasks")
         if tasks is not None:
             await tasks.send(
@@ -30,10 +31,11 @@ async def main() -> None:
             )
             print("[seed] task injected on 'tasks' channel")
 
-        # Watch a few topology + creature events flow by.
+        # Subscription filters keep the demonstration focused on lifecycle events.
         seen = 0
 
         async def watch():
+            """Count selected engine events until the demonstration ends."""
             nonlocal seen
             async for ev in engine.subscribe(
                 EventFilter(

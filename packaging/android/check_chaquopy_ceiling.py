@@ -54,11 +54,8 @@ from packaging.markers import default_environment
 from packaging.requirements import Requirement
 from packaging.version import Version
 
-# Every package the Chaquopy 13.1 curated index publishes wheels for.
-# Source: https://chaquo.com/pypi-13.1/ (verified 2026-05-23).
-# Used by ``find_missing_wheels`` to recognise packages Chaquopy
-# already serves — even without a known version ceiling, presence
-# in the index means pip can resolve them on Android.
+# Presence in Chaquopy's verified cp313 index is sufficient for Android
+# resolution even when this audit has no explicit version ceiling.
 CHAQUOPY_INDEX: frozenset[str] = frozenset(
     {
         "aiohttp",
@@ -197,14 +194,11 @@ CHAQUOPY_INDEX: frozenset[str] = frozenset(
     }
 )
 
-# PyPI metadata cache for the pure-Python wheel detection.  File-
-# backed so re-runs are fast.  Set via ``--cache <path>`` on the CLI.
+# An optional file-backed cache avoids repeated PyPI metadata requests.
 _PYPI_CACHE_PATH: Path | None = None
 
 
-# Maximum cp313 Android wheel version Chaquopy 13.1 publishes per
-# native dep.  Verified against https://chaquo.com/pypi-13.1/<pkg>/
-# on 2026-05-23.  When Chaquopy bumps versions, update here.
+# These verified cp313 wheel ceilings must move with the Chaquopy index.
 CHAQUOPY_MAX: dict[str, str] = {
     "pillow": "11.0.0",
     "pyyaml": "6.0.3",
@@ -229,14 +223,9 @@ URL_REF_PACKAGES: frozenset[str] = frozenset(
         "safetensors",
         "tokenizers",
         "primp",
-        # jiter: Rust JSON streaming parser.  Required UNCONDITIONALLY
-        # by both openai>=2.0 and anthropic>=0.68 — no escape via pin
-        # because every recent version of either package demands it.
-        # Built via dep/android-dep-collection.
+        # Recent OpenAI and Anthropic packages require this Rust extension.
         "jiter",
-        # rpds-py: Rust persistent-data-structures.  Hard transitive
-        # via jsonschema -> referencing -> rpds-py.  No pure-Python
-        # fallback.  Built via dep/android-dep-collection.
+        # jsonschema pulls this Rust extension through referencing.
         "rpds-py",
     }
 )
@@ -289,13 +278,13 @@ ANDROID_ACTIVE_EXTRAS: dict[str, frozenset[str]] = {
 
 @dataclass(frozen=True)
 class Blocker:
-    """One ``floor > ceiling`` violation."""
+    """Describe one dependency floor above Chaquopy's wheel ceiling."""
 
-    dep: str  # the Chaquopy-bound native dep (e.g. "numpy")
-    ceiling: Version  # Chaquopy's max published version
-    floor: Version  # highest version any active demander requires
-    demander: str  # the package whose metadata declared the floor
-    spec: str  # the raw requirement string for diagnostic context
+    dep: str  # Chaquopy-bound native dependency.
+    ceiling: Version  # Highest published compatible wheel.
+    floor: Version  # Highest active minimum requirement.
+    demander: str  # Package metadata declaring the floor.
+    spec: str  # Raw requirement retained for diagnostics.
 
 
 @dataclass(frozen=True)
@@ -354,8 +343,7 @@ def has_pure_python_wheel(package: str, version: str) -> bool:
         with urllib.request.urlopen(url, timeout=15) as resp:
             data = json.loads(resp.read())
     except (urllib.error.URLError, json.JSONDecodeError, TimeoutError):
-        # Conservative: if PyPI is unreachable, treat as NOT pure-Python
-        # so we err on the side of flagging.  Caller can re-run.
+        # Network uncertainty must fail conservatively rather than hide a blocker.
         result = False
         cache[cache_key] = result
         _save_pypi_cache(cache)
@@ -446,8 +434,7 @@ def _android_reachable(
         if p.get("is_direct") or p.get("requested"):
             roots.add(_normalize_name(p["metadata"]["name"]))
     if not roots:
-        # Fallback: walk everything (audit still runs, just no
-        # marker filtering benefit).
+        # Without roots, retain audit coverage even though marker pruning is lost.
         return set(by_name)
 
     reachable: set[str] = set(roots)
@@ -584,7 +571,7 @@ def find_missing_wheels(install_report: dict) -> list[MissingWheel]:
 
 
 def _normalize_name(name: str) -> str:
-    """PEP 503-ish normalisation: lowercase + dot→hyphen."""
+    """Normalize package names for cross-source comparisons."""
     return name.lower().replace("_", "-").replace(".", "-")
 
 
@@ -633,7 +620,7 @@ def _demand_active(
         try:
             if req.marker.evaluate(env_with):
                 return True
-        except Exception:  # pragma: no cover  (defensive)
+        except Exception:  # pragma: no cover - malformed markers stay conservative.
             return True
     return False
 
@@ -745,6 +732,7 @@ def _resolve_install_report(project_root: Path) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Resolve or load a pip report and return the audit exit status."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--project",

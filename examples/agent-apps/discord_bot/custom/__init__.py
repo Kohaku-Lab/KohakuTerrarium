@@ -1,5 +1,4 @@
-"""
-Custom Discord modules for the group chat bot.
+"""Expose the Discord bot's shared I/O, triggers, and emoji tools.
 
 This package provides:
 - DiscordInputModule: Receives messages from Discord
@@ -23,10 +22,8 @@ this __init__ adds the same directory so the bare imports resolve identically.
 import sys
 from pathlib import Path
 
-# Ensure this directory is on sys.path so that sub-modules' bare imports
-# (e.g. ``from discord_client import ...``) resolve when loaded as a package.
-# The framework's ModuleLoader does the same thing temporarily; here we make
-# it permanent for the package-import pathway.
+# Mirror ModuleLoader's path setup so sibling bare imports also work through
+# the package-import pathway.
 _CUSTOM_DIR = str(Path(__file__).parent)
 if _CUSTOM_DIR not in sys.path:
     sys.path.insert(0, _CUSTOM_DIR)
@@ -52,7 +49,6 @@ from emoji_search import (
 )
 
 __all__ = [
-    # Discord modules
     "DiscordClient",
     "DiscordInputModule",
     "DiscordOutputModule",
@@ -61,7 +57,6 @@ __all__ = [
     "DiscordIdleTrigger",
     "DiscordActivityMonitor",
     "create_discord_io",
-    # Emoji tools
     "EmojiSearchTool",
     "EmojiListTool",
     "EmojiGetTool",

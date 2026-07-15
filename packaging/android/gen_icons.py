@@ -34,7 +34,7 @@ from PIL import Image, ImageDraw
 ICON_DIR = Path(__file__).resolve().parents[2] / "src" / "kohakuterrarium" / "app_icons"
 SOURCE_PNG = ICON_DIR / "app.png"
 
-# (variant, sizes) tuples — match the Android template's icon-target table.
+# These sizes must match Briefcase's Android icon-target table.
 LAUNCHER_SIZES = (48, 72, 96, 144, 192)
 SPLASH_SIZES = (320, 480, 640, 960, 1280)
 ADAPTIVE_SIZES = (108, 162, 216, 324, 432)
@@ -43,23 +43,23 @@ ADAPTIVE_SIZES = (108, 162, 216, 324, 432)
 # inner 66dp of the 108dp canvas is "always visible"; the surrounding
 # 21dp gutter on each side can be cropped by the system mask.  We
 # inset the artwork so even circular system masks won't clip it.
-ADAPTIVE_SAFE_RATIO = 66.0 / 108.0  # ≈0.611
+ADAPTIVE_SAFE_RATIO = 66.0 / 108.0  # Material's always-visible safe zone.
 
 
 def _resize(src: Image.Image, size: int) -> Image.Image:
-    """Lanczos resize to a square of ``size``×``size`` pixels."""
+    """Resize artwork to a square using high-quality Lanczos sampling."""
     return src.resize((size, size), Image.LANCZOS)
 
 
 def _round_mask(size: int) -> Image.Image:
-    """Return a circular alpha mask sized ``size``×``size``."""
+    """Create the alpha mask used by round launcher variants."""
     mask = Image.new("L", (size, size), 0)
     ImageDraw.Draw(mask).ellipse((0, 0, size - 1, size - 1), fill=255)
     return mask
 
 
 def _make_round(src: Image.Image, size: int) -> Image.Image:
-    """Square resize + circular alpha clip."""
+    """Create a round launcher icon with transparent corners."""
     base = _resize(src, size).convert("RGBA")
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     out.paste(base, (0, 0), _round_mask(size))
@@ -67,18 +67,12 @@ def _make_round(src: Image.Image, size: int) -> Image.Image:
 
 
 def _make_square(src: Image.Image, size: int) -> Image.Image:
-    """Plain Lanczos resize."""
+    """Create a square launcher icon without masking."""
     return _resize(src, size).convert("RGBA")
 
 
 def _make_adaptive(src: Image.Image, size: int) -> Image.Image:
-    """Inset the artwork to the central safe zone on a transparent canvas.
-
-    Without the inset, the system's adaptive-icon mask (especially the
-    "circle" shape used by Pixel launchers) crops the outer corners of
-    the artwork — which on a mascot logo with character ears / hair
-    lopped means a recognisable icon turns unrecognisable.
-    """
+    """Inset artwork so adaptive launcher masks cannot crop key features."""
     inner = max(1, int(round(size * ADAPTIVE_SAFE_RATIO)))
     inset_art = _resize(src, inner).convert("RGBA")
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -88,13 +82,7 @@ def _make_adaptive(src: Image.Image, size: int) -> Image.Image:
 
 
 def _make_splash(src: Image.Image, size: int) -> Image.Image:
-    """Splash variant — artwork centred on a transparent canvas.
-
-    The artwork is sized to ~60% of the canvas (the rest is bleed for
-    the Android launch screen).  This matches the practical layout of
-    Material Design splash screens: a centred logo on a solid
-    background colour the template fills in at runtime.
-    """
+    """Center artwork at 60% scale for launcher splash-screen bleed."""
     inner = max(1, int(round(size * 0.6)))
     inset_art = _resize(src, inner).convert("RGBA")
     out = Image.new("RGBA", (size, size), (0, 0, 0, 0))
@@ -104,6 +92,7 @@ def _make_splash(src: Image.Image, size: int) -> Image.Image:
 
 
 def main() -> None:
+    """Generate every Briefcase Android icon variant from the source PNG."""
     if not SOURCE_PNG.exists():
         raise SystemExit(f"Source not found: {SOURCE_PNG}")
 

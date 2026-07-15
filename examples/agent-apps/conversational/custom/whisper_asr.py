@@ -1,5 +1,4 @@
-"""
-Whisper-based ASR module using openai-whisper + sounddevice + silero-vad.
+"""Provide real-time local Whisper transcription with microphone VAD.
 
 Provides real-time speech-to-text with:
 - Continuous microphone recording via sounddevice
@@ -55,8 +54,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class WhisperConfig(ASRConfig):
-    """
-    Configuration for Whisper ASR.
+    """Configure Whisper inference and VAD-based utterance segmentation.
 
     Attributes:
         model: Whisper model size ('tiny', 'base', 'small', 'medium', 'large')
@@ -80,11 +78,7 @@ class WhisperConfig(ASRConfig):
 
 
 class WhisperASR(ASRModule):
-    """
-    Real-time Whisper ASR using openai-whisper + sounddevice + silero-vad.
-
-    Uses continuous microphone recording with VAD-based segmentation.
-    Audio is only sent to Whisper when speech is detected.
+    """Transcribe VAD-segmented microphone audio with local Whisper.
 
     Usage:
         asr = WhisperASR(WhisperConfig(model="base", device="cuda"))
@@ -94,7 +88,7 @@ class WhisperASR(ASRModule):
     """
 
     def __init__(self, config: WhisperConfig | None = None):
-        """Initialize Whisper ASR."""
+        """Initialize model handles, queues, and recording-thread state."""
         super().__init__(config or WhisperConfig())
         self.whisper_config: WhisperConfig = self.config  # type: ignore
 
@@ -106,13 +100,11 @@ class WhisperASR(ASRModule):
         self._recording_thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        # Audio settings
         self._sample_rate = 16000
-        self._chunk_size = 512  # ~32ms at 16kHz
+        self._chunk_size = 512  # About 32 ms at 16 kHz, matching Silero input.
 
     async def _start_listening(self) -> None:
-        """Start continuous audio recording with VAD."""
-        # Load models
+        """Load inference models and start the microphone worker."""
         await self._load_models()
 
         logger.info(
@@ -121,7 +113,6 @@ class WhisperASR(ASRModule):
             device=self.whisper_config.device,
         )
 
-        # Start recording thread
         self._stop_event.clear()
         self._recording_thread = threading.Thread(
             target=self._recording_loop,
@@ -130,11 +121,10 @@ class WhisperASR(ASRModule):
         self._recording_thread.start()
 
     async def _load_models(self) -> None:
-        """Load Whisper and VAD models."""
+        """Load Whisper and prefer Silero VAD when its model is available."""
         if not HAS_TORCH:
             raise ImportError("torch not installed. Install with: pip install torch")
 
-        # Load Whisper model
         if not HAS_WHISPER:
             raise ImportError(
                 "openai-whisper not installed. Install with: pip install openai-whisper"
@@ -156,7 +146,6 @@ class WhisperASR(ASRModule):
         except Exception as e:
             raise RuntimeError(f"Failed to load Whisper model: {e}") from e
 
-        # Load Silero VAD
         try:
             model, utils = torch.hub.load(
                 repo_or_dir="snakers4/silero-vad",
@@ -175,20 +164,20 @@ class WhisperASR(ASRModule):
             self._vad_model = None
 
     def _recording_loop(self) -> None:
-        """Main recording loop (runs in separate thread)."""
+        """Capture and segment microphone audio on the worker thread."""
         if not HAS_SOUNDDEVICE:
             logger.error(
                 "sounddevice not installed. Install with: pip install sounddevice"
             )
             return
 
-        # Audio buffer for accumulating speech
+        # Keep utterance state local because only the recording thread mutates it.
         audio_buffer: list[np.ndarray] = []
         is_speaking = False
         silence_chunks = 0
         speech_chunks = 0
 
-        # VAD parameters
+        # Convert duration thresholds once to the stream's fixed chunk units.
         min_silence_chunks = int(
             self.whisper_config.min_silence_ms
             / (self._chunk_size / self._sample_rate * 1000)
@@ -211,14 +200,12 @@ class WhisperASR(ASRModule):
                 blocksize=self._chunk_size,
             ) as stream:
                 while not self._stop_event.is_set():
-                    # Read audio chunk
                     audio_chunk, overflowed = stream.read(self._chunk_size)
                     if overflowed:
                         logger.warning("Audio buffer overflow")
 
                     audio_chunk = audio_chunk.flatten()
 
-                    # Check for speech using VAD
                     has_speech = self._detect_speech(audio_chunk)
 
                     if has_speech:
@@ -235,9 +222,7 @@ class WhisperASR(ASRModule):
                             silence_chunks += 1
                             audio_buffer.append(audio_chunk)
 
-                            # Check if speech ended
                             if silence_chunks >= min_silence_chunks:
-                                # Process the audio
                                 self._process_audio(audio_buffer)
                                 audio_buffer = []
                                 is_speaking = False
@@ -245,7 +230,7 @@ class WhisperASR(ASRModule):
                                 silence_chunks = 0
                                 logger.debug("Speech ended")
 
-                    # Force process if too long
+                    # Bound latency and memory even if no trailing silence arrives.
                     if len(audio_buffer) >= max_speech_chunks:
                         logger.debug("Max speech duration reached, processing...")
                         self._process_audio(audio_buffer)
@@ -258,9 +243,8 @@ class WhisperASR(ASRModule):
             logger.error("Recording error", error=str(e))
 
     def _detect_speech(self, audio_chunk: np.ndarray) -> bool:
-        """Detect if audio chunk contains speech."""
+        """Classify a chunk with Silero VAD or an energy fallback."""
         if self._vad_model is not None:
-            # Use Silero VAD
             try:
                 audio_tensor = torch.from_numpy(audio_chunk)
                 speech_prob = self._vad_model(audio_tensor, self._sample_rate).item()
@@ -268,24 +252,21 @@ class WhisperASR(ASRModule):
             except Exception as e:
                 logger.debug("Silero VAD inference failed", error=str(e), exc_info=True)
 
-        # Fallback: energy-based detection
+        # Energy detection keeps capture usable when Silero inference fails.
         energy = np.sqrt(np.mean(audio_chunk**2))
-        return energy > 0.01  # Simple threshold
+        return energy > 0.01  # Conservative fixed threshold for the fallback path.
 
     def _process_audio(self, audio_buffer: list[np.ndarray]) -> None:
-        """Process accumulated audio through Whisper."""
+        """Transcribe one accumulated utterance and enqueue its result."""
         if not audio_buffer or self._whisper_model is None:
             return
 
-        # Concatenate audio
         audio = np.concatenate(audio_buffer)
 
-        # Pad/trim to 30 seconds (Whisper's expected input)
+        # Whisper requires a fixed 30-second input window.
         audio = whisper.pad_or_trim(audio)
 
-        # Transcribe
         try:
-            # Get language
             language = (
                 None
                 if self.whisper_config.language == "auto"
@@ -301,7 +282,6 @@ class WhisperASR(ASRModule):
             text = result["text"].strip()
 
             if text:
-                # Log ASR result
                 logger.info("ASR transcription", text=text)
 
                 asr_result = ASRResult(
@@ -318,21 +298,20 @@ class WhisperASR(ASRModule):
             logger.error("Transcription error", error=str(e))
 
     async def _stop_listening(self) -> None:
-        """Stop audio recording."""
+        """Stop capture, join the worker, and release model memory."""
         self._stop_event.set()
 
         if self._recording_thread and self._recording_thread.is_alive():
             self._recording_thread.join(timeout=2.0)
             self._recording_thread = None
 
-        # Clear models to free memory
         self._whisper_model = None
         self._vad_model = None
 
         logger.info("Whisper ASR stopped")
 
     async def _transcribe(self) -> ASRResult | None:
-        """Get next transcription from queue."""
+        """Wait asynchronously for the recording thread's next result."""
         while self._running:
             try:
                 result = await asyncio.get_event_loop().run_in_executor(
@@ -346,9 +325,8 @@ class WhisperASR(ASRModule):
         return None
 
 
-# Factory function for config-based creation
 def create_whisper_config(options: dict[str, Any]) -> WhisperConfig:
-    """Create WhisperConfig from config options."""
+    """Build a Whisper configuration from custom-module options."""
     return WhisperConfig(
         language=options.get("language", "auto"),
         sample_rate=options.get("sample_rate", 16000),

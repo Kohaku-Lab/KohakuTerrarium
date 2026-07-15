@@ -20,11 +20,7 @@ class WhisperInput(WhisperASR):
 
 
 class ConsoleASR(ASRModule):
-    """
-    Console-based ASR for testing.
-
-    Reads text input from console, simulating speech recognition.
-    """
+    """Simulate speech recognition by reading text from the console."""
 
     def __init__(self, config: ASRConfig | None = None):
         super().__init__(config)
@@ -32,11 +28,11 @@ class ConsoleASR(ASRModule):
         self._reader_task: asyncio.Task | None = None
 
     async def _start_listening(self) -> None:
-        """Start console input reader."""
+        """Start the background console reader."""
         self._reader_task = asyncio.create_task(self._read_console())
 
     async def _stop_listening(self) -> None:
-        """Stop console input reader."""
+        """Cancel and await the background console reader."""
         if self._reader_task:
             self._reader_task.cancel()
             try:
@@ -46,7 +42,7 @@ class ConsoleASR(ASRModule):
             self._reader_task = None
 
     async def _read_console(self) -> None:
-        """Background task to read console input."""
+        """Read console lines and enqueue non-empty input."""
         loop = asyncio.get_event_loop()
 
         print("\n[ConsoleASR] Ready for input (type and press Enter):")
@@ -54,7 +50,7 @@ class ConsoleASR(ASRModule):
 
         while self._running:
             try:
-                # Read line in thread to not block event loop
+                # stdin is blocking, so read it outside the event-loop thread.
                 line = await loop.run_in_executor(None, sys.stdin.readline)
                 line = line.strip()
 
@@ -65,7 +61,7 @@ class ConsoleASR(ASRModule):
                 break
 
     async def _transcribe(self) -> ASRResult | None:
-        """Get next input from queue."""
+        """Return the next queued line as a deterministic ASR result."""
         try:
             text = await asyncio.wait_for(
                 self._input_queue.get(),

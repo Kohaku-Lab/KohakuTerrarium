@@ -12,11 +12,9 @@ Usage in config.yaml:
         module: examples.plugins.tool_guard
         class: ToolGuardPlugin
         options:
-          # Block specific tools entirely
           blocked_tools: [bash, python]
-          # Or use an allowlist (if set, only these tools can run)
+          # An allowlist, when present, takes precedence over the blocklist.
           # allowed_tools: [read, write, edit, glob, grep, tree, think]
-          # Block specific commands within bash
           blocked_commands: [rm -rf, sudo, shutdown, reboot]
 """
 
@@ -33,8 +31,10 @@ logger = get_logger(__name__)
 
 
 class ToolGuardPlugin(BasePlugin):
+    """Enforce tool allowlists, blocklists, and command-pattern restrictions."""
+
     name = "tool_guard"
-    priority = 1  # Run first — block before any other plugin sees the call
+    priority = 1  # Security policy must run before other tool-call transforms.
 
     def __init__(self, options: dict[str, Any] | None = None):
         opts = options or {}
@@ -49,15 +49,10 @@ class ToolGuardPlugin(BasePlugin):
         logger.info("Tool guard active", mode=mode, agent=context.agent_name)
 
     async def pre_tool_execute(self, args: dict, **kwargs) -> dict | None:
-        """Check if this tool call is permitted.
-
-        Raise PluginBlockError to prevent execution.
-        The error message is returned to the model as the tool result,
-        so make it informative.
-        """
+        """Allow the call unchanged or raise an informative policy block."""
         tool_name = kwargs.get("tool_name", "")
 
-        # Allowlist mode: only explicitly allowed tools can run
+        # An allowlist is authoritative when configured.
         if self._allowed is not None and tool_name not in self._allowed:
             logger.warning("Tool blocked (not in allowlist)", tool=tool_name)
             raise PluginBlockError(
@@ -65,7 +60,7 @@ class ToolGuardPlugin(BasePlugin):
                 f"Allowed: {', '.join(sorted(self._allowed))}"
             )
 
-        # Blocklist mode: specific tools are blocked
+        # Without an allowlist, reject explicitly blocked tools.
         if tool_name in self._blocked:
             logger.warning("Tool blocked (in blocklist)", tool=tool_name)
             raise PluginBlockError(
@@ -73,7 +68,7 @@ class ToolGuardPlugin(BasePlugin):
                 "Use a different approach."
             )
 
-        # For bash/python: check if the command contains blocked patterns
+        # Command-pattern checks cover executable payloads inside shell tools.
         if tool_name in ("bash", "python") and self._blocked_commands:
             command = args.get("command", "") or args.get("code", "")
             for pattern in self._blocked_commands:
@@ -88,4 +83,4 @@ class ToolGuardPlugin(BasePlugin):
                         "This operation is not permitted."
                     )
 
-        return None  # Allow execution
+        return None  # None preserves the original arguments.

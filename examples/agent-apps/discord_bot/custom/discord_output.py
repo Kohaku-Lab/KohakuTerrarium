@@ -1,5 +1,4 @@
-"""
-Discord Output Module - Sends messages to Discord.
+"""Filter, deduplicate, and send controller output through Discord.
 
 Uses the shared DiscordClient from input module to send messages.
 Supports reply markers, mentions, keyword filtering, and deduplication.
@@ -20,10 +19,7 @@ logger = get_logger("kohakuterrarium.custom.discord_output")
 
 
 class DiscordOutputModule(BaseOutputModule):
-    """
-    Output module that sends messages to Discord.
-
-    Uses the shared DiscordClient from the input module.
+    """Send guarded output through the Discord client shared by input.
 
     Supports special markers in output:
     - [reply:Username] or [reply:#N] - reply to a message
@@ -47,8 +43,7 @@ class DiscordOutputModule(BaseOutputModule):
         dedup_threshold: float = 0.85,
         dedup_window: int = 5,
     ):
-        """
-        Initialize Discord output.
+        """Initialize filtering, load shedding, and deduplication policy.
 
         Args:
             client: Shared Discord client
@@ -66,16 +61,13 @@ class DiscordOutputModule(BaseOutputModule):
         self.client_name = client_name
         self._buffer: list[str] = []
 
-        # Drop chance config
         self.drop_base_chance = drop_base_chance
         self.drop_increment = drop_increment
         self.drop_max_chance = drop_max_chance
 
-        # Deduplication config
         self.dedup_threshold = dedup_threshold
         self._recent_outputs: deque[str] = deque(maxlen=dedup_window)
 
-        # Filtered keywords
         self._filtered_keywords: set[str] = set()
         if filtered_keywords:
             self._filtered_keywords.update(kw.lower() for kw in filtered_keywords)
@@ -89,7 +81,6 @@ class DiscordOutputModule(BaseOutputModule):
                 extra={"keyword_count": len(self._filtered_keywords)},
             )
 
-        # Typing indicator task
         self._typing_task: asyncio.Task | None = None
 
         logger.info(
@@ -102,7 +93,7 @@ class DiscordOutputModule(BaseOutputModule):
         )
 
     def _load_keywords_file(self, filepath: str) -> None:
-        """Load keywords from file (one per line, # for comments)."""
+        """Load one case-insensitive filtered keyword per non-comment line."""
         import os
 
         if not os.path.exists(filepath):
@@ -119,7 +110,7 @@ class DiscordOutputModule(BaseOutputModule):
             logger.warning("Failed to load keywords file", extra={"error": str(e)})
 
     def _filter_keywords(self, content: str) -> str:
-        """Replace filtered keywords with [filtered]."""
+        """Redact configured keywords without regard to case."""
         if not self._filtered_keywords:
             return content
 
@@ -131,7 +122,7 @@ class DiscordOutputModule(BaseOutputModule):
         return result
 
     def _similarity(self, a: str, b: str) -> float:
-        """Calculate similarity ratio between two strings."""
+        """Estimate normalized character overlap between two messages."""
         norm_a = " ".join(a.lower().split())
         norm_b = " ".join(b.lower().split())
 
@@ -156,7 +147,7 @@ class DiscordOutputModule(BaseOutputModule):
         return (2 * common) / (len_a + len_b)
 
     def _is_duplicate(self, content: str) -> bool:
-        """Check if content is duplicate or near-duplicate of recent output."""
+        """Return whether content is too similar to a recent sent message."""
         if not self._recent_outputs:
             return False
 
@@ -175,7 +166,7 @@ class DiscordOutputModule(BaseOutputModule):
         return False
 
     def _ensure_client(self) -> DiscordClient | None:
-        """Get client, looking up from registry if needed."""
+        """Return the explicit client or resolve it from the shared registry."""
         if self.client is None:
             self.client = get_client(self.client_name)
             if self.client:
@@ -185,11 +176,11 @@ class DiscordOutputModule(BaseOutputModule):
         return self.client
 
     async def _typing_loop(self, channel: discord.TextChannel | discord.Thread) -> None:
-        """Continuously send typing indicator until cancelled."""
+        """Refresh Discord's expiring typing indicator until cancelled."""
         try:
             while True:
                 await channel.typing()
-                # Discord typing indicator lasts ~10s, refresh every 8s
+                # Refresh before Discord's roughly ten-second indicator expires.
                 await asyncio.sleep(8)
         except asyncio.CancelledError:
             pass
@@ -197,8 +188,7 @@ class DiscordOutputModule(BaseOutputModule):
             pass
 
     async def on_processing_start(self) -> None:
-        """Start typing indicator when processing begins."""
-        # Cancel any existing typing task
+        """Start one typing indicator for the active writable channel."""
         if self._typing_task and not self._typing_task.done():
             self._typing_task.cancel()
             self._typing_task = None
@@ -224,7 +214,7 @@ class DiscordOutputModule(BaseOutputModule):
             logger.debug("Started typing indicator")
 
     async def on_processing_end(self) -> None:
-        """Stop typing indicator when processing ends."""
+        """Cancel and await the active typing indicator."""
         if self._typing_task and not self._typing_task.done():
             self._typing_task.cancel()
             try:
@@ -237,7 +227,7 @@ class DiscordOutputModule(BaseOutputModule):
     def _parse_markers(
         self, content: str, channel_id: int
     ) -> tuple[str, int | None, list[int]]:
-        """Parse and remove markers from content."""
+        """Resolve reply and mention markers, then remove them from content."""
         client = self._ensure_client()
         if not client:
             return content, None, []
@@ -262,12 +252,12 @@ class DiscordOutputModule(BaseOutputModule):
         return content.strip(), reply_to_id, mention_ids
 
     async def write(self, content: str) -> None:
-        """Write complete message to Discord."""
+        """Apply output policy and send one complete Discord message."""
         client = self._ensure_client()
         if not client:
             return
 
-        # Check if should drop due to pending messages
+        # Shed stale responses increasingly aggressively as new input accumulates.
         import random
 
         pending_count = client.pending_message_count()
@@ -287,12 +277,11 @@ class DiscordOutputModule(BaseOutputModule):
         if not clean_content:
             return
 
-        # Check for duplicate
         if self._is_duplicate(clean_content):
             logger.info("Filtering duplicate response")
             return
 
-        # Filter garbage patterns
+        # Reject controller/protocol fragments that are not user-facing messages.
         garbage_patterns = [
             "user",
             "assistant",
@@ -308,13 +297,13 @@ class DiscordOutputModule(BaseOutputModule):
                 logger.debug("Filtering garbage output")
                 return
 
-        # Filter very short non-meaningful content
+        # Preserve short words, but reject punctuation-only fragments.
         stripped = clean_content.replace(" ", "").replace("\n", "")
         if len(stripped) <= 3:
             if not any(c.isalnum() for c in stripped):
                 return
 
-        # Filter repetitive characters
+        # Repetitive low-entropy output is usually a generation artifact.
         unique_chars = set(stripped)
         if len(unique_chars) <= 2 and len(stripped) > 1:
             return
@@ -342,11 +331,11 @@ class DiscordOutputModule(BaseOutputModule):
             self._recent_outputs.append(final_content)
 
     async def write_stream(self, chunk: str) -> None:
-        """Buffer streaming chunks."""
+        """Buffer a streaming chunk until the turn is flushed."""
         self._buffer.append(chunk)
 
     async def flush(self) -> None:
-        """Send buffered content."""
+        """Join and send all buffered streaming chunks as one message."""
         if self._buffer:
             content = "".join(self._buffer)
             self._buffer.clear()
@@ -362,7 +351,7 @@ def create_discord_io(
     filtered_keywords: list[str] | None = None,
     keywords_file: str | None = None,
 ):
-    """Create paired Discord input and output modules."""
+    """Create paired modules that share one Discord client."""
     from discord_input import DiscordInputModule
 
     input_module = DiscordInputModule(

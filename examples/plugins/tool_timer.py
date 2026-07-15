@@ -23,32 +23,26 @@ logger = get_logger(__name__)
 
 
 class ToolTimerPlugin(BasePlugin):
+    """Measure tool latency and persist cumulative timing statistics."""
+
     name = "tool_timer"
-    priority = 5  # Low priority = runs first in pre, last in post (wraps everything)
+    priority = 5  # Early pre-hook and late post-hook measure the full wrapped call.
 
     def __init__(self, options: dict[str, Any] | None = None):
-        self._pending: dict[str, float] = {}  # job_id -> start time
+        self._pending: dict[str, float] = {}  # Job IDs correlate concurrent calls.
         self._ctx: PluginContext | None = None
 
     async def on_load(self, context: PluginContext) -> None:
         self._ctx = context
 
     async def pre_tool_execute(self, args: dict, **kwargs) -> dict | None:
-        """Record the start time before the tool executes.
-
-        kwargs contains: tool_name (str), job_id (str)
-        Return None to leave args unmodified.
-        """
+        """Associate the tool job ID with its monotonic start time."""
         job_id = kwargs.get("job_id", "")
         self._pending[job_id] = time.monotonic()
-        return None  # Don't modify args
+        return None  # Timing must not alter tool arguments.
 
     async def post_tool_execute(self, result: Any, **kwargs) -> Any | None:
-        """Log elapsed time after the tool finishes.
-
-        kwargs contains: tool_name (str), job_id (str), args (dict)
-        Return None to leave result unmodified.
-        """
+        """Log elapsed time and update persisted aggregate timing."""
         job_id = kwargs.get("job_id", "")
         tool_name = kwargs.get("tool_name", "unknown")
         start = self._pending.pop(job_id, None)
@@ -63,16 +57,16 @@ class ToolTimerPlugin(BasePlugin):
             job_id=job_id,
         )
 
-        # Persist cumulative stats in session state
         if self._ctx:
             total = float(self._ctx.get_state("total_ms") or 0)
             count = int(self._ctx.get_state("call_count") or 0)
             self._ctx.set_state("total_ms", total + elapsed_ms)
             self._ctx.set_state("call_count", count + 1)
 
-        return None  # Don't modify result
+        return None  # Timing must not alter the tool result.
 
     async def on_agent_stop(self) -> None:
+        """Log aggregate tool latency when persisted timing data exists."""
         if not self._ctx:
             return
         total = float(self._ctx.get_state("total_ms") or 0)

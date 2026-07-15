@@ -58,6 +58,7 @@ OUR_PACKAGE_PATH = "org/kohaku/terrarium"
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Apply Android overrides and compatibility patches to a generated project."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--generated",
@@ -174,10 +175,7 @@ def copy_sandbox_jni_libs(sandbox_dir: Path, generated: Path, skip_check: bool) 
         for src in abi_dir.iterdir():
             if not src.is_file():
                 continue
-            # Gradle only ships entries that look like native libs.
-            # ``lib<name>.so`` is the canonical form; anything else
-            # is silently dropped at apk-package time and would only
-            # waste build cache.
+            # Gradle packages only canonical lib<name>.so entries from jniLibs.
             if not (src.name.startswith("lib") and src.name.endswith(".so")):
                 continue
             dst = dst_root / abi_dir.name / src.name
@@ -211,8 +209,7 @@ def copy_sandbox_assets(sandbox_dir: Path, generated: Path, skip_check: bool) ->
         return 1
 
     dst_root = generated / "src" / "main" / "assets" / "sandbox" / "bin"
-    # Replace wholesale — easier to reason about than incremental
-    # sync, and the bin tree is small.
+    # Replace the small asset tree wholesale to avoid stale binaries.
     if dst_root.exists():
         shutil.rmtree(dst_root)
     dst_root.mkdir(parents=True, exist_ok=True)
@@ -323,7 +320,7 @@ _ANDROID_DROP_PACKAGES: tuple[str, ...] = (
 # extras leaves bare uvicorn which falls back to stdlib asyncio +
 # h11 (pure-Python, ships with uvicorn itself).
 _ANDROID_STRIP_EXTRAS: dict[str, str] = {
-    "uvicorn": "uvicorn",  # drop any ``[...]`` suffix on the uvicorn line
+    "uvicorn": "uvicorn",  # Preserve the base package without native extras.
 }
 
 # Packages that need to be installed from a direct URL on Android
@@ -487,7 +484,7 @@ def patch_android_requirements(generated: Path) -> int:
     req_path = generated / "requirements.txt"
     if not req_path.is_file():
         print(f"warning: requirements.txt missing at {req_path}", file=sys.stderr)
-        return 0  # not fatal — older Briefcase versions might place it elsewhere
+        return 0  # Older Briefcase versions may place requirements elsewhere.
 
     # Pre-resolve each URL-ref package's version + URL templates.
     # If a package's version can't be inferred we skip its
@@ -526,10 +523,7 @@ def patch_android_requirements(generated: Path) -> int:
         if pkg_name is not None:
             pkg_lower = pkg_name.lower()
             if pkg_lower in _ANDROID_DROP_PACKAGES:
-                # Silently drop the line — Android doesn't get this
-                # dep at all.  The consumer code is expected to
-                # lazy-import + degrade gracefully (see pymupdf
-                # consumers; gitpython is unused in our source).
+                # Consumers must lazy-import packages removed by Android carve-outs.
                 continue
             if pkg_lower in _ANDROID_STRIP_EXTRAS:
                 patched.append(_strip_extras(stripped, pkg_lower))
@@ -659,10 +653,10 @@ def _strip_extras(req_line: str, pkg_name: str) -> str:
     # whitespace in the canonical form Briefcase emits).
     bracket_start = text.find("[", len(pkg_name) - 1)
     if bracket_start == -1:
-        return text  # nothing to strip
+        return text  # No extras are present.
     bracket_end = text.find("]", bracket_start)
     if bracket_end == -1:
-        return text  # malformed — leave alone
+        return text  # Preserve malformed input rather than corrupting it.
     return text[:bracket_start] + text[bracket_end + 1 :]
 
 
@@ -721,9 +715,7 @@ def patch_launcher_activity(generated: Path) -> int:
     text = pattern.sub(_replace, text, count=1)
 
     if text == original:
-        # Pattern didn't match — Briefcase changed its template
-        # shape.  Don't silently no-op; the operator needs to
-        # update this script.
+        # Template drift must fail visibly or the wrong activity ships.
         print(
             "error: could not locate launcher Activity declaration "
             "in AndroidManifest.xml.  Has Briefcase Android's "
@@ -766,8 +758,7 @@ def patch_allow_backup(generated: Path) -> int:
         count=1,
     )
     if new == text:
-        # No allowBackup attribute at all — inject one onto the
-        # <application> open tag.
+        # Templates without the attribute still need the confidentiality safeguard.
         new = re.sub(
             r"(<application\b)",
             r'\1 android:allowBackup="false"',

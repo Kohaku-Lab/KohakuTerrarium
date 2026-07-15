@@ -10,7 +10,7 @@ import json
 import sys
 from pathlib import Path
 
-# Ensure project is importable
+# Allow direct checkout execution without installing the package.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -18,6 +18,7 @@ from kohakuterrarium.session.store import SessionStore
 
 
 def print_meta(store: SessionStore) -> None:
+    """Print session metadata with bounded previews of structured values."""
     meta = store.load_meta()
     print("=== Session Metadata ===")
     for k, v in sorted(meta.items()):
@@ -29,6 +30,7 @@ def print_meta(store: SessionStore) -> None:
 
 
 def print_events(store: SessionStore, agent: str | None = None) -> None:
+    """Print compact event summaries for one agent or the full session."""
     if agent:
         events = store.get_events(agent)
         print(f"=== Events for '{agent}' ({len(events)} total) ===")
@@ -40,7 +42,6 @@ def print_events(store: SessionStore, agent: str | None = None) -> None:
     for i, evt in enumerate(events):
         etype = evt.get("type", "?")
 
-        # Format based on type
         match etype:
             case "user_input":
                 content = evt.get("content", "")[:80]
@@ -87,8 +88,8 @@ def print_events(store: SessionStore, agent: str | None = None) -> None:
 
 
 def print_channels(store: SessionStore) -> None:
+    """Discover and print persisted channel messages."""
     print("=== Channels ===")
-    # Scan for all channel prefixes
     seen_channels = set()
     for key_bytes in store.channels.keys():
         key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
@@ -107,6 +108,7 @@ def print_channels(store: SessionStore) -> None:
 
 
 def print_subagents(store: SessionStore) -> None:
+    """Print persisted sub-agent run metadata and conversation presence."""
     print("=== Sub-Agent Runs ===")
     seen = set()
     for key_bytes in store.subagents.keys():
@@ -123,7 +125,6 @@ def print_subagents(store: SessionStore) -> None:
         success = meta.get("success", "?") if isinstance(meta, dict) else "?"
         print(f"  {prefix}: task={task} turns={turns} tools={tools} success={success}")
 
-        # Check if conversation exists
         has_conv = store.subagents.get(f"{prefix}:conversation") is not None
         if has_conv:
             print(f"    (conversation saved)")
@@ -131,6 +132,7 @@ def print_subagents(store: SessionStore) -> None:
 
 
 def print_state(store: SessionStore) -> None:
+    """Print persisted agent state entries."""
     print("=== Agent State ===")
     for key_bytes in sorted(store.state.keys()):
         key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
@@ -143,6 +145,7 @@ def print_state(store: SessionStore) -> None:
 
 
 def print_conversations(store: SessionStore) -> None:
+    """Print bounded previews of persisted conversation snapshots."""
     print("=== Conversation Snapshots ===")
     for key_bytes in sorted(store.conversation.keys()):
         key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
@@ -162,6 +165,7 @@ def print_conversations(store: SessionStore) -> None:
 
 
 def print_search(store: SessionStore, query: str) -> None:
+    """Print ranked full-text search results for the session."""
     results = store.search(query, k=10)
     print(f"=== Search: '{query}' ({len(results)} results) ===")
     for r in results:
@@ -174,7 +178,7 @@ def print_search(store: SessionStore, query: str) -> None:
 
 
 def print_summary(store: SessionStore) -> None:
-    """Print a quick summary of the session."""
+    """Print session identity and aggregate event, channel, and sub-agent counts."""
     meta = store.load_meta()
     print(f"Session: {meta.get('session_id', '?')}")
     print(f"Type: {meta.get('config_type', '?')}")
@@ -184,13 +188,11 @@ def print_summary(store: SessionStore) -> None:
     print(f"Last active: {meta.get('last_active', '?')}")
     print(f"Agents: {meta.get('agents', [])}")
 
-    # Count events per agent
     agents = meta.get("agents", [])
     for agent in agents:
         events = store.get_events(agent)
         print(f"  {agent}: {len(events)} events")
 
-    # Count channels
     seen_channels = set()
     for key_bytes in store.channels.keys():
         key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
@@ -200,7 +202,6 @@ def print_summary(store: SessionStore) -> None:
     total_msgs = sum(len(store.get_channel_messages(ch)) for ch in seen_channels)
     print(f"Channels: {len(seen_channels)} ({total_msgs} messages)")
 
-    # Count sub-agent runs
     sa_count = sum(
         1
         for k in store.subagents.keys()
@@ -211,6 +212,7 @@ def print_summary(store: SessionStore) -> None:
 
 
 def main():
+    """Parse display options and inspect one session store safely."""
     parser = argparse.ArgumentParser(description="Inspect a .kohakutr session file")
     parser.add_argument("path", help="Path to .kohakutr session file")
     parser.add_argument(

@@ -1,5 +1,4 @@
-"""
-Emoji Search Tool - Search guild emojis by name, caption, or tags.
+"""Expose searchable Discord guild emoji metadata as agent tools.
 
 This tool allows the agent to find appropriate emojis from the database
 built by emoji_builder.py.
@@ -22,12 +21,7 @@ logger = get_logger("kohakuterrarium.custom.emoji_search")
 
 
 class EmojiSearchTool(BaseTool):
-    """
-    Tool for searching guild emojis.
-
-    Searches the emoji database by query (matches name, caption, tags).
-    Returns matching emojis with their Discord format strings.
-    """
+    """Search emoji names, captions, and tags by relevance."""
 
     def __init__(
         self,
@@ -51,19 +45,18 @@ class EmojiSearchTool(BaseTool):
         return ExecutionMode.DIRECT
 
     def _get_db(self) -> EmojiDatabase:
-        """Get or load emoji database."""
+        """Lazily load and cache the configured emoji database."""
         if self._db is None:
             self._db = get_emoji_db(self.db_path)
         return self._db
 
     def reload_db(self) -> None:
-        """Reload emoji database from disk."""
+        """Replace the cached database with the latest file contents."""
         self._db = get_emoji_db(self.db_path)
         logger.info("Reloaded emoji database", extra=self._db.stats())
 
     async def _execute(self, args: dict[str, Any]) -> ToolResult:
-        """
-        Execute emoji search.
+        """Search the database and format matching Discord markup.
 
         Args:
             query: Search query (required)
@@ -85,11 +78,9 @@ class EmojiSearchTool(BaseTool):
         if guild_id is not None:
             guild_id = int(guild_id)
 
-        # Determine animated filter
         animated_only = animated_filter == "only"
         static_only = animated_filter == "exclude"
 
-        # Search database
         db = self._get_db()
         results = db.search(
             query=query,
@@ -105,7 +96,6 @@ class EmojiSearchTool(BaseTool):
                 metadata={"query": query, "count": 0},
             )
 
-        # Format results
         output_lines = [f"Found {len(results)} emoji(s) matching '{query}':", ""]
 
         for i, emoji in enumerate(results, 1):
@@ -131,7 +121,7 @@ class EmojiSearchTool(BaseTool):
         )
 
     def get_full_documentation(self) -> str:
-        """Full documentation for ##info## command."""
+        """Return detailed usage documentation for on-demand tool help."""
         return """# emoji_search
 
 Search guild emojis by keyword, emotion, or description.
@@ -174,11 +164,7 @@ Use the Discord format string to include the emoji in your response.
 
 
 class EmojiListTool(BaseTool):
-    """
-    Tool for listing available emojis.
-
-    Lists all emojis or emojis from a specific guild.
-    """
+    """List available emojis with guild filtering and pagination."""
 
     def __init__(
         self,
@@ -202,14 +188,13 @@ class EmojiListTool(BaseTool):
         return ExecutionMode.DIRECT
 
     def _get_db(self) -> EmojiDatabase:
-        """Get or load emoji database."""
+        """Lazily load and cache the configured emoji database."""
         if self._db is None:
             self._db = get_emoji_db(self.db_path)
         return self._db
 
     async def _execute(self, args: dict[str, Any]) -> ToolResult:
-        """
-        List emojis.
+        """List one paginated slice of available emojis.
 
         Args:
             guild_id: Filter by guild ID (optional)
@@ -229,7 +214,6 @@ class EmojiListTool(BaseTool):
         db = self._get_db()
         all_emojis = db.list_all(guild_id)
 
-        # Apply pagination
         paginated = all_emojis[offset : offset + limit]
 
         if not paginated:
@@ -239,7 +223,6 @@ class EmojiListTool(BaseTool):
                 metadata={"count": 0},
             )
 
-        # Format output
         total = len(all_emojis)
         showing = f"Showing {offset + 1}-{offset + len(paginated)} of {total} emojis"
 
@@ -279,9 +262,7 @@ Returns a list of emojis with their Discord format strings and guild names.
 
 
 class EmojiGetTool(BaseTool):
-    """
-    Tool for getting a specific emoji by name or ID.
-    """
+    """Retrieve detailed metadata for an emoji by exact name or ID."""
 
     def __init__(
         self,
@@ -335,7 +316,7 @@ class EmojiGetTool(BaseTool):
         elif name:
             matches = db.get_by_name(name)
             if matches:
-                emoji = matches[0]  # Return first match
+                emoji = matches[0]  # Exact names may exist in multiple guilds.
 
         if not emoji:
             return ToolResult(
@@ -343,7 +324,6 @@ class EmojiGetTool(BaseTool):
                 metadata={"found": False},
             )
 
-        # Format detailed output
         discord_fmt = emoji.to_discord_format()
         anim_tag = "Yes" if emoji.animated else "No"
 
@@ -391,7 +371,7 @@ Returns detailed emoji information including:
 
 
 def create_emoji_tools(db_path: Path | str | None = None) -> list[BaseTool]:
-    """Create all emoji-related tools."""
+    """Create search, listing, and exact-lookup tools for one database."""
     return [
         EmojiSearchTool(db_path),
         EmojiListTool(db_path),

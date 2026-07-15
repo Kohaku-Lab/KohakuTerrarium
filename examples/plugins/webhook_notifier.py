@@ -16,9 +16,9 @@ Usage in config.yaml:
         options:
           url: "https://hooks.example.com/agent-events"
           events: [agent_start, agent_stop, interrupt, compact]
-          # Auto-downgrade model when context gets too large
+          # Use a cheaper model only for compaction above this context size.
           auto_downgrade_model: "gpt-5.4-mini"
-          auto_downgrade_threshold: 100000  # tokens
+          auto_downgrade_threshold: 100000  # Input tokens.
 """
 
 from typing import Any
@@ -30,8 +30,10 @@ logger = get_logger(__name__)
 
 
 class WebhookNotifierPlugin(BasePlugin):
+    """Send selected lifecycle webhooks and optionally switch compaction models."""
+
     name = "webhook_notifier"
-    priority = 99  # Run last — observe final state
+    priority = 99  # Late observation captures the final lifecycle state.
 
     def __init__(self, options: dict[str, Any] | None = None):
         opts = options or {}
@@ -45,7 +47,7 @@ class WebhookNotifierPlugin(BasePlugin):
         self._original_model = ""
 
     async def _send(self, event_type: str, data: dict | None = None) -> None:
-        """Fire-and-forget webhook delivery."""
+        """Deliver one enabled webhook without propagating transport failures."""
         if not self._url:
             logger.debug("Webhook skipped (no URL)", event=event_type)
             return
@@ -58,8 +60,7 @@ class WebhookNotifierPlugin(BasePlugin):
             **(data or {}),
         }
 
-        # Non-blocking HTTP POST
-        # Using httpx as an optional dependency — graceful fallback
+        # httpx remains optional; unavailable or failed delivery must not stop the agent.
         try:
             import httpx
 
@@ -72,32 +73,34 @@ class WebhookNotifierPlugin(BasePlugin):
             logger.warning("Webhook failed", event=event_type, error=str(e))
 
     async def on_load(self, context: PluginContext) -> None:
+        """Capture plugin context and the model to restore after compaction."""
         self._ctx = context
         self._original_model = context.model
 
     async def on_agent_start(self) -> None:
+        """Notify listeners that the agent started with its original model."""
         await self._send("agent_start", {"model": self._original_model})
 
     async def on_agent_stop(self) -> None:
+        """Notify listeners that the agent is stopping."""
         await self._send("agent_stop")
 
     async def on_event(self, event: Any = None) -> None:
-        """Observe every trigger event. Useful for external dashboards."""
+        """Forward each trigger-event type to external observers."""
         event_type = str(getattr(event, "type", "unknown")) if event else "unknown"
         await self._send("event", {"event_type": event_type})
 
     async def on_interrupt(self) -> None:
+        """Notify listeners that the active operation was interrupted."""
         await self._send("interrupt")
 
     async def on_compact_start(self, context_length: int) -> None:
-        """Before compaction — optionally downgrade to a cheaper model."""
+        """Notify compaction start and optionally switch to a cheaper model."""
         await self._send(
             "compact", {"context_length": context_length, "phase": "start"}
         )
 
-        # Auto-downgrade model when context is very large
-        # This demonstrates switch_model(): you might want a cheaper model
-        # for the compaction turn since it's just summarization.
+        # Compaction is summarization, so large contexts can use a cheaper model.
         if (
             self._downgrade_model
             and self._downgrade_threshold
@@ -114,13 +117,12 @@ class WebhookNotifierPlugin(BasePlugin):
             )
 
     async def on_compact_end(self, summary: str, messages_removed: int) -> None:
-        """After compaction — restore original model if downgraded."""
+        """Notify compaction completion and restore the original model."""
         await self._send(
             "compact",
             {"phase": "end", "messages_removed": messages_removed},
         )
 
-        # Restore original model after compaction
         if self._downgrade_model and self._ctx and self._original_model:
             self._ctx.switch_model(self._original_model)
             logger.info("Restored model after compaction", model=self._original_model)

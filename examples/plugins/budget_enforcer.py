@@ -16,8 +16,8 @@ Usage in config.yaml:
         module: examples.plugins.budget_enforcer
         class: BudgetEnforcerPlugin
         options:
-          max_tokens: 500000      # total token budget (input + output)
-          warn_at_pct: 80         # warn when this % of budget used
+          max_tokens: 500000      # Count prompt and completion tokens together.
+          warn_at_pct: 80         # Emit one warning before hard exhaustion.
 """
 
 from typing import Any
@@ -29,8 +29,10 @@ logger = get_logger(__name__)
 
 
 class BudgetEnforcerPlugin(BasePlugin):
+    """Persist token usage and replace future calls after budget exhaustion."""
+
     name = "budget_enforcer"
-    priority = 2  # Very early — block before anything else runs
+    priority = 2  # Budget gating must precede other LLM-call transforms.
 
     def __init__(self, options: dict[str, Any] | None = None):
         opts = options or {}
@@ -48,7 +50,7 @@ class BudgetEnforcerPlugin(BasePlugin):
 
     async def on_load(self, context: PluginContext) -> None:
         self._ctx = context
-        # Restore from session state (survives resume)
+        # Session state keeps cumulative usage intact after resume.
         saved_input = context.get_state("total_input")
         if saved_input is not None:
             self._total_input = int(saved_input)
@@ -67,9 +69,9 @@ class BudgetEnforcerPlugin(BasePlugin):
         The model can then gracefully inform the user and stop.
         """
         if not self._exhausted:
-            return None  # Allow the call
+            return None  # None preserves the original call.
 
-        # Budget exhausted — replace conversation with a stop instruction
+        # Replacing messages permits a graceful user-facing stop instead of failure.
         logger.warning(
             "LLM call blocked — budget exhausted",
             total=self._total,
@@ -89,18 +91,17 @@ class BudgetEnforcerPlugin(BasePlugin):
     async def post_llm_call(
         self, messages: list[dict], response: str, usage: dict, **kwargs
     ) -> None:
-        """Track token usage after each call and check budget."""
+        """Accumulate usage, persist it, and update warning or stop state."""
         self._total_input += usage.get("prompt_tokens", 0)
         self._total_output += usage.get("completion_tokens", 0)
 
-        # Persist to session state
         if self._ctx:
             self._ctx.set_state("total_input", self._total_input)
             self._ctx.set_state("total_output", self._total_output)
 
         pct = self._total / self._max_tokens if self._max_tokens else 0
 
-        # Warn once at threshold
+        # Warn once so long sessions do not repeat the same threshold message.
         if pct >= self._warn_pct and not self._warned:
             self._warned = True
             logger.warning(
@@ -110,7 +111,7 @@ class BudgetEnforcerPlugin(BasePlugin):
                 pct=f"{pct:.0%}",
             )
 
-        # Hard stop at 100%
+        # Exhaustion affects subsequent calls because this call already completed.
         if pct >= 1.0 and not self._exhausted:
             self._exhausted = True
             logger.warning(

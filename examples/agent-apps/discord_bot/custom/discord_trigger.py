@@ -1,8 +1,4 @@
-"""
-Discord-specific triggers for group chat bot.
-
-Provides ping detection and idle/exploration triggers.
-"""
+"""Provide mention, inactivity, and activity-coordination Discord triggers."""
 
 import asyncio
 from typing import Any
@@ -17,12 +13,7 @@ logger = get_logger("kohakuterrarium.custom.discord_trigger")
 
 
 class DiscordPingTrigger(BaseTrigger):
-    """
-    Trigger that fires when bot is mentioned in Discord.
-
-    This trigger monitors the message context and fires when the bot
-    is directly mentioned (@bot), forcing a reply.
-    """
+    """Turn direct Discord mentions into non-stackable reply events."""
 
     def __init__(
         self,
@@ -31,8 +22,7 @@ class DiscordPingTrigger(BaseTrigger):
         prompt: str | None = None,
         **options: Any,
     ):
-        """
-        Initialize ping trigger.
+        """Initialize mention detection and its pending-event queue.
 
         Args:
             client: Discord client to monitor (optional, will look up from registry)
@@ -46,45 +36,37 @@ class DiscordPingTrigger(BaseTrigger):
         self._pending_pings: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
 
     def set_client(self, client: Any) -> None:
-        """Set Discord client (for delayed initialization)."""
+        """Attach a Discord client after trigger construction."""
         self.client = client
 
     def _ensure_client(self) -> Any:
-        """Get client, looking up from registry if needed."""
+        """Return the attached client or resolve it from the registry."""
         if self.client is None:
             self.client = get_client(self.client_name)
         return self.client
 
     def _on_context_update(self, context: dict[str, Any]) -> None:
-        """
-        Check context for mentions.
-
-        Called by controller when new input arrives. If the message
-        mentions the bot, queue a ping event.
-        """
-        # Check if this is a Discord message with mention
+        """Queue Discord contexts that directly mention the bot."""
         if context.get("source") != "discord":
             return
 
-        # Skip if this is already a ping event (avoid re-triggering loop)
+        # force_reply marks the synthetic event and prevents a feedback loop.
         if context.get("force_reply"):
             return
 
         is_mention = context.get("is_mention", False)
         if is_mention:
-            # Queue the ping for processing
             try:
                 self._pending_pings.put_nowait(context)
             except asyncio.QueueFull:
-                pass  # Skip if queue is full
+                pass  # Preserve non-blocking delivery if the queue is later bounded.
 
     async def wait_for_trigger(self) -> TriggerEvent | None:
-        """Wait for a ping event."""
+        """Return the next queued mention as an immediate reply event."""
         if not self._running:
             return None
 
         try:
-            # Wait for ping with timeout
             ping_context = await asyncio.wait_for(
                 self._pending_pings.get(),
                 timeout=1.0,
@@ -98,30 +80,24 @@ class DiscordPingTrigger(BaseTrigger):
                     "force_reply": True,
                 },
                 prompt_override=self.prompt,
-                stackable=False,  # Ping events need immediate attention
+                stackable=False,  # Direct mentions require prompt attention.
             )
         except asyncio.TimeoutError:
             return None
 
 
 class DiscordIdleTrigger(BaseTrigger):
-    """
-    Trigger that fires after a period of inactivity.
-
-    Used for exploration/topic-starting behavior. The trigger
-    can be configured to fire randomly within a time range.
-    """
+    """Probabilistically suggest exploration after a randomized idle period."""
 
     def __init__(
         self,
-        min_idle_seconds: float = 1800.0,  # 30 minutes
-        max_idle_seconds: float = 7200.0,  # 2 hours
-        exploration_chance: float = 0.3,  # 30% chance to actually explore
+        min_idle_seconds: float = 1800.0,  # 30 minutes.
+        max_idle_seconds: float = 7200.0,  # 2 hours.
+        exploration_chance: float = 0.3,  # Avoid forcing a topic at every timeout.
         prompt: str | None = None,
         **options: Any,
     ):
-        """
-        Initialize idle trigger.
+        """Initialize randomized idle thresholds and exploration probability.
 
         Args:
             min_idle_seconds: Minimum idle time before trigger can fire
@@ -136,14 +112,13 @@ class DiscordIdleTrigger(BaseTrigger):
         self.exploration_chance = exploration_chance
         self._last_activity = asyncio.get_event_loop().time()
         self._current_threshold: float | None = None
-        self._check_count = 0  # For logging every N checks
+        self._check_count = 0  # Throttle status logs independently of polling.
 
     def _on_context_update(self, context: dict[str, Any]) -> None:
-        """Reset idle timer on any activity."""
+        """Reset activity time and choose a fresh idle threshold."""
         import random
 
         self._last_activity = asyncio.get_event_loop().time()
-        # Set new random threshold for next idle check
         self._current_threshold = random.uniform(
             self.min_idle_seconds,
             self.max_idle_seconds,
@@ -154,7 +129,7 @@ class DiscordIdleTrigger(BaseTrigger):
         )
 
     async def _on_start(self) -> None:
-        """Initialize threshold on start."""
+        """Initialize the first randomized idle threshold."""
         import random
 
         self._last_activity = asyncio.get_event_loop().time()
@@ -173,13 +148,13 @@ class DiscordIdleTrigger(BaseTrigger):
         )
 
     async def wait_for_trigger(self) -> TriggerEvent | None:
-        """Wait for idle timeout."""
+        """Poll idle duration and occasionally emit an exploration event."""
         import random
 
         if not self._running:
             return None
 
-        # Check every 30 seconds
+        # Coarse polling avoids a continuously active trigger task.
         await asyncio.sleep(30.0)
 
         if not self._running:
@@ -188,7 +163,7 @@ class DiscordIdleTrigger(BaseTrigger):
         current_time = asyncio.get_event_loop().time()
         idle_duration = current_time - self._last_activity
 
-        # Log idle status every 10 checks (~5 minutes)
+        # Report status about every five minutes without logging every poll.
         self._check_count += 1
         if self._check_count >= 10:
             self._check_count = 0
@@ -204,9 +179,7 @@ class DiscordIdleTrigger(BaseTrigger):
                 },
             )
 
-        # Check if we've been idle long enough
         if self._current_threshold and idle_duration >= self._current_threshold:
-            # Roll for exploration chance
             roll = random.random()
             logger.info(
                 "Idle threshold reached, rolling for exploration",
@@ -220,7 +193,6 @@ class DiscordIdleTrigger(BaseTrigger):
             )
 
             if roll < self.exploration_chance:
-                # Reset timer
                 self._last_activity = current_time
                 self._current_threshold = random.uniform(
                     self.min_idle_seconds,
@@ -236,13 +208,13 @@ class DiscordIdleTrigger(BaseTrigger):
                     context={
                         "idle_duration": idle_duration,
                         "exploration": True,
-                        "force_reply": False,  # Not forced, just suggested
+                        "force_reply": False,  # Exploration remains advisory.
                     },
                     prompt_override=self.prompt,
                     stackable=True,
                 )
             else:
-                # Didn't explore this time, reset threshold
+                # A skipped roll starts a new idle window instead of retrying immediately.
                 new_threshold = random.uniform(
                     self.min_idle_seconds,
                     self.max_idle_seconds,
@@ -257,12 +229,7 @@ class DiscordIdleTrigger(BaseTrigger):
 
 
 class DiscordActivityMonitor(BaseTrigger):
-    """
-    Monitors Discord activity and provides context to other triggers.
-
-    This is a composite trigger that helps coordinate between
-    the input module and specialized triggers.
-    """
+    """Fan out Discord activity context to coordinating triggers."""
 
     def __init__(
         self,
@@ -271,8 +238,7 @@ class DiscordActivityMonitor(BaseTrigger):
         prompt: str | None = None,
         **options: Any,
     ):
-        """
-        Initialize activity monitor.
+        """Initialize client lookup and activity callback storage.
 
         Args:
             client: Discord client to monitor (optional, will look up from registry)
@@ -286,29 +252,28 @@ class DiscordActivityMonitor(BaseTrigger):
         self._activity_callbacks: list[callable] = []
 
     def set_client(self, client: Any) -> None:
-        """Set Discord client."""
+        """Attach a Discord client after monitor construction."""
         self.client = client
 
     def _ensure_client(self) -> Any:
-        """Get client, looking up from registry if needed."""
+        """Return the attached client or resolve it from the registry."""
         if self.client is None:
             self.client = get_client(self.client_name)
         return self.client
 
     def add_activity_callback(self, callback: callable) -> None:
-        """Add callback for activity updates."""
+        """Register a callback to receive each activity context."""
         self._activity_callbacks.append(callback)
 
     def _on_context_update(self, context: dict[str, Any]) -> None:
-        """Propagate activity to callbacks."""
+        """Propagate activity without allowing one callback to break others."""
         for callback in self._activity_callbacks:
             try:
                 callback(context)
             except Exception:
-                pass  # Don't let callback errors break the monitor
+                pass  # Callback isolation preserves delivery to remaining listeners.
 
     async def wait_for_trigger(self) -> TriggerEvent | None:
-        """Activity monitor doesn't produce events directly."""
-        # Just sleep and check running state
+        """Remain alive while producing no trigger events directly."""
         await asyncio.sleep(1.0)
         return None

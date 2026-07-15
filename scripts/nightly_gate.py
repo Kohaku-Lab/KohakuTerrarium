@@ -14,6 +14,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse nightly manifest and GitHub Actions output options."""
     p = argparse.ArgumentParser()
     p.add_argument("--manifest", type=Path, required=True)
     p.add_argument("--commit-sha", required=True)
@@ -28,12 +29,14 @@ def parse_args() -> argparse.Namespace:
 
 
 def _truthy(value: str | bool | None) -> bool:
+    """Interpret common workflow boolean spellings."""
     if isinstance(value, bool):
         return value
     return str(value or "").strip().lower() in {"1", "true", "yes", "y", "on"}
 
 
 def _load_manifest(path: Path) -> dict | None:
+    """Load a nightly manifest, returning None so gate failures remain open."""
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
@@ -41,6 +44,7 @@ def _load_manifest(path: Path) -> dict | None:
 
 
 def _version_local_tokens(version: str) -> set[str]:
+    """Extract hexadecimal tokens from a PEP 440 local version suffix."""
     if "+" not in version:
         return set()
     local = version.rsplit("+", 1)[1].lower()
@@ -48,11 +52,13 @@ def _version_local_tokens(version: str) -> set[str]:
 
 
 def _build_id_tokens(build_id: str) -> set[str]:
+    """Extract hexadecimal tokens from the revision-bearing build-ID suffix."""
     suffix = build_id.lower().rsplit("-", 1)[-1]
     return {token for token in re.split(r"[^0-9a-f]+", suffix) if token}
 
 
 def _token_matches_commit(token: str, commit: str, short: str) -> bool:
+    """Return whether a token identifies the full or abbreviated commit."""
     token = token.lower()
     return (
         token == commit
@@ -62,6 +68,7 @@ def _token_matches_commit(token: str, commit: str, short: str) -> bool:
 
 
 def _commit_sha_matches(value: str, commit: str, short: str) -> bool:
+    """Compare a manifest commit field with full and abbreviated revisions."""
     candidate = value.strip().lower()
     if not candidate:
         return False
@@ -73,6 +80,7 @@ def _commit_sha_matches(value: str, commit: str, short: str) -> bool:
 
 
 def _find_matching_release(manifest: dict, commit_sha: str) -> tuple[str, dict] | None:
+    """Find a retained release that identifies the requested commit."""
     commit = commit_sha.lower()
     try:
         _ = int(commit, 16)
@@ -100,6 +108,7 @@ def _find_matching_release(manifest: dict, commit_sha: str) -> tuple[str, dict] 
 def decide(
     manifest_path: Path, commit_sha: str, *, force_rebuild: bool
 ) -> dict[str, str]:
+    """Return workflow outputs deciding whether the nightly matrix should run."""
     if force_rebuild:
         return {
             "should_build": "true",
@@ -125,6 +134,7 @@ def decide(
 
 
 def _write_github_outputs(path: Path, outputs: dict[str, str]) -> None:
+    """Append decision key-value pairs to a GitHub Actions output file."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         for key, value in outputs.items():
@@ -132,6 +142,7 @@ def _write_github_outputs(path: Path, outputs: dict[str, str]) -> None:
 
 
 def main() -> int:
+    """Evaluate the nightly gate and emit workflow outputs."""
     args = parse_args()
     outputs = decide(
         args.manifest,

@@ -311,7 +311,7 @@ META = {
         "The kt serve REST endpoints and WebSocket channels, with request / response shapes.",
         ["reference", "http", "api"],
     ),
-    # Dev
+    # Development
     "docs/dev/README.md": (
         "Development",
         "Contributor-facing docs — internals, dep graph, frontend, and the test strategy.",
@@ -341,6 +341,7 @@ META = {
 
 
 def frontmatter(title: str, summary: str, tags: list[str]) -> str:
+    """Render one YAML frontmatter block from documentation metadata."""
     tag_block = "\n".join(f"  - {t}" for t in tags)
     return (
         "---\n"
@@ -353,6 +354,7 @@ def frontmatter(title: str, summary: str, tags: list[str]) -> str:
 
 
 def main() -> None:
+    """Add missing frontmatter to known documentation files in place."""
     added = 0
     skipped = 0
     missing = 0

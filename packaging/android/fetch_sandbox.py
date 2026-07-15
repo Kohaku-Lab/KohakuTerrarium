@@ -13,20 +13,16 @@ private dir.
 
 Usage:
 
-    # Normal run (CI): download + verify; fail on hash mismatch
+    # CI mode verifies declared hashes before writing assets.
     python packaging/android/fetch_sandbox.py
 
-    # Refresh mode (operator bumping a version): download but
-    # accept any hash, then PRINT the computed hashes so the
-    # operator can paste them into the manifest
+    # Refresh mode reports new hashes after an intentional version bump.
     python packaging/android/fetch_sandbox.py --refresh
 
-    # Check-only: download + verify but skip writing the bin tree
-    # (CI uses this on PRs to validate manifest integrity without
-    #  needing the bin output)
+    # Check-only mode validates the manifest without writing build assets.
     python packaging/android/fetch_sandbox.py --check-only
 
-    # Custom output root (Briefcase config can point here)
+    # Briefcase may use an alternate binary asset root.
     python packaging/android/fetch_sandbox.py --out path/to/bin
 
 Designed to run on any Python 3.10+, no extra deps — uses urllib
@@ -53,10 +49,11 @@ DEFAULT_CACHE = Path.home() / ".cache" / "kohakuterrarium" / "android-sandbox"
 
 
 class FetchError(RuntimeError):
-    """Raised on any non-recoverable fetch failure."""
+    """Signal a non-recoverable manifest or artifact fetch failure."""
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Parse fetch options and return the sandbox preparation exit status."""
     parser = argparse.ArgumentParser(
         description=(
             "Fetch + verify Android sandbox binaries declared in "
@@ -131,10 +128,7 @@ def fetch_all(
     if not abis:
         raise FetchError("manifest missing required key 'abis'")
     if not binaries:
-        # Empty manifest is legal — we use ``/system/bin/sh`` on
-        # Android now, no bundled binaries required.  Skip the
-        # download/verify loop entirely so the build doesn't fail
-        # on a perfectly-fine no-op manifest.
+        # Android currently uses /system/bin/sh, so an empty manifest is valid.
         if not check_only:
             out.mkdir(parents=True, exist_ok=True)
             _write_runtime_manifest(out, binaries, abis)
@@ -208,9 +202,7 @@ def fetch_all(
                 extract_from=extract_from,
                 arch_tag=arch_tag,
             )
-            # Mark executable so the APK packager preserves the bit
-            # (zip entries default to 0644; Briefcase respects the
-            # source mode).
+            # Briefcase preserves source modes, unlike default 0644 zip entries.
             _make_executable(target)
 
     if not check_only and not refresh:
@@ -292,9 +284,8 @@ def _materialize(
     extract_from: str | None,
     arch_tag: str | None,
 ) -> None:
-    """Copy / extract the downloaded artifact into ``target``."""
+    """Copy a direct binary or extract its declared archive member."""
     if not archive_type:
-        # Direct binary download — just copy.
         shutil.copyfile(downloaded, target)
         return
 
@@ -324,8 +315,7 @@ def _materialize(
 
 
 def _find_member(tf: tarfile.TarFile, name: str) -> tarfile.TarInfo | None:
-    # tarfile.getmember is strict; fall back to scanning so we
-    # match either exact or trailing-segment paths.
+    # Archives may prefix members with a release directory, so allow suffix matches.
     try:
         return tf.getmember(name)
     except KeyError:
@@ -337,8 +327,7 @@ def _find_member(tf: tarfile.TarFile, name: str) -> tarfile.TarInfo | None:
 
 
 def _make_executable(path: Path) -> None:
-    """Add the user-exec bit; no-op on Windows where POSIX modes
-    aren't honoured."""
+    """Add executable bits where the host filesystem honors POSIX modes."""
     try:
         mode = path.stat().st_mode
     except OSError:
@@ -347,16 +336,7 @@ def _make_executable(path: Path) -> None:
 
 
 def _write_runtime_manifest(out: Path, binaries: list[dict], abis: list[str]) -> None:
-    """Drop a small ``manifest.json`` next to the per-ABI bin dirs.
-
-    The runtime extraction path
-    (``utils.mobile_sandbox.ensure_extracted``) reads this on first
-    launch to know which files to copy from APK assets to the
-    writable private dir.  ABI-agnostic content — the APK only
-    includes the binaries for the device's actual ABI, so the
-    extraction-time check is "do we have all these names" rather
-    than "do we have the right ABI."
-    """
+    """Write the ABI-agnostic runtime extraction manifest beside assets."""
     names = [b["name"] for b in binaries]
     manifest_path = out / "manifest.json"
     manifest_path.write_text(

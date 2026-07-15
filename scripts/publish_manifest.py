@@ -29,6 +29,7 @@ from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse channel manifest publication options."""
     p = argparse.ArgumentParser()
     p.add_argument("--channel", required=True, choices=("stable", "beta", "nightly"))
     p.add_argument(
@@ -64,6 +65,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _load_sidecars(artifacts_dir: Path) -> list[dict]:
+    """Load valid release sidecars and report unreadable entries."""
     out: list[dict] = []
     for sidecar in sorted(artifacts_dir.glob("*.manifest.json")):
         try:
@@ -112,18 +114,17 @@ def _group_into_release(sidecars: list[dict], prefix: str, notes: str | None) ->
 
 
 def _artifact_url(prefix: str, sidecar: dict) -> str:
-    # Reconstruct the tarball name from the sidecar fields.
+    # Artifact naming is deterministic from version, platform, and ABI.
     name = (
         f"kohakuterrarium-{sidecar['version']}-{sidecar['platform']}-py"
         f"{_py_minor(sidecar['py_abi'])}"
     )
-    # We do NOT carry the suffix in the sidecar — infer from name pattern:
-    # sidecar files are ``<tarball>.manifest.json``, so we can look for
-    # a tarball stem match in the same dir.
+    # Published matrix artifacts use zstd; sidecars omit the archive suffix.
     return f"{prefix.rstrip('/')}/{name}.tar.zst"
 
 
 def _py_minor(abi: str) -> str:
+    """Convert a compact ABI tag such as ``cp313`` to ``3.13``."""
     digits = "".join(ch for ch in abi if ch.isdigit())
     if len(digits) >= 2:
         return f"{digits[0]}.{digits[1:]}"
@@ -131,6 +132,7 @@ def _py_minor(abi: str) -> str:
 
 
 def main() -> int:
+    """Merge matrix sidecars into a bounded channel release manifest."""
     args = parse_args()
     sidecars = _load_sidecars(args.artifacts_dir)
     if not sidecars:
@@ -145,8 +147,7 @@ def main() -> int:
     else:
         releases = []
 
-    # Replace any existing entry for this version, then prepend so the
-    # newest is at index 0.
+    # A version is unique in the feed, and newest entries remain first.
     releases = [r for r in releases if r.get("version") != release["version"]]
     releases.insert(0, release)
     releases = releases[: args.max_releases]

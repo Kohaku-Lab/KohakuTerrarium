@@ -19,12 +19,10 @@ PYPROJECT = REPO_ROOT / "pyproject.toml"
 
 
 def patch(version: str) -> None:
+    """Rewrite every authoritative top-level version field in pyproject.toml."""
     text = PYPROJECT.read_text(encoding="utf-8")
     new_line = f'version = "{version}"'
-    # Match section-anchored ``version =`` lines and rewrite them.  The
-    # file has exactly two: one under ``[project]`` and one under
-    # ``[tool.briefcase]``.  A bare regex on ``^version = `` rewrites
-    # both in one pass.
+    # Project packaging and Briefcase each read their own top-level version field.
     updated, count = re.subn(
         r'^version = "[^"]*"',
         new_line,
@@ -38,6 +36,7 @@ def patch(version: str) -> None:
 
 
 def main() -> int:
+    """Validate the CLI argument and patch the project version fields."""
     if len(sys.argv) != 2:
         print("usage: set_pyproject_version.py <version>", file=sys.stderr)
         return 2

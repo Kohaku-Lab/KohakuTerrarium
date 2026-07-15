@@ -2,9 +2,8 @@
 
 Usage: python scripts/_coverage_audit.py
 
-Runs each test tier with coverage and reports files with low coverage
-in each tier so the next-test-to-write decision can be data-driven.
-Temporary scaffolding — delete after the coverage push lands.
+Runs each test tier with coverage and reports source files that remain
+below the selected threshold across every tier.
 """
 
 import subprocess
@@ -12,6 +11,7 @@ import sys
 
 
 def file_cov(suite_args: list[str]) -> dict[str, tuple[int, int]]:
+    """Run one pytest tier and return statement and miss counts by source file."""
     r = subprocess.run(
         [
             sys.executable,
@@ -48,6 +48,7 @@ def file_cov(suite_args: list[str]) -> dict[str, tuple[int, int]]:
 
 
 def main() -> None:
+    """Compare tier coverage and print the highest-impact low-coverage files."""
     print("Running unit...")
     u = file_cov(["tests/unit", "--ignore=tests/unit/test_litellm_provider.py"])
     print(f"  unit: {len(u)} files")
@@ -62,7 +63,7 @@ def main() -> None:
     for path, (s_u, m_u) in u.items():
         if s_u < 40:
             continue
-        # Skip UI/CLI tools that the user accepts as low-coverage.
+        # Exclude platform surfaces with separate coverage expectations.
         if any(
             p in path for p in ("tui/", "cli_rich/", "cli/", "_briefcase", "web_dist")
         ):

@@ -13,8 +13,8 @@ Usage in config.yaml:
         module: examples.plugins.subagent_tracker
         class: SubagentTrackerPlugin
         options:
-          max_concurrent: 5    # warn if more than N sub-agents active
-          log_tasks: true      # log the task text
+          max_concurrent: 5    # Warn when active jobs exceed this threshold.
+          log_tasks: true      # Retain a bounded task preview per active job.
 """
 
 import time
@@ -27,6 +27,8 @@ logger = get_logger(__name__)
 
 
 class SubagentTrackerPlugin(BasePlugin):
+    """Track active sub-agents, completion totals, and background promotion."""
+
     name = "subagent_tracker"
     priority = 10
 
@@ -34,7 +36,7 @@ class SubagentTrackerPlugin(BasePlugin):
         opts = options or {}
         self._max_concurrent = int(opts.get("max_concurrent", 5))
         self._log_tasks = bool(opts.get("log_tasks", True))
-        self._active: dict[str, dict] = {}  # job_id -> {name, start, task}
+        self._active: dict[str, dict] = {}  # Job IDs correlate pre/post hooks.
         self._completed = 0
         self._total_tokens = 0
         self._ctx: PluginContext | None = None
@@ -43,12 +45,7 @@ class SubagentTrackerPlugin(BasePlugin):
         self._ctx = context
 
     async def pre_subagent_run(self, task: str, **kwargs) -> str | None:
-        """Called before a sub-agent is spawned.
-
-        kwargs: name (str), job_id (str), is_background (bool)
-        Return modified task string or None to keep unchanged.
-        Raise PluginBlockError to prevent the sub-agent from running.
-        """
+        """Record a sub-agent start and warn on excessive concurrency."""
         name = kwargs.get("name", "unknown")
         job_id = kwargs.get("job_id", "")
         is_bg = kwargs.get("is_background", False)
@@ -73,14 +70,10 @@ class SubagentTrackerPlugin(BasePlugin):
                 max=self._max_concurrent,
             )
 
-        return None  # Don't modify the task
+        return None  # Observation must not alter the delegated task.
 
     async def post_subagent_run(self, result: Any, **kwargs) -> Any | None:
-        """Called after a sub-agent finishes (success or failure).
-
-        kwargs: name (str), job_id (str)
-        Return modified result or None.
-        """
+        """Record sub-agent completion, duration, usage, and persistent totals."""
         job_id = kwargs.get("job_id", "")
         name = kwargs.get("name", "unknown")
 
@@ -88,7 +81,6 @@ class SubagentTrackerPlugin(BasePlugin):
         elapsed = (time.monotonic() - info["start"]) if info else 0
         self._completed += 1
 
-        # Extract token count from result if available
         tokens = getattr(result, "total_tokens", 0)
         self._total_tokens += tokens
 
@@ -104,7 +96,6 @@ class SubagentTrackerPlugin(BasePlugin):
             elapsed_s=f"{elapsed:.1f}",
         )
 
-        # Persist stats
         if self._ctx:
             self._ctx.set_state("completed", self._completed)
             self._ctx.set_state("total_tokens", self._total_tokens)
@@ -112,11 +103,7 @@ class SubagentTrackerPlugin(BasePlugin):
         return None
 
     async def on_task_promoted(self, job_id: str, tool_name: str) -> None:
-        """Called when a direct (blocking) task is promoted to background.
-
-        This happens when a tool/sub-agent takes too long and the framework
-        promotes it to run in the background instead of blocking.
-        """
+        """Log when a blocking task is promoted to background execution."""
         logger.info(
             "Task promoted to background",
             job_id=job_id,
@@ -124,6 +111,7 @@ class SubagentTrackerPlugin(BasePlugin):
         )
 
     async def on_agent_stop(self) -> None:
+        """Report unfinished jobs and cumulative sub-agent usage at shutdown."""
         if self._active:
             logger.warning(
                 "Sub-agents still active at shutdown",
