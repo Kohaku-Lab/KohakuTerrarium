@@ -111,6 +111,17 @@ def new_graph_id() -> str:
     return f"graph_{uuid4().hex[:12]}"
 
 
+def create_graph(state: TopologyState, graph_id: str) -> GraphTopology:
+    """Create an empty graph with an explicit restore-time identifier."""
+    if not graph_id:
+        raise ValueError("graph_id must be non-empty")
+    if graph_id in state.graphs:
+        raise ValueError(f"graph {graph_id!r} already exists")
+    graph = GraphTopology(graph_id=graph_id)
+    state.graphs[graph_id] = graph
+    return graph
+
+
 def add_creature(
     state: TopologyState,
     creature_id: str,

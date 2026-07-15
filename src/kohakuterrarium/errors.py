@@ -102,6 +102,44 @@ class SessionNotResumableError(SessionError, ValueError):
     """A session cannot be resumed because its metadata is invalid or missing."""
 
 
+class GraphManifestError(SessionNotResumableError):
+    """A live-graph manifest is malformed or cannot be used."""
+
+    def __init__(self, message: str, *, field: str | None = None) -> None:
+        super().__init__(message)
+        self.field = field
+
+
+class GraphManifestVersionError(GraphManifestError):
+    """A live-graph manifest uses an unsupported schema version."""
+
+    def __init__(self, version: object) -> None:
+        super().__init__(
+            f"Unsupported live-graph manifest version: {version!r}",
+            field="version",
+        )
+        self.version = version
+
+
+class GraphManifestCollisionError(GraphManifestError):
+    """A saved graph or creature identifier collides with the target engine."""
+
+    def __init__(self, field: str, value: str) -> None:
+        super().__init__(
+            f"Live-graph manifest {field} {value!r} already exists",
+            field=field,
+        )
+        self.value = value
+
+
+class GraphManifestPersistenceError(GraphManifestError):
+    """A live-graph manifest could not be read or written."""
+
+    def __init__(self, message: str, *, applied: bool = False) -> None:
+        super().__init__(message)
+        self.applied = applied
+
+
 class SessionNotFoundError(SessionError, NotFoundError, FileNotFoundError):
     """A named session does not exist on disk or in the engine."""
 

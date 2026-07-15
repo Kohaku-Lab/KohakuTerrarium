@@ -4,9 +4,12 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
+from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
+
 
 class _FakeTriggerManager:
     def __init__(self) -> None:
@@ -184,7 +187,13 @@ class TestTerrariumBuilder:
         first_graph_id: str | None = None
         for spec in self._creatures:
             agent = _FakeAgent(name=spec.name, responses=spec.responses)
-            creature = Creature(creature_id=spec.name, name=spec.name, agent=agent)
+            creature = Creature(
+                creature_id=spec.name,
+                name=spec.name,
+                agent=agent,
+                config_snapshot=pack_agent_config(AgentConfig(name=spec.name)),
+                build_pwd=".",
+            )
             graph = (
                 first_graph_id
                 if self._all_in_one_graph and first_graph_id is not None

@@ -10,6 +10,7 @@ both ``AgentConfig`` (file path or object) and ``CreatureConfig``
 """
 
 import asyncio
+import os
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -23,6 +24,7 @@ from kohakuterrarium.core.config import (
     build_agent_config,
     load_agent_config,
 )
+from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.turn import AgentEventStream, TurnResult
@@ -70,6 +72,10 @@ class Creature:
     agent: Agent
     graph_id: str = ""
     config: Any = None
+    config_snapshot: dict[str, Any] | None = None
+    source_ref: str | None = None
+    build_pwd: str = ""
+    injected_runtime: tuple[str, ...] = ()
     listen_channels: list[str] = field(default_factory=list)
     send_channels: list[str] = field(default_factory=list)
     output_log: OutputLogCapture | None = None
@@ -592,6 +598,40 @@ def _with_terrarium_plugin_defaults(config: AgentConfig) -> AgentConfig:
     return config
 
 
+def _runtime_injection_labels(llm, tools, plugins) -> tuple[str, ...]:
+    return tuple(
+        label
+        for label, value in (
+            ("llm_provider", llm if not isinstance(llm, (str, type(None))) else None),
+            ("tools", tools),
+            ("plugins", plugins),
+        )
+        if value
+    )
+
+
+def _build_provenance(
+    agent: Agent,
+    *,
+    source_ref: str | None,
+    injected_runtime: tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Capture the resolved declarative inputs needed to rebuild a creature."""
+    try:
+        config_snapshot = pack_agent_config(agent.config)
+    except TypeError:
+        config_snapshot = None
+    return {
+        "config_snapshot": config_snapshot,
+        "source_ref": source_ref,
+        "build_pwd": str(
+            getattr(getattr(agent, "executor", None), "_working_dir", None)
+            or os.getcwd()
+        ),
+        "injected_runtime": injected_runtime,
+    }
+
+
 def apply_creature_name(creature: "Creature", name: str) -> None:
     """Push a display-name change onto every nested object that caches it.
 
@@ -708,6 +748,11 @@ def build_creature(
             agent=agent,
             graph_id=graph_id,
             config=agent.config,
+            **_build_provenance(
+                agent,
+                source_ref=str(config),
+                injected_runtime=_runtime_injection_labels(llm, tools, plugins),
+            ),
         )
 
     if isinstance(config, AgentConfig):
@@ -734,6 +779,11 @@ def build_creature(
             agent=agent,
             graph_id=graph_id,
             config=config,
+            **_build_provenance(
+                agent,
+                source_ref=None,
+                injected_runtime=_runtime_injection_labels(llm, tools, plugins),
+            ),
         )
 
     if isinstance(config, CreatureConfig):
@@ -762,6 +812,15 @@ def build_creature(
             agent=agent,
             graph_id=graph_id,
             config=config,
+            **_build_provenance(
+                agent,
+                source_ref=(
+                    str(config.config_data.get("base_config"))
+                    if config.config_data.get("base_config")
+                    else None
+                ),
+                injected_runtime=_runtime_injection_labels(llm, tools, plugins),
+            ),
             listen_channels=list(config.listen_channels),
             send_channels=list(config.send_channels),
         )
