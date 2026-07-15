@@ -9,7 +9,6 @@ from kohakuterrarium.core.compact import (
     COMPACT_PROMPT,
     DEFAULT_KEEP_RECENT,
     DEFAULT_MAX_TOKENS,
-    DEFAULT_TARGET,
     DEFAULT_THRESHOLD,
     CompactConfig,
     CompactManager,
@@ -109,7 +108,6 @@ class TestCompactConfig:
         c = CompactConfig()
         assert c.max_tokens == DEFAULT_MAX_TOKENS
         assert c.threshold == DEFAULT_THRESHOLD
-        assert c.target == DEFAULT_TARGET
         assert c.keep_recent_turns == DEFAULT_KEEP_RECENT
         assert c.enabled is True
         assert c.cooldown_seconds == 30.0

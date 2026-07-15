@@ -41,7 +41,6 @@ logger = get_logger(__name__)
 # of max_tokens. If context somehow exceeds max_tokens, emergency truncation.
 DEFAULT_MAX_TOKENS = 256_000
 DEFAULT_THRESHOLD = 0.80  # compact when prompt_tokens >= 80% of max_tokens
-DEFAULT_TARGET = 0.40  # aim for 40% of max_tokens after compact
 DEFAULT_KEEP_RECENT = 8  # keep last 8 turns raw (not summarized)
 
 # Usage from an LLM round that STARTED before a splice can land long
@@ -56,7 +55,6 @@ class CompactConfig:
 
     max_tokens: int = DEFAULT_MAX_TOKENS
     threshold: float = DEFAULT_THRESHOLD
-    target: float = DEFAULT_TARGET
     keep_recent_turns: int = DEFAULT_KEEP_RECENT
     enabled: bool = True
     cooldown_seconds: float = 30.0
@@ -65,11 +63,7 @@ class CompactConfig:
 
 
 class CompactManager:
-    """Manages non-blocking context compaction.
-
-    Attached to an agent. Checks after each LLM call whether compaction
-    is needed, and runs it in the background if so.
-    """
+    """Manage non-blocking context compaction after LLM calls."""
 
     def __init__(self, config: CompactConfig | None = None):
         self.config = config or CompactConfig()

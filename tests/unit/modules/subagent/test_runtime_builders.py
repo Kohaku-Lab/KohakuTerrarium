@@ -162,6 +162,7 @@ class TestBuildCompactManager:
     def test_compact_config_builds_and_wires_manager(self):
         cfg = SubAgentConfig(
             name="x",
+            # "target" is a removed legacy key — tolerated, ignored.
             compact={"threshold": 0.8, "target": 0.3, "keep_recent_turns": 6},
         )
         llm = _FakeLLM()
@@ -169,7 +170,7 @@ class TestBuildCompactManager:
         assert cm is not None
         # The configured values landed on the CompactConfig.
         assert cm.config.threshold == 0.8
-        assert cm.config.target == 0.3
+        assert not hasattr(cm.config, "target")
         assert cm.config.keep_recent_turns == 6
         # The manager is wired to this llm and the sub-agent's name.
         assert cm._llm is llm
