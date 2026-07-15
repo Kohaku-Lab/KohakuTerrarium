@@ -10,6 +10,8 @@ import asyncio
 
 import pytest
 
+from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.resume import detect_session_type
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import Creature
@@ -19,7 +21,13 @@ from kohakuterrarium.testing.terrarium import _FakeAgent
 
 
 def _prebuilt(name="alice"):
-    return Creature(creature_id=name, name=name, agent=_FakeAgent(name=name))
+    return Creature(
+        creature_id=name,
+        name=name,
+        agent=_FakeAgent(name=name),
+        config_snapshot=pack_agent_config(AgentConfig(name=name)),
+        build_pwd=".",
+    )
 
 
 def _write_cfg(tmp_path, name="auto"):
@@ -48,6 +56,17 @@ class TestAutosessionViaSessionDir:
             assert meta["agents"] == ["alice"]
             assert meta["session_id"] == c.creature_id
             assert meta["status"] == "running"
+            manifest = meta["live_graph_manifest"]
+            assert manifest["graph_id"] == c.graph_id
+            assert manifest["revision"] == 2
+            assert [item["name"] for item in manifest["creatures"]] == ["alice"]
+            await t.add_channel(c.graph_id, "tasks", description="Work")
+            assert store.meta["live_graph_manifest"]["revision"] == 3
+            assert store.meta["live_graph_manifest"]["channels"] == [
+                {"name": "tasks", "description": "Work"}
+            ]
+            await t.remove_creature(c)
+            assert store.meta["live_graph_manifest"] is None
         finally:
             await t.shutdown()
         # shutdown closed the minted store — no more stuck "running".
@@ -208,16 +227,25 @@ class TestInitMetaValidation:
 
 
 class TestRealAgentRoundTrip:
-    async def test_chat_persists_and_is_resumable(self, tmp_path):
+    async def test_chat_persists_and_is_resumable(self, tmp_path, monkeypatch):
         # The 3-line replacement for the HW4 ceremony: path in,
         # resumable file out.
         cfg_dir = _write_cfg(tmp_path)
         target = tmp_path / "run.kohakutr"
+        provider = ScriptedLLM(["The graded reply."])
+        monkeypatch.setattr(
+            "kohakuterrarium.bootstrap.agent_init.create_llm_provider",
+            lambda *_args, **_kwargs: provider,
+        )
+        monkeypatch.setattr(
+            "kohakuterrarium.bootstrap.llm.create_llm_provider",
+            lambda *_args, **_kwargs: provider,
+        )
         t = Terrarium(pwd=str(tmp_path))
         try:
             c = await t.add_creature(
                 str(cfg_dir),
-                llm=ScriptedLLM(["The graded reply."]),
+                llm="default",
                 io="headless",
                 session=str(target),
             )

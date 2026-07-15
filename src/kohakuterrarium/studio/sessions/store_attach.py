@@ -7,9 +7,11 @@ function for callers that share this behavior.
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 import kohakuterrarium.terrarium.autosession as _autosession
 import kohakuterrarium.terrarium.channels as channel_module
+import kohakuterrarium.terrarium.graph_manifest as _manifest
 from kohakuterrarium.studio._runtime import as_engine
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions.registry import stores_for
@@ -57,6 +59,8 @@ def attach_session_store_for_creature(
             # listings update without an explicit reconciliation.
             _index_hooks.attach(sid, existing, session_dir())
             _retro_install_channel_persistence(engine, sid)
+            if sid in getattr(engine, "_topology", SimpleNamespace(graphs={})).graphs:
+                _manifest.checkpoint_graph(engine, sid)
             return
 
         # Engine minting preserves validated metadata and write-before-publish;
@@ -81,8 +85,11 @@ def attach_session_store_for_creature(
         engine._session_stores[sid] = store
         _index_hooks.attach(sid, store, sess_dir)
         _retro_install_channel_persistence(engine, sid)
-    except Exception as e:  # pragma: no cover - defensive
+        if sid in getattr(engine, "_topology", SimpleNamespace(graphs={})).graphs:
+            _manifest.checkpoint_graph(engine, sid)
+    except Exception as e:
         logger.warning("Session store creation failed", error=str(e))
+        raise
 
 
 def _retro_install_channel_persistence(engine: Terrarium, sid: str) -> None:

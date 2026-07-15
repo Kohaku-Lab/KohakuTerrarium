@@ -275,3 +275,4 @@ def close_owned_stores(engine: "Terrarium") -> None:
                 error=str(exc),
             )
     engine._owned_sessions.clear()
+    engine._session_stores.clear()

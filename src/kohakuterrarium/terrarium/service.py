@@ -871,6 +871,7 @@ class LocalTerrariumService(DriveServiceMixin):
             direction,
             enabled=enabled,
         )
+        await self._engine.checkpoint_graph(graph_id)
 
     async def list_output_wiring(self, creature_id: str) -> list[dict[str, Any]]:
         try:

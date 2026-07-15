@@ -92,7 +92,7 @@ class GroupAddNodeTool(BaseTool):
         if not config_path:
             return err("config_path is required")
         # Configuration loading resolves and validates package references.
-
+        name = (args.get("name") or "").strip()
         pwd = args.get("pwd") or _caller_pwd(gctx)
         try:
             # Joining at creation avoids a transient singleton graph and session.
@@ -101,14 +101,12 @@ class GroupAddNodeTool(BaseTool):
                 graph=gctx.caller.graph_id,
                 llm=args.get("llm"),
                 pwd=pwd,
+                name=name or None,
                 is_privileged=False,
                 parent_creature_id=gctx.caller.creature_id,
             )
         except Exception as exc:
             return err(f"failed to spawn creature from {config_path!r}: {exc}")
-
-        if name := (args.get("name") or "").strip():
-            group_hooks.apply_creature_name(new, name)
 
         group_hooks.attach_session_store(
             gctx.engine, new, config_path=config_path, config_type="agent"
@@ -122,6 +120,9 @@ class GroupAddNodeTool(BaseTool):
                 payload={"parent": gctx.caller.creature_id, "change": "added"},
             )
         )
+        checkpoint = getattr(gctx.engine, "checkpoint_graph", None)
+        if checkpoint is not None:
+            await checkpoint(new.graph_id)
         return ok(
             {
                 "creature_id": new.creature_id,
@@ -384,20 +385,20 @@ class GroupSpawnChildTool(BaseTool):
             return err("config_ref is required")
 
         pwd = args.get("pwd") or _caller_pwd(gctx)
+        name = (args.get("name") or "").strip()
         try:
             child = await gctx.engine.add_creature(
                 config_ref,
                 graph=gctx.caller.graph_id,
                 llm=args.get("llm"),
                 pwd=pwd,
+                name=name or None,
                 is_privileged=False,
                 parent_creature_id=gctx.caller.creature_id,
             )
         except Exception as exc:
             return err(f"failed to spawn creature from {config_ref!r}: {exc}")
 
-        if name := (args.get("name") or "").strip():
-            group_hooks.apply_creature_name(child, name)
         group_hooks.attach_session_store(
             gctx.engine, child, config_path=config_ref, config_type="agent"
         )
@@ -428,6 +429,9 @@ class GroupSpawnChildTool(BaseTool):
 
         task = (args.get("task") or "").strip()
         delivered = _deliver_initial_task(gctx.caller, child, task) if task else False
+        checkpoint = getattr(gctx.engine, "checkpoint_graph", None)
+        if checkpoint is not None:
+            await checkpoint(child.graph_id)
 
         return ok(
             {

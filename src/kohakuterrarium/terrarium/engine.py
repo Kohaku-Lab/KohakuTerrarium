@@ -10,23 +10,23 @@ the change out to live agents (channel-trigger injection, environment
 union on graph merge, session-store copy on graph split).
 """
 
-import asyncio
 from collections.abc import AsyncIterator, Iterator
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import kohakuterrarium.terrarium.autosession as _autosession
 import kohakuterrarium.terrarium.channel_lifecycle as _lifecycle
 import kohakuterrarium.terrarium.channels as _channels
+import kohakuterrarium.terrarium.engine_observability as _observability
+import kohakuterrarium.terrarium.graph_checkpoint as _checkpoint
 import kohakuterrarium.terrarium.recipe as _recipe
 import kohakuterrarium.terrarium.resume as _resume
 import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
-import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
 import kohakuterrarium.terrarium.wiring as _wiring
 import kohakuterrarium.terrarium.drive.runtime as _drive_runtime
 from kohakuterrarium.core.environment import Environment
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
     CreatureBuildInput,
@@ -55,7 +55,6 @@ from kohakuterrarium.terrarium.topology import (
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
-    from kohakuterrarium.session.store import SessionStore
     from kohakuterrarium.terrarium.config import TerrariumConfig
 
 _logger = get_logger(__name__)
@@ -116,7 +115,7 @@ class Terrarium:
         self._session_stores: dict[str, "SessionStore"] = {}
         # graph_ids whose stores THIS engine minted (closed on shutdown).
         self._owned_sessions: set[str] = set()
-        self._subscribers: list[_Subscriber] = []
+        self._subscribers: list[_observability.Subscriber] = []
         self._running = True
         # Live runtime-graph prompt block — refreshed reactively when the
         # engine emits topology / wire / parent-link events. Attaches
@@ -365,6 +364,14 @@ class Terrarium:
             raise ValueError(f"creature_id {creature.creature_id!r} already exists")
 
         graph_id = self._resolve_graph_id(graph) if graph is not None else None
+        if graph_id is not None:
+            await _checkpoint.preflight_add(
+                self,
+                graph_id,
+                creature,
+                will_persist=session is not False
+                and (session is not None or self._session_dir is not None),
+            )
         gid = _topo.add_creature(
             self._topology, creature.creature_id, graph_id=graph_id
         )
@@ -432,6 +439,7 @@ class Terrarium:
             # restoration barrier, rather than immediately on start().
             if self._drive_runtime is not None:
                 self._drive_runtime.schedule_reconcile(creature)
+        await _checkpoint.checkpoint(self, gid)
         return creature
 
     async def remove_creature(self, creature: CreatureRef) -> None:
@@ -466,6 +474,8 @@ class Terrarium:
         # away entirely (a split re-homes the manager instead).
         if old_gid not in self._topology.graphs:
             self._environments.pop(old_gid, None)
+            await _checkpoint.checkpoint(self, old_gid)
+            _checkpoint.discard(self, old_gid)
             if self._drive_runtime is not None:
                 self._drive_runtime.registry.drop_graph(old_gid)
         self._emit(
@@ -481,6 +491,7 @@ class Terrarium:
         # their new graph_id, and session stores are coordinated.
         # ``apply_split_bookkeeping`` is a no-op for non-split deltas.
         _lifecycle.apply_split_bookkeeping(self, delta)
+        await _checkpoint.checkpoint_many(self, delta.new_graph_ids)
         await self._drain_drive_topology()
 
     def get_creature(self, creature_id: str) -> Creature:
@@ -540,7 +551,7 @@ class Terrarium:
         _channels.register_channel_in_environment(
             env.shared_channels, info, engine=self, graph_id=gid
         )
-        _topo_snap.snapshot(self, gid)
+        await _checkpoint.checkpoint(self, gid)
         return info
 
     def environment(self, graph: GraphRef):
@@ -574,7 +585,7 @@ class Terrarium:
         delta = await _lifecycle.remove_channel_from_graph(self, gid, name)
         # remove_channel may auto-split; snapshot every store-attached
         # graph so each one reflects its post-removal topology.
-        _topo_snap.snapshot_all(self)
+        await _checkpoint.checkpoint_many(self, delta.new_graph_ids)
         await self._drain_drive_topology()
         return delta
 
@@ -597,9 +608,7 @@ class Terrarium:
         result = await _channels.connect_creatures(
             self, sender, receiver, channel=channel
         )
-        # connect may merge graphs; snapshot every store-attached graph
-        # so each one reflects the post-connect topology.
-        _topo_snap.snapshot_all(self)
+        await _checkpoint.checkpoint(self, result.graph_id)
         await self._drain_drive_topology()
         return result
 
@@ -619,11 +628,12 @@ class Terrarium:
         result = await _lifecycle.disconnect_creatures(
             self, sender, receiver, channel=channel
         )
-        # ``DisconnectionResult`` doesn't carry the affected gids; the
-        # mutation may also split a graph into multiple. Snapshot every
-        # store-attached graph so each one's saved topology reflects
-        # the post-disconnect wires.
-        _topo_snap.snapshot_all(self)
+        graph_ids = (
+            graph.graph_id
+            for graph in self.list_graphs()
+            if graph.graph_id in self._session_stores
+        )
+        await _checkpoint.checkpoint_many(self, graph_ids)
         await self._drain_drive_topology()
         return result
 
@@ -643,6 +653,7 @@ class Terrarium:
                 payload={"edge_id": edge_id},
             )
         )
+        await _checkpoint.checkpoint(self, c.graph_id)
         return edge_id
 
     async def unwire_output(self, creature: CreatureRef, edge_id: str) -> bool:
@@ -658,6 +669,7 @@ class Terrarium:
                     payload={"edge_id": edge_id},
                 )
             )
+            await _checkpoint.checkpoint(self, c.graph_id)
         return removed
 
     def list_output_wiring(self, creature: CreatureRef) -> list[dict]:
@@ -699,7 +711,11 @@ class Terrarium:
 
         Body lives in :func:`terrarium.root.assign_root_to`.
         """
-        return await _root.assign_root_to(self, creature, report_channel=report_channel)
+        result = await _root.assign_root_to(
+            self, creature, report_channel=report_channel
+        )
+        await _checkpoint.checkpoint(self, result.graph_id)
+        return result
 
     # ------------------------------------------------------------------
     # graphs
@@ -711,6 +727,12 @@ class Terrarium:
         if g is None:
             raise KeyError(f"graph {graph_id!r} does not exist")
         return g
+
+    def _create_restore_graph(self, graph_id: str) -> GraphTopology:
+        """Create an empty graph with a session-persisted identifier."""
+        graph = _topo.create_graph(self._topology, graph_id)
+        self._environments[graph_id] = Environment(env_id=f"env_{graph_id}")
+        return graph
 
     def list_graphs(self) -> list[GraphTopology]:
         """All currently-active graphs."""
@@ -753,11 +775,15 @@ class Terrarium:
         }
         if llm is not None:
             kwargs["llm"] = llm
-        topo = await _recipe.apply_recipe(self, recipe, **kwargs)
+        topo = None
+        with _checkpoint.suppress(self):
+            topo = await _recipe.apply_recipe(self, recipe, **kwargs)
+            if topo is not None:
+                await _autosession.attach_for_recipe(
+                    self, topo.graph_id, recipe=recipe, session=session
+                )
         if topo is not None:
-            await _autosession.attach_for_recipe(
-                self, topo.graph_id, recipe=recipe, session=session
-            )
+            await _checkpoint.checkpoint(self, topo.graph_id)
         return topo
 
     # ------------------------------------------------------------------
@@ -819,6 +845,15 @@ class Terrarium:
                     except Exception as e:  # pragma: no cover - defensive
                         _shutdown_log_warning(c.creature_id, str(e))
         finally:
+            for graph_id in sorted(self._session_stores):
+                try:
+                    await _checkpoint.checkpoint(self, graph_id)
+                except Exception as e:
+                    _logger.warning(
+                        "final graph manifest checkpoint failed",
+                        graph_id=graph_id,
+                        error=str(e),
+                    )
             # Close every store this engine minted — without this, files
             # stay status="running" forever (the HW4 case: 61 stuck files).
             _autosession.close_owned_stores(self)
@@ -853,24 +888,9 @@ class Terrarium:
                 async for ev in t.subscribe():
                     print(ev.kind, ev.creature_id)
         """
-        sub = _Subscriber(filter=filter)
+        sub = _observability.Subscriber(filter=filter)
         self._subscribers.append(sub)
-        return self._subscription_iter(sub)
-
-    async def _subscription_iter(
-        self, sub: "_Subscriber"
-    ) -> AsyncIterator[EngineEvent]:
-        try:
-            while True:
-                ev = await sub.queue.get()
-                if ev is None:
-                    return
-                yield ev
-        finally:
-            try:
-                self._subscribers.remove(sub)
-            except ValueError:
-                pass
+        return _observability.subscription_iter(self, sub)
 
     def status(self, creature: CreatureRef | None = None) -> dict:
         """Status dict for one creature, or a roll-up if ``None``.
@@ -879,19 +899,7 @@ class Terrarium:
         the same shape every API / WS endpoint reads. The roll-up
         shape (no argument) lists every creature plus graph membership.
         """
-        if creature is not None:
-            return self._creature(creature).get_status()
-        return {
-            "running": self._running,
-            "creatures": {cid: c.get_status() for cid, c in self._creatures.items()},
-            "graphs": {
-                gid: {
-                    "creature_ids": sorted(g.creature_ids),
-                    "channels": sorted(g.channels),
-                }
-                for gid, g in self._topology.graphs.items()
-            },
-        }
+        return _observability.status(self, creature)
 
     # ------------------------------------------------------------------
     # session attach
@@ -951,6 +959,7 @@ class Terrarium:
                 c.agent.attach_session_store(store)
             elif hasattr(c.agent, "session_store"):
                 c.agent.session_store = store
+        await _checkpoint.checkpoint(self, gid)
 
     # ------------------------------------------------------------------
     # internal helpers
@@ -969,6 +978,10 @@ class Terrarium:
     def _creature(self, ref: CreatureRef) -> Creature:
         return self.get_creature(self._resolve_creature_id(ref))
 
+    async def checkpoint_graph(self, graph: GraphRef) -> bool:
+        """Persist the current authoritative manifest for one graph."""
+        return await _checkpoint.checkpoint(self, self._resolve_graph_id(graph))
+
     async def _drain_drive_topology(self) -> None:
         """Apply any Drive row movement stashed by a merge or split."""
         if self._drive_runtime is not None:
@@ -976,20 +989,7 @@ class Terrarium:
 
     def _emit(self, event: EngineEvent) -> None:
         """Fan out an event to every subscriber whose filter matches."""
-        for sub in list(self._subscribers):
-            if sub.filter is None or sub.filter.matches(event):
-                try:
-                    sub.queue.put_nowait(event)
-                except Exception:  # pragma: no cover - defensive
-                    pass
-
-
-@dataclass
-class _Subscriber:
-    """Pub-sub bookkeeping for :meth:`Terrarium.subscribe`."""
-
-    filter: EventFilter | None = None
-    queue: "asyncio.Queue[EngineEvent | None]" = field(default_factory=asyncio.Queue)
+        _observability.emit(self, event)
 
 
 def _shutdown_log_warning(creature_id: str, error: str) -> None:
