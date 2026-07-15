@@ -46,3 +46,32 @@ def test_dep_graph_passes_all_gates(monkeypatch):
         "in-function-import policy violations; run "
         "`python scripts/dep_graph.py --lint-imports` for the full list"
     )
+
+
+def test_allowlist_entries_are_line_free_and_live(monkeypatch):
+    """Every allowlist entry matches by file+function+target and still
+    covers a real in-function import.
+
+    Line-pinned entries break on any unrelated edit above them (comment
+    rewrites shifted 22 entries at once), and stale entries accumulate
+    silently because the linter never reports unused ones.
+    """
+    monkeypatch.chdir(REPO_ROOT)
+    dep_graph = _load_dep_graph()
+
+    facts, parse_errors, _ = dep_graph.collect_facts()
+    assert parse_errors == []
+    fn_facts = [f for f in facts if f["in_function"]]
+
+    for entry in dep_graph.load_allowlist():
+        where = f"{entry.get('file')}:{entry.get('function')}"
+        assert "line" not in entry, f"line-pinned allowlist entry: {where}"
+        assert entry.get("function") and entry.get(
+            "target"
+        ), f"allowlist entry must name function and target: {where}"
+        assert entry.get(
+            "reason", ""
+        ).strip(), f"allowlist entry needs a reason: {where}"
+        assert any(
+            dep_graph._matches(entry, f) for f in fn_facts
+        ), f"stale allowlist entry (no matching in-function import): {where}"
