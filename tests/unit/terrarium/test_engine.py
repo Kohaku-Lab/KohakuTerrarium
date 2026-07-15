@@ -9,6 +9,7 @@ import asyncio
 
 import pytest
 
+from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
@@ -61,6 +62,22 @@ class TestAddRemoveCreature:
             assert t.list_graphs() == []
         finally:
             await t.shutdown()
+
+    async def test_persisted_graph_rejects_duplicate_name_before_add(self):
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        graph_id = t.get_creature("alice").graph_id
+        other = await TestTerrariumBuilder().with_creature("alice").build()
+        duplicate = other.get_creature("alice")
+        duplicate.creature_id = "alice_copy"
+        t._session_stores[graph_id] = object()
+        try:
+            with pytest.raises(SessionNotResumableError, match="already contains"):
+                await t.add_creature(duplicate, graph=graph_id, start=False)
+            assert t.get_graph(graph_id).creature_ids == {"alice"}
+        finally:
+            t._session_stores.clear()
+            await t.shutdown()
+            await other.shutdown()
 
     async def test_remove_unknown_raises(self):
         t = Terrarium()

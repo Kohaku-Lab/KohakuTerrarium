@@ -23,6 +23,7 @@ import kohakuterrarium.terrarium.session_coord as _session_coord
 import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.core.channel import ChannelRegistry
 from kohakuterrarium.core.environment import Environment
+from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.modules.trigger.channel import ChannelTrigger
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
@@ -379,6 +380,23 @@ async def connect_creatures(
     rid = engine._resolve_creature_id(receiver)
     sender_creature = engine.get_creature(sid)
     receiver_creature = engine.get_creature(rid)
+    sender_gid = engine._topology.creature_to_graph[sid]
+    receiver_gid = engine._topology.creature_to_graph[rid]
+    if sender_gid != receiver_gid and any(
+        graph_id in engine._session_stores for graph_id in (sender_gid, receiver_gid)
+    ):
+        names = [
+            engine._creatures[cid].name
+            for graph_id in (sender_gid, receiver_gid)
+            for cid in engine._topology.graphs[graph_id].creature_ids
+            if cid in engine._creatures
+        ]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise SessionNotResumableError(
+                "Cannot merge persisted graphs with duplicate creature names: "
+                + ", ".join(duplicates)
+            )
 
     channel_name, delta = _topo.connect(engine._topology, sid, rid, channel=channel)
     if delta.kind == "merge":
@@ -477,6 +495,20 @@ async def ensure_same_graph(
     b_gid = engine._topology.creature_to_graph[rid]
     if a_gid == b_gid:
         return a_gid
+    persisted = any(graph_id in engine._session_stores for graph_id in (a_gid, b_gid))
+    if persisted:
+        names = [
+            engine._creatures[cid].name
+            for graph_id in (a_gid, b_gid)
+            for cid in engine._topology.graphs[graph_id].creature_ids
+            if cid in engine._creatures
+        ]
+        duplicates = sorted({name for name in names if names.count(name) > 1})
+        if duplicates:
+            raise SessionNotResumableError(
+                "Cannot merge persisted graphs with duplicate creature names: "
+                + ", ".join(duplicates)
+            )
     delta = _topo._merge_graphs(engine._topology, a_gid, b_gid)
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
@@ -489,6 +521,9 @@ async def ensure_same_graph(
                 cid, creature.graph_id
             )
     _session_coord.apply_merge(engine, delta)
+    checkpoint = getattr(engine, "checkpoint_graph", None)
+    if checkpoint is not None:
+        await checkpoint(keep_gid)
     # Promote the surviving session's meta kind from "creature" to
     # "terrarium" when the merge produced a multi-creature graph so
     # the v2 rail (which splits the listing by kind) stops bouncing
@@ -502,6 +537,9 @@ async def ensure_same_graph(
     # obsolete manager until some unrelated later topology op. Idempotent — a
     # subsequent engine-level drain finds nothing pending.
     await engine._drain_drive_topology()
+    checkpoint = getattr(engine, "checkpoint_graph", None)
+    if checkpoint is not None:
+        await checkpoint(keep_gid)
     engine._emit(
         EngineEvent(
             kind=EventKind.TOPOLOGY_CHANGED,

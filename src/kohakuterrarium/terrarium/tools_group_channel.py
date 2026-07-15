@@ -204,6 +204,7 @@ async def _wire(
         if channel not in target.send_channels:
             target.send_channels.append(channel)
     _emit_intra_graph_wire_event(gctx, target.creature_id)
+    await gctx.engine.checkpoint_graph(graph.graph_id)
     return ok(
         {
             "wired": channel,
@@ -257,8 +258,11 @@ async def _unwire(
     )
     if delta.kind == "split":
         _lifecycle.apply_split_bookkeeping(gctx.engine, delta)
+        for graph_id in delta.new_graph_ids:
+            await gctx.engine.checkpoint_graph(graph_id)
     else:
         _emit_intra_graph_wire_event(gctx, target.creature_id)
+        await gctx.engine.checkpoint_graph(graph.graph_id)
 
     return ok(
         {
