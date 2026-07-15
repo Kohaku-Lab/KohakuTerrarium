@@ -5,6 +5,7 @@ from textual.widgets import Collapsible, Static
 
 from kohakuterrarium.builtins.tui.widgets.helpers import _summarize_output
 
+
 class ToolBlock(Collapsible):
     """Display a tool call and its result in a collapsible block."""
 

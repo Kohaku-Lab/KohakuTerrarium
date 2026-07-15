@@ -21,6 +21,7 @@ import sys
 from kohakuterrarium.compose import factory
 from kohakuterrarium.core.config import load_agent_config
 
+
 def make_expert(name: str, style: str):
     """Build a tool-free expert configuration with one answer style."""
     config = load_agent_config("@kt-biome/creatures/general")

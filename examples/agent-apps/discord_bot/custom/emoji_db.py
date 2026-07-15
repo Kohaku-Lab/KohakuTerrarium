@@ -76,7 +76,9 @@ class EmojiRecord:
 class EmojiDatabase:
     """Index guild emojis for filtered relevance search and JSON storage."""
 
-    emojis: dict[int, EmojiRecord] = field(default_factory=dict)  # IDs are globally unique.
+    emojis: dict[int, EmojiRecord] = field(
+        default_factory=dict
+    )  # IDs are globally unique.
     guilds: dict[int, str] = field(default_factory=dict)  # Preserve names for display.
 
     def add_emoji(self, emoji: EmojiRecord) -> None:

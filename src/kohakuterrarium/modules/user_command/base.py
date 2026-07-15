@@ -13,7 +13,6 @@ class CommandLayer(Enum):
     AGENT = "agent"
 
 
-
 def ui_text(message: str) -> dict[str, Any]:
     """Plain text block."""
     return {"type": "text", "message": message}
@@ -72,7 +71,6 @@ def ui_list(
     return {"type": "list", "title": title, "items": items}
 
 
-
 @dataclass
 class UserCommandResult:
     """Represent command text, consumption state, errors, and optional UI data."""
@@ -87,7 +85,6 @@ class UserCommandResult:
         return self.error is None
 
 
-
 @dataclass
 class UserCommandContext:
     """Provide agent, session, input, output, and extension state to commands."""
@@ -97,7 +94,6 @@ class UserCommandContext:
     input_module: Any | None = None
     output_fn: Callable[[str], None] | None = None
     extra: dict[str, Any] = field(default_factory=dict)
-
 
 
 @runtime_checkable
@@ -138,7 +134,6 @@ class BaseUserCommand:
     async def _execute(
         self, args: str, context: UserCommandContext
     ) -> UserCommandResult: ...
-
 
 
 def parse_slash_command(text: str) -> tuple[str, str]:

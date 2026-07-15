@@ -94,7 +94,9 @@ def convert_image_to_jpeg(image_data: bytes, quality: int = 85) -> bytes | None:
             if img.mode == "P":
                 img = img.convert("RGBA")
             if img.mode in ("RGBA", "LA", "PA"):
-                background.paste(img, mask=img.split()[-1])  # Preserve transparency edges.
+                background.paste(
+                    img, mask=img.split()[-1]
+                )  # Preserve transparency edges.
                 img = background
             else:
                 img = img.convert("RGB")

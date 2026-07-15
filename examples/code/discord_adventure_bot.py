@@ -35,6 +35,7 @@ from kohakuterrarium.terrarium.creature_host import Creature
 # One engine hosts every NPC creature for the whole bot process.
 ENGINE = Terrarium()
 
+
 @dataclass
 class NPC:
     """Associate a live creature with its in-game identity."""

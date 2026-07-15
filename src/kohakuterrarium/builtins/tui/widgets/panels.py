@@ -5,6 +5,7 @@ from textual.widgets import Static
 
 from kohakuterrarium.builtins.tui.widgets.helpers import _fmt_tokens
 
+
 class RunningPanel(Static):
     """Display running jobs and emit cancellation or promotion requests."""
 

@@ -20,6 +20,7 @@ from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
 
+
 def list_installed_packages() -> list[dict]:
     """Return installed package manifests through the Studio catalog boundary."""
     return list_packages()

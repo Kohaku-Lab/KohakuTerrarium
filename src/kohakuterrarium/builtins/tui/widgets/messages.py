@@ -1,5 +1,6 @@
 from textual.widgets import Collapsible, Static
 
+
 class UserMessage(Static):
     DEFAULT_CSS = """
     UserMessage {

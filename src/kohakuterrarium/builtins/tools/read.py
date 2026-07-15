@@ -273,7 +273,9 @@ class ReadTool(BaseTool):
         if not file_path.exists():
             return ToolResult(error=f"File not found: {original_path}")
 
-        max_image_bytes = 20 * 1024 * 1024  # Keep encoded payloads within provider limits.
+        max_image_bytes = (
+            20 * 1024 * 1024
+        )  # Keep encoded payloads within provider limits.
         file_size = file_path.stat().st_size
 
         if file_size > max_image_bytes:

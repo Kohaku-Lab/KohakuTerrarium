@@ -581,7 +581,9 @@ class DiscordInputModule(BaseInputModule):
                             - len(recent_media_messages),
                             "sources": [
                                 f"{img.source_type}:{img.source_name}"
-                                for img in image_parts[:5]  # Bound structured log volume.
+                                for img in image_parts[
+                                    :5
+                                ]  # Bound structured log volume.
                             ],
                         },
                     )
