@@ -44,12 +44,13 @@ def doctor_cli(
     results: list[tuple[str, bool, str]] = []
 
     def run(label: str, fn) -> bool:
+        """Execute and record one doctor check."""
         ok, detail = _check(label, fn)
         results.append((label, ok, detail))
         return ok
 
-    # 1. Config dir reachable + writable.
     def _config_dir():
+        """Verify that the configuration directory is writable."""
         d = config_dir()
         d.mkdir(parents=True, exist_ok=True)
         probe = d / ".kt-doctor-probe"
@@ -59,17 +60,14 @@ def doctor_cli(
 
     run("config dir writable", _config_dir)
 
-    # 2. Installed packages enumerate.
     run(
         "installed packages",
         lambda: ", ".join(p.get("name", "?") for p in list_packages()) or "(none)",
     )
 
-    # 2b. Terminal shims (kt / kt-cli / kt-tui on PATH). Informational —
-    # never fails the report; just reports install + PATH status.
+    # Shim status is informational and never raises for missing installations.
     run("terminal shims", shims_summary)
 
-    # 3. Model resolution (+ credentials), default or explicit.
     selector = llm or get_default_model() or None
     if selector or llm is None:
         run(
@@ -77,10 +75,10 @@ def doctor_cli(
             lambda: validate.llm(selector),
         )
 
-    # 4. Optional creature dry-run build.
     if target:
 
         def _build():
+            """Validate and summarize the requested creature."""
             report = validate.creature(target)
             return (
                 f"{report.name} [model={report.model_identifier}, "
@@ -89,7 +87,6 @@ def doctor_cli(
 
         run(f"creature builds ({target})", _build)
 
-    # 5. Optional real round-trip.
     if ping:
         run(
             f"llm ping ({selector or 'default'})",
@@ -136,4 +133,5 @@ def add_doctor_subparser(subparsers) -> None:
 
 
 def dispatch_doctor(args) -> int:
+    """Dispatch parsed doctor arguments."""
     return doctor_cli(args.target, llm=args.llm, ping=args.ping)

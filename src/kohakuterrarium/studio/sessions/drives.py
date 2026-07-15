@@ -1,16 +1,10 @@
-"""Studio session/graph-scoped Drive record façade (design §9.2, §12).
+"""Provide the graph-scoped Drive façade used by Studio adapters.
 
-A *session* is a Terrarium graph, so ``session_id`` is the ``graph_id`` the
-record operations pass to :class:`~kohakuterrarium.terrarium.service.TerrariumService`.
-This module is the single Python surface the HTTP routes, ``kt drive`` CLI, and
-generic ``/drives`` command all delegate to: it builds the typed request DTOs
-from primitive input, calls the service, and folds the returned
-:class:`DriveView` / progress / delivery records into JSON-safe dicts.
-
-Two shapes are produced (design §12.1): a **row** (list view, spec/evidence
-redacted) and a **detail** (full spec/presentation/metadata, returned only to a
-caller authorized for the record). ``allowed_actions`` rides on both so a UI can
-render permission-aware controls; the manager still re-checks every mutation.
+Session IDs are Terrarium graph IDs. HTTP routes, the CLI, and Drive commands use
+this module to build typed requests, invoke :class:`TerrariumService`, and return
+JSON-safe records. List rows redact sensitive payloads; authorized detail views
+include them. Both shapes expose allowed actions, while mutations still enforce
+permissions in the service.
 """
 
 from __future__ import annotations
@@ -35,15 +29,8 @@ from kohakuterrarium.terrarium.drive.models import ActorRef
 from kohakuterrarium.terrarium.drive.wire_service import DriveView
 
 if TYPE_CHECKING:
-    # Type-only: importing the service module at runtime would pull the whole
-    # engine and cycle back through the built-in command that consumes this
-    # façade. The functions only use ``TerrariumService`` as an annotation.
+    # Runtime import would cycle through the engine and built-in Drive command.
     from kohakuterrarium.terrarium.service import TerrariumService
-
-
-# ---------------------------------------------------------------------------
-# record operations — thin over TerrariumService (design §9.2)
-# ---------------------------------------------------------------------------
 
 
 async def list_records(
@@ -255,11 +242,8 @@ async def approve_proposal_record(
     drive_id: str | None = None,
     graph_id: str | None = None,
 ) -> dict[str, Any]:
-    # The service binds the proposal to the URL's Drive/graph before the terminal
-    # write (R1-02): a proposal whose parent Drive is not the path Drive, or whose
-    # Drive is not in the path graph, is rejected as not-found regardless of what
-    # other Drive the caller can reach. Binding the *proposal's* parent (not just
-    # the path Drive against the graph) is what closes the confused-deputy gap.
+    # The service binds both the proposal's parent Drive and that Drive's graph
+    # before mutation, preventing a caller from approving through unrelated IDs.
     view = await service.approve_drive_proposal(
         proposal_id,
         actor=actor,

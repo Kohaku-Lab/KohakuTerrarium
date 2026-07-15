@@ -1,10 +1,8 @@
 """Studio-supplied hooks for the group tool surface.
 
-The ``terrarium`` layer must not import from ``studio`` (layer rule
-enforced by :mod:`tests/unit/test_layer_independence`). Studio-tier
-behaviour the group tools want to invoke — session-store auto-attach,
-display-name propagation, the spawnable creature catalog — is plugged
-in here at import time from the studio side.
+The ``terrarium`` layer must not import from ``studio``. Studio instead
+registers optional hooks here for session attachment, display-name propagation,
+workspace resolution, and the spawnable-creature catalog.
 
 When no hook is registered, calls degrade gracefully:
 

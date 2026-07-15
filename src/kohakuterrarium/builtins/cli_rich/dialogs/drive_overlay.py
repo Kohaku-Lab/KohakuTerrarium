@@ -40,13 +40,12 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Scope presets: which Drives the list shows.
 SCOPES: list[tuple[str, str]] = [
     ("mine", "assigned to me"),
     ("graph", "whole graph"),
 ]
 
-# Status filter presets cycled with ``s``. ``None`` statuses means "all".
+# A None status set includes every status.
 _STATUS_FILTERS: list[tuple[str, frozenset[str] | None]] = [
     ("all", None),
     ("active", frozenset({"active", "waiting"})),
@@ -78,11 +77,11 @@ class DriveOverlay:
         self._on_close = on_close or (lambda: None)
 
         self.visible = False
-        self.mode = "list"  # list | detail | confirm | progress
+        self.mode = "list"  # list, detail, confirm, or progress
         self.scope = "mine"
         self._status_filter_idx = 0
-        self._views: list[Any] = []  # list[DriveView]
-        self._rows: list[dict[str, Any]] = []  # project_view() of each
+        self._views: list[Any] = []
+        self._rows: list[dict[str, Any]] = []
         self._cursor = 0
         self._detail_view: Any = None
         self._detail_row: dict[str, Any] | None = None
@@ -92,8 +91,6 @@ class DriveOverlay:
         self._flash = ""
         self._error = ""
         self._loading = False
-
-    # ── Lifecycle ───────────────────────────────────────────────
 
     def open(self) -> None:
         self.visible = True
@@ -114,16 +111,14 @@ class DriveOverlay:
         self._on_close()
 
     def is_capturing_text(self) -> bool:
-        """Modal while visible — swallow printable chars from the composer."""
+        """Return whether the visible modal owns printable input."""
         return self.visible
 
     def note_event(self) -> None:
-        """A Drive engine event arrived — reload while the overlay is open."""
+        """Refresh an open overlay after a Drive engine event."""
         if not self.visible or self._loading:
             return
         self._schedule(self.reload())
-
-    # ── Service resolution ──────────────────────────────────────
 
     def _service(self) -> Any:
         engine = self._get_engine()
@@ -144,8 +139,6 @@ class DriveOverlay:
 
     def _status_filter(self) -> frozenset[str] | None:
         return _STATUS_FILTERS[self._status_filter_idx][1]
-
-    # ── Data loading ────────────────────────────────────────────
 
     async def reload(self) -> None:
         service = self._service()
@@ -185,7 +178,7 @@ class DriveOverlay:
                 await self._refresh_detail(service, actor)
         except DriveError as exc:
             self._error = _error_text(exc)
-        except Exception as exc:  # pragma: no cover — defensive service wiring
+        except Exception as exc:  # pragma: no cover - defensive service wiring
             logger.warning("drive overlay reload failed", error=str(exc))
             self._error = f"drive error: {exc}"
         finally:
@@ -237,8 +230,6 @@ class DriveOverlay:
             )
         except DriveError:
             self._detail_progress = []
-
-    # ── Keyboard ────────────────────────────────────────────────
 
     def handle_key(self, key: str) -> bool:
         if not self.visible:
@@ -301,8 +292,7 @@ class DriveOverlay:
             self._cycle_status_filter()
         elif char == "r":
             self._schedule(self.reload())
-        # Consume every other printable char so it can't leak into the
-        # composer's textarea behind the modal overlay.
+        # Modal input must not leak into the composer behind the overlay.
         return True
 
     def _detail_key(self, key: str) -> bool:
@@ -355,8 +345,6 @@ class DriveOverlay:
                 self._schedule(self._submit_progress())
             return True
         return True
-
-    # ── Action execution ────────────────────────────────────────
 
     async def _apply_confirmed(self) -> None:
         confirm = self._confirm
@@ -417,8 +405,6 @@ class DriveOverlay:
             self._error = _error_text(exc)
             self._on_invalidate()
 
-    # ── Action gating ───────────────────────────────────────────
-
     def _action_for_key(self, char: str) -> dict[str, Any] | None:
         for action in ACTIONS:
             if action["key"] == char:
@@ -436,8 +422,6 @@ class DriveOverlay:
         if self._detail_row is None:
             return []
         return enabled_actions(self._detail_row)
-
-    # ── Navigation helpers ──────────────────────────────────────
 
     def _current_row(self) -> dict[str, Any] | None:
         if not self._rows:
@@ -468,14 +452,12 @@ class DriveOverlay:
     def status_filter_label(self) -> str:
         return _STATUS_FILTERS[self._status_filter_idx][0]
 
-    # ── Rendering ───────────────────────────────────────────────
-
     def render(self, width: int) -> str:
         return render_drive_overlay(self, width)
 
 
 def _sort_key(view: Any) -> tuple[int, int, str]:
-    """Non-terminal first, then higher priority, then id — stable ordering."""
+    """Sort active Drives first, then by priority and stable identifier."""
     record = view.record
     terminal = 1 if record.status.value in TERMINAL_STATUSES else 0
     return (terminal, -record.priority, record.drive_id)

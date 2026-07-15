@@ -1,8 +1,8 @@
 """LLM backend (provider) CRUD — list/save/delete provider definitions.
 
-Wraps :mod:`kohakuterrarium.llm.profiles` with Studio-shaped dataclasses
-the CLI and HTTP layers consume. The underlying YAML store lives in
-``llm/`` (tier below studio); this module only orchestrates.
+Wraps :mod:`kohakuterrarium.llm.profiles` with plain records consumed by CLI
+and HTTP adapters. The lower-level ``llm`` package remains the persistence owner;
+this module validates and orchestrates Studio operations.
 """
 
 from typing import Any
@@ -31,7 +31,7 @@ _SUPPORTED_BACKEND_TYPES = {"openai", "codex", "anthropic"}
 
 
 def list_backends() -> list[dict[str, Any]]:
-    """Return every configured backend (built-in + user) as plain dicts."""
+    """Return built-in and user-configured backends as Studio records."""
     return [
         {
             "name": name,
@@ -60,7 +60,7 @@ def save_backend_record(
     provider_name: str = "",
     provider_native_tools: list[str] | None = None,
 ) -> LLMBackend:
-    """Validate + persist a backend. Raises ``ValueError`` on bad input."""
+    """Validate and persist a backend, raising ``ValueError`` for bad input."""
     if not name or not backend_type:
         raise ValueError("Name and backend type are required")
     if backend_type not in _SUPPORTED_BACKEND_TYPES:
@@ -78,10 +78,10 @@ def save_backend_record(
 
 
 def remove_backend(name: str) -> bool:
-    """Delete a backend by name. Raises ``ValueError`` on built-ins / in-use."""
+    """Delete a backend, rejecting built-in or currently referenced records."""
     return delete_backend(name)
 
 
 def is_provider_known(name: str) -> bool:
-    """Cheap check for ``provider in load_backends() | PROVIDER_KEY_MAP``."""
+    """Return whether a provider has a backend or known API-key mapping."""
     return name in load_backends() or name in PROVIDER_KEY_MAP

@@ -1,8 +1,6 @@
 """Message edit / regenerate / rewind mixin for Agent.
 
-Core feature: modify past messages and re-run the turn. Works from
-TUI, frontend, and programmatic API — all three call the same
-implementation.
+Modify past messages, regenerate responses, and replay conversation branches.
 """
 
 from kohakuterrarium.core.events import EventType, TriggerEvent
@@ -49,12 +47,8 @@ class AgentMessagesMixin:
         and addressable via the ``<x/N>`` navigator.
         """
         if turn_index is not None:
-            # Resolve the user_message content for this turn at the
-            # selected branch in our subtree, then route through
-            # edit_and_rerun with that same content — semantically
-            # "edit to identical content," which opens a new branch
-            # at the requested turn just like a tail regen would for
-            # the last turn.
+            # Reusing the selected branch's content gives regeneration the same
+            # branching semantics as an edit without changing the message.
             prev_content = self._user_message_content_for_turn(
                 turn_index, branch_view=branch_view
             )
@@ -267,23 +261,12 @@ class AgentMessagesMixin:
                 )
 
     async def _rerun_from_last(self, new_user_content: str | list = "") -> None:
-        """Trigger a new LLM turn from the current conversation state.
+        """Trigger an LLM turn from the current conversation state.
 
-        ``new_user_content`` is empty for plain regenerate (no new
-        user message — we are re-running with the existing one) and
-        non-empty for edit+rerun (the controller and event log need
-        to record the edited content).
-
-        Multi-modal callers (frontend ``editMessage`` builds a list of
-        ``{type, text|image_url|file}`` dicts via ``buildMessageParts``)
-        must be normalised to ``ContentPart`` instances before the
-        TriggerEvent reaches ``_format_events_for_context`` — that
-        helper only matches ``TextPart`` / ``ImagePart`` / ``FilePart``
-        objects. A raw dict-list silently produces empty
-        ``combined_text``, which in native mode collapses to
-        ``skip_empty=True`` and the LLM ends up running with no new
-        user message at all (the symptom users saw: "edit + rerun
-        runs without the edit").
+        Empty content regenerates from the existing user message; non-empty
+        content records an edit. Normalization is required because downstream
+        context formatting recognizes content-part objects rather than raw
+        multimodal dictionaries.
         """
         edited = bool(new_user_content)
         normalised = normalize_content_parts(new_user_content)
@@ -296,10 +279,6 @@ class AgentMessagesMixin:
             stackable=False,
         )
         await self._process_event(event)
-
-    # ------------------------------------------------------------------
-    # Branch resolution helpers
-    # ------------------------------------------------------------------
 
     def _resolve_edit_message_index(
         self,
@@ -384,8 +363,7 @@ class AgentMessagesMixin:
             if eid not in live_ids:
                 continue
             if ti in seen_turns:
-                # Tolerate legacy sessions that accumulated duplicates
-                # from the pre-fix double-append bug.
+                # Legacy sessions may contain duplicate user events for a turn.
                 continue
             seen_turns.add(ti)
             live_user_turns.append((ti, eid))
@@ -479,15 +457,10 @@ class AgentMessagesMixin:
         self,
         branch_view: dict[int, int],
     ) -> None:
-        """Replay events under ``branch_view`` and reset in-memory
-        conversation + agent state to match.
+        """Replay ``branch_view`` and align the conversation and agent state.
 
-        Frontend ``selectBranch`` is a view-only operation; the
-        agent's runtime state stays on whatever branch it last ran.
-        When the user then triggers edit/retry on the switched view,
-        the runtime state must match the user's view before truncate
-        + rerun, or the resolution lands on the wrong message and
-        the edit silently fails (the "can't edit on old branch" bug).
+        Branch selection changes only the displayed view, so runtime state must
+        be reseated before an edit or retry can resolve the intended message.
         """
         if self.session_store is None:
             return
@@ -573,9 +546,7 @@ class AgentMessagesMixin:
             bi = evt.get("branch_id")
             if not isinstance(bi, int):
                 continue
-            # We want the highest branch_id that is BELOW the current
-            # branch we are about to write — that's the one to copy
-            # the wording from.
+            # The nearest lower branch is the source branch for regeneration.
             if bi < self._branch_id and bi > latest_branch:
                 latest_branch = bi
                 latest_for_turn = evt

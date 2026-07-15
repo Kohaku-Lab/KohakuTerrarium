@@ -1,15 +1,7 @@
-"""Read-only export builders for the Session Viewer V6 wave.
+"""Read-only export builders for the Session Viewer.
 
-Three formats:
-
-* ``md``    — Human-readable markdown transcript (default).
-* ``html``  — Same content wrapped in collapsible ``<details>`` for
-              bug-report attachments.
-* ``jsonl`` — One event per line, suitable for fine-tuning fixtures
-              and external analytics.
-
-All formats are streamed as text. Driven by
-``GET /sessions/{name}/export?format=…&agent=…`` on the viewer router.
+Supports human-readable Markdown, self-contained HTML with collapsible tool
+calls, and event-per-line JSONL. Every format is returned as text.
 """
 
 import html as _html_lib
@@ -29,17 +21,11 @@ CONTENT_TYPES = {
 }
 
 
-# ─────────────────────────────────────────────────────────────────────
-# Helpers
-# ─────────────────────────────────────────────────────────────────────
-
-
 def _flatten_content(content: Any) -> str:
-    """Best-effort text from any stored message-content shape.
+    """Extract text from the stored message-content shapes readers accept.
 
-    Mirrors the tolerance ladder in ``core/compact_text.py`` so the
-    export reflects exactly what a future compact-summary or trace
-    viewer would see.
+    Matching compact-text tolerance keeps exports consistent with summaries
+    and trace views for mixed or legacy content records.
     """
     if isinstance(content, str):
         return content
@@ -66,11 +52,6 @@ def _agents_for(meta: dict[str, Any], requested: str | None) -> list[str]:
     if requested not in all_agents:
         raise NotFoundError(f"Agent not found in session: {requested}")
     return [requested]
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Markdown
-# ─────────────────────────────────────────────────────────────────────
 
 
 def _render_markdown(store: SessionStore, session_name: str, agent: str | None) -> str:
@@ -138,13 +119,7 @@ def _render_markdown(store: SessionStore, session_name: str, agent: str | None) 
     return "\n".join(lines).rstrip() + "\n"
 
 
-# ─────────────────────────────────────────────────────────────────────
-# HTML
-# ─────────────────────────────────────────────────────────────────────
-
-
-# CSS lives outside ``str.format`` so its literal ``{}`` braces don't
-# collide with format-spec parsing — just plain string concatenation.
+# Keeping CSS outside ``str.format`` prevents literal braces from being parsed.
 _HTML_CSS = """<style>
 body { font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
        max-width: 880px; margin: 2em auto; padding: 0 1em; color: #1a1816; }
@@ -228,11 +203,6 @@ def _render_html(store: SessionStore, session_name: str, agent: str | None) -> s
     return "".join(out)
 
 
-# ─────────────────────────────────────────────────────────────────────
-# JSONL
-# ─────────────────────────────────────────────────────────────────────
-
-
 def _render_jsonl(store: SessionStore, session_name: str, agent: str | None) -> str:
     meta = store.load_meta()
     agents = _agents_for(meta, agent)
@@ -243,11 +213,6 @@ def _render_jsonl(store: SessionStore, session_name: str, agent: str | None) -> 
             payload.setdefault("agent", ag)
             out.append(json.dumps(payload, ensure_ascii=False))
     return "\n".join(out) + ("\n" if out else "")
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Entry point
-# ─────────────────────────────────────────────────────────────────────
 
 
 def build_export(

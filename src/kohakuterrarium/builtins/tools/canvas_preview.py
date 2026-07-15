@@ -1,39 +1,17 @@
-"""Canvas-preview metadata helper.
+"""Build bounded metadata snapshots for frontend file previews.
 
-The frontend's Canvas panel watches assistant text and image parts
-today; write / edit / multi_edit emit only text status. This helper
-builds a small ``canvas_preview`` dict that the file-mutating tools
-attach to their ``ToolResult.metadata`` so the frontend can render the
-updated file in the canvas without re-reading from disk.
-
-Schema (everything inside ``ToolResult.metadata["canvas_preview"]``)::
-
-    {
-        "kind": "write" | "edit" | "multi_edit",
-        "file_path": str,           # absolute path
-        "lang": str,                # heuristic from file extension
-        "content": str | None,      # capped at PREVIEW_MAX_BYTES; None means "too large"
-        "bytes": int,               # actual file size (post-write)
-        "truncated": bool,          # True iff content was capped
-    }
-
-Cap is intentionally modest — the canvas tab is a preview affordance,
-not a file viewer. Large files surface ``content=None`` and the
-frontend renders a "click to load via /files" stub instead.
+Large content is omitted rather than embedded so consumers can fetch it lazily
+without inflating tool results.
 """
 
 from pathlib import Path
 from typing import Any
 
-# 256 KiB — the frontend's CodeViewer handles this comfortably; bigger
-# files get pulled lazily via the /files API.
+# Larger files are represented by metadata and fetched through the files API.
 PREVIEW_MAX_BYTES: int = 256 * 1024
 
 
-# Most common extensions → CodeMirror / Monaco language hints. The
-# frontend re-maps a few of these (e.g. ``md`` → ``markdown``).  Bare
-# table covers >95% of what file-mutating tools touch in practice; the
-# fallback ``"text"`` is harmless.
+# Unknown extensions deliberately fall back to plain text in ``lang_for_path``.
 _EXT_TO_LANG: dict[str, str] = {
     ".py": "python",
     ".pyi": "python",
@@ -91,17 +69,7 @@ def build_canvas_preview(
     file_path: str | Path,
     content: str | None,
 ) -> dict[str, Any]:
-    """Build a ``canvas_preview`` metadata dict for a write / edit /
-    multi_edit ``ToolResult``.
-
-    ``content`` is the post-write file content. ``None`` is allowed
-    (e.g. when the tool only knows the delta and re-reading the file
-    would be wasteful) and propagates through as ``content=None,
-    truncated=False``. Content exceeding ``PREVIEW_MAX_BYTES`` is
-    dropped (set to ``None``) and ``truncated=True`` so the frontend
-    can offer a "fetch full content" affordance instead of stuffing
-    1 GB into a code bubble.
-    """
+    """Build preview metadata, omitting content that exceeds the size cap."""
     path_str = str(file_path)
     lang = lang_for_path(path_str)
     if content is None:

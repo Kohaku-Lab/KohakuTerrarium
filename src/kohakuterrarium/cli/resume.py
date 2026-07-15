@@ -72,8 +72,7 @@ def resume_cli(
 
 
 def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None:
-    """When the saved working dir no longer exists, ask for a new one
-    (interactive only); an explicit ``--pwd`` always wins."""
+    """Resolve a usable working directory for a resumed session."""
     if pwd_override:
         return pwd_override
     try:
@@ -100,6 +99,7 @@ def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None:
 
 
 async def _run(path, pwd_override, llm, io_mode: str | None) -> int:
+    """Resume the engine and run the selected interactive surface."""
     store = SessionStore(path)
     try:
         engine = await Terrarium.resume(store, pwd=pwd_override, llm=llm)
@@ -123,6 +123,7 @@ async def _run(path, pwd_override, llm, io_mode: str | None) -> int:
 
 
 def _pick_focus(engine: Terrarium, graph_id: str) -> str:
+    """Select the privileged creature, or the first available fallback."""
     graph = engine.get_graph(graph_id)
     privileged: list[str] = []
     fallback: list[str] = []

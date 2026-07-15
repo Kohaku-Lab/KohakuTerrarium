@@ -27,6 +27,7 @@ from kohakuterrarium.cli.identity_settings import show_cli as _settings_show_cli
 
 
 def add_config_subparser(subparsers):
+    """Register configuration management commands."""
     parser = subparsers.add_parser(
         "config",
         help="Manage KohakuTerrarium configuration (providers, presets, keys, MCP)",
@@ -114,6 +115,7 @@ def add_config_subparser(subparsers):
 
 
 def _dispatch_provider(args):
+    """Dispatch provider configuration commands."""
     sub = getattr(args, "config_provider_command", None) or "list"
     name = getattr(args, "name", None)
     match sub:
@@ -128,6 +130,7 @@ def _dispatch_provider(args):
 
 
 def _dispatch_llm(args):
+    """Dispatch LLM preset configuration commands."""
     sub = getattr(args, "config_llm_command", None) or "list"
     name = getattr(args, "name", None)
     match sub:
@@ -148,6 +151,7 @@ def _dispatch_llm(args):
 
 
 def _dispatch_key(args):
+    """Dispatch stored API-key commands."""
     sub = getattr(args, "config_key_command", None) or "list"
     provider = getattr(args, "provider", None)
     match sub:
@@ -168,6 +172,7 @@ def _dispatch_key(args):
 
 
 def _dispatch_mcp(args):
+    """Dispatch MCP server configuration commands."""
     sub = getattr(args, "config_mcp_command", None) or "list"
     name = getattr(args, "name", None)
     match sub:
@@ -182,6 +187,7 @@ def _dispatch_mcp(args):
 
 
 def _dispatch_drive(args):
+    """Dispatch Drive runtime configuration commands."""
     sub = getattr(args, "config_drive_command", None) or "show"
     match sub:
         case "show":
@@ -199,6 +205,7 @@ def _dispatch_drive(args):
 
 
 def config_cli(args):
+    """Dispatch the top-level configuration command."""
     command = getattr(args, "config_command", None)
     match command:
         case None | "show":

@@ -10,48 +10,19 @@ from kohakuterrarium.llm.message import Message
 
 @dataclass
 class ScriptEntry:
-    """One LLM response in a test script.
-
-    Attributes:
-        response: Full response text (may contain tool call syntax like [/bash]...[bash/])
-        match: If set, only use this entry if the last user message contains this string.
-               If it doesn't match, skip to next entry.
-        delay_per_chunk: Seconds to wait between yielding chunks (simulate latency)
-        chunk_size: Characters per yield (1 = character-by-character streaming)
-    """
+    """Configure one response, optional user-text match, and stream timing."""
 
     response: str
     match: str | None = None
     delay_per_chunk: float = 0
-    chunk_size: int = 10  # Reasonable default for testing
+    chunk_size: int = 10
 
 
 class ScriptedLLM:
-    """
-    Deterministic LLM that follows a script of predefined responses.
-
-    Implements the LLMProvider protocol for use in tests.
-    Tracks all received messages for test assertions.
-    Supports streaming simulation with configurable chunk sizes and delays.
-
-    Usage:
-        llm = ScriptedLLM([
-            ScriptEntry("Hello! I'll help you."),
-            ScriptEntry("[/bash]echo hello[bash/]"),
-            ScriptEntry("Done with the task."),
-        ])
-
-        # After running:
-        assert llm.call_count == 3
-        assert "hello" in llm.call_log[0]  # first messages received
-    """
+    """Return deterministic scripted responses and retain every call for assertions."""
 
     def __init__(self, script: list[ScriptEntry] | list[str] | None = None):
-        """
-        Args:
-            script: List of ScriptEntry or plain strings (auto-wrapped).
-                   If None, defaults to a single "OK" response.
-        """
+        """Initialize from entries or strings, defaulting to one ``"OK"`` response."""
         if script is None:
             script = ["OK"]
 
@@ -63,17 +34,15 @@ class ScriptedLLM:
                 self.script.append(entry)
 
         self.call_count: int = 0
-        self.call_log: list[list[dict[str, Any]]] = []  # All messages received per call
-        # Track which script entries have been returned so multiple
-        # entries sharing the same ``match`` advance through the
-        # script instead of all aliasing to the first matcher.
+        self.call_log: list[list[dict[str, Any]]] = []
+        # Match-gated retries must advance through duplicate match entries.
         self._used_indices: set[int] = set()
 
     def _normalize_messages(
         self,
         messages: list[Message] | list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        """Convert messages to dict format for logging."""
+        """Normalize message objects into dictionaries for call logs."""
         if not messages:
             return []
         if isinstance(messages[0], dict):
@@ -81,8 +50,7 @@ class ScriptedLLM:
         return [msg.to_dict() for msg in messages]  # type: ignore
 
     def _find_entry(self, messages: list[dict[str, Any]]) -> ScriptEntry:
-        """Find the matching script entry for this call."""
-        # Get last user message for matching
+        """Select the next unused matching entry or sequential fallback."""
         last_user = ""
         for msg in reversed(messages):
             if msg.get("role") == "user":
@@ -97,13 +65,7 @@ class ScriptedLLM:
                     )
                 break
 
-        # Priority pass: prefer the earliest UNUSED match-gated entry
-        # whose ``match`` is found in the latest user message.
-        # Tracking ``_used_indices`` lets multiple entries with the
-        # SAME ``match`` (regenerate / retry scenarios) advance through
-        # the script instead of all aliasing to the first one — without
-        # this, ``[("a", match=X), ("b", match=X)]`` returns "a" every
-        # call with X, defeating the purpose of scripting a sequence.
+        # Match-gated entries take priority and are consumed once.
         for idx, entry in enumerate(self.script):
             if (
                 entry.match is not None
@@ -113,7 +75,6 @@ class ScriptedLLM:
                 self._used_indices.add(idx)
                 return entry
 
-        # Fallback: walk from call_count using plain entries.
         idx = self.call_count
         while idx < len(self.script):
             entry = self.script[idx]
@@ -122,9 +83,7 @@ class ScriptedLLM:
                 return entry
             idx += 1
 
-        # Last-resort fallback: repeat last entry (script exhausted —
-        # callers either over-script or accept a repeat; the matching
-        # tests below assert ``call_count`` so over-scripting surfaces).
+        # Exhausted scripts repeat the last entry for deterministic behavior.
         return self.script[-1]
 
     async def chat(
@@ -139,7 +98,6 @@ class ScriptedLLM:
         entry = self._find_entry(normalized)
         self.call_count += 1
 
-        # Yield in chunks for realistic streaming
         response = entry.response
         chunk_size = entry.chunk_size
 
@@ -150,7 +108,7 @@ class ScriptedLLM:
                 await asyncio.sleep(entry.delay_per_chunk)
 
     async def close(self) -> None:
-        """Match the production LLM provider lifecycle API."""
+        """Satisfy the production provider lifecycle contract."""
         return None
 
     async def chat_complete(
@@ -158,7 +116,7 @@ class ScriptedLLM:
         messages: list[Message] | list[dict[str, Any]],
         **kwargs: Any,
     ) -> ChatResponse:
-        """Non-streaming convenience method."""
+        """Collect the scripted stream into a complete chat response."""
         parts: list[str] = []
         async for chunk in self.chat(messages, stream=False, **kwargs):
             parts.append(chunk)
@@ -170,18 +128,14 @@ class ScriptedLLM:
             model="scripted-test",
         )
 
-    # =========================================================================
-    # Assertion Helpers
-    # =========================================================================
-
     @property
     def last_messages(self) -> list[dict[str, Any]] | None:
-        """Get the most recent messages sent to the LLM."""
+        """Return the most recent normalized request messages."""
         return self.call_log[-1] if self.call_log else None
 
     @property
     def last_user_message(self) -> str:
-        """Extract text of the last user message sent."""
+        """Return the latest logged user-message content as text."""
         if not self.call_log:
             return ""
         for msg in reversed(self.call_log[-1]):

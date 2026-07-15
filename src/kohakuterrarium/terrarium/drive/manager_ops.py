@@ -1,16 +1,10 @@
 """Heavier DriveManager operations split out to respect the file-size cap.
 
-:class:`DriveManagerOps` is mixed into
-:class:`~kohakuterrarium.terrarium.drive.manager.DriveManager`. It carries the
-operations that need a hand-built transaction rather than a ready-made repository
-mutation: the §4.2 terminal-proposal pipeline (validate -> verifier fail-closed
--> atomic commit), owner transfer, dead-letter replay with lineage, the §6.1
-reconcile (resume + uncertain-attempt recovery), and the §6.2 orphan-and-block.
-
-It relies on the concrete manager for ``_repo`` / ``_clock`` / ``_mint`` /
-``_snapshot`` / ``_emit`` / ``_require`` / ``_has_live_delivery`` /
-``_enqueue_reason`` / ``_current_readiness_generation`` / ``_dependency_statuses``.
-No LLM, no spec interpretation.
+These operations require hand-built repository transactions rather than the
+standard mutation helpers. They cover idempotent custom commits, ownership
+transfer, and terminal proposals whose validation, verification, audit, proposal
+removal, and status transition must preserve atomicity. The concrete manager
+supplies repository, clock, identity, registry, event, and readiness services.
 """
 
 from dataclasses import replace
@@ -48,9 +42,7 @@ _TERMINAL_PROPOSAL_TARGETS = frozenset({DriveStatus.COMPLETED, DriveStatus.FAILE
 
 
 class DriveManagerOps:
-    """Transaction-building DriveManager operations (see module docstring)."""
-
-    # -- generic custom-mutation helper (idempotency + atomic commit) --------
+    """Build atomic mutations for ownership and terminal verification."""
 
     async def _run_mutation(
         self,
@@ -60,9 +52,12 @@ class DriveManagerOps:
         payload: dict[str, Any],
         build,
     ) -> Any:
-        """Open a repository transaction, honour the idempotency ledger, run
-        ``build(txn, now) -> (Mutation, result)``, stamp the ledger, and commit
-        atomically — the same contract the repository's own mutations use."""
+        """Commit a custom mutation under the repository idempotency contract.
+
+        ``build(txn, now)`` returns the mutation and its externally visible result.
+        The result is stored with the same transaction so exact retries can return
+        it without rebuilding or repeating side effects.
+        """
         async with self._repo.transaction() as txn:
             digest: str | None = None
             if idempotency_key:
@@ -115,8 +110,6 @@ class DriveManagerOps:
             )
             await txn.apply(Mutation(audit=[audit]))
 
-    # -- owner transfer ------------------------------------------------------
-
     async def transfer_owner(
         self,
         drive_id: str,
@@ -127,7 +120,7 @@ class DriveManagerOps:
         idempotency_key: str | None = None,
         is_privileged: bool = False,
     ) -> DriveRecord:
-        """Move the ownership boundary (design §3.2); ``created_by`` is unchanged."""
+        """Transfer ownership without changing the drive's creator identity."""
         current = await self._require(drive_id)
         assignment = await self._repo.get_assignment(drive_id)
         authorize(
@@ -179,8 +172,6 @@ class DriveManagerOps:
         )
         return result
 
-    # -- terminal proposal pipeline (§4.2) -----------------------------------
-
     async def propose_transition(
         self,
         drive_id: str,
@@ -192,10 +183,11 @@ class DriveManagerOps:
         expected_revision: int | None = None,
         is_privileged: bool = False,
     ) -> DriveTransitionProposal | DriveRecord:
-        """Propose a terminal transition. Verifier ``none`` auto-accepts and
-        returns the committed record; ``extension`` runs the registration
-        verifier fail-closed; ``actor``/``two_party`` return a pending proposal
-        awaiting :meth:`approve_proposal`."""
+        """Propose completion or failure under the configured verifier mode.
+
+        ``none`` commits immediately, ``extension`` invokes the registration and
+        fails closed, and actor-based modes persist a proposal for later approval.
+        """
         if target_status not in _TERMINAL_PROPOSAL_TARGETS:
             raise DriveValidationError(
                 "propose_transition is for terminal completed/failed only"
@@ -214,9 +206,8 @@ class DriveManagerOps:
         self._validate_registration_transition(
             current, target_status, {"terminal": True, "evidence": evidence or {}}
         )
-        # Pin the proposal to the revision/epoch at CREATION even when the caller
-        # omitted a revision, so a later canonical change conflicts at approval
-        # rather than silently finalizing the newer Drive (R1-08).
+        # Every proposal is pinned when created so later canonical changes cause
+        # approval conflict instead of finalizing a newer drive state.
         pinned_revision = (
             expected_revision if expected_revision is not None else current.revision
         )
@@ -238,7 +229,7 @@ class DriveManagerOps:
             case "extension":
                 await self._run_extension_verifier(current, proposal, actor)
                 return await self._finalize_proposal(proposal, actor)
-            case _:  # actor / two_party — wait for an authorized distinct approver
+            case _:  # Actor-based modes require later authorized approval.
                 await self._persist_proposal(proposal)
                 self._emit(
                     "drive_proposal_pending",
@@ -251,15 +242,13 @@ class DriveManagerOps:
                 return proposal
 
     async def _persist_proposal(self, proposal: DriveTransitionProposal) -> None:
-        """Durably record a pending two-party/actor proposal (R1-08) and mirror
-        it in the in-memory index (rebuilt from the store on resume)."""
+        """Persist an actor-approved proposal and update the runtime index."""
         async with self._repo.transaction() as txn:
             await txn.apply(Mutation(proposals=[proposal]))
         self._pending_proposals[proposal.proposal_id] = proposal
 
     async def _load_proposal(self, proposal_id: str) -> DriveTransitionProposal | None:
-        """The authoritative pending proposal from the store, falling back to the
-        in-memory mirror only for a not-yet-persisted immediate proposal."""
+        """Load durable proposal state, with a runtime fallback before persistence."""
         stored = await self._repo.get_proposal(proposal_id)
         if stored is not None:
             return stored
@@ -273,7 +262,7 @@ class DriveManagerOps:
         is_privileged: bool = False,
         operator: bool = False,
     ) -> DriveRecord:
-        """Finalize a pending actor/two_party proposal (§4.2)."""
+        """Authorize and finalize a pending actor-based proposal."""
         proposal = await self._load_proposal(proposal_id)
         if proposal is None:
             raise DriveValidationError(f"no pending proposal {proposal_id!r}")
@@ -295,12 +284,11 @@ class DriveManagerOps:
             raise DrivePermissionError(
                 "two_party completion requires a distinct approver"
             )
-        # The proposal was pinned at creation: reject if the canonical Drive has
-        # since changed revision/epoch (update / owner transfer / reassignment),
-        # so a stale proposal cannot finalize the newer Drive (R1-08).
+        # Revision and epoch pinning prevents a stale proposal from finalizing
+        # state changed by update, ownership transfer, or reassignment.
         self._require_proposal_current(proposal, current)
-        # The operator-grant audit and the proposal removal both ride the
-        # terminal-transition mutation (R1-40, R1-08): all atomic with finalize.
+        # Operator audit evidence and proposal removal commit with the terminal
+        # transition so approval cannot partially succeed.
         record = await self._finalize_proposal(
             proposal,
             actor,
@@ -382,7 +370,7 @@ class DriveManagerOps:
             )
         try:
             result = verify(proposal, {"record": current})
-        except Exception as exc:  # verifier raising fails closed (§4.2, §8.8)
+        except Exception as exc:  # Verifier failures must reject the transition.
             await self._write_audit(
                 current,
                 actor,
@@ -417,12 +405,12 @@ class DriveManagerOps:
     def _registration_extra_transitions(
         self, kind: str
     ) -> frozenset[tuple[DriveStatus, DriveStatus]]:
-        """Extra transition edges the enabled registration approves beyond the
-        generic graph (design §3.3, R1-25), e.g. a controlled terminal reopen.
+        """Return registration-approved edges beyond the generic status graph.
 
-        Duck-typed ``extra_transitions()`` on the registration; an unavailable
-        registration or a missing method declares none. A malformed edge fails
-        closed (a registration must not smuggle a non-status transition)."""
+        Unavailable registrations declare no extra edges. Every declared edge
+        must contain two ``DriveStatus`` values so extensions cannot inject an
+        unvalidated transition shape.
+        """
         entry = self._snapshot.for_kind(kind) if self._snapshot else None
         if entry is None or not entry.available:
             return frozenset()
@@ -458,7 +446,7 @@ class DriveManagerOps:
             validate(current, target, context)
         except DriveError:
             raise
-        except Exception as exc:  # a broken registration validator fails closed
+        except Exception as exc:  # Validator failures must reject the transition.
             raise DriveTransitionError(
                 f"registration rejected transition: {exc}",
                 from_status=current.status.value,

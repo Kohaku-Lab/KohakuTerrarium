@@ -1,4 +1,4 @@
-"""Clear command — clear conversation context (keeps session history)."""
+"""Clear live conversation context while preserving recorded session history."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -12,19 +12,19 @@ from kohakuterrarium.modules.user_command.base import (
 
 
 def _do_clear(context: UserCommandContext) -> str:
-    """Execute the clear: wipe context, emit event, save snapshot."""
+    """Clear context, emit its activity, persist the empty snapshot, and summarize."""
     agent = context.agent
     msgs = len(agent.controller.conversation.get_messages())
     agent.controller.conversation.clear()
 
-    # Emit context_cleared event (for TUI/frontend display + session log)
+    # Activity notification keeps frontends and the session event log synchronized.
     agent.output_router.notify_activity(
         "context_cleared",
         f"Cleared {msgs} messages",
         metadata={"messages_cleared": msgs},
     )
 
-    # Save conversation snapshot AFTER clearing (so resume gets cleared state)
+    # Persisting after mutation ensures resume restores the cleared state.
     if agent.session_store:
         agent.session_store.save_conversation(
             agent.config.name,
@@ -47,7 +47,7 @@ class ClearCommand(BaseUserCommand):
         if not context.agent:
             return UserCommandResult(error="No agent context.")
 
-        # --force skips confirmation (used by frontend after confirm dialog)
+        # Confirming frontends resubmit with ``--force`` to avoid a second prompt.
         if args.strip() == "--force":
             msg = _do_clear(context)
             return UserCommandResult(
@@ -57,12 +57,12 @@ class ClearCommand(BaseUserCommand):
 
         msgs = len(context.agent.controller.conversation.get_messages())
 
-        # CLI/TUI: clear immediately (no confirmation)
+        # Interactive terminal input provides an immediate command path.
         if context.input_module:
             msg = _do_clear(context)
             return UserCommandResult(output=msg)
 
-        # Web frontend: return confirm dialog
+        # Frontends without an input module must confirm before destructive clearing.
         return UserCommandResult(
             output=f"Clear {msgs} messages?",
             data=ui_confirm(

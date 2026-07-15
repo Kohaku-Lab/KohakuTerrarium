@@ -1,9 +1,7 @@
 """Shared libcst helpers used by per-kind codegen modules.
 
-Thin wrappers over libcst's transformer API for the patterns we
-need across tool / plugin / trigger / subagent / input-output
-modules. Phase 3 hardens these with more helpers as the codegen
-modules require.
+Provides the shared LibCST parsing, extraction, and replacement operations used
+by tool, plugin, trigger, sub-agent, and I/O editors.
 """
 
 import textwrap
@@ -25,12 +23,12 @@ class Codegen(Protocol):
 
 
 def parse(source: str) -> cst.Module:
-    """Parse Python source into a libcst Module."""
+    """Parse Python source into a LibCST module."""
     return cst.parse_module(source)
 
 
 def find_class(tree: cst.Module, name: str) -> cst.ClassDef | None:
-    """Return the module-level ClassDef named *name* or None."""
+    """Return the named module-level class, or ``None`` when absent."""
     for node in tree.body:
         if isinstance(node, cst.ClassDef) and node.name.value == name:
             return node
@@ -38,7 +36,7 @@ def find_class(tree: cst.Module, name: str) -> cst.ClassDef | None:
 
 
 def first_class(tree: cst.Module) -> cst.ClassDef | None:
-    """Return the first module-level ClassDef (any name) or None."""
+    """Return the first module-level class, or ``None`` when absent."""
     for node in tree.body:
         if isinstance(node, cst.ClassDef):
             return node
@@ -46,11 +44,10 @@ def first_class(tree: cst.Module) -> cst.ClassDef | None:
 
 
 def replace_string_property(klass: cst.ClassDef, prop: str, value: str) -> cst.ClassDef:
-    """Rewrite ``@property def prop(self): return "..."`` to the new value.
+    """Replace a string property or equivalent class assignment.
 
-    Also rewrites a plain ``prop = "..."`` class assignment if no
-    property function is found — covers both styles used across
-    the builtin tools.
+    Both property-return and class-attribute forms are supported because built-in
+    modules use both representations.
     """
 
     new_return = cst.SimpleString(_py_string_literal(value))
@@ -91,12 +88,10 @@ def replace_string_property(klass: cst.ClassDef, prop: str, value: str) -> cst.C
 def replace_class_attr_bool(
     klass: cst.ClassDef, attr: str, value: bool
 ) -> cst.ClassDef:
-    """Set a class-level boolean attribute ``attr = True/False``.
+    """Set or insert a class-level boolean attribute.
 
-    Rewrites an existing ``attr = <bool>`` class assignment; if the class
-    has none, inserts one as the first statement of the class body. Used
-    by codegen round-trips to persist editor-form metadata toggles (e.g.
-    a trigger's ``universal`` flag) back into the source.
+    Missing attributes are inserted as the first class statement so editor
+    metadata toggles have a deterministic source representation.
     """
     new_value = cst.Name(value="True" if value else "False")
 
@@ -116,7 +111,7 @@ def replace_class_attr_bool(
     new_klass = klass.visit(transformer)
     if transformer.touched:
         return new_klass
-    # Not present — insert ``attr = <value>`` as the first class statement.
+    # First-statement insertion keeps generated metadata placement deterministic.
     assign = cst.SimpleStatementLine(
         body=[
             cst.Assign(
@@ -134,11 +129,10 @@ def replace_class_attr_bool(
 def replace_method_body(
     klass: cst.ClassDef, method: str, body_source: str
 ) -> cst.ClassDef:
-    """Replace the body of ``def method(...)`` with *body_source*.
+    """Replace a method body from unindented Python source.
 
-    *body_source* is raw Python text for the new body (one or
-    more statements). Indentation is normalized — callers pass
-    unindented source; libcst re-indents on serialize.
+    Empty input becomes ``return None``. LibCST restores class indentation during
+    serialization.
     """
     body_source = _dedent_body(body_source)
     if not body_source.strip():
@@ -168,13 +162,11 @@ def replace_method_body(
 
 
 def read_property_string(klass: cst.ClassDef, prop: str) -> str | None:
-    """Extract the string returned by ``@property def prop``.
+    """Read a literal string property or equivalent class assignment.
 
-    Falls back to a class-level assignment ``prop = "..."`` if no
-    property function is present. Returns ``None`` if neither
-    shape is found.
+    Unsupported expressions and missing values return ``None``.
     """
-    # @property def form
+    # Property-return form takes precedence over the class-attribute fallback.
     for node in klass.body.body:
         if (
             isinstance(node, cst.FunctionDef)
@@ -191,10 +183,10 @@ def read_property_string(klass: cst.ClassDef, prop: str) -> str | None:
                         if isinstance(s, cst.Return) and isinstance(
                             s.value, cst.ConcatenatedString
                         ):
-                            # Not worth the bookkeeping — tell caller.
+                            # Concatenated expressions cannot be safely round-tripped here.
                             return None
 
-    # attr assignment form
+    # Fall back to a literal class assignment.
     for node in klass.body.body:
         if isinstance(node, cst.SimpleStatementLine):
             for stmt in node.body:
@@ -207,7 +199,7 @@ def read_property_string(klass: cst.ClassDef, prop: str) -> str | None:
 
 
 def read_class_attr_bool(klass: cst.ClassDef, attr: str) -> bool:
-    """Read a ``attr = True/False`` class-level assignment. Defaults False."""
+    """Read a literal class-level boolean, defaulting to ``False``."""
     for node in klass.body.body:
         if isinstance(node, cst.SimpleStatementLine):
             for stmt in node.body:
@@ -225,11 +217,10 @@ def read_class_attr_bool(klass: cst.ClassDef, attr: str) -> bool:
 
 
 def read_method_body(klass: cst.ClassDef, method: str) -> str | None:
-    """Extract the source text for *method*'s body (un-dedented).
+    """Return a method body's source text, or ``None`` when absent.
 
-    Returns None if the method is not found. Caller typically
-    wants to show this verbatim to the user; dedent on their
-    side if required.
+    The returned text preserves LibCST formatting and may require caller-side
+    dedentation for presentation.
     """
     for node in klass.body.body:
         if (
@@ -253,11 +244,6 @@ def replace_class_in_module(
     return tree.with_changes(body=body)
 
 
-# ----------------------------------------------------------------------
-# Internals
-# ----------------------------------------------------------------------
-
-
 def _assign_target_name(stmt: cst.Assign | cst.AnnAssign) -> str | None:
     if isinstance(stmt, cst.Assign):
         if len(stmt.targets) != 1:
@@ -271,9 +257,10 @@ def _assign_target_name(stmt: cst.Assign | cst.AnnAssign) -> str | None:
 
 
 def _py_string_literal(value: str) -> str:
-    """Quote *value* so it round-trips through ``cst.SimpleString``."""
-    # ``repr`` gives a valid Python literal; wrap single quotes in
-    # triple quotes for multi-line to avoid escape soup.
+    """Quote a string for lossless ``cst.SimpleString`` construction.
+
+    Multiline values use triple quotes to avoid excessive escaping.
+    """
     if "\n" in value:
         escaped = value.replace('"""', r"\"\"\"")
         return f'"""{escaped}"""'
@@ -281,8 +268,7 @@ def _py_string_literal(value: str) -> str:
 
 
 def _dedent_body(source: str) -> str:
-    """Strip common leading whitespace so parse_module accepts it."""
-    # Drop leading blank lines
+    """Remove leading blank lines and common indentation for parsing."""
     lines = source.split("\n")
     while lines and not lines[0].strip():
         lines.pop(0)

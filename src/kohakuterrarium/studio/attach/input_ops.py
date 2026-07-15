@@ -1,11 +1,4 @@
-"""WS-input handling free functions for :mod:`studio.attach.io`.
-
-Split out of ``io.py`` to keep it under the 600-line file cap: the
-input-side helpers (payload normalization, targeted-frame routing, the
-UXI-08a queued-message edit/cancel ops, and the fire-and-forget
-``inject_input`` runner) form one cohesive cluster with no dependency
-on the ``attach_io`` main loop.
-"""
+"""Normalize, route, and process inbound Studio attach websocket messages."""
 
 import asyncio
 import time
@@ -22,7 +15,7 @@ logger = get_logger(__name__)
 
 
 def _normalize_input_content(data: dict[str, Any]) -> str | list[dict[str, Any]]:
-    """Normalize incoming WS input payload."""
+    """Return a canonical text or content-part payload from a websocket frame."""
     content = data.get("content")
     if isinstance(content, list):
         parts = normalize_content_parts(content) or []
@@ -34,12 +27,12 @@ def _normalize_input_content(data: dict[str, Any]) -> str | list[dict[str, Any]]
 
 
 def _resolve_target(engine: Any, creature: Any, session_id: str, data: dict) -> Any:
-    """Resolve the creature a targeted WS frame addresses.
+    """Resolve the creature addressed by a targeted websocket frame.
 
-    Defaults to the bound creature; honours an explicit ``target``
-    display name so one WS can drive every sub-tab. Raises ``KeyError``
-    when the named creature is not in this session (via
-    ``find_creature``)."""
+    A missing target addresses the creature bound to the connection. An explicit
+    display name allows one connection to drive multiple creature tabs. ``KeyError``
+    propagates when the named creature does not belong to the session.
+    """
     target_name = (data.get("target") or "").strip()
     if not target_name or target_name == creature.name:
         return creature
@@ -54,12 +47,12 @@ def _handle_pending_op(
     session_id: str,
     queue: asyncio.Queue,
 ) -> None:
-    """Apply an ``input_edit`` / ``input_cancel`` to a queued message.
+    """Apply ``input_edit`` or ``input_cancel`` to a queued message.
 
-    Targets the pending buffer by ``event_id`` (UXI-08a); the op wins
-    only if the message is still queued (``status="already_sent"``
-    otherwise). Acks back with the same event_id so the shell can clear
-    its queued banner."""
+    The operation succeeds only while ``event_id`` remains in the pending buffer;
+    otherwise the acknowledgement reports ``status="already_sent"``. Echoing the
+    event ID lets the client reconcile the corresponding queued-message indicator.
+    """
     event_id = data.get("event_id")
     if not isinstance(event_id, str) or not event_id:
         return
@@ -102,23 +95,16 @@ async def _process_input(
     source_name: str,
     pending_id: str,
 ) -> None:
-    """Run ``agent.inject_input`` in its own task so the WS receive
-    loop can keep processing inbound frames (notably ``ui_reply``)
-    while the agent is mid-turn.
+    """Inject input without blocking the websocket receive loop.
 
-    Errors and the post-turn ``idle`` notice are pushed via the same
-    outbound queue that ``_forward_queue`` drains, so the caller
-    doesn't need to share the websocket reference.
+    Errors and terminal notices use the outbound queue so this task does not need
+    direct access to the websocket and inbound frames such as ``ui_reply`` remain
+    responsive during a turn.
 
-    ``idle`` is suppressed when ``inject_input`` returned ``False`` —
-    the event was buffered for opportunistic mid-turn drain
-    (``Agent._pending_mid_turn_inputs``) and the OTHER turn that's
-    still running owns the next ``idle`` / ``processing_end`` frame.
-    Emitting our own here would race the FE's ``processingByTab``
-    flag off and the KohakUwUing indicator would blink off until
-    the next streaming chunk arrived. Instead a buffered input
-    emits an ``input_queued`` ack carrying ``pending_id`` so a shell can
-    later ``input_edit`` / ``input_cancel`` it by id (UXI-08a).
+    A false return means another turn buffered the input for a mid-turn drain. That
+    active turn owns the next ``idle`` or ``processing_end`` frame; emitting one here
+    would clear the client's processing state too early. The ``input_queued``
+    acknowledgement exposes ``pending_id`` for later edit or cancellation.
     """
     try:
         processed = await agent.inject_input(
@@ -140,10 +126,8 @@ async def _process_input(
             logger.debug("input error frame dropped — queue full")
         return
     if not processed:
-        # Buffered for mid-turn drain — do NOT emit ``idle``; the
-        # turn that's actually running will fire its own terminal
-        # frames when it ends. Ack the queue slot by id so the client
-        # can edit / cancel it before the drain claims it.
+        # The active turn owns terminal frames; an early ``idle`` would clear the
+        # client's processing state before that turn ends.
         try:
             queue.put_nowait(
                 {

@@ -1,9 +1,4 @@
-"""
-Builtin sub-agent configurations (convenience re-exports).
-
-All real logic lives in ``builtins.subagent_catalog``. This module
-re-exports for backward compatibility and convenience.
-"""
+"""Lazily expose built-in sub-agent configurations and catalog helpers."""
 
 import importlib
 
@@ -27,6 +22,7 @@ __all__ = list(_SUBAGENT_EXPORTS.keys())
 
 
 def __getattr__(name: str):
+    """Load a configured export on first access and cache it in the module."""
     module_name = _SUBAGENT_EXPORTS.get(name)
     if module_name is None:
         raise AttributeError(name)

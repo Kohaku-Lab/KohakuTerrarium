@@ -1,30 +1,8 @@
-"""Procedural skill system (Cluster 4, Wave 2-δ).
+"""Discover and invoke model-readable procedural skill bundles.
 
-A **procedural skill** is a reusable markdown how-to bundle that lives
-in a folder such as ``.kt/skills/<name>/SKILL.md`` or
-``~/.kohakuterrarium/skills/<name>/SKILL.md``. Skills are model-readable
-procedural knowledge — the framework does **not** execute scripts for
-the model; it merely renders the skill body into the conversation when
-the skill is invoked.
-
-Three distinct invocation routes (triple-invocation, Qd in the locked
-spec):
-
-1. ``paths:`` frontmatter — auto-activates a hint when the cwd contains
-   files matching its globs (:mod:`kohakuterrarium.skills.paths`).
-2. The built-in ``skill`` tool — model-invoked, returns the SKILL.md body
-   as a tool response. A legacy text-format controller command remains for
-   non-native tool formats (:mod:`kohakuterrarium.skills.command`).
-3. ``/<skill-name> [args]`` user slash command — injects a user-turn
-   preamble that asks the model to follow the skill
-   (:mod:`kohakuterrarium.skills.user_slash`).
-
-Vocabulary distinction (Qc): *tool references* live in
-``builtin_skills/tools/<name>.md`` and document registered
-:class:`BaseTool` / :class:`BaseSubAgent` classes; they are read via the
-``info`` tool. *Skills* are procedural bundles and are
-**never** shipped as built-ins — only via user/project dirs or
-third-party packages.
+Skills provide Markdown instructions through path hints, the ``skill`` tool,
+or user slash commands. They are distinct from built-in tool references and do
+not execute bundled scripts automatically.
 """
 
 from kohakuterrarium.skills.command import SkillCommand

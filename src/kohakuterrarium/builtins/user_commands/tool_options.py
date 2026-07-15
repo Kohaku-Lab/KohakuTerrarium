@@ -1,22 +1,4 @@
-"""``/tool_options`` slash command.
-
-In-session control surface for provider-native tool option overrides.
-Operates on the current ``context.agent``'s ``native_tool_options``
-helper (see :class:`kohakuterrarium.core.agent_native_tools.NativeToolOptions`).
-
-Usage forms (parsed from the slash-command argument string)::
-
-    /tool_options                           # show all tools + values + schemas
-    /tool_options <tool>                    # show one tool's current overrides
-    /tool_options <tool> <key>=<value> ...  # set / override values
-    /tool_options <tool> --reset            # clear overrides for this tool
-
-Values are parsed permissively: bare strings, ``"`` / ``'`` quoted strings,
-JSON literals (numbers, ``true``/``false``/``null``, lists, objects).
-Strict-enum schema entries reject values outside their allowed set;
-free-form ``string``/``int``/``float``/``bool`` accept any cast-compatible
-value.
-"""
+"""Inspect, override, or reset provider-native tool options for an agent."""
 
 import shlex
 from typing import Any
@@ -100,9 +82,6 @@ class ToolOptionsCommand(BaseUserCommand):
             return UserCommandResult(output=f"Cleared {tool_name} options.")
         rendered = ", ".join(f"{k}={v}" for k, v in sorted(applied.items()))
         return UserCommandResult(output=f"Set {tool_name}: {rendered}")
-
-
-# ── Helpers ────────────────────────────────────────────────────────
 
 
 def _schema_for(agent: Any, tool_name: str) -> dict[str, Any] | None:

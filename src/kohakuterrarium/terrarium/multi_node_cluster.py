@@ -1,11 +1,8 @@
 """Cluster-graph folding for :mod:`multi_node_service`.
 
-``MultiNodeTerrariumService.runtime_graph_snapshot`` collects one engine
-graph per worker, then folds engine graphs that have been linked by a
-cross-node channel wire into a single *cluster graph* so the UI sees
-ONE graph spanning workers.  This module owns the pure fold algorithm
-(union-find over the cluster-link set) so the service file stays under
-the 1000-line hard cap.
+``MultiNodeTerrariumService.runtime_graph_snapshot`` collects one engine graph
+per worker. This module uses union-find to combine graphs linked by cross-node
+channel wires so the UI sees one graph spanning workers.
 
 The function is intentionally side-effect-free and takes its inputs as
 arguments — it is purely a transformation from
@@ -30,8 +27,8 @@ def cluster_groups(service: "TerrariumService") -> dict[str, set[str]]:
 
     Cluster IDs use the graph_id (sid) directly — the ``node`` part of
     each pair is dropped because the studio's ``_meta`` is keyed by sid
-    and the multi-node journey's B1 invariant addresses the cluster as
-    the lex-smallest sid (matching :func:`fold_clusters` above).
+    and cluster identity uses the lex-smallest sid, matching
+    :func:`fold_clusters`.
 
     Lives here in the terrarium tier (not studio) so that the multi-
     node channel routing code in ``terrarium.multi_node_channels`` can

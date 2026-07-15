@@ -45,21 +45,14 @@ class FooterBlock:
     """One-line status footer at the bottom of the live region."""
 
     def __init__(self):
-        # Cumulative counters — accumulated across every LLM call in
-        # this session. Match TUI / web frontend semantics.
         self._input_tokens = 0
         self._output_tokens = 0
         self._cached_tokens = 0
-        # Last call's prompt size — used for the context-fill % reading
-        # (the current context window is what the NEXT call will see,
-        # not the session total).
         self._last_prompt_tokens = 0
         self._max_context = 0
         self._model = ""
         self._compacting = False
         self._processing = False
-        # Multiline cursor position — set by the app each frame; (0, 0)
-        # means "not multiline" (single-line buffers don't need a pos).
         self._cursor_line: int = 0
         self._cursor_col: int = 0
         self._cursor_total_lines: int = 0
@@ -71,12 +64,7 @@ class FooterBlock:
         max_ctx: int = 0,
         cached: int = 0,
     ) -> None:
-        """Accumulate the latest LLM call's token deltas.
-
-        Called once per LLM call with that call's prompt / completion /
-        cached counts. Each call's prompt is ALSO saved as
-        ``_last_prompt_tokens`` for the context-fill % readout.
-        """
+        """Accumulate call usage and retain its prompt size for context fill."""
         self._input_tokens += max(0, prompt)
         self._output_tokens += max(0, completion)
         self._cached_tokens += max(0, cached)
@@ -108,19 +96,13 @@ class FooterBlock:
         self._processing = value
 
     def update_cursor(self, line: int, col: int, total_lines: int) -> None:
-        """Report the composer cursor's logical position.
-
-        ``total_lines >= 2`` turns the indicator on (single-line buffers
-        don't need it). Values are 1-indexed for display.
-        """
+        """Update the one-indexed composer position shown for multiline input."""
         self._cursor_line = line
         self._cursor_col = col
         self._cursor_total_lines = total_lines
 
     def __rich__(self) -> Text:
-        # We build a Text object span-by-span rather than joining strings
-        # so the context-percentage span can carry its own warning color
-        # independently of the rest of the footer.
+        # Separate spans let context fill carry an independent warning color.
         line = Text(style=COLOR_FOOTER)
         sep = "  ·  "
         first = True
@@ -131,8 +113,6 @@ class FooterBlock:
                 line.append(sep)
             first = False
 
-        # Context window fill (based on LAST prompt — reflects the
-        # current window, not session-cumulative counts).
         if self._max_context > 0 and self._last_prompt_tokens > 0:
             pct = int(self._last_prompt_tokens / self._max_context * 100)
             _push_sep()
@@ -141,8 +121,6 @@ class FooterBlock:
                 style=_context_style(pct),
             )
 
-        # Cumulative in/out tokens for the session. Include cache count
-        # inline when present — matches TUI: ``1.2k↑ (cache 800) 3.4k↓``.
         if self._input_tokens or self._output_tokens:
             tok = Text()
             tok.append(f"{_fmt_tokens(self._input_tokens)}↑")
@@ -160,9 +138,6 @@ class FooterBlock:
             _push_sep()
             line.append("⟳ compacting", style="bold yellow")
 
-        # Multiline cursor-position indicator — only shown when the
-        # composer spans more than one line so it doesn't clutter simple
-        # single-line prompts.
         if self._cursor_total_lines >= 2:
             _push_sep()
             line.append(
@@ -171,8 +146,7 @@ class FooterBlock:
                 style="dim",
             )
 
-        # Mode hints — always last so wrapping drops them first on narrow
-        # terminals.
+        # Keep mode hints last so narrow terminals discard them first.
         _push_sep()
         if self._processing:
             line.append("esc=interrupt  ctrl+b=bg  ctrl+x=cancel-bg")
@@ -180,6 +154,5 @@ class FooterBlock:
             line.append("/help  /exit  shift+enter=newline  ctrl+d=quit")
 
         if first:
-            # No segments at all — shouldn't happen, but be defensive.
             return Text("ready", style=COLOR_FOOTER)
         return line

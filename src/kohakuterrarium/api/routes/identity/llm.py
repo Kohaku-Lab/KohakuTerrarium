@@ -1,4 +1,4 @@
-"""Identity LLM — backends, profiles, default model, native tools."""
+"""Manage LLM backends, profiles, model defaults, and native-tool metadata."""
 
 from typing import Any
 
@@ -27,6 +27,8 @@ router = APIRouter()
 
 
 class BackendRequest(BaseModel):
+    """Describe a named LLM backend and its provider capabilities."""
+
     name: str
     backend_type: str = "openai"
     base_url: str = ""
@@ -36,6 +38,8 @@ class BackendRequest(BaseModel):
 
 
 class ProfileRequest(BaseModel):
+    """Describe a model profile and its generation defaults."""
+
     name: str
     model: str
     provider: str = ""
@@ -49,16 +53,20 @@ class ProfileRequest(BaseModel):
 
 
 class DefaultModelRequest(BaseModel):
+    """Select the profile used as the default model."""
+
     name: str
 
 
 @router.get("/backends")
 async def get_backends():
+    """Return all configured LLM backends."""
     return {"backends": list_backends()}
 
 
 @router.post("/backends", dependencies=[Depends(verify_admin_token)])
 async def create_backend(req: BackendRequest):
+    """Validate and persist an LLM backend record."""
     try:
         save_backend_record(
             name=req.name,
@@ -75,6 +83,7 @@ async def create_backend(req: BackendRequest):
 
 @router.delete("/backends/{name}", dependencies=[Depends(verify_admin_token)])
 async def delete_backend_route(name: str):
+    """Delete an LLM backend unless configuration invariants reject it."""
     try:
         deleted = remove_backend(name)
     except ValueError as e:
@@ -92,11 +101,13 @@ async def get_native_tools():
 
 @router.get("/profiles")
 async def get_profiles():
+    """Return all configured model profiles in API form."""
     return {"profiles": list_profiles_payload()}
 
 
 @router.post("/profiles", dependencies=[Depends(verify_admin_token)])
 async def create_profile(req: ProfileRequest):
+    """Validate and persist a model profile for an existing provider."""
     try:
         save_profile_record(
             name=req.name,
@@ -122,6 +133,7 @@ async def create_profile(req: ProfileRequest):
     "/profiles/{provider}/{name}", dependencies=[Depends(verify_admin_token)]
 )
 async def delete_profile_route(provider: str, name: str):
+    """Delete a provider-qualified model profile."""
     if not remove_profile(name, provider):
         raise HTTPException(404, f"Profile not found: {provider}/{name}")
     return {"status": "deleted", "name": name, "provider": provider}
@@ -129,15 +141,18 @@ async def delete_profile_route(provider: str, name: str):
 
 @router.get("/default-model")
 async def get_default_model_route():
+    """Return the configured default model profile name."""
     return {"default_model": get_default()}
 
 
 @router.post("/default-model", dependencies=[Depends(verify_admin_token)])
 async def set_default_model_route(req: DefaultModelRequest):
+    """Persist the model profile used as the default."""
     set_default(req.name)
     return {"status": "set", "default_model": req.name}
 
 
 @router.get("/models")
 async def get_all_models_route():
+    """Return the combined model catalog across configured backends."""
     return list_all_models_combined()

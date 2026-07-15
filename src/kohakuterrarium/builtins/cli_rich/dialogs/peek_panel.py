@@ -29,7 +29,6 @@ def _summarize_event(event) -> str:
     kind = getattr(event, "type", None) or getattr(event, "kind", None) or "event"
     payload = getattr(event, "payload", None) or getattr(event, "content", "")
     if isinstance(payload, dict):
-        # Pick a short field if present.
         for key in ("detail", "message", "name", "tool", "title"):
             if key in payload and payload[key]:
                 return f"[{kind}] {payload[key]}"

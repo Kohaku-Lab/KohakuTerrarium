@@ -1,7 +1,6 @@
 """Filtered + paginated events for one agent in a saved session.
 
-Verbatim port of ``_session_viewer.py:build_events_payload`` and the
-``_parse_type_filter`` helper it uses.
+Builds one-agent event pages with cursor, turn, type, and timestamp filters.
 """
 
 from typing import Any
@@ -30,12 +29,11 @@ def build_events_payload(
     limit: int,
     cursor: int | None,
 ) -> dict[str, Any]:
-    """Filtered events for one agent.
+    """Return a filtered event page for one agent.
 
-    Cursor is the last seen ``event_id``. Returns ``next_cursor`` =
-    ``event_id`` of the last row when more rows remain, else ``None``.
-    The agent argument is required so this stays O(events_for_one_agent)
-    — cross-agent enumeration is a separate concern (see ``/turns``).
+    ``cursor`` is the last observed event ID. A full page returns its final ID
+    as ``next_cursor``; shorter pages return ``None``. Restricting the query to
+    one agent keeps work proportional to that namespace's events.
     """
     meta = store.load_meta()
     main_agents = list(meta.get("agents") or [])

@@ -1,8 +1,6 @@
 """Sandbox profile contract.
 
-Profiles are declarative capability envelopes. They are intentionally small,
-frozen, and dependency-light so they can be imported by core, builtins, plugins,
-and third-party tools without pulling runtime machinery with them.
+Profiles stay immutable and dependency-light so every runtime layer can share them.
 """
 
 from dataclasses import dataclass, field
@@ -74,7 +72,7 @@ class SandboxProfile:
         )
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a stable JSON/YAML-friendly dict."""
+        """Serialize the profile to a stable JSON/YAML-friendly mapping."""
         return {
             "name": self.name,
             "fs_read": self.fs_read,
@@ -90,7 +88,7 @@ class SandboxProfile:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "SandboxProfile":
-        """Build a profile from a partial dict."""
+        """Build a profile from a partial mapping with restrictive defaults."""
         return cls(
             fs_read=str(data.get("fs_read", "deny")),
             fs_write=str(data.get("fs_write", "deny")),
@@ -156,7 +154,7 @@ def _intersect_network_allowlist(
     left: tuple[str, ...],
     right: tuple[str, ...],
 ) -> tuple[str, ...]:
-    """Intersect exact-host allowlists; empty means unrestricted allow."""
+    """Intersect exact-host allowlists, treating empty as unrestricted."""
     if not left:
         return tuple(sorted(set(right)))
     if not right:

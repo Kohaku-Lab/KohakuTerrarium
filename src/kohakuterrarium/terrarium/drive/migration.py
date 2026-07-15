@@ -1,24 +1,11 @@
 """Explicit migration from ad-hoc goal/plugin state to Drive records (§14.2).
 
-Migrating legacy goal state is deliberately *not* implicit guessing. The caller
-supplies each legacy record and a ``mapper`` that turns it into a
-:class:`CreateDriveRequest`; this helper only adds the cross-cutting mechanics
-the design mandates:
-
-- the original payload is preserved verbatim under ``metadata.migration.source``;
-- each new Drive gets a fresh id + revision 1 (minted by ``create``), never the
-  legacy id;
-- assignee/scope come from the caller's mapper — never inferred here;
-- a ``completed`` status is never inferred from conversation text (creation only
-  ever mints a non-terminal Drive, so a legacy "done" flag cannot smuggle a
-  terminal record in);
-- migration is idempotent via a per-record source key/hash recorded in
-  ``metadata.migration``; a re-run skips already-migrated keys;
-- legacy state is left untouched — nothing is created until ``create`` commits,
-  and the source store is only ever read.
-
-``dry_run=True`` returns the same report with nothing created, so an operator can
-preview the mapping before committing.
+Migration never guesses legacy semantics. The caller supplies records and a
+mapper that chooses drive scope, assignee, kind, and payload. This helper
+preserves the source payload in migration metadata, assigns fresh canonical
+identity through normal creation, and never infers completion from legacy text or
+flags. Source keys make reruns idempotent, the legacy store is read-only, and dry
+run reports the same mapping without creating records.
 """
 
 import hashlib
@@ -33,8 +20,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# The metadata block every migrated Drive carries so a re-run is idempotent and
-# the original payload survives audit (design §14.2).
+# Migration metadata retains source evidence and the stable rerun key.
 MIGRATION_METADATA_KEY = "migration"
 
 LegacyRecord = tuple[str, dict[str, Any]]
@@ -44,19 +30,19 @@ CreateSink = Callable[..., Awaitable[Any]]
 
 @dataclass(frozen=True)
 class MigrationEntry:
-    """One legacy record's disposition in a migration run."""
+    """Disposition of one legacy record during migration."""
 
     source_key: str
     source_hash: str
     title: str
     kind: str
-    reason: str  # "created" | "would_create" | "already_migrated"
+    reason: str
     drive_id: str | None = None
 
 
 @dataclass(frozen=True)
 class MigrationReport:
-    """The outcome of a :func:`migrate_goal_state` run."""
+    """Structured outcome of a legacy goal migration."""
 
     graph_id: str
     dry_run: bool
@@ -96,7 +82,7 @@ class MigrationReport:
 
 
 def _stable_hash(payload: dict[str, Any]) -> str:
-    """Content hash of a legacy payload (stable key order → stable hash)."""
+    """Hash a legacy payload with stable key ordering."""
     encoded = json.dumps(payload, sort_keys=True, default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
@@ -108,7 +94,7 @@ def _with_migration_metadata(
     source_hash: str,
     payload: dict[str, Any],
 ) -> CreateDriveRequest:
-    """A copy of ``request`` whose metadata preserves the legacy payload + key."""
+    """Copy a request with source evidence and idempotency metadata."""
     metadata = dict(request.metadata)
     metadata[MIGRATION_METADATA_KEY] = {
         "source_key": source_key,
@@ -120,12 +106,7 @@ def _with_migration_metadata(
 
 
 def migrated_source_keys(records: Iterable[Any]) -> set[str]:
-    """Source keys already migrated, read from records' migration metadata.
-
-    ``records`` are :class:`DriveRecord`-shaped (anything with a ``.metadata``
-    dict). Callers pass the graph's existing Drives to make a re-run idempotent
-    without re-reading the legacy store.
-    """
+    """Collect stable source keys already represented by migrated Drive records."""
     keys: set[str] = set()
     for record in records:
         metadata = getattr(record, "metadata", None)
@@ -138,13 +119,7 @@ def migrated_source_keys(records: Iterable[Any]) -> set[str]:
 
 
 def _default_legacy_reader(source_store: Any) -> list[LegacyRecord]:
-    """Best-effort extractor for ad-hoc goal state on a session store.
-
-    There is no single canonical legacy format, so this only handles a store
-    that explicitly exposes ``iter_goal_state()``/``list_goal_state()`` returning
-    ``(key, payload)`` pairs. Anything else returns ``[]`` and the caller should
-    pass ``legacy=`` with its own extraction. Never guesses record boundaries.
-    """
+    """Read declared goal-state pairs without inferring a legacy record format."""
     for attr in ("iter_goal_state", "list_goal_state"):
         reader = getattr(source_store, attr, None)
         if callable(reader):
@@ -166,14 +141,7 @@ async def migrate_goal_state(
     already_migrated: Iterable[str] = (),
     dry_run: bool = False,
 ) -> MigrationReport:
-    """Migrate ad-hoc goal state into Drive records (design §14.2).
-
-    ``mapper`` turns each ``(source_key, payload)`` into a
-    :class:`CreateDriveRequest`; this helper enriches it with idempotent
-    migration metadata and, unless ``dry_run``, commits it through ``create``
-    (an async ``(request, *, graph_id, actor) -> record`` sink such as a bound
-    ``TerrariumService.create_drive``). ``create`` is required unless ``dry_run``.
-    """
+    """Map legacy goal state into new Drives with stable migration metadata."""
     if not isinstance(actor, ActorRef):
         raise DriveValidationError("actor must be an ActorRef")
     if not dry_run and create is None:

@@ -1,34 +1,9 @@
 """Canonical-name + alias tables for built-in LLM presets.
 
-Split out of :mod:`presets` to keep that module under the 1000-line
-hard cap. The tables define two mappings:
-
-``_CANONICAL_NAMES``
-    Legacy preset key (``gpt-5.4-api`` / ``gpt-5.4-or`` / …) → bare
-    canonical name under the new ``(provider, name)`` hierarchy. Used
-    when transforming the flat ``PRESETS`` dict into the nested view
-    that the rest of the codebase consumes.
-
-``ALIASES``
-    Free-form alias (short friendly names, pre-2026 preset names)
-    → ``(provider, canonical_name)`` tuple. Used by
-    :func:`kohakuterrarium.llm.profiles.resolve_controller_llm` to
-    let user configs and CLI input keep referencing old identifiers
-    after the suffix clean-up.
+Map flat preset keys and user-facing aliases to canonical provider/name pairs.
 """
 
-# ── Canonical name mapping ────────────────────────────────────
-#
-# The flat ``PRESETS`` dict in :mod:`presets` is keyed by legacy
-# disambiguation names (``gpt-5.4-api`` / ``gpt-5.4-or`` / …) because
-# Python dict keys must be unique. The *canonical* bare name — the name
-# users see in the UI, the CLI, and when they type
-# ``controller.llm: gpt-5.4`` — drops those suffixes. Disambiguation is
-# provided by the preset's ``provider`` field.
-#
-# This table only contains legacy entries whose canonical name differs
-# from their dict key. Entries not listed here keep their key as their
-# canonical name (e.g. ``qwen3.7-max``, ``grok-4.5``).
+# Provider identity disambiguates flat keys whose public names drop route suffixes.
 _CANONICAL_NAMES: dict[str, str] = {
     # OpenAI Direct API — ``-api`` suffix.
     "gpt-5.6-sol-api": "gpt-5.6-sol",
@@ -66,13 +41,9 @@ _CANONICAL_NAMES: dict[str, str] = {
 }
 
 
-# ── Aliases ────────────────────────────────────────────────────
-# Two roles:
-#   1. Short/friendly names for frequent picks (``gpt5``, ``opus``).
-#   2. Backward-compat for pre-2026 preset names — legacy identifiers
-#      resolve to their ``(provider, canonical_name)`` pair.
+# Aliases cover both convenient short names and backward-compatible identifiers.
 ALIASES: dict[str, tuple[str, str]] = {
-    # ── Short / friendly names ──
+    # Common short names.
     "gpt5": ("codex", "gpt-5.5"),
     "gpt56": ("codex", "gpt-5.6-sol"),
     "sol": ("codex", "gpt-5.6-sol"),
@@ -116,7 +87,7 @@ ALIASES: dict[str, tuple[str, str]] = {
     "mistral-small": ("openrouter", "mistral-small-4"),
     "devstral": ("openrouter", "devstral-2"),
     "ministral": ("openrouter", "ministral-3-14b"),
-    # ── Back-compat: pre-2026-07 preset names ──
+    # Historical route-suffixed names.
     # OpenAI direct (``-direct`` / ``-api`` both → openai bare name).
     "gpt-5.6-sol-api": ("openai", "gpt-5.6-sol"),
     "gpt-5.6-terra-api": ("openai", "gpt-5.6-terra"),

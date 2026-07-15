@@ -1,12 +1,10 @@
 """Creature lifecycle reconciliation for Drives (design §6.1-6.3).
 
-Pure classification (:func:`classify_uncertain`, :func:`plan_removal`,
-:func:`select_auto_assignee`) plus the coroutine helpers the manager and Phase E
-call on creature stop / removal / restoration-ready. The coroutines drive the
-:class:`~kohakuterrarium.terrarium.drive.manager.DriveManager` through its public
-surface (repository reads, authorized transitions with the system actor, and
-reconcile); they never bypass it. Removal never silently reassigns creature-scoped
-work (§6.2) — a creature-scoped Drive is orphaned and blocked instead.
+Pure helpers classify interrupted delivery and deterministic removal outcomes.
+Lifecycle coroutines use the manager's public mutation surface, preserving its
+authorization and transition invariants. Stopping is temporary, removal is
+permanent identity loss, and creature-scoped work is always orphaned and blocked
+rather than silently reassigned.
 """
 
 from dataclasses import dataclass
@@ -21,25 +19,22 @@ from kohakuterrarium.terrarium.drive.models import (
 from kohakuterrarium.terrarium.drive.policy import disposition_on_assignee_removed
 from kohakuterrarium.terrarium.drive.requests import DriveQuery
 
-# Delivery states that still hold pursuit work and must be superseded on removal.
+# Runnable pursuit work cannot survive removal of its assignee.
 _LIVE_DELIVERY_STATES = frozenset({"pending", "claimed", "retry_wait"})
 
 
-# ---------------------------------------------------------------------------
-# Pure classification
-# ---------------------------------------------------------------------------
-
-
 def classify_uncertain(delivery: DriveDelivery) -> bool:
-    """Whether a delivery is an uncertain prior attempt (§6.1): physically
-    admitted to the creature but never acknowledged, so a side effect may have
-    run. Such a delivery becomes a ``drive_recovery`` on reconcile."""
+    """Return whether admitted work may have run without acknowledgement.
+
+    Reconciliation must recover this state rather than assuming the attempt was
+    never delivered.
+    """
     return delivery.state == "admitted" and delivery.acknowledged_at is None
 
 
 @dataclass(frozen=True)
 class RemovalPlan:
-    """Deterministic §6.2 outcome when an assigned creature is removed."""
+    """Deterministic drive and assignment outcome after assignee removal."""
 
     assignment_state: str
     drive_status: DriveStatus | None
@@ -52,7 +47,7 @@ def plan_removal(
     on_assignee_removed: str = "default",
     auto_assign: bool = False,
 ) -> RemovalPlan:
-    """Classify a removal per §6.2 (delegates to the pure policy function)."""
+    """Convert removal policy into the lifecycle actions the manager applies."""
     disposition = disposition_on_assignee_removed(
         record, auto_assign=auto_assign, on_assignee_removed=on_assignee_removed
     )
@@ -64,20 +59,18 @@ def plan_removal(
 
 
 def select_auto_assignee(member_ids: frozenset[str], *, exclude: str) -> str | None:
-    """Deterministic auto-assign target: lowest remaining member id (§6.2)."""
+    """Choose the lowest remaining member ID for deterministic auto-assignment."""
     candidates = sorted(m for m in member_ids if m != exclude)
     return candidates[0] if candidates else None
 
 
-# ---------------------------------------------------------------------------
-# Coroutine helpers (drive the manager's public surface)
-# ---------------------------------------------------------------------------
-
-
 async def on_creature_stopped(manager, creature_id: str) -> None:
-    """Stop is temporary: defer this creature's unadmitted claims back to
-    pending with NO failure count (§6.1). Admitted rows stay admitted and are
-    classified uncertain on the next restoration-ready reconcile."""
+    """Release unadmitted claims when a creature stops temporarily.
+
+    Claimed work returns to pending without a failure count. Admitted work remains
+    intact because it may already have produced side effects and must be recovered
+    after restoration.
+    """
     repo = manager.repository
     now = manager.now()
     for record in await repo.list_drives(DriveQuery(assignee_creature_id=creature_id)):
@@ -94,9 +87,11 @@ async def on_creature_removed(
     on_assignee_removed: str = "default",
     auto_assign: bool = False,
 ) -> tuple[str, ...]:
-    """Removal is permanent identity loss (§6.2): creature-scoped Drives orphan
-    and block, graph-scoped Drives unassign or deterministically auto-assign, and
-    an explicit cancel policy cancels. Returns the affected Drive ids."""
+    """Apply permanent assignee removal and return affected drive IDs.
+
+    Creature-scoped drives orphan and block. Graph-scoped drives follow explicit
+    cancellation, deterministic reassignment, or unassignment policy.
+    """
     repo = manager.repository
     affected: list[str] = []
     for record in await repo.list_drives(DriveQuery(assignee_creature_id=creature_id)):
@@ -113,14 +108,8 @@ async def on_creature_removed(
 
 
 async def on_creature_restoration_ready(manager, creature_id: str) -> None:
-    """The restoration barrier is complete (§6.5): reconcile this creature's
-    Drives — resume the still-current ones and recover uncertain attempts."""
+    """Reconcile a creature after restoration has rebuilt its runtime state."""
     await manager.reconcile(creature_id=creature_id)
-
-
-# ---------------------------------------------------------------------------
-# internal removal application
-# ---------------------------------------------------------------------------
 
 
 async def _apply_removal(

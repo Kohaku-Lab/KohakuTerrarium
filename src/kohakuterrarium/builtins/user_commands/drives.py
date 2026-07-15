@@ -1,14 +1,4 @@
-"""``/drives`` — the generic Drive record command (design §12.4-§12.6).
-
-Independent of GoalPlugin: present on any creature hosted by a Drive-enabled
-Terrarium. It resolves the service + actor + focused creature from the trusted
-:class:`UserCommandContext` (same seam ``/goal`` uses) and delegates every
-operation to :mod:`kohakuterrarium.studio.sessions.drives`, returning ordinary
-:class:`UserCommandResult` payloads so CLI, TUI, and web render the same result.
-
-Mutations require an explicit ``--revision`` (append-only ``progress`` excepted);
-omitting it returns a refetch instruction rather than risking a blind overwrite.
-"""
+"""Inspect and mutate Drive records with revision-checked state transitions."""
 
 import json
 from typing import Any
@@ -48,19 +38,18 @@ _USAGE = (
 
 
 class _Unavailable(Exception):
-    """The Drive runtime / focused creature is not usable in this context."""
+    """Indicate that the command lacks a usable Drive runtime or creature."""
 
 
 @register_user_command("drives")
 class DrivesCommand(BaseUserCommand):
-    """Generic ``/drives`` record command over the Drive service (design §12)."""
+    """Inspect and mutate Drive records through the focused creature's service."""
 
     name = "drives"
     aliases: list[str] = []
     description = "Inspect + manage Drive records (list/show/create/pause/…)"
     layer = CommandLayer.AGENT
-    # The CLI/TUI/API dispatch fills UserCommandContext.extra with the engine +
-    # focused creature + trusted principal when this is set (see /goal).
+    # Engine context is required to identify the focused creature and principal.
     needs_engine = True
 
     async def _execute(
@@ -91,10 +80,8 @@ class DrivesCommand(BaseUserCommand):
                 return await self._create(rest, ctx)
             case "progress":
                 return await self._progress(rest, ctx)
-            case _:  # pause / resume / wake / cancel
+            case _:
                 return await self._transition(sub, rest, ctx)
-
-    # -- reads ---------------------------------------------------------------
 
     async def _list(self, rest: str, ctx: "_Resolved") -> UserCommandResult:
         flags, _ = _parse_flags(rest)
@@ -133,8 +120,6 @@ class DrivesCommand(BaseUserCommand):
         if record is None:
             return UserCommandResult(error=f"no such drive: {drive_id}")
         return _panel("Drive", record)
-
-    # -- writes --------------------------------------------------------------
 
     async def _create(self, rest: str, ctx: "_Resolved") -> UserCommandResult:
         flags, _ = _parse_flags(rest)
@@ -208,11 +193,6 @@ class DrivesCommand(BaseUserCommand):
         )
 
 
-# ---------------------------------------------------------------------------
-# trusted-context resolution + parsing helpers
-# ---------------------------------------------------------------------------
-
-
 class _Resolved:
     __slots__ = ("service", "creature_id", "principal", "is_operator")
 
@@ -227,11 +207,8 @@ class _Resolved:
 
 def _resolve(context: UserCommandContext) -> _Resolved:
     extra = context.extra or {}
-    # This command is a BUILT-IN loaded eagerly by the command package, which
-    # sits inside the ``terrarium.service`` import chain; it must never import
-    # that module (even lazily — the dep-graph guard traces it and it closes a
-    # cycle). So it consumes the trusted ``service`` the dispatch supplies rather
-    # than wrapping a bare engine itself.
+    # The dispatch-provided service avoids a circular dependency on
+    # ``terrarium.service`` from this eagerly loaded command module.
     service = extra.get("service") or extra.get("drive_service")
     if service is None:
         raise _Unavailable(
@@ -242,8 +219,7 @@ def _resolve(context: UserCommandContext) -> _Resolved:
     if not creature_id:
         raise _Unavailable("/drives has no focused creature to act on")
     principal = _principal(extra.get("principal"))
-    # Default UNPRIVILEGED (R1-21): a trusted local-console / authenticated-admin
-    # adapter must pass is_operator explicitly; missing context is never elevated.
+    # Privilege must be asserted by a trusted adapter; absent context is unprivileged.
     is_operator = bool(extra.get("is_operator", False))
     return _Resolved(service, creature_id, principal, is_operator)
 

@@ -1,12 +1,11 @@
 """Recovery-admission readiness-token machinery (design §6.1; round-3c gap).
 
-Extracted from :mod:`drive.manager_readiness` so both the external preflight
-(:meth:`ManagerReadinessMixin._recovery_admitted`) and the in-txn re-check
-(:meth:`DriveManagerReconcileMixin._recovery_admitted_in_txn`) share ONE
-fingerprint definition. Pure module: it computes a versioned token that binds a
-recovery-admission verdict to the dependency/readiness inputs it was decided
-against, so a drift between preflight and commit defers admission rather than
-superseding an uncertain attempt on a stale verdict. No storage, no clock.
+Recovery admission tokens shared by external preflight and transactional checks.
+
+A token binds a readiness verdict to the drive, assignment, delivery, and
+dependency state used to compute it. Any drift before commit invalidates the
+verdict, deferring recovery rather than superseding an uncertain attempt from
+stale state. This module is pure and owns neither storage nor time.
 """
 
 from dataclasses import dataclass
@@ -22,13 +21,11 @@ from kohakuterrarium.terrarium.drive.models import (
 
 @dataclass(frozen=True)
 class RecoveryAdmission:
-    """Externally-computed §6.1 recovery-admission token (round-3c concurrent gap).
+    """Short-lived recovery verdict computed outside the repository transaction.
 
-    ``admits`` is the readiness/backpressure verdict computed BEFORE the
-    repository transaction, so the registration readiness callback never runs
-    under the SQLite lock. ``version`` fingerprints the dependency/readiness
-    inputs it saw; the in-txn admission re-derives it from txn-current reads and
-    defers on any drift rather than superseding on a stale verdict.
+    ``version`` fingerprints the inputs behind ``admits``. Transactional
+    admission recomputes the fingerprint and defers on drift, allowing readiness
+    callbacks to remain outside the SQLite lock without trusting stale state.
     """
 
     admits: bool
@@ -38,7 +35,7 @@ class RecoveryAdmission:
     def valid_at(
         self, now: datetime, *, tolerance: timedelta = timedelta(seconds=1)
     ) -> bool:
-        """Whether the preflight verdict remains inside its short validity lease."""
+        """Return whether the preflight verdict remains within its validity lease."""
         drift = now - self.evaluated_at
         return timedelta(0) <= drift <= tolerance
 
@@ -51,9 +48,11 @@ def recovery_admission_version(
     superseding: frozenset[str],
     evaluated_at: datetime,
 ) -> tuple:
-    """Fingerprint every input a §6.1 recovery admission depends on: the Drive's
-    status/revision/epoch, the live assignment identity, the settled-turn count
-    (excluding the superseded uncertain rows), and the dependency states."""
+    """Fingerprint state that must remain stable between preflight and commit.
+
+    Acknowledged turns exclude the uncertain rows being superseded because those
+    attempts never consumed a completed turn grant.
+    """
     turns_used = sum(
         1
         for d in deliveries

@@ -1,9 +1,4 @@
-"""Catalog registry — bundled ``registry.json`` + future remote sources.
-
-Replaces ``api.routes.registry.list_remote``. Reader-only — install
-and uninstall live in ``catalog.packages`` because they share the
-operation layer.
-"""
+"""Expose the read-only bundled registry of known remote package sources."""
 
 from fastapi import APIRouter
 
@@ -14,5 +9,5 @@ router = APIRouter()
 
 @router.get("")
 async def list_remote():
-    """List known remote repos from the bundled registry.json."""
+    """List remote repositories declared in the bundled registry."""
     return load_remote_registry()

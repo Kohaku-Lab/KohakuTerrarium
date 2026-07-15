@@ -1,4 +1,4 @@
-"""``/channels`` — list the channels the focused creature participates in."""
+"""List the channels available to the focused creature."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (

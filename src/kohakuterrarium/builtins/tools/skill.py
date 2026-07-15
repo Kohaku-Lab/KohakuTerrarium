@@ -1,4 +1,4 @@
-"""Skill tool - invoke procedural skills through the normal tool surface."""
+"""Expose procedural skills through the standard tool surface."""
 
 from typing import Any
 

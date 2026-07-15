@@ -1,15 +1,8 @@
 """
-Input and output module factories.
+Create configured input and output modules with CLI or stdout fallbacks.
 
-Creates input and output modules from agent config, with fallback
-to CLI input and stdout output for unknown or failed types.
-
-Bare-name input/output types (neither a builtin nor ``custom``/``package``)
-are looked up in installed package manifests via
-:func:`kohakuterrarium.packages.resolve_package_io`. This lets packages ship
-IO modules under short names (e.g. ``type: discord_input``) without the
-user needing to spell out ``module: ... ; class: ...`` in every creature
-config.
+Bare type names resolve through installed package manifests so packaged I/O can
+be referenced without repeating module and class paths.
 """
 
 from typing import Any
@@ -39,12 +32,7 @@ def create_input(
     input_override: InputModule | None,
     loader: ModuleLoader | None,
 ) -> InputModule:
-    """Create an input module from agent config.
-
-    If input_override is provided, returns it directly. Otherwise
-    resolves the input type from config (builtin, custom, or package)
-    and falls back to CLIInput on failure.
-    """
+    """Return an explicit input or resolve one with a CLI fallback."""
     if input_override:
         return input_override
 
@@ -53,11 +41,10 @@ def create_input(
         "prompt": config.input.prompt,
         **config.input.options,
     }
-    # Ensure TUI input uses the agent's session key
+    # TUI input and output must attach to the same agent session.
     if input_type == "tui" and "session_key" not in options:
         options["session_key"] = config.session_key or config.name
 
-    # Builtin input type
     if is_builtin_input(input_type):
         try:
             return create_builtin_input(input_type, options)
@@ -69,7 +56,6 @@ def create_input(
             )
             return CLIInput(prompt=config.input.prompt)
 
-    # Custom/package input
     if input_type in ("custom", "package"):
         if not config.input.module or not config.input.class_name:
             logger.warning("Custom input missing module or class, using CLI")
@@ -88,9 +74,7 @@ def create_input(
             logger.error("Failed to load custom input", error=str(e))
             return CLIInput(prompt=config.input.prompt)
 
-    # Bare name (e.g. "discord_input") — try to resolve via package manifest
-    # before giving up. This wires the kohaku.yaml `io:` entries through
-    # bootstrap so users can reference packaged inputs by short name.
+    # Bare names resolve through package manifest I/O entries.
     package_match = resolve_package_io(input_type)
     if package_match is not None:
         module_path, class_name = package_match
@@ -115,7 +99,6 @@ def create_input(
             )
             return CLIInput(prompt=config.input.prompt)
 
-    # Unknown type
     logger.warning("Unknown input type, using CLI", input_type=input_type)
     return CLIInput(prompt=config.input.prompt)
 
@@ -127,11 +110,7 @@ def _create_output_module(
     options: dict[str, Any],
     loader: ModuleLoader | None,
 ) -> OutputModule:
-    """Create a single output module from its config fields.
-
-    Resolves builtin, custom, or package output types and falls
-    back to StdoutOutput on failure.
-    """
+    """Resolve one output module with a stdout fallback."""
     if is_builtin_output(output_type):
         try:
             return create_builtin_output(output_type, options)
@@ -161,9 +140,7 @@ def _create_output_module(
             logger.error("Failed to load custom output", error=str(e))
             return StdoutOutput()
 
-    # Bare name (e.g. "discord_output") — try to resolve via package manifest
-    # before giving up. This wires the kohaku.yaml `io:` entries through
-    # bootstrap so users can reference packaged outputs by short name.
+    # Bare names resolve through package manifest I/O entries.
     package_match = resolve_package_io(output_type)
     if package_match is not None:
         pkg_module, pkg_class = package_match
@@ -188,7 +165,6 @@ def _create_output_module(
             )
             return StdoutOutput()
 
-    # Unknown type
     logger.warning("Unknown output type, using stdout", output_type=output_type)
     return StdoutOutput()
 
@@ -198,17 +174,12 @@ def create_output(
     output_override: OutputModule | None,
     loader: ModuleLoader | None,
 ) -> tuple[OutputModule, dict[str, OutputModule]]:
-    """Create default and named output modules from agent config.
-
-    Returns a tuple of (default_output, named_outputs_dict).
-    If output_override is provided, it becomes the default output.
-    """
-    # Default output
+    """Create the default output and each named routing target."""
     if output_override:
         default_output = output_override
     else:
         out_options = config.output.options.copy()
-        # Ensure TUI output uses the agent's session key
+        # TUI input and output must attach to the same agent session.
         if config.output.type == "tui" and "session_key" not in out_options:
             out_options["session_key"] = config.session_key or config.name
         default_output = _create_output_module(
@@ -219,7 +190,6 @@ def create_output(
             loader=loader,
         )
 
-    # Named outputs
     named_outputs: dict[str, OutputModule] = {}
     for name, output_config in config.output.named_outputs.items():
         output_module = _create_output_module(

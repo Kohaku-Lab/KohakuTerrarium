@@ -1,15 +1,10 @@
 """Shared-token authentication for the Laboratory layer.
 
-A single cluster-wide token authenticates clients to the host. The host
-holds the expected token; each client presents the same token in its
-Hello envelope. Tokens are compared in constant time
-(:func:`hmac.compare_digest`) so wrong-token rejection does not leak
-timing information about prefix matches.
+A single cluster-wide token authenticates clients to the host. Tokens are
+compared in constant time so rejection does not reveal matching prefixes.
 
-Empty server token (``""``) disables auth entirely — clients are accepted
-without any check. Only safe for in-process tests and local development.
-
-This is the only auth mechanism shipped in 1.5.0.
+An empty server token (``""``) disables authentication and accepts every
+client, which is only safe for in-process tests and local development.
 """
 
 import hmac
@@ -35,7 +30,7 @@ class TokenAuth:
 
     @property
     def is_disabled(self) -> bool:
-        """``True`` if auth is disabled (empty expected token)."""
+        """Return whether an empty expected token disables authentication."""
         return self._expected == ""
 
     def validate(self, provided_token: str) -> bool:
@@ -54,7 +49,7 @@ class TokenAuth:
         )
 
     def validate_hello(self, hello: HelloPayload) -> bool:
-        """Convenience wrapper: validate the token field of a HelloPayload."""
+        """Validate the token carried by a hello payload."""
         return self.validate(hello.token)
 
 

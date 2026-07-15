@@ -8,13 +8,12 @@ Every error the framework raises on a programmatic surface derives from
     except kohakuterrarium.errors.KTError as e:
         ...
 
-Many subclasses ALSO derive from the builtin exception the same failure
-historically raised (``FileNotFoundError`` / ``ValueError`` /
-``TimeoutError``), so pre-existing ``except`` sites keep working while
-callers migrate to the typed hierarchy.
+Many subclasses also derive from their historical built-in exception
+(``FileNotFoundError``, ``ValueError``, or ``TimeoutError``), preserving
+existing ``except`` handlers during migration to the typed hierarchy.
 
-This module is the bottom of the dependency graph: it must not import
-anything from ``kohakuterrarium`` (everything imports *it*).
+This module is the dependency root and must not import from
+``kohakuterrarium``.
 """
 
 
@@ -23,27 +22,24 @@ class KTError(Exception):
 
 
 # ---------------------------------------------------------------------------
-# Generic request-shaped failures (used by the studio tier; the api/
-# adapter maps them onto HTTP status codes — see ``api/app.py``)
+# Request failures mapped to HTTP status codes by the API adapter.
 # ---------------------------------------------------------------------------
 
 
 class NotFoundError(KTError, KeyError):
-    """A named resource (session / agent / artifact / target) doesn't exist."""
+    """A named session, agent, artifact, or target does not exist."""
 
     def __str__(self) -> str:
-        # KeyError.__str__ repr()s its argument (quotes the message);
-        # keep the raw message so error details stay byte-identical
-        # with the pre-typed-error surface.
+        # Bypass KeyError's quoted representation to preserve raw error details.
         return Exception.__str__(self)
 
 
 class InvalidRequestError(KTError, ValueError):
-    """A request-shaped operation got arguments it cannot honour."""
+    """A request operation received unsupported arguments."""
 
 
 class ConflictError(KTError):
-    """The operation conflicts with existing state (e.g. fork target exists)."""
+    """The operation conflicts with existing state."""
 
 
 # ---------------------------------------------------------------------------
@@ -52,11 +48,11 @@ class ConflictError(KTError):
 
 
 class ConfigError(KTError, ValueError):
-    """Invalid agent / terrarium configuration content."""
+    """Agent or terrarium configuration is invalid."""
 
 
 class ConfigNotFoundError(ConfigError, FileNotFoundError):
-    """Agent / terrarium config path (or ``@pkg`` reference) not found."""
+    """An agent or terrarium config path or package reference was not found."""
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +65,7 @@ class PackageError(KTError):
 
 
 class PackageRefError(PackageError, ValueError):
-    """Malformed ``@`` reference (bare ``@``, traversal escape, ...)."""
+    """A package reference is malformed or escapes its package root."""
 
 
 class PackageNotInstalledError(PackageError, FileNotFoundError):
@@ -90,7 +86,7 @@ class LLMError(KTError):
 
 
 class LLMNotConfiguredError(LLMError, ValueError):
-    """No usable LLM could be resolved (missing key, unknown profile, ...)."""
+    """No usable LLM could be resolved from the available configuration."""
 
 
 # ---------------------------------------------------------------------------
@@ -99,26 +95,23 @@ class LLMNotConfiguredError(LLMError, ValueError):
 
 
 class SessionError(KTError):
-    """Session persistence / resume failure."""
+    """Session persistence or resume failure."""
 
 
 class SessionNotResumableError(SessionError, ValueError):
-    """The session file exists but cannot be resumed (bad / missing meta)."""
+    """A session cannot be resumed because its metadata is invalid or missing."""
 
 
 class SessionNotFoundError(SessionError, NotFoundError, FileNotFoundError):
-    """The named / referenced session does not exist on disk or in-engine."""
+    """A named session does not exist on disk or in the engine."""
 
 
 class SessionLockedError(SessionError, RuntimeError):
-    """Another process already holds the write lock on this session file.
+    """A writer already holds the session file lock.
 
-    Raised when a second writer tries to open a ``.kohakutr`` that is
-    already attached to a running engine (in this or another process).
-    Concurrent writers would overwrite each other's conversation
-    snapshots + collide on event counters, so the second open is refused
-    rather than silently corrupting the session. Read-only opens
-    (viewers, listing, history) are unaffected — they never take the lock.
+    A second writer is rejected because concurrent writers can overwrite
+    conversation snapshots and collide on event counters. Read-only access
+    does not acquire this lock.
     """
 
     def __init__(self, message: str, holder_pid: int | None = None) -> None:
@@ -132,7 +125,7 @@ class SessionLockedError(SessionError, RuntimeError):
 
 
 class TurnError(KTError):
-    """A turn failed (provider error, unrecoverable tool crash, ...)."""
+    """A turn failed because of an unrecoverable provider or tool error."""
 
 
 class TurnTimeoutError(TurnError, TimeoutError):

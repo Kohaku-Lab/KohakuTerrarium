@@ -1,10 +1,9 @@
 """In-memory Drive repository (design §7.1 "no session" mode).
 
-:class:`MemoryDriveRepository` is the ephemeral backend used by engines with no
-attached session/store. It has the SAME transactional semantics as the SQLite
-backend — buffered writes applied atomically at commit, discarded on rollback —
-so both pass the identical behaviour suite. State survives creature stop but not
-process shutdown; :attr:`durability` reports ``"ephemeral"``.
+This backend is used when a graph has no persistent store. It preserves the same
+transactional contract as SQLite: writes are buffered, commit is all-or-nothing,
+and rollback discards staged mutations. State survives creature stop but not
+process shutdown.
 """
 
 import copy
@@ -30,7 +29,7 @@ from kohakuterrarium.terrarium.drive.requests import DriveTransitionProposal
 
 
 class _MemoryDriveTransaction:
-    """Buffers mutations against the repository's dicts; applies on commit."""
+    """Stage mutations for an atomic in-memory commit or rollback."""
 
     def __init__(self, repo: "MemoryDriveRepository") -> None:
         self._repo = repo
@@ -40,8 +39,8 @@ class _MemoryDriveTransaction:
         self._pending = []
 
     async def commit(self) -> None:
-        # _apply mutates the canonical dicts/lists incrementally, so a mid-apply
-        # failure must restore the pre-commit snapshot (commit is all-or-nothing).
+        # Applying a mutation updates several canonical containers incrementally;
+        # a snapshot restores all of them if any step fails.
         snapshot = self._repo._snapshot_state()
         try:
             for mutation in self._pending:
@@ -57,13 +56,8 @@ class _MemoryDriveTransaction:
     async def apply(self, mutation: Mutation) -> None:
         self._pending.append(mutation)
 
-    # -- reads (committed state; ops read before they stage) -----------------
-    #
-    # Records with mutable dicts (spec/metadata/presentation/policy_options/
-    # terminal_evidence, progress/audit evidence, outbox/dead-letter payloads)
-    # are deep-copied out so a caller mutating a fetched record cannot reach
-    # canonical state without a revision/audit (R1-07). The SQLite backend
-    # deserializes a fresh copy per read, so both backends isolate identically.
+    # Copy mutable payloads on read so callers cannot bypass revisioned mutations;
+    # SQLite receives equivalent isolation through deserialization.
 
     async def get_drive(self, drive_id: str) -> DriveRecord | None:
         return copy.deepcopy(self._repo._drives.get(drive_id))
@@ -117,9 +111,9 @@ class _MemoryDriveTransaction:
 
 
 class MemoryDriveRepository(BaseDriveRepository):
-    """Ephemeral Drive repository backed by process-local dicts."""
+    """Store Drives transactionally in process-local containers."""
 
-    # Canonical containers snapshotted for all-or-nothing commit (see commit()).
+    # Every canonical collection must be restored together on commit failure.
     _STATE_COLLECTIONS = (
         "_drives",
         "_assignments",
@@ -157,9 +151,8 @@ class MemoryDriveRepository(BaseDriveRepository):
         return "ephemeral"
 
     def _snapshot_state(self) -> dict[str, object]:
-        # Shallow copy each container: _apply never mutates a stored record in
-        # place (it replaces entries / appends), so restoring these references
-        # recovers the pre-commit state without regressing R1-07 isolation.
+        # Rows are replaced rather than mutated in place, so shallow container
+        # copies are sufficient for rollback.
         return {
             name: copy.copy(getattr(self, name)) for name in self._STATE_COLLECTIONS
         }
@@ -169,10 +162,8 @@ class MemoryDriveRepository(BaseDriveRepository):
             setattr(self, name, value)
 
     def _apply(self, mutation: Mutation) -> None:
-        # Deep-copy the mutable-dict-bearing rows on ingress so a caller that
-        # keeps a reference to a record it staged cannot mutate committed state
-        # after the fact (R1-07); the SQLite backend serializes on write for the
-        # same isolation.
+        # Copy mutable payloads on ingress so retained caller references cannot
+        # mutate committed state.
         for record in mutation.drives:
             self._drives[record.drive_id] = copy.deepcopy(record)
         for assignment in mutation.assignments:
@@ -201,9 +192,8 @@ class MemoryDriveRepository(BaseDriveRepository):
             self._delete_drive_cascade(drive_id)
 
     def _delete_drive_cascade(self, drive_id: str) -> None:
-        # Remove a Drive and every per-drive row so a split's retained repo keeps
-        # only its child subset (R1-10); idempotency is (actor,key)-keyed, not
-        # per-drive, so it is intentionally untouched (replicated to every child).
+        # Cascading preserves per-Drive ownership after splits; actor/key
+        # idempotency is graph-scoped and therefore retained separately.
         self._drives.pop(drive_id, None)
         self._assignments.pop(drive_id, None)
         for did in [d for d, v in self._deliveries.items() if v.drive_id == drive_id]:

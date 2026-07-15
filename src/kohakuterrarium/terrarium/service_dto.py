@@ -1,8 +1,8 @@
 """Serializable DTOs shared by the terrarium service implementations.
 
-Split out of ``terrarium/service.py`` (file-size cap): the identity/topology
-snapshot :class:`CreatureInfo` and the small serialization helpers Local /
-Remote / MultiNode services all use at their boundary. The live
+Defines the identity/topology :class:`CreatureInfo` snapshot and the small
+serialization helpers Local, Remote, and MultiNode services share at their
+boundary. The live
 :class:`~kohakuterrarium.terrarium.creature_host.Creature` is not serializable
 (it holds the Agent, channels, …), so the service Protocol returns these DTOs.
 """
@@ -43,7 +43,7 @@ class CreatureInfo:
     parent_creature_id: str | None
     listen_channels: tuple[str, ...]
     send_channels: tuple[str, ...]
-    # Resolved LLM model + canonical id (B3/B4: empty == deferred).
+    # Empty values preserve deferred model resolution.
     model: str = ""
     llm_name: str = ""
 
@@ -78,8 +78,7 @@ def creature_to_info(creature: CreatureLike) -> CreatureInfo:
         or (getattr(agent, "config", None) and getattr(agent.config, "model", ""))
         or ""
     )
-    # Canonical "provider/name" — falls back to raw model so the modal
-    # never shows "No model" when one IS bound (B3/B4).
+    # Fall back to the raw model when no canonical provider/name is available.
     llm_name = ""
     get_ident = getattr(agent, "llm_identifier", None) if agent is not None else None
     if callable(get_ident):

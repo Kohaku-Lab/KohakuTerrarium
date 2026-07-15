@@ -1,13 +1,10 @@
-"""Readiness, enqueue, backpressure, and scan helpers for the DriveManager.
+"""Readiness, enqueue, backpressure, and scan helpers for ``DriveManager``.
 
-:class:`ManagerReadinessMixin` is split out of
-:mod:`drive.manager` to respect the file-size cap. It owns the decisions about
-*when* a Drive earns a delivery: readiness/dependency evaluation, the
-enqueue-once-per-readiness-event gate, per-creature/per-graph backpressure
-(design §5.6), and the periodic scan that wakes WAITING Drives and activates
-Drives whose ``not_before`` has passed. It relies on the concrete manager for
-``_repo`` / ``_config`` / ``_snapshot`` / ``_clock`` / ``_emit`` / ``_dispatcher``
-/ ``_readiness_gen``. No LLM, no spec interpretation.
+Readiness admission decides when a drive earns a delivery. It evaluates
+registration and dependency state, enforces one delivery per readiness event,
+applies creature and graph backpressure, and scans waiting or time-gated drives.
+The concrete manager supplies repository, configuration, registration snapshot,
+clock, event emission, dispatch, and readiness-generation state.
 """
 
 import inspect
@@ -49,15 +46,11 @@ _PENDING_DELIVERY_STATES = frozenset({"pending", "claimed", "retry_wait"})
 
 
 class ReadinessOutcome(Enum):
-    """Result of a post-settlement re-arm attempt (design §4.4, R1-05).
+    """Outcome of attempting to re-arm a settled readiness generation.
 
-    Reconcile branches on this to tell a genuinely-not-a-re-arm registration
-    apart from one whose re-arm is only temporarily deferred:
-    ``NOT_APPLICABLE`` — the registration does not re-arm, so an ordinary resume
-    is correct; ``DEFERRED`` — it WOULD re-arm but a cooldown / dependency /
-    backpressure / in-flight gate holds it off, so no stale-generation resume is
-    enqueued and the next readiness scan retries; ``REARMED`` — the generation
-    advanced and the continuation delivery was enqueued.
+    ``NOT_APPLICABLE`` permits ordinary resume because no continuation applies.
+    ``DEFERRED`` preserves the settled generation until a temporary gate clears.
+    ``REARMED`` means the generation advanced and a continuation was enqueued.
     """
 
     NOT_APPLICABLE = "not_applicable"
@@ -82,8 +75,7 @@ def _call_readiness(
     now: datetime,
     turns_used: int,
 ) -> Any:
-    """Call a registration's readiness role, forwarding ``turns_used`` only when
-    the implementation accepts it (the generic role keeps the 3-argument shape)."""
+    """Call readiness while preserving compatibility with three-argument roles."""
     fn = registration.readiness
     if _accepts_turns_used(fn):
         return fn(record, deps, now, turns_used=turns_used)
@@ -91,17 +83,19 @@ def _call_readiness(
 
 
 class ManagerReadinessMixin:
-    """Readiness / enqueue / backpressure / scan surface (see module docstring)."""
+    """Apply readiness, delivery uniqueness, and backpressure gates."""
 
     def _current_readiness_generation(self, drive_id: str) -> int:
-        # Readiness generation only advances for registrations that re-arm a
-        # waiting Drive; the generic registration never does, so this stays 0.
+        # Generation zero represents registrations that never re-arm; only a
+        # continuation decision advances the in-memory counter.
         return self._readiness_gen.get(drive_id, 0)
 
     async def _current_generation_settled(self, record: DriveRecord) -> bool:
-        """True when the Drive's CURRENT readiness generation has an acknowledged
-        delivery for its current lifecycle epoch — the generation ran and settled,
-        so the next admission is a re-arm rather than a fresh resume (R1-05)."""
+        """Return whether the current epoch and generation already settled.
+
+        A settled generation must be re-armed before another delivery; it cannot
+        be treated as a fresh resume.
+        """
         gen = self._current_readiness_generation(record.drive_id)
         for delivery in await self._repo.list_deliveries(record.drive_id):
             if (
@@ -129,18 +123,17 @@ class ManagerReadinessMixin:
             return
         validate = getattr(entry.registration, "validate_spec", None)
         if callable(validate):
-            validate(spec)  # DriveValidationError propagates (fail closed)
+            validate(spec)  # Validation failures deny creation rather than degrading.
 
     def _check_payload_size(
         self, field: str, value: dict[str, Any] | None, max_bytes: int
     ) -> None:
-        """Central per-field payload guard (R1-09, design §13): reject a
-        non-dict, non-JSON-safe, or over-cap payload for one canonical field.
+        """Enforce mapping shape, JSON safety, and the byte cap for one field.
 
-        JSON safety is validated by encoding WITHOUT a ``default=`` coercion, so
-        a non-serializable value raises rather than being silently stringified;
-        the byte size is the UTF-8 length of that encoding. The manager cap is
-        authoritative and runs independently of any registration's own cap."""
+        Encoding deliberately omits ``default=`` so unsupported values fail
+        instead of being stringified. Limits apply to UTF-8 bytes and remain
+        authoritative even when a registration imposes its own cap.
+        """
         if value is None:
             return
         if not isinstance(value, dict):
@@ -164,10 +157,11 @@ class ManagerReadinessMixin:
         metadata: dict[str, Any] | None = None,
         policy_options: dict[str, Any] | None = None,
     ) -> None:
-        """Validate the canonical record payload fields against their configured
-        caps (R1-09). ``policy_options`` has no dedicated cap, so it is bounded
-        by the metadata cap and JSON-safety-checked so it cannot smuggle
-        unbounded canonical data."""
+        """Validate canonical payload fields against configured storage limits.
+
+        ``policy_options`` shares the metadata cap because it has no independent
+        limit and must not become an unbounded canonical payload.
+        """
         cfg = self._config
         self._check_payload_size("spec", spec, cfg.spec_max_bytes)
         self._check_payload_size(
@@ -185,8 +179,8 @@ class ManagerReadinessMixin:
         out: dict[str, DriveStatus] = {}
         for dep_id in record.dependency_ids:
             dep = await self._repo.get(dep_id)
-            # A missing dependency reads as non-terminal so the Drive stays
-            # not-ready rather than delivering against a vanished dependency.
+            # Missing dependencies remain logically active so vanished state
+            # cannot accidentally satisfy a terminal dependency condition.
             out[dep_id] = dep.status if dep is not None else DriveStatus.ACTIVE
         return out
 
@@ -247,10 +241,8 @@ class ManagerReadinessMixin:
             return None
         if await self._has_live_delivery(record.drive_id):
             return None
-        # Registration readiness gate (design §5.2): consult the enabled
-        # registration before admitting. A manual wake is an explicit authorized
-        # override and bypasses the gate; every other admission (create / scan /
-        # activation) is gated and fails closed on a readiness error.
+        # Manual wake is the sole authorized readiness override. Creation,
+        # activation, scanning, and recovery all fail closed through this gate.
         if not manual and not await self._readiness_admits(record, deps):
             return None
         if (
@@ -274,19 +266,17 @@ class ManagerReadinessMixin:
         evaluated_at: datetime | None = None,
         deliveries: list[DriveDelivery] | None = None,
     ) -> bool:
-        """Whether the enabled registration's readiness permits this admission.
+        """Return whether registration readiness permits admission.
 
-        Returns True when no available registration serves the kind or it
-        exposes no readiness role (nothing to gate on). Otherwise the verdict's
-        ``ready`` admits any admission and ``initial`` admits only the one
-        initial event of an activation epoch (no prior delivery for the current
-        lifecycle epoch). A readiness that raises fails closed: the Drive is
-        blocked and this admission is denied (design §5.2, §8.8).
+        Missing or unavailable readiness roles impose no additional gate.
+        ``ready`` permits admission, while ``initial`` permits only the first
+        completed opportunity in a lifecycle epoch. Readiness errors fail closed
+        by blocking the drive.
 
-        ``superseding`` names deliveries the caller will supersede in the SAME
-        atomic mutation (§6.1 recovery): they are excluded from the delivery
-        history so an uncertain attempt neither counts as a settled turn nor
-        consumes the one-per-epoch initial grant it never completed (R1-05)."""
+        ``superseding`` deliveries are excluded because uncertain attempts being
+        atomically replaced neither settled a turn nor consumed the epoch's
+        initial grant.
+        """
         entry = self._snapshot.for_kind(record.kind) if self._snapshot else None
         if entry is None or not entry.available:
             return True
@@ -308,7 +298,7 @@ class ManagerReadinessMixin:
                 evaluated_at if evaluated_at is not None else self._clock(),
                 turns_used,
             )
-        except Exception as exc:  # readiness failure fails closed (§8.8)
+        except Exception as exc:  # Registration failures must not admit work.
             await self._block_on_readiness_error(record, str(exc))
             return False
         if verdict is None:
@@ -316,11 +306,9 @@ class ManagerReadinessMixin:
         if getattr(verdict, "ready", False):
             return True
         if getattr(verdict, "initial", False):
-            # The one-per-epoch initial grant is consumed only by a delivery that
-            # actually reached the creature. An uncertain attempt that reconcile
-            # SUPERSEDED never completed, so it must NOT consume the grant: a
-            # manual-Goal recovery re-admits the initial rather than being denied
-            # because a superseded row exists in the epoch (R1-05, §6.1).
+            # Only a non-superseded delivery consumes the epoch's initial grant.
+            # This allows recovery of an uncertain first attempt without treating
+            # the abandoned row as completed delivery.
             is_initial = not any(
                 d.lifecycle_epoch == record.lifecycle_epoch and d.state != "superseded"
                 for d in considered
@@ -334,13 +322,12 @@ class ManagerReadinessMixin:
         assignment: DriveAssignment | None,
         superseding: frozenset[str],
     ) -> RecoveryAdmission:
-        """External §6.1 recovery preflight → a versioned token
-        (:class:`RecoveryAdmission`). Computes the readiness verdict OUTSIDE the
-        repository transaction — the registration readiness callback must never
-        run under the SQLite lock — and pairs it with a fingerprint of the inputs
-        it saw. ``_recovery_admitted_in_txn`` re-reads and re-validates every gate
-        against txn-current state before anything supersedes the uncertain
-        attempt (round-3c concurrent gap)."""
+        """Compute a versioned recovery verdict outside the repository lock.
+
+        Transactional admission revalidates every gate and the fingerprint before
+        superseding uncertain work, so readiness callbacks never run while the
+        SQLite transaction is locked.
+        """
         evaluated_at = self._clock()
         deps = await self._dependency_statuses(record)
         deliveries = list(await self._repo.list_deliveries(record.drive_id))
@@ -363,12 +350,12 @@ class ManagerReadinessMixin:
         deliveries: list[DriveDelivery],
         evaluated_at: datetime,
     ) -> bool:
-        """Whether a §6.1 recovery delivery may be admitted, treating the
-        uncertain deliveries named in ``superseding`` as already superseded (they
-        are, in the same atomic mutation). Mirrors ``_maybe_enqueue``'s gates —
-        deliverable status, a live assignee, wake conditions, no OTHER live
-        delivery, readiness (fail-closed), and per-graph pending backpressure —
-        so recovery does NOT override readiness (R1-05)."""
+        """Evaluate recovery with uncertain deliveries treated as superseded.
+
+        Recovery uses the same status, assignment, wake, uniqueness, readiness,
+        and graph-capacity gates as ordinary admission; it is not a readiness
+        override.
+        """
         if not is_deliverable_status(record.status):
             return False
         if (
@@ -424,9 +411,7 @@ class ManagerReadinessMixin:
         return delivery
 
     async def _scan_ready(self) -> None:
-        """Periodic readiness scan: wake WAITING Drives whose time/dependency
-        conditions are met, and activate ACTIVE Drives that became ready but were
-        never delivered in their current epoch (e.g. a future ``not_before``)."""
+        """Wake eligible waiting drives and admit undelivered active drives."""
         now = self._clock()
         for record in await self._repo.list_drives(
             DriveQuery(statuses=frozenset({DriveStatus.WAITING}))
@@ -461,8 +446,8 @@ class ManagerReadinessMixin:
             if assignment is None or assignment.assignee_creature_id is None:
                 continue
             if await self._has_epoch_delivery(record.drive_id, record.lifecycle_epoch):
-                # Already delivered this epoch: consider a post-settlement re-arm
-                # once the current generation has acknowledged (design §4.4).
+                # Epoch delivery suppresses another initial admission; only a
+                # settled generation may produce a continuation.
                 await self._reevaluate_readiness(record)
                 continue
             deps = await self._dependency_statuses(record)
@@ -472,21 +457,16 @@ class ManagerReadinessMixin:
     async def _reevaluate_readiness(
         self, record: DriveRecord, *, reason: str = "ready"
     ) -> ReadinessOutcome:
-        """Post-settlement continuation (design §4.4, §5.3, §11.4).
+        """Attempt to continue a drive after its current generation settles.
 
-        Once the current generation settles, ask the enabled registration whether
-        to re-arm. If it does — and the per-Drive cooldown has elapsed and
-        fairness/backpressure allow — advance the readiness generation (a fresh
-        §5.3 logical key) and enqueue the next delivery. A readiness calculator
-        that raises fails closed: the Drive is blocked, no delivery is admitted,
-        and a blocked Drive is never re-evaluated, so there is no crash loop.
+        A registration may re-arm after cooldown, wake conditions, and graph
+        capacity permit it. Success advances the readiness generation before
+        enqueueing, giving the continuation a fresh logical key. Registration
+        errors block the drive and prevent repeated failing scans.
 
-        Returns a three-way :class:`ReadinessOutcome` so reconcile can tell a
-        registration that does not re-arm (``NOT_APPLICABLE`` -> fall back to an
-        ordinary resume) apart from one whose re-arm is only temporarily deferred
-        (``DEFERRED`` -> leave it for the next scan, never a stale resume);
-        ``REARMED`` means the generation advanced and a continuation was enqueued
-        (R1-05)."""
+        The three outcomes distinguish registrations that do not continue from
+        continuations that are merely waiting on a temporary gate.
+        """
         if not is_deliverable_status(record.status):
             return ReadinessOutcome.NOT_APPLICABLE
         entry = self._snapshot.for_kind(record.kind) if self._snapshot else None
@@ -499,8 +479,7 @@ class ManagerReadinessMixin:
         if assignment is None or assignment.assignee_creature_id is None:
             return ReadinessOutcome.NOT_APPLICABLE
         if await self._has_live_delivery(record.drive_id):
-            # A turn is still in flight; wait for it to settle rather than
-            # falling back to a duplicate resume.
+            # In-flight work defers continuation so resume cannot duplicate it.
             return ReadinessOutcome.DEFERRED
         deliveries = await self._repo.list_deliveries(record.drive_id)
         gen = self._current_readiness_generation(record.drive_id)
@@ -512,19 +491,21 @@ class ManagerReadinessMixin:
             and d.state == "acknowledged"
         ]
         if not settled:
-            return ReadinessOutcome.NOT_APPLICABLE  # nothing settled at this gen
+            # Re-arm requires a settled generation.
+            return ReadinessOutcome.NOT_APPLICABLE
         now = self._clock()
         deps = await self._dependency_statuses(record)
         turns_used = sum(1 for d in deliveries if d.state == "acknowledged")
         try:
             verdict = _call_readiness(registration, record, deps, now, turns_used)
-        except Exception as exc:  # readiness failure fails closed (§8.8)
+        except Exception as exc:  # Registration failures must not admit work.
             await self._block_on_readiness_error(record, str(exc))
-            return ReadinessOutcome.DEFERRED  # blocked; never resume a blocked Drive
+            # Blocking forbids resume fallback.
+            return ReadinessOutcome.DEFERRED
         if verdict is None or not getattr(verdict, "re_arm", False):
             return ReadinessOutcome.NOT_APPLICABLE
-        # The registration WOULD re-arm; from here every gate is a deferral, not a
-        # fallback-to-resume signal (a stale resume would only be superseded).
+        # Once continuation is requested, every remaining gate is temporary;
+        # ordinary resume would create stale work that dispatch must supersede.
         last_ack = max(
             (d.acknowledged_at for d in settled if d.acknowledged_at is not None),
             default=None,
@@ -535,9 +516,8 @@ class ManagerReadinessMixin:
             and cooldown > 0
             and (now - last_ack).total_seconds() < cooldown
         ):
-            return (
-                ReadinessOutcome.DEFERRED
-            )  # cooldown not elapsed; a later scan retries
+            # A later scan retries after cooldown.
+            return ReadinessOutcome.DEFERRED
         if not wake_conditions_met(record, now, deps):
             return ReadinessOutcome.DEFERRED
         if (
@@ -555,9 +535,11 @@ class ManagerReadinessMixin:
         return ReadinessOutcome.REARMED
 
     async def _block_on_readiness_error(self, record: DriveRecord, error: str) -> None:
-        """§8.8 readiness fail-closed: block the Drive (system actor), emit an
-        observable condition, and audit via the transition. No delivery is
-        admitted, and a blocked Drive is not re-evaluated."""
+        """Block a drive after a readiness failure and emit the condition.
+
+        The system transition provides the audit record. Blocked drives are not
+        admitted or rescanned, preventing a persistent callback failure loop.
+        """
         if record.status not in BLOCKABLE_STATUSES:
             return
         self._emit("drive_readiness_error", record.drive_id, {"error": error})
@@ -570,7 +552,8 @@ class ManagerReadinessMixin:
                 status_reason="readiness_error",
                 operation="readiness_error_block",
             )
-        except DriveError as exc:  # blocking is best-effort; the error is observed
+        # The readiness error remains observable if blocking races.
+        except DriveError as exc:
             logger.warning(
                 "readiness-error block failed", drive_id=record.drive_id, error=str(exc)
             )
@@ -582,10 +565,11 @@ class ManagerReadinessMixin:
         )
 
     async def _rebuild_readiness_generations(self) -> None:
-        """Rebuild the in-memory readiness-generation map from persisted delivery
-        rows (design §4.4 generation persistence). Called at manager start and on
-        reconcile so a cold resume continues from the highest generation each
-        Drive reached rather than re-minting generation 0 and superseding work."""
+        """Restore readiness generations from persisted deliveries.
+
+        Cold resume must continue from each drive's highest generation rather
+        than returning to zero and colliding with previously admitted work.
+        """
         for record in await self._repo.list_drives(DriveQuery(include_terminal=False)):
             highest = 0
             for delivery in await self._repo.list_deliveries(record.drive_id):

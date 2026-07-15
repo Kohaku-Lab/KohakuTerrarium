@@ -1,15 +1,8 @@
-"""Creature resolution + rename helpers for the session lifecycle.
+"""Resolve creatures and apply consistent display-name changes.
 
-The studio's lifecycle layer needs to (a) resolve a creature by either
-``creature_id`` or display name (the frontend sends names while the
-engine namespace is ids), and (b) push a display-name change onto every
-nested object that caches it (executor, trigger manager, compact
-manager). Both helpers live here so :mod:`lifecycle` stays under the
-1000-line hard cap mandated by ``tests/unit/test_file_sizes.py``.
-
-The helpers are pure functions over a ``TerrariumService`` handle; they
-import from :mod:`studio._runtime` and not from :mod:`lifecycle` to
-avoid a cycle.
+Studio accepts engine IDs and user-facing names, while several nested runtime
+objects cache the display name. These helpers centralize both behaviors without
+introducing a lifecycle import cycle.
 """
 
 from typing import TYPE_CHECKING
@@ -84,17 +77,8 @@ def find_creature(service: "TerrariumService", session_id: str, name_or_id: str)
         if cand.name == name_or_id:
             return cand
 
-    # The frontend sends the literal string "root" as the tab key for
-    # terrariums that declare a root agent (see
-    # ``stores/chat.js:1116, 1286``).  The engine identifies the root via
-    # the privileged flag set by ``Terrarium.assign_root``; resolve the
-    # alias here so every per-creature HTTP/WS endpoint accepts it.
-    #
-    # Disambiguation order when multiple privileged creatures share a
-    # graph (e.g. user merged two solo sessions):
-    #   1. creature with ``creature_id == "root"`` (recipe convention)
-    #   2. creature with ``name == "root"``
-    #   3. first-by-sorted-id privileged creature
+    # The UI uses ``root`` as a stable alias. If several privileged creatures
+    # share a graph, prefer the conventional ID, then the display name, then ID order.
     if name_or_id == "root":
         privileged: list = []
         for cid in candidates:

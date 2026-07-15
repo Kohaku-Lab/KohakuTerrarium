@@ -1,16 +1,8 @@
-"""Borderless splash window — pywebview primary, Tk fallback.
+"""Open a borderless splash with pywebview or a Tk fallback.
 
-Both backends:
-
-1. Spin up the :class:`SplashServer` so the window has a progress feed.
-2. Inject ``window.SPLASH_ENDPOINT`` into the HTML / Tk title so the
-   page knows where to poll.
-3. Run in a background thread so the caller can drive ``publish()``
-   from the main thread (where the actual install work happens).
-
-If neither backend is available (headless Linux box, no pywebview,
-no Tk), :func:`open_splash` returns a :class:`SplashServer` only and
-the caller logs progress to stderr.
+Both backends run off the caller's thread and consume progress from a local
+:class:`SplashServer`. When no graphical backend is available, callers still
+receive the server and can follow the same publishing path headlessly.
 """
 
 import threading
@@ -23,9 +15,9 @@ _HTML_PATH = Path(__file__).parent / "splash.html"
 
 
 def _render_html(endpoint: str) -> str:
+    """Inject the progress endpoint before the template's polling script."""
     template = _HTML_PATH.read_text(encoding="utf-8")
-    # The page reads window.SPLASH_ENDPOINT — inject by appending a
-    # tiny inline script BEFORE the existing polling script tag.
+    # The assignment must precede the polling script that reads it.
     inject = f'<script>window.SPLASH_ENDPOINT = "{endpoint}";</script>'
     needle = "<script>"
     if needle not in template:
@@ -35,14 +27,15 @@ def _render_html(endpoint: str) -> str:
 
 
 def _try_pywebview(server: SplashServer) -> bool:
+    """Start a pywebview splash when the optional backend is available."""
     try:
         import webview  # type: ignore
     except ImportError:
         return False
 
     html = _render_html(server.endpoint)
-    # The splash window object is created on the background thread; the
-    # box lets the main-thread ``stop()`` reach it.
+    # The window is created asynchronously, so the server's close callback
+    # needs this shared container to reach it.
     window_box: list = []
 
     def _run():
@@ -66,10 +59,8 @@ def _try_pywebview(server: SplashServer) -> bool:
     t.start()
 
     def _close() -> None:
-        # ``webview.start`` blocks the background thread until the last
-        # window closes, so destroying the splash here also lets the
-        # background thread exit and frees pywebview's global event
-        # loop for the framework's main UI window later.
+        # Destroying the splash releases pywebview's global event loop before
+        # the main application creates another window.
         if not window_box:
             return
         try:
@@ -82,6 +73,7 @@ def _try_pywebview(server: SplashServer) -> bool:
 
 
 def _try_tk(server: SplashServer) -> bool:
+    """Start a Tk splash when the standard GUI backend is available."""
     try:
         import tkinter as tk
         from tkinter import ttk
@@ -125,9 +117,8 @@ def _try_tk(server: SplashServer) -> bool:
     t.start()
 
     def _close() -> None:
-        # Tk's in-loop self-destroy only fires on a terminal status; if
-        # ``stop()`` is called before then (early exit, exception in
-        # the install loop), the window would linger.
+        # Explicit teardown covers exits that occur before a terminal frame
+        # reaches Tk's polling loop.
         if not root_box:
             return
         try:
@@ -140,11 +131,10 @@ def _try_tk(server: SplashServer) -> bool:
 
 
 def open_splash() -> SplashServer:
-    """Start the progress server and (if possible) a splash window.
+    """Start progress serving, open the first available UI, and return it.
 
-    Returns the server unconditionally — callers always publish frames
-    even when no UI backend is available, so the same code path runs
-    headless (logs only).
+    The progress server is returned even without a graphical backend so
+    callers can publish through one consistent interface.
     """
     server = SplashServer().start()
     if _try_pywebview(server):

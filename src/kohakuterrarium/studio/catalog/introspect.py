@@ -1,22 +1,13 @@
 """Module introspection for the creature editor's option forms.
 
-Given a creature-config entry (``{kind, name, type, module?, class_name?}``)
-return a list of parameter descriptors the frontend can render as a
-form. Two sources:
+Produces parameter descriptors that configuration UIs can render as forms.
+Built-in module schemas are curated because their runtime configuration may accept
+unstructured extra keys. Custom and package modules are inspected through their
+AST, recovering constructor names, annotations, and literal defaults without
+executing user code.
 
-* **Builtin** modules — we return a curated schema per kind. Builtin
-  tools don't expose their own option schemas at runtime; they read
-  arbitrary ``config.extra`` keys. We surface the common ToolConfig /
-  SubAgentConfig fields and leave rarer knobs to the advanced JSON
-  escape hatch on the frontend.
-
-* **Custom / package** modules — we AST-parse the user's Python file
-  and pull the target class's ``__init__`` signature. This is safe
-  (no code execution) and picks up keyword arguments with their type
-  hints + literal defaults.
-
-``config`` is never surfaced — it's a framework-injected kwarg on
-BaseTool subclasses and has nothing the user should be editing here.
+Framework-injected parameters such as ``config`` are excluded from the editable
+surface.
 """
 
 import ast
@@ -29,17 +20,14 @@ from kohakuterrarium.packages.resolve import (
 )
 from kohakuterrarium.packages.walk import list_packages
 
-# Parameters that we intentionally hide from the form — they're
-# framework-level plumbing, not user-facing options.
+# Framework plumbing is not part of the user-editable constructor surface.
 _HIDDEN_PARAMS = {"config", "self"}
 
 
 def builtin_schema(kind: str) -> dict:
-    """Curated schema for a builtin module of the given kind.
+    """Return the curated form schema for a built-in module kind.
 
-    ``kind`` is the plural form ("tools", "subagents", …). Returns
-    a dict ``{params, warnings}`` where ``params`` is a list of
-    ``{name, type_hint, default, required, description}`` entries.
+    The payload contains parameter descriptors and non-blocking warnings.
     """
     if kind == "tools":
         return {
@@ -144,9 +132,8 @@ def builtin_schema(kind: str) -> dict:
             "warnings": [],
         }
     if kind == "triggers":
-        # Universal setup-tool triggers have their own per-tool schemas
-        # reachable via /api/studio/catalog/triggers. We return an empty
-        # schema here so the accordion still renders (identity fields).
+        # Universal triggers expose per-trigger setup schemas elsewhere. An empty
+        # option schema still allows consumers to render identity fields.
         return {"params": [], "warnings": []}
     return {"params": [], "warnings": []}
 
@@ -156,20 +143,12 @@ def custom_schema(
     class_name: str | None,
     sidecar_schema: list | None = None,
 ) -> dict:
-    """AST-parse a source file and extract the target class's
-    ``__init__`` signature. Pass ``class_name=None`` to use the first
-    class in the module.
+    """Extract an editable constructor schema from Python source without imports.
 
-    *sidecar_schema* — optional per-key descriptor list (loaded from
-    a sibling ``.schema.json``). When the class's ``__init__`` takes a
-    single ``options: dict`` parameter, the plugin's configurable
-    surface is the sidecar's keys rather than that one anonymous
-    dict — so we return the sidecar list directly in that case. For
-    classes with a richer ``__init__``, the sidecar is ignored.
-
-    Returns ``{params, warnings}``. Warnings surface problems without
-    blocking — the user still sees whatever params we did manage to
-    parse, plus a hint about what we couldn't recover.
+    ``class_name=None`` selects the first top-level class. A sidecar schema replaces
+    a lone ``options: dict`` parameter with named option descriptors; richer
+    constructors remain authoritative. Parse limitations are returned as warnings
+    alongside any parameters that could be recovered.
     """
     try:
         tree = ast.parse(source)
@@ -186,7 +165,8 @@ def custom_schema(
 
     target: ast.ClassDef | None = None
     if class_name:
-        # Specific class requested — no fallback if missing.
+        # An explicit class name is authoritative; silently selecting another
+        # class would expose the wrong configuration surface.
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef) and node.name == class_name:
                 target = node
@@ -202,7 +182,8 @@ def custom_schema(
                 ],
             }
     else:
-        # No class name given — fall back to the first top-level class.
+        # Without an explicit target, only top-level declaration order provides a
+        # deterministic selection rule.
         for node in tree.body:
             if isinstance(node, ast.ClassDef):
                 target = node
@@ -228,8 +209,7 @@ def custom_schema(
 
     params, warnings = _extract_init_params(init)
 
-    # Options-dict plugins: replace the anonymous ``options: dict`` with
-    # the sidecar's per-key descriptors so consumers see a real form.
+    # A sidecar turns an otherwise opaque options mapping into named form fields.
     if sidecar_schema is not None and _is_options_dict_init(params):
         return {
             "params": [_normalize_sidecar_param(p) for p in sidecar_schema],
@@ -240,8 +220,7 @@ def custom_schema(
 
 
 def _is_options_dict_init(params: list[dict]) -> bool:
-    """True when the class's editable surface is a single
-    ``options: dict`` parameter (the plugin-options convention)."""
+    """Return whether a constructor exposes only the conventional options map."""
     if len(params) != 1:
         return False
     p = params[0]
@@ -252,8 +231,7 @@ def _is_options_dict_init(params: list[dict]) -> bool:
 
 
 def _normalize_sidecar_param(raw: dict) -> dict:
-    """Coerce a sidecar entry into the same shape ``_extract_init_params``
-    produces so the frontend's ``SchemaFormField`` renders uniformly."""
+    """Normalize sidecar fields to the constructor-parameter payload shape."""
     if not isinstance(raw, dict):
         return {
             "name": "",
@@ -314,7 +292,6 @@ def _extract_init_params(
             }
         )
 
-    # Keyword-only args (after *)
     kw_only: list[ast.arg] = list(args.kwonlyargs or [])
     kw_defaults: list = list(args.kw_defaults or [])
     for i, arg in enumerate(kw_only):
@@ -359,20 +336,15 @@ def _extract_init_params(
 
 
 def resolve_module_source(workspace_root: Path, module: str) -> str | None:
-    """Resolve a ``module:`` reference to its on-disk source.
+    """Resolve supported module references to source text without importing code.
 
-    Accepts:
-      * relative paths (``./custom/send_discord.py``, ``custom/tool.py``)
-      * absolute paths
-      * dotted module paths (``modules.tools.my_tool``)
-      * package references (``@pkg/path``) — resolved via packages.py
-
-    Returns the file's text or None if we couldn't find it.
+    Relative and absolute files, package references, workspace-dotted modules,
+    and installed-package dotted modules are supported. Unresolvable or unreadable
+    references return ``None``.
     """
     if not module:
         return None
 
-    # @package references
     if module.startswith("@"):
         try:
             p = resolve_package_path(module)
@@ -382,7 +354,6 @@ def resolve_module_source(workspace_root: Path, module: str) -> str | None:
             return None
         return None
 
-    # Relative / absolute file path
     p = Path(module).expanduser()
     if not p.is_absolute():
         p = (workspace_root / p).resolve()
@@ -392,8 +363,8 @@ def resolve_module_source(workspace_root: Path, module: str) -> str | None:
         except Exception:
             return None
 
-    # Dotted module path — try the workspace tree first, then fall
-    # back to installed packages via importlib.find_spec.
+    # Workspace resolution takes precedence over installed modules so local edits
+    # describe the configuration surface the workspace will use.
     if "." in module and not module.endswith(".py"):
         candidate = workspace_root / (module.replace(".", "/") + ".py")
         if candidate.is_file():
@@ -402,9 +373,8 @@ def resolve_module_source(workspace_root: Path, module: str) -> str | None:
             except Exception:
                 return None
 
-        # Make all installed kt packages importable and look for the
-        # dotted path there. This covers kt-biome's
-        # ``kt_biome.plugins.cost_tracker`` and similar.
+        # Package roots are not guaranteed to be on ``sys.path`` during catalog
+        # inspection, so establish importability before asking for a module spec.
         try:
             for pkg in list_packages():
                 ensure_package_importable(pkg["name"])

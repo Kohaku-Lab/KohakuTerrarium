@@ -1,27 +1,10 @@
 """Mid-turn fold-in of events re-claimed from the event inbox.
 
-Extracted from ``agent_handlers.py`` to keep that file under the 1000-
-line hard cap (``tests/unit/test_file_sizes.py``). Mixed into ``Agent``
-via :class:`AgentMidTurnMixin`. The two module-level helpers
-(``_to_serializable_content``, ``_coalesce_user_contents``) move with
-them since they have no other callers.
+Fold queued input and background events into an agent's active turn.
 
-Why this cohesive cluster: mid-turn fold-in is the path where any
-fire-and-forget event (typed input, trigger, background completion,
-channel traffic) that arrived WHILE the agent is mid-stream gets
-re-claimed from the inbox (``drain_foldable``) and folded into the
-running turn AFTER the in-flight tool calls land — so the native
-``tool_calls`` / ``role=tool`` pairing stays valid. Each user-facing
-entry gets a session record + queued-banner-clear frame; every
-background completion shares ONE combined delivery banner.
-
-Shared state surface on the host ``Agent``: ``_event_inbox``,
-``_trigger_backlog_stash``, ``_turn_index``, ``_branch_id``,
-``_parent_branch_path``, ``output_router``, ``session_store``,
-``_running``, ``controller`` (set lazily by the handlers loop), and
-``config``. The combined delivery banner
-(``_emit_batch_background_banner``) lives in
-:mod:`core.agent_event_loop`.
+Events are folded only after in-flight tool results arrive, preserving native
+``tool_calls`` and ``role=tool`` pairing. User-facing entries retain distinct
+session records, while background completions share a delivery banner.
 """
 
 import asyncio
@@ -87,28 +70,23 @@ def _coalesce_user_contents(contents: list[Any]) -> Any:
 
 
 class AgentMidTurnMixin:
-    """Mid-turn input drain + interrupt-buffer drain handlers.
-
-    Stateless — every method reads instance attributes from the host
-    Agent. See module docstring for the full state surface.
-    """
+    """Drain and fold queued events into an active agent turn."""
 
     @property
     def has_pending_mid_turn_inputs(self) -> bool:
         """Whether any event is queued on the inbox awaiting a turn.
 
-        Public read-only probe the Terrarium Drive fairness check reads
-        rather than the private inbox, so a rename breaks loudly here
-        instead of silently degrading its probe."""
+        This public probe keeps fairness checks independent of the private
+        inbox representation."""
         return bool(self._event_inbox)
 
     def admit_ready_events(self, events: list[TriggerEvent]) -> int:
-        """Stash a trigger's drained backlog so the immediately-following
-        primary ``_process_event`` enqueues it right after the primary, in
-        order, as fire-and-forget fold-ins (UXI-08b). Wired onto
-        ``trigger_manager.admit_ready``; flushed synchronously by
-        ``_flush_trigger_backlog_stash`` before the primary awaits. Returns
-        the count stashed."""
+        """Stash drained trigger events for ordered admission after the primary.
+
+        The stash is flushed synchronously before the primary event yields,
+        preserving backlog order for fire-and-forget fold-ins. Returns the
+        number of events stashed.
+        """
         stash = getattr(self, "_trigger_backlog_stash", None)
         if stash is None or not events:
             return 0
@@ -116,15 +94,14 @@ class AgentMidTurnMixin:
         return len(events)
 
     def edit_pending(self, pending_id: str, content: Any) -> bool:
-        """Rewrite a still-queued message's content by id (UXI-08a).
+        """Rewrite a queued message before its envelope is claimed.
 
-        Wins iff it commits before the consumer claims the envelope; a
-        plain ``False`` "already sent" no-op otherwise."""
+        Returns ``False`` if the consumer has already claimed it.
+        """
         return self._event_inbox.edit(pending_id, content)
 
     def cancel_pending(self, pending_id: str) -> bool:
-        """Drop a still-queued message before it is sent (UXI-08a).
-        ``False`` when it was already claimed by the consumer."""
+        """Drop a queued message, returning ``False`` if already claimed."""
         return self._event_inbox.cancel(pending_id)
 
     async def _drain_mid_turn_pending_inputs(self, controller: Controller) -> int:
@@ -146,9 +123,7 @@ class AgentMidTurnMixin:
         drained: list[TriggerEvent] = [env.event for env in claimed]
 
         pairs = [(evt, self._resolve_injected_content(evt)) for evt in drained]
-        # Filter out anything that resolved to empty (unlikely but
-        # defensive — a trigger with no prompt and no fallback would
-        # produce ``None``).
+        # Empty events cannot form a meaningful user message.
         pairs = [(evt, c) for evt, c in pairs if c is not None and c != ""]
         # ONE combined delivery banner for every background completion in
         # this re-claim, plus release each one's output-wire defer: it

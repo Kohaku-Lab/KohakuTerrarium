@@ -4,9 +4,8 @@
 runs until Ctrl+C, exposing the local :class:`Terrarium` engine to the
 host via four APP adapters (runtime, events, files, deploy).
 
-This command does not start a web UI — workers don't serve their own
-Studio surface in 1.5.x.  The controller's Studio reaches into the
-worker through Lab.
+This command does not start a web UI. The controller's Studio reaches
+worker services through Lab.
 """
 
 import argparse
@@ -58,11 +57,9 @@ logger = get_logger(__name__)
 
 
 def _build_parser(parser: argparse.ArgumentParser) -> None:
-    # ``--host`` / ``--token`` / ``--name`` are NOT ``required=True``
-    # here so the layered-config loader (env-vars + YAML) can supply
-    # them when this command runs under systemd with an
-    # ``EnvironmentFile``.  ``lab_client_cli`` validates the resolved
-    # values and prints a clear error if any are still missing.
+    """Register Lab worker options on a parser."""
+    # Connection fields remain optional here because environment or YAML layers
+    # may supply them; validation runs after those layers are merged.
     parser.add_argument(
         "--host",
         default="",
@@ -116,9 +113,9 @@ def add_lab_client_subparser(subparsers) -> None:
 
 
 def lab_client_cli(args: argparse.Namespace) -> int:
+    """Resolve worker configuration and run the foreground Lab client."""
     cfg = load_layered_config("client")
-    # CLI > layered config (env / YAML / defaults).  Only fill empty
-    # argparse defaults so a flag the user typed always wins.
+    # Explicit CLI values take precedence over environment, YAML, and defaults.
     if not args.host:
         args.host = cfg.get("host_url") or ""
     if not args.token:
@@ -150,18 +147,10 @@ def lab_client_cli(args: argparse.Namespace) -> int:
         )
         return 2
 
-    # Always a foreground process: route logs to stderr so the user
-    # can actually see them.  Setting KT_LOG_STDERR alone isn't
-    # enough — ``get_logger`` may have already initialised the
-    # framework's root handler at module-import time (KT_LOG_STDERR
-    # unset back then), and its one-shot ``if _handler is None``
-    # guard never re-runs.  Call ``enable_stderr_logging`` explicitly
-    # so the stderr handler is wired regardless of import order.
+    # The logger may initialize before this command sets the environment, so
+    # install stderr logging explicitly rather than relying on KT_LOG_STDERR.
     os.environ.setdefault("KT_LOG_STDERR", "1")
-    # ``--home-dir`` re-homes every config_dir() consumer for this
-    # process: api_keys.yaml, llm_profiles.json, codex tokens, mcp
-    # servers, sessions.  Set BEFORE configure_utf8_stdio / logger init
-    # so any first-touch of the config dir lands at the right place.
+    # Set the config home before any configuration consumer first resolves it.
     if getattr(args, "home_dir", ""):
         os.environ["KT_CONFIG_DIR"] = args.home_dir
     configure_utf8_stdio(log=True)
@@ -180,10 +169,8 @@ def lab_client_cli(args: argparse.Namespace) -> int:
 
 async def _run_worker(args: argparse.Namespace) -> None:
     """Worker process body — start client, attach adapters, wait."""
-    # Test-only seam: when ``KT_TEST_LLM_SCRIPT`` is set, route every
-    # LLM factory call to a deterministic ``ScriptedLLM`` reading that
-    # file.  Production runs never set the env var; the import (and
-    # therefore the ``testing`` package) stays out of the call graph.
+    # Keep deterministic test dependencies outside production startup unless
+    # the subprocess test seam is explicitly enabled.
     if os.environ.get("KT_TEST_LLM_SCRIPT"):
         from kohakuterrarium.testing.subprocess_seam import (
             maybe_install_test_llm_seam,
@@ -208,33 +195,23 @@ async def _run_worker(args: argparse.Namespace) -> None:
         ),
         WebSocketTransport(),
     )
-    # Resolve THIS worker's Drive settings from its own config home
-    # (``KT_CONFIG_DIR`` was re-homed above) into explicit engine args, exactly
-    # like ``kt run`` does for the managed local path. Absent/disabled settings
-    # resolve to a Drive-disabled engine; a bad setting degrades to disabled
-    # with a logged warning rather than crashing worker boot.
+    # Drive settings are node-local; invalid or disabled settings resolve to a
+    # Drive-disabled engine rather than preventing worker startup.
     drive_kwargs = _drive_settings.resolve_drive_kwargs()
     engine = Terrarium(**drive_kwargs)
-    # Auto-attach SessionStore + SessionEventTee per spawned creature
-    # so events persist on this worker AND mirror to the controller.
-    # Constructed BEFORE the runtime adapter so the adapter can hand
-    # creatures off as they spawn.
+    # The runtime adapter needs the attacher at construction time so newly
+    # spawned creatures persist locally and mirror events to the controller.
     session_attacher = WorkerSessionAttacher(
         engine,
         client,
         session_dir=args.session_dir or None,
     )
-    # IdentityCache backed by the controller's StudioIdentityAdapter.
-    # The runtime adapter pre-warms it per spawn; a sync resolver
-    # registered into llm.api_keys ensures the engine's LLM builder
-    # finds keys without ever leaving the loop.
+    # Pre-warmed synchronous resolvers let LLM construction use controller-held
+    # credentials without performing network I/O from the synchronous lookup.
     identity_cache = IdentityCache(client)
     register_api_key_resolver(identity_cache.sync_api_key)
-    # Codex resolver: mirrors the api-key path so the worker's
-    # ``CodexOAuthProvider`` build picks up the host's Codex tokens
-    # via ``studio.identity.get_codex_token`` instead of falling back
-    # to the worker-local ``codex-auth.json`` (which is intentionally
-    # isolated under the worker's ``KT_CONFIG_DIR``).
+    # Codex uses the same cache path to avoid falling back to the worker-local,
+    # intentionally isolated OAuth store.
     register_codex_resolver(identity_cache.sync_codex_tokens)
     TerrariumRuntimeAdapter(
         engine,
@@ -243,97 +220,64 @@ async def _run_worker(args: argparse.Namespace) -> None:
         identity_cache=identity_cache,
     )
     TerrariumEventsAdapter(engine, client)
-    # Attach-WS proxy — the controller's chat WebSocket opens a
-    # ``terrarium.attach.start_attach`` stream against this adapter so
-    # tool calls, sub-agent events, channel messages, and interactive
-    # UI events all reach the frontend with the same shape they have
-    # for a host-local creature.
+    # Preserve the host-local attach event shape across the Lab boundary.
     TerrariumAttachAdapter(engine, client)
-    # PTY-WS proxy — spawn a shell in the creature's working directory
-    # on this worker and bridge stdin/stdout to the controller's WS.
     TerrariumPtyAdapter(engine, client)
-    # Cross-node channel forwarder.  Per-node state: which peers want
-    # local sends on (graph, channel) forwarded to them, plus the
-    # subscriptions we hold on peers.  Stashes itself on the engine
-    # under ``_broadcast_adapter`` so the channel persistence hook
-    # in ``terrarium/channels.py`` finds it without an import cycle.
+    # The engine reference lets channel persistence find the cross-node
+    # forwarder without importing Laboratory code into Terrarium channels.
     TerrariumBroadcastAdapter(engine, client)
-    # Cross-node output-wiring forwarder.  Workers only ever RECEIVE
-    # forwarded events (they have no cluster-wide target resolver);
-    # the controller drives outbound forwarding via the multi-node
-    # service.  Stashes itself on the engine under
-    # ``_output_wire_adapter`` so :class:`TerrariumOutputWiringResolver`
-    # finds it without an import cycle.
+    # Workers receive forwarded output events; the controller owns cluster-wide
+    # target resolution. The engine reference avoids an import cycle.
     TerrariumOutputWireAdapter(engine, client)
-    # StudioDeployAdapter shares the files adapter — installing both
-    # without sharing would double-register the `terrarium.files`
-    # namespace and crash on startup.
+    # Deploy and file operations must share one adapter to avoid registering the
+    # ``terrarium.files`` namespace twice.
     files_adapter = TerrariumFilesAdapter(engine, client)
     StudioDeployAdapter(engine, client, files_adapter=files_adapter)
-    # Read-side session ops the controller's mirror uses to rehydrate.
     TerrariumSessionAdapter(engine, client)
-    # Per-node catalog so the controller's aggregator can see this
-    # worker's installed packages.
     StudioCatalogAdapter(client)
-    # ``studio.identity`` adapter on the WORKER side too — exposes the
-    # worker's local identity store (api_keys.yaml / codex-auth.json /
-    # llm_profiles.json / mcp servers) so the controller's per-node
-    # Settings > Providers UI can manage credentials per worker.
-    # Codex login on a worker runs OAuth on the worker's machine, so
-    # the resulting token is process-local and Codex calls from this
-    # worker actually succeed (host's token would mismatch).
+    # Identity remains node-local because OAuth tokens and provider credentials
+    # may be process- or machine-specific.
     StudioIdentityAdapter(client)
-    # ``studio.settings`` adapter — exposes THIS worker's ``drive-settings.yaml``
-    # and live Drive runtime so the host's per-node Settings > Drives surface can
-    # read/validate/save/apply Drive settings against the worker's own config
-    # home (design §8.4/§8.5).  Node-targeted mutation is operator-gated at the
-    # host; the worker trusts its authenticated Lab peer.
+    # Settings operations target this worker's config home; authorization is
+    # enforced by the host before requests reach the authenticated Lab peer.
     StudioSettingsAdapter(engine, client)
 
     stop_event = asyncio.Event()
     loop = asyncio.get_event_loop()
 
     if sys.platform == "win32":
-        # Windows: ``loop.add_signal_handler`` is not implemented.  Use
-        # ``signal.signal`` (synchronous) and bounce into the loop via
-        # ``call_soon_threadsafe`` so the wait below resolves cleanly
-        # instead of asyncio.run raising KeyboardInterrupt into the
-        # finally block (which then can't ``await``).
+        # Windows lacks ``loop.add_signal_handler``; bridge the synchronous
+        # handler into the event loop so asynchronous cleanup can still run.
         def _on_sigint_win(_signum, _frame):
+            """Schedule worker shutdown from the Windows signal handler."""
             loop.call_soon_threadsafe(stop_event.set)
 
         signal.signal(signal.SIGINT, _on_sigint_win)
     else:
 
         def _on_signal_posix():
+            """Request worker shutdown from a POSIX signal handler."""
             stop_event.set()
 
         loop.add_signal_handler(signal.SIGTERM, _on_signal_posix)
         loop.add_signal_handler(signal.SIGINT, _on_signal_posix)
 
     await client.start()
-    # NB: ``name`` is a reserved LogRecord attribute — passing it via
-    # ``extra`` raises KeyError.  Rename to ``client_name``.
+    # ``name`` is reserved by LogRecord, so structured context uses client_name.
     logger.info("lab-client connected", client_name=args.name, host=args.host)
     print(f"lab-client {args.name!r} connected to {args.host}")
     try:
         await stop_event.wait()
     except (asyncio.CancelledError, KeyboardInterrupt):
-        # If we still slip past the signal handler (e.g. on platforms
-        # where Ctrl+C arrives as KeyboardInterrupt despite our hook),
-        # swallow it here so the finally cleanup can await cleanly.
+        # Some platforms still surface Ctrl+C directly; defer it so cleanup can await.
         pass
     finally:
-        # Release every Tee BEFORE stopping the client so the pump
-        # tasks can flush whatever is queued instead of being
-        # cancelled mid-publish.
+        # Close session tees before the client so queued events can finish publishing.
         try:
             session_attacher.close_all()
         except Exception:  # pragma: no cover - defensive
             pass
-        # Clear the resolver so the next ``kt`` invocation in the
-        # same process (tests, embedded uses) starts from a clean
-        # slate.
+        # Resolver registration is process-global and must not leak into later runs.
         try:
             clear_api_key_resolver()
         except Exception:  # pragma: no cover - defensive

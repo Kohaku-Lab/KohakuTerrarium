@@ -1,24 +1,8 @@
-"""GoalPlugin + its ``/goal`` command — the optional built-in Goal composition.
+"""Adapt the generic Drive runtime into Goal guidance and a ``/goal`` command.
 
-`/goal` is **not** a framework feature. The plugin is a pure adapter over the
-generic Drive runtime: it contributes the ``/goal`` user command and a bounded
-prompt fragment explaining Goal completion semantics. It owns no Drive record,
-queue, scheduler, or repository, and holds no canonical Goal state. It ships
-registered and enabled automatically for every Terrarium-hosted creature. A
-standalone Agent may still opt in explicitly. Disabling it removes ``/goal`` and
-the prompt fragment while leaving Goal Drives untouched — Goal-kind runtime
-semantics live in the separately-enabled
-:class:`~kohakuterrarium.terrarium.drive.goal.GoalDriveRegistration`. Enabling
-this plugin does NOT enable that registration; they are independent toggles
-(design §11.3): the plugin is a plugin-panel decision, the registration a
-Drive-settings decision.
-
-The ``/goal`` command parses deterministically, resolves the authenticated user
-actor + focused creature + ``TerrariumService`` from the trusted
-:class:`UserCommandContext`, and calls generic Drive service methods. It stores
-no canonical Goal state; every ``show`` / ``list`` reads live Drive state. When
-the Drive runtime or the ``goal`` registration is unavailable it returns a clear
-typed result and never falls back to plugin-local state.
+The plugin owns no Goal state and does not enable Goal drive registration.
+Command reads and mutations always use the live Drive service resolved from the
+trusted user-command context.
 """
 
 from typing import Any
@@ -48,9 +32,8 @@ from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 
-# Bounded, static guidance. The CURRENT objective for a turn arrives through the
-# Goal Drive event projection (design §8.7: current records are not dumped into
-# the system prompt), so this fragment only explains the durable semantics.
+# Current objectives arrive through Drive events, so the static prompt only
+# explains durable completion and budget semantics.
 _PLUGIN_PROMPT = (
     "You may be assigned durable Goal drives. A Goal is a continuing "
     "commitment, not a one-shot request: pursue it across turns, report "
@@ -77,10 +60,6 @@ class GoalPlugin(BasePlugin):
     def get_prompt_content(self, context: PluginContext) -> str | None:
         return _PLUGIN_PROMPT
 
-
-# ---------------------------------------------------------------------------
-# /goal command
-# ---------------------------------------------------------------------------
 
 _SUBCOMMANDS = frozenset(
     {"set", "show", "list", "pause", "resume", "cancel", "complete", "assign"}
@@ -124,14 +103,13 @@ class _GoalUnavailable(Exception):
 
 
 class GoalCommand(BaseUserCommand):
-    """Human ``/goal`` adapter over the generic Drive service (design §11)."""
+    """Manage Goal-kind drives through the trusted user-command context."""
 
     name = "goal"
     aliases: list[str] = []
     description = "Manage durable Goal drives (set/show/list/pause/…)"
     layer = CommandLayer.AGENT
-    # Signals the CLI to dispatch this command with the engine + focused
-    # creature in UserCommandContext.extra (see app_multi.dispatch).
+    # Dispatch requires the engine service and focused creature in the context.
     needs_engine = True
     override = False
 
@@ -168,10 +146,8 @@ class GoalCommand(BaseUserCommand):
                 return await self._assign(rest, ctx)
             case "complete":
                 return await self._complete(rest.strip(), ctx)
-            case _:  # pause / resume / cancel
+            case _:  # Remaining commands share transition handling.
                 return await self._transition(sub, rest.strip(), ctx)
-
-    # -- set -----------------------------------------------------------------
 
     async def _set(self, rest: str, ctx: "_Resolved") -> UserCommandResult:
         opts, objective = _parse_set(rest)
@@ -198,11 +174,8 @@ class GoalCommand(BaseUserCommand):
             spec=spec,
             assignee_creature_id=ctx.creature_id,
         )
-        # Creating a user-owned Drive assigned to *another* actor (the focused
-        # creature) is a graph-authority (create_graph) operation, which a plain
-        # user actor does not hold by default. The trusted operator console
-        # supplies an explicit, audited operator elevation — never creature
-        # privilege. Every other /goal verb runs as the plain user owner.
+        # Assigning a newly created drive to a creature requires explicit graph
+        # authority from the trusted operator context, never creature privilege.
         view = await ctx.service.create_drive(
             request,
             graph_id=graph_id,
@@ -216,8 +189,6 @@ class GoalCommand(BaseUserCommand):
             is_privileged=False,
         )
         return _panel("Goal created", view)
-
-    # -- show / list ---------------------------------------------------------
 
     async def _list(self, ctx: "_Resolved") -> UserCommandResult:
         views = [view for view in await _list_goals(ctx) if view.record.status in _LIVE]
@@ -241,16 +212,13 @@ class GoalCommand(BaseUserCommand):
             return UserCommandResult(output="No active goal for this creature.")
         return _panel("Goal", view)
 
-    # -- transitions ---------------------------------------------------------
-
     async def _transition(
         self, sub: str, drive_id: str, ctx: "_Resolved"
     ) -> UserCommandResult:
         view = await _select_eligible(ctx, drive_id, sub)
         if view is None:
             return _no_eligible_goal(sub)
-        # Owner capability: the user owns the goal, so pause/resume/cancel need
-        # no operator privilege.
+        # The authenticated owner can manage lifecycle without operator elevation.
         updated = await ctx.service.transition_drive(
             view.record.drive_id,
             _TRANSITION_TARGETS[sub],
@@ -264,10 +232,8 @@ class GoalCommand(BaseUserCommand):
         view = await _select_eligible(ctx, drive_id, "complete")
         if view is None:
             return _no_eligible_goal("complete")
-        # User-authoritative completion: the owner proposes (owner holds
-        # propose_terminal — no operator privilege) with evidence so
-        # self_propose / user_confirm / verifier all finalize (design §11.2).
-        # The extension verifier honors the per-Drive policy.
+        # Completion is proposed with owner evidence; the registration applies
+        # the drive's configured completion policy.
         try:
             result = await ctx.service.propose_drive_transition(
                 view.record.drive_id,
@@ -300,8 +266,7 @@ class GoalCommand(BaseUserCommand):
         if current is None:
             return UserCommandResult(error=f"no such goal: {drive_id}")
         _require_goal(current, drive_id)
-        # Reassigning a Drive to a graph member is a graph-authority operation
-        # (like create), so it uses the operator console's audited elevation.
+        # Reassignment crosses graph membership and requires operator authority.
         view = await ctx.service.assign_drive(
             drive_id,
             target_creature,
@@ -313,20 +278,8 @@ class GoalCommand(BaseUserCommand):
         return _panel(f"Goal assigned to {target_creature}", view)
 
 
-# ---------------------------------------------------------------------------
-# trusted-context resolution + helpers
-# ---------------------------------------------------------------------------
-
-
 class _Resolved:
-    """The trusted handles one ``/goal`` invocation needs.
-
-    ``is_operator`` is the console's graph-authority flag: it authorizes the
-    graph-scoped verbs (``set`` create, ``assign``) that a plain user actor
-    cannot perform. It defaults False (R1-21) — only a trusted local-console or
-    authenticated-admin adapter sets it True; a multi-user ingress leaves it off.
-    Read/manage verbs never consult it — the user acts as the Drive owner there.
-    """
+    """Hold the trusted service, actor, creature, and operator authority."""
 
     __slots__ = ("service", "creature_id", "principal", "is_operator")
 
@@ -352,9 +305,7 @@ def _resolve(context: UserCommandContext) -> _Resolved:
     if not creature_id:
         raise _GoalUnavailable("/goal has no focused creature to act on")
     principal = _principal(extra.get("principal"))
-    # Default UNPRIVILEGED (R1-21): only a trusted local-console / authenticated-
-    # admin adapter sets is_operator explicitly. Missing authority context is
-    # never a silent operator grant.
+    # Missing authority must never become an implicit operator grant.
     is_operator = bool(extra.get("is_operator", False))
     return _Resolved(service, creature_id, principal, is_operator)
 
@@ -362,8 +313,7 @@ def _resolve(context: UserCommandContext) -> _Resolved:
 def _principal(raw: Any) -> ActorRef:
     if isinstance(raw, ActorRef):
         if raw.kind != "user":
-            # /goal always acts as the authenticated human, never as a plugin
-            # or creature identity (design §11.5).
+            # Goal commands act only as the authenticated human owner.
             raise _GoalUnavailable("/goal principal must be a user actor")
         return raw
     if isinstance(raw, str) and raw:
@@ -382,8 +332,7 @@ async def _graph_of(ctx: _Resolved, creature_id: str) -> str:
 
 
 async def _list_goals(ctx: _Resolved) -> list[Any]:
-    # Reads run as the plain user; the manager scopes the view to authorized
-    # (owned / assigned) records without any privilege.
+    # Service authorization limits plain-user reads to owned or assigned records.
     views = await ctx.service.list_drives(
         actor=ctx.principal,
         assignee_creature_id=ctx.creature_id,
@@ -394,13 +343,7 @@ async def _list_goals(ctx: _Resolved) -> list[Any]:
 
 
 def _require_goal(view: Any, drive_id: str) -> Any:
-    """Ensure an explicitly-addressed Drive is goal-kind (design §11, R1-22).
-
-    ``/goal <verb> <id>`` must never mutate a generic or package-kind Drive that
-    the actor happens to be authorized for; a foreign kind is refused, not
-    silently paused/completed/assigned. A ``None`` view (not found) passes
-    through so callers report their own not-found message.
-    """
+    """Reject explicitly addressed drives that are not Goal-kind."""
     if view is not None and getattr(view.record, "kind", None) != "goal":
         raise _GoalUnavailable(
             f"drive {drive_id} is not a goal (kind="
@@ -410,12 +353,7 @@ def _require_goal(view: Any, drive_id: str) -> Any:
 
 
 async def _select(ctx: _Resolved, drive_id: str) -> Any | None:
-    """Resolve an explicit goal, or the newest live goal for the creature.
-
-    Explicit ``show`` keeps terminal history addressable. All implicit selection
-    excludes terminal records so a stale completed/cancelled goal cannot become
-    the current goal.
-    """
+    """Resolve an explicit goal or the newest live goal for the creature."""
     if drive_id:
         view = await ctx.service.get_drive(
             drive_id, actor=ctx.principal, is_privileged=False

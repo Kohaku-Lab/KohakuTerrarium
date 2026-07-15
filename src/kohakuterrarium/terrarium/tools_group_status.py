@@ -24,10 +24,8 @@ from kohakuterrarium.terrarium.tools_group_common import (
 @register_builtin("group_status")
 class GroupStatusTool(BaseTool):
     needs_context = True
-    # ``group_status`` owns the team-building paradigm hint for the
-    # whole privileged ``group_*`` surface, so its contribution must
-    # land at the top of the ``## Tool guidance`` block ahead of any
-    # alphabetical neighbours that might also opt in later.
+    # This tool owns guidance for the privileged group surface, so keep its
+    # contribution ahead of any sibling guidance.
     prompt_contribution_bucket = "first"
 
     @property
@@ -46,13 +44,8 @@ class GroupStatusTool(BaseTool):
         return ExecutionMode.DIRECT
 
     def prompt_contribution(self) -> str | None:
-        # Anchors the team-building paradigm for any privileged caller.
-        # ``group_*`` tools are registered as a set on privileged
-        # creatures, so contributing the paradigm prose from a single
-        # well-known entry point (``group_status`` — the natural "look
-        # at your team" tool) avoids fragmenting guidance across every
-        # sibling tool. Non-privileged creatures never see this because
-        # the tool itself is not registered for them.
+        # Centralizing shared guidance here keeps sibling tools concise;
+        # unprivileged creatures never register this tool.
         return (
             "The `group_*` tools let you build and run a **team of "
             "creatures**. Treat a graph creature as an **unbounded "

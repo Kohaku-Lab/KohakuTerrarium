@@ -1,12 +1,8 @@
-"""Minimal launcher-local logger.
+"""Provide launcher-local logging before the framework is importable.
 
-Cannot reuse :mod:`kohakuterrarium.utils.logging` because the wrapper
-runs BEFORE the framework's site-packages are guaranteed to be on
-``sys.path`` (clean first launch, recovery mode).  A pure-stdlib
-logger keeps the dependency surface to zero framework imports.
-
-Writes to ``~/.kohakuterrarium/logs/launcher.log`` (rotating, 1MB×3)
-plus stderr.  Single-line format so the file is grep-friendly.
+The standard-library logger writes a rotating configuration-local file and
+stderr. Keeping this module independent of framework logging allows clean
+first-launch and recovery paths to report failures.
 """
 
 import logging
@@ -20,12 +16,7 @@ _logger: logging.Logger | None = None
 
 
 def get_logger() -> logging.Logger:
-    """Return the singleton launcher logger.
-
-    Idempotent: first call wires the handlers; subsequent calls return
-    the same instance without re-installing handlers (otherwise repeated
-    invocations of :func:`bootloader.main` would duplicate lines).
-    """
+    """Return the singleton launcher logger with handlers installed once."""
     global _logger
     if _logger is not None:
         return _logger
@@ -48,7 +39,7 @@ def get_logger() -> logging.Logger:
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
     except OSError:
-        # Read-only filesystem (some sandboxes) — log only to stderr.
+        # File logging is optional when the configuration directory is read-only.
         pass
 
     stream_handler = logging.StreamHandler()

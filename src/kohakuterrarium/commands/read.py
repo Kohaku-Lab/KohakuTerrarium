@@ -1,9 +1,7 @@
 """
-Read command - Read job output.
-Info command - Get tool/subagent documentation.
+Legacy text-format commands for job output, documentation, and job control.
 
-These commands are used by legacy/custom text tool-call formats; native
-models use the corresponding registered tools.
+Native tool-call formats use the corresponding registered tools.
 """
 
 import asyncio
@@ -22,16 +20,7 @@ from kohakuterrarium.skill_docs import SkillDoc, load_skill_doc
 
 
 class ReadCommand(BaseCommand):
-    """
-    Read job output command.
-
-    Retrieves output from a completed or running job.
-
-    Usage:
-        ##read_job job_123##
-        ##read_job job_123 --lines 50##
-        ##read_job job_123 --lines 50 --offset 10##
-    """
+    """Read and optionally slice a running or completed job's output."""
 
     @property
     def command_name(self) -> str:
@@ -42,24 +31,22 @@ class ReadCommand(BaseCommand):
         return "Read output from a job"
 
     async def _execute(self, args: str, context: Any) -> CommandResult:
-        """Read job output."""
+        """Return rendered job output or its current state."""
         job_id, kwargs = parse_command_args(args)
 
         if not job_id:
             return CommandResult(error="No job_id provided. Usage: ##read_job job_id##")
 
-        # Get optional parameters
         lines = int(kwargs.get("lines", 0))
         offset = int(kwargs.get("offset", 0))
 
-        # Get job result from context
-        # Context should have get_job_result method
+        # Text commands require a context that can expose job results.
         if not hasattr(context, "get_job_result"):
             return CommandResult(error="Context does not support job result retrieval")
 
         result = _get_job_result(context, job_id)
         if result is None:
-            # Check if job exists but not completed
+            # A missing result may still represent a pending or running job.
             if hasattr(context, "get_job_status"):
                 status = context.get_job_status(job_id)
                 if status is not None:
@@ -71,10 +58,9 @@ class ReadCommand(BaseCommand):
                         return CommandResult(content=f"[Job {job_id} is pending]")
             return CommandResult(error=f"Job not found: {job_id}")
 
-        # Get safe text output; multimodal parts render as placeholders.
+        # Multimodal parts render as text placeholders in this text command.
         output = render_content_text(result.output or "")
 
-        # Apply slicing if requested
         if lines > 0 or offset > 0:
             output_lines = output.split("\n")
             if offset > 0:
@@ -83,7 +69,6 @@ class ReadCommand(BaseCommand):
                 output_lines = output_lines[:lines]
             output = "\n".join(output_lines)
 
-        # Format result
         if result.error:
             content = f"## Job {job_id} (error)\n\nError: {result.error}\n\n"
             if output:
@@ -98,18 +83,10 @@ class ReadCommand(BaseCommand):
 
 
 class InfoCommand(BaseCommand):
-    """
-    Get documentation for a tool or sub-agent.
+    """Resolve tool, sub-agent, or skill documentation by precedence.
 
-    Loads documentation from files in order of priority:
-    1. prompts/tools/{name}.md (agent folder - user override)
-    2. prompts/subagents/{name}.md (agent folder - user override)
-    3. Builtin skills from package (builtin_skills/tools/{name}.md)
-    4. Tool's get_full_documentation() method
-    5. ToolInfo.documentation field
-    6. Basic description fallback
-
-    Legacy text-format command counterpart of the native ``info`` tool.
+    Creature overrides precede built-in docs, runtime objects, registry metadata,
+    and procedural skills. This is the text-format counterpart of ``info``.
     """
 
     @property
@@ -121,24 +98,22 @@ class InfoCommand(BaseCommand):
         return "Get documentation for a tool, sub-agent, or procedural skill"
 
     async def _execute(self, args: str, context: Any) -> CommandResult:
-        """Get tool/subagent documentation."""
+        """Return the highest-priority documentation for a named target."""
         target_name, _ = parse_command_args(args)
 
         if not target_name:
             return CommandResult(error="No name provided. Use info(name=...).")
 
-        # 1. Try to load from agent folder first (user override)
+        # Creature-local documentation overrides every shared source.
         if hasattr(context, "agent_path") and context.agent_path:
             agent_path = Path(context.agent_path)
 
-            # Try tool documentation file
             tool_doc_path = agent_path / "prompts" / "tools" / f"{target_name}.md"
             if tool_doc_path.exists():
                 rendered = _render_skill_from_path(tool_doc_path)
                 if rendered is not None:
                     return CommandResult(content=rendered)
 
-            # Try subagent documentation file
             subagent_doc_path = (
                 agent_path / "prompts" / "subagents" / f"{target_name}.md"
             )
@@ -147,7 +122,7 @@ class InfoCommand(BaseCommand):
                 if rendered is not None:
                     return CommandResult(content=rendered)
 
-        # 2. Try builtin skills from package
+        # Built-in markdown precedes runtime registry fallbacks.
         rendered = _render_builtin_skill("tools", target_name)
         if rendered is not None:
             return CommandResult(content=rendered)
@@ -156,11 +131,10 @@ class InfoCommand(BaseCommand):
         if rendered is not None:
             return CommandResult(content=rendered)
 
-        # 3. Try to get tool info from registry
+        # Runtime tools may provide richer documentation than registry metadata.
         if hasattr(context, "get_tool_info"):
             tool_info = context.get_tool_info(target_name)
             if tool_info is not None:
-                # Try to get full documentation from tool instance
                 if hasattr(context, "get_tool") and context.get_tool:
                     tool = context.get_tool(target_name)
                     if tool and hasattr(tool, "get_full_documentation"):
@@ -168,23 +142,18 @@ class InfoCommand(BaseCommand):
                         if doc:
                             return CommandResult(content=doc)
 
-                # Fall back to ToolInfo documentation
+                # Registry metadata is the final tool fallback.
                 return CommandResult(
                     content=tool_info.documentation
                     or f"# {target_name}\n\n{tool_info.description}"
                 )
 
-        # 4. Try to get subagent info
         if hasattr(context, "get_subagent_info"):
             subagent_info = context.get_subagent_info(target_name)
             if subagent_info is not None:
                 return CommandResult(content=subagent_info)
 
-        # 5. Fall through to procedural skills (Cluster 4 / Qc).
-        # The controller context carries a reference to the runtime
-        # SkillRegistry when one exists; resolve the skill and render
-        # its body with a short preamble so the model can tell this is
-        # a skill rather than a registered tool.
+        # Procedural skills are distinct from registered tools in the rendered output.
         skill_content = _render_skill_info(context, target_name)
         if skill_content is not None:
             return CommandResult(content=skill_content)
@@ -210,12 +179,7 @@ def _get_job_result(context: Any, job_id: str):
 
 
 def _format_skill_for_info(doc: "SkillDoc", body: str) -> str:
-    """Render a ``SkillDoc`` body with a short ``Tags:`` preamble.
-
-    Tags are wired into the info output so that the first-class
-    ``SkillDoc.tags`` field is actually consumed by the agent — otherwise
-    it would just be parsed-and-discarded metadata.
-    """
+    """Render a skill body with its tags when present."""
     if not doc.tags:
         return body
     tag_line = "Tags: " + ", ".join(str(t) for t in doc.tags)
@@ -225,24 +189,16 @@ def _format_skill_for_info(doc: "SkillDoc", body: str) -> str:
 
 
 def _render_skill_from_path(path: Path) -> str | None:
-    """Load a skill doc from ``path`` and render its body with tags.
-
-    Falls back to the raw body via :func:`read_skill_body` if YAML parsing
-    fails, so info output never breaks on malformed frontmatter.
-    """
+    """Render parsed skill metadata, falling back to the raw markdown body."""
     doc = load_skill_doc(path)
     if doc is not None:
         return _format_skill_for_info(doc, doc.content)
-    # load_skill_doc failed (already logged). Degrade gracefully.
+    # Malformed frontmatter must not hide otherwise readable documentation.
     return read_skill_body(path)
 
 
 def _render_skill_info(context: Any, name: str) -> str | None:
-    """Resolve ``name`` against the procedural-skill registry.
-
-    Returns ``None`` when no matching skill exists so :class:`InfoCommand`
-    can fall back to its "Not found" error.
-    """
+    """Render a procedural skill or return ``None`` when it is absent."""
     registry = _lookup_skill_registry(context)
     if registry is None:
         return None
@@ -257,19 +213,17 @@ def _render_skill_info(context: Any, name: str) -> str | None:
         parts.append(f"Description: {desc}")
     if skill.paths:
         parts.append(f"Paths: {', '.join(skill.paths)}")
-    parts.append("")  # blank line
+    parts.append("")  # Separate metadata from the skill body.
     if skill.body:
         parts.append(skill.body)
     return "\n".join(parts)
 
 
 def _lookup_skill_registry(context: Any):
-    """Extract the SkillRegistry from whatever shape of context we got."""
+    """Find the skill registry across supported command-context shapes."""
     if context is None:
         return None
-    # Controller context carries the registry at ``skills_registry`` in
-    # its session.extra or via an attribute; tool contexts expose the
-    # active agent; test contexts may expose it directly.
+    # Contexts may expose the registry directly, through an agent, or a controller.
     direct = getattr(context, "skills_registry", None)
     if direct is not None:
         return direct
@@ -288,15 +242,11 @@ def _lookup_skill_registry(context: Any):
             direct = getattr(agent, "skills", None)
             if direct is not None:
                 return direct
-    # Session-based lookup.
     session = getattr(context, "session", None)
     if session is not None:
         extras = getattr(session, "extra", None) or {}
         if isinstance(extras, dict):
-            # Gate on ``is not None`` (mirroring every other lookup path
-            # above) — an *empty* SkillRegistry is falsy (``__len__`` is
-            # 0), so a truthiness check would drop a freshly-wired
-            # registry before any skill is added to it.
+            # Empty registries are valid despite being falsy.
             reg = extras.get("skills_registry")
             if reg is not None:
                 return reg
@@ -304,19 +254,13 @@ def _lookup_skill_registry(context: Any):
 
 
 def _render_builtin_skill(kind: str, name: str) -> str | None:
-    """Render a built-in skill (``tools`` or ``subagents``) by name.
-
-    Uses :func:`load_skill_doc` so we can surface tags; falls back to the
-    body-only builtin helpers if the SKILL.md fails to parse.
-    """
+    """Render built-in markdown with metadata, then use body-only helpers."""
     doc_path = BUILTIN_SKILLS_DIR / kind / f"{name}.md"
     if doc_path.exists():
         rendered = _render_skill_from_path(doc_path)
         if rendered is not None:
             return rendered
-    # Degrade to the pre-existing body-only helpers as a final fallback
-    # (used when the path itself is missing but a helper finds it via some
-    # other convention in the future).
+    # Helper lookup preserves alternate built-in storage conventions.
     if kind == "tools":
         return get_builtin_tool_doc(name)
     if kind == "subagents":
@@ -325,12 +269,7 @@ def _render_builtin_skill(kind: str, name: str) -> str | None:
 
 
 class JobsCommand(BaseCommand):
-    """
-    List running and recent background jobs.
-
-    Usage:
-        <jobs/>
-    """
+    """List currently running background jobs."""
 
     @property
     def command_name(self) -> str:
@@ -341,7 +280,7 @@ class JobsCommand(BaseCommand):
         return "List running background jobs"
 
     async def _execute(self, args: str, context: Any) -> CommandResult:
-        """List jobs."""
+        """Render the active jobs from the shared job store."""
         if not hasattr(context, "job_store"):
             return CommandResult(error="No job store available")
 
@@ -359,34 +298,7 @@ class JobsCommand(BaseCommand):
 
 
 class WaitCommand(BaseCommand):
-    """
-    Wait for a background job or sub-agent to complete.
-
-    Usage:
-        [/wait]job_id[wait/]              - Wait until job completes (up to 60s)
-        [/wait timeout="30"]job_id[wait/] - Wait up to 30 seconds
-        [/wait timeout="5"]job_id[wait/]  - Quick check (wait 5 seconds max)
-
-    The wait command blocks until:
-    - Job completes (returns result)
-    - Timeout reached (returns timeout message)
-    - Job not found (returns error)
-
-    How it works:
-    - Uses shared job_store (same as executor and subagent_manager)
-    - Polls job status every 0.5 seconds until complete or timeout
-    - Returns job result (output or error) when complete
-
-    When to use:
-    - Sub-agents always run in background; use wait to get their results
-    - Background tools (execution_mode=BACKGROUND) also need wait
-    - Direct tools don't need wait - their results come automatically
-
-    Without wait:
-    - The main agent loop reports job status ("RUNNING", then "DONE")
-    - But the model doesn't block - it continues generating
-    - Wait allows the model to explicitly block for a specific job
-    """
+    """Poll a background job until completion or a caller-specified timeout."""
 
     @property
     def command_name(self) -> str:
@@ -397,7 +309,7 @@ class WaitCommand(BaseCommand):
         return "Wait for background job/sub-agent to complete (use timeout=N for max seconds)"
 
     async def _execute(self, args: str, context: Any) -> CommandResult:
-        """Wait for job."""
+        """Return a completed result or the terminal wait state."""
         job_id, kwargs = parse_command_args(args)
 
         if not job_id:
@@ -405,7 +317,6 @@ class WaitCommand(BaseCommand):
 
         timeout = float(kwargs.get("timeout", 60.0))
 
-        # Check if job exists
         if not hasattr(context, "job_store"):
             return CommandResult(error="No job store available")
 
@@ -413,7 +324,7 @@ class WaitCommand(BaseCommand):
         if status is None:
             return CommandResult(error=f"Job not found: {job_id}")
 
-        # If already complete, return result
+        # Avoid polling jobs that already reached a terminal state.
         if status.is_complete:
             result = _get_job_result(context, job_id)
             if result:
@@ -424,9 +335,7 @@ class WaitCommand(BaseCommand):
                 )
             return CommandResult(content=f"## {job_id} - DONE (no output)")
 
-        # Wait for completion
         try:
-            # Poll for completion
             elapsed = 0.0
             interval = 0.5
             while elapsed < timeout:
@@ -458,7 +367,7 @@ class WaitCommand(BaseCommand):
             return CommandResult(content=f"## {job_id} - CANCELLED")
 
 
-# Default command instances
+# Shared stateless command instances.
 read_command = ReadCommand()
 info_command = InfoCommand()
 jobs_command = JobsCommand()

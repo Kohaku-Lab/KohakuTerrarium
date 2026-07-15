@@ -1,14 +1,8 @@
-"""sqlite connection factory + lifecycle for the auth DB.
+"""Own SQLite connections and migration state for authentication data.
 
-Single connection per request — sqlite3 is thread-safe (with the
-appropriate ``check_same_thread=False``) when used carefully; we
-deliberately use one connection per call to keep transaction
-ownership obvious in the route handlers.
-
-The DB file lives at ``<config_dir>/auth.db``.  When ``KT_AUTH_DB``
-is set, that path is used instead (tests / Docker volume binds rely
-on this).  ``WAL`` + ``foreign_keys ON`` are set on every connection
-open because sqlite forgets the foreign-keys pragma per-connection.
+Each caller receives a distinct connection so transaction ownership stays local.
+Every connection enables foreign keys and WAL because those guarantees are not
+fully inherited from prior opens. ``KT_AUTH_DB`` overrides the default config path.
 """
 
 import os
@@ -26,13 +20,7 @@ logger = get_logger(__name__)
 
 
 def auth_db_path() -> Path:
-    """Resolve the auth.db location fresh on every call.
-
-    ``KT_AUTH_DB`` overrides; else falls back to
-    ``<config_dir>/auth.db``.  Honouring the env var on every call
-    keeps tests' tmp-dir isolation intact (the autouse fixture in
-    ``tests/conftest.py`` redirects ``KT_CONFIG_DIR`` per test).
-    """
+    """Resolve the live auth database path with ``KT_AUTH_DB`` precedence."""
     explicit = os.environ.get("KT_AUTH_DB")
     if explicit:
         return Path(explicit)
@@ -40,24 +28,15 @@ def auth_db_path() -> Path:
 
 
 def open_connection(path: Path | None = None) -> sqlite3.Connection:
-    """Open a fresh sqlite connection with KT's standard pragmas.
-
-    - ``foreign_keys = ON`` so ``ON DELETE CASCADE`` actually cascades.
-    - ``journal_mode = WAL`` for concurrent readers + writers.
-    - ``row_factory = sqlite3.Row`` so handlers can index by column name.
-
-    The caller owns the connection and must close it.  For request-scoped
-    use, :func:`connection` is a context-manager wrapper.
-    """
+    """Open a caller-owned connection with foreign keys, WAL, and named rows."""
     target = path or auth_db_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(
         target,
-        # check_same_thread=False so the dependency can hand off the
-        # conn to background tasks if needed.  We still keep one conn
-        # per request to dodge cross-thread transaction confusion.
+        # Thread handoff is permitted, but each request retains its own connection
+        # so transactions are never shared across concurrent request work.
         check_same_thread=False,
-        isolation_level=None,  # autocommit; route handlers wrap explicit txns
+        isolation_level=None,  # Handlers delimit transactions explicitly.
     )
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
@@ -67,11 +46,7 @@ def open_connection(path: Path | None = None) -> sqlite3.Connection:
 
 @contextmanager
 def connection(path: Path | None = None) -> Iterator[sqlite3.Connection]:
-    """Context-manager wrapper around :func:`open_connection`.
-
-    Closes the connection on exit, swallowing close errors so the
-    actual handler exception (if any) propagates.
-    """
+    """Close a caller-owned connection without masking an active handler error."""
     conn = open_connection(path)
     try:
         yield conn
@@ -82,22 +57,14 @@ def connection(path: Path | None = None) -> Iterator[sqlite3.Connection]:
             logger.warning("auth.db: connection close raised", exc_info=True)
 
 
-# ---------------------------------------------------------------------------
-# Process-level migration state — applied once per (db path) per process.
-# ---------------------------------------------------------------------------
+# Migrations run at most once per resolved database path in each process.
 
 _migration_lock = threading.Lock()
 _migrated_paths: set[str] = set()
 
 
 def ensure_migrated(path: Path | None = None) -> Path:
-    """Apply pending migrations against the resolved DB path.
-
-    Called from the FastAPI lifespan startup hook (Phase F) so the DB
-    is ready before any request hits the auth routes.  Idempotent
-    in-process: the first call for a given path runs migrations, every
-    subsequent call short-circuits.
-    """
+    """Apply pending migrations once per resolved database path and process."""
     target = path or auth_db_path()
     key = str(target.resolve())
     with _migration_lock:
@@ -110,11 +77,7 @@ def ensure_migrated(path: Path | None = None) -> Path:
 
 
 def _reset_migration_state_for_tests() -> None:
-    """Drop the in-process migration cache.
-
-    Test fixtures call this between cases when they flip ``KT_AUTH_DB``
-    so the next ``ensure_migrated`` re-runs against the new file.
-    """
+    """Clear cached migration paths so isolated databases can migrate again."""
     with _migration_lock:
         _migrated_paths.clear()
 

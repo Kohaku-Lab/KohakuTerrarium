@@ -27,19 +27,11 @@ def init_plugins(
     *,
     strict: bool = False,
 ) -> PluginManager:
-    """Create a PluginManager with config plugins + discovered packages.
+    """Load configured plugins and register discovered plugins as disabled.
 
-    1. Plugins listed in config are loaded and enabled.  With
-       ``strict`` (the programmatic default at the Agent layer), a
-       config-listed plugin that fails to load raises
-       :class:`ConfigError` — a silently dropped plugin is a policy
-       hole (sandbox / budget / permgate gone without a trace).
-    2. Plugins found in installed packages (but not in config) are
-       registered as available but disabled — user can enable at
-       runtime.  Discovery stays lenient even under ``strict``: a
-       broken *unrelated* installed package must not block this agent.
-
-    Returns a PluginManager (possibly empty).
+    Strict mode rejects configured plugin failures because silently dropping a
+    policy plugin is unsafe. Discovery remains lenient so unrelated broken
+    packages cannot block the agent.
     """
     manager = PluginManager()
     merged_configs = _merge_default_plugin_specs(
@@ -47,50 +39,30 @@ def init_plugins(
     )
     config_names: set[str] = set()
 
-    # Pre-import every installed package so config-listed package
-    # plugins (``type: package`` with module like ``kt_biome.plugins.X``)
-    # resolve in Phase 1. Without this, packages installed via ``kt
-    # install`` (symlinked / copied into ``~/.kohakuterrarium/packages``
-    # but NOT pip-installed onto sys.path) fail to import in Phase 1 —
-    # config plugins land as None, get re-discovered by Phase 2, and
-    # arrive registered-but-disabled. The frontend Modules panel then
-    # shows config-enabled plugins as Off.
+    # Make package modules importable before loading configured package plugins.
     _pre_import_packages_for_config(merged_configs)
 
-    # Phase 1: Load plugins from config (enabled)
+    # Configured plugins are active.
     for cfg in merged_configs:
         plugin = _load_one(cfg, loader, strict=strict)
         if plugin:
             config_names.add(plugin.name)
             manager.register(plugin)
 
-    # Phase 1.5: Discover built-in catalog plugins not in config
-    # (registered as disabled — visible in the frontend Plugins tab
-    # with an "Enable" button).
+    # Unconfigured catalog plugins remain available for runtime enablement.
     _discover_catalog_plugins(manager, config_names, loader)
 
-    # Phase 2: Discover plugins from installed packages (disabled if not in config)
+    # Unconfigured package plugins also remain available but inactive.
     _discover_package_plugins(manager, config_names, loader)
 
     return manager
 
 
 def _pre_import_packages_for_config(plugin_configs: list[dict[str, Any]]) -> None:
-    """Make every installed package's Python modules importable.
+    """Expose installed package modules before loading configured plugins.
 
-    Called before Phase 1 so config plugins like
-    ``module: kt_biome.plugins.context_files`` import successfully even
-    when the package was installed via ``kt install`` (which symlinks
-    or copies into ``~/.kohakuterrarium/packages/``) rather than
-    ``pip install -e``. Without this, Phase 1 would fail on those
-    plugins and Phase 2 would re-discover them as registered-but-disabled.
-
-    The list-all approach is intentional: config plugins reference
-    packages by Python module path (``kt_biome.plugins.X``), not by
-    package name, so we can't know in advance which packages a config
-    needs. Adding all installed packages to ``sys.path`` is cheap and
-    idempotent (``ensure_package_importable`` early-exits on
-    already-added paths).
+    Config entries identify Python modules rather than package names, so every
+    installed package must be made importable when any package plugin is used.
     """
     if not plugin_configs:
         return
@@ -116,14 +88,7 @@ def _pre_import_packages_for_config(plugin_configs: list[dict[str, Any]]) -> Non
 def _discover_catalog_plugins(
     manager: PluginManager, already_loaded: set[str], loader: ModuleLoader | None
 ) -> None:
-    """Register built-in catalog plugins (e.g. permgate, budget) as
-    disabled-but-available when they're not already loaded via config.
-
-    This is the third tier of plugin discovery alongside config (Phase
-    1) and package discovery (Phase 2): the frontend's plugin list
-    shows everything in the agent's plugin manager, so registering
-    catalog entries here is what makes them opt-in via UI.
-    """
+    """Register unconfigured built-in plugins as disabled but available."""
     for spec in list_catalog_plugins():
         name = spec.get("name", "")
         if not name or name in already_loaded:
@@ -131,7 +96,7 @@ def _discover_catalog_plugins(
         plugin = _load_one(spec, loader)
         if plugin:
             manager.register(plugin)
-            manager.disable(name)  # available but not active
+            manager.disable(name)  # Discovery must not activate policy implicitly.
 
 
 def _merge_default_plugin_specs(
@@ -159,12 +124,7 @@ def _load_one(
     *,
     strict: bool = False,
 ) -> BasePlugin | None:
-    """Load a single plugin from a config entry.
-
-    Lenient mode returns ``None`` on any failure (logged); ``strict``
-    raises :class:`ConfigError` so a config-listed plugin can never be
-    silently dropped.
-    """
+    """Load one plugin, raising configured failures only in strict mode."""
     if isinstance(cfg, str):
         cfg = {"name": cfg}
 
@@ -173,8 +133,7 @@ def _load_one(
     class_name = cfg.get("class", cfg.get("class_name", ""))
     options = cfg.get("options", {})
 
-    # If only name given, resolve from the built-in catalog first, then
-    # fall back to plugins shipped by installed packages.
+    # Name-only entries prefer the built-in catalog before installed packages.
     if name and not module:
         resolved = _resolve_from_catalog(name) or _resolve_from_packages(name)
         if resolved:
@@ -203,10 +162,7 @@ def _load_one(
                 module, class_name, module_type=ptype, options=options
             )
         else:
-            # SAME constructor contract as the loader path:
-            # ``cls(**options)``.  The old ``cls(options=options)``
-            # spelling here meant a plugin worked on one load path and
-            # was silently dropped on the other.
+            # Both load paths pass options as constructor keyword arguments.
             mod = importlib.import_module(module)
             cls = getattr(mod, class_name)
             plugin = cls(**options) if options else cls()
@@ -255,7 +211,7 @@ def _discover_package_plugins(
     for pkg in packages:
         if not pkg.get("plugins"):
             continue
-        # Make the package's Python modules importable
+        # Package discovery may target modules outside the active environment.
         ensure_package_importable(pkg["name"])
         for plugin_def in pkg.get("plugins", []):
             if not isinstance(plugin_def, dict):
@@ -263,11 +219,10 @@ def _discover_package_plugins(
             name = plugin_def.get("name", "")
             if not name or name in already_loaded:
                 continue
-            # Try to load it
             plugin = _load_one(plugin_def, loader)
             if plugin:
                 manager.register(plugin)
-                manager.disable(name)  # Available but not active
+                manager.disable(name)  # Discovery must not activate policy implicitly.
 
 
 def _resolve_from_catalog(name: str) -> tuple[str, str] | None:

@@ -137,10 +137,8 @@ def info_cli(args) -> int:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
 
-    # If the spec carried an explicit source alias (``@fork/x``),
-    # preserve it in the printed Install hint — otherwise the user
-    # copies back ``kt install @x`` which silently routes to the
-    # default source's copy.
+    # Preserve an explicit source alias so the install hint cannot resolve to a
+    # same-named package from the default source.
     src_alias, _, _ = marketplace.parse_spec(spec)
     install_spec = f"@{src_alias}/{entry.name}" if src_alias else f"@{entry.name}"
 
@@ -169,12 +167,14 @@ def info_cli(args) -> int:
 
 
 def _truncate(s: str, n: int) -> str:
+    """Truncate text to a display width with an ellipsis."""
     if len(s) <= n:
         return s
     return s[: n - 1].rstrip() + "…"
 
 
 def _entry_to_dict(entry: marketplace.MarketplaceEntry) -> dict[str, object]:
+    """Convert a marketplace entry to its JSON output shape."""
     return {
         "name": entry.name,
         "repo": entry.repo,
@@ -200,7 +200,6 @@ def _entry_to_dict(entry: marketplace.MarketplaceEntry) -> dict[str, object]:
     }
 
 
-# Top-level dispatcher — wired from cli/__init__.py's COMMANDS dict
 def marketplace_cli(args) -> int:
     """Dispatch ``kt marketplace <subcommand>`` based on ``args.marketplace_command``."""
     sub = getattr(args, "marketplace_command", None)

@@ -1,12 +1,7 @@
-"""Legacy text-format controller command for procedural skills.
+"""Expose procedural skills to legacy text-format controllers.
 
-Native-capable models should use the built-in ``skill`` tool. This
-command remains for bracket/XML/custom text tool formats and shares the
-same registry lookup/rendering behavior.
-
-Note: ``disable-model-invocation: true`` hides a skill from the
-auto-invoke index (aggregator.py) but explicit skill invocation is still
-allowed (spec 4.4).
+Native models use the ``skill`` tool. Disabling model invocation hides index
+hints but does not block explicit skill requests.
 """
 
 from typing import Any

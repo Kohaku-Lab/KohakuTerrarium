@@ -3,11 +3,8 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
-# ── Modal Screens ─────────────────────────────────────────────
-
-
 class SelectionModal(ModalScreen[str | None]):
-    """Arrow-key selection modal. Returns selected value or None on cancel."""
+    """Collect one option through keyboard navigation."""
 
     DEFAULT_CSS = """
     SelectionModal {
@@ -44,6 +41,8 @@ class SelectionModal(ModalScreen[str | None]):
         super().__init__()
         self._title = title
         self._options = options
+        # Selection is driven by each option's selected flag; current is retained
+        # for compatibility with command renderers using this modal contract.
         self._current = current
 
     def compose(self):
@@ -77,7 +76,7 @@ class SelectionModal(ModalScreen[str | None]):
 
 
 class ConfirmModal(ModalScreen[bool]):
-    """Yes/No confirmation modal. Returns True or False."""
+    """Collect a yes-or-no confirmation."""
 
     DEFAULT_CSS = """
     ConfirmModal {

@@ -1,15 +1,8 @@
-"""Read-only FTS5 / vector / hybrid memory search over a saved session.
+"""Search saved-session memory with FTS, vector, or hybrid retrieval.
 
-Verbatim port of ``api/routes/sessions.py:search_session_memory``. The
-HTTP route layer resolves the session name to a path, picks up the
-process-level :class:`Terrarium` engine (so a live creature's store
-can be reused), and delegates the search to this module.
-
-The companion *write* path — building / rebuilding the vector index —
-lives in :mod:`studio.sessions.memory_build`. ``build_embeddings``
-below is kept as a thin alias for back-compat (the CLI's
-``kt embedding`` and older tests both import it from here); new
-callers should use ``memory_build.build_index`` directly.
+Live stores can be reused through a process-local Terrarium engine. Index builds
+live in :mod:`studio.sessions.memory_build`; :func:`build_embeddings` remains a
+compatibility alias for existing CLI and Python callers.
 """
 
 from pathlib import Path
@@ -125,8 +118,7 @@ async def search_session_memory(
     if not path.exists():
         raise SessionNotFoundError(f"Session not found: {path}")
     try:
-        # Find the live creature (if running) to reuse its store
-        # and embedder — same pattern as the search_memory builtin tool.
+        # Reuse a live store and its agent configuration when the session is running.
         live_agent, live_store = _live_store_for_path(engine, path)
 
         if live_store:
@@ -135,10 +127,7 @@ async def search_session_memory(
         else:
             store = SessionStore(path)
 
-        # FTS-only queries do not touch the embedder; skipping
-        # ``create_embedder`` here also dodges a slow / failing
-        # HuggingFace model fetch on first run (Windows CI has been
-        # observed timing out inside ``hf_hub_download``).
+        # FTS does not need an embedder, avoiding unnecessary model downloads.
         if mode == "fts":
             embedder = None
         else:
@@ -146,20 +135,19 @@ async def search_session_memory(
             try:
                 embedder = create_embedder(embed_config)
             except Exception as e:
-                _ = e  # embedding unavailable, continue without
+                _ = e  # Search can fall back to FTS when embedding is unavailable.
                 embedder = None
 
         memory = SessionMemory(str(path), embedder=embedder)
 
-        # Index unindexed events (idempotent — skips already indexed)
+        # Incremental indexing skips events already represented in memory.
         meta = store.load_meta()
         for agent_name in meta.get("agents", []):
             events = store.get_events(agent_name)
             if events:
                 memory.index_events(agent_name, events)
 
-        # Legacy graceful fallback (see docstring): the library search
-        # is strict; the HTTP surface keeps the old 200-with-FTS answer.
+        # Preserve the adapter contract by degrading unsupported semantic requests to FTS.
         effective_mode = mode
         if effective_mode not in ("auto", "fts", "semantic", "hybrid"):
             logger.warning("Unknown search mode, falling back to FTS", requested=mode)
@@ -170,17 +158,13 @@ async def search_session_memory(
 
         results = memory.search(query=q, mode=effective_mode, k=k, agent=agent)
 
-        # Release the SessionMemory's own SQLite handles — without this
-        # they linger until GC and (on Windows) block a later delete of
-        # the .kohakutr file. The shared SessionStore is closed only
-        # when it isn't a live creature's store.
+        # Close owned SQLite handles promptly so Windows can delete stopped sessions;
+        # a live creature retains ownership of its shared SessionStore.
         memory.close()
         if not live_store:
             store.close(update_status=False)
     except Exception as e:
-        # Log the FULL traceback so we can diagnose failures (the
-        # error detail is one line and gets surfaced to the caller /
-        # client; the traceback is what we actually need server-side).
+        # Callers receive a concise typed error while logs retain the traceback.
         logger.exception(
             "memory_search failed",
             path=str(path),

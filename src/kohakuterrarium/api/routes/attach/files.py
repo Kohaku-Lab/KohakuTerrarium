@@ -1,10 +1,7 @@
-"""Workspace files HTTP route shell.
+"""Expose workspace file operations through compatibility HTTP routes.
 
-Thin parse-and-call wrapper over
-:mod:`kohakuterrarium.studio.attach.workspace_files`. Mounted at
-``/api/files/*`` from ``api/app.py`` so the legacy ``filesAPI``
-frontend callers (``filesAPI.browseDirectories``, ``getTree``,
-``readFile``, ``writeFile``, etc.) keep their existing URL shapes.
+The handlers delegate filesystem policy and behavior to the Studio attachment
+layer while preserving the URL shapes expected by existing frontend callers.
 """
 
 from fastapi import APIRouter
@@ -17,10 +14,10 @@ router = APIRouter()
 
 @router.get("/tree")
 async def get_file_tree(root: str, depth: int = 1):
-    """Return a nested file tree starting from the given root directory.
+    """Return a bounded file tree for lazy branch expansion.
 
-    Defaults to ``depth=1`` for lazy expansion — the frontend re-calls
-    this endpoint per branch as the user clicks expand chevrons.
+    The default depth of one lets callers request deeper branches only when the
+    user expands them.
     """
     return await workspace_files.get_file_tree(root, depth)
 

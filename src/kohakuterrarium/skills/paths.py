@@ -1,14 +1,4 @@
-"""Auto-activate skills on user_input via ``paths:`` frontmatter.
-
-Spec D.6 + Qd: on every user input, scan the cwd for files that match
-any enabled skill's ``paths`` globs. For each match, inject a short
-hint into the next ``pre_llm_call`` asking the model to consider the
-explicit ``skill`` tool if the task matches.
-
-Kept cheap (per spec): at most one cwd scan per user_input, cached
-on ``(cwd, top-level mtime)`` so re-evaluating within the same turn
-is a no-op.
-"""
+"""Match skill path globs against a bounded, cached working-tree scan."""
 
 import fnmatch
 from dataclasses import dataclass
@@ -32,8 +22,7 @@ class _CacheKey:
 
 
 class SkillPathScanner:
-    """Stateful helper — scans cwd once per (cwd, mtime) and caches the
-    matching skill set."""
+    """Cache bounded file scans by working directory and top-level mtime."""
 
     def __init__(
         self,
@@ -45,16 +34,12 @@ class SkillPathScanner:
         self._max_depth = max_depth
         self._cache: tuple[_CacheKey, list[str]] | None = None
 
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
-
     def matching_skills(
         self,
         registry: SkillRegistry,
         cwd: Path,
     ) -> list[Skill]:
-        """Return enabled skills whose ``paths`` match any file under cwd."""
+        """Return enabled skills whose path globs match a scanned file."""
         relevant = [s for s in registry.list_enabled() if s.paths]
         if not relevant:
             return []
@@ -68,7 +53,7 @@ class SkillPathScanner:
         return matches
 
     def format_hint(self, matched: Iterable[Skill]) -> str:
-        """Build the hint message for matched skills (one short paragraph)."""
+        """Format a concise hint for matched, model-invocable skills."""
         matched = [s for s in matched if not s.invocation_blocked]
         if not matched:
             return ""
@@ -84,10 +69,6 @@ class SkillPathScanner:
             desc = desc_lines[0][:200] if desc_lines else ""
             lines.append(f"- **{skill.name}** — matches {patterns}. {desc}")
         return "\n".join(lines)
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
 
     def _scan(self, cwd: Path) -> list[str]:
         if not cwd.exists() or not cwd.is_dir():
@@ -105,11 +86,7 @@ class SkillPathScanner:
 
 
 def _list_files(root: Path, max_depth: int, max_files: int) -> list[str]:
-    """List repo-relative file paths, breadth-first, bounded.
-
-    Skips hidden dirs and common heavy dirs (``node_modules``,
-    ``.git``, ``venv``, etc.) to keep the scan cheap.
-    """
+    """List relative files breadth-first while bounding depth and count."""
     skip_dirs = {
         ".git",
         ".venv",
@@ -134,7 +111,6 @@ def _list_files(root: Path, max_depth: int, max_files: int) -> list[str]:
             if len(out) >= max_files:
                 break
             if entry.name.startswith("."):
-                # Skip hidden but keep scanning the dotfile-free subtree root.
                 if entry.is_dir() and entry.name in skip_dirs:
                     continue
                 if entry.is_dir():
@@ -155,22 +131,17 @@ def _list_files(root: Path, max_depth: int, max_files: int) -> list[str]:
 
 
 def _any_match(files: list[str], pattern: str) -> bool:
-    """Return True if any file matches the glob pattern.
-
-    Supports ``**`` recursive globs and basename-only matches.
-    """
+    """Return whether a path, normalized recursive glob, or basename matches."""
     pattern = pattern.strip()
     if not pattern:
         return False
-    # fnmatch does not understand "**" natively; convert it to "*" so a
-    # pattern like ``src/**/*.py`` matches ``src/foo/bar.py``.
+    # ``fnmatch`` lacks recursive-glob semantics, so test a normalized form too.
     normalised = pattern.replace("**/", "").replace("/**", "")
     for path in files:
         if fnmatch.fnmatchcase(path, pattern):
             return True
         if fnmatch.fnmatchcase(path, normalised):
             return True
-        # Basename match so patterns like "*.pdf" match "subdir/foo.pdf".
         base = path.rsplit("/", 1)[-1]
         if fnmatch.fnmatchcase(base, pattern):
             return True

@@ -38,7 +38,7 @@ THINKING_FRAMES = [
 
 
 class AgentTUI(App):
-    """Textual app for KohakuTerrarium agent interaction."""
+    """Run the Textual interface for agent interaction."""
 
     TITLE = "KohakuTerrarium"
     CSS = """
@@ -66,10 +66,7 @@ class AgentTUI(App):
         Binding("ctrl+c", "quit", "Quit", show=True),
         Binding("ctrl+l", "clear_output", "Clear", show=True),
         Binding("escape", "interrupt", "Interrupt", show=True),
-        # ``priority=True`` makes the app-level handler run BEFORE the
-        # focused widget gets the key. ChatInput is a TextArea that
-        # otherwise eats function keys via its generic input handler,
-        # which is why F2/F3 went nowhere when chat input had focus.
+        # Priority lets app shortcuts bypass the focused TextArea's key handler.
         Binding("f2", "open_modules", "Modules", show=True, priority=True),
         Binding("f3", "open_model_picker", "Model", show=True, priority=True),
         Binding("f4", "open_drives", "Drives", show=True, priority=True),
@@ -83,8 +80,7 @@ class AgentTUI(App):
     ):
         super().__init__(**kwargs)
         self.agent_name = agent_name
-        self.tui_session: Any = None  # Set by TUISession.start()
-        # Terrarium tabs: ["root", "swe", "reviewer", "#tasks", "#review"]
+        self.tui_session: Any = None
         self._terrarium_tabs = terrarium_tabs
         self._input_queue: asyncio.Queue[str] = asyncio.Queue()
         self._stop_event = asyncio.Event()
@@ -93,9 +89,11 @@ class AgentTUI(App):
         self._mounted_event = asyncio.Event()
         self._thinking_active = False
         self._thinking_thread: threading.Thread | None = None
+        # Callbacks receive no arguments for interrupt, (job_id, job_name) for
+        # cancellation, and job_id for background promotion.
         self.on_interrupt: Any = None
-        self.on_cancel_job: Any = None  # Callable[[str, str], None] or None
-        self.on_promote_job: Any = None  # Callable[[str], bool] or None
+        self.on_cancel_job: Any = None
+        self.on_promote_job: Any = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -135,12 +133,12 @@ class AgentTUI(App):
         text = event.value.strip()
         if not text:
             return
-        # Slash commands: don't show in chat — command system handles display
+        # Slash-command output is rendered by the command system.
         if text.startswith("/"):
             self._input_queue.put_nowait(text)
             return
         if self._is_processing:
-            # Agent is busy: show in queued area (above input, not in chat)
+            # Busy turns retain new input visibly until processing resumes.
             qw = QueuedMessage(text)
             self._queued_widgets.append(qw)
             try:
@@ -157,7 +155,7 @@ class AgentTUI(App):
         self._input_queue.put_nowait(text)
 
     def on_chat_input_command_hint(self, event: ChatInput.CommandHint) -> None:
-        """Show command completion hints in the quick-status line."""
+        """Display command completion hints in the status line."""
         try:
             status = self.query_one("#quick-status", Static)
             if event.hint:
@@ -168,27 +166,23 @@ class AgentTUI(App):
             logger.warning("Failed to update command hint", error=str(e), exc_info=True)
 
     def on_chat_input_edit_queued(self, event: ChatInput.EditQueued) -> None:
-        """Pull the last queued message back into the input box for editing."""
+        """Restore the latest queued message to the input editor."""
         if not self._queued_widgets:
             return
         qw = self._queued_widgets.pop()
         text = qw.message_text
-        # Remove from chat and queue
         qw.remove()
-        # Drain this message from the asyncio queue
         try:
-            # Queue is FIFO; the message we want is the last one.
-            # Rebuild queue without the last item.
+            # Preserve FIFO order while removing the most recently queued item.
             items = []
             while not self._input_queue.empty():
                 items.append(self._input_queue.get_nowait())
             if items:
-                items.pop()  # remove the last (most recent queued message)
+                items.pop()
             for item in items:
                 self._input_queue.put_nowait(item)
         except Exception as e:
             logger.warning("Failed to rebuild input queue", error=str(e), exc_info=True)
-        # Put text back in input box
         try:
             inp = self.query_one("#input-box", ChatInput)
             inp.clear()
@@ -200,7 +194,7 @@ class AgentTUI(App):
             )
 
     def on_load_older_button_clicked(self, event: LoadOlderButton.Clicked) -> None:
-        """Handle 'Load older' button click."""
+        """Load older messages into the active chat."""
         if self.tui_session:
             target = self.get_active_tab_name() if self._terrarium_tabs else ""
             self.tui_session.load_older_batch(target)
@@ -208,24 +202,23 @@ class AgentTUI(App):
     def on_running_panel_cancel_requested(
         self, event: RunningPanel.CancelRequested
     ) -> None:
-        """Handle click-to-cancel on a running job."""
+        """Forward a running job's cancellation request."""
         if self.on_cancel_job:
             self.on_cancel_job(event.job_id, event.job_name)
 
     def on_running_panel_promote_requested(
         self, event: RunningPanel.PromoteRequested
     ) -> None:
-        """Handle click-to-promote on a running direct job."""
+        """Forward a running job's background-promotion request."""
         if self.on_promote_job:
             self.on_promote_job(event.job_id)
 
     def _get_active_chat(self) -> VerticalScroll | None:
-        """Get the currently visible chat scroll widget."""
+        """Return the currently visible chat scroll."""
         try:
             if self._terrarium_tabs:
                 tabs = self.query_one("#chat-tabs", TabbedContent)
                 active = tabs.active
-                # active is like "tab-root", extract the id suffix
                 if active:
                     scroll_id = active.replace("tab-", "chat-")
                     return self.query_one(f"#{scroll_id}", VerticalScroll)
@@ -237,12 +230,12 @@ class AgentTUI(App):
             return None
 
     def get_active_tab_name(self) -> str:
-        """Get the active tab name (e.g. 'root', 'swe', '#tasks')."""
+        """Return the active tab name."""
         if not self._terrarium_tabs:
             return ""
         try:
             tabs = self.query_one("#chat-tabs", TabbedContent)
-            active_id = tabs.active  # "tab-root"
+            active_id = tabs.active
             if active_id:
                 return _id_to_name(active_id.replace("tab-", ""))
         except Exception as e:
@@ -260,16 +253,12 @@ class AgentTUI(App):
 
     def action_quit(self) -> None:
         self._stop_event.set()
-        self._input_queue.put_nowait("")  # empty string signals exit
+        # Empty input wakes the consumer and is its shutdown sentinel.
+        self._input_queue.put_nowait("")
         self.exit()
 
     def _active_tab_agent(self) -> Any:
-        """Agent behind the ACTIVE tab, falling back to ``host_agent``.
-
-        Multi-creature sessions bind each tab to its own creature; the
-        F2/F3 modals must act on the creature the user is looking at,
-        not the launch-time focus agent.
-        """
+        """Resolve the active tab's agent, falling back to the host agent."""
         if not self.tui_session:
             return None
         resolver = getattr(self.tui_session, "agent_for_tab", None)
@@ -284,29 +273,22 @@ class AgentTUI(App):
         return getattr(self.tui_session, "host_agent", None)
 
     def action_open_modules(self) -> None:
-        """Push the Modules modal screen (F2 keybinding)."""
+        """Open the module manager for the active agent."""
         agent = self._active_tab_agent()
         if agent is None:
             return
         self.push_screen(ModulesModal(agent))
 
     def action_open_model_picker(self) -> None:
-        """Push the model-picker modal (F3 keybinding)."""
+        """Open the model picker for the active agent."""
         agent = self._active_tab_agent()
         if agent is None:
             return
         self.push_screen(ModelPickerModal(agent))
 
     def action_open_drives(self) -> None:
-        """Push the Drive record panel (F4 keybinding + command palette).
-
-        The panel scopes ``assigned to me`` to the focused creature and builds a
-        service from the engine wired onto the session; without an engine it
-        degrades to a runtime-unavailable notice (the Settings tab still works).
-        """
-        # Lazy import: DriveScreen transitively imports terrarium.*/studio, whose
-        # package __init__ pulls builtins.outputs -> tui.output -> tui.session, so
-        # a module-top import here is a runtime import cycle (allowlisted).
+        """Open the drive panel scoped to the focused creature."""
+        # A module-level import would create a cycle through TUI session imports.
         from kohakuterrarium.builtins.tui.widgets.drive_panel import DriveScreen
 
         session = self.tui_session
@@ -317,14 +299,14 @@ class AgentTUI(App):
         )
 
     def _focused_creature_id(self) -> str:
-        """Creature id behind the active tab (channel tabs fall back to focus)."""
+        """Return the active creature ID, falling back from channel tabs."""
         active = self.get_active_tab_name() if self._terrarium_tabs else ""
         if active and not active.startswith("#"):
             return active
         return self._terrarium_tabs[0] if self._terrarium_tabs else ""
 
     def get_system_commands(self, screen: Screen):
-        """Add a Drives entry to the Ctrl+P command palette."""
+        """Add the drive panel to the command palette."""
         yield from super().get_system_commands(screen)
         yield SystemCommand(
             "Drives", "Open the Drive record + settings panel", self.action_open_drives
@@ -333,15 +315,12 @@ class AgentTUI(App):
     def on_tabbed_content_tab_activated(
         self, event: TabbedContent.TabActivated
     ) -> None:
-        """Tab switched — re-render the session panel's model line for
-        the newly visible creature."""
+        """Refresh session details for the newly active tab."""
         if not self.tui_session:
             return
         refresh = getattr(self.tui_session, "refresh_model_for_tab", None)
         if callable(refresh):
             refresh(self.get_active_tab_name())
-
-    # ── Thinking animation ──────────────────────────────────────
 
     def start_thinking_animation(self) -> None:
         self._thinking_active = True
@@ -386,18 +365,15 @@ class AgentTUI(App):
             logger.warning("Failed to clear status", error=str(e), exc_info=True)
 
 
-# ── Helpers ─────────────────────────────────────────────────────
-
-
 def _safe_id(name: str) -> str:
-    """Convert tab name to CSS-safe ID. '#tasks' -> 'ch_tasks'."""
+    """Convert a tab name to a CSS-safe ID."""
     if name.startswith("#"):
         return "ch_" + name[1:].replace("-", "_")
     return name.replace("-", "_")
 
 
 def _id_to_name(safe: str) -> str:
-    """Reverse of _safe_id. 'ch_tasks' -> '#tasks'."""
+    """Convert a CSS-safe tab ID back to its name."""
     if safe.startswith("ch_"):
         return "#" + safe[3:]
     return safe

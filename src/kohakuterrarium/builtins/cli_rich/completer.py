@@ -17,14 +17,7 @@ from kohakuterrarium.llm.presets import iter_all_presets
 
 
 def _model_completions(prefix: str, agent: Any | None = None) -> list[tuple[str, str]]:
-    """Suggest LLM profile names for /model.
-
-    Suggestions use ``provider/name`` form — the unambiguous identifier
-    under the (provider, name) hierarchy. A bare-name prefix match still
-    works because ``provider/name`` starts with the provider, so users
-    typing ``claude-opus`` also see ``anthropic/claude-opus-4.7`` and
-    ``openrouter/claude-opus-4.7``.
-    """
+    """Suggest provider-qualified model profiles, also matching bare names."""
     out: list[tuple[str, str]] = []
     for provider, name, data in iter_all_presets():
         identifier = f"{provider}/{name}"
@@ -72,7 +65,6 @@ def _plugin_completions(prefix: str, agent: Any | None = None) -> list[tuple[str
     return suggestions
 
 
-# Built-in argument completers — keyed by canonical command name.
 _ARG_COMPLETERS = {
     "model": _model_completions,
     "plugin": _plugin_completions,
@@ -84,7 +76,6 @@ class SlashCommandCompleter(Completer):
     """prompt_toolkit Completer for builtin slash commands and arguments."""
 
     def __init__(self, registry: dict | None = None, agent: Any | None = None):
-        # registry: name -> command instance (with .name, .description, .aliases)
         self._registry = registry or {}
         self._agent = agent
 
@@ -99,7 +90,6 @@ class SlashCommandCompleter(Completer):
         if not text.startswith("/"):
             return
 
-        # Past the command name → argument completion
         if " " in text:
             cmd_part, _, arg_part = text[1:].partition(" ")
             cmd_name = cmd_part.lower()
@@ -109,7 +99,7 @@ class SlashCommandCompleter(Completer):
             try:
                 suggestions = arg_completer(arg_part, self._agent)
             except Exception as e:
-                _ = e  # fallback: completer must not raise into prompt_toolkit
+                _ = e  # Completion failures must not escape into prompt_toolkit.
                 return
             for value, meta in suggestions:
                 yield Completion(
@@ -120,8 +110,7 @@ class SlashCommandCompleter(Completer):
                 )
             return
 
-        # Command name completion
-        prefix = text[1:].lower()  # Strip leading "/"
+        prefix = text[1:].lower()
         seen: set[str] = set()
         for name, cmd in self._registry.items():
             if name.startswith(prefix):

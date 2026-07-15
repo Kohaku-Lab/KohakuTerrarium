@@ -1,9 +1,7 @@
 """``kt admin show-host-qr`` — QR-code rendering of the host URL.
 
-Pulled out of ``cli.admin`` so the parent stays under the file-size
-budget.  The verb itself is dispatched from ``admin_cli`` in
-``admin.py``; this module owns the implementation + URI helpers
-that the QR scanner Vue component decodes.
+The verb is dispatched from ``admin_cli``; this module owns QR rendering
+and the URI helpers decoded by the scanner UI.
 """
 
 import io
@@ -52,10 +50,7 @@ def show_host_qr(url: str, yes: bool) -> int:
     uri = build_ktconnect_uri(resolved_url, cfg.host_token)
 
     qr = segno.make(uri, error="m")
-    # Buffer segno's unicode-block output before writing — Windows
-    # cp950 cmd can't render U+2580 et al.  On UTF-8 stdouts (every
-    # Linux / macOS / mobile-app shell) we pass through verbatim;
-    # on cp950 we fall back to ASCII.
+    # Buffer Unicode output so legacy Windows encodings can fall back to ASCII.
     buf = io.StringIO()
     qr.terminal(out=buf, compact=True, border=1)
     output = buf.getvalue()
@@ -83,9 +78,7 @@ def default_host_url() -> str:
     obvious 127.0.0.1 link and can pass ``--url`` explicitly to
     fix it."""
     port = int(os.environ.get("KT_SERVE_PORT", "8001"))
-    # Trick: open a UDP socket toward a routable address; the
-    # kernel populates getsockname() with the interface that would
-    # be used, without any packets sent.
+    # UDP connect selects the outbound interface without sending application data.
     try:
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         try:
@@ -113,12 +106,10 @@ def build_ktconnect_uri(host_url: str, host_token: str) -> str:
     """
     parsed = urlparse(host_url)
     if not parsed.netloc:
-        # Treat raw "host:port" inputs as authority-only.
         authority = host_url.lstrip("/")
     else:
         authority = parsed.netloc
-    # Preserve scheme hint so the client knows TLS vs plain — encode
-    # as a query param (the ktconnect scheme is transport-agnostic).
+    # The custom URI is transport-agnostic, so preserve TLS as a query hint.
     scheme = parsed.scheme or "http"
     token_q = quote(host_token, safe="")
     return f"ktconnect://{authority}/?token={token_q}&scheme={scheme}"

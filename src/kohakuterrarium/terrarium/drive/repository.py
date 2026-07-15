@@ -1,18 +1,6 @@
 """Transactional Drive repository — contract, row types, and pure builders.
 
-The Drive repository is the storage-agnostic authority for Drive state
-(design §7). This module holds everything that does not touch storage:
-
-* :class:`DriveTransaction` / :class:`DriveRepository` — the async protocols.
-* :class:`Mutation` — the atomic write bundle every canonical mutation commits.
-* Phase-B row types not in :mod:`drive.models`: :class:`DriveOutboxEntry`,
-  :class:`DriveDeadLetter`, :class:`IdempotencyRecord`.
-* Pure ``build_*`` functions that materialize the records + audit + outbox row
-  for one mutation, plus CAS / query / graph predicates.
-
-The orchestration that stitches these into a transaction lives in
-:mod:`drive.repository_base`; the two backends in :mod:`drive.memory` and
-:mod:`drive.store`. Nothing here imports Agent/engine code (design §7.2).
+Storage-agnostic Drive repository protocols, rows, and mutation builders.
 """
 
 import hashlib
@@ -55,8 +43,7 @@ from kohakuterrarium.terrarium.drive.requests import (
     DriveTransitionProposal,
 )
 
-# Re-exported for existing importers of ``drive.repository`` (row types + wire
-# helpers were extracted to ``drive.repository_rows`` for the file-size cap).
+# Preserve the original import surface after moving row definitions to a submodule.
 __all__ = [
     "DriveDeadLetter",
     "DriveOutboxEntry",
@@ -74,22 +61,13 @@ __all__ = [
 SUPERSEDABLE_DELIVERY_STATES = frozenset({"pending", "claimed", "retry_wait"})
 
 
-# ---------------------------------------------------------------------------
-# Phase-B row types (audit / progress / drive records live in drive_models).
-# The outbox / dead-letter / idempotency rows + their wire helpers live in
-# drive.repository_rows (file-size cap); re-exported here for existing callers.
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class Mutation:
-    """The row set a single canonical mutation commits atomically (design §7.2).
+    """Rows and identifier-only effects committed as one repository mutation.
 
     Every list is applied in one transaction; an empty list touches nothing.
     ``outbox_dispatched`` / ``deleted_deliveries`` carry id-only side effects.
-    ``deleted_drives`` cascades: each id removes the Drive and every per-drive row
-    (assignment / deliveries / progress / audit / outbox / dead-letters /
-    proposals) — the prune half of a subset ``replace_rows`` on split (R1-10).
+    ``deleted_drives`` cascades to every row associated with each Drive.
     """
 
     drives: list[DriveRecord] = field(default_factory=list)
@@ -105,11 +83,6 @@ class Mutation:
     deleted_deliveries: list[str] = field(default_factory=list)
     deleted_proposals: list[str] = field(default_factory=list)
     deleted_drives: list[str] = field(default_factory=list)
-
-
-# ---------------------------------------------------------------------------
-# Protocols
-# ---------------------------------------------------------------------------
 
 
 class DriveTransaction(Protocol):
@@ -144,7 +117,7 @@ class DriveTransaction(Protocol):
 
 
 class DriveRepository(Protocol):
-    """The narrow engine resource the DriveManager (Phase D) drives."""
+    """Repository operations required by the Drive manager."""
 
     def transaction(self) -> Any: ...
     async def get(self, drive_id: str) -> DriveRecord | None: ...
@@ -158,11 +131,6 @@ class DriveRepository(Protocol):
     async def close(self) -> None: ...
 
 
-# ---------------------------------------------------------------------------
-# CAS / hashing helpers (pure)
-# ---------------------------------------------------------------------------
-
-
 def require_revision(record: DriveRecord, expected: int | None) -> None:
     """Optimistic-concurrency gate: raise unless ``expected`` is current."""
     if expected is None or expected != record.revision:
@@ -174,6 +142,7 @@ def require_revision(record: DriveRecord, expected: int | None) -> None:
 
 
 def op_hash(operation: str, payload: dict[str, Any]) -> str:
+    """Return a stable hash for an operation and its payload."""
     blob = json.dumps(
         {"op": operation, "payload": payload}, sort_keys=True, default=str
     )
@@ -192,6 +161,7 @@ def new_audit(
     summary: str = "",
     details: dict[str, Any] | None = None,
 ) -> DriveAuditRecord:
+    """Build an audit row for a Drive record revision."""
     return DriveAuditRecord(
         audit_id=audit_id,
         drive_id=record.drive_id,
@@ -216,6 +186,7 @@ def new_outbox(
     delivery_id: str | None = None,
     payload: dict[str, Any] | None = None,
 ) -> DriveOutboxEntry:
+    """Build an undispatched outbox entry for a Drive event."""
     return DriveOutboxEntry(
         outbox_id=outbox_id,
         drive_id=drive_id,
@@ -226,12 +197,7 @@ def new_outbox(
     )
 
 
-# ---------------------------------------------------------------------------
-# Pure builders — each returns (Mutation, primary result) for one op
-# ---------------------------------------------------------------------------
-
-# ``mint`` is an id factory; builders never touch storage or the clock beyond
-# the ``now`` they are handed, so they are fully unit-testable in isolation.
+# Builders remain deterministic by receiving both their identifier factory and time.
 Mint = Any  # Callable[[], str]
 
 
@@ -264,8 +230,7 @@ def _initial_assignment(
 def _operator_grant_audit(
     record: DriveRecord, actor: ActorRef, now: datetime, mint: Mint, details: dict
 ) -> DriveAuditRecord:
-    """The operator-elevation audit row that rides an elevated mutation's txn
-    (design §13, R1-40): committed atomically with the mutation it authorizes."""
+    """Build the operator-grant audit committed with an elevated mutation."""
     return new_audit(
         record,
         actor,
@@ -482,7 +447,7 @@ def build_progress(
         created_at=now,
         evidence=dict(evidence or {}),
     )
-    # Progress is append-only: same revision, no drive row rewritten (§4.3).
+    # Progress preserves the current revision because it does not rewrite the Drive.
     audit = DriveAuditRecord(
         audit_id=mint(),
         drive_id=current.drive_id,
@@ -494,11 +459,6 @@ def build_progress(
         summary=summary,
     )
     return Mutation(progress=[progress], audit=[audit]), progress
-
-
-# ---------------------------------------------------------------------------
-# Query / graph predicates (pure)
-# ---------------------------------------------------------------------------
 
 
 def in_graph(

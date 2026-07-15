@@ -1,10 +1,9 @@
 """Sessions namespace for the :class:`Studio` façade.
 
-Split out of ``studio/studio.py`` (file-size cap).  Every class here is
-a thin delegation layer over ``kohakuterrarium.studio.sessions.*`` —
-the façade wires them up as ``studio.sessions`` / ``studio.sessions.chat``
-etc.  Real signatures (no ``*args/**kwargs`` passthrough) so the
-programmatic surface is discoverable and at parity with the HTTP layer.
+Provides the typed ``studio.sessions`` namespaces while delegating behavior to
+``kohakuterrarium.studio.sessions.*``. Explicit signatures keep the programmatic
+surface discoverable and aligned with the HTTP adapters without duplicating
+session logic.
 """
 
 from __future__ import annotations
@@ -101,7 +100,6 @@ class _SessionsNS:
             self._studio._service, creature_id
         )
 
-    # creature CRUD inside a running session (hot-plug)
     async def add_creature(self, session_id: str, config: Any) -> str:
         return await _session_lifecycle.add_creature(
             self._studio._service, session_id, config
@@ -115,7 +113,6 @@ class _SessionsNS:
             self._studio._service, session_id, creature_id
         )
 
-    # topology + wiring
     async def add_channel(
         self,
         session_id: str,
@@ -182,7 +179,6 @@ class _SessionsNS:
             self._studio._service, creature_id, sink_id
         )
 
-    # memory search
     async def search_memory(
         self,
         name: str | Path,
@@ -192,14 +188,12 @@ class _SessionsNS:
         k: int = 10,
         agent: str | None = None,
     ) -> dict[str, Any]:
-        """FTS5 / vector / hybrid search over a saved session.
+        """Search a saved session by name or direct ``.kohakutr`` path.
 
-        ``name`` is either a saved-session name (resolved against the
-        session dir, the same lookup the HTTP routes use) or a direct
-        ``.kohakutr`` path.  The engine is supplied from this Studio
-        instance so a live creature's store is reused when present.
-        Raises :class:`SessionNotFoundError` when the session cannot be
-        resolved — never creates files as a side effect.
+        Resolution matches the HTTP surface, and a local host engine is supplied
+        so an already-open session store can be reused. Failed resolution raises
+        :class:`SessionNotFoundError` without creating a database as a side
+        effect.
         """
         path = Path(name)
         if not path.exists():
@@ -222,10 +216,9 @@ class _SessionsChat:
     def chat(
         self, session_id: str, creature_id: str, content: Any
     ) -> AsyncIterator[str]:
-        # ``_session_chat.chat`` is an async *generator* — calling it
-        # already returns an AsyncIterator. This wrapper must NOT be
-        # ``async def`` (that would make the call return a coroutine,
-        # breaking the documented ``async for chunk in ...chat(...)``).
+        # The delegated callable is an async generator, so this wrapper must
+        # return it directly. Declaring the wrapper async would add a coroutine
+        # layer and break direct ``async for`` consumption.
         return _session_chat.chat(
             self._studio._service, session_id, creature_id, content
         )
@@ -290,7 +283,6 @@ class _SessionsCtl:
         await _session_ctl.interrupt(self._studio._service, session_id, creature_id)
 
     async def list_jobs(self, session_id: str, creature_id: str) -> list[dict]:
-        # ``_session_ctl.list_jobs`` is ``async def`` — must be awaited.
         return await _session_ctl.list_jobs(
             self._studio._service, session_id, creature_id
         )
@@ -301,7 +293,6 @@ class _SessionsCtl:
         )
 
     async def promote_job(self, session_id: str, creature_id: str, job_id: str) -> bool:
-        # ``_session_ctl.promote_job`` is ``async def`` — must be awaited.
         return await _session_ctl.promote_job(
             self._studio._service, session_id, creature_id, job_id
         )
@@ -398,12 +389,12 @@ class _SessionsCommand:
 
 
 class _SessionsDrives:
-    """Session/graph-scoped Drive record ops over ``TerrariumService`` (§9.2, §12).
+    """Manage graph-scoped Drive records through ``TerrariumService``.
 
-    A *session* is a graph, so ``session_id`` is the ``graph_id``. ``actor`` is the
-    programmatic operator (default ``user:local``); ``operator`` defaults on so the
-    trusted Python surface can create/assign graph-scoped Drives. Returns JSON-safe
-    row/detail dicts, redacting spec/evidence in list rows (design §12.1).
+    Session IDs identify graphs at this boundary. Calls default to the trusted
+    ``user:local`` actor and operator privileges so the Python surface can create
+    and assign Drives. Returned payloads are JSON-safe, and list rows omit
+    sensitive specification and evidence details.
     """
 
     def __init__(self, studio: Studio) -> None:

@@ -1,8 +1,7 @@
 """Plugin hook catalog shared by Studio routes and code generation.
 
-Extracted so that ``studio.editors.codegen_plugin`` can import it
-without a function-local import that would create a routes -> codegen
--> routes cycle.
+Keeps the editor-facing hook catalog independent of route modules so plugin
+code generation can import it without dependency cycles.
 """
 
 PLUGIN_HOOKS: list[dict] = [

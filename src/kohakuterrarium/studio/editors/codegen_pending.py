@@ -1,12 +1,8 @@
-"""Shared stub for codegen kinds whose full implementation lands in Phase 3.
+"""Raw-mode fallback for codegen kinds without structured support.
 
-Phase 1 exposes just enough for the read-only route to work: a
-``parse_back`` that returns raw-mode envelope with a warning, and
-``render_new``/``update_existing`` that simply pass source through
-(valid raw-mode behavior — no round-trip attempt).
-
-Per-kind modules re-export these via ``from codegen_pending import *``
-and override as implementation matures.
+Provides raw-mode fallbacks for module kinds without structured round-trip
+support. Parsing emits a warning, updates preserve source, and scaffolding creates
+a minimal placeholder.
 """
 
 PENDING_WARNING = {
@@ -16,11 +12,7 @@ PENDING_WARNING = {
 
 
 def render_new_stub(form: dict, *, header_comment: str = "") -> str:
-    """Scaffold a minimal placeholder file.
-
-    Used only when the form has no real implementation yet (Phase 1).
-    Phase 3 per-kind ``render_new`` replaces this.
-    """
+    """Scaffold a minimal placeholder for a raw-mode-only module kind."""
     name = form.get("name", "module")
     return (
         f'"""{header_comment or f"{name} — TODO: implement"}"""\n\n'
@@ -29,12 +21,12 @@ def render_new_stub(form: dict, *, header_comment: str = "") -> str:
 
 
 def update_existing_stub(source: str, form: dict, execute_body: str) -> str:
-    """Pass source through unchanged — raw mode writes use a different path."""
+    """Preserve source because raw-mode writes bypass structured updates."""
     return source
 
 
 def parse_back_stub(source: str) -> dict:
-    """Always raw mode with a pending warning."""
+    """Return a raw-mode envelope explaining the missing form support."""
     return {
         "mode": "raw",
         "form": {},

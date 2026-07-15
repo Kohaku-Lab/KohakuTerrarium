@@ -14,11 +14,8 @@ stack has been removed; the engine and the ``group_*`` tool surface
 are the only paths.
 """
 
-# Trigger ``@register_builtin`` for every group_* tool so the catalog
-# is populated regardless of which engine path constructs creatures.
-# ``engine.py`` already imports ``tools_group``; this is a defensive
-# anchor so a future engine refactor can't silently lose the
-# registration.
+# Importing the tool module guarantees registration regardless of which engine
+# construction path is used.
 import kohakuterrarium.terrarium.tools_group as _tools_group  # noqa: F401
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,

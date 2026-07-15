@@ -1,23 +1,9 @@
-"""Launcher entry point.
+"""Prepare versioned launcher state and hand off to the active release.
 
-Two entry shapes share most of the logic:
-
-- :func:`main` — used by ``python -m kohakuterrarium.launcher`` and the
-  ``kt-launcher`` console script. Drives :func:`prepare` and then
-  ``os.execv``'s the bundled Python with ``-m kohakuterrarium.cli`` so
-  the framework runs in a fresh process. Works on any environment
-  whose Python honours ``PYTHONPATH`` and exposes ``-m``.
-- :func:`prepare` — pure orchestration: parses settings, runs
-  first_install / maybe_update, returns the path to the active
-  version tree. No exec, no sys.path mutation.
-
-The briefcase desktop bundle's entry (``kohakuterrarium.__briefcase__``)
-calls :func:`prepare` directly and does in-process ``sys.path``
-manipulation rather than ``os.execv``. Briefcase ships a
-``python313._pth`` with ``import site`` disabled, which makes
-``PYTHONPATH`` ineffective; and ``sys.executable`` is the briefcase
-stub binary, not a plain Python — both make exec-into-versions
-impossible without redesigning the stub.
+The standard entry point executes the framework in a fresh process using the
+active release's site-packages. Briefcase reuses :func:`prepare` but performs
+an in-process handoff because its stub executable and isolated path file do
+not support the standard ``PYTHONPATH`` execution model.
 """
 
 import argparse
@@ -49,14 +35,10 @@ from kohakuterrarium.launcher.update_runner import (
 
 @dataclass
 class PrepareResult:
-    """Outcome of :func:`prepare`.
+    """Describe whether setup finished or produced an active release.
 
-    ``done=True`` means the launcher already finished its job (a
-    one-shot mode like ``--reset-settings`` or ``--splash-demo``) and
-    the caller should exit with ``exit_code``. ``site_packages``
-    populated means "you can hand off to the framework now"; the
-    caller decides whether to ``os.execv`` or do in-process
-    ``sys.path`` manipulation.
+    ``done`` directs the caller to exit with ``exit_code``. Otherwise,
+    ``site_packages`` and the version paths identify the release to launch.
     """
 
     exit_code: int = 0
@@ -71,7 +53,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="kt-launcher",
         description="KohakuTerrarium launcher — manages versioned releases.",
-        add_help=False,  # let the framework's own argparse handle --help post-exec
+        add_help=False,  # Preserve --help for the framework after handoff.
     )
     parser.add_argument(
         "--reset-settings",
@@ -98,17 +80,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def prepare(argv: list[str] | None = None) -> "PrepareResult":
-    """Run the launcher's setup phase and return where the active
-    version lives. Does NOT exec, NOT modify ``sys.path``.
+    """Prepare the active release without executing it or changing import paths.
 
-    Used by both :func:`main` (which then exec's into a fresh process)
-    and :mod:`kohakuterrarium.__briefcase__` (which does in-process
-    ``sys.path`` manipulation).
-
-    The returned :class:`PrepareResult` carries a ``site_packages``
-    path on success, or an ``exit_code`` + ``error`` describing the
-    failure. The splash UI lifecycle is owned here so both entry
-    shapes get the same first-launch UX.
+    Setup handles one-shot launcher modes, migration, first installation, and
+    optional updates. The result either directs the caller to exit or provides
+    the active release paths for a process or in-process handoff. This function
+    also owns first-install splash lifecycle for both entry points.
     """
     args = _parse_args(argv)
     log = get_logger()
@@ -132,7 +109,7 @@ def prepare(argv: list[str] | None = None) -> "PrepareResult":
     if args.splash_demo:
         return PrepareResult(exit_code=_run_splash_demo(log), done=True)
 
-    # One-shot 06 cleanup. Idempotent; no-op when nothing is there.
+    # Legacy cleanup is idempotent and must precede settings-driven setup.
     _migration.wipe_legacy_venv()
 
     cfg = _settings.load()
@@ -154,9 +131,8 @@ def prepare(argv: list[str] | None = None) -> "PrepareResult":
 
     pointer = read_active_pointer()
     if pointer is None:
-        # First launch — show splash so the user sees something during
-        # the (potentially long) extract / smoke / download. Without
-        # this, the briefcase shell appears frozen for tens of seconds.
+        # First installation can block on extraction, download, and smoke
+        # checks, so keep the shell visibly responsive with progress.
         srv = open_splash()
         try:
             srv.publish("Setting up", percent=5, message="")
@@ -229,11 +205,10 @@ def prepare(argv: list[str] | None = None) -> "PrepareResult":
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry called by ``python -m kohakuterrarium.launcher`` /
-    ``kt-launcher``. Drives :func:`prepare` and ``os.execv``'s into
-    ``-m kohakuterrarium.cli`` against the active version tree.
+    """Prepare the active release and replace the process with its CLI.
 
-    Briefcase shells DO NOT use this — see :mod:`kohakuterrarium.__briefcase__`.
+    One-shot modes return their exit code directly. Briefcase uses its separate
+    in-process entry point instead of this execution path.
     """
     result = prepare(argv)
     if result.done or result.site_packages is None:
@@ -247,7 +222,7 @@ def main(argv: list[str] | None = None) -> int:
     py = str(sys.executable)
     log.info("launcher: exec %s -m kohakuterrarium.cli %s", py, forward)
     os.execv(py, [py, "-m", "kohakuterrarium.cli", *forward])
-    return 0  # unreachable; execv replaces the process
+    return 0  # Successful execv replaces the process before this return.
 
 
 def _build_pythonpath(version_root) -> str:
@@ -260,7 +235,7 @@ def _build_pythonpath(version_root) -> str:
 
 
 def _run_splash_demo(log) -> int:
-    """Demo the splash UI without doing any real install."""
+    """Run a scripted splash sequence and return a successful exit code."""
     log.info("launcher: --splash-demo running scripted sequence")
     srv = open_splash()
     try:

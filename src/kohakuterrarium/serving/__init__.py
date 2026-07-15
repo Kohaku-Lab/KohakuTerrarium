@@ -1,12 +1,8 @@
-"""Serving — static frontend launcher.
+"""Expose serving infrastructure for web and desktop application hosts.
 
-The legacy ``KohakuManager`` facade and the ``AgentSession`` /
-``StreamOutput`` / ``ChannelEvent`` helpers were removed in Phase 3
-of the studio cleanup. The :class:`Terrarium` engine
-(``kohakuterrarium.terrarium``) and the studio sessions modules
-(``kohakuterrarium.studio.sessions``) own those responsibilities now.
-This package keeps only :mod:`kohakuterrarium.serving.web`, the
-static-files launcher used by ``kt serve`` and the desktop bundle.
+Runtime ownership belongs to the Terrarium engine and Studio modules; this
+package focuses on HTTP hosting, desktop launch, compatibility events, and
+process metrics.
 """
 
 __all__: list[str] = []

@@ -1,8 +1,4 @@
-"""
-Output module protocol and base class.
-
-Output modules handle the final delivery of agent output.
-"""
+"""Define output delivery protocols and typed-event compatibility behavior."""
 
 from abc import ABC, abstractmethod
 from typing import Protocol, runtime_checkable
@@ -12,12 +8,7 @@ from kohakuterrarium.modules.output.event import OutputEvent
 
 @runtime_checkable
 class OutputModule(Protocol):
-    """
-    Protocol for output modules.
-
-    Output modules receive content from the controller/router
-    and deliver it to the appropriate destination.
-    """
+    """Define lifecycle, streaming, activity, and typed-event output delivery."""
 
     async def start(self) -> None:
         """Start the output module."""
@@ -28,21 +19,11 @@ class OutputModule(Protocol):
         ...
 
     async def write(self, content: str) -> None:
-        """
-        Write complete content.
-
-        Args:
-            content: Full content to output
-        """
+        """Write one complete content value."""
         ...
 
     async def write_stream(self, chunk: str) -> None:
-        """
-        Write a streaming chunk.
-
-        Args:
-            chunk: Partial content chunk
-        """
+        """Write one partial streaming chunk."""
         ...
 
     async def flush(self) -> None:
@@ -58,14 +39,7 @@ class OutputModule(Protocol):
         ...
 
     def on_activity(self, activity_type: str, detail: str) -> None:
-        """
-        Called when tool/subagent activity occurs.
-
-        Args:
-            activity_type: "tool_start", "tool_done", "tool_error",
-                          "subagent_start", "subagent_done", "subagent_error"
-            detail: Human-readable detail string
-        """
+        """Receive one tool or sub-agent activity notification."""
         ...
 
     def on_assistant_image(
@@ -77,58 +51,24 @@ class OutputModule(Protocol):
         source_name: str | None = None,
         revised_prompt: str | None = None,
     ) -> None:
-        """Called when the assistant emits a structured image part.
-
-        Implementations that render to a user (stdout / TUI / WS)
-        should surface the image. Default is no-op for text-only
-        outputs.
-        """
+        """Receive a structured assistant image for optional rendering."""
         ...
 
     async def on_user_input(self, text: str) -> None:
-        """Called when user input is received, before processing starts.
-
-        Output modules can render the user's message (e.g. as a panel).
-        Default is no-op.
-        """
+        """Receive user input before processing starts."""
         ...
 
     async def on_resume(self, events: list[dict]) -> None:
-        """Called during session resume with historical events.
-
-        Output modules that render to users (TUI, stdout) can implement
-        this to show previous conversation history. Default is no-op.
-
-        Args:
-            events: List of event dicts from SessionStore.get_events().
-                    Each has at minimum {type, ts}. Common types:
-                    user_input (content), text (content),
-                    tool_call (name, args), tool_result (name, output),
-                    processing_start, processing_end.
-        """
+        """Receive historical events for user-facing session replay."""
         ...
 
     async def emit(self, event: OutputEvent) -> None:
-        """Receive a typed output event.
-
-        Bus-level entry point for the unified output system. The default
-        implementation on ``BaseOutputModule`` forwards each event to
-        the legacy imperative methods (``write_stream``,
-        ``on_processing_start``, ``on_activity`` …) so subclasses that
-        haven't been migrated to consume events directly keep working.
-
-        Renderers that want to consume events natively override this
-        method and dispatch on ``event.type`` themselves.
-        """
+        """Receive a typed event directly or through legacy method adaptation."""
         ...
 
 
 class BaseOutputModule(ABC):
-    """
-    Base class for output modules.
-
-    Provides common functionality for output handling.
-    """
+    """Provide lifecycle defaults and typed-event adaptation for outputs."""
 
     def __init__(self):
         self._running = False
@@ -150,16 +90,16 @@ class BaseOutputModule(ABC):
         await self._on_stop()
 
     async def _on_start(self) -> None:
-        """Called when module starts. Override in subclass."""
+        """Handle subclass-specific startup."""
         pass
 
     async def _on_stop(self) -> None:
-        """Called when module stops. Override in subclass."""
+        """Handle subclass-specific shutdown."""
         pass
 
     @abstractmethod
     async def write(self, content: str) -> None:
-        """Write complete content. Must be implemented by subclass."""
+        """Write complete content."""
         ...
 
     async def write_stream(self, chunk: str) -> None:
@@ -203,13 +143,7 @@ class BaseOutputModule(ABC):
         pass
 
     async def emit(self, event: OutputEvent) -> None:
-        """Default emit() — forwards typed events to legacy methods.
-
-        Phase A: every legacy method has a corresponding event type.
-        This switch keeps subclasses that don't override emit() working
-        identically to before. Subclasses that want to consume events
-        natively override emit() and bypass this switch entirely.
-        """
+        """Forward typed events to legacy methods for backward-compatible outputs."""
         match event.type:
             case "text":
                 content = event.content
@@ -235,9 +169,7 @@ class BaseOutputModule(ABC):
             case "resume_batch":
                 await self.on_resume(event.payload.get("events", []))
             case _:
-                # Activity event. Use metadata-aware hook if present
-                # and the payload has structured data, mirroring the
-                # router's notify_activity dispatch.
+                # Structured payloads use the metadata-aware activity hook when present.
                 detail = event.content if isinstance(event.content, str) else ""
                 if event.payload and hasattr(self, "on_activity_with_metadata"):
                     self.on_activity_with_metadata(event.type, detail, event.payload)

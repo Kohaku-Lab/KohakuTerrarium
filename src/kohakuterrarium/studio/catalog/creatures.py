@@ -1,7 +1,7 @@
 """Creature read-side primitives (list / load / read_prompt).
 
-Used by the catalog routes when surfacing a workspace's creatures.
-The write-side bodies live in ``studio.editors.creatures_crud``.
+Exposes workspace creature metadata and prompt reads. Mutating operations remain
+in the editor layer so catalog access stays read-only.
 """
 
 from kohakuterrarium.studio.editors.utils_paths import (
@@ -22,7 +22,7 @@ def load_creature(ws, name: str) -> dict:
 
 
 def read_prompt(ws, creature: str, rel: str) -> str:
-    """Return the contents of a prompt file relative to the creature dir."""
+    """Read a prompt while constraining the relative path to its creature root."""
     creature = sanitize_name(creature)
     creature_dir = ws.creatures_dir / creature
     if not creature_dir.is_dir():
@@ -33,5 +33,5 @@ def read_prompt(ws, creature: str, rel: str) -> str:
     return target.read_text(encoding="utf-8")
 
 
-# Re-export so route code can import the path-error type from one place.
+# Consumers can handle path-safety failures without depending on editor internals.
 __all__ = ["list_creatures", "load_creature", "read_prompt", "UnsafePath"]

@@ -1,9 +1,7 @@
-"""Cross-platform exclusive file lock for the update flow.
+"""Provide a non-blocking cross-platform lock for launcher updates.
 
-POSIX uses ``fcntl.flock``; Windows uses ``msvcrt.locking``.  Both are
-exclusive, non-blocking by default; the wrapper exposes a
-``UpdateLock`` context manager + a stale-lock detector so a crashed
-prior update doesn't permanently wedge the wrapper.
+POSIX uses ``fcntl.flock`` and Windows uses ``msvcrt.locking``. The lock file
+also records holder metadata so interfaces can identify stale update attempts.
 """
 
 import os
@@ -14,7 +12,7 @@ from typing import IO
 
 from kohakuterrarium.launcher.log import get_logger
 
-STALE_LOCK_SECONDS = 10 * 60  # 10 minutes — see design.md §15
+STALE_LOCK_SECONDS = 10 * 60  # Allow long updates before offering stale recovery.
 
 
 class LockBusy(RuntimeError):
@@ -22,12 +20,10 @@ class LockBusy(RuntimeError):
 
 
 class UpdateLock:
-    """Context manager around a flock on ``runtime/.update.lock``.
+    """Acquire and release the exclusive launcher update lock.
 
-    ``with UpdateLock(path):`` acquires (raises :class:`LockBusy` if
-    contended).  ``stale_age()`` returns the age in seconds of an
-    existing lock file so the caller can decide whether to prompt the
-    user to override.
+    Entering is non-blocking and raises :class:`LockBusy` on contention. The
+    lock file records the holder process and acquisition time while held.
     """
 
     def __init__(self, path: Path) -> None:
@@ -43,7 +39,7 @@ class UpdateLock:
             self._fh.close()
             self._fh = None
             raise
-        # Record the holder + start time for stale-lock detection.
+        # Holder metadata supports stale-lock diagnosis without weakening the lock.
         self._fh.seek(0)
         self._fh.truncate()
         self._fh.write(f"{os.getpid()}\n{time.time()}\n".encode())
@@ -99,11 +95,7 @@ class UpdateLock:
 
 
 def stale_age(path: Path) -> float | None:
-    """Return age (seconds) of the lock file if it exists; ``None`` otherwise.
-
-    Used by the UI to decide whether to prompt the user to override a
-    suspected-crashed prior update.
-    """
+    """Return the lock file's age in seconds, or ``None`` if unavailable."""
     try:
         st = path.stat()
     except OSError:
@@ -112,16 +104,13 @@ def stale_age(path: Path) -> float | None:
 
 
 def is_stale(path: Path, threshold: float = STALE_LOCK_SECONDS) -> bool:
+    """Return whether an existing lock file exceeds the stale threshold."""
     age = stale_age(path)
     return age is not None and age > threshold
 
 
 def force_release(path: Path) -> None:
-    """Best-effort: delete the lock file.
-
-    Used after the user confirms "override stale lock".  Logs a warning
-    so the action is auditable.
-    """
+    """Best-effort remove a stale lock file and log the override."""
     log = get_logger()
     try:
         path.unlink()

@@ -1,17 +1,9 @@
-"""Worker-routed Drive methods for :class:`RemoteTerrariumService` (design §9.2).
+"""Proxy Drive service operations to remote Terrarium workers.
 
-Each method translates a Drive service call into an APP request against the
-worker's ``terrarium.runtime`` namespace (``drive_*`` verbs, handled by
-:mod:`laboratory.adapters.terrarium_runtime_drive`) and translates the reply
-back. Requests carry serializable DTOs only (packed via :mod:`drive.wire` /
-:mod:`drive.wire_service`); no Python registration/record instance crosses the
-wire. Typed Drive errors round-trip via :func:`terrarium.wire.drive_error_from_body`
-so ``except DriveConflictError`` keeps working across the node hop.
-
-``RemoteTerrariumService`` mixes this in ahead of
-:class:`~kohakuterrarium.terrarium.drive.service_protocol.DriveServiceUnsupportedMixin`
-so these real implementations win the MRO while the unsupported stubs remain a
-defensive floor for any method not yet routed.
+Methods translate Drive service calls into serializable worker requests and
+reconstruct typed replies. Python registration and record instances never cross
+the wire, while typed Drive errors preserve their exception classes across the
+node boundary.
 """
 
 from typing import Any
@@ -43,7 +35,7 @@ from kohakuterrarium.terrarium.wire import drive_error_from_body
 
 
 def _raise_for_drive_error(body: Any) -> Any:
-    """Reconstruct a typed Drive error from a worker error envelope, else pass through."""
+    """Raise a typed Drive error from a worker envelope or return the body."""
     err = drive_error_from_body(body)
     if err is not None:
         raise err
@@ -58,15 +50,12 @@ def _statuses_wire(statuses: "frozenset[DriveStatus] | None") -> list[str] | Non
 
 
 class RemoteDriveServiceMixin:
-    """Drive service surface for a single worker node (over ``terrarium.runtime``)."""
+    """Proxy Drive service operations to one remote worker node."""
 
-    # Provided by RemoteTerrariumService.
     async def _req(self, type_: str, body: dict[str, Any]) -> Any: ...
 
     async def _drive_req(self, type_: str, body: dict[str, Any]) -> Any:
         return _raise_for_drive_error(await self._req(type_, body))
-
-    # -- reads ---------------------------------------------------------------
 
     async def get_drive(
         self, drive_id: str, *, actor: ActorRef, is_privileged: bool = False
@@ -185,8 +174,6 @@ class RemoteDriveServiceMixin:
     async def list_drive_registrations(self) -> tuple[dict[str, Any], ...]:
         body = await self._drive_req("drive_list_registrations", {})
         return tuple(dict(r) for r in body.get("registrations", []))
-
-    # -- writes --------------------------------------------------------------
 
     async def create_drive(
         self,
@@ -461,14 +448,14 @@ class RemoteDriveServiceMixin:
         return unpack_drive_delivery(body["delivery"])
 
     async def locate_drive_proposal(self, proposal_id: str) -> bool:
-        """Routing probe: does this worker hold a pending proposal? (read-only)."""
+        """Report whether this worker holds a pending proposal."""
         body = await self._drive_req(
             "drive_locate_proposal", {"proposal_id": proposal_id}
         )
         return bool(body.get("hosted", False))
 
     async def locate_drive_delivery(self, delivery_id: str) -> bool:
-        """Routing probe: does this worker host ``delivery_id``? (read-only)."""
+        """Report whether this worker hosts a delivery ID."""
         body = await self._drive_req(
             "drive_locate_delivery", {"delivery_id": delivery_id}
         )
@@ -477,9 +464,8 @@ class RemoteDriveServiceMixin:
     async def reconfigure_drive_runtime(
         self, registrations: Any, *, actor: ActorRef
     ) -> str:
-        # Registration *instances* cannot cross the wire (design §8.6); a worker
-        # is reconfigured through its node-targeted ``studio.settings`` apply,
-        # which resolves names against that worker's installed packages.
+        # Registration instances are process-local, so remote reconfiguration
+        # must use node-targeted settings that resolve names on the worker.
         raise CrossNodeDriveNotSupportedError(
             "reconfigure_drive_runtime with registration instances is not routable "
             "cross-node; use the node-targeted Drive settings apply "

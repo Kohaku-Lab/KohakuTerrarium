@@ -1,13 +1,4 @@
-"""
-Prompt templating using Jinja2.
-
-Provides simple variable substitution and control flow for prompts,
-plus shared prompt-fragment discovery through the package manifest
-``prompts:`` / ``templates:`` slots (Cluster 1 / A.5). A creature
-system prompt containing ``{% include "git-safety" %}`` triggers a
-search across every installed package for a fragment with that name,
-letting packages ship reusable prompt bundles.
-"""
+"""Render Jinja prompts and resolve reusable fragments from packages or files."""
 
 from pathlib import Path
 from typing import Any
@@ -21,28 +12,18 @@ logger = get_logger(__name__)
 
 
 class PackagePromptLoader(BaseLoader):
-    """Resolve ``{% include "<name>" %}`` via the package manifest.
+    """Resolve includes lazily from package manifests, then raw file paths."""
 
-    The loader queries :func:`resolve_package_prompt` for every include
-    target, falling back to absolute / relative file paths. The
-    manifest lookup is lazy so every render picks up newly-installed
-    packages without reloading the module.
-    """
-
-    def get_source(self, environment, template):  # noqa: D401 — Jinja API
+    def get_source(self, environment, template):  # noqa: D401 - Jinja API
         path: Path | None = None
         try:
             path = resolve_package_prompt(template)
         except ValueError as exc:
-            # Collision across packages — surface as TemplateNotFound
-            # with a clearer message so the Jinja traceback points at
-            # the manifest rather than the include line.
+            # Report collisions through Jinja's expected loader exception.
             logger.error("Prompt fragment collision", fragment=template, error=str(exc))
             raise TemplateNotFound(template, message=str(exc)) from exc
 
         if path is None:
-            # Try raw file path as a second resort — keeps parity with
-            # ``Environment(loader=FileSystemLoader(...))`` flows.
             candidate = Path(template)
             if candidate.exists() and candidate.is_file():
                 path = candidate.resolve()
@@ -62,59 +43,28 @@ class PackagePromptLoader(BaseLoader):
         return source, str(path), uptodate
 
 
-# Create Jinja2 environment with safe defaults
 _env = Environment(
     loader=PackagePromptLoader(),
-    autoescape=False,  # Prompts are not HTML
+    autoescape=False,  # Prompt text must remain literal.
     trim_blocks=True,
     lstrip_blocks=True,
 )
 
 
 def render_template(template: str, **variables: Any) -> str:
-    """
-    Render a prompt template with variables.
-
-    Supports Jinja2 syntax:
-    - Variables: {{ variable }}
-    - Conditionals: {% if condition %}...{% endif %}
-    - Loops: {% for item in items %}...{% endfor %}
-    - Includes: {% include "git-safety" %} resolves via the package
-      manifest ``prompts:`` slot, then falls back to a raw file path.
-
-    Args:
-        template: Template string with Jinja2 syntax
-        **variables: Variables to substitute
-
-    Returns:
-        Rendered template string
-
-    Raises:
-        TemplateSyntaxError: If template syntax is invalid
-    """
+    """Render a Jinja prompt with variables and package-aware includes."""
     try:
         jinja_template = _env.from_string(template)
         result = jinja_template.render(**variables)
         return result
     except TemplateSyntaxError as e:
-        # NB: ``message`` is a reserved LogRecord attribute — passing it
-        # as an extra kwarg makes the stdlib logging machinery raise
-        # KeyError, which would escape this handler before ``raise``.
+        # ``message`` is reserved by LogRecord and cannot be an extra field.
         logger.error("Template syntax error", line=e.lineno, error=str(e))
         raise
 
 
 def render_template_safe(template: str, **variables: Any) -> str:
-    """
-    Render template, returning original on error.
-
-    Args:
-        template: Template string
-        **variables: Variables to substitute
-
-    Returns:
-        Rendered template or original on error
-    """
+    """Render a prompt, returning the source unchanged on any failure."""
     try:
         return render_template(template, **variables)
     except Exception as e:
@@ -123,35 +73,18 @@ def render_template_safe(template: str, **variables: Any) -> str:
 
 
 class PromptTemplate:
-    """
-    Reusable prompt template.
-
-    Compiles template once for efficient repeated rendering.
-    """
+    """Compile a reusable Jinja prompt once for repeated rendering."""
 
     def __init__(self, template: str):
-        """
-        Create a prompt template.
-
-        Args:
-            template: Jinja2 template string
-        """
+        """Compile the provided Jinja source."""
         self._source = template
         self._template = _env.from_string(template)
 
     def render(self, **variables: Any) -> str:
-        """
-        Render the template with variables.
-
-        Args:
-            **variables: Variables to substitute
-
-        Returns:
-            Rendered string
-        """
+        """Render the compiled template with supplied variables."""
         return self._template.render(**variables)
 
     @property
     def source(self) -> str:
-        """Get original template source."""
+        """Return the original uncompiled template source."""
         return self._source

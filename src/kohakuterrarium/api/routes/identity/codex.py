@@ -1,10 +1,8 @@
-"""Identity codex — OAuth login/status/usage.
+"""Expose node-targeted Codex OAuth, usage, and reset-credit operations.
 
-Accepts a ``?node=<id>`` query param: when set to a connected worker,
-the OAuth flow runs ON THAT WORKER (browser opens on the worker's
-machine, tokens land in the worker's ``<config_dir>/codex-auth.json``).
-This is the ONLY sound way to use Codex from a worker — OAuth tokens
-are process-bound so the host's token cannot be reused remotely.
+Worker requests execute on the selected worker because Codex OAuth credentials
+are process-local and cannot be reused from the host. Streaming login is
+host-only because cross-node event streaming is not available.
 """
 
 import asyncio
@@ -31,14 +29,9 @@ from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
 
-# Heartbeat cadence for ``codex-login-stream``.  Without periodic
-# writes the NDJSON stream goes silent for up to 15 minutes (the
-# device-code poll window) and Android WebView / mobile browsers
-# happily kill the connection mid-poll.  When the ``completed``
-# event finally enqueues, it has nowhere to go and the modal stays
-# open forever.  15s is a comfortable margin under typical mobile
-# NAT idle timeouts (30–60s).  Exposed at module level so tests can
-# monkeypatch it down to a sub-second value.
+# Device-code polling can leave the NDJSON stream idle long enough for mobile
+# clients or NATs to drop it. Periodic frames keep the transport alive; the
+# module-level value also permits shorter test intervals.
 HEARTBEAT_INTERVAL = 15.0
 
 
@@ -53,9 +46,8 @@ async def codex_login(
             return await login_async()
         except Exception as e:
             raise HTTPException(500, f"Codex login failed: {e}") from e
-    # Worker-side login: long-running (waits for user OAuth callback or
-    # device-code entry). Bump the lab-request timeout so the user has
-    # time to complete the flow.
+    # Worker login waits for interactive OAuth completion, so it requires a
+    # longer cross-node request timeout than ordinary identity operations.
     return await call_node_identity(service, node, "codex_login", timeout=300.0)
 
 
@@ -64,26 +56,11 @@ async def codex_login(
     dependencies=[Depends(verify_admin_token)],
 )
 async def codex_login_stream(node: str = ""):
-    """Run Codex login while streaming progress events to the client.
+    """Run host Codex login as a line-delimited JSON event stream.
 
-    The frontend ``CodexLoginModal`` consumes this endpoint as a
-    line-delimited JSON stream (one JSON object per line).  Events:
-
-      * ``{"event": "device_code", "verification_url": ..., "user_code": ..., "expires_in": int}``
-        — fired as soon as the device-code branch obtains the user
-        code, BEFORE the poll loop starts.  The modal renders this
-        so the user can manually open the URL + enter the code on
-        any device.
-      * ``{"event": "completed", "expires_at": float}`` — final
-        success.  Modal closes itself with a success toast.
-      * ``{"event": "error", "message": str}`` — terminal failure.
-
-    Only the host path streams events directly.  Worker-side login
-    falls back to the existing one-shot ``/codex-login`` route since
-    cross-node event streaming isn't wired in 1.5.0; this leaves the
-    modal-based UX functional in the common case (local Codex login
-    on the host's own machine) and the host-router lab path for the
-    rare worker case.
+    The stream emits device-code details, periodic keepalive pings, and one
+    terminal completion or error event. Worker login is rejected because the
+    node-routing layer cannot relay incremental events.
     """
     if not is_host_target(node):
         raise HTTPException(
@@ -97,6 +74,7 @@ async def codex_login_stream(node: str = ""):
     queue: asyncio.Queue = asyncio.Queue()
 
     async def emit_device_code(verification_url: str, user_code: str, expires_in: int):
+        """Queue device-code details before polling begins."""
         await queue.put(
             {
                 "event": "device_code",
@@ -107,16 +85,11 @@ async def codex_login_stream(node: str = ""):
         )
 
     async def run_login():
+        """Produce login events and terminate the queue with a sentinel."""
         try:
-            # ``open_browser=False`` — the frontend modal is already
-            # the user's interaction surface.  Auto-popping a system
-            # browser on the host machine (same machine in standalone
-            # mode) is at best redundant; on Android Chaquopy it
-            # blocks the event loop hunting for a non-existent
-            # system browser.  The browser-redirect HTTP server on
-            # :1455 still runs in parallel — codex-rs ships the same
-            # dual-flow shape — so a user who manually clicks the
-            # printed auth URL still completes via the browser path.
+            # The frontend modal is the interaction surface, so opening a system
+            # browser is redundant and can block on platforms without one. The
+            # redirect listener still supports manually opening the auth URL.
             result = await login_async(
                 on_device_code=emit_device_code, open_browser=False
             )
@@ -131,9 +104,11 @@ async def codex_login_stream(node: str = ""):
                 {"event": "error", "message": f"{type(exc).__name__}: {exc}"}
             )
         finally:
-            await queue.put(None)  # sentinel — close the stream
+            # A sentinel closes the consumer after every terminal outcome.
+            await queue.put(None)
 
     async def stream():
+        """Yield queued events and cancel login if the client disconnects."""
         task = asyncio.create_task(run_login())
         try:
             while True:
@@ -142,10 +117,8 @@ async def codex_login_stream(node: str = ""):
                         queue.get(), timeout=HEARTBEAT_INTERVAL
                     )
                 except asyncio.TimeoutError:
-                    # Heartbeat — keeps the underlying TCP / WebView
-                    # fetch alive during the long device-code poll.
-                    # The frontend ignores ``ping`` events; their
-                    # only job is to push bytes onto the wire.
+                    # Ping events carry no state; they only prevent idle
+                    # transport timeouts during device-code polling.
                     yield json.dumps({"event": "ping"}) + "\n"
                     continue
                 if event is None:
@@ -167,6 +140,7 @@ async def codex_status(
     node: str = "",
     service: TerrariumService = Depends(get_service),
 ):
+    """Return Codex authentication status from the targeted node."""
     if is_host_target(node):
         return get_status()
     return await call_node_identity(service, node, "codex_status")
@@ -177,11 +151,10 @@ async def get_codex_usage(
     node: str = "",
     service: TerrariumService = Depends(get_service),
 ):
-    """Return the live Codex rate-limit / credits snapshot for the node.
+    """Return live Codex rate limits and reset credits for the target node.
 
-    Host target performs a live ``/wham/usage`` fetch (no model round);
-    a worker target routes to that worker's own Codex tokens via the
-    ``studio.identity`` ``codex_usage`` op.
+    Host requests fetch usage directly; worker requests execute against that
+    worker's own credentials.
     """
     if is_host_target(node):
         try:
@@ -192,6 +165,8 @@ async def get_codex_usage(
 
 
 class CodexResetConsumeRequest(BaseModel):
+    """Identify an optional idempotent Codex reset-credit redemption."""
+
     idempotency_key: str | None = None
     credit_id: str | None = None
 
@@ -202,11 +177,10 @@ async def codex_reset_consume(
     node: str = "",
     service: TerrariumService = Depends(get_service),
 ):
-    """Redeem a Codex rate-limit reset credit on the targeted node.
+    """Redeem a Codex reset credit on the targeted node.
 
-    Never optimistically decrements — the frontend refetches usage after
-    a ``reset`` / ``alreadyRedeemed`` outcome.  Worker targets route to
-    that worker's ``codex_reset_consume`` adapter op.
+    The response does not mutate cached usage optimistically; callers must
+    refetch authoritative usage after reset or already-redeemed outcomes.
     """
     if is_host_target(node):
         try:
@@ -217,8 +191,8 @@ async def codex_reset_consume(
         except PermissionError as e:
             raise HTTPException(401, str(e)) from e
         except httpx.HTTPStatusError as e:
-            # An upstream auth rejection is a 401 for the caller; only
-            # genuine gateway / transport failures are a 502.
+            # Preserve upstream authentication failures as 401; other upstream
+            # failures represent gateway or transport errors.
             if e.response.status_code == 401:
                 raise HTTPException(401, f"Codex rejected the request: {e}") from e
             raise HTTPException(502, f"Codex reset consume failed: {e}") from e

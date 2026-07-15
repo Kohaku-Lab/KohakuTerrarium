@@ -17,11 +17,11 @@ from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 
 
 class DriveSidecarMissingError(DriveError):
-    """The session has no Drive sidecar (a valid, empty saved Drive view)."""
+    """Indicate that a saved session has no Drive sidecar."""
 
 
 class OfflineDriveSnapshot:
-    """Own the private SQLite connection, temporary database, and writer lock."""
+    """Own a private SQLite snapshot and its temporary resources."""
 
     def __init__(
         self,
@@ -107,7 +107,7 @@ def open_offline_drive_snapshot(
     *,
     busy_timeout_ms: int,
 ) -> OfflineDriveSnapshot:
-    """Capture one SQLite-consistent saved view, or fail with a typed Drive error."""
+    """Capture a transactionally consistent offline view of a Drive sidecar."""
     session = Path(session_path)
     sidecar = Path(sidecar_path)
     writer_lock = FileLock(str(session) + ".lock")

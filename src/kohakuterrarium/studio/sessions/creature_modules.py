@@ -1,9 +1,7 @@
-"""Per-creature configurable modules — unified dispatcher.
+"""Dispatch per-creature module configuration across supported types.
 
-A *module* is anything the framework lets a user configure on a
-running creature: plugins, provider-native tools, MCP servers, etc.
-This module unifies the runtime configuration surface across types
-under a single shape::
+A module is any runtime-configurable creature component, such as a plugin or
+provider-native tool. All types expose a common shape::
 
     {
         "type": "plugin" | "native_tool" | ...,
@@ -14,13 +12,8 @@ under a single shape::
         "enabled": True | False | None,
     }
 
-Each module type implements a small adapter (``_inventory_*``,
-``_get_options_*``, ``_set_options_*``, ``_toggle_*``) that pulls
-data from the existing per-type backend (``creature_plugins``,
-``creature_state``…). The dispatcher never duplicates business
-logic — it just routes by ``type``.
-
-Adding a new type takes one block in :data:`_TYPE_DISPATCH`.
+Each type delegates inventory, options, and toggling to its existing backend.
+Adding a type requires one entry in :data:`_TYPE_DISPATCH`.
 """
 
 from typing import Any
@@ -29,9 +22,6 @@ from kohakuterrarium.studio.sessions import creature_plugins, creature_state
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.studio._runtime import as_engine
-
-# ── Per-type adapters ────────────────────────────────────────────
-
 
 def _inventory_plugins(
     engine: Terrarium, session_id: str, creature_id: str
@@ -130,8 +120,6 @@ async def _toggle_unsupported(
     raise ValueError("Module type does not support toggle")
 
 
-# ── Type dispatch table ──────────────────────────────────────────
-
 _TYPE_DISPATCH: dict[str, dict[str, Any]] = {
     "plugin": {
         "inventory": _inventory_plugins,
@@ -162,9 +150,6 @@ def _adapter(module_type: str, op: str):
     return fn
 
 
-# ── Public API ───────────────────────────────────────────────────
-
-
 def list_modules(
     service: "TerrariumService", session_id: str, creature_id: str
 ) -> list[dict]:
@@ -177,7 +162,7 @@ def list_modules(
         except KeyError:
             raise
         except Exception:
-            # Per-type failure shouldn't blank the whole inventory.
+            # One unavailable backend must not hide modules from other types.
             continue
     return out
 

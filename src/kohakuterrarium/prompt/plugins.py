@@ -1,9 +1,4 @@
-"""
-System prompt plugins - modular components for prompt aggregation.
-
-Each plugin contributes a section to the final system prompt.
-Plugins are sorted by priority (lower = earlier in prompt).
-"""
+"""Define priority-ordered components for modular prompt composition."""
 
 import platform
 from abc import ABC, abstractmethod
@@ -27,7 +22,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class PluginContext:
-    """Context passed to plugins during aggregation."""
+    """Provide registry, path, format, and custom data to prompt plugins."""
 
     registry: "Registry | None" = None
     working_dir: Path = field(default_factory=Path.cwd)
@@ -38,57 +33,45 @@ class PluginContext:
 
 @runtime_checkable
 class PromptPlugin(Protocol):
-    """Protocol for system prompt plugins."""
+    """Require named, prioritized prompt content providers."""
 
     @property
     def name(self) -> str:
-        """Unique plugin name."""
+        """Return the plugin's stable registry name."""
         ...
 
     @property
     def priority(self) -> int:
-        """Sort priority (lower = earlier in prompt)."""
+        """Return prompt order; lower values appear earlier."""
         ...
 
     def get_content(self, context: PluginContext) -> str | None:
-        """
-        Generate content to add to system prompt.
-
-        Args:
-            context: Plugin context with registry, paths, etc.
-
-        Returns:
-            Content string or None to skip.
-        """
+        """Return prompt content or ``None`` when the plugin has nothing to add."""
         ...
 
 
 class BasePlugin(ABC):
-    """Base class for prompt plugins."""
+    """Provide the default priority for prompt plugins."""
 
     @property
     @abstractmethod
     def name(self) -> str:
-        """Unique plugin name."""
+        """Return the plugin's stable registry name."""
         ...
 
     @property
     def priority(self) -> int:
-        """Sort priority (lower = earlier). Default: 50."""
+        """Return prompt order, defaulting to 50."""
         return 50
 
     @abstractmethod
     def get_content(self, context: PluginContext) -> str | None:
-        """Generate content for system prompt."""
+        """Return content to append to the system prompt."""
         ...
 
 
 class ToolListPlugin(BasePlugin):
-    """
-    Generates tool list section.
-
-    Outputs: tool name + one-line description for each tool.
-    """
+    """List registered tools with one-line descriptions."""
 
     @property
     def name(self) -> str:
@@ -119,11 +102,7 @@ class ToolListPlugin(BasePlugin):
 
 
 class FrameworkHintsPlugin(BasePlugin):
-    """
-    Adds framework hints (tool call syntax, commands).
-
-    This is the core syntax that all agents need.
-    """
+    """Describe tool-call syntax and framework commands."""
 
     @property
     def name(self) -> str:
@@ -142,7 +121,6 @@ class FrameworkHintsPlugin(BasePlugin):
                 "Use the `info` tool for full documentation on any function."
             )
 
-        # Custom format: generate examples from ToolCallFormat
         match context.tool_format:
             case "xml":
                 fmt = XML_FORMAT
@@ -171,12 +149,7 @@ class FrameworkHintsPlugin(BasePlugin):
 
 
 class EnvInfoPlugin(BasePlugin):
-    """
-    Injects environment information.
-
-    Includes: working directory, git status, platform, date.
-    Useful for SWE agents that need context awareness.
-    """
+    """Inject working-directory, repository, platform, and date context."""
 
     @property
     def name(self) -> str:
@@ -184,7 +157,7 @@ class EnvInfoPlugin(BasePlugin):
 
     @property
     def priority(self) -> int:
-        return 10  # Early in prompt
+        return 10
 
     def get_content(self, context: PluginContext) -> str | None:
         cwd = context.working_dir
@@ -201,13 +174,9 @@ Date: {date}
 
 
 class ProjectInstructionsPlugin(BasePlugin):
-    """
-    Loads project-specific instructions from files.
+    """Load hierarchical project instructions from the working tree.
 
-    Searches for: AGENTS.md, .kohaku.md, CLAUDE.md
-    in working directory and parent directories up to repo root.
-
-    Deeper files override higher-level files (appended later).
+    Root-level files appear first so deeper instructions can override them.
     """
 
     INSTRUCTION_FILES = ["AGENTS.md", ".kohaku.md", "CLAUDE.md"]
@@ -218,24 +187,22 @@ class ProjectInstructionsPlugin(BasePlugin):
 
     @property
     def priority(self) -> int:
-        return 20  # After env info, before tools
+        return 20
 
     def get_content(self, context: PluginContext) -> str | None:
         cwd = context.working_dir
         instructions = []
 
-        # Walk up to find repo root or filesystem root
         current = cwd
         paths_to_check = []
 
         while current != current.parent:
             paths_to_check.append(current)
-            # Stop at git root
             if (current / ".git").exists():
                 break
             current = current.parent
 
-        # Check from root down (so deeper files come later and override)
+        # Append from root to leaf so narrower instructions take precedence.
         for path in reversed(paths_to_check):
             for filename in self.INSTRUCTION_FILES:
                 filepath = path / filename
@@ -264,7 +231,6 @@ class ProjectInstructionsPlugin(BasePlugin):
         return "## Project Instructions\n\n" + "\n\n".join(instructions)
 
 
-# Registry of built-in plugins
 BUILTIN_PLUGINS: dict[str, type[BasePlugin]] = {
     "tool_list": ToolListPlugin,
     "framework_hints": FrameworkHintsPlugin,
@@ -274,7 +240,7 @@ BUILTIN_PLUGINS: dict[str, type[BasePlugin]] = {
 
 
 def create_plugin(name: str) -> BasePlugin | None:
-    """Create a plugin by name."""
+    """Instantiate a built-in plugin by registry name."""
     plugin_cls = BUILTIN_PLUGINS.get(name)
     if plugin_cls:
         return plugin_cls()
@@ -282,7 +248,7 @@ def create_plugin(name: str) -> BasePlugin | None:
 
 
 def get_default_plugins() -> list[BasePlugin]:
-    """Get default plugins for basic agent."""
+    """Return the basic tool-list and framework-hint plugins."""
     return [
         ToolListPlugin(),
         FrameworkHintsPlugin(),
@@ -290,7 +256,7 @@ def get_default_plugins() -> list[BasePlugin]:
 
 
 def get_swe_plugins() -> list[BasePlugin]:
-    """Get plugins for SWE-style agents."""
+    """Return environment, project, tool, and framework plugins for SWE agents."""
     return [
         EnvInfoPlugin(),
         ProjectInstructionsPlugin(),

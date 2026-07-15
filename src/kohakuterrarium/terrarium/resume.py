@@ -1,10 +1,5 @@
 """Engine-level resume — adopt a saved session into a live engine.
 
-Body of :meth:`Terrarium.resume` and :meth:`Terrarium.adopt_session`,
-kept in a sibling module so ``engine.py`` stays under the file-size
-cap.  Exactly the same pattern as ``terrarium/root.py`` for
-``assign_root``.
-
 Resume is an engine concern: rebuild creatures from saved config,
 inject the saved conversation / scratchpad / triggers / events, wrap
 each agent in a :class:`Creature`, attach the :class:`SessionStore`
@@ -39,7 +34,7 @@ logger = get_logger(__name__)
 
 
 def _schedule_drive_reconcile(engine: "Terrarium", creature: "Creature") -> None:
-    """Arm Drive reconciliation for a resumed creature (design §6.5, §9.6).
+    """Arm Drive reconciliation for a resumed creature.
 
     Resume starts creatures directly (not via ``engine.add_creature``), so it
     must wire the restoration-barrier-gated reconcile itself. A no-op on a
@@ -66,8 +61,7 @@ async def resume_into_engine(
     ``store`` may be a path-like to a ``.kohakutr`` file or an
     already-open :class:`SessionStore` instance.  An instance is CLOSED
     here first — the rebuild paths open the file themselves, and two
-    live handles on one session file kept independent event counters
-    (E8).
+    live handles on one session file keep independent event counters.
     """
     path = _resolve_store_path(store)
     if isinstance(store, SessionStore):
@@ -144,9 +138,9 @@ async def _resume_agent_into_engine(
         engine._owned_sessions.add(creature.graph_id)
 
         await creature.start()
-        # Drive reconcile is gated on the restoration barrier (design §6.5): the
-        # session store + Drive repository are already attached above, so the
-        # persisted Drives redeliver only after startup settles.
+        # The restoration barrier gates Drive reconciliation. The session store
+        # and Drive repository are already attached, so persisted Drives
+        # redeliver only after startup settles.
         _schedule_drive_reconcile(engine, creature)
 
         logger.info(
@@ -203,8 +197,8 @@ async def _resume_terrarium_body(
     if not config_path:
         raise SessionNotResumableError("Saved terrarium has no config_path in metadata")
 
-    # ``pwd`` flows into ``apply_recipe`` (per-creature workspaces) —
-    # no process-wide ``os.chdir`` (E8).
+    # ``pwd`` flows into ``apply_recipe`` for per-creature workspaces;
+    # resume must not change the process-wide working directory.
     saved_pwd = meta.get("pwd", ".")
     pwd = pwd or saved_pwd
     if not (pwd and os.path.isdir(pwd)):
@@ -305,9 +299,9 @@ async def _resume_terrarium_body(
         except KeyError:
             continue
         await creature.start()
-        # Drive reconcile is gated on the restoration barrier (design §6.5):
-        # session + Drive repository are attached above (attach_session), so
-        # persisted Drives redeliver only once each creature's startup settles.
+        # The restoration barrier gates Drive reconciliation. The session and
+        # Drive repository are attached above, so persisted Drives redeliver
+        # only once each creature's startup settles.
         _schedule_drive_reconcile(engine, creature)
 
     logger.info(

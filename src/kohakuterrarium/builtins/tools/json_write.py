@@ -1,4 +1,4 @@
-"""JSON write tool - modify JSON files."""
+"""Modify JSON documents through dot-path expressions."""
 
 import json
 from typing import Any
@@ -35,14 +35,13 @@ def _split_path(path: str) -> list[str | int]:
 
 
 def _set_path(data: Any, query: str, value: Any) -> Any:
-    """Set a value at a dot-path in JSON data. Returns modified data."""
+    """Set a value at a dot path, creating missing object parents."""
     if not query or query == ".":
         return value
 
     path = query.lstrip(".")
     parts = _split_path(path)
 
-    # Navigate to parent, creating intermediate dicts as needed
     current = data
     for part in parts[:-1]:
         if isinstance(part, int):
@@ -52,7 +51,6 @@ def _set_path(data: Any, query: str, value: Any) -> Any:
                 current[part] = {}
             current = current[part]
 
-    # Set value at final key
     last = parts[-1]
     if isinstance(last, int):
         current[last] = value
@@ -92,7 +90,7 @@ class JsonWriteTool(BaseTool):
         if not value_str:
             return ToolResult(error="Value is required")
 
-        # Parse the value as JSON, fall back to plain string
+        # Non-JSON input remains a string rather than being rejected.
         try:
             value = json.loads(value_str)
         except json.JSONDecodeError:
@@ -100,7 +98,6 @@ class JsonWriteTool(BaseTool):
 
         file_path = resolve_tool_path(path, context)
 
-        # Read existing file or start with empty dict
         if file_path.exists():
             try:
                 async with aiofiles.open(file_path, encoding="utf-8") as f:
@@ -114,17 +111,14 @@ class JsonWriteTool(BaseTool):
                 logger.error("JSON read failed", error=str(e))
                 return ToolResult(error=str(e))
         else:
-            # Ensure parent directory exists
             file_path.parent.mkdir(parents=True, exist_ok=True)
             data = {}
 
-        # Apply modification
         try:
             data = _set_path(data, query, value)
         except (KeyError, IndexError, TypeError) as e:
             return ToolResult(error=f"Failed to set path: {e}")
 
-        # Write back
         try:
             output_str = json.dumps(data, indent=2, ensure_ascii=False) + "\n"
             async with aiofiles.open(file_path, mode="w", encoding="utf-8") as f:

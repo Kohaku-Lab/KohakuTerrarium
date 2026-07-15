@@ -1,8 +1,7 @@
 """Creature CRUD primitives (scaffold / save / delete / write_prompt).
 
-Operate on a workspace root directly; the surrounding ``LocalWorkspace``
-methods are thin wrappers that thread sanitization + load callbacks
-through these helpers.
+Operates on a workspace's creature directory. ``LocalWorkspace`` delegates
+filesystem mutation here and handles higher-level loading and response shaping.
 """
 
 import shutil
@@ -17,10 +16,9 @@ from kohakuterrarium.studio.editors.yaml_creature import save_creature_merged
 
 
 def scaffold_creature(creatures_dir: Path, name: str, base: str | None) -> Path:
-    """Create a fresh creature directory + seed config and system.md.
+    """Create a creature directory with seed configuration and system prompt.
 
-    Returns the new creature directory. Raises ``FileExistsError`` if
-    ``<creatures_dir>/<name>/`` already exists.
+    Existing creature directories raise ``FileExistsError``.
     """
     name = sanitize_name(name)
     creature_dir = creatures_dir / name
@@ -29,7 +27,7 @@ def scaffold_creature(creatures_dir: Path, name: str, base: str | None) -> Path:
     creature_dir.mkdir(parents=True)
     prompts_dir = creature_dir / "prompts"
     prompts_dir.mkdir()
-    # Seed system.md + config.yaml from templates
+    # Both seed files must come from the shared templates to remain consistent.
     (prompts_dir / "system.md").write_text(render_system_prompt(name), encoding="utf-8")
     cfg_text = render_creature_config(name=name, base=base)
     (creature_dir / "config.yaml").write_text(cfg_text, encoding="utf-8")
@@ -37,11 +35,10 @@ def scaffold_creature(creatures_dir: Path, name: str, base: str | None) -> Path:
 
 
 def save_creature(creatures_dir: Path, name: str, body: dict) -> Path:
-    """Write the creature's config.yaml + any prompt files in *body*.
+    """Merge a creature config and write any supplied prompt files.
 
-    The incoming ``body`` shape mirrors the API request:
-    ``{"config": {...}, "prompts": {"<rel>": "<content>"}}``.
-    Returns the creature directory path.
+    Prompt paths are resolved within the creature directory. The creature
+    directory is returned after persistence.
     """
     name = sanitize_name(name)
     creature_dir = creatures_dir / name
@@ -58,10 +55,7 @@ def save_creature(creatures_dir: Path, name: str, body: dict) -> Path:
 
 
 def delete_creature(creatures_dir: Path, name: str) -> None:
-    """Recursively delete the creature directory.
-
-    Raises ``FileNotFoundError`` when no such creature exists.
-    """
+    """Recursively delete a creature, raising ``FileNotFoundError`` if absent."""
     name = sanitize_name(name)
     creature_dir = creatures_dir / name
     if not creature_dir.exists():
@@ -70,7 +64,7 @@ def delete_creature(creatures_dir: Path, name: str) -> None:
 
 
 def write_prompt(creatures_dir: Path, creature: str, rel: str, body: str) -> None:
-    """Write a single prompt file under ``<creatures_dir>/<creature>/<rel>``."""
+    """Write one prompt file while enforcing creature-directory containment."""
     creature = sanitize_name(creature)
     creature_dir = creatures_dir / creature
     creature_dir.mkdir(parents=True, exist_ok=True)

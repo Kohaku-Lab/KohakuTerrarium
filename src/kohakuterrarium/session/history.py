@@ -1,27 +1,18 @@
+"""Normalize, branch-select, and replay persisted session events."""
+
 import json
 from collections.abc import Hashable
 from typing import Any, Iterable
 
-# ---------------------------------------------------------------------
-# Parent-branch-path resolution (nested branching).
-#
-# Each event records ``(turn_index, branch_id)`` natively. Nested
-# branching adds a third dimension: the *path of branches* on prior
-# turns at the time the event was recorded. New backend code stamps
-# this path explicitly via the ``parent_branch_path`` field; pre-
-# existing events do not carry it, so we derive it from event order
-# (the latest branch of each prior turn seen before this event).
-#
-# This lets a branch switch on turn N hide every follow-up turn whose
-# implicit/explicit parent path no longer matches the user's view.
-# ---------------------------------------------------------------------
+# Parent paths identify the selected branches of earlier turns. Legacy events
+# derive this ancestry from event order when no explicit path was persisted.
 
 
 def _coerce_path(raw: Any) -> tuple[tuple[int, int], ...]:
     """Normalize a parent_branch_path payload into a tuple of pairs.
 
-    Accepts list-of-pairs (JSON friendly) and tuple-of-pairs. Returns
-    an empty tuple for invalid / missing input.
+    Accept JSON-friendly lists or tuples of integer pairs. Invalid or missing
+    input produces an empty path.
     """
     if not raw:
         return ()
@@ -42,9 +33,8 @@ def _index_parent_paths(
 ) -> dict[int, tuple[tuple[int, int], ...]]:
     """Map each event_id → its parent_branch_path.
 
-    Explicit ``parent_branch_path`` on the event wins. Otherwise we
-    walk events in order and snapshot the latest branch_id seen on
-    every prior turn — that snapshot is the implicit path.
+    Explicit paths take precedence. Legacy events inherit the latest branch seen
+    for each earlier turn at that point in event order.
     """
     paths: dict[int, tuple[tuple[int, int], ...]] = {}
     latest_by_turn: dict[int, int] = {}
@@ -74,13 +64,10 @@ def _path_matches(
     parent_path: tuple[tuple[int, int], ...],
     selected: dict[int, int],
 ) -> bool:
-    """A parent path is consistent with ``selected`` iff every (t, b)
-    in the path matches what the user selected for turn ``t``.
+    """Return whether a parent path is compatible with selected branches.
 
-    Turns the path mentions but selected does not are treated as a
-    match — those turns simply have not been overridden yet, and the
-    default-latest resolver below will pick a branch that matches the
-    path on its next pass.
+    Path turns absent from ``selected`` remain unconstrained until resolution
+    reaches them.
     """
     for t, b in parent_path:
         if t in selected and selected[t] != b:
@@ -95,18 +82,9 @@ def _resolve_selected_branches(
 ) -> dict[int, int]:
     """Pick a live branch for each turn while respecting nested paths.
 
-    Walks turns in ascending order. For each turn:
-
-    * If ``branch_view`` overrides this turn, use that branch (when it
-      exists in the recorded set).
-    * Otherwise, take the highest ``branch_id`` whose ``parent_path``
-      is consistent with the branches already selected for prior
-      turns. This is the natural "latest" within the user's chosen
-      subtree.
-
-    Turns whose every branch is incompatible with the selected prior
-    turns are simply absent from the result, which removes their
-    events from the live set entirely.
+    Turns resolve in ascending order. Valid overrides win; otherwise the highest
+    compatible branch is selected. Turns with no compatible branch are omitted
+    from the live subtree.
     """
     branches_by_turn: dict[int, list[tuple[int, int]]] = {}
     for evt in events_list:
@@ -138,7 +116,6 @@ def _resolve_selected_branches(
             if match is not None:
                 selected[ti] = match[1]
                 continue
-        # Pick the highest branch_id among compatible candidates.
         selected[ti] = max(bi for _, bi in candidates)
     return selected
 
@@ -150,17 +127,9 @@ def collect_branch_metadata(
 ) -> dict[int, dict[str, Any]]:
     """Extract per-turn branch metadata from an event stream.
 
-    Returns a dict ``{turn_index: {"branches": [branch_id, ...],
-    "latest_branch": int, "events_by_branch": {branch_id: [event_ids]}}}``.
-    Events without ``turn_index`` / ``branch_id`` are ignored — they
-    are non-state events (audit) or pre-branch legacy events that
-    treat the whole stream as branch 1.
-
-    When ``branch_view`` is provided, the per-turn ``branches`` list
-    is filtered to those whose ``parent_branch_path`` is consistent
-    with the user's selections on prior turns. ``latest_branch`` is
-    the largest such branch (so the navigator shows ``<x/N>`` based on
-    the visible subtree, not the global branch population).
+    Events lacking turn or branch identifiers are ignored. With ``branch_view``,
+    only branches compatible with selected prior ancestry are reported, so
+    navigator counts reflect the visible subtree.
     """
     events_list = list(events)
     parent_paths = _index_parent_paths(events_list)
@@ -174,9 +143,7 @@ def collect_branch_metadata(
         if not isinstance(ti, int) or not isinstance(bi, int):
             continue
         path = parent_paths.get(eid, ()) if isinstance(eid, int) else ()
-        # Only count branches whose parent path is compatible with the
-        # current view of prior turns. This is what makes the navigator
-        # show <x/N> within the user's subtree, not globally.
+        # Navigator counts must remain local to the selected ancestry.
         prior_selected = {t: b for t, b in selected.items() if t < ti}
         if not _path_matches(path, prior_selected):
             continue
@@ -202,19 +169,9 @@ def collect_user_groups(
 ) -> dict[int, dict[str, Any]]:
     """Per-turn grouping of branches by ``user_message`` content.
 
-    Two branches sharing identical user_message content are siblings
-    of a single user turn — they differ only in the assistant
-    response (regen). Branches with different user_message content
-    represent distinct user-side alternatives (edit + rerun).
-
-    Returns ``{turn_index: {"groups": [{"content": str, "branches":
-    [int, ...]}], "selected_group_idx": int}}`` for every turn that
-    has at least one branch. Empty when the stream has no branched
-    turns.
-
-    The grouping mirrors what the frontend's ``_collectBranchMetadata``
-    derives so CLI, TUI, and programmatic surfaces show the same
-    user-vs-assistant navigator placement.
+    Identical user content groups response regenerations together; distinct user
+    content represents edited alternatives. Each turn reports its groups and the
+    selected group index.
     """
     events_list = list(events)
     meta = collect_branch_metadata(events_list, branch_view=branch_view)
@@ -255,13 +212,9 @@ def select_live_event_ids(
 ) -> set[int]:
     """Return the event_ids that belong to the live subtree.
 
-    "Live" means: belongs to the user's selected branch of its turn
-    AND its ``parent_branch_path`` matches the user's selected
-    branches on every prior turn. Events without turn/branch metadata
-    are treated as live (legacy / non-state events).
-
-    Without ``branch_view``, the live subtree is the latest branch at
-    every level — i.e. the freshest leaf of the branch tree.
+    Live events belong to the selected branch and compatible prior ancestry.
+    Legacy or non-state events without branch metadata remain live. Without an
+    override, the latest compatible branch is selected at every turn.
     """
     events_list = list(events)
     parent_paths = _index_parent_paths(events_list)
@@ -300,12 +253,9 @@ def dedupe_adjacent_duplicate_events(
 ) -> list[dict[str, Any]]:
     """Collapse identical adjacent persisted events.
 
-    Some resumed graph paths briefly attached two ``SessionOutput`` sinks
-    to the same agent/store pair. That wrote each text chunk/tool event
-    twice with distinct ``event_id``/``ts`` values, producing frontend
-    output like ``RootRoot cause cause``. Treat those duplicate rows as a
-    storage accident for replay/history consumers while keeping the raw
-    log intact for audit/debugging.
+    Duplicate sink attachment can persist equivalent neighboring rows with distinct
+    identifiers and timestamps. Replay consumers collapse them while the raw log
+    remains unchanged.
     """
     out: list[dict[str, Any]] = []
     previous_signature: tuple[tuple[str, Hashable], ...] | None = None
@@ -331,45 +281,16 @@ def replay_conversation(
 ) -> list[dict[str, Any]]:
     """Rebuild an OpenAI-shape message list from the event log.
 
-    Walks the event stream in order and emits a deterministic message
-    list ready to be fed to an LLM provider. Consecutive ``text_chunk``
-    events collapse into a single assistant message so the user-facing
-    conversation stays clean even though streaming storage is per-chunk.
-
-    By default, when a turn has multiple branches (regenerate /
-    edit+rerun), only the latest branch is replayed; sibling branches
-    are kept on disk for the ``<1/N>`` navigator. Pass ``branch_view``
-    as ``{turn_index: branch_id}`` to override per-turn selection.
-
-    Supported event types:
-
-    - ``user_message``: role/content pair. ``content`` may be a plain
-      str or a list of multimodal content parts.
-    - ``text_chunk``: accumulator. ``content`` is concatenated with
-      subsequent ``text_chunk`` events until a non-chunk event arrives,
-      then the buffer is flushed as one assistant message.
-    - ``assistant_tool_calls``: attaches the ``tool_calls`` list to the
-      pending assistant message (or emits a tool-call-only assistant
-      message when no text buffer is present).
-    - ``tool_result``: role=tool message carrying ``content`` (from the
-      event's ``output`` field) plus ``tool_call_id`` and ``name``.
-    - ``system_prompt_set``: role=system message. The most recent one
-      wins — replay keeps all of them in order so the caller can see
-      the full history.
-    - ``compact_replace``: replaces every event whose ``event_id`` falls
-      inside ``[replaced_from_event_id, replaced_to_event_id]`` with a
-      single assistant summary message.
-
-    Unknown event types are ignored (they are observability-only).
+    Events are branch-filtered and emitted in provider-ready message order.
+    Consecutive text chunks coalesce, tool announcements pair with tool results,
+    system prompts remain ordered, and compaction ranges become one summary.
+    Unknown observability events are ignored.
     """
     events_list = dedupe_adjacent_duplicate_events(events)
-    # Path-aware live filter. Replaces the old per-turn-only selector
-    # so nested branches (turn N has its own siblings under turn N-1's
-    # selected branch) are honored.
+    # Nested branch ancestry determines the live event set.
     live_ids = select_live_event_ids(events_list, branch_view=branch_view)
 
-    # Pre-pass: ``compact_replace`` ranges replace covered events with
-    # a single summary message in place.
+    # Compaction summaries replace every covered source event.
     replaced_ids: set[int] = set()
     for evt in events_list:
         if evt.get("type") == "compact_replace":
@@ -394,9 +315,7 @@ def replay_conversation(
         etype = evt.get("type", "")
         eid = evt.get("event_id")
 
-        # Skip events outside the live subtree (wrong branch / wrong
-        # parent path). Events without an event_id (synthetic / inline)
-        # always replay.
+        # Synthetic events without identifiers bypass branch filtering.
         if isinstance(eid, int) and eid not in live_ids:
             continue
 
@@ -425,7 +344,7 @@ def replay_conversation(
         ):
             continue
 
-        # Any non-chunk structural event flushes the buffer first.
+        # Structural events delimit streamed assistant text.
         _flush_text()
 
         if etype == "user_message":
@@ -472,11 +391,8 @@ def replay_conversation(
 def _coerce_tool_args_to_json(args: Any) -> str:
     """Best-effort serialisation for ``assistant_tool_calls.arguments``.
 
-    Mirrors :func:`session.migrations.v1_to_v2._coerce_args`. The wire
-    contract for an OpenAI-shaped tool_call is that ``arguments`` is a
-    JSON-encoded string — replay_conversation passes it through unchanged
-    so downstream consumers (the orphan sanitiser, persistence fork
-    endpoints) expect a string here too.
+    OpenAI-shaped tool-call arguments must remain JSON strings for replay and
+    downstream sanitization.
     """
     if isinstance(args, str):
         return args
@@ -491,34 +407,11 @@ def _coerce_tool_args_to_json(args: Any) -> str:
 def _inject_synthetic_announcements(
     events: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """B8: insert ``assistant_tool_calls`` before every orphan tool pair.
+    """Insert missing assistant tool-call announcements before consumption.
 
-    The live runtime emits ``tool_call`` + ``tool_result`` events but
-    NEVER an ``assistant_tool_calls`` announcement — that event type is
-    only written by the v1→v2 migrator. On the host-side session mirror
-    (which only sees ``append_event`` outputs, not conversation
-    snapshots), :func:`replay_conversation` therefore produces
-    ``role=tool`` messages with no preceding ``assistant.tool_calls``
-    list. :meth:`Conversation.sanitize_orphan_tool_pairs` then drops
-    every such tool message as orphan and logs a WARNING.
-
-    The fix mirrors the migrator's flush logic
-    (``migrations/v1_to_v2.py:_flush_pending_tool_calls``): buffer
-    pending ``tool_call`` events and flush them as a single
-    ``assistant_tool_calls`` announcement immediately before the next
-    structural event that consumes them — a ``tool_result`` for one of
-    them, the next user turn, or any other non-tool_call structural
-    event.
-
-    Idempotent: if an explicit ``assistant_tool_calls`` event already
-    announces a tool_call's id, we drop that id from the buffer so no
-    duplicate announcement is synthesised.
-
-    Synthetic events are stamped ``_synthetic_announce=True`` and carry
-    NO ``event_id`` — :func:`replay_conversation` bypasses the live-ids
-    filter for events without an integer event_id, so the synthetic
-    announcement always replays in its inserted position regardless of
-    branch view.
+    Pending calls are grouped until a structural event requires them. Existing
+    announcements suppress duplicates. Synthetic announcements intentionally omit
+    event identifiers so replay preserves their inserted position.
     """
     pending: list[dict[str, Any]] = []
     announced_ids: set[str] = set()
@@ -560,8 +453,7 @@ def _inject_synthetic_announcements(
 
         if etype == "tool_call":
             cid = str(evt.get("call_id") or evt.get("job_id") or "")
-            # If a real ``assistant_tool_calls`` event already announced
-            # this id (or it was just flushed), don't buffer it again.
+            # Calls already announced must not be synthesized again.
             if cid and cid in announced_ids:
                 result.append(evt)
                 continue
@@ -570,20 +462,13 @@ def _inject_synthetic_announcements(
             continue
 
         if etype == "subagent_call":
-            # ``subagent_call`` is a sibling-pending event: a single LLM
-            # turn can interleave ``tool_call`` and ``subagent_call``
-            # dispatches, and they all belong to the SAME assistant
-            # message. Treating subagent_call as a structural flush
-            # trigger would split one turn's tool_calls into multiple
-            # synthetic ``assistant_tool_calls`` events, breaking the
-            # downstream conversation pairing for every tool_call that
-            # lands after the subagent_call.
+            # Sub-agent dispatches can interleave with calls from the same assistant
+            # message and therefore do not delimit the pending call group.
             result.append(evt)
             continue
 
         if etype == "assistant_tool_calls":
-            # Real announcement — record its ids and drop any pending
-            # tool_call entries that match (no double-announce).
+            # Explicit announcements remove matching calls from the pending group.
             for tc in evt.get("tool_calls") or []:
                 tid = str(tc.get("id") or "")
                 if tid:
@@ -596,15 +481,11 @@ def _inject_synthetic_announcements(
             result.append(evt)
             continue
 
-        # Any other structural event flushes pending tool_calls so the
-        # announcement lands BEFORE whatever consumes them. This matches
-        # the migrator's behaviour where ``user_input``, ``text_chunk``,
-        # ``tool_result``, ``compact_complete``, … all flush the buffer.
+        # Announcements must precede the structural event that consumes the calls.
         _flush_pending()
         result.append(evt)
 
-    # Trailing pending tool_calls (no terminating event in stream) —
-    # still announce them so replay sees a consistent assistant turn.
+    # An unfinished stream still needs a valid trailing assistant announcement.
     _flush_pending()
     return result
 
@@ -616,22 +497,9 @@ def normalize_resumable_events(
 ) -> list[dict[str, Any]]:
     """Mark unfinished tool/sub-agent work as interrupted for history replay.
 
-    When ``live_job_ids`` is provided, jobs whose id appears in that set
-    are treated as still-running and NOT synthesized as interrupted.
-    Pass it from the live history endpoint so in-flight background
-    sub-agents (whose ``subagent_result`` event hasn't been recorded yet)
-    don't render as interrupted while they're still working. Resume code
-    paths leave it unset — at resume time the process actually died, so
-    every unfinished job is truly interrupted and the synthetic event is
-    correct.
-
-    Also injects synthetic ``assistant_tool_calls`` announcements before
-    every ``tool_result`` / end-of-turn that has unannounced ``tool_call``
-    events ahead of it (see :func:`_inject_synthetic_announcements`).
-    Without this step the host-side session mirror (which never receives
-    conversation snapshots) replays as a series of orphan ``role=tool``
-    messages — the user-visible "high orphan tool call" rate on
-    multi-node creatures (B8).
+    Jobs listed in ``live_job_ids`` remain running; all other unfinished work is
+    represented by synthetic interrupted results. Missing assistant tool-call
+    announcements are also injected so replay preserves valid tool pairing.
     """
     normalized = [dict(evt) for evt in events]
     started_tools: dict[str, dict[str, Any]] = {}

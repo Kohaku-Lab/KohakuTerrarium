@@ -1,9 +1,6 @@
 """Multi-output router subclass.
 
-A thin extension of :class:`OutputRouter` that owns an extra named
-output map and exposes ``write_to(name, content)`` for direct writes
-to a specific module. Lives in its own file so the main ``router.py``
-stays small.
+An additional named-output map supports direct writes with cascaded lifecycle.
 """
 
 from __future__ import annotations
@@ -18,12 +15,7 @@ logger = get_logger(__name__)
 
 
 class MultiOutputRouter(OutputRouter):
-    """Router that can route to multiple output modules.
-
-    Different content types can go to different destinations via
-    :meth:`write_to`. Lifecycle (start / stop / flush) cascades to
-    every output module owned by this router.
-    """
+    """Route direct named writes and cascade lifecycle to all owned outputs."""
 
     def __init__(
         self,
@@ -31,13 +23,7 @@ class MultiOutputRouter(OutputRouter):
         outputs: dict[str, OutputModule] | None = None,
         **kwargs: Any,
     ):
-        """Initialize multi-output router.
-
-        Args:
-            default_output: Default output module
-            outputs: Named output modules for specific content types
-            **kwargs: Additional arguments for base router
-        """
+        """Initialize the base router and its direct-write output map."""
         super().__init__(default_output, **kwargs)
         self.outputs = outputs or {}
 
@@ -54,12 +40,7 @@ class MultiOutputRouter(OutputRouter):
         await super().stop()
 
     async def write_to(self, name: str, content: str) -> None:
-        """Write to a specific named output.
-
-        Args:
-            name: Output module name
-            content: Content to write
-        """
+        """Write content directly to a named output when registered."""
         if name in self.outputs:
             await self.outputs[name].write(content)
         else:

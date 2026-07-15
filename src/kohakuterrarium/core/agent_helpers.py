@@ -1,13 +1,9 @@
 """Composition helpers attached to ``Agent`` post-construction.
 
-Tiny wiring module so :class:`~kohakuterrarium.core.agent.Agent` only
-spends one line on adding new per-agent helpers — keeping ``agent.py``
-under its file-size cap.
+Wiring for agent-scoped helper objects that expose session configuration.
 
-Each helper is a thin object that holds an ``agent`` reference and
-exposes session-scoped read/write methods (e.g. ``agent.workspace.set``,
-``agent.native_tool_options.set``). The agent is the source of truth;
-the helpers are stateless beyond what they can re-read off the agent.
+Each helper retains an agent reference while the agent remains the source of
+truth for all mutable state.
 """
 
 from typing import TYPE_CHECKING

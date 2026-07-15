@@ -1,8 +1,8 @@
 """Module CRUD primitives (scaffold / save / save_doc / delete).
 
-Operate via the per-kind codegen dispatcher. The wrapping
-``LocalWorkspace`` methods locate the on-disk path (workspace-native
-or manifest-declared) and thread it through these helpers.
+Uses the per-kind code-generation dispatcher for scaffolding and structured
+updates. ``LocalWorkspace`` resolves workspace-native or manifest-declared paths
+before delegating here.
 """
 
 from pathlib import Path
@@ -17,10 +17,9 @@ from kohakuterrarium.studio.editors.workspace_manifest import (
 
 
 def scaffold_module(kind_dir: Path, kind: str, name: str, template: str | None) -> Path:
-    """Scaffold a new module file under ``<kind_dir>/<name>.py``.
+    """Scaffold a new Python module and return its path.
 
-    Raises ``FileExistsError`` when the file already exists.
-    Returns the new path.
+    Existing destinations raise ``FileExistsError``.
     """
     name = sanitize_name(name)
     kind_dir.mkdir(parents=True, exist_ok=True)
@@ -49,12 +48,11 @@ def save_module(
     existing_path: Path | None,
     fallback_path: Path,
 ) -> Path:
-    """Write a module file using either raw or simple form mode.
+    """Persist a module in raw-source or structured form mode.
 
-    ``existing_path`` is the located path for in-place updates;
-    ``fallback_path`` is the destination when no prior file is found.
-    Raises ``ValueError`` for unknown modes / empty raw bodies and
-    ``RoundTripError`` when ``cg.update_existing`` cannot patch safely.
+    Existing modules are updated in place; new modules use ``fallback_path``.
+    Invalid modes and empty raw source raise ``ValueError``. Unsafe structured
+    rewrites propagate ``RoundTripError``.
     """
     name = sanitize_name(name)
     cg = get_codegen(kind)
@@ -96,12 +94,12 @@ def save_module(
 
 
 def save_module_doc(py_path: Path, content: str) -> None:
-    """Write the skill-doc sidecar (``.md``) next to a module file."""
+    """Write a module's Markdown documentation sidecar."""
     save_sidecar_doc(py_path, content)
 
 
 def delete_module(kind: str, name: str, path: Path | None) -> None:
-    """Delete a module file. Raises ``FileNotFoundError`` when missing."""
+    """Delete a module file, raising ``FileNotFoundError`` when absent."""
     sanitize_name(name)
     if path is None:
         raise FileNotFoundError(f"{kind}/{name}")

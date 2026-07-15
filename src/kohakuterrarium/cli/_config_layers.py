@@ -120,6 +120,7 @@ def _set_nested(d: dict[str, Any], path: tuple[str, ...], value: Any) -> None:
 
 
 def _coerce(path: tuple[str, ...], value: str) -> Any:
+    """Coerce environment values according to their configured paths."""
     if path in _INT_KEYS:
         try:
             return int(value)
@@ -197,7 +198,7 @@ def load_layered_config(
         )
 
     layered = dict(_BUILTIN_DEFAULTS[role])
-    layered = _deep_merge(_BUILTIN_DEFAULTS[role], {})  # deep copy
+    layered = _deep_merge(_BUILTIN_DEFAULTS[role], {})
 
     for path in _candidate_yaml_paths(role):
         layered = _deep_merge(layered, _load_yaml_layer(path))

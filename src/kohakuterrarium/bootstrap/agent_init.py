@@ -1,12 +1,5 @@
 """
-Agent component initialization.
-
-Contains mixin methods for initializing all agent subsystems
-(LLM, registry, executor, input, output, triggers, sub-agents).
-Separated from the main Agent class to keep file sizes manageable.
-
-Heavy initialization logic is delegated to bootstrap.* factory modules
-to reduce import fan-out.
+Agent subsystem initialization delegated to focused bootstrap factories.
 """
 
 import importlib
@@ -70,46 +63,28 @@ logger = get_logger(__name__)
 
 
 class AgentInitMixin:
-    """
-    Mixin providing component initialization for the Agent class.
-
-    All _init_* and _create_* methods live here to keep the main Agent
-    class focused on its public API and runtime loop.
-    """
+    """Initialize the components used by the Agent runtime."""
 
     config: AgentConfig
     _loader: ModuleLoader
 
     def _init_llm(self) -> None:
-        """Initialize the LLM provider from the ``llm=`` spec.
+        """Bind an injected provider or resolve a configured LLM.
 
-        A provider *instance* (or :class:`LLMProfile`) injected via
-        ``llm=`` binds directly — no resolution, no fallback; a broken
-        instance is the caller's bug and raises immediately.
-
-        Selector strings / config-resolved providers may defer: model
-        selection is a runtime concern — the user can pick a model in
-        the Studio UI or via ``switch_model`` after the creature
-        exists.  Gating creature **creation** on a working provider
-        locks the user out of an existing conversation just because
-        the host's identity store doesn't carry that profile's key
-        today.  So construction errors install a
-        :class:`DeferredLLMProvider` placeholder; a chat turn raises
-        with a clear "pick a model" message until the user rebinds.
+        Direct instances and profiles fail immediately when invalid. In
+        non-strict mode, selector resolution may install a deferred provider so
+        an existing creature remains accessible until the user selects a model.
         """
         llm_spec = getattr(self, "_llm_spec", None)
         if llm_spec is not None and not isinstance(llm_spec, str):
-            # Instance / LLMProfile injection — bind directly, raise on
-            # misuse (TypeError from the coercer).
+            # Explicit objects are caller-owned bindings and must fail eagerly.
             self.llm = coerce_llm_provider(llm_spec, self.config)
             return
         try:
             self.llm = create_llm_provider(self.config, llm_spec)
         except (ValueError, RuntimeError) as exc:
             if getattr(self, "_strict", True):
-                # Programmatic default: a misconfigured model is a
-                # caller bug — raise now instead of building an agent
-                # that "works" and says nothing.
+                # Strict builds reject model errors before creating an unusable agent.
                 raise
             logger.warning(
                 "agent build: no LLM provider yet, deferring (reason=%s)",
@@ -118,22 +93,7 @@ class AgentInitMixin:
             self.llm = DeferredLLMProvider(reason=str(exc))
 
     def _init_registry(self) -> None:
-        """Initialize module registry and register tools.
-
-        Order matters:
-
-        1. ``init_tools`` wires user-configured entries from the
-           creature YAML.
-        2. ``_drop_unsupported_provider_native_tools`` removes any of
-           those user-wired entries that the active provider can't
-           handle (explicit wiring on the wrong provider → silent drop
-           with an INFO log).
-        3. ``_auto_inject_provider_native_tools`` adds every native
-           tool the active provider advertises via
-           ``provider_native_tools`` that isn't already in the registry
-           and isn't opted out by the creature's
-           ``disable_provider_tools`` list.
-        """
+        """Register configured tools, remove unsupported native tools, then inject offered ones."""
         self.registry = Registry()
         init_tools(
             self.config,
@@ -145,14 +105,7 @@ class AgentInitMixin:
         self._auto_inject_provider_native_tools()
 
     def _drop_unsupported_provider_native_tools(self) -> None:
-        """Remove user-wired provider-native tools the provider can't serve.
-
-        Users may explicitly list e.g. ``image_gen`` under ``tools:``.
-        If the active provider's ``provider_name`` is not in the
-        tool's ``provider_support`` set, drop the entry — the tool
-        can't function here and the provider won't translate it.
-        Auto-injection handles the happy path in a separate step.
-        """
+        """Remove configured provider-native tools unsupported by the active LLM."""
         llm = getattr(self, "llm", None)
         active = getattr(llm, "provider_name", "") if llm is not None else ""
         for name in list(self.registry.list_tools()):
@@ -171,15 +124,7 @@ class AgentInitMixin:
             )
 
     def _auto_inject_provider_native_tools(self) -> None:
-        """Auto-register provider-native tools advertised by the LLM.
-
-        Every provider declares the builtin tool names it can serve
-        via the ``provider_native_tools`` class attribute. Those
-        entries are injected into the registry automatically — the
-        creature does NOT have to list them under ``tools:``. To
-        suppress any of them, add the tool name to the creature's
-        ``disable_provider_tools`` list.
-        """
+        """Register advertised provider-native tools unless disabled or overridden."""
         llm = getattr(self, "llm", None)
         offered = (
             getattr(llm, "provider_native_tools", frozenset()) if llm else frozenset()
@@ -199,7 +144,7 @@ class AgentInitMixin:
                 )
                 continue
             if name in existing:
-                # User already wired it with custom config — respect that.
+                # Explicit configuration takes precedence over automatic injection.
                 continue
             tool = get_builtin_tool(name)
             if tool is None:
@@ -217,12 +162,7 @@ class AgentInitMixin:
             )
 
     def _init_iteration_budget(self) -> None:
-        """Create shared IterationBudget; parent + children consume it.
-
-        Sub-agents that inherit share this counter. The parent
-        controller also consumes one slot per turn in
-        ``AgentHandlersMixin._check_termination``.
-        """
+        """Create the iteration counter shared by the parent and sub-agents."""
         cap = getattr(self.config, "max_iterations", None)
         if not cap or cap <= 0:
             self.iteration_budget = None
@@ -257,22 +197,12 @@ class AgentInitMixin:
         """Initialize background executor."""
         self.executor = Executor()
 
-        # Register tools from registry
         for tool_name in self.registry.list_tools():
             tool = self.registry.get_tool(tool_name)
             if tool:
                 self.executor.register_tool(tool)
 
-        # Wire session for ToolContext building.
-        #
-        # - An explicit `Session` (terrarium environment-scoped) wins.
-        # - An explicit `config.session_key` is the opt-in to a SHARED,
-        #   process-global session (cooperating standalone agents).
-        # - Otherwise the agent owns a FRESH, private Session. Falling
-        #   back to ``config.name`` as the global-registry key made two
-        #   unrelated creatures that happen to share a name (a restarted
-        #   creature, two ``general``s) silently share scratchpad +
-        #   channels across engine / Studio lifecycles.
+        # Explicit sessions win; session_key opts into sharing; otherwise isolate state.
         explicit = getattr(self, "_explicit_session", None)
         if explicit is not None:
             self.session = explicit
@@ -281,11 +211,10 @@ class AgentInitMixin:
         else:
             self.session = Session(key=self.config.name)
 
-        # Backward-compatible accessors
+        # Preserve the legacy direct accessors over the selected session.
         self.channel_registry = self.session.channels
         self.scratchpad = self.session.scratchpad
 
-        # Set executor context
         self.executor._agent = self
         self.executor._agent_name = self.config.name
         self.executor._session = self.session
@@ -295,8 +224,7 @@ class AgentInitMixin:
             if isinstance(self.config.tool_format, str)
             else "bracket"
         )
-        # Working dir: explicit pwd from API/config > process cwd.
-        # agent_path is for resolving config-relative paths (prompts, custom tools).
+        # The runtime working directory is independent of config-relative agent_path.
         explicit_pwd = getattr(self, "_explicit_pwd", None)
         if explicit_pwd:
             self.executor._working_dir = Path(explicit_pwd).resolve()
@@ -309,7 +237,6 @@ class AgentInitMixin:
                     self.config.agent_path / memory_config["path"]
                 )
 
-        # File safety guards
         self._file_read_state = FileReadState()
         self.executor._file_read_state = self._file_read_state
 
@@ -321,8 +248,8 @@ class AgentInitMixin:
         self.executor._path_guard = self._path_guard
 
     def _init_subagents(self) -> None:
-        """Initialize sub-agent manager and register sub-agents."""
-        # Pass parent's tool_format so sub-agents inherit it
+        """Create the sub-agent manager with inherited runtime context."""
+        # Sub-agents inherit the parent's call syntax.
         parent_tool_format = (
             self.config.tool_format
             if isinstance(self.config.tool_format, str)
@@ -336,24 +263,18 @@ class AgentInitMixin:
             parent_registry=self.registry,
             llm=self.llm,
             agent_path=self.config.agent_path,
-            job_store=self.executor.job_store,  # Share job store so wait command works
+            job_store=self.executor.job_store,  # Shared jobs let parent commands await children.
             max_depth=self.config.max_subagent_depth,
             tool_format=parent_tool_format,
             default_plugin_specs=default_plugin_specs,
         )
-        # Inherit parent's tool context builder (working_dir, file guards, etc.)
+        # Reuse the parent executor's working directory and safety guards.
         self.subagent_manager._parent_executor = self.executor
 
         init_subagents(self.config, self.subagent_manager, self.registry, self._loader)
 
     def _resolve_tool_format(self) -> ToolCallFormat | None:
-        """
-        Resolve tool_format config to a ToolCallFormat instance.
-
-        Returns:
-            ToolCallFormat for bracket/xml/custom, or None for native mode
-            (native mode bypasses the stream parser entirely).
-        """
+        """Resolve configured call syntax; native mode bypasses stream parsing."""
         fmt = self.config.tool_format
         if isinstance(fmt, str):
             match fmt:
@@ -362,7 +283,7 @@ class AgentInitMixin:
                 case "xml":
                     return XML_FORMAT
                 case "native":
-                    return None  # Native mode bypasses parser
+                    return None  # Native calls are already structured by the provider.
                 case _:
                     logger.warning(
                         "Unknown tool_format, using bracket", tool_format=fmt
@@ -381,11 +302,11 @@ class AgentInitMixin:
             else "custom"
         )
 
-        # Store controller config for creating controllers on-demand (parallel mode)
+        # Retain immutable settings for controllers created by parallel turns.
         self._controller_config = ControllerConfig(
             system_prompt=system_prompt,
             include_job_status=True,
-            include_tools_list=False,  # Already in aggregated prompt
+            include_tools_list=False,  # The aggregated prompt already contains tools.
             max_messages=self.config.max_messages,
             ephemeral=self.config.ephemeral,
             known_outputs=getattr(self, "_known_outputs", set()),
@@ -393,27 +314,18 @@ class AgentInitMixin:
             sanitize_orphan_tool_calls=self.config.sanitize_orphan_tool_calls,
         )
 
-        # Primary controller (always exists)
-        # Note: Controller handles framework commands (read, info, jobs, wait)
-        # via its own _commands dict and ControllerContext
+        # The primary controller also owns framework command dispatch.
         self.controller = self._create_controller()
         if getattr(self, "plugins", None):
             self.controller.plugins = self.plugins
             self._apply_plugin_hooks()
 
     def _build_aggregated_prompt(self) -> str:
-        """Aggregate the full system prompt for the CURRENT registry.
-
-        Used at construction and by ``refresh_system_prompt`` after a
-        runtime ``add_tool`` (E7) — the tool list inside the prompt is
-        recomputed from whatever the registry holds now.
-        """
-        # Build system prompt
-        # Aggregator auto-adds: tool list (name + description), framework hints
-        # system.md should only contain agent personality/guidelines
+        """Build a system prompt from the current registry and runtime context."""
+        # The aggregator adds tools and framework hints; system.md remains agent-specific.
         base_prompt = self.config.system_prompt
 
-        # Add sub-agents section if any registered (respects include_tools_in_prompt)
+        # Sub-agent inventory follows the same prompt-inclusion switch as tools.
         if self.config.include_tools_in_prompt:
             subagents_prompt = self.subagent_manager.get_subagents_prompt()
             if subagents_prompt:
@@ -421,7 +333,6 @@ class AgentInitMixin:
 
         known_outputs = getattr(self, "_known_outputs", set())
 
-        # Resolve tool format from config
         self._tool_format = self._resolve_tool_format()
         tool_format_name = (
             self.config.tool_format
@@ -429,8 +340,7 @@ class AgentInitMixin:
             else "custom"
         )
 
-        # Resolve framework-hint overrides: package-level (kohaku.yaml)
-        # merges under creature-level (AgentConfig.framework_hint_overrides).
+        # Creature hint overrides take precedence over package defaults.
         pkg_root = find_package_root_for_path(self.config.agent_path)
         package_hints = get_package_framework_hints(pkg_root)
         hint_overrides = merge_overrides(
@@ -457,12 +367,7 @@ class AgentInitMixin:
                 model=getattr(self.llm, "model", ""),
                 _host_agent=self,
             )
-        # ``extra_context`` is passed to the Jinja-style renderer so
-        # template variables like ``{{ agent_name }}`` /
-        # ``{{ creature_name }}`` / ``{{ pwd }}`` resolve in the base
-        # prompt. Without these, kt-biome's ``general/prompts/system.md``
-        # renders as ``# `` and ``You are , a general-purpose...`` —
-        # the empty-name footgun the user reported.
+        # Supply standard runtime variables expected by prompt templates.
         prompt_extra_context: dict = {
             "agent_name": self.config.name,
             "creature_name": self.config.name,
@@ -570,7 +475,7 @@ class AgentInitMixin:
         return result.output or content
 
     def _create_controller(self) -> Controller:
-        """Create a new controller instance (for parallel processing)."""
+        """Create a controller sharing the agent's runtime components."""
         controller = Controller(
             self.llm,
             self._controller_config,
@@ -586,26 +491,16 @@ class AgentInitMixin:
             controller.register_command("skill", SkillCommand(skill_registry))
             if hasattr(controller, "_context"):
                 controller._context.skills_registry = skill_registry
-        # Wire the creature's config folder so InfoCommand's documented
-        # priority-#1 override (prompts/tools/<name>.md) is reachable.
+        # Tool documentation overrides resolve relative to the creature config.
         if hasattr(controller, "_context"):
             controller._context.agent_path = getattr(self.config, "agent_path", None)
         return controller
 
     def _init_skills(self) -> None:
-        """Discover procedural skills and build the runtime registry.
+        """Discover procedural skills and persist their enable state in the session.
 
-        Scans (in priority order, high → low):
-
-        1. ``<cwd>/.kt/skills``, ``.claude/skills``, ``.agents/skills``
-        2. ``~/.kohakuterrarium/skills``, ``~/.claude/skills``,
-           ``~/.agents/skills``
-        3. ``<agent>/prompts/skills``
-        4. every installed package's ``skills:`` manifest entries
-
-        Last-wins across origins (spec 1.1 exception). Runtime
-        enable-state is persisted to the session scratchpad under
-        ``skills.enabled``.
+        Project, user, creature, and package locations are scanned in priority
+        order, with later discoveries replacing earlier names.
         """
         scratchpad = getattr(self, "scratchpad", None)
         self.skills = SkillRegistry(scratchpad=scratchpad)
@@ -632,8 +527,7 @@ class AgentInitMixin:
         for skill in discovered:
             self.skills.add(skill)
 
-        # Mirror the registry onto session.extra so plugins and the
-        # studio routes can reach it without an agent reference.
+        # Session metadata exposes skills to plugins and Studio without an agent handle.
         session = getattr(self, "session", None)
         if session is not None:
             session.extra["skills_registry"] = self.skills
@@ -654,20 +548,14 @@ class AgentInitMixin:
             self.config, custom_output, self._loader
         )
 
-        # Store known outputs for parser config
+        # Named outputs constrain parser routing targets.
         self._known_outputs = set(named_outputs.keys())
         logger.info("Named outputs registered", named_outputs=list(self._known_outputs))
 
         self.output_router = OutputRouter(default_output, named_outputs=named_outputs)
 
     def _init_user_commands(self) -> None:
-        """Wire the aggregated user-command registry into the input module.
-
-        The registry is the collision-checked union of built-ins, package
-        ``user_commands:`` entries, constructor-injected commands, and active
-        plugin contributions (design §8.9). It is rebuilt on plugin
-        enable/disable/add/remove by :meth:`refresh_user_commands`.
-        """
+        """Aggregate every user-command source and bind it to the input module."""
         commands, provenance = self._aggregate_user_commands()
         self._user_command_registry = commands
         self._user_command_provenance = provenance
@@ -683,12 +571,10 @@ class AgentInitMixin:
     def _aggregate_user_commands(
         self,
     ) -> tuple[dict[str, Any], dict[str, CommandProvenance]]:
-        """Collision-checked union of every user-command source (design §8.9).
+        """Combine command sources while requiring a unique explicit override.
 
-        Order of sources does not change the outcome: a name claimed by two
-        sources is a hard error unless exactly one carries ``override=True``.
-        Constructor-injected commands are implicit overriders so an
-        application's ``user_commands=`` may still shadow a built-in.
+        Constructor-injected commands override by default so applications can
+        replace built-ins deliberately.
         """
         contributions: list[CommandContribution] = []
         for name in list_builtin_user_commands():
@@ -718,12 +604,7 @@ class AgentInitMixin:
         return aggregate_user_commands(contributions)
 
     def _load_package_user_command_contributions(self) -> list[CommandContribution]:
-        """Import package ``user_commands:`` classes into contributions.
-
-        A failing import is logged and skipped so one broken package cannot
-        strip every slash command; the collision policy still runs over the
-        successfully loaded set.
-        """
+        """Load package commands while isolating failures to the broken package."""
         out: list[CommandContribution] = []
         for pkg_name, entry in iter_package_user_command_entries():
             name = entry.get("name")
@@ -757,13 +638,7 @@ class AgentInitMixin:
         return out
 
     def refresh_user_commands(self) -> dict[str, Any]:
-        """Rebuild the aggregated registry and re-wire every live inventory.
-
-        Called after a plugin is enabled / disabled / added / removed so a
-        plugin-contributed ``/command`` appears or disappears in the input
-        layer, the rich CLI, the TUI, and the web command inventory at once
-        (design §11.3). Returns the new registry.
-        """
+        """Rebuild commands and notify every live input or inventory listener."""
         commands, provenance = self._aggregate_user_commands()
         self._user_command_registry = commands
         self._user_command_provenance = provenance
@@ -781,23 +656,18 @@ class AgentInitMixin:
         for listener in list(getattr(self, "_user_command_listeners", []) or []):
             try:
                 listener(commands)
-            except Exception as exc:  # pragma: no cover — defensive
+            except Exception as exc:  # pragma: no cover - listeners are isolated
                 logger.warning(
                     "user-command listener failed", error=str(exc), exc_info=True
                 )
         return commands
 
     def list_user_commands(self) -> dict[str, Any]:
-        """The live aggregated ``name -> command`` registry (a copy)."""
+        """Return a copy of the live aggregated command registry."""
         return dict(getattr(self, "_user_command_registry", {}) or {})
 
     def add_user_command_listener(self, listener: "Callable[[dict], None]") -> None:
-        """Register a callback fired with the new registry on every refresh.
-
-        Interactive front-ends (rich CLI, TUI) use this so their help /
-        completer / palette follow plugin toggles instead of a boot-time
-        snapshot.
-        """
+        """Register a listener that keeps interactive command inventories current."""
         listeners = getattr(self, "_user_command_listeners", None)
         if listeners is None:
             listeners = []

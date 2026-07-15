@@ -1,8 +1,4 @@
-"""
-Framework-wide constants.
+"""Shared constants for core runtime behavior."""
 
-Centralizes magic numbers and default values used across modules.
-"""
-
-# Job status preview (for logging/UI only, NOT for LLM consumption)
-TOOL_OUTPUT_PREVIEW_CHARS = 200  # Max chars for job status preview field
+# Status previews are presentation-only and must not replace full tool output.
+TOOL_OUTPUT_PREVIEW_CHARS = 200

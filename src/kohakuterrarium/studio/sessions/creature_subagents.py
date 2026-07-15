@@ -1,14 +1,9 @@
-"""Per-creature sub-agent inspection + interactive send.
+"""Inspect sub-agent conversations and message live sub-agents.
 
-Read a sub-agent run's inner conversation — a LIVE ``SubAgent`` via the
-running manager (by ``job_id``, or by ``name`` for a live interactive
-child), or the persisted ``<parent>:<name>:<run>`` snapshot via the
-session store — and push a live user message to a RUNNING sub-agent
-(one-shot included) via its inbox.
-
-Single-host: reaches the creature's ``Agent`` through the host engine,
-mirroring ``creature_chat.history``. There is no ``TerrariumService``
-Protocol method for sub-agent internals, so this unwraps ``as_engine``.
+Live runs resolve through the parent manager by job ID or interactive name;
+persisted runs resolve through the session store. Sub-agent internals are not
+part of the service protocol, so this surface is available only when the host
+owns the creature's agent engine.
 """
 
 import re
@@ -21,15 +16,12 @@ from kohakuterrarium.terrarium.service import TerrariumService
 from kohakuterrarium.modules.subagent.interactive import InteractiveSubAgent
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 
-# ``generate_job_id(f"agent_{name}")`` → ``agent_<name>_<8 hex>``; the name
-# itself may contain underscores, so anchor on the trailing uuid segment.
+# Names may contain underscores, so job IDs are parsed from the fixed hex suffix.
 _JOB_ID_RE = re.compile(r"^agent_(?P<name>.+)_[0-9a-f]{8}$")
 
 
 def _agent(service: "TerrariumService", session_id: str, creature_id: str) -> Any:
-    # Sub-agent internals live on the host-local ``Agent``; in lab-host /
-    # multi-node mode there is no host agent engine, so degrade cleanly
-    # instead of letting ``as_engine`` raise a 500.
+    # Multi-node hosts cannot inspect worker-local sub-agent internals.
     engine = host_engine_or_none(service)
     if engine is None:
         raise NotFoundError("sub-agent inspection is not available in multi-node mode")
@@ -85,10 +77,8 @@ def _payload(
         "run": run,
         "job_id": job_id,
         "live": live,
-        # ``interactive`` = the child is an InteractiveSubAgent (typing info).
-        # ``can_receive`` = a live instance the user can message right now —
-        # the flag the frontend gates its chat box on. Any live sub-agent
-        # (one-shot included) can receive a direct message via its inbox.
+        # ``interactive`` describes the subtype; ``can_receive`` reflects whether
+        # this specific live run can currently accept inbox messages.
         "interactive": interactive,
         "can_receive": can_receive,
         "messages": messages,
@@ -169,9 +159,8 @@ def read_subagent_conversation(
             )
 
     if run is None:
-        # No live interactive child: fall back to the latest persisted run
-        # for this name (a resumed block whose event carried the name but
-        # no job_id) rather than 404 a transcript that exists on disk.
+        # Name-only reads fall back to the latest persisted transcript when no
+        # interactive child is live.
         store = getattr(agent, "session_store", None)
         latest = (
             _latest_persisted_run(store, _parent_name(agent), name)

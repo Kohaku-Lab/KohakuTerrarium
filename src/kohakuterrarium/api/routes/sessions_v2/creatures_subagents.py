@@ -1,14 +1,4 @@
-"""Per-creature sub-agent routes — read a sub-agent's inner conversation
-and send a live user message to a running sub-agent.
-
-Mounted at ``/api/sessions``; URLs land at
-``/api/sessions/{session_id}/creatures/{creature_id}/subagents/...``.
-
-Service-driven resolution (``Depends(get_service)`` +
-``resolve_creature_id``) mirrors ``creatures_ctl.py`` / ``creatures_chat.py``.
-Sub-agent internals are read off the host engine's live ``Agent`` — the
-same single-host reach ``creatures_chat.history`` uses.
-"""
+"""Read sub-agent conversations and message live sub-agent runs."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -28,9 +18,7 @@ router = APIRouter()
 class SubAgentMessage(BaseModel):
     content: str = ""
     message: str | None = None
-    # Precise live target: the ``job_id`` the frontend block carries.
-    # Prefer it so concurrent same-name runs aren't ambiguous; the path
-    # ``{name}`` is the fallback target.
+    # Job identifiers disambiguate concurrent runs that share a name.
     job_id: str | None = None
 
 
@@ -43,16 +31,12 @@ async def read_subagent_conversation_route(
     run: int | None = Query(default=None),
     service: TerrariumService = Depends(get_service),
 ):
-    """Read a sub-agent run's conversation.
+    """Return a live or persisted sub-agent conversation.
 
-    ``?job_id=`` reads a live task sub-agent, falling back to the latest
-    persisted run for that name when the job is no longer live (e.g. a
-    resumed session, whose event log carries only the job id). ``?name=``
-    alone reads a live interactive child, else the latest persisted run for
-    that name; ``?name=&run=`` reads a specific persisted snapshot.
-    ``can_receive`` is true for any live, still-running
-    instance (one-shot included) — the flag the frontend gates its chat box
-    on; completed / persisted runs are read-only.
+    A job identifier targets a live task and falls back to its latest persisted
+    run. A name targets a live interactive child or its latest persisted run; a
+    run number selects a specific snapshot. Only live, running instances report
+    ``can_receive`` and accept messages.
     """
     cid = await resolve_creature_id(service, creature_id, session_id)
     try:
@@ -75,11 +59,10 @@ async def send_subagent_route(
     req: SubAgentMessage,
     service: TerrariumService = Depends(get_service),
 ):
-    """Send a live user message to a RUNNING sub-agent.
+    """Send a user message to a running sub-agent.
 
-    ``job_id`` in the body targets one exact live run (preferred); the
-    path ``{name}`` is the fallback target. Rejected with 409 when there
-    is no live sub-agent to receive it — completed runs are read-only.
+    A body ``job_id`` targets one exact run; the path name is the fallback.
+    Completed and persisted runs are read-only.
     """
     cid = await resolve_creature_id(service, creature_id, session_id)
     content = req.content if req.content else (req.message or "")

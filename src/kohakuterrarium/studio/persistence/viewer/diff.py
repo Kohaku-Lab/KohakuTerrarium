@@ -1,10 +1,7 @@
-"""Structured diff between two saved sessions (V6 viewer wave).
+"""Structured diff between two saved sessions.
 
-Compares the conversation message lists produced by
-``replay_conversation`` for both sessions, identifies the longest
-shared prefix, and returns the divergent suffix from each side along
-with a per-turn classification of changes. Driven by
-``GET /sessions/{name}/diff?other=<name>&agent=…``.
+Compares replayed conversation messages, identifies their longest shared
+prefix, and returns compact summaries of each divergent suffix.
 """
 
 from pathlib import Path
@@ -18,13 +15,10 @@ from kohakuterrarium.session.store import SessionStore
 def _agents_for(
     meta: dict[str, Any], store: SessionStore, requested: str | None
 ) -> str:
-    """Pick a single agent name to diff (one slice at a time).
+    """Select one main or attached agent namespace for comparison.
 
-    Accepts main creatures (``meta["agents"]``) and Wave F attached
-    namespaces (via ``discover_attached_agents``); when ``requested`` is
-    ``None``, prefers ``meta["viewer_default_agent"]`` over the first
-    main creature so attach-driven sessions diff against the namespace
-    that actually carries per-turn activity.
+    Without an explicit agent, ``viewer_default_agent`` takes precedence over
+    the first main creature so attach-driven sessions use their active history.
     """
     main_agents = list(meta.get("agents") or [])
     attached_namespaces = [
@@ -65,12 +59,10 @@ def _flatten(content: Any) -> str:
 
 
 def _msg_signature(msg: dict[str, Any]) -> tuple:
-    """Stable identity tuple for diff comparison.
+    """Return a stable, intentionally coarse message identity.
 
-    Two messages are "the same" iff they share role, flattened text,
-    and tool-call signature (name + first 200 chars of args). This is
-    deliberately coarse — exact dict-equality would flag noise like
-    timestamp drift or tool_call_id reshuffles.
+    Role, flattened text, and bounded tool-call signatures define equality;
+    volatile fields such as timestamps and tool-call IDs do not.
     """
     role = msg.get("role", "")
     content = _flatten(msg.get("content", ""))
@@ -111,12 +103,11 @@ def _load_messages(
     agent_arg: str | None,
     store: SessionStore | None = None,
 ) -> tuple[list[dict], str, str]:
-    """Open the store, replay events, return ``(messages, name, agent)``.
+    """Replay one session and return ``(messages, name, agent)``.
 
-    ``store``: an already-open LIVE store to reuse (caller keeps
-    ownership — it is not closed here). Otherwise the on-disk file is
-    opened, guarding existence first — ``SessionStore(path)`` would
-    otherwise create an empty file as a side effect of the diff lookup.
+    A supplied live store remains caller-owned. On-disk paths are checked
+    before opening because ``SessionStore`` would otherwise create a missing
+    file during a read-only diff.
     """
     if store is not None:
         return _replay_messages(store, Path(path).stem, agent_arg)
@@ -137,22 +128,15 @@ def build_diff_payload(
     a_store: SessionStore | None = None,
     b_store: SessionStore | None = None,
 ) -> dict[str, Any]:
-    """Compute the diff payload for ``a`` vs ``b``.
+    """Compare one agent slice from two sessions.
 
-    Both sessions are sliced to the named agent (or the first agent in
-    the meta when ``agent is None``). Returns a payload describing the
-    shared prefix length, divergence point, and the divergent suffixes
-    from each side as one-line summaries — full message bodies stay
-    server-side so a single diff request stays small.
-
-    ``a_store`` / ``b_store``: already-open LIVE stores to reuse for
-    the matching side — a second open of an actively-written file is
-    unreliable on POSIX (``SQLITE_IOERR``).
+    The payload contains the shared-prefix length and compact divergent
+    suffixes; full message bodies remain server-side. Supplied live stores are
+    reused because reopening actively written SQLite files can fail on POSIX.
     """
     a_msgs, a_name, a_agent = _load_messages(a_path, agent, a_store)
     b_msgs, b_name, b_agent = _load_messages(b_path, agent, b_store)
 
-    # Shared-prefix length using the coarse signature.
     common = 0
     for ma, mb in zip(a_msgs, b_msgs):
         if _msg_signature(ma) == _msg_signature(mb):

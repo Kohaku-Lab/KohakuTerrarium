@@ -1,6 +1,4 @@
-"""
-Write tool - write content to files.
-"""
+"""Guarded file creation and replacement."""
 
 import os
 import time
@@ -24,16 +22,10 @@ logger = get_logger(__name__)
 
 @register_builtin("write")
 class WriteTool(BaseTool):
-    """
-    Tool for writing/creating files.
-
-    Creates parent directories if needed.
-    """
+    """Write complete file content, creating parent directories as needed."""
 
     needs_context = True
-    # File writes mutate the filesystem — running two in parallel
-    # against the same or related paths is a foot-gun. The executor
-    # serializes unsafe tools so only one write runs at a time.
+    # Serial execution prevents related paths from being mutated concurrently.
     is_concurrency_safe = False
 
     @property
@@ -58,16 +50,13 @@ class WriteTool(BaseTool):
         if not path:
             return ToolResult(error="No path provided")
 
-        # Resolve path
         file_path = resolve_tool_path(path, context)
 
-        # Path boundary guard
         if context and context.path_guard:
             msg = context.path_guard.check(str(file_path))
             if msg:
                 return ToolResult(error=msg)
 
-        # Read-before-write guard
         msg = check_read_before_write(
             context.file_read_state if context else None, str(file_path)
         )
@@ -75,13 +64,10 @@ class WriteTool(BaseTool):
             return ToolResult(error=msg)
 
         try:
-            # Create parent directories if needed
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # Check if file exists for logging
             exists = file_path.exists()
 
-            # Write content
             async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
                 await f.write(content)
 
@@ -95,7 +81,7 @@ class WriteTool(BaseTool):
                 lines=lines,
             )
 
-            # Update file_read_state with new mtime
+            # The completed write becomes the new read baseline for later guards.
             if context and context.file_read_state:
                 mtime_ns = os.stat(file_path).st_mtime_ns
                 context.file_read_state.record_read(
@@ -106,10 +92,8 @@ class WriteTool(BaseTool):
                 output=f"{action} {file_path} ({lines} lines, {len(content)} bytes)",
                 exit_code=0,
                 metadata={
-                    # Canvas preview — frontend's canvas panel reads this
-                    # to render the just-written file without re-fetching
-                    # via /files. Keeps the panel in sync with whatever
-                    # the agent just changed.
+                    # Inline content lets the canvas reflect the write without a
+                    # second file fetch that could observe a later filesystem state.
                     "canvas_preview": build_canvas_preview(
                         kind="write",
                         file_path=str(file_path),

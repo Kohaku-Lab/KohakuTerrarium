@@ -9,7 +9,7 @@ from kohakuterrarium.modules.sandbox.profile import SandboxProfile
 
 @dataclass(slots=True)
 class SandboxConfig:
-    """Runtime-adjustable sandbox configuration."""
+    """Configure runtime sandbox caps, allowlists, and per-tool overrides."""
 
     enabled: bool = True
     audit: bool = False

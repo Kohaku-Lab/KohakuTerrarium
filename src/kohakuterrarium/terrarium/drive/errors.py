@@ -68,8 +68,7 @@ class DriveIdempotencyConflictError(DriveError, ConflictError):
 
 
 class DriveProposalConflictError(DriveError, ConflictError):
-    """A proposal id collides across merged topology sources with a different
-    proposal (a genuine identity clash), so the merge cannot proceed (R1-08)."""
+    """A proposal ID identifies different proposals across topology sources."""
 
     def __init__(self, message: str, *, proposal_id: str | None = None) -> None:
         super().__init__(message)
@@ -89,12 +88,7 @@ class DriveRegistrationIncompatibleError(DriveError):
 
 
 class DriveSchemaVersionError(DriveError):
-    """A Drive store declares a schema version this build cannot serve.
-
-    Raised before any write when a sidecar's ``drive_meta.schema_version`` is a
-    future version or is not a valid integer, so a newer-format store is never
-    silently opened and mutated by older code (design §7, R1-14).
-    """
+    """A Drive store declares an invalid or unsupported schema version."""
 
 
 class DriveReconfigurationRequiredError(DriveError):
@@ -114,11 +108,7 @@ class DriveDeliveryError(DriveError):
 
 
 class DriveSettingsConflictError(DriveError, ConflictError):
-    """A managed Drive settings save lost an optimistic-concurrency race.
-
-    The on-disk revision (content hash) no longer matches the caller's
-    ``expected_revision``; the last valid file is preserved (design §8.4).
-    """
+    """A managed Drive settings save lost an optimistic-concurrency race."""
 
     def __init__(
         self,
@@ -133,9 +123,4 @@ class DriveSettingsConflictError(DriveError, ConflictError):
 
 
 class CrossNodeDriveNotSupportedError(DriveError):
-    """A Drive service operation would require cross-node routing not yet wired.
-
-    Local worker Drives still work; the distributed routing lands in Phase H.
-    Raised by the Remote / MultiNode service stubs so an unsupported call fails
-    with a typed error rather than ``AttributeError`` (impl-plan rule §4.12).
-    """
+    """A Drive operation requires unsupported cross-node behavior."""

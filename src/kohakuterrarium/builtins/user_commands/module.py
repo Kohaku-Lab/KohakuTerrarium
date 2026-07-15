@@ -1,36 +1,4 @@
-"""``/module`` slash command — unified runtime configuration of plugins,
-provider-native tools, and any future module type.
-
-Mirrors the Vue ``ModulesPanel.vue`` surface as a text command: every
-operation the panel supports has an in-chat equivalent. CLI and TUI both
-render the result; for ``edit``, the command spawns ``$EDITOR`` with the
-module's options as YAML so list/dict values are pleasant to type.
-
-Usage forms (parsed from the slash-command argument string)::
-
-    /module                              # list all modules across types
-    /module list [plugin|native_tool]    # list, optionally type-filtered
-    /module show <name>                  # description + options table
-    /module enable <name>                # toggle plugin on
-    /module disable <name>               # toggle plugin off
-    /module toggle <name>                # flip enable state
-    /module set <name> <key> <value>...  # apply one option
-                                         # value parsed as JSON if it
-                                         # looks JSON-y (starts with
-                                         # [/{/"/digit/+/-, or true/
-                                         # false/null), else as string
-    /module edit <name>                  # spawn $EDITOR with YAML;
-                                         # apply on save, surface
-                                         # validation errors
-    /module reset <name> [<key>]         # clear one override or all
-
-When a name is ambiguous (matches both a plugin and a native tool, e.g.
-both call something ``image_gen``) prefix with the type:
-``plugin/permgate`` or ``native_tool/image_gen``.
-
-Backward compatibility: ``/plugin`` continues to work as a plugins-only
-shortcut. ``/module`` is the canonical surface.
-"""
+"""Inspect and configure runtime plugins and provider-native tools."""
 
 import json
 import os
@@ -49,8 +17,6 @@ from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     UserCommandResult,
 )
-
-# ── Subcommand dispatch ─────────────────────────────────────────────
 
 
 @register_user_command("module")
@@ -111,16 +77,8 @@ class ModuleCommand(BaseUserCommand):
                 )
 
 
-# ── Inventory + lookup ──────────────────────────────────────────────
-
-
 def _inventory(agent: Any) -> list[dict[str, Any]]:
-    """Collect every configurable module on the agent.
-
-    Mirrors the studio dispatcher in ``creature_modules`` but talks
-    directly to the in-process agent helpers — slash commands run with
-    the live agent in scope.
-    """
+    """Return normalized records for configurable plugins and native tools."""
     out: list[dict[str, Any]] = []
     out.extend(_inventory_plugins(agent))
     out.extend(_inventory_native_tools(agent))
@@ -178,7 +136,7 @@ def _inventory_native_tools(agent: Any) -> list[dict[str, Any]]:
 
 
 def _resolve_or_error(agent: Any, ref: str) -> tuple[dict[str, Any] | None, str | None]:
-    """Resolve and return ``(module, error_message)`` — exactly one is set."""
+    """Resolve a module reference, returning either its record or an error."""
     inv = _inventory(agent)
     if "/" in ref:
         type_part, _, name_part = ref.partition("/")
@@ -197,14 +155,11 @@ def _resolve_or_error(agent: Any, ref: str) -> tuple[dict[str, Any] | None, str 
     return matches[0], None
 
 
-# ── Rendering ───────────────────────────────────────────────────────
-
-
 def _status_glyph(m: dict[str, Any]) -> str:
     if m["enabled"] is True:
-        return "●"  # filled circle
+        return "●"
     if m["enabled"] is False:
-        return "○"  # empty circle
+        return "○"
     return "-"
 
 
@@ -221,9 +176,7 @@ def _render_list(agent: Any, rest: list[str]) -> str:
     if not inv:
         return "No configurable modules."
 
-    # Group by type. Within plugins: enabled-on-top, sorted by priority
-    # (lower runs first, per BasePlugin convention). Within native
-    # tools: alphabetical.
+    # Plugin priority order matches execution order; native tools remain alphabetical.
     out: list[str] = []
     plugins = [m for m in inv if m["type"] == "plugin"]
     native_tools = [m for m in inv if m["type"] == "native_tool"]
@@ -298,9 +251,6 @@ def _render_show_module(m: dict[str, Any]) -> str:
     return "\n".join(out)
 
 
-# ── Mutating subcommands ────────────────────────────────────────────
-
-
 async def _do_toggle(
     agent: Any, rest: list[str], *, want: bool | None
 ) -> UserCommandResult:
@@ -355,9 +305,8 @@ def _do_reset(agent: Any, rest: list[str]) -> UserCommandResult:
     if err:
         return UserCommandResult(error=err)
     if key is None:
-        # Reset all overrides for this module — for plugins this means
-        # repopulating defaults from option_schema; for native tools it
-        # clears the override map.
+        # Plugins materialize schema defaults, while native tools represent
+        # default behavior with an empty override map.
         if m["type"] == "plugin":
             schema = m.get("schema") or {}
             defaults = {k: (s or {}).get("default") for k, s in schema.items()}
@@ -430,17 +379,10 @@ def _do_edit(agent: Any, rest: list[str]) -> UserCommandResult:
     )
 
 
-# ── Helpers (apply + parse + edit) ──────────────────────────────────
-
-
 def _apply_options(
     agent: Any, m: dict[str, Any], values: dict[str, Any]
 ) -> dict[str, Any]:
-    """Route the option write to the right helper for the module type.
-
-    Returns the post-merge options dict the helper applied, so the
-    caller can echo it back to the user.
-    """
+    """Apply module options and return the resulting active option mapping."""
     if m["type"] == "plugin":
         helper = getattr(agent, "plugin_options", None)
         if helper is None:
@@ -450,9 +392,8 @@ def _apply_options(
         helper = getattr(agent, "native_tool_options", None)
         if helper is None:
             raise RuntimeError("agent has no native_tool_options helper")
-        # native_tool_options.set replaces the override map entirely;
-        # we want a merge (set one key, leave others). Read current
-        # then merge.
+        # Native-tool writes replace the entire override map, so partial updates
+        # must merge with the current mapping first.
         current = dict(helper.get(m["name"]))
         current.update(values)
         return helper.set(m["name"], current)
@@ -509,7 +450,7 @@ def _spawn_editor_with_yaml(
 
         after_mtime = os.stat(path).st_mtime_ns
         if after_mtime == before_mtime:
-            return None  # cancelled
+            return None
 
         with open(path, encoding="utf-8") as f:
             edited_text = f.read()
@@ -529,7 +470,7 @@ def _spawn_editor_with_yaml(
 
 
 def _build_yaml_template(m: dict[str, Any], schema: dict[str, Any]) -> str:
-    """Build the editable YAML buffer with schema docs as comments."""
+    """Build an editable YAML document containing current values and schema hints."""
     options = m.get("options") or {}
     lines: list[str] = []
     lines.append(f"# {m['type']}/{m['name']}")

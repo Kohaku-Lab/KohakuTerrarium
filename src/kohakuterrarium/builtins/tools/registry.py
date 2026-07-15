@@ -1,10 +1,7 @@
-"""
-Builtin tool registry (backward-compatible re-exports).
+"""Preserve the legacy built-in tool registry import path.
 
-All real logic now lives in ``builtins.tool_catalog``. This module
-re-exports the public API so that existing tool modules importing
-``from kohakuterrarium.builtins.tools.registry import register_builtin``
-continue to work without changes.
+Registry behavior lives in ``builtins.tool_catalog``; these re-exports keep
+existing tool modules and third-party imports compatible.
 """
 
 from kohakuterrarium.builtins.tool_catalog import (

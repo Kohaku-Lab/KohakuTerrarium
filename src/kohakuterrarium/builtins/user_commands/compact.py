@@ -1,4 +1,4 @@
-"""Compact command — trigger manual context compaction."""
+"""Trigger manual conversation compaction and report why it may be skipped."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -31,9 +31,8 @@ class CompactCommand(BaseUserCommand):
                 data=ui_notify("Compaction already in progress", level="warning"),
             )
         if not mgr.trigger_compact():
-            # ``trigger_compact`` returns ``False`` for three distinct
-            # reasons; ``_last_skip_reason`` tells us which so the user
-            # gets a precise message instead of a generic "busy" line.
+            # The manager records a skip reason so each rejected trigger can
+            # produce a specific user-facing explanation.
             reason = getattr(mgr, "_last_skip_reason", "") or ""
             messages = {
                 "no_controller": (

@@ -1,9 +1,8 @@
 """Studio catalog — package operations (install / uninstall / update / show).
 
-Wraps the low-tier ``packages/`` library so HTTP routes and the CLI
-share a single set of operation entry points. Each function returns
-plain dicts / value tuples so transport-specific formatting (Rich
-console output, JSON for HTTP) lives at the route or CLI layer.
+Wraps the low-tier package library with transport-neutral operations shared by
+HTTP and CLI adapters. Functions return plain values so presentation and error
+rendering remain outside the catalog layer.
 """
 
 import os
@@ -21,31 +20,14 @@ from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
 
-# ---------------------------------------------------------------------------
-# Package summaries
-# ---------------------------------------------------------------------------
-
-
 def list_installed_packages() -> list[dict]:
-    """Thin pass-through to ``list_packages`` for the HTTP route.
-
-    Provides a single Studio-tier symbol so downstream code never has
-    to reach into ``packages.walk`` directly.
-    """
+    """Return installed package manifests through the Studio catalog boundary."""
     return list_packages()
 
 
 def packages_dir() -> Path:
-    """Return the configured packages directory.
-
-    Indirection so the CLI / API don't import ``packages.locations``.
-    """
+    """Return the configured package root without exposing location internals."""
     return _locations_packages_dir()
-
-
-# ---------------------------------------------------------------------------
-# Installation operations
-# ---------------------------------------------------------------------------
 
 
 def install_package_op(
@@ -55,20 +37,11 @@ def install_package_op(
     *,
     deps: str = "auto",
 ) -> str:
-    """Install a creature/terrarium package; returns its package name.
+    """Install a package and return its registered name.
 
-    Verbatim wrapper around ``packages.install.install_package`` —
-    propagates exceptions to the caller for transport-specific
-    error rendering.
-
-    Invalidates the ``packages_scan`` disk-walk cache on success so
-    the next ``/api/configs/creatures`` (or ``terrariums``) call
-    sees the newly installed configs immediately instead of waiting
-    out the 10s TTL.  The frontend ``useConfigsStore`` always re-
-    fetches on modal open, so the only place a stale cache could
-    leak into the UI is this short post-install window — closing
-    that loop here keeps the contract tight regardless of which
-    transport (HTTP, future Lab APP) called the op.
+    Exceptions remain transport-neutral. Successful installation invalidates
+    discovery caches so newly declared creatures and terrariums are visible on
+    the next catalog read.
     """
     name = install_package_spec(
         source, editable=editable, name_override=name, deps=deps
@@ -78,12 +51,7 @@ def install_package_op(
 
 
 def uninstall_package_op(name: str) -> bool:
-    """Uninstall a package by name; returns ``True`` if it was removed.
-
-    Invalidates the ``packages_scan`` cache on a successful
-    removal so the next catalog read doesn't surface a
-    no-longer-installed creature/terrarium entry.
-    """
+    """Uninstall a package and invalidate discovery only when removal occurs."""
     removed = uninstall_package(name)
     if removed:
         invalidate_scan_caches()
@@ -91,10 +59,7 @@ def uninstall_package_op(name: str) -> bool:
 
 
 def normalize_package_name(target: str) -> str:
-    """Normalize ``@pkg`` / ``@pkg/path`` / ``pkg`` to the bare package name.
-
-    Verbatim port of ``cli.packages._normalize_package_name``.
-    """
+    """Normalize package references and paths to a bare package name."""
     target = target.strip()
     if not target:
         return ""
@@ -106,11 +71,9 @@ def normalize_package_name(target: str) -> str:
 
 
 def update_package_op(name: str) -> tuple[int, str]:
-    """Update a single git-backed package.
+    """Update one git-backed package and return a CLI-style result tuple.
 
-    Returns ``(rc, message)`` where ``rc`` is a CLI-style exit code
-    (0 = success or skipped, 1 = error). Skips editable and non-git
-    packages with rc=0, matching ``cli.packages._update_package``.
+    Editable and non-git packages are intentional skips rather than failures.
     """
     packages = {pkg["name"]: pkg for pkg in list_packages()}
     pkg = packages.get(name)
@@ -129,19 +92,14 @@ def update_package_op(name: str) -> tuple[int, str]:
     except Exception as e:
         return 1, f"Failed to update {name}: {e}"
 
-    # Update may have changed the package's creature/terrarium
-    # manifest on disk — bust the scan cache so the catalog
-    # reflects whatever the new revision exposes.
+    # A new revision may change manifest visibility, so cached discovery is no
+    # longer authoritative after a successful update.
     invalidate_scan_caches()
     return 0, f"Updated: {name}"
 
 
 def update_all_packages_op() -> tuple[int, list[str], int, int]:
-    """Update every git-backed installed package.
-
-    Returns ``(exit_code, messages, updated_count, skipped_count)``.
-    Verbatim port of the ``--all`` branch of ``cli.packages.update_cli``.
-    """
+    """Update all eligible packages and aggregate messages and counts."""
     packages = list_packages()
     if not packages:
         return 0, [f"No packages installed in {packages_dir()}"], 0, 0
@@ -169,20 +127,11 @@ def update_all_packages_op() -> tuple[int, list[str], int, int]:
     return exit_code, messages, updated, skipped
 
 
-# ---------------------------------------------------------------------------
-# Inspection / editing
-# ---------------------------------------------------------------------------
-
-
 def load_agent_info(agent_path: str) -> tuple[int, dict | str]:
-    """Load a creature/agent's config + file listing for ``kt info``.
+    """Load summary metadata and sibling files for a creature directory.
 
-    Returns ``(rc, payload)``. On success, ``payload`` is a dict with
-    ``{name, description, model, tools, subagents, files}``. On
-    failure, ``payload`` is an error message string.
-
-    Verbatim port of ``cli.packages.show_agent_info_cli`` — config
-    parsing and field extraction unchanged.
+    The result uses a CLI-style ``(return_code, payload)`` tuple so callers can
+    render either the structured success value or an error string.
     """
     path = Path(agent_path)
     if not path.exists():
@@ -227,11 +176,10 @@ def load_agent_info(agent_path: str) -> tuple[int, dict | str]:
 
 
 def resolve_edit_target(target: str) -> tuple[int, Path | str]:
-    """Resolve an ``@pkg/...`` reference (or local path) to a config file.
+    """Resolve a package reference to the first supported config file.
 
-    Returns ``(rc, payload)`` where payload is the resolved Path on
-    success or an error string on failure. Verbatim port of the
-    resolution branch of ``cli.packages.edit_cli``.
+    The returned tuple contains either the resolved path or a transport-neutral
+    error message.
     """
     if not target.startswith("@"):
         target = "@" + target
@@ -249,7 +197,8 @@ def resolve_edit_target(target: str) -> tuple[int, Path | str]:
             break
 
     if config_file is None:
-        # Maybe they pointed to the file directly
+        # Direct file references are valid when no conventional config exists
+        # beneath the resolved path.
         if path.is_file():
             config_file = path
         else:
@@ -259,10 +208,6 @@ def resolve_edit_target(target: str) -> tuple[int, Path | str]:
 
 
 def open_in_editor(config_file: Path) -> None:
-    """Hand off ``config_file`` to ``$EDITOR`` (never returns).
-
-    Wraps the ``os.execvp`` call from ``cli.packages.edit_cli`` so
-    transport code doesn't have to import ``os`` for this helper.
-    """
+    """Replace the current process with the configured editor."""
     editor = os.environ.get("EDITOR", os.environ.get("VISUAL", "nano"))
     os.execvp(editor, [editor, str(config_file)])

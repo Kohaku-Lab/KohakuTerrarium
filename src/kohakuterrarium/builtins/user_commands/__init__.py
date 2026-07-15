@@ -1,10 +1,4 @@
-"""
-Built-in user commands (slash commands).
-
-Registration follows the same pattern as tool_catalog.py:
-@register_user_command("name") on a class triggers registration
-at import time.
-"""
+"""Register and export the built-in slash-command catalog."""
 
 from kohakuterrarium.builtins.user_commands.registry import (
     get_builtin_user_command,
@@ -12,9 +6,8 @@ from kohakuterrarium.builtins.user_commands.registry import (
     register_user_command,
 )
 
-# Import commands to trigger @register_user_command decorators.
-# Command modules import the lightweight registry directly, not this package,
-# so this catalog import does not create a package-level cycle.
+# Importing each command runs its registration decorator. Command modules depend
+# only on the lightweight registry, keeping this catalog outside their import path.
 from kohakuterrarium.builtins.user_commands.branch import BranchCommand
 from kohakuterrarium.builtins.user_commands.channels import ChannelsCommand
 from kohakuterrarium.builtins.user_commands.clear import ClearCommand

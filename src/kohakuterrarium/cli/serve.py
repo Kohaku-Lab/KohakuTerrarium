@@ -23,10 +23,12 @@ LOG_PATH = RUN_DIR / "web.log"
 
 
 def _utc_now_iso() -> str:
+    """Return the current UTC time in ISO format."""
     return datetime.now(timezone.utc).isoformat()
 
 
 def _is_pid_alive(pid: int) -> bool:
+    """Return whether a process id is currently alive."""
     if pid <= 0:
         return False
     if sys.platform == "win32":
@@ -61,6 +63,7 @@ def _is_pid_alive(pid: int) -> bool:
 
 
 def _load_state() -> dict:
+    """Load daemon state, returning an empty mapping on invalid data."""
     if not STATE_PATH.exists():
         return {}
     try:
@@ -72,12 +75,14 @@ def _load_state() -> dict:
 
 
 def _save_state(data: dict) -> None:
+    """Persist daemon state as JSON."""
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     with open(STATE_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def _remove_runtime_files() -> None:
+    """Remove daemon PID and state files."""
     for path in (PID_PATH, STATE_PATH):
         try:
             path.unlink()
@@ -86,6 +91,7 @@ def _remove_runtime_files() -> None:
 
 
 def _current_runtime() -> dict:
+    """Return saved daemon state with its current liveness."""
     state = _load_state()
     pid = int(state.get("pid", 0) or 0)
     alive = _is_pid_alive(pid)
@@ -99,6 +105,7 @@ def _current_runtime() -> dict:
 def _write_started_state(
     *, pid: int, host: str, port: int, dev: bool, log_level: str
 ) -> None:
+    """Persist the initial state for a spawned daemon."""
     git = get_git_info()
     _save_state(
         {
@@ -130,6 +137,7 @@ def _spawn_server_process(
     lab_bind: str = "",
     lab_token: str = "",
 ) -> int:
+    """Spawn a detached web-server subprocess and return its PID."""
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     log_file = open(LOG_PATH, "a", encoding="utf-8")  # noqa: SIM115
     cmd = [
@@ -169,6 +177,7 @@ def _spawn_server_process(
 
 
 def _wait_until_alive(pid: int, timeout: float = 3.0) -> bool:
+    """Wait briefly for a subprocess to become observable."""
     deadline = time.time() + timeout
     while time.time() < deadline:
         if _is_pid_alive(pid):
@@ -191,9 +200,7 @@ def _wait_until_bound(pid: int, timeout: float = 30.0) -> str:
                      this as a soft warning, not a hard failure: the
                      daemon will almost certainly come up shortly.
 
-    The bump from the old 3s budget is what stops ``kt serve restart``
-    from reporting "Failed to start" while the daemon is still booting
-    fine.
+    The extended timeout avoids treating a legitimate cold start as failure.
     """
     deadline = time.time() + timeout
     while time.time() < deadline:
@@ -228,9 +235,8 @@ def _apply_host_layered_config(args: argparse.Namespace) -> None:
             "log_level": ("log_level",),
         },
     )
-    # Drop CLI overrides that are still at their argparse default
-    # (so YAML / env can win); detect by comparing to the parser's
-    # advertised defaults.
+    # Parser defaults are not explicit operator choices, so lower config layers
+    # may replace them.
     if args.host == "127.0.0.1":
         overrides.get("http", {}).pop("host", None)
     if args.port == 8001:
@@ -250,26 +256,13 @@ def _apply_host_layered_config(args: argparse.Namespace) -> None:
 
 
 def serve_start_cli(args: argparse.Namespace) -> int:
+    """Start the web server in foreground or daemon mode."""
     _apply_host_layered_config(args)
-    # ``--home-dir`` re-homes every config_dir() consumer (api keys,
-    # OAuth tokens, profiles, MCP servers, sessions). Set BEFORE
-    # spawning the daemon — subprocess inherits KT_CONFIG_DIR.
+    # Set the config home before spawning so the child inherits it.
     if getattr(args, "home_dir", ""):
         os.environ["KT_CONFIG_DIR"] = args.home_dir
-    # Foreground mode: bypass the daemon machinery entirely.  Useful
-    # when running the host in a foreground terminal alongside a
-    # ``kt lab-client`` worker, or when iterating on the boot path.
     if getattr(args, "foreground", False):
-        # Route logs to stderr so the user sees them in their terminal
-        # instead of the daemon's log file.
-        #
-        # KT_LOG_STDERR alone is not sufficient: by the time this
-        # function runs, ``serving.web`` has already been imported and
-        # called ``get_logger`` at module load (with KT_LOG_STDERR
-        # unset).  The ``if _handler is None`` guard then never
-        # re-enters, so a setenv here would have no effect.  Call
-        # ``enable_stderr_logging`` directly to wire the stderr handler
-        # regardless of import order.
+        # Logging may already be initialized, so install stderr output directly.
         os.environ.setdefault("KT_LOG_STDERR", "1")
         enable_stderr_logging(args.log_level)
         return run_server_internal(
@@ -322,9 +315,7 @@ def serve_start_cli(args: argparse.Namespace) -> int:
 
     state = _load_state()
     if status == "slow":
-        # Subprocess is alive but engine cold-start (embedding model,
-        # plugin discovery, etc.) hasn't finished publishing yet.
-        # Don't claim failure — the daemon is on its way up.
+        # A live subprocess that has not published a port is still a valid cold start.
         print("KohakuTerrarium web daemon starting (still booting)")
         print(f"  pid:  {pid}")
         print(f"  url:  {state.get('url', '') or f'http://{args.host}:{args.port}'}")
@@ -340,6 +331,7 @@ def serve_start_cli(args: argparse.Namespace) -> int:
 
 
 def serve_stop_cli(args: argparse.Namespace) -> int:
+    """Stop the managed web daemon, escalating after a timeout."""
     runtime = _current_runtime()
     pid = runtime["pid"]
     if not pid or not runtime["alive"]:
@@ -386,6 +378,7 @@ def serve_stop_cli(args: argparse.Namespace) -> int:
 
 
 def serve_status_cli() -> int:
+    """Print current daemon status and saved metadata."""
     runtime = _current_runtime()
     state = runtime["state"]
     pid = runtime["pid"]
@@ -417,6 +410,7 @@ def serve_status_cli() -> int:
 
 
 def serve_logs_cli(args: argparse.Namespace) -> int:
+    """Print or follow the managed daemon log."""
     if not LOG_PATH.exists():
         print(f"Log file not found: {LOG_PATH}")
         return 1
@@ -438,13 +432,12 @@ def serve_logs_cli(args: argparse.Namespace) -> int:
 
 
 def serve_restart_cli(args: argparse.Namespace) -> int:
+    """Restart the daemon while preserving start options."""
     stop_args = argparse.Namespace(timeout=args.timeout)
     stop_code = serve_stop_cli(stop_args)
     if stop_code not in (0,):
         return stop_code
-    # Carry every flag the start command accepts — without these the
-    # restart silently boots a standalone daemon even when the caller
-    # passed --mode lab-host / --lab-bind / --lab-token / --foreground.
+    # Preserve all start options so restart cannot silently change server mode.
     start_args = argparse.Namespace(
         host=args.host,
         port=args.port,
@@ -459,6 +452,7 @@ def serve_restart_cli(args: argparse.Namespace) -> int:
 
 
 def run_server_internal(args: argparse.Namespace) -> int:
+    """Run the internal foreground web-server entry point."""
     run_web_server(
         host=args.host,
         port=args.port,
@@ -473,6 +467,7 @@ def run_server_internal(args: argparse.Namespace) -> int:
 
 
 def serve_cli(args: argparse.Namespace) -> int:
+    """Dispatch web-server lifecycle commands."""
     sub = getattr(args, "serve_command", None)
     if sub == "start" or sub is None:
         return serve_start_cli(args)
@@ -491,6 +486,7 @@ def serve_cli(args: argparse.Namespace) -> int:
 
 
 def add_serve_subparser(subparsers) -> None:
+    """Register web-server lifecycle commands."""
     serve_parser = subparsers.add_parser("serve", help="Manage the web UI daemon")
     serve_parser.set_defaults(
         serve_command="start",

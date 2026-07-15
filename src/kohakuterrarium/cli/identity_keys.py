@@ -11,6 +11,7 @@ from kohakuterrarium.studio.identity.api_keys import (
 
 
 def list_cli() -> int:
+    """List provider key sources with masked values."""
     print(f"API keys file: {KEYS_FILE_PATH}")
     print()
     rows = list_keys_for_cli()
@@ -23,6 +24,7 @@ def list_cli() -> int:
 
 
 def set_cli(provider: str, value: str | None) -> int:
+    """Store an API key for a configured provider."""
     key = value or input(f"API key for {provider}: ").strip()
     if not key:
         print("Key is required.")
@@ -40,6 +42,7 @@ def set_cli(provider: str, value: str | None) -> int:
 
 
 def delete_cli(provider: str) -> int:
+    """Delete a stored provider key after confirmation."""
     if not _confirm(f"Delete stored key for '{provider}'?", default=False):
         print("Cancelled.")
         return 0

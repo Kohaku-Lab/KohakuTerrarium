@@ -1,9 +1,8 @@
 """LLM preset (profile) CRUD — list/save/delete user presets.
 
-Wraps :mod:`kohakuterrarium.llm.profiles`. The legacy bare-name profile
-delete (without provider) is preserved here as a documented one-release
-shim — see ``remove_profile_legacy`` and the matching route in
-``api/routes/identity/llm.py``.
+Wraps :mod:`kohakuterrarium.llm.profiles` with Studio-facing payloads and
+identifier handling. The legacy bare-name delete remains a compatibility shim;
+canonical profile identity is ``(provider, name)``.
 """
 
 from typing import Any
@@ -24,7 +23,7 @@ from kohakuterrarium.llm.profiles import (
 
 
 def list_profiles_payload() -> list[dict[str, Any]]:
-    """Return every user-defined LLM profile as a plain-dict payload."""
+    """Return every user-defined LLM profile as a Studio payload."""
     profiles = load_profiles()
     presets = load_presets()
     return [
@@ -56,7 +55,7 @@ def list_user_profile_keys() -> list[tuple[str, str]]:
 
 
 def split_identifier(name: str) -> tuple[str, str]:
-    """Split ``provider/name`` into ``(provider, name)``; bare → ``("", name)``."""
+    """Split a qualified or bare profile identifier into provider and name."""
     if "/" in name:
         prov, bare = name.split("/", 1)
         return prov, bare
@@ -84,7 +83,7 @@ def save_profile_record(
     extra_body: dict[str, Any] | None = None,
     variation_groups: dict[str, dict[str, dict[str, Any]]] | None = None,
 ) -> LLMPreset:
-    """Validate + persist a preset. Raises ``ValueError`` on bad input."""
+    """Validate and persist a preset, raising ``ValueError`` for bad input."""
     if not name or not model or not provider:
         raise ValueError("Name, model, and provider are required")
     if provider not in load_backends():
@@ -106,17 +105,15 @@ def save_profile_record(
 
 
 def remove_profile(name: str, provider: str = "") -> bool:
-    """Delete a preset under ``(provider, name)``. Returns False if missing."""
+    """Delete a preset by canonical provider and name, reporting if it existed."""
     return delete_profile(name, provider)
 
 
-# TODO Phase 3: remove legacy bare-name profile-delete (P5)
 def remove_profile_legacy(name: str) -> bool:
-    """Legacy bare-name delete — succeeds only when the bare name is unambiguous.
+    """Delete by bare name only when it resolves unambiguously.
 
-    Kept for older API clients. Prefer :func:`remove_profile` with an
-    explicit ``provider`` since the canonical key is ``(provider, name)``.
-    Documented for removal in the next release.
+    This compatibility path serves older clients; new callers should use
+    :func:`remove_profile` with the canonical provider-qualified identity.
     """
     return delete_profile(name)
 
@@ -134,5 +131,5 @@ def set_default_model_identifier(identifier: str) -> None:
 
 
 def list_all_models() -> list[dict[str, Any]]:
-    """Return user + built-in presets resolved against current providers."""
+    """Return user and built-in presets resolved against current providers."""
     return list_all()

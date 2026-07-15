@@ -1,25 +1,6 @@
 """``@tool`` — turn a plain Python function into an agent tool (E7).
 
-The zero-boilerplate adapter behind instance injection::
-
-    import kohakuterrarium as kt
-
-    @kt.tool
-    def score_notebook(path: str, rubric: str = "default") -> str:
-        \"\"\"Grade a notebook file against the rubric.\"\"\"
-        return do_grading(path, rubric)
-
-    agent = await kt.Agent.build(cfg, tools=[score_notebook], ...)
-
-Both sync and async functions work (sync runs via ``asyncio.to_thread``
-so it never blocks the loop).  The tool name defaults to the function
-name, the description to the first docstring line, and the parameter
-schema is derived from the signature (annotations → JSON-schema
-types).  A ``context`` parameter receives the :class:`ToolContext`.
-
-(The old ``core.registry.tool`` decorator registered classes into a
-global registry nothing ever read — this module repurposes the name
-for something that actually reaches an agent.)
+Function signatures supply names, descriptions, schemas, and optional tool context.
 """
 
 import asyncio
@@ -56,7 +37,7 @@ def _annotation_to_json_type(annotation: Any) -> str:
 
 
 class FunctionTool(BaseTool):
-    """A :class:`BaseTool` wrapping a plain (a)sync function."""
+    """Wrap a function with signature-derived schema and optional tool context."""
 
     def __init__(
         self,
@@ -124,7 +105,7 @@ class FunctionTool(BaseTool):
                 out = await self._fn(**kwargs)
             else:
                 out = await asyncio.to_thread(self._fn, **kwargs)
-        except Exception as exc:  # noqa: BLE001 - tool surface
+        except Exception as exc:  # noqa: BLE001
             return ToolResult(error=f"{type(exc).__name__}: {exc}")
         if isinstance(out, ToolResult):
             return out
@@ -138,12 +119,7 @@ def tool(
     description: str | None = None,
     execution_mode: ExecutionMode = ExecutionMode.DIRECT,
 ) -> "FunctionTool | Callable[[Callable[..., Any]], FunctionTool]":
-    """Wrap a function as a tool — decorator or direct call.
-
-    ``@tool`` / ``@tool(name=..., description=...)`` /
-    ``tool(existing_fn)`` all return a :class:`FunctionTool` instance
-    ready for ``Agent.build(tools=[...])`` or ``agent.add_tool(...)``.
-    """
+    """Return a function-backed tool through decorator or direct-call syntax."""
 
     def _wrap(f: Callable[..., Any]) -> FunctionTool:
         return FunctionTool(

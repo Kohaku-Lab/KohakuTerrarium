@@ -1,19 +1,10 @@
 """Composition algebra core — protocol, operators, and combinators.
 
-All operators live in ONE file to avoid circular imports.
-``BaseRunnable`` defines the operator overloads, and all combinators
-(Sequence, Product, Fallback, …) are defined after it in the same module.
+Composable asynchronous runnable algebra.
 
-Operators:
-  ``>>``  sequence (auto-wraps plain callables)
-  ``&``   parallel product (siblings cancelled on first failure)
-  ``|``   fallback (try first, if exception try second; failures chain)
-  ``*N``  retry N times
-  ``()``  run (await pipeline(x))
-  ``.retry(n, backoff=…)``  retry with exponential backoff
-  ``.iterate(x)``  async-for loop
-  ``.map(fn)``  / ``.contramap(fn)``  profunctor transforms
-  ``.fails_when(pred)``  custom failure predicate
+Operators and combinators share one module to avoid circular imports. Sequence,
+parallel product, fallback, retry, routing, mapping, and iteration all inherit
+the same operator surface.
 """
 
 import asyncio
@@ -25,7 +16,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# ── Protocol ─────────────────────────────────────────────────────────
+# Runnable protocol.
 
 
 @runtime_checkable
@@ -35,19 +26,16 @@ class Runnable(Protocol):
     async def run(self, input: Any) -> Any: ...
 
 
-# ── Sentinel for iterate .feed() ─────────────────────────────────────
+# Distinguishes an explicit feed value from normal iteration state.
 
 _SENTINEL = object()
 
 
-# ── BaseRunnable ─────────────────────────────────────────────────────
+# Operator surface.
 
 
 class BaseRunnable:
-    """Concrete base providing Pythonic operator overloads.
-
-    Combinators inherit this so they all get ``>>``, ``&``, ``|``, ``*``.
-    """
+    """Provide the shared sequence, product, fallback, and retry operators."""
 
     async def run(self, input: Any) -> Any:
         raise NotImplementedError
@@ -55,8 +43,6 @@ class BaseRunnable:
     async def __call__(self, input: Any) -> Any:
         """``await pipeline(x)`` is sugar for ``await pipeline.run(x)``."""
         return await self.run(input)
-
-    # ── Sequence (>>) ────────────────────────────────────────────────
 
     def __rshift__(self, other: Any) -> "BaseRunnable":
         if isinstance(other, dict):
@@ -77,8 +63,6 @@ class BaseRunnable:
             return Sequence._flat(Pure(other), self)
         return NotImplemented
 
-    # ── Parallel (&) ─────────────────────────────────────────────────
-
     def __and__(self, other: Any) -> "BaseRunnable":
         if isinstance(other, BaseRunnable):
             return Product._flat(self, other)
@@ -86,16 +70,12 @@ class BaseRunnable:
             return Product._flat(self, Pure(other))
         return NotImplemented
 
-    # ── Fallback (|) ─────────────────────────────────────────────────
-
     def __or__(self, other: Any) -> "BaseRunnable":
         if isinstance(other, BaseRunnable):
             return Fallback(self, other)
         if callable(other):
             return Fallback(self, Pure(other))
         return NotImplemented
-
-    # ── Retry (* N) ──────────────────────────────────────────────────
 
     def __mul__(self, n: Any) -> "BaseRunnable":
         if isinstance(n, int) and n > 0:
@@ -108,16 +88,8 @@ class BaseRunnable:
     def retry(
         self, max_attempts: int, *, backoff: float = 0.0, max_backoff: float = 30.0
     ) -> "BaseRunnable":
-        """Retry with optional exponential backoff.
-
-        ``pipeline * 3`` is sugar for ``pipeline.retry(3)``; use this
-        form when you need a delay between attempts: ``backoff`` is the
-        sleep after the first failure, doubling per attempt and capped
-        at ``max_backoff`` seconds.
-        """
+        """Retry with exponential backoff capped by ``max_backoff``."""
         return Retry(self, max_attempts, backoff=backoff, max_backoff=max_backoff)
-
-    # ── Iterate (async for) ──────────────────────────────────────────
 
     def iterate(self, initial_input: Any) -> "PipelineIterator":
         """Return an async iterator that feeds output back as input.
@@ -130,8 +102,6 @@ class BaseRunnable:
         """
         return PipelineIterator(self, initial_input)
 
-    # ── Profunctor maps ──────────────────────────────────────────────
-
     def map(self, fn: Callable) -> "BaseRunnable":
         """Post-process output: ``self >> pure(fn)``."""
         return Sequence._flat(self, Pure(fn))
@@ -140,23 +110,19 @@ class BaseRunnable:
         """Pre-process input: ``pure(fn) >> self``."""
         return Sequence._flat(Pure(fn), self)
 
-    # ── Failure predicate ────────────────────────────────────────────
-
     def fails_when(self, predicate: Callable[[Any], bool]) -> "BaseRunnable":
-        """Wrap so that output matching *predicate* raises (triggers fallback)."""
+        """Convert predicate-matching output into a failure for composition."""
         return FailsWhen(self, predicate)
-
-    # ── repr ─────────────────────────────────────────────────────────
 
     def __repr__(self) -> str:
         return f"<{type(self).__name__}>"
 
 
-# ── Pure ─────────────────────────────────────────────────────────────
+# Callable adapter.
 
 
 class Pure(BaseRunnable):
-    """Wrap a sync or async callable as a zero-cost Runnable."""
+    """Adapt a synchronous or asynchronous callable to ``Runnable``."""
 
     def __init__(self, fn: Any):
         if not callable(fn):
@@ -174,12 +140,11 @@ class Pure(BaseRunnable):
         return f"<Pure {name}>"
 
 
-# Lowercase alias — the documented spelling for wrapping a function
-# inline: ``pure(extract_code) >> reviewer``.
+# Lowercase alias supports inline composition with ordinary callables.
 pure = Pure
 
 
-# ── Sequence ─────────────────────────────────────────────────────────
+# Sequential composition.
 
 
 class Sequence(BaseRunnable):
@@ -196,7 +161,7 @@ class Sequence(BaseRunnable):
 
     @classmethod
     def _flat(cls, *parts: BaseRunnable) -> "Sequence":
-        """Build a flattened Sequence (merge nested Sequences)."""
+        """Flatten nested sequences to keep execution and representation linear."""
         flat: list[BaseRunnable] = []
         for p in parts:
             if isinstance(p, Sequence):
@@ -210,16 +175,14 @@ class Sequence(BaseRunnable):
         return f"<Sequence {inner}>"
 
 
-# ── Product (Parallel) ───────────────────────────────────────────────
+# Parallel composition.
 
 
 class Product(BaseRunnable):
-    """Run branches concurrently, return tuple of results.
+    """Run branches concurrently and cancel siblings after the first failure.
 
-    On the first branch failure the surviving siblings are CANCELLED
-    and awaited before the exception propagates — a bare ``gather``
-    would leave them running detached, burning LLM turns whose
-    results nobody will ever read.
+    Cancelled siblings are awaited so no detached task continues consuming
+    resources after the product fails.
     """
 
     def __init__(self, *branches: BaseRunnable):
@@ -237,7 +200,7 @@ class Product(BaseRunnable):
 
     @classmethod
     def _flat(cls, *parts: BaseRunnable) -> "Product":
-        """Build a flattened Product (merge nested Products)."""
+        """Flatten nested products into one concurrent branch set."""
         flat: list[BaseRunnable] = []
         for p in parts:
             if isinstance(p, Product):
@@ -251,16 +214,11 @@ class Product(BaseRunnable):
         return f"<Product {inner}>"
 
 
-# ── Fallback ─────────────────────────────────────────────────────────
+# Exception fallback.
 
 
 class Fallback(BaseRunnable):
-    """Try primary; if it raises ``Exception``, run fallback instead.
-
-    When the fallback ALSO fails, the primary's exception is chained
-    as the ``__cause__`` — debugging a dead pipeline needs the
-    original failure, not just the last resort's.
-    """
+    """Run the fallback after a primary exception and preserve both failures."""
 
     def __init__(self, primary: BaseRunnable, fallback: BaseRunnable):
         self._primary = primary
@@ -285,11 +243,11 @@ class Fallback(BaseRunnable):
         return f"<Fallback {self._primary!r} | {self._fallback!r}>"
 
 
-# ── FailsWhen ────────────────────────────────────────────────────────
+# Output predicate failure.
 
 
 class FailsWhen(BaseRunnable):
-    """Wrap a Runnable — raise ``ValueError`` when predicate matches output."""
+    """Raise ``ValueError`` when a runnable's output matches a predicate."""
 
     def __init__(self, inner: BaseRunnable, predicate: Callable[[Any], bool]):
         self._inner = inner
@@ -305,16 +263,11 @@ class FailsWhen(BaseRunnable):
         return f"<FailsWhen {self._inner!r}>"
 
 
-# ── Retry ────────────────────────────────────────────────────────────
+# Retry composition.
 
 
 class Retry(BaseRunnable):
-    """Retry a Runnable up to *max_attempts* times on ``Exception``.
-
-    ``backoff`` (seconds) sleeps after each failed attempt, doubling
-    every attempt and capped at ``max_backoff``. The default 0.0
-    preserves ``pipeline * N`` semantics (immediate retry).
-    """
+    """Retry exceptions with optional capped exponential backoff."""
 
     def __init__(
         self,
@@ -351,11 +304,11 @@ class Retry(BaseRunnable):
         return f"<Retry {self._inner!r} * {self._max_attempts}>"
 
 
-# ── Router ───────────────────────────────────────────────────────────
+# Keyed routing.
 
 
 class Router(BaseRunnable):
-    """Route to a branch by key.  Use ``_default`` for catch-all."""
+    """Route keyed input to a branch, using ``_default`` as the catch-all."""
 
     def __init__(self, routes: dict[str, BaseRunnable]):
         self._routes = dict(routes)
@@ -384,7 +337,7 @@ class Router(BaseRunnable):
         return f"<Router [{', '.join(keys)}]>"
 
 
-# ── PipelineIterator ─────────────────────────────────────────────────
+# Feedback iteration.
 
 
 class PipelineIterator:
@@ -396,7 +349,7 @@ class PipelineIterator:
         self._override: Any = _SENTINEL
 
     def feed(self, value: Any) -> None:
-        """Override the next iteration's input (instead of previous output)."""
+        """Override the next input instead of feeding back the previous output."""
         self._override = value
 
     def __aiter__(self) -> "PipelineIterator":

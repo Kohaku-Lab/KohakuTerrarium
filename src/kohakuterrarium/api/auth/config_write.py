@@ -1,11 +1,8 @@
-"""Write helpers for the ``[auth]`` section of ``<config_dir>/config.toml``.
+"""Read and write the controlled ``[auth]`` subset of ``config.toml``.
 
-The stdlib ``tomllib`` is read-only — there is no built-in writer.
-This module emits a minimal subset of TOML (strings, ints, bools,
-lists) sufficient for the ``[auth]`` shapes we control.  It is the
-ONE place both the CLI (``kt admin set-host-token``) and the API
-admin-rotation routes write secrets to disk, so the wire format
-cannot drift between the two callers.
+The standard library provides no TOML writer, so CLI and API mutations share this
+minimal emitter to preserve one on-disk format. Unsupported shapes fail explicitly
+rather than being discarded during a rewrite.
 """
 
 from pathlib import Path
@@ -39,12 +36,7 @@ def read_config_toml() -> dict:
 
 
 def write_auth_section(updates: dict[str, object]) -> None:
-    """Merge ``updates`` into the ``[auth]`` table and rewrite the file.
-
-    Existing sections + values are preserved; only the ``[auth]``
-    section is mutated.  Output is sorted within each section for
-    stable diffs.
-    """
+    """Merge auth updates while preserving other supported sections and values."""
     path = config_toml_path()
     data = read_config_toml()
     auth = dict(data.get("auth") or {})
@@ -55,30 +47,11 @@ def write_auth_section(updates: dict[str, object]) -> None:
 
 
 def _dump_toml_like(data: dict) -> str:
-    """Minimal TOML emitter for the framework's ``[section]`` shapes.
+    """Emit flat section tables with scalar or flat-list values.
 
-    Supports:
-
-    - String / int / float / bool scalars.
-    - Flat lists of the above.
-    - One level of ``[section]`` tables (insertion-ordered; keys
-      within each section sorted alphabetically for stable diffs).
-
-    **Raises** :class:`ValueError` rather than silently losing data
-    on either of:
-
-    - Top-level scalars outside any section.  The framework defines
-      none; an operator who manually adds one is using TOML shapes
-      this writer doesn't preserve.  The re-audit caught the earlier
-      log-warning-and-drop behaviour as "loss-with-warning that the
-      operator probably won't see" — making this an explicit raise
-      matches the nested-table policy and the "fail loudly, don't
-      corrupt user data" principle.
-    - Nested tables (``[section.subsection]``).
-
-    If real nested-table / top-level-scalar use cases appear, swap
-    this for a proper TOML writer (e.g. ``tomli_w``) — the
-    ``[auth]`` use case didn't justify the dependency.
+    Keys are sorted for stable output. Top-level scalars and nested tables raise
+    :class:`ValueError` because this constrained writer cannot preserve them without
+    risking silent configuration loss.
     """
     top_level_scalars: list[str] = []
     lines: list[str] = []

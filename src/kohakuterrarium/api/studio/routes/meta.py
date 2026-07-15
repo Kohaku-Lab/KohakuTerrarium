@@ -15,6 +15,7 @@ STUDIO_VERSION = "0.1.0"
 
 
 def _core_version() -> str:
+    """Return the installed core version when package metadata is available."""
     try:
         return _pkg_version("kohakuterrarium")
     except PackageNotFoundError:
@@ -29,16 +30,9 @@ async def health() -> dict:
 
 @router.get("/version")
 async def version(service: TerrariumService = Depends(get_service)) -> dict:
-    """Return studio + core versions plus the runtime mode.
-
-    Frontend reads ``mode`` at boot to decide whether to render
-    node-pickers / per-node badges (``"lab-host"``) or stay in
-    single-node UI (``"standalone"``). When in lab-host mode also
-    surfaces the connected node count so the dashboard can show a
-    cluster-size badge without a separate ``/api/nodes`` round-trip.
-    """
-    # Multi-node services expose ``connected_nodes`` returning
-    # ("_host", "worker-1", ...).  Local services don't have it.
+    """Return component versions and topology metadata for frontend startup."""
+    # Only multi-node services expose ``connected_nodes``; its presence defines
+    # lab-host mode and avoids a separate node-count request.
     nodes_fn = getattr(service, "connected_nodes", None)
     if callable(nodes_fn):
         nodes = tuple(nodes_fn())

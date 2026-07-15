@@ -1,20 +1,6 @@
 """Codex rate-limit / credits parser.
 
-The Codex backend no longer exposes a dedicated ``/backend-api/codex/usage``
-endpoint — that endpoint has been removed and is shielded by Cloudflare
-when reached from non-browser clients. Rate limits are now delivered
-**passively** on every chat-completion response through two channels:
-
-1. **Response headers** (``x-codex-*`` family). Parsed by
-   :func:`parse_all_rate_limits` / :func:`parse_rate_limit_for_limit`.
-2. **Streaming SSE events** of type ``codex.rate_limits`` inside a
-   completion response. Parsed by :func:`parse_rate_limit_event`.
-
-Faithful port of ``codex-rs/codex-api/src/rate_limits.rs`` in the
-upstream Codex source, with the same header naming and parsing rules.
-
-There is no polling endpoint; you must capture this data from the
-response of a real API call.
+Parse Codex rate-limit headers, events, and usage responses.
 """
 
 import json
@@ -25,11 +11,11 @@ from typing import Any, Mapping
 
 @dataclass
 class RateLimitWindow:
-    """One usage window (e.g. 5h primary or weekly secondary)."""
+    """Usage state for one primary or secondary limit window."""
 
     used_percent: float
     window_minutes: int | None = None
-    resets_at: int | None = None  # unix epoch seconds
+    resets_at: int | None = None  # Unix epoch seconds from the backend.
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,7 +43,7 @@ class CreditsSnapshot:
 
 @dataclass
 class RateLimitSnapshot:
-    """One family of rate-limit state (typically ``codex`` default family)."""
+    """Rate-limit state for one metered feature family."""
 
     limit_id: str = "codex"
     limit_name: str | None = None
@@ -89,16 +75,11 @@ class RateLimitSnapshot:
 
 @dataclass
 class UsageSnapshot:
-    """Everything captured from the most recent Codex response.
-
-    Aggregates all rate-limit families plus any promo text the server
-    sent. Produced by :func:`capture_from_headers` and stored in the
-    module-level cache by :func:`set_cached`.
-    """
+    """Rate-limit families and promotional text captured from one response."""
 
     snapshots: list[RateLimitSnapshot] = field(default_factory=list)
     promo_message: str | None = None
-    captured_at: float = 0.0  # unix seconds; set by the cache
+    captured_at: float = 0.0  # Unix timestamp assigned when cached.
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -109,11 +90,6 @@ class UsageSnapshot:
 
     def is_empty(self) -> bool:
         return not any(s.has_data() for s in self.snapshots) and not self.promo_message
-
-
-# ---------------------------------------------------------------------------
-# Header parsing
-# ---------------------------------------------------------------------------
 
 
 def _normalize_limit_id(raw: str) -> str:
@@ -146,7 +122,8 @@ def _parse_float(headers: Mapping[str, str], name: str) -> float | None:
         v = float(raw)
     except (TypeError, ValueError):
         return None
-    if v != v or v in (float("inf"), float("-inf")):  # NaN / inf guard
+    # Non-finite percentages cannot represent usable backend limits.
+    if v != v or v in (float("inf"), float("-inf")):
         return None
     return v
 
@@ -187,11 +164,7 @@ def _parse_window(
     window_minutes_header: str,
     resets_at_header: str,
 ) -> RateLimitWindow | None:
-    """Build a single RateLimitWindow from its three headers.
-
-    Returns None when the percent header is missing entirely, or when all
-    three values are zero/empty (no actual data from the server).
-    """
+    """Parse one window, ignoring absent or entirely empty header values."""
     used_percent = _parse_float(headers, used_percent_header)
     if used_percent is None:
         return None
@@ -227,12 +200,7 @@ def _parse_credits(headers: Mapping[str, str]) -> CreditsSnapshot | None:
 def parse_rate_limit_for_limit(
     headers: Mapping[str, str], limit_id: str | None = None
 ) -> RateLimitSnapshot | None:
-    """Parse one rate-limit family's headers.
-
-    ``limit_id`` is the server-provided metered limit id (e.g. ``codex``,
-    ``codex_other``, ``codex_bengalfox``). None → the default ``codex``
-    family.
-    """
+    """Parse one metered feature's headers, defaulting to the Codex family."""
     normalized = _normalize_limit_id(limit_id) if limit_id else "codex"
     prefix = _header_prefix(normalized)
 
@@ -275,20 +243,13 @@ def _header_name_to_limit_id(header_name: str) -> str | None:
 
 
 def parse_all_rate_limits(headers: Mapping[str, str]) -> list[RateLimitSnapshot]:
-    """Parse every rate-limit family advertised in the response headers.
-
-    Always includes the default ``codex`` family (even if empty — callers
-    can check :meth:`RateLimitSnapshot.has_data` themselves). Additional
-    families are discovered by scanning for ``x-<slug>-primary-used-percent``
-    header names.
-    """
+    """Parse the default family and any additional families named by headers."""
     snapshots: list[RateLimitSnapshot] = []
 
     default = parse_rate_limit_for_limit(headers, None)
     if default is not None:
         snapshots.append(default)
 
-    # Discover additional families by header name.
     seen: set[str] = set()
     for name in headers.keys():
         lower = name.lower()
@@ -312,12 +273,7 @@ def parse_promo_message(headers: Mapping[str, str]) -> str | None:
     return _parse_str(headers, "x-codex-promo-message")
 
 
-# ---------------------------------------------------------------------------
-# Live usage-body parsing (GET /wham/usage)
-# ---------------------------------------------------------------------------
-
-# ``rate_limit_reached_type.type`` values the backend advertises; anything
-# else collapses to None (see codex-rs RateLimitReachedKind).
+# Unknown reached types are discarded so callers only receive stable backend states.
 _REACHED_TYPES = frozenset(
     {
         "rate_limit_reached",
@@ -379,13 +335,7 @@ def _reached_type_from_body(d: Any) -> str | None:
 
 
 def snapshots_from_usage_body(body: Mapping[str, Any]) -> list[RateLimitSnapshot]:
-    """Parse a ``GET /wham/usage`` JSON body into rate-limit snapshots.
-
-    The authoritative live counterpart of :func:`parse_all_rate_limits`:
-    the default ``codex`` family comes from ``rate_limit`` + ``credits``,
-    and each ``additional_rate_limits`` entry becomes an extra family.
-    Faithful to codex-rs ``rate_limit_snapshots_from_payload``.
-    """
+    """Parse default and additional rate-limit families from a usage response."""
     if not isinstance(body, Mapping):
         return []
     plan_type = body.get("plan_type")
@@ -433,29 +383,8 @@ def snapshots_from_usage_body(body: Mapping[str, Any]) -> list[RateLimitSnapshot
     return snapshots
 
 
-# ---------------------------------------------------------------------------
-# SSE event parsing
-# ---------------------------------------------------------------------------
-
-
 def parse_rate_limit_event(payload: str) -> RateLimitSnapshot | None:
-    """Parse a ``codex.rate_limits`` streaming SSE event payload.
-
-    The payload is a JSON string matching::
-
-        {
-          "type": "codex.rate_limits",
-          "plan_type": "...",
-          "metered_limit_name": "...",
-          "rate_limits": {
-            "primary":   {"used_percent": 12.5, "window_minutes": 300,  "reset_at": ...},
-            "secondary": {"used_percent": 80.0, "window_minutes": 1440, "reset_at": ...}
-          },
-          "credits": {"has_credits": true, "unlimited": false, "balance": "42"}
-        }
-
-    Returns None when the payload is not a valid rate-limit event.
-    """
+    """Parse a streaming rate-limit event, returning ``None`` if invalid."""
     try:
         event = json.loads(payload)
     except (TypeError, ValueError):
@@ -513,13 +442,8 @@ def parse_rate_limit_event(payload: str) -> RateLimitSnapshot | None:
     )
 
 
-# ---------------------------------------------------------------------------
-# Capture helper + process-level cache
-# ---------------------------------------------------------------------------
-
-
 def capture_from_headers(headers: Mapping[str, str]) -> UsageSnapshot:
-    """One-shot helper: headers → UsageSnapshot ready for caching."""
+    """Build a cache-ready usage snapshot from response headers."""
     return UsageSnapshot(
         snapshots=parse_all_rate_limits(headers),
         promo_message=parse_promo_message(headers),
@@ -530,12 +454,7 @@ _cached: UsageSnapshot | None = None
 
 
 def set_cached(snapshot: UsageSnapshot, *, now: float | None = None) -> None:
-    """Store the latest snapshot in the process cache.
-
-    Skips storing when the snapshot contains no usable data — keeps the
-    previous (useful) snapshot rather than overwriting it with noise
-    from a response that didn't carry rate-limit headers.
-    """
+    """Cache a non-empty snapshot without replacing useful data with noise."""
     global _cached
     if snapshot.is_empty():
         return
@@ -551,6 +470,6 @@ def get_cached() -> UsageSnapshot | None:
 
 
 def clear_cache() -> None:
-    """Reset the cache (primarily for tests)."""
+    """Remove the process-level usage snapshot."""
     global _cached
     _cached = None

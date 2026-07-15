@@ -1,4 +1,4 @@
-"""Exit command — graceful shutdown."""
+"""Request an immediate terminal exit or return web confirmation data."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -20,12 +20,12 @@ class ExitCommand(BaseUserCommand):
     async def _execute(
         self, args: str, context: UserCommandContext
     ) -> UserCommandResult:
-        # For CLI/TUI: exit immediately (no confirmation)
+        # Interactive terminal modules own their exit flag and do not require confirmation.
         if context.input_module and hasattr(context.input_module, "_exit_requested"):
             context.input_module._exit_requested = True
             return UserCommandResult(output="")
 
-        # For web frontend: return confirm payload
+        # Frontends without an exit flag need a confirmation payload.
         return UserCommandResult(
             output="Exiting session.",
             data=ui_confirm(

@@ -113,7 +113,6 @@ def run() -> int:
     token = _resolve_token(config_dir)
     token_path = _persist_token(config_dir, token)
 
-    # Strip the colon-port from lab_bind for the readiness check.
     lab_port_str = lab_bind.rsplit(":", 1)[-1]
     try:
         lab_port = int(lab_port_str)
@@ -138,7 +137,6 @@ def run() -> int:
     base_env = os.environ.copy()
     base_env["KT_HOST_TOKEN"] = token
 
-    # 1. Spawn lab-host
     kt = _kt_executable()
     host_cmd = [
         kt,
@@ -160,7 +158,6 @@ def run() -> int:
     ]
     host_proc = _spawn(host_cmd, base_env)
 
-    # 2. Wait for lab port
     print(
         f"[kt-aio] Waiting for lab port {lab_port} to be ready…",
         file=sys.stderr,
@@ -178,7 +175,6 @@ def run() -> int:
         return 1
     print("[kt-aio] Lab port ready.", file=sys.stderr, flush=True)
 
-    # 3. Spawn embedded worker
     worker_dir = config_dir / f"worker-{client_name}"
     client_cmd = [
         kt,
@@ -194,8 +190,9 @@ def run() -> int:
     ]
     worker_proc = _spawn(client_cmd, base_env)
 
-    # 4. Forward SIGTERM/SIGINT to both children
+    # Both children must receive termination so systemd sees a clean shutdown.
     def _term(_signo, _frame):
+        """Forward process termination to both managed children."""
         print("[kt-aio] Stopping…", file=sys.stderr, flush=True)
         for p in (worker_proc, host_proc):
             try:
@@ -206,7 +203,7 @@ def run() -> int:
     signal.signal(signal.SIGTERM, _term)
     signal.signal(signal.SIGINT, _term)
 
-    # 5. Wait for either child to exit; on exit, take down the other.
+    # The host and worker form one service; either child exiting terminates its sibling.
     try:
         while True:
             for label, proc in (("host", host_proc), ("worker", worker_proc)):
@@ -248,7 +245,7 @@ def _kt_executable() -> str:
     found = shutil.which("kt")
     if found:
         return found
-    # Last resort: hope it's on PATH at runtime.
+    # Preserve subprocess PATH lookup as the final fallback.
     return "kt"
 
 

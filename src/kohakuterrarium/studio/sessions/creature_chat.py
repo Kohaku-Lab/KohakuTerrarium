@@ -1,10 +1,4 @@
-"""Per-creature chat: HTTP fallback chat + regenerate + edit + rewind +
-history + branches.
-
-Replaces ``KohakuManager.agent_chat / agent_get_history /
-terrarium_chat`` and the legacy ``routes/agents.py`` regen/edit/rewind/
-branches handlers + ``routes/terrarium.py:terrarium_history`` body.
-"""
+"""Provide creature chat mutations, history, and branch metadata."""
 
 from typing import Any, AsyncIterator
 
@@ -137,12 +131,8 @@ def history(
     creature = find_creature(engine, session_id, creature_id)
     agent = creature.agent
 
-    # Currently-in-flight job ids — union of foreground (direct_job_meta)
-    # AND background-promoted (subagent_manager / executor) jobs so a
-    # promoted sub-agent that was dropped from ``_direct_job_meta`` is
-    # still treated as live. Without the union, ``normalize_resumable_events``
-    # synthesises an "Interrupted by session resume" terminal for the
-    # live bg sub-agent and the UI flips to "interrupted" (Bug 1).
+    # Foreground and promoted background jobs must both remain live during
+    # resumable-event normalization to avoid synthetic interruption events.
     live_job_ids: set[str] = agent_live_job_ids(agent)
 
     events: list[dict] = []
@@ -155,9 +145,7 @@ def history(
             events = []
 
     if not events:
-        # Fallback to lifecycle-attached store if any. ``engine`` here is
-        # already the concrete engine hosting this creature, so resolve
-        # the graph by a direct local walk — no service round-trip.
+        # Fall back to the graph store attached by lifecycle bookkeeping.
         sid = next(
             (g.graph_id for g in engine.list_graphs() if creature_id in g.creature_ids),
             session_id,
@@ -191,10 +179,8 @@ def channel_history(engine: Terrarium, session_id: str, channel: str) -> dict[st
     """
     store = get_session_store(engine, session_id)
     if store is None:
-        # Walk every active store as a last resort; useful when the
-        # session id is the legacy "_" wildcard or when the studio
-        # bookkeeping disagrees with the engine after a fork. Pick the
-        # first active store that actually holds this channel.
+        # Wildcard sessions and stale bookkeeping require probing active stores for
+        # the first one that actually contains the channel.
         for candidate in list_session_stores(engine):
             try:
                 if candidate.get_channel_messages(channel):

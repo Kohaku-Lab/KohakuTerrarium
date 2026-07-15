@@ -4,9 +4,8 @@ Mirrors the legacy "root agent" pattern (one creature listens to every
 peer's channel + a dedicated ``report_to_root`` channel) at the engine
 layer in pure channel + wiring terms.
 
-The body of :meth:`Terrarium.assign_root` lives here so ``engine.py``
-stays under the file-size cap; everything channel-related is grouped
-with its siblings (``channels.py``, ``wiring.py``).
+Keeping root assignment beside channel and wiring helpers ensures privilege,
+topology edges, and live triggers change together.
 """
 
 from typing import TYPE_CHECKING
@@ -107,9 +106,9 @@ async def assign_root_to(
     # freshly-elevated creature. Basic comm tools (``send_channel`` /
     # ``group_send``) were already attached at ``add_creature`` time.
     force_register_privileged_tools(root.agent)
-    # Drive-enabled engines inject the privileged ``group_drive`` tool on
-    # elevation too (design §9.3); idempotent re-run now that the creature is
-    # privileged. A Drive-disabled engine has no runtime and skips this.
+    # Drive-enabled engines also inject the privileged ``group_drive`` tool on
+    # elevation. Re-running installation is idempotent now that the creature is
+    # privileged; a Drive-disabled engine has no runtime and skips this.
     if engine._drive_runtime is not None:
         await _drive_injection.install_drive_runtime(root.agent, engine._drive_runtime)
 

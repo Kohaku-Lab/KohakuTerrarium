@@ -4,10 +4,9 @@ Thin shell over :mod:`kohakuterrarium.studio.attach.log`. The URL
 ``/ws/logs`` is preserved to keep the existing frontend
 ``useLogStream`` composable working without changes.
 
-The helpers (:func:`_find_current_process_log`, :func:`_tail_file`) are
-re-exported at module scope so test code can monkeypatch them on this
-module the same way it has historically. The route body is intentionally
-small — all real work lives in the studio attach layer.
+The helpers (:func:`_find_current_process_log`, :func:`_tail_file`) remain
+at module scope to preserve the established test monkeypatch seam; log
+discovery and tailing behavior live in the Studio attach layer.
 """
 
 import os

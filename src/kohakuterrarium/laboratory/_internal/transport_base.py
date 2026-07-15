@@ -1,23 +1,9 @@
 """L1 transport abstraction for the Laboratory layer.
 
-The transport moves opaque frames (bytes) between two endpoints. It
-knows nothing about envelopes, channels, or nodes — those are L2+
-concerns.
+Define transport protocols for opaque framed-byte communication.
 
-Three pieces:
-
-- :class:`Transport` — host-side ``serve()`` and client-side ``connect()``.
-- :class:`Server` — a listening host; iterate ``connections()`` to
-  receive incoming :class:`Connection` objects.
-- :class:`Connection` — a bidirectional, framed byte channel between
-  two endpoints.
-
-Two implementations ship with 1.5.0:
-
-- :class:`~kohakuterrarium.laboratory._internal.transport_inproc.InProcTransport`
-  — in-process, for tests and embedded clients.
-- :class:`~kohakuterrarium.laboratory._internal.transport_ws.WebSocketTransport`
-  — real network transport for production.
+Transports preserve frame boundaries but intentionally know nothing about
+higher-level envelopes, channels, or nodes.
 """
 
 from collections.abc import AsyncIterator
@@ -25,12 +11,7 @@ from typing import Protocol
 
 
 class ConnectionClosed(Exception):
-    """Raised when an I/O operation is attempted on a closed connection.
-
-    Either side may have closed: ``send_frame`` after local close,
-    ``recv_frame`` after peer close, or both. The error message
-    identifies which side initiated the close when known.
-    """
+    """Indicate that frame I/O cannot continue because either side closed."""
 
 
 class ConnectionRefused(Exception):
@@ -100,12 +81,7 @@ class Server(Protocol):
 
 
 class Transport(Protocol):
-    """A two-sided transport.
-
-    Hosts call :meth:`serve` to listen. Clients call :meth:`connect`
-    to dial out. Both halves of a transport produce :class:`Connection`
-    objects with identical semantics.
-    """
+    """Provide server-side listening and client-side connection creation."""
 
     async def serve(self, addr: str) -> Server:
         """Bind to ``addr`` and start accepting connections.

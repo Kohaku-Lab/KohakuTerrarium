@@ -1,14 +1,12 @@
 """Persistence history — read-only on-disk history per target.
 
-Paths use ``/{session_name}/history[/{target}]`` so the router can be
-mounted under ``/api/sessions`` for URL preservation.
+Paths use ``/{session_name}/history[/{target}]`` so mounting under
+``/api/sessions`` preserves the public URLs.
 
-Saved sessions open the SQLite file in a worker thread. A LIVE session
-(addressed by graph_id or by its file stem while still running) REUSES
-the engine's already-open store on the event loop instead — a second
-open of an actively-written store is unreliable on POSIX
-(``SQLITE_IOERR`` on the tables the live writer touched), and the loop
-serializes these reads with the writer.
+Saved-session SQLite reads run in a worker thread. Live sessions reuse the
+engine-owned store on the event loop because a second connection to an actively
+written store can raise ``SQLITE_IOERR`` on POSIX; loop affinity also
+serializes reads with the writer.
 """
 
 import asyncio
@@ -36,7 +34,7 @@ router = APIRouter()
 
 
 async def _resolve_saved_path(session_name: str) -> Path:
-    """Resolve a saved session's on-disk path; 404 if unknown."""
+    """Resolve a saved session path or raise 404 when it is unknown."""
     path = await asyncio.to_thread(resolve_session_path_default, session_name)
     if path is None:
         raise HTTPException(404, f"Session not found: {session_name}")
@@ -46,13 +44,11 @@ async def _resolve_saved_path(session_name: str) -> Path:
 def _live_job_ids_for_graph(
     service: TerrariumService, graph_id: str
 ) -> set[str] | None:
-    """Union of in-flight job ids across the live graph's creatures.
+    """Collect in-flight job IDs across every creature in a live graph.
 
-    Returns ``None`` when there is no host-local engine (lab host) or the
-    id doesn't resolve to a live graph — the saved-history case, where
-    every unfinished job is genuinely dead and its interrupted terminal
-    is correct. When live, the ids let ``session_history_payload`` skip
-    synthesising an ``interrupted`` terminal for still-running work.
+    ``None`` means no host-local live graph was found, so unfinished persisted
+    jobs may be represented as interrupted. For a live graph, the returned IDs
+    prevent history rendering from marking active work as interrupted.
     """
     engine = host_engine_or_none(service)
     if engine is None:
@@ -73,7 +69,7 @@ def _live_job_ids_for_graph(
 
 
 def _live_session_name(store: SessionStore, session_name: str) -> str:
-    """Payload display name: the store's file stem when available."""
+    """Use the live store's file stem as its display name when available."""
     path = getattr(store, "_path", None)
     return Path(path).stem if path else session_name
 
@@ -98,11 +94,11 @@ async def get_session_history(
     target: str,
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, Any]:
-    """Return history for an agent/root/channel target.
+    """Return history for an agent, root, or channel target.
 
-    For a LIVE session the still-running jobs are threaded through so an
-    in-flight background sub-agent isn't shown as ``interrupted``; a
-    saved session passes ``None`` and keeps read-only semantics.
+    Live job IDs prevent active background work from appearing interrupted.
+    Saved sessions have no live-job set, so persisted unfinished work receives
+    the normal terminal representation.
     """
     target = unquote(target)
     entry = live_store_entry(service, session_name)

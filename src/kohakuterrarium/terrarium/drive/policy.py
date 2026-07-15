@@ -1,9 +1,9 @@
 """Pure deterministic Drive policy functions (design §3-6).
 
-No clock reads (callers pass ``now``), no I/O, no randomness. Everything here
-is a total function over the immutable records in :mod:`drive_models`, so the
-runtime layers (repository, manager, dispatcher) can rely on one canonical
-answer to every deterministic question Terrarium is allowed to decide (§1.4).
+Callers supply time; these functions perform no I/O or randomness. Keeping
+status, readiness, assignment, scheduling, retry, split, and authorization
+policy pure gives repositories, managers, and dispatchers one canonical answer
+to each deterministic decision.
 """
 
 from dataclasses import dataclass
@@ -28,10 +28,6 @@ from kohakuterrarium.terrarium.drive.models import (
     _require_nonempty,
 )
 
-# ---------------------------------------------------------------------------
-# Status classification and the generic transition graph (design §3.3)
-# ---------------------------------------------------------------------------
-
 TERMINAL_STATUSES = frozenset(
     {
         DriveStatus.COMPLETED,
@@ -40,16 +36,15 @@ TERMINAL_STATUSES = frozenset(
         DriveStatus.RETIRED,
     }
 )
-# Terminal states that may still advance to RETIRED (RETIRED itself cannot).
+# Retirement is available only after another terminal outcome.
 RETIRABLE_STATUSES = frozenset(
     {DriveStatus.COMPLETED, DriveStatus.FAILED, DriveStatus.CANCELLED}
 )
 
-# The generic edges a Drive may take without an enabling registration policy.
-# Suspended states (waiting/paused/blocked) keep generic admin cancel/pause and
-# actor-unblock exits so a record whose registration is unavailable stays
-# administratable (§8.6, §6.2, §6.7). completed/failed only from active;
-# terminal reopen absent by design; retire only from a non-retired terminal.
+# Generic edges remain sufficient to administer suspended drives even when their
+# registration is unavailable. Completion and failure require active pursuit,
+# terminal reopen requires an extension edge, and retirement follows another
+# terminal outcome.
 GENERIC_TRANSITIONS: frozenset[tuple[DriveStatus, DriveStatus]] = frozenset(
     {
         (DriveStatus.DRAFT, DriveStatus.ACTIVE),
@@ -91,8 +86,7 @@ def validate_transition(
     *,
     extra_transitions: frozenset[tuple[DriveStatus, DriveStatus]] = frozenset(),
 ) -> None:
-    """Raise :class:`DriveTransitionError` unless ``current -> target`` is legal;
-    ``extra_transitions`` adds registration-specific edges (design §3.3)."""
+    """Validate a generic or registration-approved status transition."""
     if not isinstance(current, DriveStatus) or not isinstance(target, DriveStatus):
         raise DriveValidationError("transition endpoints must be DriveStatus")
     if (current, target) in GENERIC_TRANSITIONS or (
@@ -120,13 +114,8 @@ def validate_transition(
     )
 
 
-# ---------------------------------------------------------------------------
-# Deliverability and readiness — distinct concepts (design §3.3 table, §4.4)
-# ---------------------------------------------------------------------------
-
-
 def is_deliverable_status(status: DriveStatus) -> bool:
-    """Only ACTIVE is deliverable; WAITING must first wake to ACTIVE (§4.4)."""
+    """Return whether status permits delivery; waiting drives must wake first."""
     return status is DriveStatus.ACTIVE
 
 
@@ -139,8 +128,10 @@ def is_expired(record: DriveRecord, now: datetime) -> bool:
 
 
 def dependencies_terminal(dependency_statuses: dict[str, DriveStatus]) -> bool:
-    """Generic dependency readiness: every dependency has reached a terminal
-    state. Registrations refine "reached configured states" (§4.4)."""
+    """Return whether every dependency reached a terminal state.
+
+    Registrations may impose a more specific dependency-state condition.
+    """
     return all(is_terminal(status) for status in dependency_statuses.values())
 
 
@@ -149,7 +140,7 @@ def wake_conditions_met(
     now: datetime,
     dependency_statuses: dict[str, DriveStatus],
 ) -> bool:
-    """Whether a WAITING Drive's deterministic wake conditions are satisfied."""
+    """Return whether time, expiry, and dependency wake conditions are satisfied."""
     return (
         is_time_ready(record, now)
         and not is_expired(record, now)
@@ -167,20 +158,15 @@ def is_ready_for_delivery(
     )
 
 
-# ---------------------------------------------------------------------------
-# Assignment constraints (design §3.4, §6.2)
-# ---------------------------------------------------------------------------
-
-
 def validate_assignment_target(
     record: DriveRecord,
     *,
     target_creature_id: str | None,
     graph_member_ids: frozenset[str],
 ) -> None:
-    """Raise if assigning ``record`` to ``target_creature_id`` breaks scope.
+    """Validate that assignment remains within the drive's scope.
 
-    ``target_creature_id=None`` means unassign, legal only for graph scope.
+    ``None`` means unassignment and is valid only for graph-scoped drives.
     """
     if target_creature_id is None:
         if record.scope_type == "creature":
@@ -204,7 +190,7 @@ def validate_assignment_target(
 
 
 def validate_assignment_consistency(assignment: DriveAssignment) -> None:
-    """Raise if an assignment's state and assignee field disagree (§3.4)."""
+    """Validate consistency between assignment state and assignee identity."""
     state = assignment.assignment_state
     cid = assignment.assignee_creature_id
     if state == "assigned" and not cid:
@@ -215,7 +201,7 @@ def validate_assignment_consistency(assignment: DriveAssignment) -> None:
 
 @dataclass(frozen=True)
 class RemovalDisposition:
-    """What happens to an assignment when its assignee creature is removed."""
+    """Drive and assignment effects of permanent assignee removal."""
 
     assignment_state: Literal["unassigned", "orphaned"]
     drive_status: DriveStatus | None
@@ -228,18 +214,13 @@ def disposition_on_assignee_removed(
     auto_assign: bool = False,
     on_assignee_removed: str = "default",
 ) -> RemovalDisposition:
-    """Deterministic §6.2 outcome when an assigned creature is removed."""
+    """Choose cancellation, orphaning, unassignment, or reassignment intent."""
     if on_assignee_removed == "cancel":
         state = "orphaned" if record.scope_type == "creature" else "unassigned"
         return RemovalDisposition(state, DriveStatus.CANCELLED, False)
     if record.scope_type == "creature":
         return RemovalDisposition("orphaned", DriveStatus.BLOCKED, False)
     return RemovalDisposition("unassigned", None, auto_assign)
-
-
-# ---------------------------------------------------------------------------
-# Stale / duplicate delivery suppression (design §5.4)
-# ---------------------------------------------------------------------------
 
 
 def is_delivery_stale(
@@ -250,7 +231,7 @@ def is_delivery_stale(
     current_readiness_generation: int,
     allow_readmit: bool = False,
 ) -> bool:
-    """Whether a claimed delivery must be superseded before admission (§5.4)."""
+    """Return whether a claimed delivery no longer matches canonical state."""
     if record is None or not is_deliverable_status(record.status):
         return True
     if delivery.drive_revision != record.revision:
@@ -272,15 +253,13 @@ def is_delivery_stale(
     return False
 
 
-# ---------------------------------------------------------------------------
-# Deterministic scheduler ordering (design §5.5)
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveScheduleItem:
-    """One schedulable Drive; ``last_delivered_at=None`` (never delivered)
-    sorts first, having waited longest."""
+    """Scheduling inputs for one drive.
+
+    A missing ``last_delivered_at`` sorts first because the drive has never
+    received service.
+    """
 
     drive_id: str
     available_at: datetime
@@ -297,9 +276,11 @@ class DriveScheduleItem:
 
 
 def schedule_sort_key(item: DriveScheduleItem) -> tuple[float, int, float, float, str]:
-    """Ascending key giving: available_at ASC, priority DESC, last_delivered_at
-    ASC (None first), created_at ASC, drive_id ASC. ``drive_id`` is unique per
-    Drive, so the order is total and independent of input order."""
+    """Build a total, input-order-independent scheduling key.
+
+    Earlier availability wins, then higher priority, least recent service,
+    earlier creation, and finally unique drive ID.
+    """
     last = item.last_delivered_at
     last_key = last.timestamp() if last is not None else float("-inf")
     return (
@@ -315,14 +296,9 @@ def order_schedule(items: list[DriveScheduleItem]) -> list[DriveScheduleItem]:
     return sorted(items, key=schedule_sort_key)
 
 
-# ---------------------------------------------------------------------------
-# Graph split placement (design §6.7)
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class GraphComponent:
-    """A post-split child graph: its id and the creatures it now holds."""
+    """Child graph identity and membership after a topology split."""
 
     graph_id: str
     creature_ids: frozenset[str]
@@ -330,7 +306,7 @@ class GraphComponent:
 
 @dataclass(frozen=True)
 class SplitPlacement:
-    """Where a Drive goes after a split: follow a child, orphan, or clone."""
+    """Placement decision to follow a child, orphan, or clone a drive."""
 
     kind: Literal["follow", "orphan", "clone"]
     graph_id: str | None = None
@@ -348,7 +324,7 @@ def _component_with(
 def _largest_component(components: list[GraphComponent]) -> GraphComponent | None:
     if not components:
         return None
-    # deterministic: largest by size, ties broken by lowest graph_id.
+    # Graph ID breaks equal-size ties so placement is independent of input order.
     return min(components, key=lambda c: (-len(c.creature_ids), c.graph_id))
 
 
@@ -359,7 +335,7 @@ def select_split_placement(
     *,
     split_policy: str | None = None,
 ) -> SplitPlacement:
-    """Deterministic §6.7 placement of one Drive across split child graphs."""
+    """Place a drive deterministically across child graphs after a split."""
     if record.scope_type == "creature":
         comp = _component_with(components, record.scope_id)
         return _follow_or_orphan(comp)
@@ -393,11 +369,6 @@ def _follow_or_orphan(comp: GraphComponent | None) -> SplitPlacement:
     return SplitPlacement(kind="follow", graph_id=comp.graph_id)
 
 
-# ---------------------------------------------------------------------------
-# Retry classification (design §5.6)
-# ---------------------------------------------------------------------------
-
-
 class DeliveryFailureKind(str, Enum):
     TRANSIENT = "transient"
     UNAVAILABLE_ASSIGNEE = "unavailable_assignee"
@@ -420,7 +391,7 @@ def classify_delivery_failure(
     attempt: int,
     max_attempts: int,
 ) -> RetryDisposition:
-    """Map a delivery failure to its retry disposition (§5.6)."""
+    """Map failure type and attempt budget to a retry disposition."""
     _require_int(attempt, "attempt", minimum=0)
     _require_int(max_attempts, "max_attempts", minimum=1)
     match kind:
@@ -435,11 +406,6 @@ def classify_delivery_failure(
                 return RetryDisposition.RETRY_BACKOFF
             return RetryDisposition.DEAD_LETTER
     raise DriveValidationError(f"unknown delivery failure kind {kind!r}")
-
-
-# ---------------------------------------------------------------------------
-# Actor capabilities and authorization (design §3.6)
-# ---------------------------------------------------------------------------
 
 
 class DriveCapability(str, Enum):
@@ -491,7 +457,7 @@ _OPERATION_CAPABILITY: dict[DriveOperation, DriveCapability] = {
     DriveOperation.ADMIN: DriveCapability.ADMIN,
 }
 
-# Transitions an assignee (not the owner) may request on a foreign Drive (§3.6).
+# Assignees may suspend blocked work but lack the owner's full transition set.
 _ASSIGNEE_TRANSITIONS = frozenset({DriveStatus.WAITING, DriveStatus.BLOCKED})
 
 
@@ -511,8 +477,7 @@ def effective_capabilities(
     *,
     is_privileged: bool = False,
 ) -> frozenset[DriveCapability]:
-    """Default-policy capabilities an actor holds for one record (§3.6): the
-    system actor is omnipotent, else the owner/assignee/privileged model."""
+    """Derive capabilities from system, privilege, ownership, and assignment."""
     if actor == SYSTEM_ACTOR:
         return frozenset(DriveCapability)
     caps: set[DriveCapability] = {DriveCapability.READ}
@@ -553,7 +518,7 @@ def is_operation_allowed(
     is_privileged: bool = False,
     target_status: DriveStatus | None = None,
 ) -> bool:
-    """Default-policy authorization decision for one operation (design §3.6)."""
+    """Return whether default capability policy permits an operation."""
     caps = effective_capabilities(
         actor, record, assignment, is_privileged=is_privileged
     )
@@ -585,7 +550,7 @@ def require_operation(
     is_privileged: bool = False,
     target_status: DriveStatus | None = None,
 ) -> None:
-    """Raise :class:`DrivePermissionError` if the operation is not allowed."""
+    """Require default capability policy to permit an operation."""
     if not is_operation_allowed(
         actor,
         record,

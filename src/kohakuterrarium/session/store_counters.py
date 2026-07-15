@@ -1,10 +1,4 @@
-"""Counter restoration helpers for ``SessionStore``.
-
-Extracted from ``store.py`` so the main store module stays under the
-600-line soft cap. These functions scan KVault tables after reopen and
-rebuild the sequence counters that ``append_event`` and friends rely
-on.
-"""
+"""Rebuild session sequence counters from persisted KVault keys."""
 
 from kohakuvault import KVault
 
@@ -12,10 +6,7 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# KVault's ``keys()`` defaults to ``limit=10000`` — way too small for
-# long-running sessions. A truncated scan here corrupts the recovered
-# sequence counters, which makes new appends overwrite existing keys.
-# Pass an explicit cap that comfortably covers any realistic session.
+# Truncated key scans can restore stale counters and overwrite existing rows.
 _KV_KEYS_LIMIT: int = 2**31 - 1
 
 
@@ -27,11 +18,9 @@ def _decode_key(key_bytes: bytes | str) -> str:
 
 
 def restore_event_counters(events: KVault, event_seq: dict[str, int]) -> int:
-    """Scan the events table. Populate per-agent seq + return max event_id.
+    """Restore per-agent event sequences and return the largest event ID.
 
-    ``event_seq`` is mutated in-place. Keys follow ``{agent}:e{seq:06d}``;
-    event bodies may carry a Wave B ``event_id`` integer which we track
-    so the global counter survives reopen.
+    ``event_seq`` is updated in place from ``{agent}:e{seq}`` keys.
     """
     max_event_id = 0
     for key_bytes in events.keys(limit=_KV_KEYS_LIMIT):
@@ -61,10 +50,7 @@ def restore_event_counters(events: KVault, event_seq: dict[str, int]) -> int:
 
 
 def restore_suffix_counters(table: KVault, sep: str, counter: dict[str, int]) -> None:
-    """Restore ``{prefix}{sep}{seq:06d}``-shaped counters (e.g. channels).
-
-    ``counter`` is mutated in-place.
-    """
+    """Restore suffix-based sequence counters in place."""
     for key_bytes in table.keys(limit=_KV_KEYS_LIMIT):
         key = _decode_key(key_bytes)
         parts = key.rsplit(sep, 1)
@@ -81,8 +67,7 @@ def restore_suffix_counters(table: KVault, sep: str, counter: dict[str, int]) ->
 def restore_subagent_counters(subagents: KVault, runs: dict[str, int]) -> None:
     """Restore per-(parent, name) sub-agent run counters.
 
-    Keys follow ``{parent}:{name}:{run}:meta``. ``runs`` is mutated
-    in-place.
+    ``runs`` is updated in place from ``{parent}:{name}:{run}:meta`` keys.
     """
     for key_bytes in subagents.keys(limit=_KV_KEYS_LIMIT):
         key = _decode_key(key_bytes)

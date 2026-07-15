@@ -1,14 +1,12 @@
 """Path-safety helpers for studio FS operations.
 
-All user-supplied names and relative paths pass through here so
-workspace operations can never escape the workspace root.
-Called at every IO boundary.
+Validates user-supplied names and resolves relative paths without allowing
+workspace escape. Workspace I/O boundaries rely on these checks.
 """
 
 from pathlib import Path
 
-# Reserved OS names on Windows (case-insensitive). Refused as creature /
-# module names to keep cross-platform checkouts sane.
+# Reject Windows device names on every platform so workspaces remain portable.
 _WINDOWS_RESERVED = {
     "con",
     "prn",
@@ -24,11 +22,10 @@ class UnsafePath(ValueError):
 
 
 def sanitize_name(name: str) -> str:
-    """Return *name* if it is a valid creature / module name.
+    """Validate and return a portable creature or module name.
 
-    Rejects empty strings, leading dots (``.hidden``), absolute
-    paths, path separators, parent-dir refs, and Windows reserved
-    names.
+    Empty, hidden, whitespace-padded, path-like, parent, and reserved names are
+    rejected.
     """
     if not name or not isinstance(name, str):
         raise ValueError("name must be a non-empty string")
@@ -46,10 +43,10 @@ def sanitize_name(name: str) -> str:
 
 
 def ensure_in_root(root: Path, rel: str) -> Path:
-    """Resolve *rel* under *root* and assert it stays inside.
+    """Resolve a relative path and require containment within ``root``.
 
-    Accepts forward- or back-slashes. Rejects absolute inputs.
-    Returns the resolved absolute path.
+    Absolute and escaping paths raise :class:`UnsafePath`; valid inputs return an
+    absolute resolved path.
     """
     if not rel:
         raise UnsafePath("empty relative path")

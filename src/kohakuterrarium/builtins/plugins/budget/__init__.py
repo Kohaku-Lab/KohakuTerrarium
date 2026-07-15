@@ -1,4 +1,4 @@
-"""Budget plugin pack."""
+"""Expose the built-in runtime budget plugin."""
 
 from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 

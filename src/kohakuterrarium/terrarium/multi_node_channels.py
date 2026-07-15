@@ -1,11 +1,7 @@
 """Cluster-aware channel read paths for :class:`MultiNodeTerrariumService`.
 
-Extracted from ``multi_node_service.py`` (CF-4 cluster fan-out
-helpers). Kept as free functions so ``MultiNodeTerrariumService`` can
-keep thin delegators while this file owns the verbose cluster-walk
-comments and merge logic.
-
-Three pieces live here:
+Free functions keep cluster fan-out and merge logic separate from the
+``MultiNodeTerrariumService`` delegators:
 
 - :func:`cluster_members_for` — resolve a graph_id to its cluster's
   ``(node_id, member_sid)`` pairs via the shared ``cluster_fold``
@@ -27,7 +23,7 @@ logger = get_logger(__name__)
 
 
 def cluster_members_for(service, graph_id: str) -> list[tuple[str, str]]:
-    """CF-4: list ``(node_id, member_sid)`` pairs for ``graph_id``.
+    """List ``(node_id, member_sid)`` pairs for ``graph_id``.
 
     Reads ``service._cluster_links`` (via the shared
     :func:`cluster_fold.cluster_groups` algorithm) to discover all sids
@@ -59,7 +55,7 @@ def cluster_members_for(service, graph_id: str) -> list[tuple[str, str]]:
 
 
 async def list_channels(service, graph_id: str) -> tuple[ChannelInfo, ...]:
-    """CF-4: cluster channels are replicated on every member worker's
+    """Cluster channels are replicated on every member worker's
     engine.  Returning the first hit only would lose channels that exist
     on a peer member (e.g. the user wired a channel cross-node from
     worker-B's side — the replica is registered on worker-A's engine but
@@ -106,7 +102,7 @@ async def channel_history(
     *,
     limit: int | None = None,
 ) -> list[dict[str, Any]]:
-    """CF-4: cluster channels record their messages independently on
+    """Cluster channels record their messages independently on
     each member's session store (a send on worker-A's side fires the
     broadcast cross-sub to worker-B, but each side records the message
     into its own engine's channel object).  Asking only the cluster

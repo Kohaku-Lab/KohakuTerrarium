@@ -1,9 +1,7 @@
-"""Runtime-configurable hard sandbox plugin.
+"""Enforce runtime-configurable file, network, tool, and subprocess policy.
 
-This plugin is intentionally self-contained: it uses normal plugin hooks and
-an optional runtime service consumed by subprocess-capable tools. If the plugin
-is not loaded, disabled, or set to backend="off", no sandbox behavior is
-installed.
+The sandbox remains a plugin: hooks gate known tools, while a runtime service
+provides the same policy boundary to subprocess-capable tools.
 """
 
 import asyncio
@@ -194,12 +192,7 @@ class SandboxPlugin(BasePlugin):
         input_data: bytes | None = None,
         max_output_bytes: int | None = None,
     ) -> dict[str, Any]:
-        """Run a subprocess under the current sandbox policy.
-
-        This first implementation enforces policy before spawning and then
-        delegates to the host OS unchanged. OS-level adapters can replace the
-        spawn block here without changing core or tools.
-        """
+        """Validate subprocess policy before delegating execution to the host OS."""
         if not self._enabled:
             return await _run_plain_subprocess(
                 argv,
@@ -377,6 +370,7 @@ async def _run_plain_subprocess(
     input_data: bytes | None,
     max_output_bytes: int | None,
 ) -> dict[str, Any]:
+    """Run a subprocess and return bounded byte streams and timeout state."""
     process = await asyncio.create_subprocess_exec(
         *argv,
         cwd=str(cwd) if cwd is not None else None,

@@ -1,20 +1,12 @@
-"""Routed Drive methods for :class:`MultiNodeTerrariumService` (design §9.2, §10).
+"""Route Drive operations across multi-node Terrarium workers.
 
-The host process runs no agents; every Drive lives on the worker that owns its
-graph's repository (its **home**). This mixin enforces the single-canonical-writer
-rule (design §10.1):
-
-- per-Drive **writes** route only to the Drive's home, repairing a stale route
-  once on ``not_found``;
-- **reads** either target a known graph's home or fan out and dedupe by Drive id;
-- **cross-node assignment** (a Drive homed on node A assigned to a creature on
-  node B) is refused with :class:`CrossNodeDriveNotSupportedError` in v1, because
-  the same-writer prerequisite only holds when assignee and home colocate;
-- runtime status / registration reads aggregate truthfully across workers.
-
-It relies on the host service exposing ``_remotes``, ``service_for``,
-``_resolve_graph_home``, and a :class:`~terrarium.drive.multi_node.DriveRouteCache`
-at ``_drive_routes``.
+The host owns no agents or drive repositories. Reads target a graph home or fan
+out across workers, while per-drive mutations route only to a uniquely verified
+canonical home. Assignment across worker boundaries is refused because assignee
+execution and repository writes must share one writer. Runtime status and
+registration views aggregate worker state without inventing a cluster-wide
+revision. The host service supplies remote access, graph-home resolution, and
+the drive route cache.
 """
 
 from typing import Any
@@ -46,9 +38,7 @@ from kohakuterrarium.terrarium.drive.wire_service import (
 
 
 class MultiNodeDriveServiceMixin:
-    """Home-routing Drive surface for the lab-host composite service."""
-
-    # -- reads ---------------------------------------------------------------
+    """Route drive reads and mutations to authoritative worker services."""
 
     async def get_drive(
         self, drive_id: str, *, actor: ActorRef, is_privileged: bool = False
@@ -182,7 +172,7 @@ class MultiNodeDriveServiceMixin:
         )
 
     async def drive_runtime_status(self) -> DriveRuntimeStatus:
-        """Aggregate every worker's running Drive status (truthful cluster view)."""
+        """Aggregate available worker runtime status without a global revision."""
         enabled = False
         durability: str | None = None
         counts: dict[str, int] = {}
@@ -202,8 +192,8 @@ class MultiNodeDriveServiceMixin:
                 if name not in seen_regs:
                     seen_regs.add(name)
                     registrations.append(dict(reg))
-        # A cluster has no single running revision; per-node revisions are read
-        # through the node-targeted settings surface.
+        # Workers may run different registry configurations, so no cluster-wide
+        # running revision is meaningful.
         return DriveRuntimeStatus(
             enabled=enabled,
             durability=durability,
@@ -226,8 +216,6 @@ class MultiNodeDriveServiceMixin:
                     seen.add(name)
                     merged.append(dict(reg))
         return tuple(merged)
-
-    # -- writes --------------------------------------------------------------
 
     async def create_drive(
         self,
@@ -287,8 +275,8 @@ class MultiNodeDriveServiceMixin:
         try:
             assignee_home = await self._resolve_graph_home(assignee_graph_id)
         except KeyError:
-            # Unknown assignee graph — let the home worker reject it in-scope
-            # rather than mislabel it a cross-node case.
+            # Unknown graph placement is delegated to the authoritative worker
+            # instead of being misclassified as a cross-node assignment.
             assignee_home = home
         if assignee_home != home:
             raise CrossNodeDriveNotSupportedError(
@@ -444,8 +432,8 @@ class MultiNodeDriveServiceMixin:
             expected_revision=expected_revision,
             is_privileged=is_privileged,
         )
-        # This is only a hint. Approval always performs a fresh complete proposal
-        # probe, because another worker can acquire the same claim without a join.
+        # Proposal caching is advisory; approval reprobes all workers because
+        # ownership may change before the mutation.
         if isinstance(result, dict) and result.get("proposal_id"):
             self._drive_routes.bind_home(
                 "proposal",
@@ -465,8 +453,8 @@ class MultiNodeDriveServiceMixin:
         drive_id: str | None = None,
         graph_id: str | None = None,
     ) -> DriveView:
-        # Locate read-only on every worker before granting mutation authority.
-        # The worker still binds Drive/graph to the proposal before finalizing.
+        # Read-only uniqueness probes select the worker; that worker still checks
+        # drive and graph binding before approval.
         node_id = await resolve_proposal_home(self, proposal_id)
         return await self.service_for(node_id).approve_drive_proposal(
             proposal_id,
@@ -516,18 +504,14 @@ class MultiNodeDriveServiceMixin:
         )
 
     async def _resolve_delivery_home(self, delivery_id: str) -> str:
-        """Locate the worker hosting ``delivery_id`` (admin replay carries no graph).
-
-        Delegates to the shared uniqueness resolver: two workers claiming one
-        delivery id is a quarantined integrity error, never a first-wins accept.
-        """
+        """Resolve the unique delivery home for administrative replay."""
         return await resolve_delivery_home(self, delivery_id)
 
     async def reconfigure_drive_runtime(
         self, registrations: Any, *, actor: ActorRef
     ) -> str:
-        # Registration *instances* are not serializable; a worker is reconfigured
-        # through its node-targeted ``studio.settings`` apply (design §8.6).
+        # Registration instances are process-local objects, so configuration must
+        # target each worker's settings surface directly.
         raise CrossNodeDriveNotSupportedError(
             "reconfigure_drive_runtime with registration instances is not routable "
             "cross-node; apply per-node Drive settings via "

@@ -1,28 +1,8 @@
 """Saved-session resume — Studio wiring layer.
 
-Resume itself is an engine primitive: :meth:`Terrarium.resume`
-(class-level: build engine + adopt) and :meth:`Terrarium.adopt_session`
-(instance-level: adopt into running engine).  Their bodies live in
-:mod:`terrarium.resume`.
-
-This module is the *Studio* tier on top of those primitives.  It:
-
-- Calls ``engine.adopt_session`` for HTTP / programmatic adoption.
-- Registers studio-tier metadata (``_meta`` / ``_session_stores``) in
-  :mod:`studio.sessions.lifecycle` so the resumed session lists like
-  any freshly-started session.
-- Hosts :func:`announce_migration_if_needed` (pure logging) so the
-  CLI and HTTP surfaces share the same upgrade announcement.
-
-Layer mapping:
-
-- ``session.resume`` (low-tier): Agent rebuild from store.
-- ``terrarium.resume`` + ``Terrarium.{resume, adopt_session}``:
-  engine adopts saved creatures + attaches store.
-- ``studio.persistence.resume`` (this module): adds studio metadata,
-  returns a :class:`Session` handle.  Used by HTTP and CLI.
-- ``api.routes.persistence.resume``: thin HTTP shell.
-- ``cli.resume``: CLI shell with TTY handling.
+Engine primitives reconstruct creatures and attach saved stores. This Studio
+layer adds lifecycle metadata, returns a ``Session`` handle, and provides a
+shared migration announcement for CLI and HTTP callers.
 """
 
 import os
@@ -49,14 +29,10 @@ logger = get_logger(__name__)
 
 
 def announce_migration_if_needed(path: Path) -> None:
-    """Log an informational line when resume will trigger a migration.
+    """Announce when resume will create a migrated session file.
 
-    Doesn't perform the migration itself — that's the job of
-    :func:`session.migrations.ensure_latest_version` invoked by
-    :func:`session.resume._open_store_with_migration`.  This just
-    surfaces the "v1 → v2" transition on the terminal so the user
-    isn't confused when a new file appears beside their original
-    session.
+    Migration remains the responsibility of the session resume layer; this
+    function only makes the additional versioned file visible to the user.
     """
     candidates = discover_versions(path)
     if not candidates:
@@ -84,34 +60,21 @@ async def resume_session(
     pwd_override: str | None = None,
     llm: str | None = None,
 ) -> Session:
-    """Adopt a saved session into ``engine`` and register Studio metadata.
+    """Adopt a saved session and register it with Studio lifecycle state.
 
-    Returns a :class:`Session` handle for the resulting graph.  The
-    handle can be inspected by :func:`studio.sessions.lifecycle.list_sessions`
-    just like a freshly-started session because the same studio
-    metadata maps are populated.
-
-    Example::
-
-        from kohakuterrarium.studio.persistence.resume import resume_session
-
-        async with Terrarium() as t:
-            session = await resume_session(t, "alice.kohakutr")
-            print(f"resumed {session.name} with {len(session.creatures)} creature(s)")
+    The returned handle is indistinguishable from a freshly started session to
+    Studio listing and lookup APIs.
     """
     engine = as_engine(service)
     path = Path(path)
-    # Guard BEFORE any store open: ``SessionStore(path)`` (which the
-    # resume internals use) creates the SQLite file as a side effect of
-    # construction, so resuming a typo'd path used to mint an empty
-    # ``.kohakutr`` on disk and then fail anyway.
+    # Reject missing paths before the resume layer can create an empty SQLite
+    # file as a side effect of opening it.
     if not path.exists() and not discover_versions(path):
         raise SessionNotFoundError(f"Session not found: {path}")
     sid = await engine.adopt_session(path, pwd=pwd_override, llm=llm)
 
-    # Register studio-tier metadata so list_sessions / get_session
-    # surface the resumed graph alongside fresh ones.  Pull config
-    # path / pwd / kind from the just-attached session store.
+    # Lifecycle registries must contain resumed graphs so listing and lookup
+    # treat them like newly started sessions.
     store = engine._session_stores.get(sid)
     meta = store.load_meta() if store is not None else {}
     kind = _resolve_session_kind(meta)
@@ -144,40 +107,21 @@ def _first_agent_name(meta: dict) -> str | None:
 
 
 def _resolve_session_kind(meta: dict) -> str:
-    """Decide whether a saved session resumes as ``"creature"`` or
-    ``"terrarium"`` based on its *final* recorded state — not just the
-    original ``config_type``.
+    """Classify the resumed graph from its final recorded shape.
 
-    A session that started as a terrarium can split down to a single
-    creature; in that case the saved ``agents`` list is length 1 and
-    we treat it as a creature on resume so the user-facing surface
-    (frontend route, instance shape, hot-plug semantics) matches the
-    actual graph it resumes into.
-
-    A session whose ``config_type`` is ``"agent"`` is always a
-    creature.  A ``"terrarium"`` session with two or more creatures or
-    any live channel definitions stays a terrarium.
+    Non-terrarium configs are creatures. A terrarium that ended with at most
+    one agent is also surfaced as a creature so UI routing and hot-plug behavior
+    match the graph being restored.
     """
     if meta.get("config_type") != "terrarium":
         return "creature"
     agents = meta.get("agents") or []
     if isinstance(agents, list) and len(agents) <= 1:
-        # Even though config_type was terrarium, the session ended as a
-        # single creature — surface it as one.  The terrarium-shape
-        # bookkeeping (channels, has_root) is empty in that case anyway.
+        # Final graph shape takes precedence over the original config type.
         return "creature"
     return "terrarium"
 
 
-# ---------------------------------------------------------------------------
-# Programmatic helpers — open + status reads (used by CLI for migration UI)
-# ---------------------------------------------------------------------------
-
-
 def open_store(path: Path | str):
-    """Open a saved-session store with automatic format migration.
-
-    Re-exported for callers (CLI, viewer routes) that want to read
-    metadata without going through the full resume flow.
-    """
+    """Open a saved-session store with automatic format migration."""
     return _open_store_with_migration(path)

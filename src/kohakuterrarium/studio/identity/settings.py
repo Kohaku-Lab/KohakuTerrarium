@@ -21,7 +21,7 @@ def config_paths() -> dict[str, Path]:
 
 
 def show_paths() -> int:
-    """Print the configured paths. Returns CLI exit code."""
+    """Print all configured paths and return the CLI exit code."""
     paths = config_paths()
     print("KohakuTerrarium config paths")
     for name, path in paths.items():
@@ -30,7 +30,7 @@ def show_paths() -> int:
 
 
 def show_path(name: str | None) -> int:
-    """Print a single path or fall back to ``show_paths()``."""
+    """Print one named path, or all paths when no name is supplied."""
     paths = config_paths()
     if not name:
         return show_paths()
@@ -44,7 +44,7 @@ def show_path(name: str | None) -> int:
 
 
 def edit_config(name: str | None) -> int:
-    """Open a config file in ``$EDITOR``. ``name`` defaults to ``llm_profiles``."""
+    """Open a named config file in ``$EDITOR``, defaulting to LLM profiles."""
     paths = config_paths()
     key = name or "llm_profiles"
     path = paths.get(key)

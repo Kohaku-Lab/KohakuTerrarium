@@ -1,9 +1,4 @@
-"""``/stop`` — stop the focused creature, or a creature by name.
-
-Multi-creature aware: with no args, stops the focused creature. With
-``/stop <name>`` stops a specific creature looked up via the engine
-passed in ``context.extra["engine"]``.
-"""
+"""Stop the focused creature or resolve and stop a named creature."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -15,13 +10,12 @@ from kohakuterrarium.modules.user_command.base import (
 
 
 def _resolve_target(name: str, context: UserCommandContext):
-    """Look up the creature to act on; ``None`` if not found."""
+    """Resolve the focused or named creature, returning ``None`` if unavailable."""
     engine = (context.extra or {}).get("engine")
     if engine is None:
         return None
     target_name = (name or "").strip()
     if not target_name:
-        # Default to the focused creature.
         cid = (context.extra or {}).get("creature_id", "")
         if not cid:
             return None
@@ -29,7 +23,6 @@ def _resolve_target(name: str, context: UserCommandContext):
             return engine.get_creature(cid)
         except Exception:
             return None
-    # Try by id first, then by name.
     try:
         return engine.get_creature(target_name)
     except Exception:
@@ -59,6 +52,6 @@ class StopCommand(BaseUserCommand):
             return UserCommandResult(output=f"{target.name} is already stopped")
         try:
             await target.stop()
-        except Exception as e:  # pragma: no cover - defensive
+        except Exception as e:  # pragma: no cover
             return UserCommandResult(error=f"stop failed: {e}")
         return UserCommandResult(output=f"Stopped {target.name}")

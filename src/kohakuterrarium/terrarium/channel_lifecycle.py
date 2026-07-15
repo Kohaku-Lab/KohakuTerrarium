@@ -1,8 +1,8 @@
 """Engine-side topology lifecycle helpers — disconnect, split
 bookkeeping, channel removal.
 
-Split out of :mod:`terrarium.channels` to keep that file under the
-600-line per-file budget. The functions here are tightly coupled:
+These functions share channel-registry, trigger, and topology lifecycle
+bookkeeping:
 
 - :func:`disconnect_creatures` is the body of
   :meth:`Terrarium.disconnect` — drops listen/send edges, removes

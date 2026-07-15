@@ -6,20 +6,15 @@ from typing import Any
 
 from kohakuterrarium.utils.config_dir import config_dir
 
-# Import-time default — back-compat for display callers.  The live
-# read / write path goes through :func:`ui_prefs_path`.
+# Retain the legacy display constants; live reads and writes resolve through
+# :func:`ui_prefs_path` so configuration-directory changes remain visible.
 KT_DIR = Path.home() / ".kohakuterrarium"
 UI_PREFS_PATH = KT_DIR / "ui_prefs.json"
 
 DEFAULTS: dict[str, Any] = {
     "theme": "system",
-    # Zoom defaults MUST match the frontend's ``DEFAULT_*_ZOOM``
-    # constants in ``src/stores/theme.js``.  The frontend reads
-    # this dict via ``settingsAPI.getUIPrefs()`` on first launch
-    # and uses the backend value before its own fallback fires —
-    # so a mismatch here silently overrides the frontend default
-    # on every fresh install (the "fresh install still shows
-    # 125 %" bug we kept hitting).  Keep both sides at 1.0.
+    # These values must match the frontend ``DEFAULT_*_ZOOM`` constants because
+    # backend preferences take precedence during first-launch initialization.
     "kt-desktop-zoom": 1.0,
     "kt-mobile-zoom": 1.0,
     "nav-expanded": True,
@@ -33,15 +28,11 @@ DEFAULTS: dict[str, Any] = {
 
 
 def ui_prefs_path(user_id: int | None = None) -> Path:
-    """The ``ui_prefs.json`` path, honouring ``KT_CONFIG_DIR``.
+    """Return the current shared or per-user UI preferences path.
 
-    With ``user_id`` set, resolves to
-    ``<config_dir>/users/<user_id>/ui_prefs.json`` — per-user prefs
-    when L4 multi-user mode is on.  ``None`` falls back to the
-    shared ``<config_dir>/ui_prefs.json`` (legacy / L4-off path).
-
-    Resolved fresh each call so test isolation / operator re-homing
-    works — a module constant computed once at import would not.
+    ``user_id`` selects ``users/<id>/ui_prefs.json``; ``None`` selects the
+    legacy shared file. Resolving the config directory per call preserves test
+    isolation and runtime changes to ``KT_CONFIG_DIR``.
     """
     if user_id is None:
         return config_dir() / "ui_prefs.json"
@@ -49,9 +40,11 @@ def ui_prefs_path(user_id: int | None = None) -> Path:
 
 
 def load_prefs(user_id: int | None = None) -> dict[str, Any]:
-    """Load UI prefs merged over the defaults.  Tolerant to
-    missing / malformed files.  ``user_id`` selects per-user
-    (L4) vs shared (legacy) storage."""
+    """Load shared or per-user UI preferences merged over defaults.
+
+    Missing, malformed, and non-object files degrade to a fresh copy of the
+    defaults.
+    """
     path = ui_prefs_path(user_id)
     if not path.exists():
         return dict(DEFAULTS)
@@ -66,13 +59,11 @@ def load_prefs(user_id: int | None = None) -> dict[str, Any]:
 
 
 def save_prefs(values: dict[str, Any], *, user_id: int | None = None) -> dict[str, Any]:
-    """Merge ``values`` over existing prefs and persist.  Returns
-    the merged view.  A ``None`` value deletes the key (the
-    frontend's ``removeHybridPref`` sends ``null``) — non-default
-    keys drop out of the file instead of accumulating as ``null``
-    litter, and default keys fall back to ``DEFAULTS``.  ``user_id``
-    selects per-user vs shared storage; the API route binds this
-    from ``Depends(get_optional_user)`` when L4 is on."""
+    """Merge and persist shared or per-user UI preferences.
+
+    ``None`` removes a key, allowing defaults to reappear without storing null
+    placeholders. The returned mapping is the persisted merged view.
+    """
     merged = {**load_prefs(user_id), **(values or {})}
     merged = {k: v for k, v in merged.items() if v is not None}
     path = ui_prefs_path(user_id)

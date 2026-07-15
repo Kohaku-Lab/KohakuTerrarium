@@ -1,10 +1,7 @@
-"""Catalog routes — read-only module directory for the pool.
+"""Provide a read-only module directory for creature configuration.
 
-Each module kind merges three sources: builtins, workspace
-``kohaku.yaml``, and installed packages. Entries carry ``source``
-(``builtin`` | ``workspace-manifest`` | ``package:<name>``) and enough
-wiring info (``type``, ``module``, ``class_name``) that the frontend
-can produce a valid creature config entry on click.
+Entries merge builtins, the workspace manifest, and installed packages while
+retaining enough source and wiring metadata to construct valid config records.
 """
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -30,9 +27,6 @@ from kohakuterrarium.studio.editors.plugin_hooks import PLUGIN_HOOKS
 from kohakuterrarium.studio.editors.workspace_manifest import Workspace
 
 router = APIRouter()
-
-
-# ---- Tools ----------------------------------------------------------
 
 
 @router.get("/tools")
@@ -64,9 +58,6 @@ async def get_tool_doc_route(name: str) -> dict:
     return {"name": name, "doc": doc}
 
 
-# ---- Sub-agents -----------------------------------------------------
-
-
 @router.get("/subagents")
 async def list_subagents(
     ws: Workspace | None = Depends(get_workspace_optional),
@@ -93,9 +84,6 @@ async def get_subagent_doc_route(name: str) -> dict:
     return {"name": name, "doc": doc}
 
 
-# ---- Triggers -------------------------------------------------------
-
-
 @router.get("/triggers")
 async def list_triggers(
     ws: Workspace | None = Depends(get_workspace_optional),
@@ -106,9 +94,6 @@ async def list_triggers(
     out.extend(package_entries("triggers"))
     out = dedupe_preserve_order(out)
     return out
-
-
-# ---- Plugins --------------------------------------------------------
 
 
 @router.get("/plugins")
@@ -122,9 +107,6 @@ async def list_plugins(
     out = dedupe_preserve_order(out)
     out.sort(key=lambda x: x["name"])
     return out
-
-
-# ---- Inputs / Outputs ----------------------------------------------
 
 
 @router.get("/inputs")
@@ -147,18 +129,15 @@ async def list_outputs(
     return out
 
 
-# ---- Models + plugin hooks (unchanged) -----------------------------
-
-
 @router.get("/models")
 async def list_models() -> list[dict]:
-    """LLM profiles (reuses core llm.profiles.list_all)."""
+    """List configured LLM profiles."""
     return list_all_models()
 
 
 @router.get("/embedding_presets")
 async def list_embedding_presets() -> dict:
-    """Grouped embedding presets (model2vec / sentence-transformer)."""
+    """List embedding presets grouped by provider family."""
     return _list_embedding_presets()
 
 

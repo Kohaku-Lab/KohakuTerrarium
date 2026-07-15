@@ -1,24 +1,8 @@
-"""Instance-scoped studio session registries.
+"""Scope Studio session metadata and stores to each runtime.
 
-Historically :mod:`studio.sessions.lifecycle` kept ``_meta`` and
-``_session_stores`` as module-global dicts — two ``Studio()`` /
-``LocalTerrariumService`` instances in one process (or two engines in
-the L4 per-user pool) shared and cross-contaminated each other's
-session bookkeeping.  This module re-homes that state per runtime.
-
-The registry is anchored on the object that actually scopes a set of
-sessions:
-
-* a host engine when one exists (``host_engine_or_none`` resolves both
-  a raw :class:`Terrarium` and a :class:`LocalTerrariumService` wrapping
-  it to the SAME engine, so service wrappers created per-request — the
-  L4 pool does this — keep seeing one registry per engine);
-* the service itself in lab-host mode (``MultiNodeTerrariumService``
-  runs no host agent engine; its remote-session ``_meta`` cache is
-  controller-side state).
-
-Accessors are lazy: the first touch attaches a fresh
-:class:`StudioSessionRegistry` to the anchor as ``_studio_sessions``.
+Local services and raw Terrarium handles share the host engine as their registry
+anchor. Multi-node lab hosts use the service itself because remote-session
+metadata is controller-side state. Registries are created lazily on first use.
 """
 
 from datetime import datetime, timezone
@@ -47,9 +31,7 @@ class StudioSessionRegistry:
         self.stores: dict[str, "SessionStore"] = {}
 
 
-# Fallback for anchors that reject attribute assignment (slotted /
-# frozen runtime fakes).  Weak so a dead engine's bookkeeping dies
-# with it instead of leaking for the process lifetime.
+# Slotted or frozen anchors use weak fallback storage so dead runtimes release state.
 _FALLBACK: "WeakKeyDictionary[Any, StudioSessionRegistry]" = WeakKeyDictionary()
 
 
@@ -62,15 +44,14 @@ def registry_for(runtime) -> StudioSessionRegistry:
     which form a caller holds.
     """
     engine = host_engine_or_none(runtime)
-    # NB: Terrarium defines ``__len__`` so an empty engine is falsy —
-    # test ``is None`` explicitly, never truthiness.
+    # Empty Terrarium instances are falsy because they define ``__len__``.
     anchor = runtime if engine is None else engine
     reg = getattr(anchor, "_studio_sessions", None)
     if isinstance(reg, StudioSessionRegistry):
         return reg
     try:
         reg = _FALLBACK.get(anchor)
-    except TypeError:  # anchor not weakref-able — attribute attach only
+    except TypeError:  # Non-weak-referenceable anchors require attribute storage.
         reg = None
     if reg is not None:
         return reg
@@ -90,12 +71,6 @@ def meta_for(runtime) -> dict[str, dict[str, Any]]:
 def stores_for(runtime) -> "dict[str, SessionStore]":
     """The per-runtime attached-store dict (``session_id`` → store)."""
     return registry_for(runtime).stores
-
-
-# ---------------------------------------------------------------------------
-# Public read / write accessors — what api/ and sibling studio modules
-# use instead of reaching into the registry dicts directly.
-# ---------------------------------------------------------------------------
 
 
 def get_session_meta(runtime, session_id: str) -> dict[str, Any]:

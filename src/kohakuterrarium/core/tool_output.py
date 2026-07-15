@@ -1,10 +1,7 @@
-"""Central normalization and rendering for tool outputs.
+"""Safe normalization of arbitrary tool output before storage or context.
 
-The executor is the authoritative boundary between arbitrary tool
-payloads and model context.  This module keeps that boundary consistent:
-text is byte-budgeted, multimodal parts are rendered safely for logs and
-commands, and raw image data URLs are moved to session artifacts (or
-elided when no artifact store is available).
+Text is byte-budgeted, multimodal content has a safe plain-text rendering, and
+inline binary data is materialized to session artifacts or explicitly elided.
 """
 
 import base64
@@ -33,7 +30,7 @@ _DATA_URL_RE = re.compile(
 
 @dataclass(slots=True)
 class OutputStats:
-    """Text-rendered statistics for a normalized output payload."""
+    """Summarize the safe text rendering of normalized output."""
 
     text: str = ""
     lines: int = 0
@@ -43,7 +40,7 @@ class OutputStats:
 
 @dataclass(slots=True)
 class NormalizedToolOutput:
-    """Normalized payload plus safe text render and metadata."""
+    """Bundle normalized output with its text statistics and metadata."""
 
     output: str | list[ContentPart]
     stats: OutputStats
@@ -55,11 +52,10 @@ class NormalizedToolOutput:
 
 
 def truncate_text_utf8(text: str, max_bytes: int) -> tuple[str, dict[str, Any]]:
-    """Byte-safe UTF-8 truncation for tool text.
+    """Truncate tool text at a valid UTF-8 boundary.
 
-    ``max_bytes <= 0`` means unlimited.  The truncation note is appended
-    after the retained prefix, so the final rendered payload may exceed
-    ``max_bytes`` slightly; the budget controls retained tool text.
+    The byte limit applies to retained source text; the explanatory truncation note
+    may make the final rendered value slightly larger.
     """
     raw = text.encode("utf-8")
     original_bytes = len(raw)
@@ -100,11 +96,7 @@ def output_stats(
 
 
 def render_content_text(content: Any) -> str:
-    """Render text or multimodal content into safe plain text.
-
-    Raw base64/data URLs are never emitted by this renderer.  Image/file
-    parts become compact placeholders unless they already have text.
-    """
+    """Render content as plain text without exposing inline binary data."""
     normalized = normalize_content_parts(content)
     if normalized is None:
         return ""
@@ -132,12 +124,10 @@ def normalize_tool_output(
     artifact_store: Any = None,
     preview_chars: int = TOOL_OUTPUT_PREVIEW_CHARS,
 ) -> NormalizedToolOutput:
-    """Normalize one tool result before storing or injecting it.
+    """Normalize and byte-limit a tool result before storage or injection.
 
-    Text and text parts are capped by ``max_output`` bytes.  Image data
-    URLs are written to the session artifact store when available; when
-    no store exists, they are replaced with text placeholders so raw
-    base64 never reaches model context.
+    Inline images become session artifacts when possible and safe placeholders
+    otherwise, preventing raw base64 from entering model context.
     """
     metadata: dict[str, Any] = {}
     normalized = normalize_content_parts(output)
@@ -190,11 +180,10 @@ def materialize_image_part(
     stem_hint: str | None = None,
     elide_without_store: bool = False,
 ) -> ImagePart | TextPart:
-    """Persist a data-URL image part or return a safe replacement.
+    """Persist an inline image or return a safe non-binary replacement.
 
-    Non-data URLs are returned unchanged.  If ``artifact_store`` is not
-    available and ``elide_without_store`` is true, a ``TextPart``
-    placeholder is returned instead of carrying the raw base64 forward.
+    Ordinary URLs pass through unchanged. Without storage, callers may retain the
+    original part or request a placeholder through ``elide_without_store``.
     """
     match = _DATA_URL_RE.match(part.url or "")
     if not match:

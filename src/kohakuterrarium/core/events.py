@@ -1,15 +1,4 @@
-"""
-Unified Event Model for KohakuTerrarium.
-
-TriggerEvent is the universal event type that flows through the entire system:
-- Input completion -> TriggerEvent
-- Timer/condition triggers -> TriggerEvent
-- Tool completion -> TriggerEvent
-- Sub-agent output -> TriggerEvent
-
-Stackable events can be batched when occurring simultaneously.
-Supports multimodal content (text + images).
-"""
+"""Unified multimodal events exchanged across agent runtime components."""
 
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -18,45 +7,12 @@ from typing import Any
 from kohakuterrarium.core.tool_output import render_content_text
 from kohakuterrarium.llm.message import ContentPart, normalize_content_parts
 
-# Type alias for event content (text or multimodal)
 EventContent = str | list[ContentPart]
 
 
 @dataclass
 class TriggerEvent:
-    """
-    Universal event type that flows through the entire system.
-
-    All components communicate through this single event type - inputs, triggers,
-    tool completions, and sub-agent outputs all produce TriggerEvents.
-
-    Attributes:
-        type: Event type identifier. Common types:
-            - "user_input": User provided input
-            - "idle": Idle timeout trigger
-            - "timer": Timer-based trigger
-            - "tool_complete": Tool finished execution
-            - "subagent_output": Sub-agent produced output
-            - "monitor": Monitoring condition triggered
-            - "error": Error occurred
-
-        content: Main content/message of the event
-            Can be str for text-only, or list[ContentPart] for multimodal
-
-        context: Additional context data (flexible dict for type-specific info)
-            For tool_complete: may include exit_code, error, etc.
-            For user_input: may include source, metadata, etc.
-
-        timestamp: When the event was created
-
-        job_id: For tool/subagent completion events, the job ID that completed
-
-        prompt_override: Optional prompt injection for this event
-            Triggers can include built-in prompts that tell agent what to do
-
-        stackable: Whether this event can be batched with simultaneous events
-            When multiple triggers fire at once, stackable events are combined
-    """
+    """Carry typed event content, context, and batching behavior across modules."""
 
     type: str
     content: EventContent = ""
@@ -67,29 +23,20 @@ class TriggerEvent:
     stackable: bool = True
 
     def __post_init__(self) -> None:
-        """Validate event after initialization."""
+        """Reject events without a routing type."""
         if not self.type:
             raise ValueError("TriggerEvent type cannot be empty")
 
     def get_text_content(self) -> str:
-        """
-        Extract text content from event.
-
-        For multimodal events, renders safe text placeholders for
-        non-text parts without exposing raw base64 payloads.
-        """
+        """Render text and safe placeholders without exposing binary payloads."""
         return render_content_text(self.content)
 
     def is_multimodal(self) -> bool:
-        """Check if event has multimodal content."""
+        """Return whether the event contains structured content parts."""
         return isinstance(self.content, list)
 
     def with_context(self, **kwargs: Any) -> "TriggerEvent":
-        """
-        Create a new event with additional context.
-
-        Returns a new TriggerEvent with merged context (doesn't mutate self).
-        """
+        """Return a copy with merged context, leaving this event unchanged."""
         new_context = {**self.context, **kwargs}
         return TriggerEvent(
             type=self.type,
@@ -121,9 +68,8 @@ class TriggerEvent:
         return ", ".join(parts) + ")"
 
 
-# Common event type constants for type safety
 class EventType:
-    """Common event type constants."""
+    """Canonical event type names used across runtime components."""
 
     USER_INPUT = "user_input"
     IDLE = "idle"
@@ -187,27 +133,10 @@ def create_creature_output_event(
     turn_index: int = 0,
     prompt_override: str | None = None,
 ) -> TriggerEvent:
-    """Create a creature_output event for output-wiring delivery.
+    """Create a turn-end event for output-wiring delivery.
 
-    This is the wire payload used by the output-wiring framework hook:
-    one creature's turn-end produces an event that the resolver pushes
-    directly into the target creature's event queue.
-
-    Args:
-        source: Name of the creature whose turn just ended.
-        target: Name of the creature receiving this event (for context).
-        content: The source creature's last-round assistant text. Pass
-            an empty string when ``with_content=False``.
-        with_content: Mirrors the wiring entry's setting; stored in
-            context so plugins / receivers can distinguish metadata
-            pings from content deliveries.
-        source_event_type: The type of the event that originally
-            triggered the source's turn (``user_input``, ``channel_message``,
-            etc.). Stored for observability.
-        turn_index: Per-source monotonic turn counter.
-        prompt_override: Rendered prompt text that wraps the raw content
-            when the receiver's controller consumes the event. Same
-            mechanism ``ChannelTrigger`` already uses.
+    Context distinguishes content deliveries from metadata-only notifications and
+    preserves the source trigger and monotonic turn index for observability.
     """
     return TriggerEvent(
         type=EventType.CREATURE_OUTPUT,
@@ -236,5 +165,5 @@ def create_error_event(
         content=message,
         context={"error_type": error_type, **extra_context},
         job_id=job_id,
-        stackable=False,  # Errors typically need immediate attention
+        stackable=False,  # Errors retain their own turn for immediate handling.
     )

@@ -1,13 +1,6 @@
-"""Storage-agnostic Drive repository orchestration (design §4, §7).
+"""Storage-agnostic Drive repository orchestration.
 
-:class:`BaseDriveRepository` turns the pure builders in
-:mod:`drive.repository` into atomic transactions: it owns the serialization
-lock, idempotency ledger, and the canonical Drive mutations, all against the
-:class:`DriveTransaction` seam. The delivery-plane / read / export surface is
-mixed in from :mod:`drive.repository_ops`. The two backends
-(:mod:`drive.memory`, :mod:`drive.store`) implement only the transaction seam,
-so every backend is behaviourally identical. This layer owns no asyncio
-background task and imports no Agent/engine code (impl-plan Phase B rules).
+Shared transactional orchestration for Drive repository backends.
 """
 
 import asyncio
@@ -65,8 +58,6 @@ class BaseDriveRepository(DeliveryOpsMixin):
         self._clock = clock or (lambda: datetime.now(timezone.utc))
         self._mint = id_factory or (lambda: uuid.uuid4().hex)
 
-    # -- backend seam --------------------------------------------------------
-
     def _new_transaction(self) -> DriveTransaction:
         raise NotImplementedError
 
@@ -76,8 +67,6 @@ class BaseDriveRepository(DeliveryOpsMixin):
 
     async def close(self) -> None:
         return None
-
-    # -- transaction plumbing ------------------------------------------------
 
     @asynccontextmanager
     async def _txn(self) -> AsyncIterator[DriveTransaction]:
@@ -94,10 +83,8 @@ class BaseDriveRepository(DeliveryOpsMixin):
                     await txn.rollback()
 
     def transaction(self):
-        """Public low-level transaction (Phase D dispatcher + crash tests)."""
+        """Return a serialized low-level repository transaction."""
         return self._txn()
-
-    # -- idempotency helpers -------------------------------------------------
 
     async def _begin_idem(
         self,
@@ -162,8 +149,6 @@ class BaseDriveRepository(DeliveryOpsMixin):
         raise DriveIdempotencyConflictError(
             "could not mint a unique Drive ID after repeated collisions"
         )
-
-    # -- canonical mutations -------------------------------------------------
 
     async def create_drive(
         self,
@@ -338,8 +323,7 @@ class BaseDriveRepository(DeliveryOpsMixin):
                 mint=self._mint,
                 operator_grant=operator_grant,
             )
-            # A finalized terminal proposal is removed in the SAME transaction as
-            # its transition, so completion and removal are atomic (R1-08).
+            # Removing a finalized proposal with its transition prevents partial state.
             if delete_proposal_id is not None:
                 mutation.deleted_proposals.append(delete_proposal_id)
             await txn.apply(
@@ -355,7 +339,7 @@ class BaseDriveRepository(DeliveryOpsMixin):
         actor: ActorRef,
         idempotency_key: str | None = None,
     ) -> DriveRecord:
-        """Move a terminal Drive to RETIRED. Rows are never deleted (§7.4)."""
+        """Move a terminal Drive to retired without deleting its rows."""
         return await self.transition_drive(
             drive_id,
             DriveStatus.RETIRED,
@@ -374,7 +358,7 @@ class BaseDriveRepository(DeliveryOpsMixin):
         actor: ActorRef,
         idempotency_key: str | None = None,
     ) -> DriveProgress:
-        """Append-only progress (design §4.3): NO revision change, no CAS."""
+        """Append progress without changing the Drive revision or requiring CAS."""
         payload = {"drive_id": drive_id, "summary": summary, "evidence": evidence or {}}
         async with self._txn() as txn:
             digest, replay = await self._begin_idem(

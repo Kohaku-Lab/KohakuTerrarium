@@ -1,4 +1,4 @@
-"""Plugin command — list and toggle plugins at runtime."""
+"""List, enable, disable, or toggle runtime plugins."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -30,7 +30,6 @@ class PluginCommand(BaseUserCommand):
         parts = args.strip().split(maxsplit=1)
         subcmd = parts[0] if parts else ""
 
-        # /plugin toggle <name>
         if subcmd == "toggle" and len(parts) > 1:
             name = parts[1].strip()
             if mgr.is_enabled(name):
@@ -42,7 +41,6 @@ class PluginCommand(BaseUserCommand):
             else:
                 return UserCommandResult(error=f"Plugin not found: {name}")
 
-        # /plugin enable <name>
         if subcmd == "enable" and len(parts) > 1:
             name = parts[1].strip()
             if mgr.enable(name):
@@ -50,14 +48,12 @@ class PluginCommand(BaseUserCommand):
                 return UserCommandResult(output=f"Plugin '{name}' enabled.")
             return UserCommandResult(error=f"Plugin not found: {name}")
 
-        # /plugin disable <name>
         if subcmd == "disable" and len(parts) > 1:
             name = parts[1].strip()
             if mgr.disable(name):
                 return UserCommandResult(output=f"Plugin '{name}' disabled.")
             return UserCommandResult(error=f"Plugin not found: {name}")
 
-        # /plugin (list)
         plugins = mgr.list_plugins()
         if not plugins:
             return UserCommandResult(output="No plugins loaded.")

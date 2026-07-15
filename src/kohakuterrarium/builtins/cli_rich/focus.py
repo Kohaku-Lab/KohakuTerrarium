@@ -18,11 +18,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Iterable
 
-# Match ``@name <message>`` at the start of input. ``name`` allows
-# alphanumerics, dashes, dots, underscores — the union of every
-# legal creature name shape used by the recipe / config layer. The
-# message body is everything after the first whitespace block, dotall
-# so the user can paste multi-line content after the redirect.
+# DOTALL preserves multiline payloads after a valid creature-name prefix.
 _AT_NAME_RE = re.compile(r"^\s*@([\w.\-]+)\s+(.*)$", re.DOTALL)
 
 
@@ -36,18 +32,13 @@ class AtNameTarget:
 
 
 def parse_at_name(text: str) -> AtNameTarget | None:
-    """Return ``AtNameTarget`` if ``text`` starts with ``@name``, else ``None``.
-
-    ``@all msg`` sets ``is_broadcast=True``. The caller decides
-    whether to honour broadcast based on the focused creature's
-    privilege bit (broadcast is a privileged op).
-    """
+    """Parse an @name redirect, marking @all as a broadcast target."""
     match = _AT_NAME_RE.match(text)
     if match is None:
         return None
     name, payload = match.group(1), match.group(2).strip()
     if not payload:
-        return None  # `@name` alone with no body is treated as plain text
+        return None  # A target without a payload remains ordinary text.
     return AtNameTarget(
         name=name,
         payload=payload,
@@ -57,15 +48,7 @@ def parse_at_name(text: str) -> AtNameTarget | None:
 
 @dataclass
 class FocusController:
-    """Pure focus state — ordered list of creature ids + cursor.
-
-    Construction:
-
-        ctrl = FocusController(creature_ids=["c1", "c2", "c3"], focus_id="c2")
-
-    Mutations all return the new focus id so callers can act on the
-    change without re-reading state.
-    """
+    """Track and cycle focus across an ordered creature-id list."""
 
     creature_ids: list[str] = field(default_factory=list)
     focus_id: str = ""
@@ -132,17 +115,13 @@ class FocusController:
         if not self.creature_ids:
             self.focus_id = ""
             return self.focus_id
-        # Prefer the next sibling, falling back to the previous (or 0).
+        # Preserve list position by choosing the next sibling, then the previous.
         new_idx = min(idx, len(self.creature_ids) - 1)
         self.focus_id = self.creature_ids[new_idx]
         return self.focus_id
 
     def replace(self, creature_ids: Iterable[str]) -> None:
-        """Reset the tracked id list (e.g. after engine topology change).
-
-        Preserves the current focus_id if it still exists; otherwise
-        falls back to the first id (or empty).
-        """
+        """Replace tracked ids while preserving focus when possible."""
         ids = list(creature_ids)
         self.creature_ids = ids
         if not ids:

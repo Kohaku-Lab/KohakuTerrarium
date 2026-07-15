@@ -1,20 +1,13 @@
 """GoalDriveRegistration + the ``kind="goal"`` semantic payload (design §11.1).
 
-Ships the deterministic Goal-kind policy beside the builtin generic registration:
-pure, framework-independent validation + normalization of the Goal spec plus a
-deterministic budget check, and the registration that answers the Drive core's
-deterministic questions (schema / readiness / projection / terminal
-verification). It runs no LLM, writes no repository, and dispatches no events.
+This module owns pure goal-spec normalization, deterministic budget checks, and
+the registration roles for schema validation, readiness, projection, and
+terminal verification. It performs no delivery or persistence.
 
-The Drive core never interprets ``spec``; the spec helpers here are what the
-Goal registration and the ``/goal`` command agree on. The design's "no
-/goal-specific field in the core generic model" holds — this is a REGISTRATION
-beside generic, not a model change.
-
-Verifier note: the Drive core reads one verifier *mode* from a registration's
-descriptor for all its records. Goal completion is per-Drive (self_propose /
-user_confirm / verifier), so this registration declares ``extension`` mode and
-resolves the actual per-Drive policy inside :meth:`verify_terminal`.
+The drive core treats ``spec`` as opaque; goal semantics remain isolated in this
+registration and are shared with the ``/goal`` command. Because completion
+policy varies per Drive while a registration exposes one verifier mode,
+terminal verification resolves the selected policy per record.
 """
 
 from datetime import datetime
@@ -39,7 +32,7 @@ DEFAULT_AUTONOMY = "manual"
 
 
 class GoalSpecError(ValueError):
-    """A malformed GoalSpec. Raised by :func:`normalize_goal_spec`."""
+    """Indicate that a goal specification cannot be normalized."""
 
 
 def _str_list(value: Any, name: str) -> list[str]:
@@ -78,12 +71,7 @@ def _budgets(value: Any) -> dict[str, int | None]:
 
 
 def normalize_goal_spec(spec: Any) -> dict[str, Any]:
-    """Validate ``spec`` and return a fully-populated, normalized GoalSpec.
-
-    Raises :class:`GoalSpecError` on any malformed field. The objective is the
-    only required field; every other field defaults conservatively (manual
-    autonomy, self-propose completion, no budgets).
-    """
+    """Validate a goal specification and populate all default fields."""
     if not isinstance(spec, dict):
         raise GoalSpecError("goal spec must be an object")
     objective = spec.get("objective")
@@ -118,7 +106,7 @@ def build_goal_spec(
     autonomy: str = DEFAULT_AUTONOMY,
     budgets: dict[str, int | None] | None = None,
 ) -> dict[str, Any]:
-    """Construct a normalized GoalSpec from keyword parts (used by ``/goal set``)."""
+    """Build a normalized goal specification from command-style fields."""
     return normalize_goal_spec(
         {
             "objective": objective,
@@ -138,14 +126,7 @@ def budget_block_reason(
     tool_calls_used: int = 0,
     walltime_s: float = 0.0,
 ) -> str | None:
-    """Deterministic budget verdict (design §11: budgets pause/block, never
-    complete).
-
-    Returns a human-readable reason string when any configured budget is
-    exhausted, else ``None``. The counters are supplied by the caller (the
-    continuation policy derives ``turns_used`` from the Drive's delivery
-    count); this function never mutates state and never proposes completion.
-    """
+    """Return the first exhausted pursuit budget without mutating state."""
     budgets = spec.get("budgets") or {}
     max_turns = budgets.get("max_turns")
     if max_turns is not None and turns_used >= max_turns:
@@ -168,14 +149,13 @@ _PROMPT = (
     "budget is exhausted, propose pausing, never completing."
 )
 
-# Bounded projection budget: the objective line is truncated to keep the
-# per-event context small (the core also caps the projected context dict).
+# Per-field limits keep goal projections bounded before aggregate size checks.
 _MAX_OBJECTIVE_CHARS = 240
 _MAX_CRITERIA = 6
 
 
 class GoalDriveRegistration:
-    """Durable objective-pursuit policy for Drive ``kind="goal"``."""
+    """Define validation, readiness, projection, and completion for goal drives."""
 
     name = "goal"
     kind = "goal"
@@ -191,55 +171,37 @@ class GoalDriveRegistration:
             required_roles=frozenset({"spec", "transition", "readiness"}),
             optional_roles=frozenset({"projection", "verifier", "prompt"}),
             prompt_contribution=_PROMPT,
-            # Per-Drive completion policy is enforced in verify_terminal; the
-            # core still routes every terminal proposal through it (§4.2).
+            # Completion policy belongs to each Drive, so terminal proposals must
+            # route through registration-level extension verification.
             verifier_mode="extension",
         )
 
-    # -- schema --------------------------------------------------------------
-
     def validate_spec(self, spec: dict[str, Any]) -> None:
-        """Fail closed on a malformed GoalSpec (design §8.8)."""
+        """Reject malformed goal specifications."""
         try:
             normalize_goal_spec(spec)
         except GoalSpecError as exc:
             raise DriveValidationError(str(exc)) from exc
 
     def validate_transition(self, before: Any, proposal: Any, context: Any) -> None:
-        # Generic edges (drive_policy) already forbid terminal reopen; Goal adds
-        # no extra transition constraints beyond its terminal verification.
         return None
-
-    # -- readiness -----------------------------------------------------------
 
     def readiness(
         self, drive: Any, dependencies: Any, now: datetime, *, turns_used: int = 0
     ) -> Readiness:
-        """Autonomy- and budget-aware readiness (design §11.2, §11.4).
-
-        ``manual`` goals never auto-re-arm (an authorized actor must wake them).
-        ``continue_when_ready`` goals re-arm after each prior settlement — the
-        ``re_arm`` signal drives the generic dispatcher's continuation — until a
-        configured budget is exhausted, at which point they stop re-arming
-        without ever completing (budgets pause/block, never succeed). The
-        manager supplies ``turns_used`` (the settled-delivery count).
-        """
+        """Compute readiness from autonomy mode and consumed turn budget."""
         spec = self._spec(drive)
         if spec.get("autonomy") != "continue_when_ready":
-            # Manual autonomy: grant exactly one initial delivery (design §11.4
-            # `/goal set` -> initial event) but never auto-re-arm; continuation
-            # requires an explicit authorized wake.
+            # Manual goals receive one initial opportunity and require an
+            # authorized wake before any continuation.
             return Readiness(
                 ready=False, initial=True, reason="manual autonomy: awaiting wake"
             )
         block = budget_block_reason(spec, turns_used=turns_used)
         if block is not None:
-            # Budget exhausted: stop continuation; the creature proposes a
-            # pause/block, and completion is never inferred from exhaustion.
+            # Exhausted budgets stop continuation without implying completion.
             return Readiness(ready=False, reason=block)
         return Readiness(ready=True, re_arm=True)
-
-    # -- projection ----------------------------------------------------------
 
     def project_event(
         self, drive: Any, assignment: Any, reason: Any
@@ -270,21 +232,8 @@ class GoalDriveRegistration:
             context={"kind": "goal", "objective": objective},
         )
 
-    # -- terminal verification -----------------------------------------------
-
     def verify_terminal(self, proposal: Any, context: Any) -> VerificationResult:
-        """Per-Drive completion policy (design §11.1).
-
-        * ``self_propose`` — an authorized proposal is accepted.
-        * ``user_confirm`` — only a user-actor proposal finalizes; a creature's
-          proposal is not accepted, so completion stays with the human
-          ``/goal complete`` path.
-        * ``verifier`` — a deterministic evidence gate: the proposal must carry
-          non-empty evidence.
-
-        Budget exhaustion never appears here: budgets pause/block a goal, they
-        never drive it to completed (design §11).
-        """
+        """Verify a terminal proposal using the goal's completion policy."""
         record = (context or {}).get("record") if isinstance(context, dict) else None
         spec = self._spec(record) if record is not None else {}
         policy = spec.get("completion_policy", "self_propose")
@@ -298,7 +247,7 @@ class GoalDriveRegistration:
                 approved=False,
                 reason="user_confirm goal: awaiting user confirmation",
             )
-        # verifier policy: require deterministic evidence.
+        # Verifier policy uses evidence presence as its deterministic gate.
         evidence = getattr(proposal, "evidence", None) or {}
         if evidence:
             return VerificationResult(approved=True)
@@ -308,8 +257,6 @@ class GoalDriveRegistration:
 
     def prompt_contribution(self) -> str | None:
         return _PROMPT
-
-    # -- helpers -------------------------------------------------------------
 
     @staticmethod
     def _spec(drive: Any) -> dict[str, Any]:

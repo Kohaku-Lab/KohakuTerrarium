@@ -1,8 +1,7 @@
 """Pre-flight validation — answer "is my setup correct?" loudly.
 
-Every helper raises a typed error (:mod:`kohakuterrarium.errors`) on
-the first problem instead of warn-and-continue, so scripts and CI can
-gate on them::
+Each helper raises a typed error (:mod:`kohakuterrarium.errors`) on the
+first failure, allowing scripts and CI to use validation as a gate::
 
     import kohakuterrarium as kt
 
@@ -45,32 +44,21 @@ class ValidationReport:
 
 
 def config(path: "str | Path") -> AgentConfig:
-    """Validate an agent config folder / ``@pkg`` ref.
-
-    Loads the config with full strictness: a missing folder, an
-    uninstalled package, or an unresolvable ``base_config`` raises.
-
-    Returns:
-        The loaded :class:`AgentConfig` on success.
-    """
+    """Load an agent config and resolve its package and base-config references."""
     return load_agent_config(path)
 
 
 def terrarium_config(path: "str | Path") -> TerrariumConfig:
-    """Validate a terrarium recipe folder / file / ``@pkg`` ref."""
+    """Load and validate a terrarium recipe path or package reference."""
     return load_terrarium_config(path)
 
 
 def llm(selector: str | None = None) -> str:
-    """Validate that an LLM selector resolves to a usable provider.
-
-    Resolves the profile AND constructs the provider (which checks
-    credentials) — without making any network call.
+    """Resolve an LLM selector and construct its provider without a network call.
 
     Args:
-        selector: Profile / preset name or
-            ``provider/model[@variations]``.  ``None`` validates the
-            configured default model.
+        selector: Profile or preset name, or ``provider/model[@variations]``.
+            ``None`` validates the configured default model.
 
     Returns:
         The canonical ``provider/name[@variations]`` identifier.
@@ -91,17 +79,15 @@ def llm(selector: str | None = None) -> str:
 
 
 def creature(path: "str | Path", *, llm_binding: Any = None) -> ValidationReport:
-    """Dry-run build a creature with full strictness.
+    """Build but do not start a creature, validating all configured components.
 
-    Constructs the real ``Agent`` (``strict=True``, headless IO) so
-    every layer validates: config + inheritance, LLM resolution,
-    every configured tool, every config-listed plugin, sub-agent
-    configs.  The agent is never started.
+    The strict headless build resolves config inheritance, the LLM, tools,
+    plugins, and sub-agent configs.
 
     Args:
-        path: Creature config folder / ``@pkg`` ref.
-        llm_binding: Optional ``llm=`` value to validate with (provider
-            instance / selector / profile) instead of the config's own.
+        path: Creature config folder or package reference.
+        llm_binding: Optional provider, selector, or profile that overrides the
+            config's LLM binding.
 
     Returns:
         A :class:`ValidationReport` describing what was built.
@@ -128,10 +114,10 @@ def creature(path: "str | Path", *, llm_binding: Any = None) -> ValidationReport
 
 
 async def ping(selector_or_provider: Any = None, *, timeout: float = 30.0) -> str:
-    """Make one minimal real LLM round-trip.
+    """Make one real LLM round trip and return its text response.
 
-    The only validator that touches the network.  Returns the (text)
-    reply.  Raises on any provider / transport / credential failure.
+    This is the only validator that accesses the network; provider, transport,
+    and credential failures propagate.
     """
     cfg = AgentConfig(name="_kt_ping")
     provider = coerce_llm_provider(selector_or_provider, cfg)

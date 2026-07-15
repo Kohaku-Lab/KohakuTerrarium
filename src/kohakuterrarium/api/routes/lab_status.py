@@ -1,12 +1,8 @@
-"""``/api/lab/status`` — operator-facing lab cluster snapshot.
+"""Expose a deployment-oriented snapshot of lab mode and client membership.
 
-A richer counterpart to ``/api/nodes`` aimed at the deployment side:
-returns the lab mode, the bind address, and a per-client summary
-(``node_id``, ``connected_at``, ``last_seen``, ``creatures``).
-
-Standalone mode returns ``{"mode": "standalone", "clients": []}`` so
-a deployment dashboard can show "single-host" without special-casing
-the 404 from ``/api/nodes``.
+Unlike node-management routes, this endpoint returns an empty standalone
+snapshot instead of 404 so deployment dashboards can represent a single-host
+installation without a separate error path.
 """
 
 from typing import Any
@@ -18,10 +14,10 @@ router = APIRouter()
 
 @router.get("/status")
 async def lab_status(request: Request) -> dict[str, Any]:
-    """Lab cluster snapshot for the deployment dashboard.
+    """Return lab mode, bind address, and the host's tracked client roster.
 
-    Cheap enough for a per-second poll: no network round-trip, only
-    reads ``HostEngine``'s already-tracked client roster.
+    The route performs no worker round trips, so it is safe for frequent
+    deployment-dashboard polling.
     """
     app = request.app
     lab_mode = getattr(app.state, "lab_mode", "standalone")
@@ -36,6 +32,8 @@ async def lab_status(request: Request) -> dict[str, Any]:
     if host_engine is None:
         return out
 
+    # Prefer membership metadata for connection timestamps, but retain the
+    # legacy alive-client surface when that registry is unavailable.
     membership = getattr(host_engine, "membership", None)
     roster: dict[str, dict[str, Any]] = {}
     if membership is not None and hasattr(membership, "roster"):

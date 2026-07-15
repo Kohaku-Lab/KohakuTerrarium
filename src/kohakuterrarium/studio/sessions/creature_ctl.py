@@ -1,14 +1,8 @@
-"""Per-creature control: interrupt + jobs + cancel + promote.
+"""Control live creature turns and jobs through TerrariumService.
 
-Routes via the :class:`TerrariumService` so multi-node lab-host
-deployments hit the creature's home node automatically — no
-``as_engine`` unwrap here.  Resolution by ``creature_id`` mirrors
-``MultiNodeTerrariumService._route_per_creature``.
-
-The ``session_id`` parameter is kept for backwards compatibility
-with existing API routes (which thread it through unchanged) — it's
-not actually needed for routing since ``creature_id`` is globally
-unique, but the legacy signature lets the routes stay unchanged.
+Service routing reaches the creature's home node in multi-node deployments.
+``session_id`` remains in the signatures for API compatibility, although the
+globally unique creature ID determines routing.
 """
 
 from kohakuterrarium.terrarium import TerrariumService

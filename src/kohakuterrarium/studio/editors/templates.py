@@ -1,17 +1,14 @@
 """Jinja template rendering for scaffolding.
 
-Kept tiny — Phase 1 only needs the creature-config + system-prompt
-templates. Per-kind module templates (``tool.py.j2`` etc.) are
-driven from ``codegen_<kind>.py`` in Phase 3.
+Provides the shared Jinja environment used by creature scaffolding and per-kind
+code-generation modules.
 """
 
 from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-# Templates are kept inside the legacy api/studio/templates/ directory
-# until a future phase relocates them. studio/editors/templates.py is the
-# read-side here and only points to that directory.
+# Template data lives beside this module so all editor code uses one loader root.
 _TEMPLATE_DIR = Path(__file__).resolve().parent / "templates_data"
 
 _env = Environment(

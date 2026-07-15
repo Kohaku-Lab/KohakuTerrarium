@@ -1,9 +1,4 @@
-"""Protocols for session store helper modules.
-
-Keeping the structural type separate from ``session.store`` lets helpers such
-as ``store_fork`` type-check against the small surface they need without
-importing the concrete ``SessionStore`` class at runtime.
-"""
+"""Define the structural store surface required by session helpers."""
 
 from pathlib import Path
 from typing import Any, Protocol
@@ -12,7 +7,7 @@ from kohakuvault import KVault, TextVault
 
 
 class SessionStoreLike(Protocol):
-    """Structural surface of ``SessionStore`` needed by helper modules."""
+    """Expose the tables and operations required by store helper modules."""
 
     meta: KVault
     state: KVault

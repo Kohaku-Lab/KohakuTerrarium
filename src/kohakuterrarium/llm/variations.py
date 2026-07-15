@@ -1,12 +1,6 @@
 """Pure variation-selector machinery.
 
-A preset's ``variation_groups`` field is a two-level dict:
-``{group_name: {option_name: {dotted_path: value}}}``. Users select one
-option per group via ``preset_name@group=option,group2=option2`` (or a
-single-token shorthand ``preset_name@option`` when unambiguous).
-
-This module owns the parsing, validation, and patch application. It has no
-YAML / I/O / state dependency — just the dataclass from ``profile_types``.
+Parse and apply provider-independent preset variation selectors.
 """
 
 from copy import deepcopy
@@ -14,8 +8,7 @@ from typing import Any
 
 from kohakuterrarium.llm.profile_types import LLMPreset
 
-# Patch dotted-path roots that variations are allowed to mutate. Anything
-# outside this set is rejected at apply time (and during selector resolution).
+# Variation patches are constrained to model-facing preset fields.
 _ALLOWED_VARIATION_ROOTS: set[str] = {
     "temperature",
     "reasoning_effort",
@@ -26,19 +19,12 @@ _ALLOWED_VARIATION_ROOTS: set[str] = {
     "retry_policy",
 }
 
-# Internal sentinel used in a selections dict to mark a bare ``@foo``
-# shorthand before the group is disambiguated against the preset's groups.
+# Bare shorthand is retained until the preset's groups can disambiguate it.
 _SHORTHAND_SELECTION_KEY = "__option__"
 
 
 def parse_variation_selector(selector: str) -> tuple[str, dict[str, str]]:
-    """Parse ``preset@group=option,group2=option2`` into name + selections.
-
-    The input may omit the ``@…`` suffix — in that case an empty selections
-    dict is returned. A bare ``preset@foo`` gets stored under the internal
-    shorthand key so :func:`normalize_variation_selections` can resolve it
-    against the preset's actual group/option names.
-    """
+    """Parse a preset selector and retain unqualified shorthand for later resolution."""
     if "@" not in selector:
         return selector, {}
 
@@ -97,11 +83,7 @@ def _set_dotted_path(target: dict[str, Any], path: str, value: Any) -> None:
 
 
 def apply_patch_map(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    """Deep-copy ``base`` and apply each ``dotted.path: value`` from ``patch``.
-
-    Raises ``ValueError`` if any patch targets a disallowed root or collides
-    with a non-object intermediate segment.
-    """
+    """Apply validated dotted-path patches to a deep copy of the base preset."""
     result = deepcopy(base)
     for path, value in (patch or {}).items():
         _validate_patch_target(path)
@@ -113,13 +95,7 @@ def normalize_variation_selections(
     selection_map: dict[str, str],
     preset: LLMPreset,
 ) -> dict[str, str]:
-    """Resolve a shorthand option against the preset's groups + validate.
-
-    Returns a dict ``{group_name: option_name}`` where every entry is known
-    to exist in ``preset.variation_groups``. Raises ``ValueError`` with an
-    explicit message when a group or option name is unknown, or when the
-    shorthand form matches more than one group (requires disambiguation).
-    """
+    """Resolve shorthand and validate every selected group and option."""
     groups = preset.variation_groups or {}
     selections = dict(selection_map or {})
     normalized: dict[str, str] = {}
@@ -163,12 +139,7 @@ def apply_variation_groups(
     variation_groups: dict[str, dict[str, dict[str, Any]]],
     selections: dict[str, str],
 ) -> dict[str, Any]:
-    """Apply every selected option's patch map onto ``base``, in iteration order.
-
-    Raises ``ValueError`` if two selections want to write to the same dotted
-    path — cross-group collisions are a configuration error rather than a
-    last-writer-wins surprise.
-    """
+    """Apply selected patches while rejecting cross-group path collisions."""
     result = deepcopy(base)
     written_paths: dict[str, tuple[str, str]] = {}
 
@@ -190,12 +161,7 @@ def apply_variation_groups(
 
 
 def deep_merge_dicts(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    """Recursive dict merge — returns a new dict without mutating inputs.
-
-    Non-dict values at any level are replaced by the override. Used for
-    layering an inline ``controller.extra_body`` on top of a variation-resolved
-    preset extra_body.
-    """
+    """Recursively merge dictionaries without mutating either input."""
     merged = deepcopy(base)
     for key, value in (override or {}).items():
         if isinstance(value, dict) and isinstance(merged.get(key), dict):

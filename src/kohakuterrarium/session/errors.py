@@ -1,37 +1,24 @@
-"""Session-level exceptions.
-
-Kept in a small dedicated module so both synchronous :mod:`session.store`
-helpers and the async :mod:`session.session` wrapper can import the same
-exception types without introducing a cycle.
-"""
+"""Define errors shared by session stores, forks, and attachments."""
 
 
 class ForkNotStableError(Exception):
     """Raised when :meth:`SessionStore.fork` cannot safely fork at a point.
 
-    A fork is "unstable" when copying would leave an in-flight tool or
-    sub-agent call *without* its matching result inside the copied
-    event range AND the originating :class:`Session` is still running
-    that call. The caller is expected to wait for the job to finish or
-    cancel it explicitly before retrying the fork.
+    An unstable fork would split a tool or sub-agent call from its result while
+    that job is still active. Callers must wait or cancel before retrying.
     """
 
 
 class AlreadyAttachedError(Exception):
-    """Raised when an Agent is already attached to a (different) Session.
+    """Raised when an agent is attached to a different session.
 
-    Wave F §2.3 locked decision Q3: one session per agent. Attaching an
-    already-attached agent to a *different* session is a usage bug —
-    callers should :meth:`Agent.detach_from_session` first. Re-attaching
-    to the same session is idempotent and does not raise.
+    Reattaching to the same session is idempotent; switching sessions requires
+    explicit detachment.
     """
 
 
 class NotAttachedError(Exception):
-    """Raised when :meth:`Agent.detach_from_session` is called on an
-    agent that is not currently attached via the Wave F attach API.
+    """Raised when detachment is requested without a session attachment.
 
-    Plain ``attach_session_store`` calls (pre-Wave-F internal) are not
-    considered "attached" for the purposes of this check — detach is a
-    no-op in that case, not an error.
+    Direct store attachment does not count as a detachable session binding.
     """

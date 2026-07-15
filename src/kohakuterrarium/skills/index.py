@@ -1,13 +1,4 @@
-"""Build the auto-invoke "Skills" section for the system prompt.
-
-Spec D.2: each *enabled, non-disable-model-invocation* skill
-contributes its ``name`` + ``description`` to a ``## Skills`` section.
-Overflow past a soft byte budget (default 4 KB) is truncated — those
-skills remain reachable via explicit ``info(name=...)`` /
-``skill(name=...)`` tool calls.
-
-Ordering: alphabetical by name for determinism.
-"""
+"""Build a deterministic, byte-bounded index of model-invocable skills."""
 
 from kohakuterrarium.skills.registry import Skill, SkillRegistry
 
@@ -19,12 +10,7 @@ def build_skill_index(
     *,
     budget_bytes: int = DEFAULT_SKILL_INDEX_BUDGET_BYTES,
 ) -> str:
-    """Return the ``## Skills`` markdown section, or ``""`` if none apply.
-
-    Skills past the byte budget are silently omitted (spec 4.3).
-    Skills with ``disable-model-invocation: true`` never appear in the
-    index (spec 4.4) but remain callable via the explicit skill tool.
-    """
+    """List enabled model-invocable skills within the configured byte budget."""
     if registry is None or len(registry) == 0:
         return ""
     eligible = [s for s in registry.list_enabled() if not s.invocation_blocked]
@@ -45,7 +31,7 @@ def build_skill_index(
     omitted = 0
     for skill in eligible:
         line = _format_entry(skill)
-        # Always include at least one skill, even if it breaks the budget.
+        # A non-empty registry must expose at least one discoverable skill.
         if used + len(line) > budget_bytes and (len(lines) > 2):
             omitted += 1
             continue

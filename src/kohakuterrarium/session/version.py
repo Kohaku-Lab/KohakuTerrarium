@@ -1,14 +1,7 @@
-"""Session format version helpers.
+"""Define and detect the persisted session format version.
 
-Wave D introduces the migration framework. ``FORMAT_VERSION`` is the
-version new stores write into ``meta["format_version"]``. Bumping it
-requires a matching migrator in
-:mod:`kohakuterrarium.session.migrations`.
-
-File naming: the bare ``<name>.kohakutr`` slot is reserved for the
-original v1 file and is never rewritten by the migrator. Upgraded
-files use the ``<name>.kohakutr.v<N>`` suffix so old frameworks can
-still read the v1 file alongside the new one.
+Version increments require a registered migration path, and migrated files use
+versioned suffixes so original sources remain intact.
 """
 
 from pathlib import Path
@@ -19,18 +12,15 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# The format version new stores initialise in ``meta``. Incrementing
-# this constant requires registering a ``(src, dst)`` migrator in
-# :mod:`kohakuterrarium.session.migrations`.
+# Increment only with a registered migration path to the new version.
 FORMAT_VERSION: int = 2
 
 
 def detect_format_version(path: str | Path) -> int:
     """Return the ``meta["format_version"]`` stored in a ``.kohakutr`` file.
 
-    Opens only the ``meta`` KVault so we don't restore event counters or
-    touch FTS. Defaults to ``1`` when the key is absent — v1 was the
-    implicit format before this field existed.
+    Only metadata is opened. Missing or invalid version values resolve to version
+    1, whose files predate the explicit field.
     """
     p = Path(path)
     if not p.exists():

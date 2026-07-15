@@ -9,12 +9,7 @@ from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
 
 @dataclass
 class CreatureHandle:
-    """
-    Wrapper around an Agent instance with terrarium metadata.
-
-    Tracks which channels the creature listens to and can send on,
-    along with the original config and the live Agent reference.
-    """
+    """Pair a live agent with its configuration, channels, and output capture."""
 
     name: str
     agent: Agent

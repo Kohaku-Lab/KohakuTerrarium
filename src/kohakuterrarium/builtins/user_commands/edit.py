@@ -1,18 +1,4 @@
-"""Edit command — edit a past user message and regenerate from it.
-
-Usage in the in-session prompt::
-
-    /edit <message_index> <new content>
-
-``<message_index>`` is 0-based and refers to the index of the message
-in the in-memory conversation. ``/status`` lists indices for visible
-turns; in practice users typically retarget the last user message
-(``/edit -1 new content`` works as a shortcut).
-
-Each edit opens a new ``branch_id`` of the corresponding turn — the
-original branch is preserved and addressable via the ``<1/N>``
-navigator (frontend) or by manually inspecting the event log.
-"""
+"""Edit a prior conversation message and regenerate from that point."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -24,10 +10,7 @@ from kohakuterrarium.modules.user_command.base import (
 
 
 def _parse_args(args: str) -> tuple[int | None, str]:
-    """Split ``"<idx> <content>"`` into ``(idx, content)``.
-
-    Returns ``(None, "")`` when args are malformed.
-    """
+    """Parse a message index and replacement content, or return an empty result."""
     s = (args or "").strip()
     if not s:
         return None, ""
@@ -55,8 +38,7 @@ class EditCommand(BaseUserCommand):
         idx, content = _parse_args(args)
         if idx is None or not content:
             return UserCommandResult(error="Usage: /edit <message_index> <new content>")
-        # Resolve negative indices against the in-memory conversation so
-        # ``-1`` targets the most recent user message.
+        # Negative indices follow Python sequence semantics for recent messages.
         msgs = context.agent.controller.conversation.get_messages()
         n = len(msgs)
         if idx < 0:

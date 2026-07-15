@@ -1,52 +1,9 @@
-"""Host engine — accepts client connections, routes envelopes between them.
+"""Host client connections and route Laboratory protocol envelopes.
 
-A :class:`HostEngine` instance owns:
-
-- a :class:`~kohakuterrarium.laboratory._internal.transport_base.Server`
-  bound on the configured address
-- per-client read/write tasks
-- a :class:`~kohakuterrarium.laboratory._internal.membership.Membership`
-  registry of connected clients
-- an :class:`~kohakuterrarium.laboratory._internal.addressing.AddressDirectory`
-  mapping creature refs and channel names to client ids
-- pluggable CONTROL handlers (framework-internal) and APP extension
-  handlers (application-level)
-- a periodic heartbeat-loss checker
-
-For each accepted connection, the host performs the Hello/Welcome
-handshake. On success the client is registered in membership and its
-read/write tasks start; on failure a Reject is sent and the connection
-is closed.
-
-Envelope routing rules (1.5.0):
-
-- ``HEARTBEAT`` — refresh membership timestamp.
-- ``SEND`` to a creature ref → resolve via :meth:`AddressDirectory.resolve_creature`,
-  forward to that one node.
-- ``SEND`` to a channel name (``channel://`` prefix) → load-balanced via
-  :meth:`AddressDirectory.pick_listener`.
-- ``BROADCAST`` to a topic name → fan out to every listener via
-  :meth:`AddressDirectory.listeners`.
-- ``CONTROL`` to host → dispatched to a builtin or registered handler.
-- ``CONTROL`` to a specific node → forwarded like SEND.
-- ``APP`` to host → dispatched to the registered extension for the
-  message's namespace; responses (when ``request_id`` set) are sent back.
-- ``APP`` to a specific node → forwarded like SEND.
-- ``ACK`` — forwarded to the original sender's node (just routed like SEND).
-- ``HELLO`` / ``WELCOME`` after the initial handshake — logged as
-  protocol violations and ignored.
-
-Extension points:
-
-- :meth:`HostEngine.register_control_handler` — install a custom
-  CONTROL discriminator handler. Built-ins (subscribe, unsubscribe,
-  register_creature, unregister_creature) cannot be overridden;
-  registered handlers fire before the built-ins for any *other*
-  discriminator.
-- :meth:`HostEngine.register_app_extension` — install an APP extension
-  for a namespace. Receives :class:`AppMessage` instances; the return
-  value (if not None and ``request_id`` set) is sent back as the
-  response body.
+The engine owns membership and address registries, isolates each client's
+I/O in dedicated tasks, and reaps clients that miss heartbeats. Host-bound
+CONTROL and APP envelopes are dispatched locally; other routable envelopes
+are resolved to creatures, channel listeners, or client IDs.
 """
 
 import asyncio
@@ -103,9 +60,8 @@ from kohakuterrarium.laboratory._internal.transport_base import (
 )
 from kohakuterrarium.utils.logging import get_logger
 
-# Handler signature for custom CONTROL discriminators registered via
-# :meth:`HostEngine.register_control_handler`. Receives (sender, envelope,
-# parsed_fields) where parsed_fields excludes the discriminator key.
+# Custom CONTROL handlers receive the sender, envelope, and fields without the
+# discriminator key.
 ControlHandler = Callable[
     ["ConnectedClient", Envelope, dict[str, Any]], Awaitable[None]
 ]
@@ -127,17 +83,7 @@ class ConnectedClient:
 
 
 class HostEngine:
-    """Laboratory host: routes envelopes between connected clients.
-
-    Lifecycle:
-
-    .. code-block:: python
-
-        engine = HostEngine(config, transport)
-        await engine.start()
-        ...
-        await engine.stop()
-    """
+    """Accept Laboratory clients and route their protocol envelopes."""
 
     def __init__(
         self,
@@ -163,25 +109,11 @@ class HostEngine:
         self._reaper_interval_seconds = min(5.0, config.heartbeat_timeout_seconds / 2.0)
         self._control_handlers: dict[str, ControlHandler] = {}
         self._app_extensions: dict[str, ExtensionHandler] = {}
-        # Outstanding host-initiated APP requests keyed by request_id.
-        # Populated by :meth:`request`; drained by :meth:`_handle_app`
-        # when a response envelope addressed to HOST_NODE_ID with a
-        # matching ``in_reply_to`` arrives.  Each future is paired with
-        # its target node so :meth:`_disconnect_client` can fail every
-        # in-flight request whose worker has gone away instead of
-        # leaving callers blocked until ``asyncio.wait_for`` times out.
+        # Pair pending requests with targets so disconnects fail them immediately.
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._pending_request_targets: dict[str, str] = {}
-        # Callbacks invoked when a connected client disconnects.  Used
-        # by :class:`StreamDemux` to drain streams whose producer node
-        # has gone away, so consumers don't hang on ``queue.get()``.
-        # Each callback is a sync function taking the departed node_id;
-        # exceptions are logged and swallowed.
+        # Disconnect callbacks unblock consumers waiting on departed producers.
         self._disconnect_callbacks: list[Callable[[str], None]] = []
-
-    # ------------------------------------------------------------------
-    # Lifecycle
-    # ------------------------------------------------------------------
 
     @property
     def is_running(self) -> bool:
@@ -216,14 +148,9 @@ class HostEngine:
             await self._server.close()
         if self._accept_task is not None:
             await self._accept_task
-        # Disconnect all clients (each disconnect fails its pending
-        # host→client requests).
         for client in list(self._clients.values()):
             await self._disconnect_client(client, reason="host stopped")
-        # Belt-and-braces: any pending request that survived (because
-        # its target was already gone before stop()) fails now too,
-        # so the caller's ``await host.request(...)`` resolves
-        # immediately rather than hanging until ``wait_for`` expires.
+        # Fail requests whose targets disappeared before client teardown began.
         for request_id, future in list(self._pending_requests.items()):
             if not future.done():
                 future.set_exception(
@@ -236,10 +163,6 @@ class HostEngine:
                 pass
         self._membership.close_subscribers()
 
-    # ------------------------------------------------------------------
-    # Read-only views
-    # ------------------------------------------------------------------
-
     def alive_clients(self) -> set[str]:
         return self._membership.alive()
 
@@ -251,8 +174,7 @@ class HostEngine:
         return self._membership
 
     def set_token(self, token: str) -> None:
-        # HostConfig is frozen — swap _auth (the only thing the accept
-        # loop consults at handshake time).
+        # HostConfig is frozen; handshakes consult the replaceable authenticator.
         self._auth = TokenAuth(token)
 
     def block_client_id(self, client_id: str) -> None:
@@ -268,22 +190,12 @@ class HostEngine:
     def addressing(self) -> AddressDirectory:
         return self._addressing
 
-    # ------------------------------------------------------------------
-    # Extension API
-    # ------------------------------------------------------------------
-
     def register_control_handler(
         self,
         control_type: str,
         handler: ControlHandler,
     ) -> None:
-        """Register a CONTROL discriminator handler.
-
-        Cannot override built-in discriminators (``subscribe``,
-        ``unsubscribe``, ``register_creature``, ``unregister_creature``).
-        Any other ``control_type`` string can be registered exactly once;
-        re-registration raises :class:`ValueError`.
-        """
+        """Register one handler for a non-built-in CONTROL discriminator."""
         if control_type in _BUILTIN_CONTROL_TYPES:
             raise ValueError(f"cannot override built-in CONTROL type {control_type!r}")
         if control_type in self._control_handlers:
@@ -295,11 +207,7 @@ class HostEngine:
         namespace: str,
         handler: ExtensionHandler,
     ) -> None:
-        """Register an APP extension handler for a namespace.
-
-        Each namespace may have at most one host-side handler; re-registration
-        raises :class:`ValueError`.
-        """
+        """Register the sole host-side APP handler for a namespace."""
         if namespace in self._app_extensions:
             raise ValueError(
                 f"APP extension for namespace {namespace!r} already registered"
@@ -315,19 +223,8 @@ class HostEngine:
         return self._control_handlers.pop(control_type, None) is not None
 
     def on_node_disconnect(self, callback: Callable[[str], None]) -> None:
-        """Register a sync callback fired when a client disconnects.
-
-        Used by stream demuxes and similar consumers to drain
-        per-producer state when a producer node goes away.  Callbacks
-        receive the departed ``client_id`` and run synchronously during
-        :meth:`_disconnect_client`; exceptions are logged and
-        swallowed.
-        """
+        """Register a synchronous, best-effort client-disconnect callback."""
         self._disconnect_callbacks.append(callback)
-
-    # ------------------------------------------------------------------
-    # Host-initiated APP messaging
-    # ------------------------------------------------------------------
 
     async def notify(
         self,
@@ -337,11 +234,7 @@ class HostEngine:
         type: str,
         body: Any = None,
     ) -> None:
-        """Send a fire-and-forget APP message to a connected client.
-
-        Does not await a response.  Raises ``KeyError`` if ``to_node``
-        is not a known connected client.
-        """
+        """Send an APP notification to a connected client."""
         if to_node not in self._clients:
             raise KeyError(f"unknown client {to_node!r}")
         env = build_app_envelope(
@@ -362,16 +255,7 @@ class HostEngine:
         body: Any = None,
         timeout: float = 30.0,
     ) -> Any:
-        """Send an APP request to a connected client and await its response.
-
-        Mirrors :meth:`ClientConnector.request` but originates from the
-        host.  Used by the controller-side proxies
-        (e.g. :class:`RemoteTerrariumService`) to drive worker nodes.
-
-        Raises :class:`RequestTimeoutError` if no response arrives within
-        ``timeout`` seconds.  Raises ``KeyError`` if ``to_node`` is not
-        a known connected client.
-        """
+        """Send a host-originated APP request and await its response."""
         if to_node not in self._clients:
             raise KeyError(f"unknown client {to_node!r}")
         request_id = new_request_id()
@@ -391,11 +275,7 @@ class HostEngine:
             await self._route_send(env)
             return await asyncio.wait_for(future, timeout=timeout)
         except asyncio.TimeoutError as exc:
-            # ``RequestAbortedError`` is a TimeoutError subclass — when
-            # ``_disconnect_client``/``stop`` ``set_exception``s the
-            # future with it, ``wait_for`` propagates it through this
-            # same except.  Re-raise typed errors as-is instead of
-            # wrapping them back into a plain RequestTimeoutError.
+            # Preserve aborted-request subtypes caught through TimeoutError.
             if isinstance(exc, RequestTimeoutError):
                 raise
             _log.warning(
@@ -413,10 +293,6 @@ class HostEngine:
         finally:
             self._pending_requests.pop(request_id, None)
             self._pending_request_targets.pop(request_id, None)
-
-    # ------------------------------------------------------------------
-    # Accept + handshake
-    # ------------------------------------------------------------------
 
     async def _accept_loop(self) -> None:
         assert self._server is not None
@@ -581,10 +457,6 @@ class HostEngine:
             pass
         await conn.close()
 
-    # ------------------------------------------------------------------
-    # Per-client loops
-    # ------------------------------------------------------------------
-
     async def _client_read_loop(self, client: ConnectedClient) -> None:
         try:
             while not client.is_disconnecting:
@@ -635,15 +507,11 @@ class HostEngine:
         if client.is_disconnecting:
             return
         client.is_disconnecting = True
-        # Synchronously evict from registries first so a rapid reconnect
-        # with the same client_id doesn't collide with this cleanup.
+        # Evict registries first so immediate reconnects can reuse the client ID.
         self._addressing.evict_node(client.client_id)
         self._membership.leave(client.client_id)
         self._clients.pop(client.client_id, None)
-        # Notify disconnect listeners (e.g. ``StreamDemux``) BEFORE
-        # failing pending requests so anything downstream sees the
-        # disconnect first.  Sync, best-effort: a buggy callback must
-        # not prevent the rest of the teardown.
+        # Notify consumers before failing requests; callback faults must not stop cleanup.
         for cb in list(self._disconnect_callbacks):
             try:
                 cb(client.client_id)
@@ -652,11 +520,7 @@ class HostEngine:
                     "disconnect callback raised for client %s",
                     client.client_id,
                 )
-        # Fail any host-initiated APP requests addressed to this client
-        # with a structured ``ConnectionError`` instead of leaving
-        # callers blocked until ``asyncio.wait_for`` times out (30s by
-        # default).  Iterates a snapshot of the targets dict because
-        # ``request()``'s finally clause will pop entries.
+        # Iterate a snapshot because each resumed request removes its own entries.
         aborted = 0
         for request_id, target in list(self._pending_request_targets.items()):
             if target != client.client_id:
@@ -677,7 +541,6 @@ class HostEngine:
             aborted_requests=aborted,
             remaining_clients=len(self._clients),
         )
-        # Now do the (asynchronous) connection teardown.
         if client.write_task is not None:
             client.write_task.cancel()
         try:
@@ -689,10 +552,6 @@ class HostEngine:
                 await client.write_task
             except (asyncio.CancelledError, Exception):
                 pass
-
-    # ------------------------------------------------------------------
-    # Routing
-    # ------------------------------------------------------------------
 
     async def _route_envelope(
         self,
@@ -709,9 +568,7 @@ class HostEngine:
                     env.kind.value,
                 )
             case EnvelopeKind.CONTROL:
-                # Host-bound CONTROL is dispatched; everything else is
-                # routed like SEND so apps can use CONTROL as a routable
-                # discriminator if they prefer it over APP.
+                # Non-host CONTROL envelopes remain routable like SEND envelopes.
                 if env.to_node == HOST_NODE_ID:
                     await self._handle_control(sender, env)
                 else:
@@ -731,8 +588,7 @@ class HostEngine:
             case EnvelopeKind.SEND | EnvelopeKind.ACK:
                 await self._route_send_forwarded(env)
             case _:
-                # LOG verb is not implemented in 1.5; unknown kinds
-                # arriving from a peer running a newer protocol fall here.
+                # Newer peers may send envelope kinds this host does not support.
                 _log.warning(
                     "client %s sent envelope of unsupported kind %s",
                     sender.client_id,
@@ -740,26 +596,14 @@ class HostEngine:
                 )
 
     async def _route_send_forwarded(self, env: Envelope) -> None:
-        """Route an envelope arriving from a remote sender.
-
-        Identical to :meth:`_route_send` except backpressure on the
-        target client is logged and swallowed: the remote sender isn't
-        awaiting a synchronous result on this hop, and propagating the
-        exception up would tear down the *sender*'s read loop because
-        of a slow *third party*.  Host-initiated callers
-        (:meth:`notify` / :meth:`request`) still see the exception via
-        :meth:`_route_send`.
-        """
+        """Route a forwarded envelope without disconnecting its sender on backpressure."""
         try:
             await self._route_send(env)
         except BackpressureError:
-            # Already logged at ERROR by ``_enqueue``.
             pass
 
     async def _route_send(self, env: Envelope) -> None:
-        # to_node may be a creature ref, a channel name (load-balanced),
-        # or a direct NodeId. Resolution order: creature ref → channel
-        # listener → direct.
+        # Resolve creature refs first, then load-balanced channels, then direct IDs.
         target_node: str | None = self._addressing.resolve_creature(env.to_node)
         if target_node is None and env.to_node.startswith("channel://"):
             channel = env.to_node[len("channel://") :]
@@ -767,7 +611,7 @@ class HostEngine:
         if target_node is None:
             target_node = env.to_node
         if target_node == HOST_NODE_ID:
-            # Host-bound send is dropped in 1.5; host has no local creatures.
+            # The host does not own a local SEND endpoint.
             return
         client = self._clients.get(target_node)
         if client is None:
@@ -783,10 +627,7 @@ class HostEngine:
         channel = env.to_node
         if channel.startswith("topic://"):
             channel = channel[len("topic://") :]
-        # A single slow listener must not block the rest of the
-        # broadcast.  Swallow per-listener backpressure here — the
-        # buffer's ``overflow_count`` and an ERROR log surface the
-        # drop, and broadcast is fire-and-forget by design.
+        # Broadcast is fire-and-forget, so one full outbox cannot block other listeners.
         for node_id in self._addressing.listeners(channel):
             client = self._clients.get(node_id)
             if client is None:
@@ -794,7 +635,6 @@ class HostEngine:
             try:
                 await self._enqueue(client, env)
             except BackpressureError:
-                # Logged inside ``_enqueue``; keep fanning out.
                 pass
 
     async def _handle_control(
@@ -859,8 +699,7 @@ class HostEngine:
                 exc,
             )
             return
-        # If this is a response to a host-initiated request, route to the
-        # pending future instead of dispatching to the namespace handler.
+        # Responses complete pending host requests rather than invoking extensions.
         if msg.in_reply_to is not None:
             future = self._pending_requests.pop(msg.in_reply_to, None)
             self._pending_request_targets.pop(msg.in_reply_to, None)
@@ -894,12 +733,7 @@ class HostEngine:
                 msg.namespace,
             )
             return
-        # Spawn the handler so the read loop keeps draining inbound
-        # frames.  Nested requests (handler issuing its own ``request``
-        # and awaiting the response) deadlock if the read loop is held
-        # by ``await handler(msg)`` — the response envelope can't reach
-        # the pending-future table.  See the matching fix in
-        # ``client.py:_handle_app``.
+        # Run handlers separately so nested requests can receive responses on this read loop.
         asyncio.create_task(
             self._run_handler_and_reply(msg, handler),
             name=f"app_handler_{msg.namespace}_{msg.type}",
@@ -910,13 +744,7 @@ class HostEngine:
         msg: Any,
         handler: Any,
     ) -> None:
-        """Run a namespace handler and route the response back.
-
-        Spawned as a task by :meth:`_handle_app` so the read loop
-        isn't held while the handler awaits.  Errors are logged and
-        swallowed (the original sender's request will time out, which
-        is the correct surface for an extension failure).
-        """
+        """Run an APP extension and return its response when requested."""
         try:
             result = await handler(msg)
         except Exception:
@@ -943,21 +771,11 @@ class HostEngine:
             msg_type=msg.type,
             in_reply_to=msg.request_id,
         )
-        # Response delivery uses the forwarded variant so a slow
-        # original-sender can't crash this background handler task.
+        # A full sender outbox must not fail the background handler task.
         await self._route_send_forwarded(response)
 
     async def _enqueue(self, client: ConnectedClient, env: Envelope) -> None:
-        """Try to enqueue ``env`` for delivery to ``client``.
-
-        Uses ``wait=False`` so a slow client doesn't stall routing for
-        others.  When the per-client outbox is full, raises
-        :class:`BackpressureError` so the caller can surface the drop
-        instead of silently losing the envelope.  Callers that prefer
-        fire-and-forget semantics should wrap in ``try/except``.
-
-        Overflow is also counted on the buffer for monitoring.
-        """
+        """Enqueue without waiting, raising when the client outbox is full."""
         try:
             await client.send_buffer.put(env, wait=False)
         except BackpressureError:
@@ -967,10 +785,6 @@ class HostEngine:
                 client.send_buffer.overflow_count,
             )
             raise
-
-    # ------------------------------------------------------------------
-    # Heartbeat reaper
-    # ------------------------------------------------------------------
 
     async def _reaper_loop(self) -> None:
         try:

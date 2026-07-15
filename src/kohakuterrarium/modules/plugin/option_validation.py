@@ -1,24 +1,6 @@
 """Validation helpers for plugin option overrides.
 
-Schema shape mirrors :mod:`kohakuterrarium.core.native_tool_validation` so
-the two systems use identical option-spec dicts. Plugin authors return
-the schema from :meth:`BasePlugin.option_schema` and the validator
-coerces user-supplied values against it.
-
-Schema entry::
-
-    {
-        "type": "string" | "int" | "float" | "bool" | "enum" | "list" | "dict",
-        "default": ...,
-        "doc": "Short description",
-        # type-specific:
-        "values":     [...],         # enum
-        "min":        ...,           # int / float
-        "max":        ...,           # int / float
-        "max_length": ...,           # string
-        "item_type":  "string"|...,  # list — element type (no defaults)
-        "max_items":  ...,           # list
-    }
+Plugin and native-tool options intentionally share the same schema conventions.
 """
 
 from typing import Any
@@ -36,12 +18,7 @@ def validate_plugin_options(
     values: dict[str, Any],
     schema: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Validate and coerce plugin option overrides.
-
-    Rejects unknown keys and wrong types. Returns a cleaned dict with
-    coerced values. Empty schema means the plugin has no declared
-    options — any non-empty ``values`` raises.
-    """
+    """Return coerced declared options, rejecting unknown keys and invalid values."""
     if not isinstance(values, dict):
         raise PluginOptionError("values must be an object")
     if not values:

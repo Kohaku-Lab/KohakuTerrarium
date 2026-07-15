@@ -1,8 +1,7 @@
-"""Studio skills routes — discover + runtime toggle (Qa).
+"""Discover procedural skills and persist their enabled state.
 
-Skill discovery walks the filesystem (cwd ↑ to git root, ``~/.kohaku``,
-plus every installed package's ``skills/`` dir). Off-loaded to a
-worker thread so a slow filesystem scan can't stall the runtime API.
+Discovery spans workspace, user, and installed-package locations, so filesystem
+work runs outside the event loop.
 """
 
 import asyncio
@@ -32,7 +31,7 @@ def _discover_with_state(cwd: Path) -> list[dict]:
 async def list_skills(
     ws: Workspace | None = Depends(get_workspace_optional),
 ) -> list[dict]:
-    """List every procedural skill discoverable from the workspace cwd."""
+    """List skills discoverable from the workspace context with persisted state."""
     cwd = Path(ws.root) if ws is not None else Path.cwd()
     try:
         return await asyncio.to_thread(_discover_with_state, cwd)
@@ -59,7 +58,7 @@ async def toggle_skill(
     name: str,
     ws: Workspace | None = Depends(get_workspace_optional),
 ) -> dict:
-    """Flip the persisted enabled state for ``name``."""
+    """Flip and persist the enabled state of a discoverable skill."""
     cwd = Path(ws.root) if ws is not None else Path.cwd()
     try:
         return await asyncio.to_thread(_toggle_skill_sync, cwd, name)

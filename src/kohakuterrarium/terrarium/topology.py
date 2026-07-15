@@ -1,26 +1,10 @@
 """Pure-data topology model for the Terrarium runtime engine.
 
-Holds the structural state of all running creatures: which graph each
-creature belongs to, which channels exist, who listens to / sends on
-which channel. No live ``Agent`` references live in this layer — the
-runtime engine layers those on top.
+Model engine topology as connected creature-and-channel graphs.
 
-The model is testable without asyncio, without an LLM, without a
-session store. ``tests/unit/terrarium/test_topology.py`` exercises every
-function here with string IDs only.
-
-## Concepts
-
-- A **graph** is a connected component of creatures + channels.
-- Two creatures are in the same graph iff there is a path between them
-  through channels they share.
-- ``connect(a, b, channel=...)`` may merge two graphs.
-- ``disconnect(a, b, channel=...)`` may split one graph.
-- All other topology changes (rewire within a graph) preserve graph
-  membership.
-
-These rules drive the session merge/split policy in
-``terrarium.session_coord``.
+This layer stores opaque IDs rather than live agents, keeping topology independent
+of the runtime. Connections can merge graphs, while disconnections and removals
+can split them; the resulting deltas drive session-store coordination.
 """
 
 from collections import deque

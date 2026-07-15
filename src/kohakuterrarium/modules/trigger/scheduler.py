@@ -1,8 +1,4 @@
-"""
-Scheduler trigger: fires at specific clock times.
-
-Supports cron-like scheduling: specific times, daily, hourly, etc.
-"""
+"""Fire clock-aligned recurring events at minute, hourly, or daily intervals."""
 
 import asyncio
 from datetime import datetime, timedelta
@@ -16,19 +12,7 @@ logger = get_logger(__name__)
 
 
 class SchedulerTrigger(BaseTrigger):
-    """Trigger that fires at specific clock times.
-
-    Modes:
-    - every_minutes: fire every N minutes (aligned to clock)
-    - daily_at: fire once per day at HH:MM
-    - hourly_at: fire once per hour at :MM
-
-    Usage:
-        trigger = SchedulerTrigger(
-            every_minutes=30,
-            prompt="Half-hour check",
-        )
-    """
+    """Fire according to one clock-aligned minute, hourly, or daily schedule."""
 
     resumable = True
     universal = True
@@ -75,13 +59,7 @@ class SchedulerTrigger(BaseTrigger):
         prompt: str | None = None,
         **options: Any,
     ):
-        """
-        Args:
-            every_minutes: Fire every N minutes (1-1440)
-            daily_at: Fire daily at "HH:MM" (24h format)
-            hourly_at: Fire every hour at minute :MM (0-59)
-            prompt: Prompt to include in event
-        """
+        """Initialize one schedule mode and its emitted prompt."""
         super().__init__(prompt=prompt, **options)
         self.every_minutes = every_minutes
         self.daily_at = daily_at
@@ -124,13 +102,13 @@ class SchedulerTrigger(BaseTrigger):
 
         wait_seconds = self._seconds_until_next()
         if wait_seconds <= 0:
-            wait_seconds = 1  # avoid busy loop
+            wait_seconds = 1
 
         try:
             await asyncio.wait_for(self._stop_event.wait(), timeout=wait_seconds)
-            return None  # stopped
+            return None
         except asyncio.TimeoutError:
-            pass  # time to fire
+            pass
 
         if not self._running:
             return None
@@ -152,11 +130,10 @@ class SchedulerTrigger(BaseTrigger):
         now = datetime.now()
 
         if self.every_minutes:
-            # Align to clock: next multiple of N minutes from midnight
+            # Minute intervals align to midnight rather than trigger start time.
             minutes_today = now.hour * 60 + now.minute
             next_slot = ((minutes_today // self.every_minutes) + 1) * self.every_minutes
             if next_slot >= 1440:
-                # Past midnight — wrap to next day
                 target = (now + timedelta(days=1)).replace(
                     hour=0, minute=0, second=0, microsecond=0
                 )
@@ -185,4 +162,4 @@ class SchedulerTrigger(BaseTrigger):
                 target += timedelta(hours=1)
             return (target - now).total_seconds()
 
-        return 60  # fallback
+        return 60

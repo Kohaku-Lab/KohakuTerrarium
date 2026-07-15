@@ -1,20 +1,11 @@
 """
-Message types for LLM conversations.
-
-Provides typed message structures compatible with OpenAI API format.
-Supports both text-only and multimodal (text + images) content.
+Define typed text, file, image, and conversation message structures.
 """
 
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-# Role type for type safety
 Role = Literal["system", "user", "assistant", "tool"]
-
-
-# =============================================================================
-# Multimodal Content Parts
-# =============================================================================
 
 
 @dataclass
@@ -59,24 +50,14 @@ class FilePart:
 
 @dataclass
 class ImagePart:
-    """
-    Image content part for multimodal messages.
-
-    Supports both URL and base64 data URLs.
-
-    Attributes:
-        url: Image URL (https://... or data:image/png;base64,...)
-        detail: Image detail level for vision models
-        source_type: Description of image source (attachment, emoji, sticker, etc.)
-        source_name: Name/identifier of the source
-    """
+    """Image content with optional source metadata for display."""
 
     url: str
     detail: Literal["auto", "low", "high"] = "low"
     source_type: str | None = (
-        None  # e.g., "attachment", "emoji", "sticker", "gif_frame"
+        None  # Identifies the display source, such as an attachment, emoji, or frame.
     )
-    source_name: str | None = None  # e.g., filename, emoji name
+    source_name: str | None = None  # Filename or source identifier shown to users.
     type: Literal["image_url"] = "image_url"
 
     def to_dict(self) -> dict[str, Any]:
@@ -104,7 +85,6 @@ class ImagePart:
         return "[image]"
 
 
-# Union type for content parts
 ContentPart = TextPart | ImagePart | FilePart
 RawContentPart = dict[str, Any]
 
@@ -156,24 +136,11 @@ def normalize_content_parts(
 
 
 def content_parts_to_dicts(parts: list[ContentPart]) -> list[dict[str, Any]]:
-    """Convert content parts to OpenAI API format.
-
-    Handles both ContentPart objects and raw dicts (from resumed sessions
-    where multimodal content was stored as serialized dicts).
-    """
+    """Serialize typed or resumed raw content parts to wire dictionaries."""
     return [part if isinstance(part, dict) else part.to_dict() for part in parts]
 
 
-# =============================================================================
-# Message Classes
-# =============================================================================
-
-
-# Keys that the standard OpenAI-compatible wire format already recognises.
-# Anything else on a message dict (``reasoning_content``, ``reasoning_details``,
-# ``reasoning``, audio fields, future provider-specific extras) is captured
-# into ``Message.extra_fields`` so it survives serialization and round-trips
-# back on the next outgoing turn.
+# Non-standard fields are preserved separately so provider state survives round-trips.
 _STANDARD_MESSAGE_KEYS = frozenset(
     {"role", "content", "name", "tool_call_id", "tool_calls"}
 )
@@ -181,24 +148,7 @@ _STANDARD_MESSAGE_KEYS = frozenset(
 
 @dataclass
 class Message:
-    """
-    A single message in a conversation.
-
-    Compatible with OpenAI API message format.
-    Supports both text-only and multimodal content.
-
-    Attributes:
-        role: Message role (system, user, assistant, tool)
-        content: Message content - either str or list of ContentPart for multimodal
-        name: Optional name for the message sender
-        tool_call_id: For tool messages, the ID of the tool call this responds to
-        tool_calls: Native tool call records (assistant role)
-        metadata: Optional metadata (NOT sent to API, for internal use)
-        extra_fields: Non-standard top-level fields captured from the provider
-            (e.g. ``reasoning_content``, ``reasoning_details``). Spread back
-            into the outgoing wire format so stateful-chain reasoning models
-            see their own prior state on the next turn.
-    """
+    """Conversation message with multimodal content and provider-owned extra fields."""
 
     role: Role
     content: str | list[ContentPart]
@@ -212,7 +162,6 @@ class Message:
         """Convert to OpenAI API format dict."""
         result: dict[str, Any] = {"role": self.role}
 
-        # Handle both string and multimodal content
         if isinstance(self.content, str):
             result["content"] = self.content
         elif self.content is None:
@@ -227,8 +176,7 @@ class Message:
         if self.tool_calls:
             result["tool_calls"] = self.tool_calls
 
-        # Echo non-standard fields (reasoning_content, reasoning_details, …)
-        # last so they never clobber the canonical keys above.
+        # Extras are applied last but cannot overwrite canonical message fields.
         for k, v in (self.extra_fields or {}).items():
             if k in _STANDARD_MESSAGE_KEYS:
                 continue
@@ -237,21 +185,14 @@ class Message:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "Message":
-        """Create Message from dict (e.g., API response).
-
-        Any keys outside the standard OpenAI message shape land in
-        ``extra_fields`` so provider-specific additions (reasoning
-        content, reasoning details, etc.) survive round-trips.
-        """
+        """Deserialize a wire message while retaining provider-specific fields."""
         content = data.get("content", "")
 
-        # Handle multimodal content from API
         if isinstance(content, list):
             content = normalize_content_parts(content) or []
 
         extras = {k: v for k, v in data.items() if k not in _STANDARD_MESSAGE_KEYS}
-        # Drop internal-only keys that callers (e.g. persistence layer)
-        # pass through dict shape — those don't belong on the wire.
+        # Persistence metadata is internal and must never return to providers.
         extras.pop("metadata", None)
 
         return cls(
@@ -264,17 +205,10 @@ class Message:
         )
 
     def get_text_content(self) -> str:
-        """
-        Extract text content from message.
-
-        For multimodal messages, concatenates all text parts.
-        Useful for logging, display, and context length calculation.
-        """
+        """Extract text, joining text parts from multimodal content."""
         if isinstance(self.content, str):
             return self.content
-        # ``content`` can also be ``None`` — a valid wire shape that
-        # ``to_dict`` itself emits for a native-tool-call assistant turn.
-        # Only a list is iterable as content parts.
+        # Native tool-call assistant messages may legally carry ``None`` content.
         if not isinstance(self.content, list):
             return ""
         return "\n".join(
@@ -310,11 +244,7 @@ class SystemMessage(Message):
 
 @dataclass
 class UserMessage(Message):
-    """
-    User message in the conversation.
-
-    Supports multimodal content (text + images).
-    """
+    """User message supporting text and multimodal content."""
 
     role: Role = field(default="user", init=False)
 
@@ -339,11 +269,7 @@ class AssistantMessage(Message):
 
 @dataclass
 class ToolMessage(Message):
-    """
-    Tool result message in the conversation.
-
-    Supports multimodal content for tools that return images.
-    """
+    """Tool result message supporting multimodal outputs."""
 
     role: Role = field(default="tool", init=False)
 
@@ -363,10 +289,8 @@ class ToolMessage(Message):
         )
 
 
-# Type alias for a list of messages
 MessageList = list[Message]
 
-# Type alias for content (text or multimodal)
 MessageContent = str | list[ContentPart]
 
 
@@ -388,32 +312,16 @@ def create_message(
     content: str | list[ContentPart],
     **kwargs: Any,
 ) -> Message:
-    """
-    Factory function to create the appropriate Message subclass.
-
-    Args:
-        role: Message role (system, user, assistant, tool)
-        content: Text string or list of ContentPart for multimodal
-        **kwargs: Additional message attributes
-
-    Returns:
-        Appropriate Message subclass instance
-    """
+    """Create the role-specific message type while preserving structured content."""
     match role:
         case "system":
-            # System messages are always text-only
             if isinstance(content, list):
                 content = "\n".join(p.text for p in content if isinstance(p, TextPart))
             return SystemMessage(content, **kwargs)
         case "user":
             return UserMessage(content, **kwargs)
         case "assistant":
-            # Assistant messages are usually text, but providers that
-            # emit structured content (e.g. Codex image_generation)
-            # deliver ImagePart entries in a list — preserve those so
-            # the image survives serialization / resume. Lists that
-            # contain only text parts still get flattened for cheaper
-            # downstream handling.
+            # Keep non-text parts structured so generated media survives persistence.
             if isinstance(content, list):
                 if any(not isinstance(p, TextPart) for p in content):
                     return AssistantMessage(content, **kwargs)
@@ -432,17 +340,7 @@ def make_multimodal_content(
     images: list[ImagePart] | None = None,
     prepend_images: bool = False,
 ) -> str | list[ContentPart]:
-    """
-    Create message content, using multimodal format only if images are present.
-
-    Args:
-        text: Text content
-        images: Optional list of ImagePart objects
-        prepend_images: If True, images come before text; otherwise after
-
-    Returns:
-        str if no images, list[ContentPart] if images present
-    """
+    """Return plain text unless images require multimodal content."""
     if not images:
         return text
 

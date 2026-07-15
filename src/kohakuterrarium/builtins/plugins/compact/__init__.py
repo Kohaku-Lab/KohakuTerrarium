@@ -1,1 +1,1 @@
-"""Compact plugins."""
+"""Built-in context-compaction plugins."""

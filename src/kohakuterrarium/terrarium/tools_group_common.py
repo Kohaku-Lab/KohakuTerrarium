@@ -1,9 +1,7 @@
 """Shared helpers for the group_* tool modules.
 
-Splitting the group tools across modules keeps each file under the
-project's 600-line per-file budget. This module owns the helpers
-every group tool wants: caller resolution, JSON-shaped result
-formatters, and channel-history serialization.
+Shared helpers provide caller resolution, JSON-shaped results, and channel-history
+serialization for the group tools.
 """
 
 import json

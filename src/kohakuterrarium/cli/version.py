@@ -55,6 +55,7 @@ def get_package_version() -> str:
 
 
 def _repo_root() -> Path:
+    """Return the expected source repository root."""
     return Path(__file__).resolve().parents[3]
 
 
@@ -123,6 +124,7 @@ def get_git_info() -> dict[str, str | bool]:
 
 
 def format_version_report(verbose: bool = False) -> str:
+    """Format package, runtime, and optional environment identity details."""
     package_path = Path(__file__).resolve().parents[1]
     git = get_git_info()
     lines = [

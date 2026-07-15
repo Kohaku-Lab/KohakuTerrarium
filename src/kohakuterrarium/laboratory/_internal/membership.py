@@ -11,9 +11,8 @@ Heartbeat-based liveness:
 - :meth:`Membership.leave` removes a node cleanly (e.g. on graceful
   disconnect) and emits a :attr:`MembershipEvent.LEFT` event.
 
-All time is supplied by callers (``now`` parameter, monotonic seconds).
-This keeps the module synchronous and trivially testable; the host
-engine drives the ticking.
+Callers supply monotonic timestamps so membership remains independent of
+the host's clock and scheduling policy.
 """
 
 import asyncio
@@ -57,10 +56,6 @@ class Membership:
         self._nodes: dict[str, NodeInfo] = {}
         self._subscribers: list[asyncio.Queue[tuple[MembershipEvent, str] | None]] = []
         self.heartbeat_timeout_seconds = heartbeat_timeout_seconds
-
-    # ------------------------------------------------------------------
-    # Mutating operations
-    # ------------------------------------------------------------------
 
     def join(self, node_id: str, capabilities, now: float) -> bool:
         """Register a node as joined or refresh its capabilities.
@@ -115,7 +110,7 @@ class Membership:
         """
         timeout = self.heartbeat_timeout_seconds
         lost: list[str] = []
-        # Materialize the list first since we're going to mutate the dict.
+        # Snapshot entries because stale nodes are deleted during iteration.
         for node_id, info in list(self._nodes.items()):
             if now - info.last_heartbeat > timeout:
                 del self._nodes[node_id]
@@ -123,12 +118,8 @@ class Membership:
                 lost.append(node_id)
         return lost
 
-    # ------------------------------------------------------------------
-    # Read operations
-    # ------------------------------------------------------------------
-
     def alive(self) -> set[str]:
-        """Set of currently-known node ids."""
+        """Return the currently known node identifiers."""
         return set(self._nodes.keys())
 
     def capabilities(self, node_id: str) -> tuple[str, ...] | None:
@@ -141,12 +132,8 @@ class Membership:
         return self._nodes.get(node_id)
 
     def snapshot(self) -> dict[str, NodeInfo]:
-        """Copy of the full node table (shallow)."""
+        """Return a shallow snapshot of the node table."""
         return dict(self._nodes)
-
-    # ------------------------------------------------------------------
-    # Event subscription
-    # ------------------------------------------------------------------
 
     def subscribe(self) -> AsyncIterator[tuple[MembershipEvent, str]]:
         """Async iterator yielding membership events as they happen.
@@ -175,10 +162,6 @@ class Membership:
         """Signal all current subscribers to stop iterating."""
         for queue in list(self._subscribers):
             queue.put_nowait(None)
-
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
 
     def _emit(self, event: MembershipEvent, node_id: str) -> None:
         for queue in list(self._subscribers):

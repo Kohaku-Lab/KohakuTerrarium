@@ -1,10 +1,8 @@
-"""Session-cookie CRUD.
+"""Create, validate, refresh, and delete browser sessions.
 
-Session ID = ``secrets.token_urlsafe(32)`` (256 bits).  Stored
-verbatim in the cookie + DB.  Unlike API tokens, session IDs are NOT
-hashed — they're short-lived (default 168h), high-entropy, and rotated
-on every login.  Hashing would prevent us from rotating ``last_seen``
-without recomputing the hash on every request.
+Session identifiers are short-lived, high-entropy values rotated at login and stored
+verbatim so request-time ``last_seen`` updates can address rows directly. Validation
+requires an active user, future absolute expiry, and optional idle-window freshness.
 """
 
 import sqlite3
@@ -52,14 +50,7 @@ def get_session_user(
     *,
     idle_minutes: int = 0,
 ) -> User | None:
-    """Return the :class:`User` for an active session, else ``None``.
-
-    Considered active when (a) the row exists, (b) ``expires_at`` is
-    in the future, (c) the user is still active, and (d) — when
-    ``idle_minutes > 0`` — ``last_seen`` is within that window.
-    Expired / disabled / idled-out sessions are ignored; the caller
-    treats all of them as "needs re-login."
-    """
+    """Return the user only when the session and account remain active."""
     if not session_id:
         return None
     row = conn.execute(
@@ -77,21 +68,11 @@ def get_session_user(
         return None
     if not row["is_active"]:
         return None
-    # ISO-8601 string compare is lexically correct for UTC timestamps.
+    # Uniform UTC ISO-8601 timestamps preserve chronological order lexically.
     if row["expires_at"] <= _iso_now():
         return None
-    # Idle-expiry: ``last_seen`` is bumped on every authenticated
-    # request via :func:`touch_last_seen`.  An idle window of zero
-    # disables the check (default — matches the legacy "only
-    # absolute expiry matters" behaviour).
-    #
-    # Invariant: ``create_session`` always seeds ``last_seen`` to
-    # ``created_at``, so ``NULL`` here means a session row was
-    # manually inserted (test fixtures, future migration leaving
-    # the column blank).  In that case we treat the session as
-    # active — locking everyone out on a fresh DB column would be
-    # the wrong default.  Test ``test_null_last_seen_treated_as_active``
-    # pins this so a refactor doesn't silently flip the semantic.
+    # Zero disables idle expiry. New sessions seed ``last_seen``; a null value from
+    # older or manually inserted rows remains active to preserve migration compatibility.
     if idle_minutes > 0:
         last_seen = row["last_seen"]
         if last_seen is not None and last_seen < _iso_minutes_ago(idle_minutes):
@@ -100,7 +81,7 @@ def get_session_user(
 
 
 def touch_last_seen(conn: sqlite3.Connection, session_id: str) -> None:
-    """Bump ``last_seen``.  Best-effort; failures swallowed."""
+    """Refresh observational activity metadata without failing authentication."""
     if not session_id:
         return
     try:
@@ -110,7 +91,7 @@ def touch_last_seen(conn: sqlite3.Connection, session_id: str) -> None:
         )
         conn.commit()
     except sqlite3.Error:
-        # last_seen is observational; don't 500 a real request on it.
+        # Activity telemetry must not turn an otherwise valid request into an error.
         pass
 
 
@@ -123,7 +104,7 @@ def delete_session(conn: sqlite3.Connection, session_id: str) -> bool:
 
 
 def delete_user_sessions(conn: sqlite3.Connection, user_id: int) -> int:
-    """Nuclear logout — drop every session for the user."""
+    """Invalidate every browser session owned by the user."""
     cur = conn.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
     conn.commit()
     return cur.rowcount

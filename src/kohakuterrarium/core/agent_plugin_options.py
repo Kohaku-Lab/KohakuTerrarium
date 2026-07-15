@@ -1,17 +1,6 @@
 """Per-agent runtime overrides for plugin options.
 
-Composition helper attached to :class:`~kohakuterrarium.core.agent.Agent`
-as ``agent.plugin_options``. Mirrors :class:`NativeToolOptions` in shape:
-
-* The override map ``{plugin_name: {option_key: value}}`` lives on this
-  helper.
-* :meth:`set` validates against the plugin's :meth:`option_schema`,
-  applies via the plugin's :meth:`set_options` (which calls
-  :meth:`refresh_options`), and persists.
-* The map is persisted to private session state when a SessionStore is
-  attached, and to ``session.extra`` for ephemeral runs.
-* :meth:`apply` is called from session resume to rehydrate stored
-  values into the live plugin instances.
+Validate, apply, and persist session-scoped plugin option overrides.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -33,8 +22,6 @@ class PluginOptions:
         self._agent = agent
         self._values: dict[str, dict[str, Any]] = {}
 
-    # ── Read ────────────────────────────────────────────────────
-
     def get(self, plugin_name: str) -> dict[str, Any]:
         """Return the current overrides for ``plugin_name`` (copy)."""
         return dict(self._values.get(plugin_name, {}))
@@ -42,8 +29,6 @@ class PluginOptions:
     def list(self) -> dict[str, dict[str, Any]]:
         """Return a deep copy of every overridden plugin's options."""
         return {name: dict(opts) for name, opts in self._values.items()}
-
-    # ── Mutate ──────────────────────────────────────────────────
 
     def set(self, plugin_name: str, values: dict[str, Any]) -> dict[str, Any]:
         """Apply option overrides to a plugin instance + persist.
@@ -65,12 +50,10 @@ class PluginOptions:
         return applied
 
     def apply(self) -> None:
-        """Pull stored overrides → live plugin instances.
+        """Apply stored overrides to live plugins.
 
-        Called from ``session/resume.py`` after the plugin manager has
-        loaded all plugins. Fresh agents with no stored state are a
-        no-op. Invalid stored entries are logged and skipped — they
-        don't block other plugins from rehydrating.
+        Invalid entries are logged and skipped so other plugins can still be
+        rehydrated.
         """
         data = self._load_private_state()
         if not isinstance(data, dict):

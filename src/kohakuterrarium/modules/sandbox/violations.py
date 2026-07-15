@@ -29,7 +29,7 @@ class ProfileViolation(Exception):
         return self.message
 
     def to_dict(self) -> dict[str, Any]:
-        """Serialize to a stable metadata payload."""
+        """Serialize the violation to a stable metadata payload."""
         return {
             "type": "profile_violation",
             "axis": self.axis,

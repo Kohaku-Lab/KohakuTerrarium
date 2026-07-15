@@ -1,7 +1,7 @@
 """``kt config drive`` — operator CLI over the Studio Drive settings façade.
 
-Thin terminal wrapper around :mod:`kohakuterrarium.studio.identity.drive_settings`
-(design §8.4, §12.2): ``show`` / ``set`` / ``registrations`` manage the canonical
+Thin terminal wrapper around :mod:`kohakuterrarium.studio.identity.drive_settings`:
+``show`` / ``set`` / ``registrations`` manage the canonical
 ``drive-settings.yaml``; ``apply`` validates that the saved settings resolve. A
 raw save is deliberately distinct from live apply — the CLI has no running engine
 to swap, so ``apply`` reports validity + ``restart_required`` rather than claiming
@@ -94,8 +94,8 @@ def apply_cli() -> int:
     """Validate that the saved settings resolve; report live-apply expectation.
 
     The CLI owns no running engine, so a successful resolve is reported as
-    ``restart_required`` for any running server (design §8.6): the file is valid
-    and will take effect on the next engine start.
+    ``restart_required`` for any running server; the file takes effect on the
+    next engine start.
     """
     try:
         spec = ds.resolve_runtime()
@@ -115,6 +115,7 @@ def apply_cli() -> int:
 
 
 def _apply_set(data: dict[str, Any], field: str, value: str) -> None:
+    """Apply one CLI field assignment to the settings mapping."""
     if field.startswith("registration:"):
         name = field.split(":", 1)[1]
         if not name:
@@ -132,6 +133,7 @@ def _apply_set(data: dict[str, Any], field: str, value: str) -> None:
 
 
 def _coerce_bool(value: str) -> bool:
+    """Parse accepted CLI boolean spellings."""
     lowered = value.strip().lower()
     if lowered in ("true", "on", "1", "yes"):
         return True
@@ -141,6 +143,7 @@ def _coerce_bool(value: str) -> bool:
 
 
 def _coerce_scalar(value: str) -> Any:
+    """Coerce a CLI value to a boolean or integer when possible."""
     lowered = value.strip().lower()
     if lowered in ("true", "false"):
         return lowered == "true"
@@ -151,6 +154,7 @@ def _coerce_scalar(value: str) -> Any:
 
 
 def _print_registrations(regs: list[dict[str, Any]]) -> None:
+    """Print registration status rows."""
     if not regs:
         return
     print("registrations:")

@@ -1,20 +1,9 @@
-"""B1 — multi-node cluster fold helpers for the session lifecycle.
+"""Fold multi-node cluster members into unified Studio sessions.
 
-After a cross-node ``connect()`` records a ``_cluster_links`` entry on
-the ``MultiNodeTerrariumService`` (see
-:mod:`kohakuterrarium.terrarium.multi_node_replication`), the studio
-sessions layer MUST collapse the two per-spawn ``_meta`` listings into
-ONE cluster listing addressed by the lex-smallest sid. The same fold
-must apply to ``get_session`` so a single Session handle exposes every
-creature across the cluster — that's how standalone mode looks after a
-``session_coord.apply_merge``, and the multi-node code path must
-preserve that "one graph = one session" UX invariant.
-
-The helpers here are pure transformations: they take a
-``TerrariumService`` (read its ``_cluster_links`` set) and the studio's
-``_meta`` registry, and produce folded listings / creature lists. They
-live in their own module so :mod:`lifecycle` stays under the 1000-line
-hard cap mandated by ``tests/unit/test_file_sizes.py``.
+Cross-node links represent one logical graph, so listings use the lexicographically
+smallest session ID and Session handles expose creatures from every member. The
+helpers transform service link state and caller-provided metadata without owning
+session lifecycle state.
 """
 
 from pathlib import Path
@@ -31,11 +20,8 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# ``cluster_groups`` moved to ``terrarium.multi_node_cluster`` so the
-# multi-node channel routing in the terrarium tier can consume it
-# without inverting the layer (terrarium → studio was the original
-# tier violation). Re-exported here so studio callers that historically
-# read it from this module keep working.
+# Re-export the terrarium-tier grouping helper for existing Studio callers without
+# reintroducing a terrarium-to-Studio dependency.
 
 
 def sid_to_primary(service: "TerrariumService") -> dict[str, str]:
@@ -80,9 +66,7 @@ def fold_session_listings(
     for primary, count in primary_counts.items():
         proto = primaries.get(primary)
         if proto is None:
-            # Primary's _meta isn't in the input list (worker offline /
-            # purged). Skip — without the primary's name + node we
-            # cannot render a meaningful entry.
+            # A missing primary leaves no authoritative name or home node to render.
             continue
         folded.append(
             SessionListing(
@@ -127,8 +111,7 @@ def fold_session_creatures(
         return None
     creatures: list[dict] = []
     seen: set[str] = set()
-    # CF-12: prefer the caller-supplied live roster — these entries
-    # reflect the workers' current view, not the host's _meta cache.
+    # Live worker data takes precedence over the host's eventually consistent cache.
     if live_creatures:
         for entry in live_creatures:
             cid = entry.get("creature_id") or entry.get("agent_id")
@@ -176,7 +159,7 @@ def fold_session_creatures(
 async def refresh_cluster_creatures_live(
     service: "TerrariumService", session_id: str
 ) -> list[dict] | None:
-    """CF-12: pull a live cluster roster via ``service.list_creatures()``.
+    """Pull a live cluster roster through ``service.list_creatures()``.
 
     Returns a list of per-creature dicts (in the shape that
     :func:`fold_session_creatures` accepts as ``live_creatures``) for
@@ -229,7 +212,7 @@ async def refresh_cluster_creatures_live(
 def persist_cluster_members_to_mirror(
     service: "TerrariumService", session_id: str, mirror_dir: Path
 ) -> None:
-    """CF-6 — persist cluster membership to the host-side mirror meta.
+    """Persist cluster membership into each host-side mirror store.
 
     ``service._cluster_links`` lives only on the live
     ``MultiNodeTerrariumService`` instance — host restart wipes it,
@@ -251,10 +234,8 @@ def persist_cluster_members_to_mirror(
     links = getattr(service, "_cluster_links", None)
     if not links:
         return
-    # Walk the link graph from ``session_id`` to collect every member.
-    # A 3-way cluster has the primary in two pairs; union-find by
-    # membership over the (node, gid) pair set gives the full set.
-    members: dict[str, str] = {}  # sid -> on_node
+    # Traverse linked session pairs to collect the full connected cluster.
+    members: dict[str, str] = {}  # Session ID mapped to its home node.
     queue: list[str] = [session_id]
     while queue:
         current = queue.pop()

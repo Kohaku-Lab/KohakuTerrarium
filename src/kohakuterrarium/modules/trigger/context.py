@@ -1,6 +1,4 @@
-"""
-Context update trigger - fires when context changes.
-"""
+"""Fire debounced events when externally supplied context changes."""
 
 import asyncio
 from typing import Any
@@ -13,27 +11,7 @@ logger = get_logger(__name__)
 
 
 class ContextUpdateTrigger(BaseTrigger):
-    """
-    Trigger that fires when context is updated.
-
-    Used by conversational agents to trigger output when:
-    - New ASR input arrives
-    - Memory is updated
-    - External state changes
-
-    Usage:
-        trigger = ContextUpdateTrigger(
-            prompt="New context available",
-            debounce_ms=100,
-        )
-        await trigger.start()
-
-        # In another coroutine:
-        trigger.set_context({"new_input": "hello"})
-
-        # Wait for trigger:
-        event = await trigger.wait_for_trigger()
-    """
+    """Fire after context changes settle for the configured debounce interval."""
 
     def __init__(
         self,
@@ -41,14 +19,7 @@ class ContextUpdateTrigger(BaseTrigger):
         debounce_ms: int = 100,
         **options: Any,
     ):
-        """
-        Initialize context update trigger.
-
-        Args:
-            prompt: Prompt to include in event
-            debounce_ms: Milliseconds to debounce rapid updates
-            **options: Additional options
-        """
+        """Initialize prompt, debounce duration, and lazy async state."""
         super().__init__(prompt=prompt, **options)
         self.debounce_ms = debounce_ms
         self._pending_event: asyncio.Event | None = None
@@ -74,13 +45,12 @@ class ContextUpdateTrigger(BaseTrigger):
         """Signal stop."""
         self._ensure_events()
         self._stop_event.set()
-        self._pending_event.set()  # Wake up any waiting
+        self._pending_event.set()
         logger.debug("Context update trigger stopped")
 
     def _on_context_update(self, context: dict[str, Any]) -> None:
-        """Called when context is updated."""
+        """Signal only context values that differ from the previous update."""
         self._ensure_events()
-        # Check if context actually changed
         if context != self._last_context:
             self._last_context = context.copy()
             self._pending_event.set()
@@ -92,13 +62,11 @@ class ContextUpdateTrigger(BaseTrigger):
             return None
 
         self._ensure_events()
-        # Wait for context update or stop
         await self._pending_event.wait()
 
         if not self._running:
             return None
 
-        # Debounce - wait a bit for more updates
         if self.debounce_ms > 0:
             await asyncio.sleep(self.debounce_ms / 1000)
 
@@ -114,12 +82,7 @@ class ContextUpdateTrigger(BaseTrigger):
         )
 
     def trigger_now(self, context: dict[str, Any] | None = None) -> None:
-        """
-        Manually trigger with optional context.
-
-        Args:
-            context: Optional context to set before triggering
-        """
+        """Signal the trigger immediately after optionally replacing context."""
         self._ensure_events()
         if context:
             self._context.update(context)

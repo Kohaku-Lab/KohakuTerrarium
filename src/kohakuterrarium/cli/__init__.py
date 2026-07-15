@@ -65,7 +65,6 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     subparsers = parser.add_subparsers(dest="command", help="Commands")
 
-    # Run command
     run_parser = subparsers.add_parser("run", help="Run an agent")
     run_parser.add_argument(
         "agent_path",
@@ -147,9 +146,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # cli / tui — subcommand aliases for the standalone ``kt-cli`` /
-    # ``kt-tui`` front doors. Optional creature argument; omit it to pick
-    # one from the startup picker.
+    # Keep aliases on the shared argument builder so standalone and ``kt``
+    # entry points expose the same options.
     cli_parser = subparsers.add_parser(
         "cli",
         help="Interactive rich CLI (optional creature; picker when omitted)",
@@ -161,10 +159,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     add_run_like_args(tui_parser)
 
-    # shims — expose kt / kt-cli / kt-tui on the terminal PATH.
     add_shims_subparser(subparsers)
 
-    # List command
     list_parser = subparsers.add_parser("list", help="List available agents")
     list_parser.add_argument(
         "--path",
@@ -172,14 +168,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Path to agents directory",
     )
 
-    # Info command
     info_parser = subparsers.add_parser("info", help="Show agent info")
     info_parser.add_argument(
         "agent_path",
         help="Path to agent config folder",
     )
 
-    # Resume command
     resume_parser = subparsers.add_parser(
         "resume", help="Resume a session (by name, path, or list recent)"
     )
@@ -225,17 +219,14 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # Doctor command
     add_doctor_subparser(subparsers)
 
-    # Login command
     login_parser = subparsers.add_parser("login", help="Authenticate with a provider")
     login_parser.add_argument(
         "provider",
         help="Provider or backend name to authenticate with",
     )
 
-    # Install command
     install_parser = subparsers.add_parser(
         "install", help="Install a creature/terrarium package"
     )
@@ -259,13 +250,11 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Skip installing the package's declared Python dependencies",
     )
 
-    # Uninstall command
     uninstall_parser = subparsers.add_parser(
         "uninstall", help="Remove an installed package"
     )
     uninstall_parser.add_argument("name", help="Package name to remove")
 
-    # Update command
     update_parser = subparsers.add_parser(
         "update", help="Update installed package repositories"
     )
@@ -281,7 +270,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Update all installed git-backed packages",
     )
 
-    # Edit command
     edit_parser = subparsers.add_parser(
         "edit", help="Open a creature/terrarium config in editor"
     )
@@ -290,7 +278,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="@package/creatures/name or @package/terrariums/name",
     )
 
-    # Embedding command
     embed_parser = subparsers.add_parser(
         "embedding", help="Build embeddings for a session (offline indexing)"
     )
@@ -308,7 +295,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--dimensions", type=int, default=None, help="Embedding dimensions (Matryoshka)"
     )
 
-    # Search command
     search_parser = subparsers.add_parser("search", help="Search a session's memory")
     search_parser.add_argument("session", help="Session name/prefix or path")
     search_parser.add_argument("query", help="Search query")
@@ -323,7 +309,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "-k", type=int, default=10, help="Max results (default: 10)"
     )
 
-    # Web server command
     web_parser = subparsers.add_parser(
         "web", help="Serve web UI + API (single process)"
     )
@@ -350,7 +335,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Logging level",
     )
 
-    # Desktop app command
     app_parser = subparsers.add_parser(
         "app", help="Launch native desktop UI (requires pywebview)"
     )
@@ -364,7 +348,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Logging level",
     )
 
-    # Model command
     model_parser = subparsers.add_parser("model", help="Manage LLM profiles")
     model_sub = model_parser.add_subparsers(dest="model_command")
     model_sub.add_parser("list", help="List all profiles and presets")
@@ -373,7 +356,6 @@ def _build_parser() -> argparse.ArgumentParser:
     model_show_parser = model_sub.add_parser("show", help="Show profile details")
     model_show_parser.add_argument("name", help="Model/profile name")
 
-    # Extension command group
     ext_parser = subparsers.add_parser(
         "extension", help="Manage package extension modules"
     )
@@ -384,10 +366,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     ext_info_parser.add_argument("name", help="Package name")
 
-    # Marketplace command group — discovery + source-list management
-    # for the TerrariumMarket-backed package registry.  ``kt install
-    # @<name>`` already routes through the same resolver, so this
-    # surface is mostly for browsing + curating sources.
+    # Marketplace browsing and installation share the same configured sources.
     mp_parser = subparsers.add_parser(
         "marketplace",
         help="Browse + manage TerrariumMarket sources (kt install @<name> uses these)",
@@ -427,7 +406,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help="@name, @name@version, or @source/name (the leading @ is optional)",
     )
 
-    # MCP command group
     mcp_parser = subparsers.add_parser("mcp", help="MCP server management")
     mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
     mcp_list_parser = mcp_sub.add_parser(
@@ -437,37 +415,23 @@ def _build_parser() -> argparse.ArgumentParser:
         "--agent", required=True, help="Path to agent config folder"
     )
 
-    # Drive record automation
     add_drive_subparser(subparsers)
 
-    # Config command group
     add_config_subparser(subparsers)
 
-    # Serve command group
     add_serve_subparser(subparsers)
 
-    # Lab worker command (foreground)
     add_lab_client_subparser(subparsers)
 
-    # ── 1.5 distribution-infra aliases ────────────────────────────
-    # `kt host`   == `kt serve start --mode lab-host --foreground …`
-    # `kt client` == `kt lab-client …`
-    # These match the deployment-doc nomenclature (host / client) so
-    # operator instructions, systemd unit names, and Docker image
-    # names all read the same as the commands you actually type.
+    # Deployment aliases keep operator commands aligned with service and image names.
     add_host_alias(subparsers)
     add_client_alias(subparsers)
 
-    # ``kt service`` — systemd unit install / uninstall / status / edit
     add_service_subparser(subparsers)
 
-    # ``kt admin`` — operator auth admin: tokens, users, invitations,
-    # shared-state → user-namespace migration.  Runs locally; does NOT
-    # require the server.  Frontend has parity via /api/auth/* routes
-    # (admin-only) once Phase H-K Vue components land.
+    # Administrative commands operate on local state without requiring a server.
     add_admin_subparser(subparsers)
 
-    # ``kt self-update`` — wrapper-aware framework update with pip fallback
     add_self_update_subparser(subparsers)
 
     internal_serve_parser = subparsers.add_parser(
@@ -588,7 +552,6 @@ def _dispatch_extension(args: argparse.Namespace) -> int:
     elif sub == "info":
         return extension_info_cli(args.name)
     else:
-        # Print help for extension subparser; re-parse to get the parser
         parser = _build_parser()
         parser.parse_args(["extension", "--help"])
         return 0
@@ -605,7 +568,6 @@ def _dispatch_mcp(args: argparse.Namespace) -> int:
         return 0
 
 
-# Command dispatch table: command name -> handler function
 COMMANDS: dict[str, callable] = {
     "run": _dispatch_run,
     "cli": _dispatch_cli_mode,

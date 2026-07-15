@@ -1,34 +1,11 @@
 """APP envelope helpers and the application extension dispatch model.
 
-The ``APP`` envelope kind carries structured, namespaced application
-messages with optional request/response correlation. It is the
-recommended channel for application-level protocols (Studio, metrics,
-user-defined APIs, …) layered above the L4 verbs.
+Build and parse namespaced application messages carried by ``APP`` envelopes.
 
-Wire shape — the ``Envelope.payload`` of an ``APP`` envelope is a
-msgpack-encoded dict:
-
-::
-
-    { "namespace": str, "type": str, "body": <any msgpack> }
-
-Routing:
-
-- Sent with ``to_node = HOST_NODE_ID`` — dispatched to the host's
-  registered extension for ``namespace``.
-- Sent with ``to_node = "<client-id>"`` — forwarded to that client,
-  dispatched to the client's registered extension for ``namespace``.
-- Sent with ``to_node = "channel://..."`` — load-balanced (Send-style)
-  across listeners.
-
-Request/response — set ``envelope.request_id`` to correlate. The
-receiver's extension handler may return any msgpack-serializable value;
-the framework packs it into a response envelope addressed back to
-``envelope.from_node`` with ``in_reply_to = request_id``.
-
-This dispatch contract lives at L4. Adding a new application protocol
-means registering an :data:`ExtensionHandler` against a unique
-``namespace`` — no changes to L1–L3.
+Payloads are msgpack maps containing ``namespace``, ``type``, and ``body``.
+Optional ``request_id`` and ``in_reply_to`` envelope fields correlate requests
+and responses. Routing dispatches each message to the extension registered for
+its namespace.
 """
 
 import uuid
@@ -56,16 +33,7 @@ class ExtensionNotFoundError(LookupError):
 
 @dataclass(frozen=True)
 class AppMessage:
-    """A decoded application message handed to an extension handler.
-
-    Attributes:
-        namespace: The extension namespace this message belongs to.
-        type: Message type within the namespace (free-form string).
-        body: The structured body — any msgpack-serializable value.
-        sender_node: NodeId of the sender (from envelope.from_node).
-        request_id: Correlation id if this is a request; else ``None``.
-        in_reply_to: Correlation id this responds to; else ``None``.
-    """
+    """Represent a decoded application message for an extension handler."""
 
     namespace: str
     type: str
@@ -76,11 +44,9 @@ class AppMessage:
 
 
 ExtensionHandler = Callable[[AppMessage], Awaitable[Any]]
-"""Async handler invoked for each inbound APP message in a namespace.
+"""Handle an APP message and optionally return a serializable response.
 
-The handler may return any msgpack-serializable value. If the inbound
-message has a ``request_id``, the return value is sent back as the body
-of a response envelope. ``None`` skips the response.
+``None`` suppresses a response even when the message has a request ID.
 """
 
 

@@ -56,11 +56,6 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Argparse wiring
-# ---------------------------------------------------------------------------
-
-
 def add_admin_subparser(subparsers: argparse._SubParsersAction) -> None:
     """Mount the ``kt admin`` parser tree."""
     admin = subparsers.add_parser(
@@ -69,7 +64,6 @@ def add_admin_subparser(subparsers: argparse._SubParsersAction) -> None:
     )
     admin_sub = admin.add_subparsers(dest="admin_command", required=False)
 
-    # Token verbs --------------------------------------------------------
     admin_sub.add_parser(
         "set-host-token",
         help="Generate + save a new host_token in <config_dir>/config.toml",
@@ -116,7 +110,6 @@ def add_admin_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Confirm you want to print the host_token in plaintext via QR",
     )
 
-    # Users --------------------------------------------------------------
     users = admin_sub.add_parser("users", help="User account management")
     users_sub = users.add_subparsers(dest="users_command", required=True)
     add_user = users_sub.add_parser("add", help="Create a new user")
@@ -148,7 +141,6 @@ def add_admin_subparser(subparsers: argparse._SubParsersAction) -> None:
         help="Skip the interactive confirmation prompt",
     )
 
-    # Invitations --------------------------------------------------------
     invitations = admin_sub.add_parser(
         "invitations", help="Invitation token management"
     )
@@ -170,7 +162,6 @@ def add_admin_subparser(subparsers: argparse._SubParsersAction) -> None:
     revoke = inv_sub.add_parser("revoke", help="Revoke an unused invitation by id")
     revoke.add_argument("invite_id", type=int)
 
-    # Migrate ------------------------------------------------------------
     migrate = admin_sub.add_parser(
         "migrate",
         help="Move shared-state UI prefs / sessions into a user namespace",
@@ -190,11 +181,6 @@ def add_admin_subparser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Print what would be moved without touching the filesystem",
     )
-
-
-# ---------------------------------------------------------------------------
-# Dispatch
-# ---------------------------------------------------------------------------
 
 
 def admin_cli(args: argparse.Namespace) -> int:
@@ -227,11 +213,7 @@ def admin_cli(args: argparse.Namespace) -> int:
     return 2
 
 
-# ---------------------------------------------------------------------------
-# Token verbs — delegate to :mod:`api.auth.config_write` so the CLI and the
-# admin-rotation API routes write the same TOML.
-# ---------------------------------------------------------------------------
-
+# CLI and API token rotation share the same TOML writer.
 
 def _write_token_or_complain(field: str, value: str) -> int:
     """Wrap ``write_auth_section`` to translate ValueError into a
@@ -259,6 +241,7 @@ def _write_token_or_complain(field: str, value: str) -> int:
 
 
 def _set_host_token(*, rotate: bool) -> int:
+    """Generate and persist a host token."""
     token = secrets.token_hex(32)
     rc = _write_token_or_complain("host_token", token)
     if rc != 0:
@@ -275,6 +258,7 @@ def _set_host_token(*, rotate: bool) -> int:
 
 
 def _set_admin_token() -> int:
+    """Generate and persist an administrator token."""
     token = secrets.token_hex(32)
     rc = _write_token_or_complain("admin_token", token)
     if rc != 0:
@@ -285,6 +269,7 @@ def _set_admin_token() -> int:
 
 
 def _show_host_token(yes: bool) -> int:
+    """Print the host token after explicit confirmation."""
     if not yes:
         print(
             "this command prints the host_token in cleartext.",
@@ -301,11 +286,6 @@ def _show_host_token(yes: bool) -> int:
         return 0
     print(cfg.host_token)
     return 0
-
-
-# ---------------------------------------------------------------------------
-# Users
-# ---------------------------------------------------------------------------
 
 
 def _ensure_db() -> None:
@@ -327,6 +307,7 @@ def _read_password_twice(prompt: str = "Password: ") -> str | None:
 
 
 def _dispatch_users(args: argparse.Namespace) -> int:
+    """Dispatch user administration commands."""
     cmd = args.users_command
     if cmd == "add":
         return _users_add(args.username, args.role)
@@ -347,6 +328,7 @@ def _dispatch_users(args: argparse.Namespace) -> int:
 
 
 def _users_add(username: str, role: str) -> int:
+    """Create a user after interactive password confirmation."""
     _ensure_db()
     password = _read_password_twice()
     if password is None:
@@ -372,13 +354,13 @@ def _users_add(username: str, role: str) -> int:
 
 
 def _users_list() -> int:
+    """List users in a fixed-width terminal table."""
     _ensure_db()
     with connection() as conn:
         users = users_db.list_users(conn)
     if not users:
         print("(no users)")
         return 0
-    # Plain text table, fixed-width.
     print(f"{'ID':<4}  {'USERNAME':<24}  {'ROLE':<8}  {'ACTIVE':<8}  LAST_LOGIN")
     print("-" * 70)
     for u in users:
@@ -391,13 +373,14 @@ def _users_list() -> int:
 
 
 def _users_set_role(username: str, role: str) -> int:
+    """Set a user's role while preserving an active administrator."""
     _ensure_db()
     with connection() as conn:
         user = users_db.get_user_by_username(conn, username)
         if user is None:
             print(f"user not found: {username}", file=sys.stderr)
             return 1
-        # Last-admin guard: refuse to demote the only active admin.
+        # At least one active administrator must remain.
         if (
             user.role == "admin"
             and role != "admin"
@@ -415,6 +398,7 @@ def _users_set_role(username: str, role: str) -> int:
 
 
 def _users_set_active(username: str, is_active: bool) -> int:
+    """Enable or disable a user and revoke disabled-user sessions."""
     _ensure_db()
     with connection() as conn:
         user = users_db.get_user_by_username(conn, username)
@@ -429,8 +413,7 @@ def _users_set_active(username: str, is_active: bool) -> int:
             return 1
         users_db.set_active(conn, user.id, is_active)
         if not is_active:
-            # Nuke all sessions for a disabled user — keeps them out
-            # immediately rather than waiting for cookie expiry.
+            # Revocation must take effect immediately rather than at cookie expiry.
             removed = delete_user_sessions(conn, user.id)
             if removed:
                 print(f"  (dropped {removed} active session(s))")
@@ -440,6 +423,7 @@ def _users_set_active(username: str, is_active: bool) -> int:
 
 
 def _users_delete(username: str, yes: bool) -> int:
+    """Delete a user while retaining their filesystem namespace."""
     _ensure_db()
     with connection() as conn:
         user = users_db.get_user_by_username(conn, username)
@@ -463,8 +447,7 @@ def _users_delete(username: str, yes: bool) -> int:
     with connection() as conn:
         users_db.delete_user(conn, user.id)
     print(f"user {username!r} deleted (id={user.id}).")
-    # Note: per-user dir on disk is left intact.  Removing it is a
-    # separate operator decision because it carries the user's data.
+    # Filesystem data survives account deletion until the operator removes it.
     nspace = user_config_dir(user.id)
     if nspace.exists():
         print(
@@ -474,12 +457,8 @@ def _users_delete(username: str, yes: bool) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# Invitations
-# ---------------------------------------------------------------------------
-
-
 def _dispatch_invitations(args: argparse.Namespace) -> int:
+    """Dispatch invitation administration commands."""
     cmd = args.inv_command
     if cmd == "create":
         return _invitations_create(args.role, args.expires_in_hours)
@@ -492,11 +471,12 @@ def _dispatch_invitations(args: argparse.Namespace) -> int:
 
 
 def _invitations_create(role: str, expires_in_hours: int | None) -> int:
+    """Create and print a one-shot invitation token."""
     _ensure_db()
     with connection() as conn:
         plaintext, invite = invitations_db.create(
             conn,
-            created_by=None,  # CLI-issued — no actor user id
+            created_by=None,
             role=role,
             expires_in_hours=expires_in_hours,
         )
@@ -512,6 +492,7 @@ def _invitations_create(role: str, expires_in_hours: int | None) -> int:
 
 
 def _invitations_list() -> int:
+    """List unused invitations."""
     _ensure_db()
     with connection() as conn:
         unused = invitations_db.list_unused(conn)
@@ -529,6 +510,7 @@ def _invitations_list() -> int:
 
 
 def _invitations_revoke(invite_id: int) -> int:
+    """Revoke one unused invitation."""
     _ensure_db()
     with connection() as conn:
         ok = invitations_db.revoke(conn, invite_id)
@@ -539,12 +521,8 @@ def _invitations_revoke(invite_id: int) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# Migrate shared-state → user namespace
-# ---------------------------------------------------------------------------
-
-
 def _migrate(args: argparse.Namespace) -> int:
+    """Move shared UI preferences and sessions into a user namespace."""
     if not args.from_shared_state:
         print(
             "this verb currently supports only --from-shared-state",

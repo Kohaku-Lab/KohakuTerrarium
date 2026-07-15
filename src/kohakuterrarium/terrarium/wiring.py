@@ -20,9 +20,6 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# terrarium-aware resolver installation
-# ---------------------------------------------------------------------------
 
 
 def install_output_wiring_resolver(engine: Any) -> Any:

@@ -1,14 +1,8 @@
-"""Session fork / branch (Wave E) handler logic.
+"""Session fork and branch handling.
 
-Verbatim port of ``api/routes/_session_fork.py``: derives the child
-``.kohakutr`` path, validates the mutation payload, and drives
-``SessionStore.fork``. Lives in the studio tier so the HTTP route
-under ``api/routes/persistence/fork.py`` only handles transport
-concerns (path resolution + 404 mapping).
-
-The routes pass primitive arguments (``at_event_id``, ``mutate_kind``,
-``mutate_args``, ``name``) so the studio tier does not depend on
-``api.schemas``.
+Derives child paths, validates optional fork mutations, and drives
+``SessionStore.fork`` without depending on HTTP schemas. Transport adapters
+remain responsible for path resolution and response mapping.
 """
 
 import time
@@ -29,12 +23,7 @@ from kohakuterrarium.session.version import FORMAT_VERSION
 
 
 def fork_target_path(parent: Path, fork_name: str) -> Path:
-    """Derive the child ``.kohakutr`` path for a fork.
-
-    Keeps the child in the same directory as the parent; the current
-    :data:`FORMAT_VERSION` determines the file suffix via
-    :func:`path_for_version`.
-    """
+    """Return a versioned child path beside the parent session file."""
     base = parent.name.split(".kohakutr", 1)[0]
     child_bare = parent.parent / f"{base}-{fork_name}.kohakutr"
     return path_for_version(child_bare, FORMAT_VERSION)
@@ -80,11 +69,10 @@ def mutation_from_payload(
     args: dict | None,
     fork_point_event: dict[str, Any],
 ) -> Callable[[dict[str, Any]], dict[str, Any] | None]:
-    """Map the HTTP mutation payload to a local mutator callable.
+    """Validate a mutation request and return its event mutator.
 
-    Validates that the requested mutation is compatible with the
-    fork-point event type. Raises :class:`InvalidRequestError` on
-    mismatch.
+    Mutations that replace user messages or inject tool results require a
+    compatible fork-point event type.
     """
     args = args or {}
     fork_type = fork_point_event.get("type", "")
@@ -144,25 +132,13 @@ async def fork_session_handler(
     name: str | None,
     store: SessionStore | None = None,
 ) -> dict[str, Any]:
-    """Shared handler body for ``POST /sessions/{id}/fork``.
+    """Fork a resolved session path and return transport-neutral metadata.
 
-    Caller is responsible for resolving ``session_name`` to ``session_path``
-    so this helper stays transport-agnostic. Returns a plain dict that
-    the route layer wraps in the ``ForkResponse`` pydantic model.
-
-    ``store``: an already-open LIVE store to fork from — a second open
-    of an actively-written file is unreliable on POSIX
-    (``SQLITE_IOERR``). The caller keeps ownership; it is NOT closed
-    here. ``store.fork`` reads the source through this object (logical
-    row copy), so the source file is never re-opened.
-
-    Typed errors (the api adapter maps them onto 400/404/409/500):
-    :class:`SessionNotFoundError` for a missing source — raised BEFORE
-    any store open, since ``SessionStore(path)`` creates the file as a
-    side effect; :class:`InvalidRequestError` for a bad ``at_event_id``
-    / mutation payload; :class:`ConflictError` when the fork target
-    exists or the fork point splits an in-flight job;
-    :class:`SessionError` for anything else.
+    A supplied live store remains caller-owned and avoids reopening an actively
+    written SQLite file. Missing paths are rejected before ``SessionStore`` can
+    create them. Invalid mutations raise ``InvalidRequestError``; target or
+    stability conflicts raise ``ConflictError``; other failures are wrapped in
+    ``SessionError``.
     """
     session_path = Path(session_path)
     if not session_path.exists():

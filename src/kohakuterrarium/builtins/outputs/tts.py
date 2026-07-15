@@ -1,31 +1,4 @@
-"""
-TTS (Text-to-Speech) output module.
-
-Provides abstract interface for text-to-speech with support for:
-- Fish Speech (priority - low latency, voice cloning)
-- Edge TTS (free, good quality)
-- OpenAI TTS
-
-Features:
-- Streaming synthesis for low latency
-- Hard interruption support
-- Voice configuration
-
-Usage:
-    # Create TTS output
-    tts = FishSpeechTTS(voice_id="default")
-
-    # Speak text
-    await tts.speak("Hello, world!")
-
-    # Stream text as it arrives
-    async for chunk in text_stream:
-        await tts.stream(chunk)
-    await tts.flush()
-
-    # Interrupt current speech
-    await tts.interrupt()
-"""
+"""Text-to-speech output abstractions with buffering and interruption."""
 
 import asyncio
 import sys
@@ -51,19 +24,7 @@ class TTSState(Enum):
 
 @dataclass
 class TTSConfig:
-    """
-    Configuration for TTS modules.
-
-    Attributes:
-        voice_id: Voice identifier (varies by backend)
-        language: Target language code
-        speed: Speaking speed multiplier (1.0 = normal)
-        pitch: Pitch adjustment (-1.0 to 1.0)
-        volume: Volume level (0.0 to 1.0)
-        sample_rate: Output sample rate
-        streaming: Enable streaming synthesis
-        buffer_size: Text buffer size before synthesis
-    """
+    """Configure voice, audio, and streaming behavior for a TTS backend."""
 
     voice_id: str = "default"
     language: str = "en"
@@ -72,22 +33,13 @@ class TTSConfig:
     volume: float = 1.0
     sample_rate: int = 24000
     streaming: bool = True
-    buffer_size: int = 50  # Characters before starting synthesis
+    buffer_size: int = 50  # Delay synthesis until enough text or punctuation arrives.
     options: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class AudioChunk:
-    """
-    Audio data chunk from TTS.
-
-    Attributes:
-        data: Raw audio bytes
-        sample_rate: Audio sample rate
-        channels: Number of audio channels
-        is_final: Whether this is the last chunk
-        text: Text that was synthesized (for logging)
-    """
+    """Represent one synthesized audio chunk and its source text."""
 
     data: bytes
     sample_rate: int = 24000
@@ -97,27 +49,10 @@ class AudioChunk:
 
 
 class TTSModule(OutputModule, ABC):
-    """
-    Abstract base class for TTS output modules.
-
-    Subclasses must implement:
-    - _synthesize(): Convert text to audio
-    - _play_audio(): Play audio data
-    - _stop_playback(): Stop current playback
-
-    The base class handles:
-    - State management
-    - Text buffering for streaming
-    - Interruption logic
-    """
+    """Provide TTS state, buffering, playback, and interruption orchestration."""
 
     def __init__(self, config: TTSConfig | None = None):
-        """
-        Initialize TTS module.
-
-        Args:
-            config: TTS configuration
-        """
+        """Initialize TTS state from optional backend configuration."""
         self.config = config or TTSConfig()
         self._state = TTSState.IDLE
         self._running = False
@@ -126,12 +61,12 @@ class TTSModule(OutputModule, ABC):
 
     @property
     def state(self) -> TTSState:
-        """Get current TTS state."""
+        """Return the current synthesis or playback state."""
         return self._state
 
     @property
     def is_speaking(self) -> bool:
-        """Check if currently speaking."""
+        """Return whether audio playback is active."""
         return self._state == TTSState.SPEAKING
 
     async def start(self) -> None:
@@ -156,14 +91,7 @@ class TTSModule(OutputModule, ABC):
         logger.info("TTS stopped")
 
     async def speak(self, text: str) -> None:
-        """
-        Speak complete text.
-
-        Synthesizes and plays the entire text.
-
-        Args:
-            text: Text to speak
-        """
+        """Synthesize and play one complete text segment."""
         if not text.strip():
             return
 
@@ -186,18 +114,10 @@ class TTSModule(OutputModule, ABC):
                 self._state = TTSState.IDLE
 
     async def stream(self, text_chunk: str) -> None:
-        """
-        Stream text for synthesis.
-
-        Buffers text and synthesizes when buffer is full or on punctuation.
-
-        Args:
-            text_chunk: Text chunk to add to buffer
-        """
+        """Buffer text and synthesize at size or sentence boundaries."""
         self._text_buffer += text_chunk
         self._state = TTSState.BUFFERING
 
-        # Check if we should synthesize
         should_synthesize = len(
             self._text_buffer
         ) >= self.config.buffer_size or self._ends_with_sentence(self._text_buffer)
@@ -208,22 +128,14 @@ class TTSModule(OutputModule, ABC):
             await self.speak(text)
 
     async def flush(self) -> None:
-        """
-        Flush remaining buffered text.
-
-        Call after streaming is complete to speak any remaining text.
-        """
+        """Synthesize any text remaining in the streaming buffer."""
         if self._text_buffer.strip():
             text = self._text_buffer
             self._text_buffer = ""
             await self.speak(text)
 
     async def interrupt(self) -> None:
-        """
-        Interrupt current speech (hard cut).
-
-        Immediately stops playback.
-        """
+        """Stop active playback immediately and clear buffered text."""
         if self._state != TTSState.SPEAKING:
             return
 
@@ -234,13 +146,11 @@ class TTSModule(OutputModule, ABC):
         logger.debug("TTS interrupted")
 
     def _ends_with_sentence(self, text: str) -> bool:
-        """Check if text ends with sentence-ending punctuation."""
+        """Return whether text ends at a supported sentence boundary."""
         text = text.rstrip()
         if not text:
             return False
         return text[-1] in ".!?。！？"
-
-    # === OutputModule interface ===
 
     async def write(self, text: str) -> None:
         """Write text to TTS (implements OutputModule)."""
@@ -249,8 +159,6 @@ class TTSModule(OutputModule, ABC):
     async def write_stream(self, chunk: str) -> None:
         """Write streaming chunk to TTS (implements OutputModule)."""
         await self.stream(chunk)
-
-    # === Abstract methods for subclasses ===
 
     async def _initialize(self) -> None:
         """Initialize TTS backend. Override if needed."""
@@ -262,27 +170,12 @@ class TTSModule(OutputModule, ABC):
 
     @abstractmethod
     async def _synthesize(self, text: str) -> AsyncIterator[AudioChunk]:
-        """
-        Synthesize text to audio.
-
-        Should yield AudioChunk objects as they're generated.
-
-        Args:
-            text: Text to synthesize
-
-        Yields:
-            AudioChunk with audio data
-        """
+        """Yield audio chunks synthesized from text."""
         ...
 
     @abstractmethod
     async def _play_audio(self, chunk: AudioChunk) -> None:
-        """
-        Play an audio chunk.
-
-        Args:
-            chunk: Audio data to play
-        """
+        """Play one synthesized audio chunk."""
         ...
 
     @abstractmethod
@@ -291,32 +184,21 @@ class TTSModule(OutputModule, ABC):
         ...
 
 
-# =============================================================================
-# Placeholder Implementations
-# =============================================================================
-
-
 class DummyTTS(TTSModule):
-    """
-    Dummy TTS for testing.
-
-    Logs text instead of speaking.
-    """
+    """Record synthesized text without producing audio."""
 
     def __init__(self, config: TTSConfig | None = None):
         super().__init__(config)
         self.spoken_texts: list[str] = []
 
     async def _synthesize(self, text: str) -> AsyncIterator[AudioChunk]:
-        """Fake synthesis - just yield empty chunks."""
-        # Simulate synthesis delay based on text length
-        delay = len(text) * 0.01  # ~10ms per character
+        """Record text and yield one empty final audio chunk."""
+        delay = len(text) * 0.01  # Approximate synthesis latency for tests.
         await asyncio.sleep(min(delay, 0.5))
 
         self.spoken_texts.append(text)
         logger.info("DummyTTS speaking", text=text[:50])
 
-        # Yield single chunk
         yield AudioChunk(
             data=b"",
             is_final=True,
@@ -333,11 +215,7 @@ class DummyTTS(TTSModule):
 
 
 class ConsoleTTS(TTSModule):
-    """
-    Console TTS for testing.
-
-    Prints text to console with typing effect.
-    """
+    """Simulate speech by printing characters with a configurable delay."""
 
     def __init__(
         self,

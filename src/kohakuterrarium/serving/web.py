@@ -1,8 +1,7 @@
-"""
-Web server and desktop app launcher for KohakuTerrarium.
+"""Serve the web application or host it in a native desktop window.
 
-``kt web``  — FastAPI + built Vue frontend in a single process.
-``kt app``  — Same, but wrapped in a native pywebview window.
+Web mode runs FastAPI with the built Vue frontend. Desktop mode adds a
+pywebview shell and adapts process handling for regular and Briefcase runtimes.
 """
 
 import ctypes
@@ -29,22 +28,20 @@ from kohakuterrarium.utils.logging import (
 
 logger = get_logger(__name__)
 
-# web_dist lives at src/kohakuterrarium/web_dist/ (built by vite)
+# Vite places the packaged frontend beside the Python application modules.
 WEB_DIST_DIR = Path(__file__).resolve().parent.parent / "web_dist"
 
 
 def _resolve_config_dirs() -> tuple[list[str], list[str]]:
-    """Resolve creature/terrarium config directories.
+    """Merge explicit, installed-package, and working-directory config paths.
 
-    Sources (all merged):
-      1. KT_CREATURES_DIRS / KT_TERRARIUMS_DIRS env vars
-      2. Installed packages (``~/.kohakuterrarium/packages/``)
-      3. Local project dirs (``creatures/``, ``terrariums/`` in project root)
+    Environment paths have highest discovery precedence, followed by installed
+    packages and conventional local project directories.
     """
     creatures: list[str] = []
     terrariums: list[str] = []
 
-    # 1. Env vars (highest priority, explicit override)
+    # Explicit paths lead the discovery order.
     env_creatures = os.environ.get("KT_CREATURES_DIRS")
     if env_creatures:
         creatures.extend(env_creatures.split(","))
@@ -52,7 +49,6 @@ def _resolve_config_dirs() -> tuple[list[str], list[str]]:
     if env_terrariums:
         terrariums.extend(env_terrariums.split(","))
 
-    # 2. Installed packages
     if packages_dir().exists():
         for pkg in list_packages():
             pkg_root = get_package_root(pkg["name"])
@@ -64,7 +60,7 @@ def _resolve_config_dirs() -> tuple[list[str], list[str]]:
                 if t.is_dir():
                     terrariums.append(str(t))
 
-    # 3. Current working directory (where the user runs kt web/app from)
+    # Local directories make project configs visible without installation.
     cwd = Path.cwd()
     for d in (cwd / "creatures", cwd / "agents"):
         if d.is_dir() and str(d) not in creatures:
@@ -79,16 +75,11 @@ def _resolve_config_dirs() -> tuple[list[str], list[str]]:
 def find_free_port(
     start: int = 8001, host: str = "127.0.0.1", max_tries: int = 50
 ) -> int:
-    """Find a free TCP port starting from ``start``.
+    """Probe sequential TCP ports and return the first bindable candidate.
 
-    Tries ``start``, ``start+1``, ... up to ``max_tries`` ports.
-    Returns the first port that can be bound. Raises RuntimeError if none.
-
-    Note: this is a *probe* — the returned port can theoretically be
-    grabbed by another process between probe close and the real bind
-    (TOCTOU race). For the desktop / web entrypoints, prefer
-    :func:`start_uvicorn_with_port_fallback`, which retries the start
-    until uvicorn actually binds and returns the verified port.
+    The socket is closed before return, so another process may claim the port.
+    Use :func:`start_uvicorn_with_port_fallback` when the caller needs a port
+    verified by the actual server bind.
     """
     for offset in range(max_tries):
         port = start + offset
@@ -110,35 +101,20 @@ def start_uvicorn_with_port_fallback(
     log_level: str = "warning",
     startup_timeout: float = 10.0,
 ):
-    """Start uvicorn in a daemon thread, returning ``(server, port)``.
+    """Start uvicorn on the first viable port and return its server and port.
 
-    Handles two failure modes that the bare ``threading.Thread(uvicorn.run)``
-    pattern silently swallows:
-
-    1. **TOCTOU between ``find_free_port`` and the real bind** — if
-       another process grabs the probed port in the interim, uvicorn's
-       startup task raises ``OSError`` and the daemon thread dies.
-       This helper detects the dead thread and retries the next port.
-    2. **Webview pointed at a dead port** — the previous code passed
-       the *requested* port to ``webview.create_window`` even if
-       uvicorn never bound it. Here we wait for ``server.started`` to
-       flip true and read the port from ``server.servers[0].sockets[0]``
-       so the caller always gets the verified-bound port.
-
-    The returned ``server`` is a live ``uvicorn.Server`` instance; the
-    caller can call ``server.should_exit = True`` to shut it down.
-    The thread is daemonised so the process can exit cleanly when the
-    webview window closes.
+    Each attempt runs in a daemon thread and waits for uvicorn to confirm its
+    bind. Dead or timed-out attempts advance to the next port. The returned port
+    is read from the live server socket, and callers may request shutdown by
+    setting ``server.should_exit``.
     """
     last_exc: Exception | None = None
     for offset in range(max_tries):
         port = requested_port + offset
         config = uvicorn.Config(app, host=host, port=port, log_level=log_level)
         server = uvicorn.Server(config)
-        # Disable uvicorn's signal-handler install — pywebview owns the
-        # main thread on Windows / macOS, and uvicorn's ``signal.signal``
-        # calls from a worker thread raise ``ValueError: signal only
-        # works in main thread of the main interpreter``.
+        # Uvicorn runs off the main thread here, where Python forbids signal
+        # handler installation.
         server.install_signal_handlers = lambda: None  # type: ignore[method-assign]
         thread = threading.Thread(
             target=server.run, daemon=True, name=f"uvicorn-{port}"
@@ -157,16 +133,14 @@ def start_uvicorn_with_port_fallback(
                     pass
                 return server, actual_port
             if not thread.is_alive():
-                # Bind failed; uvicorn's startup task raised + the
-                # thread exited. Try the next port.
+                # A dead startup thread indicates that this candidate never bound.
                 last_exc = RuntimeError(
                     f"uvicorn thread for port {port} died before binding"
                 )
                 break
             time.sleep(0.05)
         else:
-            # Timed out waiting for startup — try to shut it down and
-            # move on. Don't accumulate stuck threads across retries.
+            # Request shutdown before retrying so timed-out threads do not accumulate.
             try:
                 server.should_exit = True
             except Exception:
@@ -181,10 +155,9 @@ def start_uvicorn_with_port_fallback(
 
 
 def _publish_actual_port(state_path: str | None, host: str, port: int) -> None:
-    """Update daemon state file with the actual bound port.
+    """Publish the verified server address to an existing daemon state file.
 
-    No-op if state_path is None (e.g. ``kt web`` direct invocation) or the
-    file does not exist. CLI polls this file's ``bound`` field after spawn.
+    Direct invocations without a state path and missing state files are ignored.
     """
     if not state_path:
         return
@@ -215,35 +188,17 @@ def run_web_server(
     lab_bind: str | None = None,
     lab_token: str | None = None,
 ) -> None:
-    """Start the FastAPI server, optionally serving the built frontend.
+    """Run the FastAPI service in standalone or authenticated lab-host mode.
 
-    Args:
-        host: Bind address.
-        port: Bind port.
-        dev: If True, skip static file serving (user runs vite dev separately).
-        state_path: When set (daemon mode), write the actual bound port back
-            to this JSON file so the launching CLI can show the truth.
-        mode: ``"standalone"`` or ``"lab-host"``.  In lab-host mode a
-            :class:`HostEngine` is started in the FastAPI lifespan and a
-            :class:`MultiNodeTerrariumService` is installed for the API
-            routes that consume :func:`get_service`.
-        lab_bind: ``host:port`` for the Lab WebSocket transport (lab-host
-            only).  Defaults to ``127.0.0.1:8100``.
-        lab_token: shared token clients must present (lab-host only).
-            Required when ``mode == "lab-host"``.
+    Development mode omits static frontend serving. Daemon callers may provide
+    ``state_path`` to receive the selected port. Lab-host mode also starts the
+    WebSocket transport at ``lab_bind`` and requires ``lab_token``.
     """
     configure_utf8_stdio(log=True)
 
     set_level(log_level)
-    # Mirror kohakuterrarium logs to stderr so the daemon's redirected
-    # stderr (~/.kohakuterrarium/run/web.log) captures BOTH uvicorn AND
-    # our own logger output. Without this, ``kt serve logs`` shows only
-    # uvicorn — our INFO logs (e.g. "Event buffered for mid-turn
-    # injection", "Drained N mid-turn buffered event(s)") get
-    # silently routed to a separate file (~/.kohakuterrarium/logs/kt.log)
-    # the user has no reason to know about. Idempotent: if stderr
-    # logging is already on (foreground path), this just resets the
-    # level.
+    # Daemon stderr is the user-facing service log, so mirror framework logs
+    # there alongside uvicorn output. Reconfiguration is idempotent.
     enable_stderr_logging(log_level)
     static_dir = None if dev else WEB_DIST_DIR
 
@@ -281,7 +236,7 @@ def run_web_server(
         lab_token=lab_token,
     )
 
-    # Auto-find port if requested port is busy
+    # Probe forward so direct web serving can tolerate a busy requested port.
     try:
         port = find_free_port(start=port, host=host)
     except RuntimeError as e:
@@ -303,17 +258,10 @@ def run_web_server(
 
 
 def _is_briefcase_runtime() -> bool:
-    """True when this process is running inside a Briefcase desktop bundle.
+    """Return whether the process uses the non-detachable Briefcase runtime.
 
-    Briefcase Windows shells lay down ``python3XX._pth`` next to
-    ``sys.executable`` (which is the briefcase STUB binary, not a real
-    Python). We can't subprocess-detach via ``sys.executable -m ...``
-    because the stub doesn't honour ``-m`` — it routes argv straight
-    into the framework CLI parser.
-
-    Detection mirrors ``kohakuterrarium.__main__._is_briefcase_bundle``;
-    the launcher additionally sets ``KT_LAUNCHER_EXEC=1`` after its
-    in-process sys.path swap so we have a second positive signal.
+    Detection accepts the launcher's explicit environment marker or the
+    isolated path file placed beside a Briefcase stub executable.
     """
     if os.environ.get("KT_LAUNCHER_EXEC") == "1":
         return True
@@ -325,26 +273,15 @@ def _is_briefcase_runtime() -> bool:
 
 
 def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
-    """Launch the desktop app.
+    """Launch the desktop app in-process for Briefcase or detached otherwise.
 
-    Two paths:
-
-    - **CLI / dev** (regular Python interpreter): detach a child process
-      via ``Popen`` so the caller's terminal is freed. Child writes
-      stderr to ``~/.kohakuterrarium/app.log``.
-    - **Briefcase desktop bundle**: there is no detachable Python — the
-      briefcase stub doesn't honour ``-m``. Run the server + pywebview
-      in this same process via :func:`_run_desktop_app_blocking`. The
-      briefcase stub IS the desktop app; releasing a terminal is
-      meaningless here.
+    Regular interpreters spawn a child and redirect its output to ``app.log``.
+    Briefcase must run the server and window in the current process because its
+    application stub does not support ``python -m`` execution.
     """
     if _is_briefcase_runtime():
-        # The briefcase stub IS the GUI process. Inline the desktop
-        # entry so the same process drives uvicorn + pywebview to
-        # completion. Spawning ``sys.executable -m kohakuterrarium.serving.web``
-        # would re-enter the briefcase CLI parser and exit silently
-        # with an "argument command: invalid choice" — exactly the
-        # "runs for a while then turns off" symptom seen in dev5.
+        # The Briefcase stub is the GUI process and cannot be relaunched with
+        # module arguments, so it must own uvicorn and pywebview directly.
         _run_desktop_app_blocking(port=port, log_level=log_level)
         return
 
@@ -379,11 +316,10 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
 
 
 def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None:
-    """Actually run the desktop app (blocking). Called by the child process."""
+    """Run uvicorn and the native desktop window until the UI closes."""
     configure_utf8_stdio(log=True)
 
-    # Set AppUserModelID on Windows so the taskbar shows our icon
-    # instead of the generic python.exe icon.
+    # A stable application ID lets Windows associate the packaged taskbar icon.
     if sys.platform == "win32":
         try:
             ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
@@ -417,9 +353,7 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         static_dir=WEB_DIST_DIR,
     )
 
-    # Start uvicorn with fallback + verified bound port.  ``port`` from
-    # here on is the ACTUAL port uvicorn is listening on, not the
-    # requested one — webview opens against this.
+    # Open webview only after uvicorn reports the actual bound port.
     try:
         _server, port = start_uvicorn_with_port_fallback(
             app,
@@ -432,7 +366,6 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         sys.exit(1)
     logger.info("desktop: uvicorn listening at http://127.0.0.1:%d", port)
 
-    # Resolve icon paths
     icons_dir = Path(__file__).parent.parent / "app_icons"
     icon_ico = icons_dir / "window.ico"
     icon_png = icons_dir / "window.png"

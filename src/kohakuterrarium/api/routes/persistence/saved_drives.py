@@ -1,12 +1,12 @@
-"""Read-only Drive records for a SAVED (non-live) session (design §12.3).
+"""Read-only Drive records for a saved or live session.
 
-The saved-session viewer's Drives tab needs the persisted Drive records without
-resuming the session. This reads them straight from the session's Drive sidecar
-(``<name>.kohakutr.drives``) through the storage layer's public reader — no live
-engine, no DriveManager, so rows carry no ``allowed_actions`` (the viewer is
-read-only) and spec/evidence stay redacted like every list row.
+The saved-session viewer reads persisted Drive records directly from
+``<name>.kohakutr.drives`` without resuming the session or constructing a
+``DriveManager``. Rows are read-only, expose no allowed actions, and retain the
+standard list-row redaction of specifications and evidence.
 
-Mounted under ``/api/persistence/viewer`` → ``/{session_name}/drives``.
+The router mounts at
+``/api/persistence/viewer/{session_name}/drives``.
 """
 
 import asyncio
@@ -32,7 +32,7 @@ _REDACTED = ("spec", "presentation", "metadata", "terminal_evidence")
 
 
 def _saved_row(record: Any, assignment: Any) -> dict[str, Any]:
-    """A redacted, read-only row for a persisted Drive record (no live ACL)."""
+    """Build a redacted persisted-Drive row without live authorization data."""
     r = record
     return {
         "drive_id": r.drive_id,
@@ -65,16 +65,13 @@ def _saved_row(record: Any, assignment: Any) -> dict[str, Any]:
 
 
 async def _read_saved_drives(path: str | Path) -> list[dict[str, Any]]:
-    """List a saved session's persisted Drive records WITHOUT touching the parent.
+    """Read persisted Drive rows without opening or modifying the parent store.
 
-    Strictly read-only, and it NEVER opens the parent ``.kohakutr``: constructing a
-    writable ``SessionStore`` would initialise that database merely by viewing. The
-    sidecar path is derived from the session path exactly as ``SessionStore`` would
-    normalise it (``Path.expanduser``). A session whose ``.drives`` sidecar is
-    absent reports zero drives and the sidecar stays absent (viewing never migrates
-    or initialises Drive storage). An existing sidecar is opened ``mode=ro`` and
-    read under ONE transaction so committed WAL rows are included consistently;
-    THIS caller owns closing the read-only repo.
+    Opening a writable ``SessionStore`` would initialize a missing parent merely
+    by viewing it. The sidecar path therefore uses the same expanded-path
+    normalization directly. A missing sidecar means no drives and remains absent;
+    an existing sidecar is opened read-only and closed by this function. Its single
+    repository read keeps committed WAL rows consistent.
     """
     sidecar = drive_sidecar_path(Path(path).expanduser())
     repo = open_drive_repository_readonly(sidecar, session_path=path)
@@ -93,20 +90,16 @@ async def saved_session_drives(
     session_dir: Path = Depends(resolve_request_session_dir),
     service: TerrariumService = Depends(get_service),
 ):
-    """Read-only persisted Drive records for a saved OR live session.
+    """Return persisted Drive records for a saved or live session.
 
-    A live session is addressed by its graph_id (its file is named by
-    creature_id), so its attached store is resolved first — otherwise the
-    Drives tab 404s for a running session. Its parent writer lock is held,
-    so the offline sidecar read may refuse; that degrades to an empty list
-    rather than crashing the tab (the live ``/api/sessions/{sid}/drives``
-    surface serves a running session's live records).
+    Live graph IDs resolve through their attached store because files are named
+    by creature ID. If the active writer prevents an offline sidecar read, this
+    viewer endpoint returns an empty list; the live Drive endpoint remains the
+    authoritative source.
 
-    Saved sessions resolve strictly inside the caller's L4 session namespace
-    (R1-01): an anonymous ``required``-mode request is rejected upstream by
-    the dependency, and no user namespace falls back to the global directory.
-    404 if the session file does not exist; a live/locked or corrupt sidecar
-    of a saved session is refused with 409 (typed).
+    Saved sessions resolve only within the request's session namespace, without
+    global fallback. Missing sessions return 404, while locked or corrupt saved
+    sidecars return 409.
     """
     live = live_store_path(service, session_name)
     if live is not None:

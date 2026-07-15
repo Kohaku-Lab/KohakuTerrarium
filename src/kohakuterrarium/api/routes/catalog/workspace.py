@@ -1,9 +1,4 @@
-"""Workspace lifecycle routes.
-
-* GET    /workspace          — active summary (409 if none)
-* POST   /workspace/open     — switch to a new workspace
-* POST   /workspace/close    — clear active workspace
-"""
+"""Open, summarize, and close the active catalog workspace."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel

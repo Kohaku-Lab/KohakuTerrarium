@@ -28,20 +28,10 @@ class LogEntry:
 
 
 class OutputLogCapture:
-    """
-    Tee wrapper that captures output into a ring buffer.
+    """Forward output while retaining recent entries in a bounded ring buffer.
 
-    Wraps an existing OutputModule. All output goes to the wrapped
-    module AND is logged into a deque for later retrieval.
-
-    Usage::
-
-        original_output = creature.agent.output_router.default_output
-        capture = OutputLogCapture(original_output, max_entries=100)
-        creature.agent.output_router.default_output = capture
-
-        # Later:
-        entries = capture.get_entries(last_n=10)
+    Stream chunks become one log entry only when flushed; regular writes and
+    activities are captured immediately.
     """
 
     def __init__(self, wrapped: OutputModule, max_entries: int = 100):

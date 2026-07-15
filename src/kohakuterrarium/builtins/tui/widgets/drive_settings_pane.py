@@ -1,15 +1,8 @@
-"""Textual pane for Drive runtime + registration settings.
+"""Edit Studio-owned drive settings while separating persistence from live apply.
 
-Embedded in the ``Settings`` tab of :class:`DriveScreen`. Edits the Studio-owned
-``drive-settings.yaml`` through the same façade the rich CLI, web Settings, and
-``kt config drive`` use, so every surface stays in lock-step. Save and Apply are
-distinct (design §8.6, §12.2): **Save** persists validated config; **Apply**
-attempts a live application and reports ``applied_live`` / ``restart_required`` /
-``rejected`` honestly. Advanced fields (byte budgets, backoff, retention) remain
-``kt config`` / YAML editable and are intentionally omitted here.
-
-``build_settings_from_values`` is a pure helper so the collect+persist logic is
-unit-testable without mounting the Textual app.
+The pane exposes common runtime and registration controls, preserves every
+unexposed setting, and reports whether applying saved settings succeeded live or
+requires a restart.
 """
 
 from dataclasses import replace
@@ -46,13 +39,7 @@ _INT_FIELDS: list[tuple[str, str]] = [
 def build_settings_from_values(
     base: DriveSettings, values: dict[str, Any]
 ) -> DriveSettings:
-    """Fold edited widget ``values`` into a new :class:`DriveSettings`.
-
-    Preserves every field the pane does not expose (byte budgets, backoff,
-    retention, per-registration options). ``values`` carries ``enabled``, the
-    int tuning fields (dotted ``retry.max_attempts`` handled specially), and a
-    ``registrations`` name->enabled map.
-    """
+    """Merge pane values into settings without discarding unexposed options."""
     runtime = base.runtime
     overrides: dict[str, Any] = {}
     retry_attempts: int | None = None
@@ -82,14 +69,15 @@ def _safe(name: str) -> str:
 
 
 class DriveSettingsPane(VerticalScroll):
-    """Runtime + registration editor bound to ``drive-settings.yaml``."""
+    """Persist validated drive settings and apply them separately to an engine."""
 
     def __init__(self, get_engine: Callable[[], Any] | None = None) -> None:
         super().__init__()
         self._get_engine = get_engine or (lambda: None)
         self._settings: DriveSettings | None = None
         self._status: dict[str, Any] = {}
-        self._reg_switches: list[tuple[str, str]] = []  # (name, switch id)
+        # Registration names map to generated widget IDs for value collection.
+        self._reg_switches: list[tuple[str, str]] = []
         try:
             self._settings = load_settings()
         except DriveValidationError:
@@ -128,8 +116,6 @@ class DriveSettingsPane(VerticalScroll):
             yield Button("Apply to engine", id="drive-apply", variant="warning")
         yield Static("", id="drive-settings-status")
 
-    # ── Actions ─────────────────────────────────────────────────
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "drive-save":
             self._save()
@@ -162,6 +148,7 @@ class DriveSettingsPane(VerticalScroll):
             self._set_status(f"[red]invalid: {exc}[/red]")
             return
         try:
+            # Revision checks prevent overwriting settings changed by another surface.
             saved = save_settings(
                 new_settings,
                 expected_revision=self._settings.revision,
@@ -190,7 +177,7 @@ class DriveSettingsPane(VerticalScroll):
     def _apply(self) -> None:
         try:
             result = apply_runtime(self._get_engine())
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover - defensive boundary
             logger.warning("drive settings apply failed", error=str(exc))
             self._set_status(f"[red]apply rejected: {exc}[/red]")
             return
@@ -207,7 +194,7 @@ class DriveSettingsPane(VerticalScroll):
     def _set_status(self, markup: str) -> None:
         try:
             self.query_one("#drive-settings-status", Static).update(markup)
-        except Exception:  # pragma: no cover — before mount
+        except Exception:  # pragma: no cover - widget may not be mounted
             pass
 
 

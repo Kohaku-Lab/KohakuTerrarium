@@ -1,9 +1,6 @@
-"""Request-scoped dependencies for catalog routes.
+"""Provide catalog dependencies for the process-wide active workspace.
 
-Tracks a single active workspace per process (local-only single-user
-assumption for v1). ``set_workspace`` is called from the CLI / tests;
-``get_workspace`` is the FastAPI dependency used by every catalog
-route that needs filesystem access.
+A single active workspace is an explicit local, single-user constraint.
 """
 
 from fastapi import HTTPException
@@ -33,6 +30,5 @@ def get_workspace() -> Workspace:
 
 
 def get_workspace_optional() -> Workspace | None:
-    """Return the active workspace or None — for routes that still
-    work without one (catalog listing, package browsing, etc.)."""
+    """Return the active workspace when the route can also operate without one."""
     return _active

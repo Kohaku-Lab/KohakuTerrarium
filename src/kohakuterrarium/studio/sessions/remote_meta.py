@@ -1,21 +1,8 @@
-"""B3/B4 — remote-creature ``_meta`` model cache helpers.
+"""Maintain cached status for remote creatures in session metadata.
 
-The studio's lifecycle layer caches ``model`` / ``llm_name`` /
-``running`` / ``is_privileged`` on every remote-hosted ``_meta`` entry
-so tab-reopen and ``get_session`` reads survive a brief worker
-disconnect without flipping the UI to "No model". The cache is
-refreshed lazily on read (``get_session_async``) and eagerly after a
-``switch_model`` mutation.
-
-This module owns the cache schema + read/write helpers. Keeping them
-out of :mod:`lifecycle` keeps that module under the 1000-line hard cap
-mandated by ``tests/unit/test_file_sizes.py`` while leaving the cache
-state (the per-runtime registry in ``studio.sessions.registry``)
-where every other reader expects it.
-
-The helpers are pure functions over the caller's per-runtime meta
-dict (``registry.meta_for(service)``); each function takes the registry
-as an argument from the lifecycle caller.
+Model, LLM, running, and privilege fields let Studio render remote sessions during
+brief worker outages. Callers provide their runtime-scoped metadata registry;
+reads refresh lazily, while model switches can update the cache eagerly.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -31,8 +18,7 @@ def update_remote_creature_model_meta(
     model: str = "",
     llm_name: str = "",
 ) -> None:
-    """B4: refresh ``_meta`` model cache after switch_model so a tab
-    reopen racing a worker disconnect still surfaces the choice."""
+    """Cache a remote creature's model choice after a successful switch."""
     if not creature_id:
         return
     for meta in meta_registry.values():
@@ -51,8 +37,7 @@ async def refresh_remote_creature_meta(
     *,
     cluster_members: list[str] | None = None,
 ) -> None:
-    """B3/B4: refresh cached model/llm_name from the worker for every
-    creature tracked under ``session_id`` (single + cluster members).
+    """Refresh cached worker status for a session and its cluster members.
 
     ``cluster_members`` is the list of sids belonging to ``session_id``'s
     cluster (caller resolves via :mod:`cluster_fold`); we always include
@@ -94,8 +79,7 @@ async def refresh_all_remote_creature_meta(
     meta_registry: dict[str, dict[str, Any]],
     service: "TerrariumService",
 ) -> None:
-    """S6-2: refresh cached model/llm_name for EVERY remote-hosted meta
-    entry via a single ``service.list_creatures()`` fan-out.
+    """Refresh every remote metadata entry from one creature-list fan-out.
 
     Worker-side switch_model paths that do not call the host's
     ``/creatures/{cid}/model`` route (the ``/model`` slash command,
@@ -105,10 +89,8 @@ async def refresh_all_remote_creature_meta(
     ``lifecycle.list_creatures``, and the legacy ``GET /agents``
     aliases — return the stale cached identifier.
 
-    This fan-out brings every cached entry back in sync from a single
-    Protocol call, then the sync read paths emit the fresh model.
-    Empty worker replies MUST NOT clobber cached values; the user's
-    selection is the source of truth in that race.
+    One service call synchronizes all cached entries before synchronous readers
+    use them. Empty worker values never replace a previously confirmed selection.
     """
     list_creatures_fn = getattr(service, "list_creatures", None)
     if not callable(list_creatures_fn):

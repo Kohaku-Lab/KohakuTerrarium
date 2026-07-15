@@ -271,7 +271,7 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         return None
 
     # ------------------------------------------------------------------
-    # Per-creature control (per ``api-lab-design.md`` §2)
+    # Per-creature control
     # ------------------------------------------------------------------
 
     async def interrupt(self, creature_id: str) -> None:
@@ -565,9 +565,9 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         principal: str = "user:local",
         is_operator: bool = False,
     ) -> dict[str, Any]:
-        # Args is conventionally a string; accept dict for forward-compat. The
-        # host-authorized principal/operator ride the trusted host->worker link
-        # (R1-20); the worker rejects a non-host origin (R1-04).
+        # Args is conventionally a string; accept dict for forward compatibility.
+        # The host-authorized principal/operator travel over the trusted
+        # host-to-worker link, and the worker rejects non-host origins.
         body = _maybe_raise(
             await self._req(
                 "execute_command",
@@ -662,17 +662,13 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
     async def runtime_graph_snapshot(self) -> dict[str, Any]:
         body = _maybe_raise(await self._req("runtime_graph_snapshot", {}))
         snap = body.get("snapshot", {"graphs": [], "version": 0})
-        # The worker's own snapshot reports ``node_id="_host"`` for each
-        # graph because, on its side, IT *is* the host of its engine.
-        # Rewrite to OUR ``node_id`` so the host-side aggregator and the
-        # graph editor render worker graphs with the correct site chip
-        # (user-reported "graphs show as host" bug stems from this
-        # missing rewrite — cluster linkage also keys on this id).
+        # A worker reports ``node_id="_host"`` because it hosts its own engine.
+        # Rewrite that local identity to the controller's node id so aggregation,
+        # cluster linkage, and graph rendering identify the worker correctly.
         for graph in snap.get("graphs", []):
             graph["node_id"] = self._target_node
-            # Stamp each creature's home site so the graph editor can
-            # render the per-creature worker chip (BUG #147: worker
-            # creatures previously surfaced as ``_host``).
+            # Stamp each creature's home site for the same reason; otherwise
+            # worker-hosted creatures appear to belong to ``_host``.
             for creature in graph.get("creatures", []) or []:
                 if isinstance(creature, dict):
                     creature["home_node"] = self._target_node

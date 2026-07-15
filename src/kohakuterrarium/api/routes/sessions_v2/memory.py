@@ -1,10 +1,4 @@
-"""Sessions memory — FTS5 / vector / hybrid search over a saved session.
-
-Path is ``/{session_name}/memory/search`` so the router can be mounted
-under ``/api/sessions`` for URL preservation: the frontend's
-``sessionAPI.searchSession`` calls ``GET
-/sessions/{name}/memory/search``.
-"""
+"""Search saved session memory with full-text, vector, or hybrid modes."""
 
 import asyncio
 from pathlib import Path
@@ -25,20 +19,10 @@ router = APIRouter()
 def _resolve_cluster_member_paths(
     session_sid: str, service: TerrariumService
 ) -> list[tuple[str, Path]]:
-    """Return ``[(member_sid, path)]`` for every reachable cluster member.
+    """Resolve materialized session paths for every reachable cluster member.
 
-    Mirrors :func:`studio.sessions.cluster_paths.resolve_cluster_member_paths`
-    but uses the module-level ``resolve_session_path_default`` binding
-    so unit tests can monkeypatch ``memory_mod.resolve_session_path_default``
-    and have it affect the route's path lookup.
-
-    See ``studio/sessions/cluster_paths.py`` for the canonical
-    docstring — short version: maps the requested sid to its cluster
-    primary, walks every member sid, resolves each member's mirror
-    path, skips members whose mirror hasn't materialised. Standalone
-    mode (no cluster links) returns a single-entry list with the
-    requested sid's own path so the caller takes the existing scalar
-    fast path.
+    The module-level path resolver remains patchable by route unit tests. Missing
+    mirrors are skipped; standalone sessions resolve to their own single path.
     """
     primary = cluster_fold.sid_to_primary(service).get(session_sid, session_sid)
     members = cluster_fold.cluster_groups(service).get(primary, {session_sid})
@@ -54,13 +38,10 @@ def _resolve_cluster_member_paths(
 def _merge_member_results(
     member_results: list[dict[str, Any]], k: int
 ) -> list[dict[str, Any]]:
-    """Merge per-member search payloads into one ``results`` list.
+    """Merge member results by descending score and retain the top ``k``.
 
-    Each payload has shape ``{"results": [{"score": float, ...}, ...]}``.
-    Sort the union by descending ``score`` (FTS BM25 / vector similarity
-    / RRF fusion all expose a comparable ``score`` float) and trim to
-    ``k``. Hits with no ``score`` are sorted to the end so a partial
-    failure on one member can't crowd out a member with real scores.
+    Full-text, vector, and reciprocal-rank fusion results expose comparable scores.
+    Missing or invalid scores sort last so they cannot displace scored hits.
     """
     merged: list[dict[str, Any]] = []
     for payload in member_results:
@@ -83,31 +64,14 @@ async def search_session_memory_route(
     agent: str | None = None,
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, Any]:
-    """Search a session's memory via FTS5 or semantic / hybrid modes.
+    """Search session memory without changing indexing behavior.
 
-    Read-only. Wraps the existing ``SessionMemory.search()`` — no new
-    indexing behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
-    ``hybrid``.
-
-    CF-5: in multi-node mode the requested ``session_name`` is usually a
-    cluster's primary sid. Each cluster member writes events to its OWN
-    per-worker store (mirrored host-side as
-    ``<session_dir>/mirror/<member_sid>.kohakutr``); opening only the
-    primary's mirror missed every hit from the other members. Resolve
-    the cluster via :func:`cluster_fold.cluster_groups`, search each
-    member's mirror, and merge by score. Standalone falls through with
-    a single member (the requested sid itself) — same behaviour as
-    before.
-
-    Service-routed: in lab-host mode the host runs no agent engine, so
-    the "find a live creature with this session path" optimisation has
-    no host-side hit to begin with — ``host_engine_or_none`` returns
-    ``None`` and the search opens a fresh :class:`SessionStore` from
-    the on-disk path.
+    Multi-node sessions search every member's mirrored store and merge results by
+    score because each worker records its own events. Standalone sessions use the
+    same path with one member. When the lab host has no agent engine, searches open
+    the on-disk stores directly.
     """
-    # ``resolve_session_path_default`` walks ``~/.kohakuterrarium/sessions``
-    # — a small but synchronous filesystem stat. Off-load it (plus the
-    # full cluster-member resolution, which does one stat per member).
+    # Path resolution performs synchronous filesystem stats for every member.
     member_paths = await asyncio.to_thread(
         _resolve_cluster_member_paths, session_name, service
     )
@@ -115,18 +79,14 @@ async def search_session_memory_route(
         raise HTTPException(404, f"Session not found: {session_name}")
 
     engine = host_engine_or_none(service)
-    # Fan out across cluster members. Standalone shape is a single-entry
-    # list — same code path, same query, no per-member overhead beyond
-    # one extra ``cluster_groups`` lookup at the top.
+    # A single-member standalone session follows the same fan-out path.
     per_member = await asyncio.gather(
         *(
             search_session_memory(
                 path,
                 q=q,
                 mode=mode,
-                # Pull ``k`` from EACH member so the top-k merge across
-                # the union still has k candidates from every side; trim
-                # to k after sort.
+                # Each member contributes up to k candidates before the global trim.
                 k=k,
                 agent=agent,
                 engine=engine,
@@ -135,9 +95,7 @@ async def search_session_memory_route(
         )
     )
 
-    # Standalone fast path: single member, no merge bookkeeping needed —
-    # return the per-member payload verbatim so its ``count`` /
-    # ``session_name`` fields match the pre-CF-5 shape exactly.
+    # Preserve the standalone payload fields exactly when no merge is required.
     if len(per_member) == 1:
         return per_member[0]
 

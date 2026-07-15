@@ -1,19 +1,9 @@
 """Builtin tool parameter schemas.
 
-Pure-data module — one entry per built-in tool, keyed by tool_name.
-Used by llm/tools.py:build_tool_schemas when constructing the
-native function-calling schema list passed to the LLM.
+Define native function-calling schemas for built-in tools.
 
-This file intentionally lives standalone and is exempt from the file-
-size guard: every new builtin tool adds an entry here, and inlining
-the dict in tools.py made the dispatch logic hard to read once the
-catalogue grew past ~30 entries.
-
-If a tool is missing from this dict, build_tool_schemas falls back
-to a generic {content: string} schema — which silently strips
-structured arguments. The regression test
-tests/unit/test_tool_schemas_complete.py enforces every registered
-builtin tool has an entry here.
+Every registered built-in tool must have an entry so structured arguments are
+preserved instead of falling back to a generic content string.
 """
 
 _BUILTIN_SCHEMAS: dict[str, dict] = {

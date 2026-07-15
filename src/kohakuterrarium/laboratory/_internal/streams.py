@@ -19,14 +19,10 @@ from kohakuterrarium.laboratory._internal.envelope import (
     EnvelopeKind,
 )
 
-# Default ack timeout for ack-required sends, in seconds. The host/client
-# engine polls due_for_retry() with this value. Tunable per-call via flags
-# in a future revision; fixed default suffices for 1.5.0.
+# The host and client engines use this timeout when polling for retries.
 DEFAULT_ACK_TIMEOUT_SECONDS = 5.0
 
-# Max envelopes a receiver will hold in its reorder buffer before dropping.
-# Caps the per-stream memory footprint when sequences are pathologically
-# delayed.
+# Bound each stream's memory use when sequence gaps persist.
 DEFAULT_REORDER_BUFFER_SIZE = 128
 
 
@@ -42,7 +38,7 @@ class StreamSender:
     pending: dict[int, tuple[Envelope, float]] = field(default_factory=dict)
 
     def assign_seq(self) -> int:
-        """Return and consume the next monotonically increasing seq."""
+        """Return and consume the next monotonically increasing sequence."""
         seq = self.next_seq
         self.next_seq += 1
         return seq
@@ -122,7 +118,7 @@ class StreamReceiver:
           buffered subsequent slots drain in sequence.
         """
         if env.seq < self.expected_seq:
-            # Duplicate: already delivered or about to be (would-be replay).
+            # Earlier sequences have already been delivered and are replays.
             return []
         if env.seq == self.expected_seq:
             ready = [env]
@@ -131,7 +127,7 @@ class StreamReceiver:
                 ready.append(self.buffer.pop(self.expected_seq))
                 self.expected_seq += 1
             return ready
-        # env.seq > expected_seq: buffer for later.
+        # Preserve future sequences until the gap is filled.
         if len(self.buffer) >= self.max_reorder_buffer:
             # Buffer full — drop this far-future envelope. Sender's
             # retransmit will arrive after the gap fills.

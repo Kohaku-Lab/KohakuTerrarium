@@ -1,11 +1,7 @@
 """Runtime-topology snapshot + replay.
 
-Recipes (``terrarium.yaml``) describe the topology a graph starts
-with. Everything the user / a privileged tool adds AFTER the recipe
-loads — extra channels via ``service.add_channel``, extra wires via
-``service.connect``, ``unwire`` removals — only lives in the
-in-memory :class:`GraphTopology`. Without persistence, a close +
-resume cycle reverts to the original recipe.
+Recipes define the initial graph; this module preserves subsequent in-memory
+channel and wire changes across close and resume.
 
 This module captures the live topology as a primitive-dict snapshot
 into the graph's :class:`SessionStore` ``meta`` after every mutation,

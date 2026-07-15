@@ -1,9 +1,8 @@
-"""Runtime graph snapshot API for the graph editor.
+"""Serialize live runtime graphs for the graph editor.
 
-The graph editor needs one normalized, process-local view of the live
-Terrarium engine: graphs, creatures, shared channels, and direct output
-wiring. This route is read-only and returns backend/runtime data only;
-frontend layout state remains a UI preference.
+Snapshots contain backend topology, creatures, shared channels, and output
+wiring. Frontend layout remains separate UI state and is never inferred or
+persisted here.
 """
 
 import json
@@ -25,26 +24,25 @@ router = APIRouter()
 async def runtime_graph_snapshot(
     service: TerrariumService = Depends(get_service),
 ):
-    """Return a normalized snapshot of every live runtime graph.
+    """Return normalized live graphs from all services.
 
-    In multi-node mode this fans out across nodes and unions the
-    per-node snapshots (each graph is annotated with ``node_id``).
-    The frontend graph editor keys by ``graph_id`` which is globally
-    unique, so it can render without further changes.
+    Multi-node services merge per-node snapshots and annotate each graph with
+    its node. Graph IDs are globally unique, so no additional namespacing is
+    required.
     """
     return await service.runtime_graph_snapshot()
 
 
 def build_runtime_graph_snapshot(engine: Terrarium) -> dict[str, Any]:
-    """Build the graph-editor snapshot from the live engine.
+    """Build a normalized graph-editor snapshot from a live engine.
 
-    Graphs are ordered by their session ``created_at`` timestamp
-    (oldest first, newest last) so the graph editor's auto-layout
-    appends new creatures to the right of existing ones rather than
-    shoving them in alphabetically by id. ``graph_id`` breaks ties.
+    Graphs are ordered by session creation time so auto-layout appends newer
+    graphs after existing ones; ``graph_id`` provides deterministic tie
+    breaking.
     """
 
     def _order_key(graph: GraphTopology) -> tuple[str, str]:
+        """Order graphs chronologically with a stable ID tie breaker."""
         meta = lifecycle.get_session_meta(engine, graph.graph_id)
         return (meta.get("created_at", ""), graph.graph_id)
 
@@ -58,6 +56,7 @@ def build_runtime_graph_snapshot(engine: Terrarium) -> dict[str, Any]:
 
 
 def _graph_to_dict(engine: Terrarium, graph: GraphTopology) -> dict[str, Any]:
+    """Serialize one graph and its runtime-owned relationships."""
     meta = lifecycle.get_session_meta(engine, graph.graph_id)
     creatures = _creatures_for_graph(engine, graph)
     channels = _channels_for_graph(engine, graph)
@@ -78,15 +77,11 @@ def _graph_to_dict(engine: Terrarium, graph: GraphTopology) -> dict[str, Any]:
 def _creatures_for_graph(
     engine: Terrarium, graph: GraphTopology
 ) -> list[dict[str, Any]]:
-    """Serialize every creature in ``graph`` for the snapshot.
+    """Serialize graph creatures and select one compatibility root.
 
-    ``is_root`` is retained as a synonym for legacy frontend code.
-    With multiple privileged creatures in one graph (possible after
-    merging two solo sessions, or hot-plugging a second user-spawn),
-    only one creature is tagged as the root: the one with
-    ``creature_id == "root"`` (recipe convention) or, failing that,
-    ``name == "root"``. ``is_privileged`` is the canonical flag and
-    every privileged creature carries it.
+    ``is_privileged`` is canonical and may be true for multiple creatures.
+    Legacy ``is_root`` is assigned to at most one privileged creature, preferring
+    ID ``root``, then name ``root``, then the first sorted privileged ID.
     """
     creatures: list[dict[str, Any]] = []
     privileged_ids: list[str] = []
@@ -102,8 +97,8 @@ def _creatures_for_graph(
 
     root_id = ""
     if privileged_ids:
-        # Recipe convention first (``creature_id == "root"``), then
-        # ``name == "root"``, then the lowest-sorted privileged id.
+        # Preserve the recipe root convention while keeping the fallback
+        # deterministic for merged graphs with multiple privileged creatures.
         for cid in privileged_ids:
             if cid == "root":
                 root_id = cid
@@ -123,9 +118,8 @@ def _creatures_for_graph(
         status["is_root"] = creature_id == root_id
         status["parent_creature_id"] = getattr(creature, "parent_creature_id", None)
         status["graph_id"] = graph.graph_id
-        # Default to the host site. The remote service rewrites this to
-        # the worker's node id when the snapshot crosses the wire (see
-        # ``RemoteTerrariumService.runtime_graph_snapshot``).
+        # Local snapshots originate on the host; remote services rewrite this
+        # field to their worker ID when aggregating across nodes.
         status["home_node"] = "_host"
         creatures.append(status)
     return creatures
@@ -134,6 +128,7 @@ def _creatures_for_graph(
 def _channels_for_graph(
     engine: Terrarium, graph: GraphTopology
 ) -> list[dict[str, Any]]:
+    """Serialize the union of topology-declared and runtime channels."""
     env = engine._environments.get(graph.graph_id)
     registry = getattr(env, "shared_channels", None) if env is not None else None
     names = set(graph.channels)
@@ -172,6 +167,7 @@ def _output_edges_for_graph(
     graph: GraphTopology,
     creatures: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    """Serialize output wiring and resolve each edge target to a creature ID."""
     edges: list[dict[str, Any]] = []
     for creature in creatures:
         creature_id = creature.get("creature_id") or creature.get("agent_id")
@@ -201,6 +197,7 @@ def _resolve_target_creature_id(
     creatures: list[dict[str, Any]],
     target: str,
 ) -> str:
+    """Resolve an output target expressed as an ID, name, or legacy root alias."""
     if not target:
         return ""
     by_id = {
@@ -222,6 +219,7 @@ def _resolve_target_creature_id(
 
 
 def _message_to_dict(message: Any) -> dict[str, Any]:
+    """Serialize a channel message with JSON-safe content and metadata."""
     return {
         "message_id": getattr(message, "message_id", ""),
         "sender": getattr(message, "sender", ""),
@@ -234,6 +232,7 @@ def _message_to_dict(message: Any) -> dict[str, Any]:
 
 
 def _jsonable(value: Any) -> Any:
+    """Preserve JSON-serializable values and stringify unsupported objects."""
     try:
         json.dumps(value)
         return value
@@ -242,6 +241,7 @@ def _jsonable(value: Any) -> Any:
 
 
 def _preview(value: Any, limit: int = 160) -> str:
+    """Render a single-line, length-bounded message preview."""
     if isinstance(value, str):
         text = value
     else:
@@ -256,6 +256,7 @@ def _preview(value: Any, limit: int = 160) -> str:
 
 
 def _timestamp_to_string(value: Any) -> str:
+    """Return an ISO timestamp when supported, otherwise a string value."""
     if value is None:
         return ""
     isoformat = getattr(value, "isoformat", None)

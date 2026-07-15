@@ -1,8 +1,4 @@
-"""
-Trigger module protocol and base class.
-
-Triggers produce TriggerEvents without user input - enabling autonomous agents.
-"""
+"""Define autonomous trigger protocols and shared lifecycle behavior."""
 
 from abc import ABC, abstractmethod
 from typing import Any, ClassVar, Protocol, runtime_checkable
@@ -12,15 +8,7 @@ from kohakuterrarium.core.events import TriggerEvent
 
 @runtime_checkable
 class TriggerModule(Protocol):
-    """
-    Protocol for trigger modules.
-
-    Triggers produce TriggerEvents based on various conditions:
-    - Timer: Fire at intervals
-    - Condition: Fire when state matches
-    - Context: Fire when context changes
-    - Idle: Fire after inactivity period
-    """
+    """Define lifecycle and event delivery for autonomous trigger modules."""
 
     async def start(self) -> None:
         """Start the trigger."""
@@ -31,56 +19,29 @@ class TriggerModule(Protocol):
         ...
 
     async def wait_for_trigger(self) -> TriggerEvent | None:
-        """
-        Wait for and return the next trigger event.
-
-        Returns:
-            TriggerEvent when trigger fires, or None if stopped
-        """
+        """Wait for the next event, returning none after the trigger stops."""
         ...
 
     def set_context(self, context: dict[str, Any]) -> None:
-        """
-        Update trigger context.
-
-        Used by context-based triggers to receive state updates.
-
-        Args:
-            context: Current context dict
-        """
+        """Update state consumed by context-sensitive triggers."""
         ...
 
 
 class BaseTrigger(ABC):
-    """
-    Base class for trigger modules.
+    """Provide trigger lifecycle, context, setup metadata, and event creation."""
 
-    Provides common functionality for trigger handling.
-    """
-
-    # Override in subclass to enable resume persistence
     resumable: bool = False
-    # Override in subclass to allow the agent to install this trigger at
-    # runtime via a tool call. Setup-able triggers get wrapped as tools by
-    # ``CallableTriggerTool`` (see ``modules/trigger/callable.py``).
+    # Universal triggers may be installed at runtime through a generated tool.
     universal: ClassVar[bool] = False
 
-    # --- Setup-able trigger metadata (only honoured when universal=True) ---
-    # Tool name the agent calls to install this trigger (e.g. "add_timer").
     setup_tool_name: ClassVar[str] = ""
-    # One-line summary shown in the tool list. The adapter prepends
-    # "**Trigger**: " so the LLM knows this call installs a long-lived
-    # side-effect rather than returning an immediate result.
+    # The adapter marks setup descriptions as long-lived trigger side effects.
     setup_description: ClassVar[str] = ""
-    # JSON-schema-like dict describing the args the agent should pass.
-    # None means the tool accepts no args.
+    # None denotes a setup tool with no arguments.
     setup_param_schema: ClassVar[dict[str, Any] | None] = None
-    # Long-form documentation surfaced by the ``info`` framework command.
-    # Empty string falls back to setup_description.
+    # Empty setup documentation falls back to the one-line description.
     setup_full_doc: ClassVar[str] = ""
-    # If True, the adapter requires the agent to call ``info <name>`` before
-    # using the tool — for triggers whose correct use depends on subtle
-    # details beyond the schema.
+    # Manual-read gating protects triggers whose constraints exceed their schema.
     setup_require_manual_read: ClassVar[bool] = False
 
     def __init__(
@@ -88,53 +49,29 @@ class BaseTrigger(ABC):
         prompt: str | None = None,
         **options: Any,
     ):
-        """
-        Initialize trigger.
-
-        Args:
-            prompt: Default prompt to include in trigger events
-            **options: Additional trigger options
-        """
+        """Initialize the default prompt, options, context, and stopped state."""
         self.prompt = prompt
         self.options = options
         self._running = False
         self._context: dict[str, Any] = {}
 
     def to_resume_dict(self) -> dict[str, Any]:
-        """Serialize trigger config for session persistence.
-
-        Override in subclass to save constructor args needed for re-creation.
-        Only called if resumable=True.
-        """
+        """Serialize constructor data required to resume this trigger."""
         return {"prompt": self.prompt, **self.options}
 
     @classmethod
     def from_resume_dict(cls, data: dict[str, Any]) -> "BaseTrigger":
-        """Re-create trigger from saved config.
-
-        Override in subclass if constructor signature differs from data keys.
-        """
+        """Recreate a trigger from persisted constructor data."""
         return cls(**data)
 
     @classmethod
     def from_setup_args(cls, args: dict[str, Any]) -> "BaseTrigger":
-        """Build an instance from the agent-supplied setup tool args.
-
-        Default: forwards to ``from_resume_dict``. Override when the setup
-        schema differs from the resume dict shape (e.g. when you accept
-        user-facing aliases or need validation beyond dataclass wiring).
-        """
+        """Build from setup arguments, defaulting to the resume-data contract."""
         return cls.from_resume_dict(args)
 
     @classmethod
     def post_setup(cls, trigger: "BaseTrigger", context: Any) -> None:
-        """Hook called after an agent-installed trigger is constructed.
-
-        Default: no-op. Triggers that need context-derived state (e.g. a
-        channel registry or a creature-name-based ``ignore_sender``) override
-        this to wire those fields from the executor ``context`` before the
-        trigger is registered with the trigger manager.
-        """
+        """Wire context-derived state before a generated trigger is registered."""
         return None
 
     @property
@@ -153,11 +90,11 @@ class BaseTrigger(ABC):
         await self._on_stop()
 
     async def _on_start(self) -> None:
-        """Called when trigger starts. Override in subclass."""
+        """Handle subclass-specific startup."""
         pass
 
     async def _on_stop(self) -> None:
-        """Called when trigger stops. Override in subclass."""
+        """Handle subclass-specific shutdown."""
         pass
 
     def set_context(self, context: dict[str, Any]) -> None:
@@ -166,12 +103,12 @@ class BaseTrigger(ABC):
         self._on_context_update(context)
 
     def _on_context_update(self, context: dict[str, Any]) -> None:
-        """Called when context is updated. Override in subclass."""
+        """React to newly merged trigger context."""
         pass
 
     @abstractmethod
     async def wait_for_trigger(self) -> TriggerEvent | None:
-        """Wait for trigger event. Must be implemented by subclass."""
+        """Wait for the next trigger event."""
         ...
 
     def _create_event(

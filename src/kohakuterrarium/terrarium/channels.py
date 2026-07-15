@@ -9,10 +9,8 @@ listens to, a :class:`ChannelTrigger` is added to its
 Supports both static wiring (declared at recipe-load time) and live
 hot-plug (creatures connecting after they're already running).
 
-The ``connect_creatures`` / ``disconnect_creatures`` helpers below are
-the bodies of ``Terrarium.connect`` / ``Terrarium.disconnect``;
-they're kept here to keep ``engine.py`` under the 600-line cap and
-because every line of logic in them is channel-related.
+The engine delegates channel connection behavior to these helpers so topology
+mutation and live channel injection remain coordinated.
 """
 
 import asyncio
@@ -497,7 +495,7 @@ async def ensure_same_graph(
     # between agentAPI.list and terrariumAPI.list as snapshots roll in.
     _promote_session_kind_after_merge(keep_gid)
     _emit_session_kind_changed(engine, keep_gid, drop_gids, delta)
-    # Drain the Drive row movement this merge stashed BEFORE returning (R1-12).
+    # Drain the Drive row movement this merge stashed before returning.
     # ``apply_merge`` only stashes the capture; without draining here a caller
     # like ``group_wire`` that invokes this primitive directly (not through
     # ``Terrarium.connect``) would leave the absorbed graph's Drive rows in its

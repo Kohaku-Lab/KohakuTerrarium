@@ -73,11 +73,8 @@ def build_channel_topology_prompt(
     """
     Build a prompt section describing channel topology for a creature.
 
-    This is the CRITICAL prompt that teaches the creature how to participate
-    in the terrarium. It must clearly distinguish:
-    - Team channels (shared, for communicating with OTHER creatures)
-    - Sub-agents (internal, for delegating work WITHIN this creature)
-    - The workflow: what to do when triggered, where to send results
+    Distinguish shared team channels from private sub-agent delegation, and
+    describe how triggers and result delivery use those channels.
     """
     ch_by_name: dict[str, ChannelConfig] = {}
     for ch in config.channels:

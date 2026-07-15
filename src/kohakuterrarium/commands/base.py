@@ -1,8 +1,5 @@
 """
-Framework command protocol and base classes.
-
-Commands are special actions the legacy/custom text-format controller
-path can invoke.
+Protocol and base types for legacy text-format controller commands.
 """
 
 from dataclasses import dataclass
@@ -11,14 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @dataclass
 class CommandResult:
-    """
-    Result from command execution.
-
-    Attributes:
-        content: Result content to inject into context
-        error: Error message if failed
-        metadata: Additional result data
-    """
+    """Command content, failure text, and optional structured metadata."""
 
     content: str = ""
     error: str | None = None
@@ -31,34 +21,20 @@ class CommandResult:
 
 @runtime_checkable
 class Command(Protocol):
-    """
-    Protocol for framework commands.
-
-    Commands are synchronous operations that return content
-    to be injected into the controller's context.
-    """
+    """Asynchronous command that returns content for controller context."""
 
     @property
     def command_name(self) -> str:
-        """Command name (e.g., 'read', 'info')."""
+        """Return the parser-visible command name."""
         ...
 
     @property
     def description(self) -> str:
-        """One-line description."""
+        """Return a concise command description."""
         ...
 
     async def execute(self, args: str, context: Any) -> CommandResult:
-        """
-        Execute the command.
-
-        Args:
-            args: Arguments string from the parsed controller command
-            context: Controller context for accessing jobs, tools, etc.
-
-        Returns:
-            CommandResult with content to inject
-        """
+        """Execute parsed arguments against a controller context."""
         ...
 
 
@@ -74,29 +50,19 @@ class BaseCommand:
         raise NotImplementedError
 
     async def execute(self, args: str, context: Any) -> CommandResult:
-        """Execute with error handling."""
+        """Convert command exceptions into a failed result."""
         try:
             return await self._execute(args, context)
         except Exception as e:
             return CommandResult(error=str(e))
 
     async def _execute(self, args: str, context: Any) -> CommandResult:
-        """Internal execution - override in subclass."""
+        """Implement command behavior in a subclass."""
         raise NotImplementedError
 
 
 def parse_command_args(args: str) -> tuple[str, dict[str, str]]:
-    """
-    Parse command arguments.
-
-    Handles formats like:
-    - "job_123" -> ("job_123", {})
-    - "job_123 --lines 50" -> ("job_123", {"lines": "50"})
-    - "job_123 --lines 50 --offset 10" -> ("job_123", {"lines": "50", "offset": "10"})
-
-    Returns:
-        (positional_arg, kwargs_dict)
-    """
+    """Parse one positional value and short or long option flags."""
     parts = args.strip().split()
     if not parts:
         return "", {}

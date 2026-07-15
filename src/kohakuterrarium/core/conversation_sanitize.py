@@ -1,8 +1,4 @@
-"""Orphan tool-call / tool-result sanitation for :class:`Conversation`.
-
-Split out of :mod:`conversation` to keep that module under the
-file-size guard.
-"""
+"""Sanitization of unmatched native tool calls and results."""
 
 from datetime import datetime
 from typing import Any
@@ -14,14 +10,7 @@ logger = get_logger(__name__)
 
 
 def _is_empty_content(content: Any) -> bool:
-    """Return True if a message's ``content`` carries no user-visible text.
-
-    Used by the orphan tool-call sanitiser to decide whether an assistant
-    message whose ``tool_calls`` were all dropped can be removed wholesale.
-    Treats ``None``, the empty string (after strip), and an empty list as
-    empty. A list with any non-trivial part (text with content, image,
-    file) counts as non-empty — the assistant still has something to say.
-    """
+    """Return whether content has no visible text or non-text payload."""
     if content is None:
         return True
     if isinstance(content, str):
@@ -32,8 +21,7 @@ def _is_empty_content(content: Any) -> bool:
                 if part.text and part.text.strip():
                     return False
             elif isinstance(part, dict):
-                # Post-serialisation dicts — treat anything non-text or
-                # non-empty text as meaningful payload.
+                # Serialized image and file parts remain meaningful without text.
                 if part.get("type") == "text":
                     text = part.get("text", "")
                     if text and text.strip():
@@ -41,8 +29,7 @@ def _is_empty_content(content: Any) -> bool:
                 else:
                     return False
             else:
-                # Any non-TextPart object (ImagePart, FilePart, …) is
-                # meaningful — keep the message.
+                # Any non-text content part keeps the assistant message meaningful.
                 return False
         return True
     return False
@@ -53,33 +40,12 @@ def sanitize_orphan_tool_pairs(
     *,
     preserve_pending_tail: bool = False,
 ) -> list[dict[str, Any]]:
-    """Strip unmatched tool_call / tool-result pairs.
+    """Return an idempotently sanitized provider message sequence.
 
-    Pure function: takes the provider payload, returns a new list
-    with orphan fragments removed. Idempotent — running twice
-    yields identical output.
-
-    Rules (matches the OpenAI Chat Completions contract):
-
-    1. Every id in an ``assistant.tool_calls`` list MUST have a
-       matching ``role=tool`` message with the same ``tool_call_id``
-       somewhere between that assistant message and the next
-       ``assistant`` / ``user`` message. Unmatched ids are dropped
-       from ``tool_calls``. If an assistant message ends up with
-       empty ``tool_calls`` AND empty ``content``, the whole
-       message is dropped.
-    2. Every ``role=tool`` message MUST reference a ``tool_call_id``
-       announced by some *preceding* assistant message (after the
-       same sanitisation pass). Orphan tool messages are dropped.
-
-    ``preserve_pending_tail`` protects the FINAL announcement when it
-    is followed only by tool results (or nothing): its unmatched ids
-    are in-flight calls whose results are still executing — a live
-    mid-turn caller (the compact splice) must not delete them, or the
-    arriving results become orphans.
-
-    Produces WARNING-level log entries for every drop so operators
-    can see when compaction left the conversation inconsistent.
+    Each assistant call must receive a matching tool result before the next user
+    or assistant message, and each tool result must reference a preceding retained
+    call. ``preserve_pending_tail`` protects the final in-flight announcement so
+    later results can still attach during mid-turn persistence or compaction.
     """
     if not messages:
         return messages
@@ -96,10 +62,8 @@ def sanitize_orphan_tool_pairs(
                 }
             break
 
-    # --- Pass 1 + 2: scan for orphan assistant tool_calls. ---
-    # For each assistant with tool_calls, walk forward until we hit
-    # the next assistant/user and collect the tool_call_ids that
-    # actually showed up. Drop the missing ones.
+    # Tool results belong only to the assistant round before the next user or
+    # assistant message; later matches cannot repair an earlier orphaned call.
     cleaned: list[dict[str, Any]] = []
     n = len(messages)
     for idx, msg in enumerate(messages):
@@ -107,7 +71,6 @@ def sanitize_orphan_tool_pairs(
             expected_ids = [
                 tc.get("id") for tc in msg["tool_calls"] if tc.get("id") is not None
             ]
-            # Collect responder ids up to the next assistant/user.
             observed_ids: set[str] = set()
             for j in range(idx + 1, n):
                 nxt = messages[j]
@@ -141,13 +104,10 @@ def sanitize_orphan_tool_pairs(
             if kept_calls:
                 new_msg["tool_calls"] = kept_calls
             else:
-                # All tool_calls orphaned — remove the key so the
-                # provider doesn't see an empty list.
+                # Providers reject an explicit empty native-call list.
                 new_msg.pop("tool_calls", None)
 
-            # If the assistant now has NO meaningful payload, drop
-            # the whole message. Content considered "empty" if it's
-            # None, empty string, or empty list.
+            # An assistant shell with neither content nor calls is invalid context.
             if not kept_calls and _is_empty_content(new_msg.get("content")):
                 logger.warning(
                     f"dropped assistant message #{idx} — no content + all tool_calls orphaned",
@@ -158,9 +118,7 @@ def sanitize_orphan_tool_pairs(
         else:
             cleaned.append(msg)
 
-    # --- Pass 3: drop orphan tool-result messages. ---
-    # A tool message is valid only if some preceding assistant in
-    # the (already sanitised) list advertises its tool_call_id.
+    # Validate results against the already-sanitized assistant announcements.
     announced_ids: set[str] = set()
     final: list[dict[str, Any]] = []
     for idx, msg in enumerate(cleaned):
@@ -190,12 +148,10 @@ def sanitize_orphan_tool_pairs(
 def prune_orphan_tool_pairs(
     conversation: Any, *, preserve_pending_tail: bool = False
 ) -> int:
-    """Apply the orphan sanitiser to the in-memory list itself.
+    """Prune in-memory orphan tool pairs and return the removal count.
 
-    ``to_messages`` sanitizes a fresh copy on every call, so orphans
-    left in ``_messages`` re-warn on every LLM request. This prunes
-    them once (the session store is untouched). Returns the number
-    of messages removed.
+    This prevents repeated warnings from copy-only wire sanitization without
+    modifying the persisted session snapshot.
     """
     source = [dict(d) for d in messages_to_dicts(conversation._messages)]
     if len(source) != len(conversation._messages):

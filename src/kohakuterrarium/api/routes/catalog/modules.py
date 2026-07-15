@@ -1,4 +1,4 @@
-"""Module CRUD routes — one router covers every kind."""
+"""Manage every supported workspace module kind through one router."""
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field

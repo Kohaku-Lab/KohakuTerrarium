@@ -1,4 +1,4 @@
-"""``/start`` — start a stopped creature by name (or the focused one)."""
+"""Start the focused creature or resolve and start a named creature."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.builtins.user_commands.stop import _resolve_target
@@ -29,6 +29,6 @@ class StartCommand(BaseUserCommand):
             return UserCommandResult(output=f"{target.name} is already running")
         try:
             await target.start()
-        except Exception as e:  # pragma: no cover - defensive
+        except Exception as e:  # pragma: no cover
             return UserCommandResult(error=f"start failed: {e}")
         return UserCommandResult(output=f"Started {target.name}")

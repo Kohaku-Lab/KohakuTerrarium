@@ -1,45 +1,7 @@
-"""Provider-native image generation (Codex built-in ``image_generation``).
+"""Describe Codex-native image generation to the provider layer.
 
-This is a **provider-native** tool and is **opt-out** — every
-creature that runs on Codex gets it automatically. The tool runner
-never executes it; the provider translates its presence into a
-wire-format tool spec, captures the returned image from the
-response stream, and surfaces it as structured assistant content.
-
-Supported providers:
-
-* ``codex`` — via ``CodexOAuthProvider``, which maps this tool to
-  the Codex Responses API built-in
-  ``{"type":"image_generation", "output_format": ...}``.
-
-### Default behaviour
-
-- Codex-backed creatures: ``image_gen`` is auto-registered with
-  provider defaults (PNG, auto size, auto quality). No YAML needed.
-- Non-Codex creatures: ``image_gen`` simply isn't available. No
-  error, no prompt noise.
-
-### Opt-out
-
-Add the tool name to the creature's ``disable_provider_tools``
-list to suppress the auto-injection::
-
-    disable_provider_tools:
-      - image_gen
-
-### Custom knobs
-
-Wire the tool explicitly if you want non-default knobs. The
-explicit entry wins over auto-injection::
-
-    tools:
-      - name: image_gen
-        type: builtin
-        output_format: png        # png | webp | jpeg
-        size: 1024x1024           # 1024x1024 | 1024x1536 | 1536x1024 | auto
-        quality: high             # low | medium | high | auto
-        action: auto              # generate | edit | auto
-        background: auto          # transparent | opaque | auto
+The provider executes this opt-out tool directly; the ordinary tool runner
+never invokes it. Explicit configuration overrides provider defaults.
 """
 
 from typing import Any
@@ -53,7 +15,6 @@ from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResul
 class ImageGenTool(BaseTool):
     """Codex-native image generation (text-to-image + image edit)."""
 
-    # Provider-native hooks — see BaseTool for full contract.
     is_provider_native = True
     provider_support = frozenset({"codex"})
 
@@ -68,9 +29,8 @@ class ImageGenTool(BaseTool):
                 "description": "Image file format the provider returns.",
             },
             "size": {
-                # Free-form with runtime validation: newer image models
-                # may accept sizes not listed below, but values still
-                # must be "auto" or WIDTHxHEIGHT within sane bounds.
+                # Suggestions are non-exhaustive; runtime validation permits future
+                # dimensions while retaining bounded WIDTHxHEIGHT syntax.
                 "type": "string",
                 "suggestions": [
                     "auto",
@@ -119,11 +79,8 @@ class ImageGenTool(BaseTool):
         config: Any = None,
     ) -> None:
         super().__init__(config=config)
-        # Capture explicit kwargs separately so a later
-        # :meth:`refresh_native_options` re-read of ``ToolConfig.extra``
-        # (used when the bootstrap merges profile-level options after
-        # construction) keeps honoring them as the highest-priority
-        # source.
+        # Explicit constructor values must remain highest priority after profile
+        # options are merged into ``ToolConfig.extra``.
         self._explicit_kwargs: dict[str, Any] = {
             "output_format": output_format,
             "action": action,
@@ -134,13 +91,7 @@ class ImageGenTool(BaseTool):
         self.refresh_native_options()
 
     def refresh_native_options(self) -> None:
-        """Re-read ``ToolConfig.extra`` into instance fields.
-
-        Called by the bootstrap layer after profile-level options are
-        merged into ``self.config.extra``. The merge order is::
-
-            explicit kwargs > config.extra > schema defaults > "png"
-        """
+        """Resolve validated native options using configuration precedence."""
         extra = getattr(self.config, "extra", {}) or {}
         kwargs = self._explicit_kwargs
 
@@ -178,15 +129,11 @@ class ImageGenTool(BaseTool):
 
     @property
     def execution_mode(self) -> ExecutionMode:
-        # Provider-native tools never actually execute through the
-        # tool runner, but we still declare DIRECT so any accidental
-        # code path that dispatches us doesn't treat us like a
-        # long-running background job.
+        # A defensive dispatch must remain synchronous rather than becoming a job.
         return ExecutionMode.DIRECT
 
     async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
-        """Unreachable — the base class's ``execute`` short-circuits
-        provider-native tools before they reach ``_execute``."""
+        """Report an invariant violation if provider-native dispatch leaks here."""
         return ToolResult(
             error=(
                 "image_gen is provider-native; if you see this error the "
@@ -196,9 +143,7 @@ class ImageGenTool(BaseTool):
         )
 
     def provider_native_options(self) -> dict[str, Any]:
-        """Return the subset of per-tool knobs the provider should
-        merge into its wire-format tool spec. Omits ``None`` values
-        so each provider can keep its own defaults."""
+        """Return configured wire options while preserving provider defaults."""
         opts: dict[str, Any] = {"output_format": self.output_format}
         if self.action:
             opts["action"] = self.action

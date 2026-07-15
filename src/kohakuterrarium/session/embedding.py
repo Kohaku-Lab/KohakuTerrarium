@@ -1,11 +1,4 @@
-"""
-Embedding providers for session memory search.
-
-Three tiers:
-  - Model2Vec (default): ~8 MB, numpy-only, microsecond inference
-  - SentenceTransformer: Gemma/Jina/any HF model, optional dep
-  - API: OpenAI, Google, Jina via HTTP
-"""
+"""Create local or API embedding providers for session memory search."""
 
 import os
 from abc import ABC, abstractmethod
@@ -26,14 +19,7 @@ class BaseEmbedder(ABC):
 
     @abstractmethod
     def encode(self, texts: list[str]) -> np.ndarray:
-        """Encode texts into embedding vectors.
-
-        Args:
-            texts: List of text strings to embed
-
-        Returns:
-            numpy array of shape (len(texts), dimensions), dtype float32
-        """
+        """Encode texts as a float32 matrix with one row per input."""
         ...
 
     def encode_one(self, text: str) -> np.ndarray:
@@ -42,11 +28,7 @@ class BaseEmbedder(ABC):
 
 
 class Model2VecEmbedder(BaseEmbedder):
-    """Model2Vec static embeddings (default, CPU-only, microsecond speed).
-
-    Uses potion-base-8M (~8 MB) or potion-retrieval-32M (~32 MB).
-    Dependencies: model2vec (pip install model2vec)
-    """
+    """Provide lightweight CPU-only static embeddings through Model2Vec."""
 
     def __init__(self, model_name: str = "minishlab/potion-base-8M"):
         try:
@@ -67,11 +49,7 @@ class Model2VecEmbedder(BaseEmbedder):
 
 
 class SentenceTransformerEmbedder(BaseEmbedder):
-    """SentenceTransformer embeddings (Gemma, Jina, bge, etc.).
-
-    Dependencies: sentence-transformers (pip install sentence-transformers)
-    Optional ONNX: pip install sentence-transformers[onnx]
-    """
+    """Provide configurable SentenceTransformer embeddings."""
 
     def __init__(
         self,
@@ -88,7 +66,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             )
 
         logger.info("Loading SentenceTransformer", model=model_name)
-        # Jina v5 requires default_task; other models ignore it
+        # Retrieval-capable Jina models require a default task; others ignore it.
         self._model = SentenceTransformer(
             model_name,
             device=device,
@@ -96,7 +74,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
             model_kwargs={"default_task": "retrieval"},
         )
         self._truncate_dim = dimensions
-        # Detect dimensions (some models return None from the accessor)
+        # Probe models whose dimension accessor is unavailable.
         auto_dim = self._model.get_sentence_embedding_dimension()
         if auto_dim is None:
             probe = self._model.encode(["test"])
@@ -119,11 +97,7 @@ class SentenceTransformerEmbedder(BaseEmbedder):
 
 
 class APIEmbedder(BaseEmbedder):
-    """API-based embeddings (OpenAI, Google, Jina).
-
-    Uses the OpenAI-compatible /v1/embeddings endpoint.
-    Works with OpenAI, Google (via OpenAI compat), Jina, etc.
-    """
+    """Use an OpenAI-compatible HTTP embeddings endpoint."""
 
     def __init__(
         self,
@@ -164,10 +138,7 @@ class APIEmbedder(BaseEmbedder):
 
 
 class NullEmbedder(BaseEmbedder):
-    """No-op embedder for sessions without embedding config.
-
-    Only FTS keyword search is available.
-    """
+    """Represent sessions where only keyword search is available."""
 
     dimensions = 0
 
@@ -178,52 +149,42 @@ class NullEmbedder(BaseEmbedder):
         )
 
 
-# ── Model presets ────────────────────────────────────────────────────
-# Use via config: { provider: model2vec, model: "@retrieval" }
-# or just:        { provider: model2vec, model: "minishlab/potion-retrieval-32M" }
-
 MODEL2VEC_PRESETS: dict[str, dict[str, Any]] = {
-    # Tiny (< 10M params, pure numpy, microsecond inference)
-    "tiny": {"model": "minishlab/potion-base-2M"},  # 64-dim, ~2MB
-    "base": {"model": "minishlab/potion-base-8M"},  # 256-dim, ~8MB
-    # Retrieval-optimized
-    "retrieval": {"model": "minishlab/potion-retrieval-32M"},  # 512-dim, ~32MB
-    # High-quality static (Matryoshka 1024/512/256/128/64/32)
+    # Compact static models trade retrieval quality for size and latency.
+    "tiny": {"model": "minishlab/potion-base-2M"},  # 64 dimensions, about 2 MB
+    "base": {"model": "minishlab/potion-base-8M"},  # 256 dimensions, about 8 MB
+    "retrieval": {"model": "minishlab/potion-retrieval-32M"},  # 512 dimensions
+    # Matryoshka dimensions support smaller indexes without changing models.
     "best": {
-        "model": "sentence-transformers/static-retrieval-mrl-en-v1",  # 1024-dim, ~120MB
+        "model": "sentence-transformers/static-retrieval-mrl-en-v1",
     },
-    # Multilingual
     "multilingual": {
-        "model": "minishlab/potion-multilingual-128M",  # 256-dim, 101 langs, ~512MB
+        "model": "minishlab/potion-multilingual-128M",  # 101 languages
     },
     "multilingual-best": {
-        "model": "sentence-transformers/static-similarity-mrl-multilingual-v1",  # 1024-dim, 51 langs
-    },
-    # Science domain
-    "science": {"model": "minishlab/potion-science-32M"},  # 256-dim, arxiv+pubmed
+        "model": "sentence-transformers/static-similarity-mrl-multilingual-v1",
+    },  # 51 languages
+    "science": {"model": "minishlab/potion-science-32M"},  # arXiv and PubMed
 }
 
 ST_PRESETS: dict[str, dict[str, Any]] = {
-    # Tiny (< 50M params)
     "tiny": {
-        "model": "ibm-granite/granite-embedding-30m-english",  # 384-dim, 512 ctx
+        "model": "ibm-granite/granite-embedding-30m-english",  # 512-token context
     },
     "small": {
-        "model": "ibm-granite/granite-embedding-small-english-r2",  # 384-dim, 8K ctx
+        "model": "ibm-granite/granite-embedding-small-english-r2",  # 8K context
     },
-    # Base (100-150M params)
     "base": {
-        "model": "Alibaba-NLP/gte-modernbert-base",  # 768-dim, 8K ctx, BEIR 55.33
+        "model": "Alibaba-NLP/gte-modernbert-base",  # 8K context
     },
     "nomic": {
-        "model": "nomic-ai/nomic-embed-text-v1.5",  # 768-dim, 8K ctx, Matryoshka
+        "model": "nomic-ai/nomic-embed-text-v1.5",  # 8K Matryoshka model
     },
-    # Medium (300M+ params)
     "gemma": {
-        "model": "google/embeddinggemma-300m",  # 768-dim, 2K ctx, 100+ langs
+        "model": "google/embeddinggemma-300m",  # multilingual, 2K context
     },
     "multilingual": {
-        "model": "Alibaba-NLP/gte-multilingual-base",  # 768-dim, 8K ctx, 70+ langs
+        "model": "Alibaba-NLP/gte-multilingual-base",  # 70+ languages, 8K context
     },
 }
 
@@ -234,7 +195,7 @@ DEFAULT_ST_MODEL = "Alibaba-NLP/gte-modernbert-base"
 def _resolve_preset(
     model: str, presets: dict[str, dict[str, Any]]
 ) -> dict[str, Any] | None:
-    """Resolve a @preset reference to a preset dict, or None."""
+    """Resolve an ``@preset`` reference, returning ``None`` when unknown."""
     if model.startswith("@"):
         name = model[1:]
         if name in presets:
@@ -246,7 +207,7 @@ def _resolve_preset(
 def _detect_best_provider() -> str:
     """Detect the best available embedding provider.
 
-    Preference: model2vec (lightweight default) > sentence-transformers > none.
+    Prefer Model2Vec, then SentenceTransformers, then keyword-only search.
     """
     try:
         import model2vec  # noqa: F401
@@ -269,28 +230,11 @@ def list_embedding_presets() -> dict[str, dict[str, dict[str, Any]]]:
 
 
 def create_embedder(config: dict[str, Any] | None = None) -> BaseEmbedder:
-    """Create an embedder from config dict.
+    """Create an embedder from provider, model, dimension, and device settings.
 
-    Config format::
-
-        provider: "auto" | "model2vec" | "sentence-transformer" | "api" | "none"
-        model: model name, HuggingFace path, or "@preset" (e.g. "@retrieval")
-        dimensions: optional dimension override (Matryoshka truncation)
-        api_key: for API providers
-        base_url: for API providers
-        device: "cpu" or "cuda" (for sentence-transformer)
-
-    Preset examples::
-
-        { provider: model2vec, model: "@retrieval" }     # potion-retrieval-32M
-        { provider: model2vec, model: "@multilingual" }   # potion-multilingual-128M
-        { provider: sentence-transformer, model: "@base" } # gte-modernbert-base
-        { provider: sentence-transformer, model: "@gemma" } # embeddinggemma-300m
-
-    "auto" (default): tries model2vec first, falls back to
-    sentence-transformers, then NullEmbedder.
-
-    Returns NullEmbedder if config is None or provider is "none".
+    ``auto`` selects the best installed local provider. ``none`` or missing config
+    returns :class:`NullEmbedder`; API providers may load their key from an
+    environment variable.
     """
     if not config:
         return NullEmbedder()

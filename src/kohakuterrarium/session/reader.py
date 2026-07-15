@@ -1,19 +1,6 @@
-"""SessionReader — read a finished ``.kohakutr`` without spelunking.
+"""Provide a read-only high-level view of completed session files.
 
-Extracting "what happened in this run" used to require knowing the
-KohakuVault table layout and event-key conventions.  The reader is the
-one-stop, READ-ONLY surface::
-
-    from kohakuterrarium.session.reader import SessionReader
-
-    with SessionReader("runs/student-42.kohakutr") as r:
-        print(r.meta["status"], r.agents)
-        for turn in r.turns():
-            print(turn.user_text, "->", turn.assistant_text[:80])
-        hits = r.search("score.json")
-
-Opens via :meth:`SessionStore.open_readonly` — reading never bumps
-``last_active`` or flips ``status``.
+Reader operations preserve session status and recency metadata.
 """
 
 from dataclasses import dataclass, field
@@ -35,8 +22,8 @@ logger = get_logger(__name__)
 class TurnView:
     """One conversational turn, reassembled from the event log.
 
-    Only the LIVE branch of each turn is included (regenerated /
-    edited siblings are skipped, matching what every viewer shows).
+    Only the selected live branch is included; regenerated and edited siblings
+    remain excluded.
     """
 
     index: int
@@ -57,8 +44,6 @@ class SessionReader:
         self._path = path
         self._store = SessionStore.open_readonly(path)
 
-    # -- lifecycle -------------------------------------------------------
-
     def __enter__(self) -> "SessionReader":
         return self
 
@@ -67,8 +52,6 @@ class SessionReader:
 
     def close(self) -> None:
         self._store.close()
-
-    # -- raw surfaces ----------------------------------------------------
 
     @property
     def path(self) -> Path:
@@ -103,8 +86,6 @@ class SessionReader:
     def channel_messages(self, channel: str) -> list[dict[str, Any]]:
         """Message history of one terrarium channel."""
         return self._store.get_channel_messages(channel)
-
-    # -- assembled views -------------------------------------------------
 
     def turns(self, agent: str | None = None) -> list[TurnView]:
         """Reassemble live-branch turns from the event log."""
@@ -157,9 +138,8 @@ class SessionReader:
     ) -> list[SearchResult]:
         """Full-text (or vector, if indexed) search over the session.
 
-        FTS works out of the box once events were indexed via
-        ``kt embedding`` / ``memory_build``; un-indexed sessions return
-        no hits — call ``index()`` first for ad-hoc reads.
+        Sessions without an existing memory index return no hits; call
+        :meth:`index` first for ad-hoc keyword search.
         """
         memory = SessionMemory(str(self._path))
         try:

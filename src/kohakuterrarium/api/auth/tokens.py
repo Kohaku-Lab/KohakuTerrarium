@@ -1,8 +1,7 @@
-"""API-token CRUD.
+"""Create, resolve, list, and revoke user API tokens.
 
-The plaintext token is shown to the user ONCE at creation and never
-again (KohakuHub pattern).  The DB stores only the SHA3-512 hash, so
-a DB leak can't be used to impersonate users.
+Plaintext exists only at creation; persistence stores a SHA3-512 digest so database
+contents cannot be replayed directly as bearer credentials.
 """
 
 import sqlite3
@@ -27,12 +26,7 @@ def _iso_now() -> str:
 def create_token(
     conn: sqlite3.Connection, user_id: int, name: str
 ) -> tuple[str, ApiToken]:
-    """Generate + insert a new token.  Returns ``(plaintext, ApiToken)``.
-
-    The plaintext is the ONLY copy the API can return — it isn't
-    recoverable from the DB.  The :class:`ApiToken` carries the row's
-    id + metadata for the listing UI.
-    """
+    """Create a token and return its one-time plaintext with public metadata."""
     cleaned_name = (name or "").strip()
     if not cleaned_name:
         raise ValueError("token name must not be empty")
@@ -58,14 +52,7 @@ def create_token(
 
 
 def get_token_user(conn: sqlite3.Connection, plaintext: str) -> User | None:
-    """Look up the owning user by plaintext token.
-
-    Hashes the plaintext, queries by hash, joins to ``users``.  Returns
-    ``None`` if no row matches OR the user is inactive.
-
-    Updates ``last_used_at`` as a side effect on a successful match —
-    same behaviour as KohakuHub.
-    """
+    """Resolve an active token owner and best-effort refresh usage metadata."""
     if not plaintext:
         return None
     token_hash = hash_token(plaintext)
@@ -83,8 +70,7 @@ def get_token_user(conn: sqlite3.Connection, plaintext: str) -> User | None:
         return None
     if not row["is_active"]:
         return None
-    # Best-effort last_used_at touch — don't fail the lookup on a
-    # write error.
+    # Usage telemetry must not invalidate an otherwise valid credential lookup.
     try:
         conn.execute(
             "UPDATE api_tokens SET last_used_at = ? WHERE id = ?",
@@ -106,12 +92,7 @@ def list_user_tokens(conn: sqlite3.Connection, user_id: int) -> list[ApiToken]:
 
 
 def delete_token(conn: sqlite3.Connection, user_id: int, token_id: int) -> bool:
-    """Revoke a user's token.  Returns True if deleted.
-
-    The user-id scope is enforced so a Bob can't revoke an Alice token
-    by guessing IDs — only the owner (or an admin via a separate path)
-    can revoke.
-    """
+    """Revoke a token only when it belongs to the supplied user ID."""
     cur = conn.execute(
         "DELETE FROM api_tokens WHERE id = ? AND user_id = ?",
         (token_id, user_id),
@@ -121,7 +102,7 @@ def delete_token(conn: sqlite3.Connection, user_id: int, token_id: int) -> bool:
 
 
 def delete_token_admin(conn: sqlite3.Connection, token_id: int) -> bool:
-    """Admin-scope variant — deletes regardless of owner."""
+    """Revoke a token without applying owner scope."""
     cur = conn.execute("DELETE FROM api_tokens WHERE id = ?", (token_id,))
     conn.commit()
     return cur.rowcount > 0

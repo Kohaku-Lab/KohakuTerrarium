@@ -1,17 +1,8 @@
 """Backpressure for outbound envelope buffers.
 
-A :class:`BoundedSendBuffer` is a bounded async queue with overflow
-diagnostics. Senders ``put`` envelopes; the transport drains via
-``get``. When the queue is full:
-
-- ``put(wait=True)`` (default) blocks until space is available.
-- ``put(wait=False)`` raises :class:`BackpressureError` immediately.
-
-A counter records overflow events for telemetry; the 1.5.0 host engine
-logs these and (in the future) may pause local creature work when
-sustained backpressure occurs.
-
-The default capacity is 1000 envelopes.
+A :class:`BoundedSendBuffer` blocks producers by default when full. Callers
+that opt out of waiting receive :class:`BackpressureError`, and each such
+rejection increments the overflow counter for telemetry.
 """
 
 import asyncio
@@ -22,7 +13,7 @@ DEFAULT_BUFFER_SIZE = 1000
 
 
 class BackpressureError(Exception):
-    """Raised by :meth:`BoundedSendBuffer.put` with ``wait=False`` when full."""
+    """Raised when a non-waiting buffer insertion finds no capacity."""
 
 
 class BoundedSendBuffer:

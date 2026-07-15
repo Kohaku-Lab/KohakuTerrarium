@@ -1,23 +1,11 @@
-"""Windows-only ``bash.exe`` discovery for the ``bash`` tool.
-
-Split out of ``bash.py`` to keep that file under the 600-line cap
-(it grew when the mobile-sandbox PATH-prepend block landed).  This
-module is import-safe on every platform; the only Windows-specific
-thing is the candidate-path list, which produces an empty result
-on non-Windows shells.
-"""
+"""Discover common Git Bash installation paths on Windows."""
 
 import os
 from pathlib import Path
 
 
 def windows_git_bash_candidates() -> list[str]:
-    """Enumerate well-known ``bash.exe`` install locations on
-    Windows — Git for Windows (Program Files / scoop / per-user),
-    ordered most-likely-first.  Returns ``[]`` on non-Windows
-    platforms.  Caller is responsible for ``Path.exists()`` checks;
-    the candidate set is independent of what's installed.
-    """
+    """Return likely ``bash.exe`` paths in discovery priority order."""
     candidates: list[str] = []
     program_files = [
         os.environ.get("ProgramW6432"),
@@ -62,7 +50,7 @@ def windows_git_bash_candidates() -> list[str]:
             ]
         )
 
-    # Dedupe case-insensitively while preserving order.
+    # Windows paths are case-insensitive, but discovery priority must be stable.
     seen: set[str] = set()
     unique: list[str] = []
     for candidate in candidates:

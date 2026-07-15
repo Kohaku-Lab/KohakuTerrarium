@@ -1,8 +1,4 @@
-"""Event → user-message formatting for the controller turn context.
-
-Split out of :mod:`controller` to keep that module under the file-size
-guard. Pure function — no controller state.
-"""
+"""Formatting of trigger events into provider-facing user context."""
 
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.tool_output import render_content_text
@@ -12,11 +8,7 @@ from kohakuterrarium.llm.message import ContentPart, FilePart, ImagePart, TextPa
 def format_events_for_context(
     events: list[TriggerEvent],
 ) -> "str | list[ContentPart]":
-    """
-    Format events as user message content.
-
-    Returns multimodal content if any event has images.
-    """
+    """Format events as text or multimodal user message content."""
     text_parts: list[str] = []
     image_parts: list[ImagePart] = []
     file_parts: list[FilePart] = []
@@ -44,9 +36,8 @@ def format_events_for_context(
                 text_parts.append(event.content)
         elif event.type == "tool_complete":
             if not event.job_id and not event.get_text_content():
-                # Internal wake event (results already sit in the
-                # conversation) — rendering it fabricates a
-                # "[Tool None completed]" the model then reacts to.
+                # Internal wakes only resume processing; their results already
+                # exist in conversation and must not become fabricated tool output.
                 continue
             prefix = f"[Tool {event.job_id} completed]"
             if isinstance(event.content, list):

@@ -1,20 +1,8 @@
-"""``/api/app/*`` — app-update API for the Vue ``Admin → Updates`` tab.
+"""Expose launcher settings, release discovery, updates, and rollback.
 
-Wraps the launcher's update_runner + feeds + settings helpers in HTTP
-+ WebSocket form so the frontend can drive the same flow the CLI's
-``kt self-update`` exposes. Only mounted in standalone and lab-host
-modes; worker installs (lab-client) return 404 across the whole
-namespace.
-
-Endpoints (canonical: ``plans/1.5.0-roadmap/06b-release-bundle-update/design.md`` §11):
-
-| GET  | ``/api/app/settings``       | round-trip settings |
-| PUT  | ``/api/app/settings``       | round-trip settings |
-| POST | ``/api/app/feeds/probe``    | force-fetch channel manifest |
-| GET  | ``/api/app/state``          | aggregate UI state |
-| POST | ``/api/app/update``         | start update; returns WS path |
-| POST | ``/api/app/rollback``       | revert pointer |
-| WS   | ``/ws/app/update``          | streams progress frames |
+HTTP routes manage launcher state and initiate operations, while the dedicated
+WebSocket route streams update progress. Lab clients reject this namespace
+because only standalone and lab-host processes own their installation.
 """
 
 import asyncio
@@ -47,8 +35,8 @@ from kohakuterrarium.launcher.update_runner import (
 )
 
 router = APIRouter()
-# WebSocket lives on its own router so the API router's ``/api/app``
-# prefix doesn't shift the canonical ``/ws/app/update`` path.
+# The WebSocket uses a separate router to preserve its root-level canonical
+# path instead of inheriting the HTTP router's ``/api/app`` prefix.
 ws_router = APIRouter()
 
 
@@ -62,6 +50,7 @@ def _wrapper_mode_only(request: Request) -> None:
 
 
 def _result_to_dict(r: UpdateResult) -> dict[str, Any]:
+    """Convert an update result to the public response schema."""
     return {
         "ok": r.ok,
         "version": r.version,
@@ -72,17 +61,16 @@ def _result_to_dict(r: UpdateResult) -> dict[str, Any]:
     }
 
 
-# ── Settings ────────────────────────────────────────────────────────
-
-
 @router.get("/settings")
 async def get_settings(request: Request) -> dict[str, Any]:
+    """Return launcher settings in their public representation."""
     _wrapper_mode_only(request)
     return _launcher_settings.to_public_dict(_launcher_settings.load())
 
 
 @router.put("/settings")
 async def put_settings(request: Request, body: dict[str, Any]) -> dict[str, Any]:
+    """Validate, persist, and return public launcher settings."""
     _wrapper_mode_only(request)
     if not isinstance(body, dict):
         raise HTTPException(400, "request body must be a JSON object")
@@ -91,11 +79,9 @@ async def put_settings(request: Request, body: dict[str, Any]) -> dict[str, Any]
     return _launcher_settings.to_public_dict(new_settings)
 
 
-# ── State + probe ───────────────────────────────────────────────────
-
-
 @router.get("/state")
 async def get_state(request: Request) -> dict[str, Any]:
+    """Return installed versions, active version, settings, and platform state."""
     _wrapper_mode_only(request)
     cfg = _launcher_settings.load()
     ptr = read_active_pointer()
@@ -130,8 +116,7 @@ async def get_state(request: Request) -> dict[str, Any]:
 
 @router.post("/feeds/probe")
 async def post_feeds_probe(request: Request) -> dict[str, Any]:
-    """Force-fetch the channel manifest; return its releases filtered
-    for the running platform/abi (newest first)."""
+    """Fetch the channel manifest and list compatible releases newest first."""
     _wrapper_mode_only(request)
     cfg = _launcher_settings.load()
     plat = current_platform_tag()
@@ -152,11 +137,9 @@ async def post_feeds_probe(request: Request) -> dict[str, Any]:
     }
 
 
-# ── Update / rollback ───────────────────────────────────────────────
-
-
 @router.post("/update")
 async def post_update(request: Request) -> dict[str, Any]:
+    """Validate update eligibility and return the progress WebSocket path."""
     _wrapper_mode_only(request)
     if not is_launcher_install():
         raise HTTPException(
@@ -169,6 +152,7 @@ async def post_update(request: Request) -> dict[str, Any]:
 
 @router.post("/rollback")
 async def post_rollback(request: Request) -> dict[str, Any]:
+    """Roll a launcher-managed installation back to its previous pointer."""
     _wrapper_mode_only(request)
     if not is_launcher_install():
         raise HTTPException(409, "rollback is launcher-only")
@@ -184,18 +168,15 @@ async def post_check(request: Request) -> dict[str, Any]:
     return _result_to_dict(result)
 
 
-# ── WebSocket ───────────────────────────────────────────────────────
-
-
 _WS_PATH = "/ws/app/update"
 
 
 async def _stream_update(ws: WebSocket) -> None:
-    """Drive run_update() to completion, streaming progress frames."""
+    """Run the update in an executor and stream progress through ``ws``."""
     queue: asyncio.Queue = asyncio.Queue()
 
     def _push(phase: str, percent: float, message: str) -> None:
-        # Called from the worker thread; thread-safe enqueue.
+        """Translate update-runner progress into queued WebSocket frames."""
         try:
             queue.put_nowait({"phase": phase, "percent": percent, "message": message})
         except Exception:  # pragma: no cover - defensive
@@ -204,6 +185,7 @@ async def _stream_update(ws: WebSocket) -> None:
     loop = asyncio.get_running_loop()
 
     async def _pump() -> UpdateResult:
+        """Execute the blocking updater outside the event loop."""
         return await loop.run_in_executor(None, lambda: run_update(_push))
 
     runner_task = asyncio.create_task(_pump())
@@ -214,7 +196,8 @@ async def _stream_update(ws: WebSocket) -> None:
                 return_when=asyncio.FIRST_COMPLETED,
                 timeout=0.5,
             )
-            # Drain whatever frames are pending.
+            # Flush all available progress before testing for completion so the
+            # terminal frame cannot overtake an already queued update.
             while not queue.empty():
                 frame = queue.get_nowait()
                 await ws.send_text(json.dumps(frame))
@@ -239,6 +222,7 @@ async def _stream_update(ws: WebSocket) -> None:
 
 @ws_router.websocket(_WS_PATH)
 async def ws_update(ws: WebSocket) -> None:
+    """Stream an eligible launcher update or close with a mode-specific refusal."""
     lab_mode = getattr(ws.app.state, "lab_mode", "standalone")
     if lab_mode == "lab-client":
         await ws.close(code=4404)

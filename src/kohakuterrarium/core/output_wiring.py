@@ -1,25 +1,7 @@
-"""Output wiring — framework hook that fires at creature turn-end.
+"""Turn-end event delivery between creatures through configured wiring.
 
-When a creature's controller returns to idle at the end of a turn (one
-trigger event → one or more LLM rounds + tools → controller exits its
-loop), the framework emits a ``TriggerEvent(type="creature_output", ...)``
-and delivers it directly into one or more target creatures' event queues.
-
-This is strictly event-level. No channels, no tools, no triggers — the
-event goes straight through the same ``agent._process_event`` path that
-any other ``TriggerEvent`` already uses.
-
-Components in this module (leaf; only imports stdlib + events):
-
-- ``OutputWiringEntry`` — one wiring directive, declared in creature config.
-- ``parse_wiring_entry`` — YAML-shape → dataclass.
-- ``render_prompt`` — render the receiver-side prompt template
-  (``simple`` string-format or ``jinja`` via ``prompt.template``).
-- ``OutputWiringResolver`` — protocol the runtime implements.
-- ``NoopOutputWiringResolver`` — default used by standalone agents;
-  logs once per source and drops emissions.
-
-The terrarium-specific resolver lives in ``terrarium/output_wiring.py``.
+Wiring bypasses graph channels and enters the target through its normal event
+path. Standalone agents use a no-op resolver because no target graph exists.
 """
 
 from dataclasses import dataclass, field
@@ -31,54 +13,23 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-#: Magic-string target: the root agent (which sits *outside* the terrarium).
-#: Matches existing root conventions (``report_to_root`` auto-channel, root
-#: awareness prompt, etc.).
+# The root target is resolved outside the terrarium's ordinary creature set.
 ROOT_TARGET = "root"
 
 PROMPT_FORMAT_SIMPLE = "simple"
 PROMPT_FORMAT_JINJA = "jinja"
 
-#: Default prompt template when ``with_content=True`` and no explicit
-#: ``prompt`` is set on the entry. The ``[output-wire from X] ...`` tag
-#: distinguishes wire deliveries from channel messages and group_send
-#: directs in the receiver's turn context.
+# The tag distinguishes wiring deliveries from channel and direct messages.
 DEFAULT_PROMPT_WITH_CONTENT = "[output-wire from {source}] {content}"
 
-#: Default prompt template when ``with_content=False`` (metadata-only ping).
 DEFAULT_PROMPT_WITHOUT_CONTENT = (
     "[output-wire from {source}] (turn-end signal, no content)"
 )
 
 
-# ---------------------------------------------------------------------------
-# Entry dataclass + parser
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class OutputWiringEntry:
-    """One output-wiring directive on a creature.
-
-    Attributes:
-        to: Target creature name, or the magic string ``"root"``.
-        with_content: If True, the receiver event carries the source's
-            last-round assistant text. If False, content is stripped to
-            an empty string and only metadata reaches the receiver.
-        prompt: Optional prompt template. When None, a default template
-            is used (see ``DEFAULT_PROMPT_*``). Available variables:
-            ``source``, ``target``, ``content``, ``turn_index``,
-            ``source_event_type``, ``with_content``.
-        prompt_format: ``"simple"`` (default, ``str.format_map``) or
-            ``"jinja"`` (uses ``prompt.template.render_template_safe``).
-        allow_self_trigger: Explicit opt-in for source → same-target
-            delivery. Defaults to False so accidental self-loops are
-            dropped by terrarium resolvers.
-    """
+    """Configure one turn-end delivery target and its receiver prompt."""
 
     to: str
     with_content: bool = True
@@ -100,19 +51,7 @@ class OutputWiringEntry:
 
 
 def parse_wiring_entry(raw: Any) -> OutputWiringEntry:
-    """Parse a single YAML/dict/string entry into an ``OutputWiringEntry``.
-
-    Shorthand: a bare string is sugar for ``{to: <str>, with_content: true}``.
-
-    Args:
-        raw: A string (shorthand) or a mapping (full form).
-
-    Returns:
-        Parsed entry.
-
-    Raises:
-        ValueError: If the shape is invalid.
-    """
+    """Parse a wiring entry, accepting a target string as shorthand."""
     if isinstance(raw, str):
         return OutputWiringEntry(to=raw)
     if not isinstance(raw, dict):
@@ -139,11 +78,6 @@ def parse_wiring_list(raw: Any) -> list[OutputWiringEntry]:
     return [parse_wiring_entry(x) for x in raw]
 
 
-# ---------------------------------------------------------------------------
-# Prompt rendering
-# ---------------------------------------------------------------------------
-
-
 def render_prompt(
     entry: OutputWiringEntry,
     *,
@@ -153,15 +87,7 @@ def render_prompt(
     turn_index: int,
     source_event_type: str,
 ) -> str:
-    """Render the receiver-side prompt for a single wiring entry.
-
-    Chooses a template: explicit ``entry.prompt`` wins; otherwise the
-    default depends on ``entry.with_content``. Then renders with the
-    entry's ``prompt_format``.
-
-    Never raises. On template errors, falls back to the default template
-    for the current ``with_content`` setting and logs a warning.
-    """
+    """Render a receiver prompt, falling back safely on template errors."""
     template = entry.prompt
     if template is None:
         template = (
@@ -182,11 +108,10 @@ def render_prompt(
     if entry.prompt_format == PROMPT_FORMAT_JINJA:
         return render_template_safe(template, **variables)
 
-    # Simple mode: str.format_map with a defaulting mapping so missing
-    # keys render as empty string instead of raising.
+    # Missing simple-format variables render empty to keep wiring delivery alive.
     try:
         return template.format_map(_SafeFormatDict(variables))
-    except Exception as exc:  # pragma: no cover - defensive
+    except Exception as exc:  # pragma: no cover - delivery must survive templates
         logger.warning(
             "output_wiring simple-format render failed, using fallback",
             template_error=str(exc),
@@ -208,19 +133,9 @@ class _SafeFormatDict(dict):
         return ""
 
 
-# ---------------------------------------------------------------------------
-# Resolver protocol + default no-op
-# ---------------------------------------------------------------------------
-
-
 @runtime_checkable
 class OutputWiringResolver(Protocol):
-    """Dispatches ``creature_output`` events to targets named in entries.
-
-    The framework calls ``emit`` once at each creature's turn boundary
-    (from ``AgentHandlersMixin._finalize_processing``). Implementations
-    must never raise back into the caller — log and skip on any failure.
-    """
+    """Dispatch turn-end events without propagating delivery failures."""
 
     async def emit(
         self,
@@ -234,14 +149,7 @@ class OutputWiringResolver(Protocol):
 
 
 class NoopOutputWiringResolver:
-    """Default resolver used when no real one is attached.
-
-    A standalone creature can declare ``output_wiring`` in its config
-    (creatures are portable — the same config runs inside a terrarium
-    or standalone). When no terrarium is present, there are no targets
-    to resolve, so we log the first drop per source and stay silent
-    after that.
-    """
+    """Drop standalone wiring emissions, logging once per source."""
 
     def __init__(self) -> None:
         self._logged_sources: set[str] = set()
@@ -265,24 +173,14 @@ class NoopOutputWiringResolver:
         )
 
 
-# ---------------------------------------------------------------------------
-# Small helpers for tests / callers
-# ---------------------------------------------------------------------------
-
-
 def wiring_targets(entries: list[OutputWiringEntry]) -> list[str]:
-    """Return just the target names, preserving order.
-
-    Handy for building status displays / debug dumps.
-    """
+    """Return target names in declaration order."""
     return [e.to for e in entries]
 
 
 @dataclass
 class _EmissionContext:
-    """Context passed to resolvers. Used by tests; not part of the
-    public surface for callers.
-    """
+    """Bundle resolver inputs for internal callers and tests."""
 
     source: str
     content: str

@@ -1,25 +1,8 @@
-"""Auth routes — mounted under ``/api/auth/*``.
+"""Expose authentication, user, token, invitation, and admin endpoints.
 
-Surface:
-
-| Method   | Path                          | Auth                                                    |
-|----------|-------------------------------|---------------------------------------------------------|
-| GET      | ``/capabilities``             | none — probe                                            |
-| POST     | ``/register``                 | varies by ``registration`` mode                         |
-| POST     | ``/login``                    | password                                                |
-| POST     | ``/logout``                   | session cookie                                          |
-| GET      | ``/me``                       | current user                                            |
-| POST     | ``/me/password``              | current user (password change)                          |
-| GET      | ``/tokens``                   | current user                                            |
-| POST     | ``/tokens``                   | current user (creates new API token; plaintext once)    |
-| DELETE   | ``/tokens/{id}``              | current user (own token only) OR admin                  |
-| GET      | ``/users``                    | admin                                                   |
-| POST     | ``/users``                    | admin (CLI-equivalent registration)                     |
-| PATCH    | ``/users/{id}``               | admin (role / is_active)                                |
-| DELETE   | ``/users/{id}``               | admin                                                   |
-| POST     | ``/invitations``              | admin                                                   |
-| GET      | ``/invitations``              | admin                                                   |
-| DELETE   | ``/invitations/{id}``         | admin                                                   |
+Public capabilities reveal no secrets. Registration follows host policy, user routes
+require an authenticated account, and administrative routes require the admin role.
+Generated bearer and invitation plaintexts are returned only at creation time.
 """
 
 from typing import Literal
@@ -53,29 +36,21 @@ router = APIRouter()
 _CAPABILITIES_SCHEMA = 1
 
 
-# ---------------------------------------------------------------------------
-# Capabilities — unauthenticated
-# ---------------------------------------------------------------------------
+# Public authentication-policy discovery.
 
 
 @router.get("/capabilities")
 def capabilities(
     auth_config: AuthConfig = Depends(get_auth_config),
 ) -> dict[str, object]:
-    """Advertise which auth layers the host has enabled.
-
-    Unauthenticated by design — the response carries no secrets, only
-    the enabled flags + mode metadata.
-    """
+    """Advertise non-secret authentication requirements before login."""
     return {
         "schema": _CAPABILITIES_SCHEMA,
         "auth": auth_config.as_capabilities_dict(),
     }
 
 
-# ---------------------------------------------------------------------------
-# Pydantic request / response shapes
-# ---------------------------------------------------------------------------
+# Request and response payloads.
 
 
 class RegisterRequest(BaseModel):
@@ -134,9 +109,7 @@ class InvitationCreateRequest(BaseModel):
     expires_in_hours: int | None = Field(default=None, ge=1, le=24 * 365)
 
 
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
+# Authorization, serialization, and credential helpers.
 
 
 def _require_admin(user: User) -> None:
@@ -163,18 +136,12 @@ def _set_session_cookie(
     session_id: str,
     expires_at: str,
 ) -> None:
-    """Set the session cookie with the documented attributes.
+    """Set an HttpOnly, SameSite-Lax session cookie and expose its expiry.
 
-    - ``HttpOnly`` — no JS access (XSS hardening).
-    - ``SameSite=Lax`` — sent on same-site navigations, blocked on
-      most cross-site (CSRF mitigation; the user explicitly clicks a
-      link to the host).
-    - ``Secure`` is NOT forced here because operators behind a reverse
-      proxy may terminate TLS upstream; the proxy adds the flag when
-      the request was originally HTTPS.  For local desktop on
-      loopback, the cookie ships without Secure and that's fine.
+    ``Secure`` is not forced because TLS may terminate at a reverse proxy and local
+    desktop deployments may use loopback HTTP.
     """
-    # Path defaults to "/" so the cookie is sent on every API call.
+    # The root path makes the session available to every API namespace.
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
@@ -182,14 +149,11 @@ def _set_session_cookie(
         samesite="lax",
         path="/",
     )
-    # Surface the expiry to the frontend as well so it can prompt the
-    # user before the cookie silently dies.
+    # Explicit expiry metadata lets clients warn before the browser drops the cookie.
     response.headers["X-Session-Expires"] = expires_at
 
 
-# Auto-token name used when login/register mints a bearer for an ``api``
-# client.  Distinct from user-named tokens (created via ``POST /tokens``)
-# so the listing UI can mark these as session-derived if desired.
+# Auto-minted client tokens remain distinguishable from user-named credentials.
 _AUTO_API_TOKEN_NAME = "auto:web-login"
 
 
@@ -198,14 +162,10 @@ def _maybe_mint_api_token(
     user: User,
     client_kind: str,
 ) -> str:
-    """Return a fresh plaintext bearer token for ``api`` clients.
+    """Mint a one-time plaintext bearer only for API-style clients.
 
-    ``browser`` clients return ``""`` — the cookie alone is enough for
-    same-origin web flows.  ``api`` clients ALWAYS receive a freshly
-    minted token (we do not reuse existing rows because the plaintext
-    only exists at creation time; reusing the row would force the user
-    to re-issue regardless).  Multiple sessions are fine — the user can
-    revoke stale ones via ``DELETE /api/auth/tokens/{id}``.
+    Existing rows cannot be reused because their plaintext is never stored. Browser
+    clients rely on the same-origin session cookie instead.
     """
     if client_kind != "api":
         return ""
@@ -218,13 +178,10 @@ def _registration_allowed_or_raise(
     invitation_token: str,
     conn,
 ) -> dict[str, object] | None:
-    """Check the registration mode and consume invitations if needed.
+    """Enforce self-registration policy and retain invite context for claiming.
 
-    Returns:
-        ``{}`` when registration is allowed open / via admin_only path
-        (admin gate enforced elsewhere); a ``{"role": ...}`` dict when
-        an invitation was consumed and the new user inherits that
-        role; raises HTTPException otherwise.
+    Open registration assigns the user role, admin-only rejects self-service, and
+    invite-only defers the atomic claim until a new user ID exists.
     """
     mode = cfg.registration
     if mode == "open":
@@ -237,7 +194,7 @@ def _registration_allowed_or_raise(
                 "message": "self-registration disabled; ask the host operator to add you",
             },
         )
-    # invite_only — verify and consume.
+    # Invite-only registration requires a token that can later be claimed.
     if not invitation_token:
         raise HTTPException(
             status_code=400,
@@ -246,14 +203,11 @@ def _registration_allowed_or_raise(
                 "message": "registration requires a valid invitation token",
             },
         )
-    # We can't consume yet (need a user_id first); validate by
-    # peeking — actual consume happens after user creation.
+    # Claiming must wait until the created user provides ``used_by``.
     return {"_invite_token": invitation_token}
 
 
-# ---------------------------------------------------------------------------
-# Registration / login / logout / me
-# ---------------------------------------------------------------------------
+# Account registration and session lifecycle.
 
 
 @router.post("/register")
@@ -262,19 +216,7 @@ def register(
     response: Response,
     auth_config: AuthConfig = Depends(get_auth_config),
 ) -> dict[str, object]:
-    """Create a new user account.
-
-    Behaviour by ``auth.registration`` mode:
-
-    - ``open`` — anyone can register; role defaults to ``user``.
-    - ``invite_only`` — caller MUST supply ``invitation_token``; the
-      role on the invitation is honoured.
-    - ``admin_only`` — endpoint refuses with 403; operator uses
-      ``kt admin users add`` or the admin ``POST /users`` endpoint.
-
-    On success: row inserted, session created, cookie set, body
-    carries the user dict.
-    """
+    """Create an account under registration policy and start its first session."""
     if not auth_config.multi_user_enabled:
         raise HTTPException(
             status_code=400,
@@ -291,11 +233,8 @@ def register(
         invite_token = (verdict or {}).get("_invite_token", "")
         invite_role: str | None = None
         if invite_token:
-            # Peek-then-consume pattern: validate before creating the
-            # user (so a malformed username doesn't burn a valid
-            # invitation), then atomically claim once we have a user
-            # id.  Two callers racing the same token: only one
-            # consume() updates the row; the other returns None.
+            # Validate before user creation so invalid account data does not consume
+            # the invitation; the later conditional claim resolves concurrent races.
             invite = invitations_db.peek(conn, invite_token)
             if invite is None:
                 raise HTTPException(
@@ -320,10 +259,10 @@ def register(
             raise HTTPException(400, str(e)) from e
 
         if invite_token:
-            # Atomically claim — racing register calls lose here.
+            # Only one concurrent registration can satisfy the claim predicate.
             consumed = invitations_db.consume(conn, invite_token, used_by=user.id)
             if consumed is None:
-                # Another caller raced and won.  Roll back our user.
+                # Remove the unentitled account when another caller won the invitation.
                 users_db.delete_user(conn, user.id)
                 raise HTTPException(
                     status_code=409,
@@ -364,7 +303,7 @@ def login(
     with connection() as conn:
         user = users_db.verify_user_password(conn, req.username, req.password)
         if user is None:
-            # Constant-time-ish — bcrypt verify cost is ~uniform per attempt.
+            # Return one generic credential failure so username validity is not revealed.
             raise HTTPException(
                 status_code=401,
                 detail={
@@ -390,9 +329,7 @@ def logout(
     response: Response,
     session_id: str | None = Cookie(default=None, alias=SESSION_COOKIE_NAME),
 ) -> dict[str, object]:
-    """Drop the current session row + clear the cookie.  No-op when
-    no cookie is present (idempotent — frontend can call on tab close
-    without first checking auth state)."""
+    """Delete the current session and clear the cookie idempotently."""
     if session_id:
         with connection() as conn:
             sessions_db.delete_session(conn, session_id)
@@ -412,7 +349,7 @@ def change_my_password(
     auth_config: AuthConfig = Depends(get_auth_config),
 ) -> dict[str, str]:
     with connection() as conn:
-        # Verify the current password before honouring the change.
+        # Possession of the current credential is required before replacement.
         verified = users_db.verify_user_password(
             conn, user.username, req.current_password
         )
@@ -427,9 +364,7 @@ def change_my_password(
     return {"status": "ok"}
 
 
-# ---------------------------------------------------------------------------
-# API tokens (per-user)
-# ---------------------------------------------------------------------------
+# Per-user API token management.
 
 
 @router.get("/tokens")
@@ -458,7 +393,7 @@ def create_my_token(
             plaintext, token = tokens_db.create_token(conn, user.id, req.name)
         except ValueError as e:
             raise HTTPException(400, str(e)) from e
-    # Returned EXACTLY ONCE — the DB only stores the hash.
+    # Plaintext is returned only here because persistence stores only its digest.
     return {
         "token": plaintext,
         "id": token.id,
@@ -478,9 +413,7 @@ def revoke_my_token(
     return {"status": "revoked", "id": token_id}
 
 
-# ---------------------------------------------------------------------------
-# Admin: users
-# ---------------------------------------------------------------------------
+# Administrative user management.
 
 
 @router.get("/users")
@@ -527,7 +460,7 @@ def admin_patch_user(
         target = users_db.get_user_by_id(conn, user_id)
         if target is None:
             raise HTTPException(404, {"error": "user_not_found"})
-        # Guard: the last active admin can't demote / disable themselves.
+        # At least one active administrator must remain able to manage the host.
         will_lose_admin = target.role == "admin" and (
             req.role == "user" or req.is_active is False
         )
@@ -541,7 +474,7 @@ def admin_patch_user(
         if req.is_active is not None:
             users_db.set_active(conn, user_id, bool(req.is_active))
             if not req.is_active:
-                # Nuke the user's sessions on disable.
+                # Disabled users must lose all existing session access immediately.
                 sessions_db.delete_user_sessions(conn, user_id)
         updated = users_db.get_user_by_id(conn, user_id)
     return {"user": _user_public(updated)}  # type: ignore[arg-type]
@@ -565,9 +498,7 @@ def admin_delete_user(
     return {"status": "deleted", "id": user_id}
 
 
-# ---------------------------------------------------------------------------
-# Admin: invitations
-# ---------------------------------------------------------------------------
+# Administrative invitation management.
 
 
 @router.post("/invitations")
@@ -583,7 +514,7 @@ def admin_create_invitation(
             expires_in_hours=req.expires_in_hours,
         )
     return {
-        "token": plaintext,  # shown once
+        "token": plaintext,  # The digest is the only persisted representation.
         "id": invite.id,
         "role": invite.role,
         "expires_at": invite.expires_at,
@@ -624,28 +555,15 @@ def admin_revoke_invitation(
     return {"status": "revoked", "id": invite_id}
 
 
-# ---------------------------------------------------------------------------
-# Admin: token rotation — frontend parity with ``kt admin set-host-token`` etc.
-# ---------------------------------------------------------------------------
+# Administrative host and admin token rotation.
 
 
 def _rotate_token_in_config(field: str, request_app) -> str:
-    """Generate a new token + write it into ``[auth]`` in config.toml.
+    """Persist a generated token and replace the live auth snapshot.
 
-    Mirrors the CLI :mod:`cli.admin` write path so frontend-initiated
-    rotation lands in the same place.  Both paths now share
-    :mod:`api.auth.config_write`, eliminating wire-format drift.
-
-    The newly-generated value is ALSO live-installed into
-    ``app.state.auth_config`` so middleware decisions on the very
-    next request honour the rotation — without this, the operator
-    would have to restart the server for the new token to take effect.
-
-    When ``write_auth_section`` rejects an existing config (top-level
-    scalar or nested table that the minimal writer refuses), we
-    translate the ``ValueError`` into a 400 with a clear operator
-    message — bubbling the bare exception would surface as an opaque
-    500 in the admin UI.
+    CLI and API rotation share one writer. Unsupported TOML shapes become an explicit
+    client error, and successful rotation affects the next middleware decision without
+    requiring process restart.
     """
     new_token = secrets.token_hex(32)
     try:
@@ -664,8 +582,7 @@ def _rotate_token_in_config(field: str, request_app) -> str:
                 "writer_error": str(e),
             },
         ) from e
-    # Live-apply by replacing the frozen AuthConfig snapshot.  The
-    # ``dataclasses.replace`` keeps every other field intact.
+    # Replace only the rotated field while preserving the immutable policy snapshot.
     cached = getattr(request_app.state, "auth_config", None)
     if isinstance(cached, AuthConfig):
         request_app.state.auth_config = dataclasses.replace(
@@ -675,13 +592,7 @@ def _rotate_token_in_config(field: str, request_app) -> str:
 
 
 class TokenRotateResponse(BaseModel):
-    """Wire shape for token-rotate routes.
-
-    The full plaintext token is returned ONCE so the admin UI can show
-    it (and the user can copy it to their password manager).  A
-    one-time-show pattern; subsequent requests can only see the
-    masked-tail metadata via :func:`token_status`.
-    """
+    """Return rotated plaintext once; later status responses expose only its tail."""
 
     token: str
     field: str
@@ -698,12 +609,7 @@ def admin_token_status(
     actor: User = Depends(get_current_user),
     auth_config: AuthConfig = Depends(get_auth_config),
 ) -> dict[str, object]:
-    """Inspect the configured host_token / admin_token without leaking them.
-
-    Returns enabled flags + last-6-chars tail of each so the admin UI
-    can show "current host token: ...abc123" without revealing the
-    full secret.
-    """
+    """Return enabled flags and short token tails without exposing full secrets."""
     _require_admin(actor)
     return {
         "host_token": {
@@ -722,15 +628,7 @@ def admin_rotate_host_token(
     request: "Request",  # noqa: F821 — fastapi resolves the actual type
     actor: User = Depends(get_current_user),
 ) -> dict[str, str]:
-    """Generate + save a new ``host_token``.  Admin-only.
-
-    Existing connections continue to use the old token until they
-    reconnect — there is no kick-everyone-out semantic baked into the
-    middleware (it compares against the live ``app.state.auth_config``
-    on every request, so the next request from an existing client will
-    401).  The admin UI is expected to surface this and prompt the
-    operator before clicking the button.
-    """
+    """Rotate the host token and require it on every subsequent request."""
     _require_admin(actor)
     new_token = _rotate_token_in_config("host_token", request.app)
     logger.info("auth: host_token rotated via API by admin")
@@ -742,13 +640,7 @@ def admin_rotate_admin_token(
     request: "Request",  # noqa: F821
     actor: User = Depends(get_current_user),
 ) -> dict[str, str]:
-    """Generate + save a new ``admin_token``.  Admin-only.
-
-    The rotation is live: the next request must carry the new token
-    in the ``X-Admin-Token`` header to pass L3.  The frontend MUST
-    update its stored admin token before any subsequent config-mutating
-    call or 401 storms ensue.
-    """
+    """Rotate the admin token and require it for subsequent mutations."""
     _require_admin(actor)
     new_token = _rotate_token_in_config("admin_token", request.app)
     logger.info("auth: admin_token rotated via API by admin")

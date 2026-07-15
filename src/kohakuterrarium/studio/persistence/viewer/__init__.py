@@ -1,1 +1,1 @@
-"""Studio persistence viewer — tree, summary, turns, events, diff, export (Phase 0 skeleton)."""
+"""Session viewer payloads for trees, summaries, turns, events, diffs, and exports."""

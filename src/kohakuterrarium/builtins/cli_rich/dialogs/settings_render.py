@@ -1,8 +1,6 @@
 """Rendering helpers for ``SettingsOverlay``.
 
-Split out of ``settings.py`` to keep the main file under the 600-line
-soft limit. All functions here are pure read-only views over overlay
-state — they take the overlay and return Rich renderables.
+These helpers are read-only views over overlay state.
 """
 
 from io import StringIO

@@ -1,9 +1,10 @@
 """Scan installed creature / terrarium configs for MCP server references.
 
-Used by ``GET /api/settings/mcp/{name}/usage`` to surface "this server
-is used by N creatures" on the MCP settings tab.
+Scans installed creature and terrarium configurations for references to a named
+MCP server. The API exposes these results in the MCP settings view.
 
-Synchronous + IO-bound; callers should ``to_thread`` this.
+The scan is synchronous and I/O-bound; asynchronous callers should offload it to
+a worker thread.
 """
 
 from pathlib import Path
@@ -18,11 +19,10 @@ logger = get_logger(__name__)
 
 
 def _candidate_roots() -> list[Path]:
-    """Where to look for installed creature / terrarium configs.
+    """Return distinct existing roots that may contain installed packages.
 
-    Today these all live under ``~/.kohakuterrarium/packages/`` (the
-    package-manager root). The CLI's installed-package shape mirrors
-    a checkout: ``packages/<pkg>/creatures/<name>/config.yaml`` etc.
+    Package contents mirror a checkout under ``packages/<pkg>/``, including
+    ``creatures`` and ``terrariums`` directories.
     """
     roots = [
         config_dir() / "packages",
@@ -44,7 +44,7 @@ def _candidate_roots() -> list[Path]:
 
 
 def _scan_kind(root: Path, kind: str) -> list[tuple[Path, dict[str, Any]]]:
-    """Walk ``root/*/<kind>s/*/config.yaml`` and yield (path, parsed config)."""
+    """Return valid mappings found under ``root/*/<kind>s/*`` configs."""
     subdir = f"{kind}s"
     out: list[tuple[Path, dict[str, Any]]] = []
     for pkg_dir in root.iterdir() if root.exists() else []:
@@ -77,11 +77,10 @@ def _scan_kind(root: Path, kind: str) -> list[tuple[Path, dict[str, Any]]]:
 
 
 def _references_server(config: dict[str, Any], server_name: str) -> bool:
-    """Does ``config`` declare a dependency on the named MCP server?
+    """Return whether a config references the named MCP server.
 
-    Looks at the ``mcp_servers:`` top-level list (the canonical
-    shape) plus a nested ``tools.mcp_servers`` fallback for older
-    configs. Each entry may be a bare string or a dict with ``name``.
+    The canonical top-level ``mcp_servers`` list and legacy
+    ``tools.mcp_servers`` list accept either names or mappings with ``name``.
     """
     candidates: list[Any] = []
     top = config.get("mcp_servers")
@@ -101,10 +100,7 @@ def _references_server(config: dict[str, Any], server_name: str) -> bool:
 
 
 def find_creatures_using_server(server_name: str) -> list[dict[str, str]]:
-    """Return a list of ``{name, kind, path}`` refs that depend on the server.
-
-    Sorted by ``(kind, name)`` so the UI rendering is stable across calls.
-    """
+    """Return stable, path-deduplicated config references to an MCP server."""
     refs: list[dict[str, str]] = []
     for root in _candidate_roots():
         for kind in ("creature", "terrarium"):
@@ -113,8 +109,8 @@ def find_creatures_using_server(server_name: str) -> list[dict[str, str]]:
                     name = config.get("name") or path.parent.name or path.stem
                     refs.append({"name": str(name), "kind": kind, "path": str(path)})
     refs.sort(key=lambda r: (r["kind"], r["name"]))
-    # Deduplicate by path — same file may appear twice if both home and
-    # KT_CONFIG_DIR resolve to the same place.
+    # A custom config directory may alias the legacy home root, so path identity
+    # is the final deduplication key.
     seen: set[str] = set()
     deduped: list[dict[str, str]] = []
     for ref in refs:

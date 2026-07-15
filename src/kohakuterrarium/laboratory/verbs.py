@@ -1,18 +1,4 @@
-"""L4 user verbs for the Laboratory layer.
-
-The three delivery verbs from the canonical design are:
-
-- :class:`Channel` — **Send** verb: point-to-point delivery to a named
-  channel. Multiple subscribers load-balance one envelope each.
-- :class:`Topic` — **Broadcast** verb: pub-sub fan-out to all subscribers.
-- Replicate verb — deferred to a later release with the universal state
-  system (design.md §6.4 / §7).
-
-Both verbs sit on top of any object implementing the small :class:`LabNode`
-duck interface — typically a :class:`ClientConnector` (when used from a
-laboratory client) but trivially adaptable to a host-side node if/when
-the host hosts local creatures.
-"""
+"""Provide point-to-point channels and broadcast topics over Laboratory nodes."""
 
 import asyncio
 import itertools
@@ -35,9 +21,7 @@ from kohakuterrarium.laboratory._internal.streams import (
     build_ack_envelope,
 )
 
-# Process-wide counter so verbs running on the same node get distinct
-# stream_ids. Per-instance ids would also work, but a process-wide
-# counter avoids any chance of collision across coexisting verbs.
+# Process-wide allocation prevents stream ID collisions across endpoint instances.
 _STREAM_ID_COUNTER = itertools.count(1)
 
 
@@ -50,11 +34,7 @@ class AckTimeoutError(TimeoutError):
 
 
 class LabNode(Protocol):
-    """Minimal interface a Channel/Topic uses to talk to its host.
-
-    Implemented by :class:`~kohakuterrarium.laboratory._internal.client.ClientConnector`
-    today; future host-side adapters will implement the same surface.
-    """
+    """Define the node operations required by channels and topics."""
 
     @property
     def client_id(self) -> str | None:
@@ -86,11 +66,7 @@ class _BaseEndpoint:
         return self._name
 
     async def subscribe(self) -> None:
-        """Ask the host to register this node as a listener.
-
-        Idempotent: calling twice is harmless (the host's directory
-        deduplicates).
-        """
+        """Idempotently register this node as a listener with the host."""
         if self._subscribed:
             return
         sender = self._node.client_id or ""
@@ -129,8 +105,7 @@ class _BaseEndpoint:
             yield env.payload
 
     def _on_envelope(self, env: Envelope) -> Awaitable[None]:
-        # Subclasses override; provided here so async signature is
-        # consistent for handler registration.
+        # Keep a uniform handler signature while subclasses implement filtering.
         return self._handle(env)
 
     async def _handle(self, env: Envelope) -> None:
@@ -138,13 +113,7 @@ class _BaseEndpoint:
 
 
 class Channel(_BaseEndpoint):
-    """L4 **Send** verb — point-to-point with load-balanced delivery.
-
-    When multiple nodes :meth:`subscribe` to the same channel, each
-    :meth:`send` lands on exactly one of them (host-side round-robin).
-    With ``ack=True``, the receiver auto-acks and ``send`` awaits the
-    ack with a timeout.
-    """
+    """Deliver each payload to one load-balanced channel subscriber."""
 
     def __init__(self, name: str, node: LabNode) -> None:
         super().__init__(name, node)
@@ -158,15 +127,7 @@ class Channel(_BaseEndpoint):
         ack: bool = False,
         timeout: float = DEFAULT_ACK_TIMEOUT_SECONDS,
     ) -> None:
-        """Send one payload to the channel.
-
-        Args:
-            payload: Opaque bytes delivered to one subscribed listener.
-            ack: If ``True``, the receiver acks and this call awaits it.
-            timeout: Max seconds to wait for the ack; raises
-                :class:`AckTimeoutError` on expiry. Ignored when ``ack``
-                is ``False``.
-        """
+        """Send one payload, optionally waiting for a receiver acknowledgement."""
         sender = self._node.client_id or ""
         seq = self._stream_sender.assign_seq()
         env = Envelope(
@@ -221,12 +182,7 @@ class Channel(_BaseEndpoint):
 
 
 class Topic(_BaseEndpoint):
-    """L4 **Broadcast** verb — pub-sub fan-out to every subscriber.
-
-    Every node that :meth:`subscribe` s to the topic receives every
-    :meth:`publish` (including the publisher, if it also subscribed).
-    Best-effort delivery; no acks.
-    """
+    """Broadcast each payload to every topic subscriber without acknowledgements."""
 
     async def publish(self, payload: bytes) -> None:
         """Publish a payload to every subscriber of this topic."""

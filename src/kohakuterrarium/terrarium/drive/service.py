@@ -41,18 +41,9 @@ from kohakuterrarium.terrarium.drive.wire_service import (
 
 
 class DriveServiceMixin(DriveHistoryReadMixin):
-    """Local, in-process Drive implementation for ``LocalTerrariumService``.
-
-    Requires ``self._engine`` (a live :class:`Terrarium`). Phase F partitions the
-    runtime into one manager per graph, so per-``drive_id`` ops resolve the owning
-    graph's manager (never ``manager_for("")``, which would spawn a phantom
-    graph); ``create`` uses the caller-supplied graph; graph-less reads aggregate
-    across every graph manager.
-    """
+    """Implement local Drive service operations over graph-scoped managers."""
 
     _engine: Any
-
-    # -- helpers -------------------------------------------------------------
 
     def _drive_runtime(self) -> Any:
         drives = getattr(self._engine, "drives", None)
@@ -66,7 +57,7 @@ class DriveServiceMixin(DriveHistoryReadMixin):
     async def _find_manager(
         self, runtime: Any, drive_id: str
     ) -> tuple[Any, DriveRecord] | None:
-        """The (manager, record) owning ``drive_id`` across graphs, or ``None``."""
+        """Find the graph manager and record that own a Drive ID."""
         for manager in self._all_managers(runtime):
             record = await manager.get_drive(drive_id)
             if record is not None:
@@ -82,12 +73,7 @@ class DriveServiceMixin(DriveHistoryReadMixin):
     async def _require_manager_in_graph(
         self, runtime: Any, drive_id: str, graph_id: str
     ) -> tuple[Any, DriveRecord]:
-        """(manager, record) for ``drive_id`` iff it lives in ``graph_id``.
-
-        A Drive addressed through the wrong graph URL is reported as not-found
-        (R1-02 confused-deputy): the caller must never learn that the Drive
-        exists in some other graph, and must never mutate it there.
-        """
+        """Resolve a Drive only when it belongs to the addressed graph."""
         found = await self._find_manager(runtime, drive_id)
         if found is None:
             raise DriveNotFoundError(f"no Drive {drive_id!r}")
@@ -105,21 +91,12 @@ class DriveServiceMixin(DriveHistoryReadMixin):
         actor: ActorRef,
         is_privileged: bool = False,
     ) -> None:
-        """Raise :class:`DriveNotFoundError` unless ``drive_id`` is in ``graph_id``.
-
-        The graph-scope gate adapters inherit via the Studio façade (R1-02); the
-        subsequent op still runs its own ACL check.
-        """
+        """Require a Drive to belong to the addressed graph without leaking others."""
         runtime = self._drive_runtime()
         await self._require_manager_in_graph(runtime, drive_id, graph_id)
 
     async def _proposal_for(self, runtime: Any, proposal_id: str) -> tuple[Any, Any]:
-        """(manager, proposal) for a pending ``proposal_id`` across graphs.
-
-        Prefers the manager's persisted-proposal accessor (store-authoritative);
-        the in-memory pending index (rebuilt from the store on resume) is the
-        fallback, so approval binding works whether or not the accessor exists.
-        """
+        """Find the manager and persisted pending proposal for a proposal ID."""
         for manager in self._all_managers(runtime):
             getter = getattr(manager, "get_proposal", None)
             if callable(getter):
@@ -131,8 +108,7 @@ class DriveServiceMixin(DriveHistoryReadMixin):
         raise DriveValidationError(f"no pending proposal {proposal_id!r}")
 
     async def _manager_for_delivery(self, runtime: Any, delivery_id: str) -> Any:
-        """The manager whose graph repository holds ``delivery_id`` (admin replay
-        takes only a delivery id, so probe each graph's repo transactionally)."""
+        """Find the manager whose repository holds a delivery ID."""
         for manager in self._all_managers(runtime):
             async with manager.repository.transaction() as txn:
                 if await txn.get_delivery(delivery_id) is not None:
@@ -164,8 +140,6 @@ class DriveServiceMixin(DriveHistoryReadMixin):
             durability=manager.repository.durability,
             allowed_actions=tuple(actions),
         )
-
-    # -- reads ---------------------------------------------------------------
 
     async def get_drive(
         self, drive_id: str, *, actor: ActorRef, is_privileged: bool = False
@@ -235,8 +209,6 @@ class DriveServiceMixin(DriveHistoryReadMixin):
             return ()
         return registration_dtos(drives)
 
-    # -- writes --------------------------------------------------------------
-
     async def create_drive(
         self,
         request: CreateDriveRequest,
@@ -248,9 +220,8 @@ class DriveServiceMixin(DriveHistoryReadMixin):
     ) -> DriveView:
         runtime = self._drive_runtime()
         manager = runtime.manager_for(graph_id)
-        # A create-time assignee is validated against live topology exactly like an
-        # explicit assign (R1-06): an unknown / out-of-graph assignee is rejected
-        # before the record is minted, never delivered to a phantom creature.
+        # Create-time assignment must satisfy the same live topology constraints
+        # as a later explicit assignment.
         if request.assignee_creature_id is not None:
             self._require_creature_in_graph(request.assignee_creature_id, graph_id)
         record = await manager.create_drive(
@@ -287,11 +258,7 @@ class DriveServiceMixin(DriveHistoryReadMixin):
     def _require_creature_in_graph(
         self, assignee_creature_id: str, graph_id: str
     ) -> None:
-        """The assignee creature must exist and belong to ``graph_id`` (R1-06).
-
-        The service owns the engine, so it is the one layer that can prove an
-        assignee against live topology; the manager cannot see the graph.
-        """
+        """Require an assignee to exist in the specified live graph."""
         engine = self._engine
         if assignee_creature_id not in engine:
             raise DriveValidationError(
@@ -312,11 +279,7 @@ class DriveServiceMixin(DriveHistoryReadMixin):
         assignee_creature_id: str,
         assignee_graph_id: str,
     ) -> None:
-        """Validate an assignment target against live Terrarium topology (R1-06).
-
-        On top of creature existence + membership, the target graph must be the
-        Drive's canonical graph (no cross-graph assignment in v1).
-        """
+        """Validate an assignee and require the Drive's canonical graph."""
         self._require_creature_in_graph(assignee_creature_id, assignee_graph_id)
         graph_manager = runtime.peek_manager(assignee_graph_id)
         if graph_manager is None or manager is not graph_manager:
@@ -501,14 +464,7 @@ class DriveServiceMixin(DriveHistoryReadMixin):
         drive_id: str | None,
         graph_id: str | None,
     ) -> None:
-        """Bind a proposal to the URL's Drive/graph before its terminal write (R1-02).
-
-        The approve URL carries the parent Drive id and graph; a proposal whose
-        Drive is not that Drive — or whose Drive does not live in that graph — is
-        reported not-found, so a caller authorized for one graph can never
-        approve another graph's proposal by satisfying the URL with a Drive it
-        does own (confused-deputy).
-        """
+        """Bind a proposal to the addressed Drive and graph before approval."""
         if drive_id is not None and proposal.drive_id != drive_id:
             raise DriveNotFoundError(
                 f"no proposal {proposal.proposal_id!r} for Drive {drive_id!r}"
@@ -569,8 +525,8 @@ class DriveServiceMixin(DriveHistoryReadMixin):
         runtime = self._drive_runtime()
         manager = await self._manager_for_delivery(runtime, delivery_id)
         if graph_id is not None:
-            # Bind the delivery to the path graph via its owning manager (R1-02):
-            # a delivery reached through the wrong graph URL is not-found.
+            # A graph-scoped replay must not reveal or mutate another graph's
+            # delivery.
             graph_manager = runtime.peek_manager(graph_id)
             if graph_manager is None or manager is not graph_manager:
                 raise DriveDeliveryError(
@@ -583,10 +539,8 @@ class DriveServiceMixin(DriveHistoryReadMixin):
     async def reconfigure_drive_runtime(
         self, registrations: Any, *, actor: ActorRef
     ) -> str:
-        # Operator/admin authorization is enforced at the API/Studio boundary
-        # (Phase J); the actor is carried for audit. Registration instances are
-        # in-process only, so this method has no wire form (Phase H resolves
-        # names on the worker).
+        # Registration instances are process-local; remote settings resolve
+        # registration names on their target worker.
         return self._engine.reconfigure_drives(registrations)
 
 

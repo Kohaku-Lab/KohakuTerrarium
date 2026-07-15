@@ -24,10 +24,9 @@ DTOs vs live objects:
 - :class:`CreatureInfo` is a frozen, msgpack-serializable snapshot of
   a creature's identity + topology binding. Used for cross-process
   transit and for code that only needs identity/topology data.
-- The :attr:`LocalTerrariumService.engine` escape hatch returns the
-  live :class:`~kohakuterrarium.terrarium.engine.Terrarium` for local
-  callers that need access not on the Protocol (rare; primarily
-  inside Phase 0 before W1 migration).
+- The :attr:`LocalTerrariumService.engine` escape hatch returns the live
+  :class:`~kohakuterrarium.terrarium.engine.Terrarium` for rare local callers
+  that need access not exposed by the Protocol.
 """
 
 from collections.abc import AsyncIterator
@@ -89,7 +88,7 @@ class TerrariumService(DriveServiceProtocol, Protocol):
     Method semantics match the underlying
     :class:`~kohakuterrarium.terrarium.engine.Terrarium` engine
     exactly; an implementation that diverges from engine behavior is
-    a bug. The Drive surface (§9.2) comes from ``DriveServiceProtocol``.
+    a bug. The Drive surface comes from ``DriveServiceProtocol``.
     """
 
     @property
@@ -239,7 +238,7 @@ class TerrariumService(DriveServiceProtocol, Protocol):
         """Inject ``message`` and stream the agent's text response."""
         ...
 
-    # === Per-creature control (per ``api-lab-design.md`` §2) ===
+    # === Per-creature control ===
 
     async def interrupt(self, creature_id: str) -> None:
         """Interrupt the creature's current controller turn.

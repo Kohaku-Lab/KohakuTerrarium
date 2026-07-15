@@ -1,16 +1,4 @@
-"""Channel observer attach — engine-backed.
-
-Replaces ``KohakuManager.terrarium_channel_stream`` and
-``agent_channel_stream``.  Streams channel messages observed in a
-session's environment as ``ChannelEvent`` objects.
-
-Body adapted verbatim from
-``serving/manager.py:_stream_from_registry`` (the legacy implementation
-that already worked over either a shared or private ``ChannelRegistry``).
-The only behaviour change is the resolution path: instead of
-``manager._get_runtime(...).environment.shared_channels`` we use
-``engine._environments[session_id].shared_channels``.
-"""
+"""Expose host-local shared and private channel messages as async events."""
 
 import asyncio
 from dataclasses import dataclass, field
@@ -26,7 +14,7 @@ from kohakuterrarium.studio._runtime import host_engine_or_none
 
 @dataclass
 class ChannelEvent:
-    """A channel message observed in a session."""
+    """A channel message annotated with its observed source."""
 
     terrarium_id: str
     channel: str
@@ -43,13 +31,11 @@ async def stream_session_channels(
     *,
     filter_channels: list[str] | None = None,
 ) -> AsyncIterator[ChannelEvent]:
-    """Stream every shared-channel message from a session as it arrives.
+    """Stream shared-channel messages from a host-local graph session.
 
-    The channel-observer stream taps a host engine's internal channel
-    registry directly — in lab-host mode there is no host engine, and a
-    cross-node observer path is not yet wired, so a worker session's
-    channels surface as ``KeyError`` (the standard "not here" signal
-    the WS route closes cleanly on) rather than an engine reach-in.
+    Observation reads the engine's channel registry directly. Lab hosts therefore
+    raise ``KeyError`` for worker sessions until a cross-node observer transport is
+    available, allowing websocket callers to use the standard not-local close path.
     """
     engine = host_engine_or_none(service)
     if engine is None:
@@ -77,10 +63,10 @@ async def stream_creature_channels(
     *,
     filter_channels: list[str] | None = None,
 ) -> AsyncIterator[ChannelEvent]:
-    """Stream a creature's private (sub-agent) channel messages.
+    """Stream private sub-agent channel messages for a host-local creature.
 
-    Host-engine-internal, like :func:`stream_session_channels` — a
-    worker creature surfaces as ``KeyError`` in lab-host mode.
+    Worker creatures raise ``KeyError`` because private registries are not available
+    on a lab host.
     """
     engine = host_engine_or_none(service)
     if engine is None:
@@ -108,10 +94,7 @@ async def _stream_from_registry(
     filter_channels: list[str] | None = None,
     running_check: Any = None,
 ) -> AsyncIterator[ChannelEvent]:
-    """Stream channel events from any ``ChannelRegistry``.
-
-    Adapted from ``serving/manager.py:_stream_from_registry``.
-    """
+    """Observe an arbitrary channel registry until its source stops running."""
     observer = ChannelObserver(None)
     observer._session = None
 
@@ -132,14 +115,11 @@ async def _stream_from_registry(
     observer.on_message(on_message)
 
     def _subscribe_new_channels() -> None:
-        """Pick up any channel that's been created since the last tick.
+        """Subscribe to eligible channels created since the previous poll.
 
-        The observer was originally a one-shot snapshot of
-        ``registry.list_channels()`` at attach time, which silently
-        dropped messages on channels created later (the typical
-        frontend flow: open the panel, then create the channel).
-        Re-polling on each tick is cheap and covers add/connect-merge
-        cases uniformly.
+        Registries are dynamic, so an attachment-time snapshot would miss later
+        channel creation and graph merges. Periodic polling keeps subscriptions
+        current without requiring registry mutation hooks.
         """
         for ch_name in filter_channels or registry.list_channels():
             if ch_name in observer._subscriptions:

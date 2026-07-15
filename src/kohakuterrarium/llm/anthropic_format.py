@@ -12,8 +12,7 @@ from kohakuterrarium.llm.anthropic_pairing import (
 from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
 
-# Re-exported for back-compat with any callers that imported it from
-# ``anthropic_format``. Canonical home is ``anthropic_pairing``.
+# Preserve the historical import path; pairing logic lives in anthropic_pairing.
 __all__ = ["SYNTHETIC_TOOL_RESULT_TEXT", "fix_anthropic_tool_block_pairing"]
 
 KT_CONTENT_KEY = "_kt_anthropic_content"
@@ -72,11 +71,7 @@ def prepare_messages(
             continue
         if role == "tool":
             append_tool_result(body, msg)
-    # Final pass — enforce Anthropic's strict ``tool_use`` ↔ ``tool_result``
-    # pairing rule. Mirrors what ``fix_tool_call_pairing`` does for the
-    # Codex Responses API at codex_format.py:90. Runs on every request,
-    # not just on resume, so any orderings introduced by mid-turn
-    # injection / branch switches get normalised before the API call.
+    # Normalize every request because injected or branched history can break pairing.
     body = fix_anthropic_tool_block_pairing(body)
     return "\n\n".join(system_parts), body
 
@@ -105,17 +100,7 @@ def assistant_message(msg: dict[str, Any]) -> dict[str, Any]:
 
 
 def sanitized_native_content(msg: dict[str, Any]) -> list[dict[str, Any]]:
-    """Round-trip the previous Anthropic response's native content blocks,
-    filtering out ``tool_use`` blocks the canonical OpenAI-shape no
-    longer announces.
-
-    Treats ``tool_calls`` MISSING the same as ``tool_calls: []`` —
-    both mean "this assistant announces no tool calls in the canonical
-    shape, so any ``tool_use`` in native content is orphan". The
-    legacy code returned ALL native content when the key was absent,
-    which let orphan ``tool_use`` blocks slip through to the API and
-    trigger 400 ("tool_use ids found without tool_result blocks").
-    """
+    """Round-trip native blocks while removing tool uses absent from canonical calls."""
     native_content = msg.get(KT_CONTENT_KEY)
     if not isinstance(native_content, list) or not native_content:
         return []
@@ -180,9 +165,7 @@ def user_content(content: Any) -> str | list[dict[str, Any]]:
 def image_part(part: dict[str, Any]) -> dict[str, Any]:
     image = part.get("image_url") if isinstance(part.get("image_url"), dict) else {}
     url = str(image.get("url") or part.get("url") or "")
-    # Local ``/api/sessions/.../artifacts/...`` URLs aren't fetchable by
-    # the remote API; resolve to an inline ``data:`` URL so the image is
-    # sent as base64 instead of being dropped (issue #70).
+    # Remote APIs cannot fetch local artifact paths, so inline them before sending.
     url = resolve_artifact_url(url)
     if url.startswith("data:"):
         match = DATA_IMAGE_RE.match(url)
@@ -356,13 +339,7 @@ def usage_to_dict(usage: Any) -> dict[str, int]:
 
 
 def merge_usage(existing: dict[str, int], usage: Any) -> dict[str, int]:
-    """Merge a partial Anthropic stream usage object into accumulated usage.
-
-    Anthropic streaming reports input/cache tokens at ``message_start`` and
-    output tokens later on ``message_delta``. Some fields are omitted from a
-    given event rather than repeated, so a blind ``dict.update`` can zero out
-    the prompt side when the final event only includes output tokens.
-    """
+    """Merge partial stream usage without erasing fields omitted by later events."""
     data = block_to_dict(usage)
     if not data:
         return dict(existing)

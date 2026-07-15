@@ -31,7 +31,6 @@ from kohakuterrarium.builtins.cli_rich.creature_status import (
     StatusState,
 )
 
-# Grouping order — first listed renders first.
 _GROUP_ORDER: list[StatusState] = ["waiting", "working", "idle", "stopped", "failed"]
 _GROUP_LABEL: dict[StatusState, str] = {
     "waiting": "Needs input",
@@ -58,17 +57,12 @@ _GLYPH: dict[StatusState, str] = {
 
 @dataclass
 class AgentOverlayState:
-    """Pure data state for the agent overlay.
-
-    The overlay's UI render reads from this; keyboard handlers
-    mutate it. ``selected_id`` is the canonical "what's highlighted"
-    pointer (creature_id, not index, so it survives filter changes).
-    """
+    """Store filter, selection, and peek state for the agent overlay."""
 
     statuses: list[CreatureStatus] = field(default_factory=list)
     filter_text: str = ""
     selected_id: str = ""
-    peek_id: str | None = None  # None = peek closed
+    peek_id: str | None = None
 
     def visible(self) -> list[CreatureStatus]:
         """Statuses that match the filter, grouped by state in priority order."""
@@ -135,25 +129,14 @@ KeyAction = Literal["consumed", "passthrough", "close", "focus", "peek"]
 
 @dataclass
 class KeyResult:
-    """What the overlay decided after handling a key."""
+    """Describe the result of an overlay key event."""
 
     action: KeyAction
-    creature_id: str | None = None  # for "focus" / "peek" actions
+    creature_id: str | None = None
 
 
 def handle_key(state: AgentOverlayState, key: str) -> KeyResult:
-    """Translate a key event into a state mutation + outcome action.
-
-    Pure function so the keyboard layer can be tested without
-    prompt_toolkit. The composer integration wires this to the
-    actual KeyPressEvent loop.
-
-    Tab / Shift+Tab act as ↓ / ↑ inside the overlay so the user
-    keeps cycling with the same key they used outside — without
-    this Tab leaks through to the composer's focus_next and the
-    overlay's selected_id drifts out of sync with the actual focused
-    creature.
-    """
+    """Translate a key into a pure overlay state transition."""
     if key == "escape":
         return KeyResult(action="close")
     if key in ("up", "s-tab"):
@@ -170,12 +153,8 @@ def handle_key(state: AgentOverlayState, key: str) -> KeyResult:
             return KeyResult(action="focus", creature_id=state.selected_id)
         return KeyResult(action="consumed")
     if key in ("right",) and state.peek_id:
-        # → on a peeked row promotes peek to focus.
         return KeyResult(action="focus", creature_id=state.peek_id)
     return KeyResult(action="passthrough")
-
-
-# ── Rendering ────────────────────────────────────────────────────────
 
 
 def _row_text(status: CreatureStatus, is_selected: bool) -> Text:
@@ -185,9 +164,7 @@ def _row_text(status: CreatureStatus, is_selected: bool) -> Text:
     out.append(f"  {status.name:<16}", style="bold" if is_selected else "")
     model = getattr(status, "model", "")
     if model:
-        # Per-creature model — the whole point of the overlay in a
-        # multi-model graph. Truncated so long variation selectors
-        # don't push the activity column off-screen.
+        # Bound model width so activity remains visible in multi-model graphs.
         shown = model if len(model) <= 32 else model[:31] + "…"
         out.append(f"  {shown}", style="cyan")
     out.append(f"  {status.activity}", style="dim")
@@ -221,7 +198,7 @@ def render_overlay(state: AgentOverlayState) -> RenderableType:
 
 
 class AgentOverlay:
-    """Stateful overlay — wraps :class:`AgentOverlayState` with callbacks."""
+    """Combine agent-overlay state with focus, peek, and close callbacks."""
 
     def __init__(
         self,
@@ -238,7 +215,7 @@ class AgentOverlay:
         self.visible: bool = False
 
     def open(self) -> None:
-        """Refresh the snapshot + open."""
+        """Refresh statuses and open the overlay."""
         self.state.statuses = list(self.get_statuses() or [])
         self.state.ensure_valid_selection()
         self.visible = True
@@ -286,8 +263,7 @@ class AgentOverlay:
     def render(self) -> RenderableType | None:
         if not self.visible:
             return None
-        # Refresh the snapshot every render so add/remove topology
-        # changes propagate without explicit invalidation calls.
+        # Poll topology on render because add/remove events may not invalidate this view.
         self.state.statuses = list(self.get_statuses() or [])
         self.state.ensure_valid_selection()
         return render_overlay(self.state)

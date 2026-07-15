@@ -1,22 +1,14 @@
-"""Per-graph Drive repository + manager partitioning (design §3.1, §7.1; Phase F).
+"""Per-graph drive repository and manager partitioning.
 
-Phase E ran ONE :class:`DriveManager` over ONE repository for the whole engine.
-But a Drive is graph-scoped (design §3.1): a Drive belongs to exactly one graph
-and topology merge/split moves Drive rows *between* graph repositories rather
-than sharing one mutable store across disconnected graphs (design §7.1). Phase F
-therefore partitions the runtime — each graph gets its own repository and its own
-``DriveManager`` + dispatcher, so a Drive created in graph A is invisible to
-graph B's manager, and merge/split can move rows with the ``export_rows`` /
-``import_rows`` seam.
+Each graph owns an isolated repository, manager, and dispatcher. Drives are
+therefore invisible across disconnected graphs, while topology merge and split
+move rows explicitly through repository export and import rather than sharing
+mutable storage.
 
-Repository source precedence, per graph (design §7.1):
-
-1. an explicit ``drive_store`` provider — a graph-scoped factory ``(gid) -> repo``
-   (or a single bound repository claimed by the first graph, never blindly shared);
-2. the graph's attached :class:`SessionStore` — durable, resumes after restart;
-3. :class:`MemoryDriveRepository` — ephemeral, survives creature stop only.
-
-The registry owns no model semantics; it is pure wiring around the managers.
+Repository selection prefers an explicit graph-scoped provider, then the graph's
+session store, then ephemeral memory. A single repository instance can be
+claimed by only one graph. The registry owns wiring and lifecycle only; drive
+semantics remain in the manager and policy layers.
 """
 
 import asyncio
@@ -36,13 +28,11 @@ logger = get_logger(__name__)
 
 
 def _make_store_provider(store: Any) -> "Callable[[str], Any] | None":
-    """Turn the constructor ``drive_store`` into a per-graph repo provider.
+    """Normalize drive-store configuration into a graph-scoped provider.
 
-    - ``None`` → no provider (fall through to session/memory).
-    - a callable → a graph-scoped factory ``store(gid) -> repo | None``.
-    - a repository instance → a single-graph store claimed by the FIRST graph
-      that asks for it; later graphs get ``None`` so one mutable repository is
-      never blindly shared across disconnected graphs (design §7.1).
+    ``None`` falls through to session or memory storage. Callables resolve per
+    graph. A repository instance is claimed by the first graph only, preventing
+    disconnected graphs from sharing one mutable store.
     """
     if store is None:
         return None
@@ -60,7 +50,7 @@ def _make_store_provider(store: Any) -> "Callable[[str], Any] | None":
 
 
 class GraphDriveRegistry:
-    """Owns the per-graph repositories + managers for a Drive-enabled engine."""
+    """Own per-graph repositories, managers, and dispatcher lifecycle."""
 
     def __init__(
         self,
@@ -84,54 +74,47 @@ class GraphDriveRegistry:
         self._rng = rng
         self._id_factory = id_factory
         self._provider = _make_store_provider(store)
-        # Each graph's explicit provider repository is resolved exactly ONCE and
-        # cached, so a presence check never consumes a single-store provider and
-        # a later resolve returns the same repo (design §7.1, R1-10). ``None`` is
-        # cached too — a graph the single-store provider declines stays declined.
+        # Provider resolution is stable per graph; caching absence also prevents
+        # a single-store provider from being consumed by later graphs.
         self._provider_repos: dict[str, Any] = {}
         self._managers: dict[str, DriveManager] = {}
         self._repos: dict[str, Any] = {}
-        # graph_id -> the SessionStore its session-backed repo was opened from,
-        # so a repeated bind for the same store is a no-op (no leaked conn).
+        # Rebinding the same session store must not create another repository
+        # connection.
         self._bound_stores: dict[str, Any] = {}
-        # Graphs whose dispatcher is allowed to run: a creature crossed the
-        # restoration barrier (design §6.5 — no Drive delivered/claimed before
-        # the barrier). Manager creation is eager (so tool ops resolve a repo);
-        # the dispatcher START is gated on this set so it never claims/writes on
-        # the shared session file DURING resume/state-injection.
+        # Managers may exist for tool access before restoration, but dispatch must
+        # wait until resume finishes writing shared session state.
         self._ready_graphs: set[str] = set()
         self._active = False
         self._start_tasks: set[asyncio.Task] = set()
-        # Fire-and-forget stops of DETACHED managers (rebind / drop_graph). Kept
-        # apart from _start_tasks so shutdown DRAINS them (awaits completion)
-        # rather than cancelling a dispatcher stop mid-round.
+        # Detached manager stops are drained during shutdown rather than cancelled
+        # mid-round.
         self._stop_tasks: set[asyncio.Task] = set()
 
-    # -- read surface --------------------------------------------------------
-
     def peek(self, graph_id: str) -> DriveManager | None:
-        """The manager for ``graph_id`` if one exists — never creates one."""
+        """Return an existing graph manager without creating one."""
         return self._managers.get(graph_id)
 
     def all_managers(self) -> list[DriveManager]:
-        """Every live per-graph manager (for cross-graph list unions, §3.1)."""
+        """Return every live graph manager for cross-graph read unions."""
         return list(self._managers.values())
 
     def repository_for(self, graph_id: str) -> Any:
         return self._repos.get(graph_id)
 
     def durability_for(self, graph_id: str) -> str:
-        """This graph's Drive durability, ``ephemeral`` if it has no repo yet."""
+        """Return graph durability, or ephemeral before repository creation."""
         repo = self._repos.get(graph_id)
         return repo.durability if repo is not None else "ephemeral"
 
     @property
     def durability(self) -> str:
-        """Aggregate durability across graphs (design §7.1, R1-41).
+        """Summarize durability across all graph repositories.
 
-        A single mode when every graph agrees, ``mixed`` when the engine holds
-        both persistent and ephemeral graphs, and ``ephemeral`` when empty. A
-        per-graph consumer must call :meth:`durability_for`."""
+        Matching graphs report their common mode, differing modes report
+        ``mixed``, and an empty registry reports ``ephemeral``. Per-graph callers
+        should use :meth:`durability_for`.
+        """
         modes = {repo.durability for repo in self._repos.values()}
         if not modes:
             return "ephemeral"
@@ -139,15 +122,12 @@ class GraphDriveRegistry:
             return next(iter(modes))
         return "mixed"
 
-    # -- creation / lifecycle ------------------------------------------------
-
     def manager_for(self, graph_id: str, *, create: bool = True) -> DriveManager | None:
-        """Get-or-create the manager for ``graph_id`` (design §3.1).
+        """Get or create a graph manager using current storage precedence.
 
-        The tool + operation surface calls this: a creature creating its first
-        Drive mints the graph's manager on demand, resolving the repository from
-        the best source available right now (provider → attached store → memory).
-        ``create=False`` peeks without minting."""
+        First use resolves provider, attached session store, or memory storage.
+        ``create=False`` performs a non-creating lookup.
+        """
         existing = self._managers.get(graph_id)
         if existing is not None:
             return existing
@@ -157,11 +137,11 @@ class GraphDriveRegistry:
         return self._install(graph_id, repo, store)
 
     async def ensure_started(self, graph_id: str) -> DriveManager:
-        """Mark the graph delivery-ready and start its dispatcher (design §6.5).
+        """Mark a restored graph delivery-ready and start its dispatcher.
 
-        This is the barrier-crossed signal: called from ``_reconcile_when_ready``
-        once a creature is restoration-ready, and from topology merge/split (which
-        operate on already-running graphs). Idempotent."""
+        Repeated calls are safe. Topology movement also uses this path because it
+        operates on graphs that already crossed restoration.
+        """
         self._ready_graphs.add(graph_id)
         manager = self.manager_for(graph_id)
         assert manager is not None
@@ -169,45 +149,34 @@ class GraphDriveRegistry:
         return manager
 
     async def bind_store(self, graph_id: str, session_store: Any) -> DriveManager:
-        """Bind (or rebind) the graph's repository to a session-backed one.
+        """Bind a graph to session-backed storage before restoration completes.
 
-        Called when a :class:`SessionStore` is attached/minted for the graph
-        (autosession / resume), BEFORE the graph's creatures reach the
-        restoration barrier (design §6.5, §7.1). If a manager was already minted
-        with an ephemeral repository (an early tool-created Drive before the
-        store attached), its rows migrate into the session-backed repository so
-        nothing is lost. Idempotent for a store already bound to the graph."""
+        If early tool use already created an ephemeral manager, its rows migrate
+        into the session repository. Rebinding the same store is idempotent.
+        """
         if self._bound_stores.get(graph_id) is session_store:
             return self._managers[graph_id]
-        # An explicit provider owns the repository selection; a session store
-        # attach must not override it (design §7.1 precedence). Use the CACHED
-        # provider resolution so the presence check does not consume a
-        # single-store provider (R1-10).
+        # Explicit providers outrank session storage, and cached resolution avoids
+        # consuming a single-store provider during precedence checks.
         if self._provider_repo(graph_id) is not None:
             return self.manager_for(graph_id)
         repo = open_session_drive_repository(session_store)
         existing = self._managers.get(graph_id)
         if existing is None:
-            # NO eager start: bind_store runs during resume/autosession attach,
-            # BEFORE the restoration barrier. The dispatcher starts only when a
-            # creature crosses the barrier (``ensure_started`` via reconcile), so
-            # it never contends with resume's session-file writes (design §6.5).
+            # Dispatch remains dormant until restoration finishes, avoiding
+            # contention with resume writes.
             return self._install(graph_id, repo, session_store)
         await self._rebind(graph_id, existing, repo, session_store)
         return self._managers[graph_id]
 
     def rebind_repository(self, graph_id: str, repo: Any, store: Any = None) -> None:
-        """Swap a graph's repository, keeping the graph (topology merge/split).
+        """Rewire a graph after topology movement has replaced its repository.
 
-        The caller has already moved rows into ``repo`` AND closed the old repo
-        (``_close_if_persistent``); here we only rewire the manager. The old
-        dispatcher's stop is fire-and-forget: the graph's session store is NOT
-        closing (the survivor/child keeps it), so there is no companion-closer
-        race, and the old dispatcher quiesces harmlessly against the already-
-        closed old repo (delivery's TestRepoCloseRace). Awaiting the stop here
-        would instead block the topology op on the old dispatcher's teardown. A
-        no-op when the repo is unchanged. Contrast :meth:`detach_and_stop`, which
-        DOES await — used when the store itself is about to close."""
+        The caller has already moved rows and closed the old repository. Dispatcher
+        stop is asynchronous because the surviving store remains open and topology
+        mutation should not wait for teardown. When a store itself will close,
+        :meth:`detach_and_stop` must be used instead.
+        """
         existing = self._managers.get(graph_id)
         if existing is not None and self._repos.get(graph_id) is repo:
             return
@@ -216,11 +185,11 @@ class GraphDriveRegistry:
         self._install(graph_id, repo, store)
 
     def drop_graph(self, graph_id: str) -> None:
-        """Forget a graph whose topology went away entirely (a creature removed
-        its last member). Fire-and-forget stop: this is a sync engine path, and
-        the dispatcher tolerates the graph store's later close. A topology
-        merge/split that DROPS a graph uses the awaited :meth:`detach_and_stop`
-        instead, because it closes the store right after."""
+        """Forget an empty graph and schedule asynchronous manager shutdown.
+
+        Merge and split use :meth:`detach_and_stop` when repository closure follows
+        immediately.
+        """
         manager = self._managers.pop(graph_id, None)
         self._repos.pop(graph_id, None)
         self._bound_stores.pop(graph_id, None)
@@ -229,13 +198,11 @@ class GraphDriveRegistry:
             self._schedule_stop(manager)
 
     async def detach_and_stop(self, graph_id: str) -> None:
-        """AWAIT-stop + forget a graph's manager while its repo is still open.
+        """Stop and forget a graph manager while its repository is still open.
 
-        Called before a graph's session store (and its companion Drive repo) is
-        closed — on store replacement, or when a topology merge/split drops the
-        graph — so the dispatcher releases its claims against a live connection
-        and is fully stopped BEFORE the store's companion closer shuts the repo
-        executor (no fire-and-forget stop racing the close, design §6.4/§7.1)."""
+        Awaiting shutdown lets the dispatcher release claims before session-store
+        replacement or topology movement closes the companion repository.
+        """
         manager = self._managers.pop(graph_id, None)
         self._repos.pop(graph_id, None)
         self._bound_stores.pop(graph_id, None)
@@ -243,27 +210,23 @@ class GraphDriveRegistry:
         if manager is not None:
             try:
                 await manager.stop()
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:  # pragma: no cover
                 logger.warning("drive manager detach stop failed", error=str(exc))
 
     async def start_all(self) -> None:
-        """Mark the registry active and start every barrier-ready dispatcher.
-
-        Only graphs already marked delivery-ready start here; a graph mid-resume
-        (bound but pre-barrier) waits for ``ensure_started`` at the barrier."""
+        """Activate the registry and start dispatchers for restored graphs only."""
         self._active = True
         for graph_id, manager in list(self._managers.items()):
             if graph_id in self._ready_graphs:
                 await manager.start()
 
     async def stop_all(self) -> None:
-        """Stop every dispatcher (engine shutdown / drain, design §6.4).
+        """Stop all dispatchers without leaving detached shutdowns mid-round.
 
-        Cancel pending START tasks (nothing should start mid-shutdown) but DRAIN
-        in-flight scheduled STOPS (detached managers): awaiting them guarantees a
-        dispatcher's ``_run`` is down before the loop is torn out from under it,
-        rather than cancelling the stop and leaving a round to race a closing
-        repo (the DriveRepositoryClosedError churn drive-gaps quiesced)."""
+        Pending starts are cancelled, while already scheduled stops are drained
+        before active managers stop. This prevents dispatch from racing repository
+        closure as the event loop shuts down.
+        """
         for task in list(self._start_tasks):
             if not task.done():
                 task.cancel()
@@ -277,17 +240,12 @@ class GraphDriveRegistry:
         self._active = False
 
     def set_snapshot(self, snapshot: EnabledRegistrySnapshot | None) -> None:
-        """Publish a new enabled-registry snapshot to every graph's manager."""
+        """Publish registry changes to every graph manager."""
         for manager in self._managers.values():
             manager.set_snapshot(snapshot)
 
-    # -- internals -----------------------------------------------------------
-
     def _provider_repo(self, graph_id: str) -> Any:
-        """The graph's explicit provider repository, resolved once and cached.
-
-        Caches ``None`` too, so a single-store provider is claimed by exactly one
-        graph and re-consulting it never re-claims or re-consumes it (R1-10)."""
+        """Resolve a graph's explicit provider once, including an absent result."""
         if graph_id in self._provider_repos:
             return self._provider_repos[graph_id]
         repo = self._provider(graph_id) if self._provider is not None else None
@@ -295,7 +253,7 @@ class GraphDriveRegistry:
         return repo
 
     def _resolve_repo(self, graph_id: str) -> tuple[Any, Any]:
-        """Resolve ``(repo, session_store)`` by the §7.1 precedence."""
+        """Resolve repository and backing session store by configured precedence."""
         provided = self._provider_repo(graph_id)
         if provided is not None:
             return provided, None
@@ -306,14 +264,7 @@ class GraphDriveRegistry:
         return MemoryDriveRepository(), None
 
     def resolve_destination_repo(self, graph_id: str) -> tuple[Any, Any]:
-        """The destination repository + store for a graph on topology movement.
-
-        The ONE resolver shared by initial bind, merge, and split (design §7.1,
-        R1-10): the explicit provider (cached) wins over the session store, which
-        wins over an ephemeral memory repo — so caller-selected durability /
-        isolation is preserved across merge and split, not silently replaced by
-        the session sidecar. A provider repo is owned by the provider and must
-        not be closed by the mover; a session/memory destination is the mover's."""
+        """Resolve topology-movement storage with standard graph precedence."""
         return self._resolve_repo(graph_id)
 
     def _build_manager(self, graph_id: str, repo: Any) -> DriveManager:
@@ -330,11 +281,7 @@ class GraphDriveRegistry:
         )
 
     def _make_topology_validator(self, graph_id: str) -> Callable[[Any], bool]:
-        """A trusted live-topology check for ``graph_id`` (R1-06): an assignment
-        is valid only when its assignee is a current member of this graph and its
-        canonical graph is this graph. When no live topology is available (a
-        headless test engine, or the graph not yet in topology mid-setup) it
-        returns True so reconcile never orphans on missing information."""
+        """Build a membership validator that tolerates incomplete topology state."""
         engine = self._engine
 
         def _valid(assignment: Any) -> bool:
@@ -370,31 +317,20 @@ class GraphDriveRegistry:
     async def _rebind(
         self, graph_id: str, existing: DriveManager, repo: Any, store: Any
     ) -> None:
-        """Migrate rows from an EPHEMERAL repo into the session repo, then swap.
-
-        Only the memory→session promotion path migrates (a Drive created before
-        the store attached). A session→session rebind never exports the old repo
-        — the session repo already carries any persisted rows on resume, and a
-        superseded store's sqlite connection may already be closed (topology
-        merge/split move rows through their own path)."""
+        """Promote ephemeral rows into session storage before replacing a manager."""
         old_repo = self._repos.get(graph_id)
         if getattr(old_repo, "durability", "") == "ephemeral":
             try:
                 payload = await old_repo.export_rows()
                 if payload.get("drives"):
                     await repo.import_rows(payload)
-            except Exception as exc:  # pragma: no cover - defensive
+            except Exception as exc:  # pragma: no cover
                 logger.warning("drive repo rebind migrate failed", error=str(exc))
         await existing.stop()
         self._install(graph_id, repo, store)
 
     def _maybe_start(self, graph_id: str, manager: DriveManager) -> None:
-        """Start a freshly-minted dispatcher when the registry is active, its
-        graph is barrier-ready, and a loop is running (lazy tool-path creation).
-
-        Gated on ``_ready_graphs`` so a manager minted DURING resume/bind (before
-        the barrier) does not start its dispatcher and contend on the session file
-        (design §6.5); the barrier's ``ensure_started`` starts it."""
+        """Start a lazily created manager only after its graph is restoration-ready."""
         if not self._active or graph_id not in self._ready_graphs:
             return
         try:
@@ -406,9 +342,7 @@ class GraphDriveRegistry:
         task.add_done_callback(self._start_tasks.discard)
 
     def _schedule_stop(self, manager: DriveManager) -> None:
-        """Fire-and-forget stop for a manager whose repo is ALREADY closed (a
-        rebind swap). Not for the store-close path — that awaits via
-        :meth:`detach_and_stop` so the stop finishes before the store closes."""
+        """Schedule shutdown after detaching a manager without closing its store."""
         try:
             asyncio.get_running_loop()
         except RuntimeError:

@@ -1,19 +1,9 @@
-"""Cluster-aware session-file path resolution.
+"""Resolve every persisted store belonging to a clustered session.
 
-After a cross-node ``connect()`` records a ``_cluster_links`` entry on
-the ``MultiNodeTerrariumService``, every cluster member writes its OWN
-per-worker session store. Host-side, those are mirrored under
-``<session_dir>/mirror/<member_sid>.kohakutr``. Any read-only endpoint
-that surfaces "everything in this session" (memory search, viewer
-tree / summary / turns / events, …) MUST walk every member's file —
-opening only the primary's store hides the non-primary workers'
-history. CF-5 fixed memory search; the viewer endpoints share the same
-blind spot and use this helper for the same fan-out.
-
-This module is pure: it takes a ``TerrariumService`` (read its
-``_cluster_links``) and the requested sid, returns the on-disk paths
-for every reachable cluster member. No I/O beyond a directory-scan
-``stat`` per member sid.
+Each worker writes its own store, mirrored on the host by member session ID.
+Read-only views must fan out across all members or they omit non-primary history.
+This helper maps a requested member to deterministic on-disk paths without
+opening the stores.
 """
 
 from pathlib import Path

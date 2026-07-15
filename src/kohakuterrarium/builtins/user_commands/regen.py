@@ -1,4 +1,4 @@
-"""Regen command — regenerate the last assistant response."""
+"""Regenerate the last assistant response with the current agent settings."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (

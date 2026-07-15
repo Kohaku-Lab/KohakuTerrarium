@@ -9,10 +9,10 @@ class TerrariumCreate(BaseModel):
     """Request body for creating a terrarium."""
 
     config_path: str
-    llm: str | None = None  # LLM profile override for all creatures
-    pwd: str | None = None  # Working directory (default: server cwd)
-    name: str | None = None  # Display name override (defaults to recipe name)
-    on_node: str | None = None  # Lab target node; absent = ``_host``
+    llm: str | None = None  # Overrides every creature's configured LLM profile.
+    pwd: str | None = None  # Defaults to the server process working directory.
+    name: str | None = None  # Defaults to the recipe name.
+    on_node: str | None = None  # Absence selects the Laboratory host.
 
 
 class TerrariumStatus(BaseModel):
@@ -92,7 +92,7 @@ class WireChannel(BaseModel):
     """Request body for wiring a creature to a channel."""
 
     channel: str
-    direction: str  # "listen" or "send"
+    direction: str  # Channel wiring accepts only the listen or send direction.
     enabled: bool = True
 
 
@@ -100,10 +100,10 @@ class AgentCreate(BaseModel):
     """Request body for creating a standalone agent."""
 
     config_path: str
-    llm: str | None = None  # LLM profile override
-    pwd: str | None = None  # Working directory (default: server cwd)
-    name: str | None = None  # Display name override (defaults to config name)
-    on_node: str | None = None  # Lab target node; absent = ``_host``
+    llm: str | None = None  # Overrides the configured LLM profile.
+    pwd: str | None = None  # Defaults to the server process working directory.
+    name: str | None = None  # Defaults to the creature configuration name.
+    on_node: str | None = None  # Absence selects the Laboratory host.
 
 
 class RenameRequest(BaseModel):
@@ -115,7 +115,7 @@ class RenameRequest(BaseModel):
 class ModelSwitch(BaseModel):
     """Request body for switching an agent/creature's LLM model."""
 
-    model: str  # Profile name (e.g. "claude-opus-4.6", "gemini-3.1-pro")
+    model: str  # LLM profile name rather than a provider-specific model ID.
 
 
 class AgentChat(BaseModel):
@@ -126,16 +126,11 @@ class AgentChat(BaseModel):
 
 
 class RegenerateRequest(BaseModel):
-    """Request body for regenerating an assistant response.
+    """Select the turn and branch view used to regenerate a response.
 
-    ``turn_index=None`` regenerates the conversation tail (default).
-    A specific ``turn_index`` opens a new branch at that turn — used
-    when the user clicks "retry" on a non-tail message.
-
-    ``branch_view`` is the user's current ``{turn_index: branch_id}``
-    selection — required when retrying on a non-latest branch so the
-    backend can reload its in-memory conversation under that view
-    before opening the new branch.
+    Omitting ``turn_index`` regenerates the conversation tail. A specific turn
+    opens a branch there, and ``branch_view`` restores the selected subtree before
+    branching from a non-latest path.
     """
 
     turn_index: int | None = None
@@ -145,28 +140,21 @@ class RegenerateRequest(BaseModel):
 class MessageEdit(BaseModel):
     """Request body for editing a user message and re-running."""
 
-    # Accept either a plain string (legacy / text-only edit) or a list of
-    # multimodal content parts — same shape as ``AgentChat.content`` —
-    # so the frontend's ``buildMessageParts`` output is valid.
+    # Text-only and multimodal edits share the same payload accepted by chat.
     content: str | list[ContentPartPayload]
-    # Prefer stable visible-user targeting over raw conversation indices.
-    # ``msg_idx`` remains in the URL for backward compatibility, but the
-    # frontend sends one of these fields so system/tool messages cannot
-    # shift the target.
+    # Visible-user coordinates remain stable when hidden system or tool messages
+    # change raw conversation indices.
     turn_index: int | None = None
     user_position: int | None = None
-    # The user's current branch selection — needed when editing a
-    # message that lives on a non-latest branch so the backend can
-    # reload its conversation under that subtree before resolving the
-    # edit target.
+    # Restore the selected subtree before resolving edits on a non-latest branch.
     branch_view: dict[int, int] | None = None
 
 
 class SlashCommand(BaseModel):
     """Request body for executing a slash command."""
 
-    command: str  # Command name without slash (e.g. "model", "status")
-    args: str = ""  # Arguments string
+    command: str  # Command name excludes the leading slash.
+    args: str = ""  # Unparsed argument text follows the command name.
 
 
 class FileWrite(BaseModel):

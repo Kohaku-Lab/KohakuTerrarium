@@ -1,16 +1,9 @@
 """Single event consumer + batch-turn driver (queue-first event system).
 
-The agent has exactly ONE consumer coroutine (:meth:`_run_event_consumer`).
-It parks on the :class:`~kohakuterrarium.core.event_inbox.EventInbox`, claims
-the WHOLE queue on each wake, segments it into maximal stackable runs, and
-drives ONE turn per run. Because there is a single consumer, turns are
-serialized by construction — the ``_processing_lock`` is now only a turn
-mutex the consumer holds so ``stop()`` can join an in-flight turn.
+Single-consumer event batching and serialized turn execution for agents.
 
-Split out of ``agent_handlers.py`` (file-size cap); mixed into ``Agent``.
-The turn-body helpers it calls (``_prepare_processing_cycle``,
-``_run_controller_loop``, ``_finalize_processing``) stay in
-:class:`~kohakuterrarium.core.agent_handlers.AgentHandlersMixin`.
+Each inbox claim is segmented into maximal stackable runs, with one turn driven
+per run. The processing lock allows shutdown to join an in-flight turn.
 """
 
 import asyncio
@@ -74,20 +67,17 @@ class AgentEventLoopMixin:
     """The single consumer + batch-turn driver mixed into ``Agent``."""
 
     def _flush_trigger_backlog_stash(self) -> None:
-        """Move a trigger's stashed backlog onto the inbox, in order, right
-        after the primary was enqueued (UXI-08b). Synchronous — no ``await``
-        runs between ``_process_event`` staging the primary and this flush,
-        so the backlog always lands immediately behind its primary."""
+        """Place a trigger's stashed backlog immediately after its primary.
+
+        The synchronous flush admits no scheduling point, preserving adjacency
+        and order in the inbox.
+        """
         stash = getattr(self, "_trigger_backlog_stash", None)
         if not stash:
             return
         for event in stash:
             self._event_inbox.put(EventEnvelope(event))
         stash.clear()
-
-    # ------------------------------------------------------------------
-    # Consumer loop
-    # ------------------------------------------------------------------
 
     async def _run_event_consumer(self) -> None:
         """Drain the inbox forever: claim ALL → one turn per stackable run.
@@ -172,10 +162,6 @@ class AgentEventLoopMixin:
             interrupted=interrupted,
         )
 
-    # ------------------------------------------------------------------
-    # Future resolution
-    # ------------------------------------------------------------------
-
     def _resolve_run(
         self, run: list[EventEnvelope], *, status: str, interrupted: bool = False
     ) -> None:
@@ -212,10 +198,6 @@ class AgentEventLoopMixin:
             fut = env.future
             if fut is not None and not fut.done():
                 fut.set_result(TurnOutcome(status="rejected", was_primary=False))
-
-    # ------------------------------------------------------------------
-    # Batch bookkeeping (primary + folded) + combined banner
-    # ------------------------------------------------------------------
 
     async def _begin_batch(self, events: list) -> None:
         """Pre-turn side effects for the whole batch: primary branch /
@@ -359,10 +341,6 @@ class AgentEventLoopMixin:
                 "branch_id": self._branch_id,
             },
         )
-
-    # ------------------------------------------------------------------
-    # Turn driver (moved from AgentHandlersMixin; now batch-native)
-    # ------------------------------------------------------------------
 
     async def _process_batch_with_controller(self, events: list, controller) -> None:
         """Push the whole stackable run to the controller (one combined

@@ -36,11 +36,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# low-level copy primitives (testable without the engine)
-# ---------------------------------------------------------------------------
-
-
 def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
     """Copy every event in ``src`` into ``dst`` preserving agent
     namespaces.  Returns the number of events copied.
@@ -254,9 +249,9 @@ def apply_merge(
         return
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
-    # Capture the Drive rows of every source graph (sync, before any store
-    # closes) so the engine's async topology drain can move them into the
-    # survivor's repository (design §6.6). No-op on a Drive-disabled engine.
+    # Capture every source graph's Drive rows synchronously before any store
+    # closes, so the async topology drain can move them into the survivor's
+    # repository. This is a no-op on a Drive-disabled engine.
     _drive_topology.stash_merge(engine, keep_gid, list(delta.old_graph_ids))
     source_gids = [keep_gid, *drop_gids]
     # Snapshot each source graph's store + ownership BEFORE remapping —
@@ -351,9 +346,9 @@ def apply_split(
     if delta.kind != "split" or not delta.old_graph_ids:
         return
     parent_gid = delta.old_graph_ids[0]
-    # Capture the parent graph's Drive rows (sync, before its store closes) so
-    # the async drain can redistribute them to the child graphs per the split
-    # placement policy (design §6.7). No-op on a Drive-disabled engine.
+    # Capture the parent graph's Drive rows synchronously before its store
+    # closes, so the async drain can redistribute them according to the child
+    # graph placement policy. This is a no-op on a Drive-disabled engine.
     _drive_topology.stash_split(engine, parent_gid, list(delta.new_graph_ids))
     parent = engine._session_stores.get(parent_gid)
     if parent is None:

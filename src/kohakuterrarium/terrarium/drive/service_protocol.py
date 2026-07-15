@@ -1,15 +1,8 @@
-"""Drive service contract + the typed cross-node-unsupported stub mixin.
+"""Define the Drive service contract and typed unsupported fallbacks.
 
-Split from :mod:`drive.service` (file-size cap):
-
-- :class:`DriveServiceProtocol` — the DTO-based Drive method contract every
-  :class:`~kohakuterrarium.terrarium.service.TerrariumService` implementation
-  must satisfy (design §9.2);
-- :class:`DriveServiceUnsupportedMixin` — typed stubs Remote / MultiNode inherit
-  so an unrouted Drive call fails with :class:`CrossNodeDriveNotSupportedError`,
-  never ``AttributeError`` (impl-plan rule §4.12). Real routing lands in Phase H.
-
-The Local in-process implementation lives in :class:`drive.service.DriveServiceMixin`.
+The protocol describes DTO-based operations shared by local and remote service
+implementations. Unsupported fallbacks raise a Drive-specific error rather than
+leaking a missing-method failure.
 """
 
 from typing import Any, Protocol
@@ -26,9 +19,8 @@ from kohakuterrarium.terrarium.drive.wire_service import DriveRuntimeStatus, Dri
 
 
 class DriveServiceProtocol(Protocol):
-    """DTO-based Drive operations on the terrarium service (design §9.2)."""
+    """Define DTO-based Drive operations for Terrarium services."""
 
-    # reads
     async def get_drive(
         self, drive_id: str, *, actor: ActorRef, is_privileged: bool = False
     ) -> DriveView | None: ...
@@ -83,7 +75,6 @@ class DriveServiceProtocol(Protocol):
 
     async def list_drive_registrations(self) -> tuple[dict[str, Any], ...]: ...
 
-    # writes
     async def create_drive(
         self,
         request: CreateDriveRequest,
@@ -225,11 +216,7 @@ def _unsupported(op: str) -> None:
 
 
 class DriveServiceUnsupportedMixin:
-    """Typed Drive stubs for Remote / MultiNode services (Phase H does routing).
-
-    Every method raises :class:`CrossNodeDriveNotSupportedError` so an unrouted
-    call fails with a typed error instead of ``AttributeError``.
-    """
+    """Raise typed errors for Drive operations unsupported by a service."""
 
     async def get_drive(self, *args: Any, **kwargs: Any) -> Any:
         _unsupported("get_drive")

@@ -1,18 +1,10 @@
 """Per-agent runtime overrides for provider-native tool options.
 
-Composition helper attached to :class:`~kohakuterrarium.core.agent.Agent`
-as ``agent.native_tool_options``. Kept as a standalone class (not a
-mixin) so the Agent file size guard stays clean.
+Manage session-scoped option overrides for provider-native tools.
 
-Policy:
-
-* The override map ``{tool_name: {key: value}}`` lives on this helper.
-* :meth:`set` updates the matching tool in ``agent.registry`` in place
-  (via ``BaseTool.refresh_native_options``) so the next provider
-  request picks up the change without rebuilding the agent.
-* The map is persisted to private session state when a SessionStore is
-  attached, and to ``session.extra`` for ephemeral runs. Legacy
-  scratchpad-backed values are migrated on apply.
+Overrides update registered tools in place so subsequent provider requests see
+them without rebuilding the agent. Session state is canonical; legacy
+scratchpad values are migrated when applied.
 """
 
 import json
@@ -37,8 +29,6 @@ class NativeToolOptions:
         self._agent = agent
         self._values: dict[str, dict[str, Any]] = {}
 
-    # ── Read ────────────────────────────────────────────────────
-
     def get(self, tool_name: str) -> dict[str, Any]:
         """Return the current overrides for ``tool_name`` (copy)."""
         return dict(self._values.get(tool_name, {}))
@@ -46,8 +36,6 @@ class NativeToolOptions:
     def list(self) -> dict[str, dict[str, Any]]:
         """Return a deep copy of every overridden tool's options."""
         return {tool: dict(opts) for tool, opts in self._values.items()}
-
-    # ── Mutate ──────────────────────────────────────────────────
 
     def set(self, tool_name: str, values: dict[str, Any]) -> dict[str, Any]:
         """Patch-merge the override dict for one provider-native tool.
@@ -71,9 +59,7 @@ class NativeToolOptions:
         Returns the **full** post-merge override dict for the tool.
         """
         incoming = values or {}
-        # ``{}`` is the explicit-reset sentinel. The studio frontend
-        # short-circuits empty payloads so this never fires for
-        # partial updates from the panel.
+        # An empty mapping is reserved for explicit reset, not partial update.
         if not incoming:
             self._values.pop(tool_name, None)
             self._refresh_in_registry(tool_name, {})
@@ -98,11 +84,7 @@ class NativeToolOptions:
         return cleaned
 
     def apply(self) -> None:
-        """Pull options from scratchpad → in-memory map + tool registry.
-
-        Called from ``session/resume.py`` after scratchpad rehydrate.
-        Fresh agents with no scratchpad are a no-op.
-        """
+        """Load persisted overrides, migrate legacy state, and update tools."""
         data = self._load_private_state()
         legacy = self._load_legacy_scratchpad()
         if legacy:
@@ -130,8 +112,6 @@ class NativeToolOptions:
             self._values[str(tool_name)] = cleaned
             self._refresh_in_registry(str(tool_name), cleaned)
         self._persist()
-
-    # ── Internals ───────────────────────────────────────────────
 
     def _validate(self, tool_name: str, values: dict[str, Any]) -> dict[str, Any]:
         registry = getattr(self._agent, "registry", None)

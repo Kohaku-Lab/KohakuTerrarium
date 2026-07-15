@@ -1,21 +1,4 @@
-"""WebSocket transport for the Laboratory layer.
-
-Wraps the :mod:`websockets` library to implement the
-:class:`~kohakuterrarium.laboratory._internal.transport_base.Transport`
-protocol.
-
-Address conventions:
-
-- **Server** address is ``host:port`` (e.g. ``"127.0.0.1:8100"``).
-  Port ``0`` selects an OS-chosen ephemeral port; the actual port is
-  exposed via :attr:`WebSocketServer.local_addr`.
-- **Client** address is a full WebSocket URL (e.g.
-  ``"ws://127.0.0.1:8100/_lab"`` or ``"wss://host.example.com/_lab"``).
-
-This transport runs a dedicated WebSocket server. In lab-host mode the
-FastAPI lifespan starts the same :class:`HostEngine` alongside the API
-server, and workers connect to this Lab listener.
-"""
+"""Implement Laboratory framed transport over binary WebSocket messages."""
 
 import asyncio
 
@@ -37,16 +20,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 _log = get_logger(__name__)
 
-# Per-message size cap for the Lab transport.  The ``websockets``
-# library defaults to 1 MiB — far too small for legitimate APP
-# traffic: pushing a ``.kohakutr`` to a worker for resume, deploying
-# a creature bundle, or a chunked file transfer all routinely exceed
-# 1 MiB.  Before this cap was raised, an oversized message silently
-# *killed the connection* ("client disconnected before responding")
-# instead of erroring cleanly.  The Lab link is a trusted,
-# token-authenticated channel between a host and its own workers, so
-# a generous ceiling is appropriate; it still bounds a pathological
-# message rather than allowing unbounded ones (``max_size=None``).
+# Session transfer and deployment frames exceed the library's 1 MiB default;
+# retain a finite ceiling to bound malformed or pathological messages.
 LAB_WS_MAX_SIZE = 64 * 1024 * 1024
 
 
@@ -64,12 +39,7 @@ def _parse_bind_addr(addr: str) -> tuple[str, int]:
 
 
 class WebSocketConnection:
-    """WebSocket-backed :class:`Connection`.
-
-    Wraps a single ``websockets`` connection (server-side handler arg
-    or client-side handle). Frames are sent and received as binary
-    WebSocket messages.
-    """
+    """Adapt one WebSocket connection to the framed transport protocol."""
 
     def __init__(self, ws, name: str = "ws") -> None:
         self._ws = ws
@@ -108,24 +78,19 @@ class WebSocketConnection:
         try:
             await self._ws.close()
         except Exception:
-            # close() should always succeed from the user's perspective.
+            # Closing is idempotent from the transport caller's perspective.
             pass
         _log.debug("ws connection closed", addr_label=self._name)
 
 
 class WebSocketServer:
-    """WebSocket-backed :class:`Server`.
-
-    Owns the underlying :class:`websockets.asyncio.server.Server` and
-    bridges its per-connection handler into our queue-based accept
-    pattern.
-    """
+    """Bridge WebSocket connection handlers into the server accept iterator."""
 
     def __init__(self) -> None:
         self._accept_queue: "asyncio.Queue[WebSocketConnection | None]" = (
             asyncio.Queue()
         )
-        self._ws_server = None  # set by WebSocketTransport.serve()
+        self._ws_server = None
         self._closed = False
         self._shutdown_event = asyncio.Event()
         self._addr_label = "ws-server"
@@ -152,8 +117,7 @@ class WebSocketServer:
         if self._closed:
             return
         self._closed = True
-        # Wake up any per-connection handlers so they can exit; otherwise
-        # wait_closed() below would deadlock waiting for them.
+        # Wake connection handlers before waiting for server closure.
         self._shutdown_event.set()
         if self._ws_server is not None:
             self._ws_server.close()
@@ -165,13 +129,7 @@ class WebSocketServer:
 
 
 class WebSocketTransport:
-    """WebSocket-backed :class:`Transport`.
-
-    Servers bind to a ``host:port`` address; clients connect via a
-    ``ws://`` or ``wss://`` URL. The two halves use the same
-    :class:`WebSocketConnection` adapter on top of the underlying
-    websockets library.
-    """
+    """Create WebSocket servers from bind addresses and clients from URLs."""
 
     async def serve(self, addr: str) -> Server:
         host, port = _parse_bind_addr(addr)
@@ -190,9 +148,7 @@ class WebSocketTransport:
             )
             conn = WebSocketConnection(ws, name=f"ws-server:{addr}")
             await server._accept_queue.put(conn)
-            # websockets closes the underlying socket when the handler
-            # returns. Keep it alive until either the wrapper signals
-            # close OR the server is shutting down.
+            # The handler must remain alive or websockets closes its socket.
             close_wait = asyncio.create_task(conn._closed_event.wait())
             shutdown_wait = asyncio.create_task(server._shutdown_event.wait())
             try:

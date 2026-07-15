@@ -1,16 +1,7 @@
-"""Catalog server-info — runtime environment introspection.
+"""Expose host or worker environment defaults and diagnostic metadata.
 
-Replaces ``api.routes.configs.server_info``.
-
-The endpoint optionally accepts an ``on_node`` query parameter so the
-New Creature / New Terrarium modal can ask for a worker-side default
-working directory when the user picks a worker as the spawn target
-(B5).  Standalone mode (no multi-node service) and ``on_node`` omitted
-or ``"_host"`` both return the host process's ``os.getcwd()``.  In
-lab-host mode with a worker name, the route forwards a
-``terrarium.files getcwd`` RPC to the named worker and returns its
-``Path.home()`` so the modal seeds a sensible workspace default
-instead of the host's cwd.
+Worker targets prefer their home directory because a worker process may inherit
+the host's cwd, which is not a meaningful default workspace for that node.
 """
 
 import os
@@ -33,7 +24,7 @@ logger = get_logger(__name__)
 router = APIRouter()
 
 
-# Captured once at import — used as the daemon's start time.
+# Import time is the stable baseline for daemon uptime.
 _PROCESS_START = time.time()
 
 
@@ -45,7 +36,7 @@ def _get_version() -> str:
 
 
 def _install_kind() -> str:
-    """Launcher-managed install vs other (dev, packaged python, etc.)."""
+    """Classify the installation as launcher-managed or user-managed."""
     try:
         return "launcher" if is_launcher_install() else "user"
     except OSError:
@@ -68,8 +59,7 @@ async def server_info(
         try:
             info = await service.default_workdir(on_node)
         except KeyError:
-            # Unknown / disconnected node — fall through to host cwd
-            # rather than 500 so the modal still gets a sane default.
+            # A stale worker selection should still yield a usable host default.
             logger.warning(
                 "server-info on_node=%r is not a connected worker; "
                 "falling back to host cwd",
@@ -80,10 +70,7 @@ async def server_info(
                 "server-info default_workdir failed for on_node=%r", on_node
             )
         else:
-            # Prefer ``home`` as the modal's pre-fill — the worker
-            # process's cwd is rarely a useful workspace default, and
-            # in same-host dev deployments the worker process inherits
-            # the host's cwd which is exactly the bug we're fixing.
+            # A worker may inherit the host cwd, so its home is the safer workspace default.
             cwd = info.get("home") or info.get("cwd") or ""
             return {
                 "cwd": cwd,
@@ -97,12 +84,7 @@ async def server_info(
 
 @router.get("/diagnostics")
 async def diagnostics(request: Request) -> dict[str, Any]:
-    """Full diagnostic snapshot for the About panel.
-
-    Single endpoint covering version, runtime, paths, and daemon
-    state — paste-ready content for bug reports. Equivalent of
-    ``kt --version --verbose`` plus the daemon's PID / uptime / mode.
-    """
+    """Return a paste-ready snapshot of runtime, paths, and daemon state."""
     home = config_dir()
     python_impl = platform.python_implementation()
     arch = platform.machine() or "unknown"

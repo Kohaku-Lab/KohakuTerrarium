@@ -1,9 +1,4 @@
-"""
-Shell command execution tool.
-
-Executes commands via a specified shell (bash, zsh, sh, etc.).
-On all platforms, prefers bash (git bash available on Windows).
-"""
+"""Cross-platform shell command execution with bounded output and timeouts."""
 
 import asyncio
 import os
@@ -33,8 +28,7 @@ from kohakuterrarium.utils.mobile_sandbox import (
 
 logger = get_logger(__name__)
 
-# Shell type → (executable, args-before-command)
-# The command string is appended after these args.
+# Each prefix is followed by the caller's command string.
 _SHELL_SPECS: dict[str, tuple[str, list[str]]] = {
     "bash": ("bash", ["-c"]),
     "zsh": ("zsh", ["-c"]),
@@ -67,27 +61,9 @@ def _shell_override_env(shell_type: str) -> str | None:
 
 
 def _resolve_shell_executable(shell_type: str) -> str | None:
-    # Mobile profile (Android): every device since Android 1.0 ships
-    # ``/system/bin/sh`` (mksh — MirBSD Korn shell) plus toybox-backed
-    # ``/system/bin/{ls,grep,cat,find,…}``.  ``/system`` is mounted
-    # with the ``exec`` flag (unlike ``/data``) and the binaries are
-    # world-executable, so an app's subprocess can spawn them
-    # without any of the W^X / SELinux / PIE complications that
-    # block bundled busybox in the app's data dir.
-    #
-    # mksh is POSIX-compliant — every plain shell command the agent
-    # emits works; only bash-only extensions (``[[``, ``(( ))``,
-    # arrays, ``$'…'``) would break, and those are uncommon in tool
-    # use.  ``bash`` / ``sh`` / ``zsh`` requests all land on mksh
-    # here because none of those have stock-Android binaries either.
-    #
-    # The bundled-sandbox fallback below is kept for desktops that
-    # opt into the mobile profile for testing (and for any future
-    # APK that ships a proper PIE+bionic busybox).  Order:
-    #
-    #   1. ``/system/bin/sh`` (Android stock)
-    #   2. bundled ``sandbox_binary("sh")`` (when present)
-    #   3. operator override env / PATH lookup (desktop path)
+    # Android's executable system shell is preferred over app-data binaries,
+    # which may be blocked by platform W^X or noexec policy. Bash-like requests
+    # share this POSIX shell because stock Android does not ship those binaries.
     if is_mobile_profile() and shell_type in {"bash", "sh", "zsh"}:
         system_sh = Path("/system/bin/sh")
         if system_sh.is_file():
@@ -111,21 +87,7 @@ def _resolve_shell_executable(shell_type: str) -> str | None:
 
 
 def _build_shell_argv(shell_type: str, resolved_exe: str, command: str) -> list[str]:
-    """Compose the ``argv`` list for the resolved shell + command.
-
-    On the mobile profile with a bundled busybox, the canonical
-    invocation is ``busybox sh -c <command>`` (multicall dispatch
-    via the applet name).  Everywhere else we use the per-shell
-    prefix args from ``_SHELL_SPECS``.
-
-    When the bundled binary is shipped as a native library
-    (``libbusybox.so``) — required on Android because data-dir
-    binaries fail ``execve()`` due to W^X / noexec policy —
-    ``argv[0]`` still reads ``busybox`` so the multicall dispatcher
-    finds the ``sh`` applet; the caller is expected to invoke
-    ``subprocess.Popen`` with ``executable=`` set to the real
-    ``libbusybox.so`` path (see :func:`_is_bundled_busybox`).
-    """
+    """Compose shell arguments, preserving BusyBox multicall dispatch."""
     if (
         is_mobile_profile()
         and shell_type in {"bash", "sh", "zsh"}
@@ -139,13 +101,7 @@ def _build_shell_argv(shell_type: str, resolved_exe: str, command: str) -> list[
 
 
 def _is_bundled_busybox(resolved_exe: str | None) -> bool:
-    """``True`` when ``resolved_exe`` is the sandbox-provided busybox.
-
-    Matches both bundled-name layouts: ``busybox`` (legacy / dev
-    sideload) and ``libbusybox.so`` (Android native-library
-    layout).  Callers gate the argv[0]-override + ``executable=``
-    Popen path on this.
-    """
+    """Return whether the executable uses a supported bundled BusyBox layout."""
     if not resolved_exe:
         return False
     name = Path(resolved_exe).name
@@ -246,10 +202,7 @@ def _subprocess_runner(context: Any) -> Any:
     return None
 
 
-# Sentinel returned by :func:`_run_busybox_blocking` to signal a
-# timeout — the caller maps this back to the ``ToolResult`` timeout
-# error branch.  Negative values are safe because every legitimate
-# Linux exit code is in ``[0, 255]``.
+# Negative values cannot collide with legitimate Linux process exit codes.
 _BUSYBOX_TIMEOUT_SENTINEL = -2
 
 
@@ -260,19 +213,7 @@ def _run_busybox_blocking(
     kwargs: dict[str, Any],
     timeout: float | None,
 ) -> int:
-    """Run ``argv`` via ``subprocess.Popen`` with ``executable=``
-    set, returning the exit code (or :data:`_BUSYBOX_TIMEOUT_SENTINEL`
-    on timeout).
-
-    Used on the Android mobile profile to invoke
-    ``libbusybox.so`` while keeping ``argv[0]="busybox"`` —
-    asyncio's ``create_subprocess_exec`` can't separate the two,
-    so we sit on a thread and let the event loop schedule
-    something else while this blocks.  ``terminate`` on timeout
-    follows the same start-new-session pattern as the async
-    path: kill the whole process group so a misbehaving applet
-    that forked children doesn't survive.
-    """
+    """Run bundled BusyBox with distinct executable and ``argv[0]`` values."""
     process = subprocess.Popen(
         argv,
         executable=executable,
@@ -298,18 +239,10 @@ def _run_busybox_blocking(
 
 @register_builtin("bash")
 class ShellTool(BaseTool):
-    """
-    Tool for executing shell commands.
-
-    Supports multiple shell types via the ``type`` parameter.
-    Defaults to bash on all platforms (git bash on Windows).
-    """
+    """Execute a command with the selected shell and working directory."""
 
     needs_context = True
-    # Shell commands are opaque — the runner can't tell if two
-    # invocations will conflict. Serialize unsafe tools so two parallel
-    # bash calls can't race against each other (e.g. two writes, two
-    # test runs sharing a port). Safe tools keep running in parallel.
+    # Commands are opaque, so concurrent invocations cannot be proven independent.
     is_concurrency_safe = False
 
     def __init__(self, config: ToolConfig | None = None):
@@ -364,7 +297,6 @@ class ShellTool(BaseTool):
         if wait_error:
             return ToolResult(error=wait_error)
 
-        # Resolve shell type
         shell_type = args.get("type", "bash").lower().strip()
         if shell_type not in _SHELL_SPECS:
             available = _get_available_shells()
@@ -391,20 +323,11 @@ class ShellTool(BaseTool):
 
         logger.debug("Executing command", shell=shell_type, command=command[:100])
 
-        # Set up environment
         env = os.environ.copy()
         if self.config.env:
             env.update(self.config.env)
-        # Mobile profile: Android has no ``/bin`` and no ``/usr/bin``,
-        # but ``/system/bin`` + ``/system/xbin`` carry the stock
-        # toybox-backed coreutils (``ls``, ``cat``, ``grep``,
-        # ``find``, ``sed``, ``awk``, ``date``, ``head``, ``tail``,
-        # …) plus the mksh shell and a few platform tools (``am``,
-        # ``pm``, ``logcat``).  Prepend both so ``sh -c "ls -la"``
-        # and the like resolve without needing a bundled busybox.
-        # The bundled sandbox bin dir is added LAST as a fallback
-        # for any applet toybox lacks (or for non-Android mobile-
-        # profile sideloads).
+        # System tool directories precede the bundled fallback so Android uses
+        # executable platform binaries whenever they are available.
         if is_mobile_profile():
             android_path_parts = []
             for system_path in ("/system/bin", "/system/xbin"):
@@ -419,7 +342,7 @@ class ShellTool(BaseTool):
                     os.pathsep + existing if existing else ""
                 )
 
-        # Set working directory: context (agent-aware) > tool config > process cwd
+        # Agent working directories take precedence over tool and process defaults.
         if context and getattr(context, "working_dir", None):
             cwd = str(context.working_dir)
         else:
@@ -465,17 +388,9 @@ class ShellTool(BaseTool):
                 else:
                     popen_kwargs["start_new_session"] = True
 
-                # Mobile / bundled-busybox path: asyncio's
-                # ``create_subprocess_exec`` uses the first arg as
-                # BOTH the executable path AND argv[0] — no way to
-                # split them.  busybox's multicall dispatch needs
-                # argv[0] to be the applet name (``busybox`` or
-                # ``sh``) but the on-disk file is named
-                # ``libbusybox.so`` (the only filename Android's
-                # PackageManager copies into the W^X-exempt
-                # ``nativeLibraryDir``).  Fall back to a synchronous
-                # ``subprocess.Popen`` with ``executable=`` set, run
-                # on a thread so we don't block the event loop.
+                # asyncio cannot separate the executable path from ``argv[0]``;
+                # BusyBox native-library packaging requires both, so use Popen on
+                # a worker thread for this platform-specific path.
                 if _is_bundled_busybox(resolved_exe):
                     exit_code = await asyncio.to_thread(
                         _run_busybox_blocking,
@@ -581,5 +496,5 @@ class ShellTool(BaseTool):
                 output_handle.close()
 
 
-# Backward-compatible alias
+# Preserve the public class name used by existing configurations.
 BashTool = ShellTool

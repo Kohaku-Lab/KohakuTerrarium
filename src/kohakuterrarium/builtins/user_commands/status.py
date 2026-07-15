@@ -1,4 +1,4 @@
-"""Status command — show agent/session info."""
+"""Show the agent's model, conversation, tools, jobs, and compaction status."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -41,7 +41,6 @@ class StatusCommand(BaseUserCommand):
             {"key": "Compacting", "value": "yes" if compacting else "no"},
         ]
 
-        # Plain text
         lines = [f"{f['key']:<14} {f['value']}" for f in fields]
 
         return UserCommandResult(

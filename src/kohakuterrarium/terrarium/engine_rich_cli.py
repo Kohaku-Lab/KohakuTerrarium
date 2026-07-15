@@ -1,9 +1,7 @@
 """Engine launcher for ``--mode cli`` (the rich inline CLI).
 
-The pre-unification rich CLI mode was removed in commit ab256f72 with a
-"deferred" placeholder warning ("``cli`` / ``plain`` variants will
-return in a follow-up"). This module is that follow-up: it mounts
-:class:`RichCLIApp` on top of a running :class:`Terrarium` engine so
+This module mounts :class:`RichCLIApp` on top of a running
+:class:`Terrarium` engine so
 ``kt run --mode cli`` produces an inline prompt with bordered input
 + live region instead of the full-screen Textual TUI.
 

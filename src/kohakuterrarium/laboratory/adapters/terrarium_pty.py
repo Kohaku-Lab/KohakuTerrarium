@@ -1,29 +1,4 @@
-"""APP extension adapter for ``terrarium.pty`` — PTY shell over Lab.
-
-Subclass of :class:`WSProxyAdapter` (the unified ws-forwarder).
-Spawns a PTY shell in the creature's working directory ON THE
-WORKER and bridges stdin / stdout / resize frames bidirectionally to
-the controller's frontend WebSocket through the lab transport.
-
-How the lift works without duplicating ``pty_posix`` / ``pty_windows``:
-
-- The existing ``studio.attach.pty_router.pty_session(websocket, cwd)``
-  takes a :class:`fastapi.WebSocket` directly.  This adapter wraps the
-  :class:`WSFrameSink` from the proxy base class in a
-  :class:`_FakeWebSocket` that satisfies the same interface
-  (``send_json`` / ``receive_text``).  ``pty_session`` runs unchanged.
-- ``send_json`` writes onto the sink's outbox (controller → frontend
-  WS path).
-- ``receive_text`` awaits ``sink.receive_json()`` and JSON-encodes it
-  back to the string that ``pty_session`` expects.
-
-Backpressure: the sink's bounded outbox protects against PTY output
-bursts (``ls /tmp`` on a populated tree).  Frames are coalesced at the
-transport layer.
-
-Process lifecycle: ``on_close`` cancels the PTY task; ``pty_session``
-already kills the child process when its WebSocket is gone.
-"""
+"""Bridge a worker-local PTY session through Laboratory WebSocket frames."""
 
 import asyncio
 import json
@@ -39,15 +14,7 @@ logger = get_logger(__name__)
 
 
 class _FakeWebSocket:
-    """WebSocket lookalike that bridges to a :class:`WSFrameSink`.
-
-    Exposes the subset of ``fastapi.WebSocket`` that
-    ``studio.attach.pty_*`` actually calls: ``send_json``,
-    ``receive_text``, plus a ``close`` no-op so disconnect paths don't
-    crash.  Errors from the underlying sink surface as ``RuntimeError``
-    — ``pty_session`` already handles ``WebSocketDisconnect`` so we
-    raise that type too.
-    """
+    """Adapt a frame sink to the WebSocket subset required by ``pty_session``."""
 
     def __init__(self, sink: WSFrameSink) -> None:
         self._sink = sink
@@ -56,16 +23,12 @@ class _FakeWebSocket:
         await self._sink.send_json(frame)
 
     async def receive_text(self) -> str:
-        # PTY's write loop reads JSON-strings rather than JSON-objects
-        # because ``starlette``'s ``receive_text`` returns the raw
-        # client message body.  We re-serialise the sink frame so the
-        # unmodified ``json.loads`` in the producer path works.
+        # ``pty_session`` expects the raw JSON text returned by Starlette.
         frame = await self._sink.receive_json()
         return json.dumps(frame)
 
     async def close(self) -> None:
-        # Sink lifecycle is owned by the proxy base class; nothing
-        # for the fake-WS itself to do.
+        # The proxy owns the underlying sink lifecycle.
         return None
 
 
@@ -88,9 +51,7 @@ class TerrariumPtyAdapter(WSProxyAdapter):
         cwd = session_cwd(creature)
 
         fake_ws = _FakeWebSocket(sink)
-        # ``pty_session`` is long-running until the shell exits or the
-        # WS closes — spawn as a task so on_start can return
-        # immediately with setup info for the controller.
+        # Run the shell separately so stream setup can return before it exits.
         task = asyncio.create_task(self._run_pty(fake_ws, cwd, sink))
         self._sessions[sink.stream_id] = {"task": task, "cwd": cwd}
         return {"setup": {"type": "ready", "cwd": cwd}}

@@ -24,9 +24,9 @@ router = APIRouter()
 
 
 class ModuleSchemaRequest(BaseModel):
-    kind: str  # tools | subagents | triggers | plugins | inputs | outputs
+    kind: str  # Catalog module category used for schema introspection.
     name: str = ""
-    type: str = "builtin"  # builtin | custom | package | trigger
+    type: str = "builtin"  # Selects builtin introspection or source resolution.
     module: str | None = None
     class_name: str | None = None
 
@@ -59,10 +59,7 @@ async def module_schema(
     req: ModuleSchemaRequest,
     ws: Workspace = Depends(get_workspace),
 ) -> dict:
-    # Trigger-as-tool entries (``type: trigger``) aren't real builtins —
-    # their identity is the setup_tool_name and they carry no options
-    # the user would edit here (those are set via the add_* call at
-    # runtime). Return the builtin-tools schema as a baseline.
+    # Trigger tools expose no editable options because runtime add_* calls supply them.
     if req.type == "trigger":
         return builtin_schema("tools")
 
@@ -92,13 +89,7 @@ async def module_schema(
 
 
 def _load_plugin_sidecar(root, module: str) -> list | None:
-    """Best-effort read of ``<stem>.schema.json`` next to the module file.
-
-    Returns None when the sidecar is missing or unreadable — callers
-    fall back to the plain ``__init__`` signature. Kept here rather
-    than in introspect.py so studio's workspace-rooted path resolution
-    stays local to the route that understands it.
-    """
+    """Read a plugin schema sidecar, falling back to signature introspection."""
     if not module:
         return None
     candidate = Path(root) / (module.replace(".", "/") + ".schema.json")

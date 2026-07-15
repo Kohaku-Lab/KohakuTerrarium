@@ -52,11 +52,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Phase 0 stub routers — empty APIRouter()s pre-mounted so Phase 1
-# agents only need to populate handlers, not edit ``app.py``. Each
-# subpackage maps to a future Studio tier (catalog / identity /
-# sessions / persistence / attach). The legacy single-file routes
-# were removed in Phase 3; the studio layer is the only path now.
+# Route modules are grouped by Studio concern so this factory only owns
+# application-wide mounting, middleware, and lifecycle coordination.
 from kohakuterrarium.api.routes import app_update as app_update_route
 from kohakuterrarium.api.routes import health as health_route
 from kohakuterrarium.api.routes import lab_clients as lab_clients_route
@@ -133,34 +130,24 @@ from kohakuterrarium.api.ws import trace as ws_trace
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup and shutdown.
+    """Manage API-wide resources for standalone and Laboratory host modes.
 
-    In standalone mode the lifespan attaches the runtime-graph prompt to
-    the local engine and shuts it down at exit.  In ``lab-host`` mode it
-    additionally starts a :class:`HostEngine`, wires a
-    :class:`MultiNodeTerrariumService`, and installs it as the active
-    service so routes calling :func:`get_service` see the multi-node
-    surface; ``get_engine`` still returns the host's own local engine
-    for the routes that haven't migrated.
+    Standalone mode owns the local engine and its runtime prompt. Laboratory host
+    mode owns the transport, coordination engine, multi-node service, adapters,
+    membership watcher, and session mirror.
     """
-    # Process-metrics: subscribe the aggregator at startup so we
-    # capture events the very first turn produces, not from the first
-    # snapshot poll.
+    # Subscribe before requests can start turns so the first emitted event is captured.
     get_aggregator()
 
-    # Auth DB: apply pending migrations BEFORE any auth route handler
-    # can fire.  Idempotent — second startup in the same process is a
-    # cheap no-op.  Runs regardless of which auth layers are enabled
-    # because turning L4 on at runtime later needs a ready schema.
+    # The schema must be ready before any auth handler runs. Migration is
+    # idempotent and remains required when user auth is enabled after startup.
     try:
         ensure_auth_migrated()
-    except Exception:  # pragma: no cover - boot failures get logged + re-raised
+    except Exception:  # pragma: no cover - startup failure path
         logger.exception("auth: schema migration failed at startup")
         raise
 
-    # Per-user engine-pool reaper — sweeps idle engines so a long-running
-    # multi-user host doesn't leak resources.  No-op when L4 is off
-    # because no per-user engines get pooled in that mode.
+    # Reap idle per-user engines so long-running multi-user hosts release resources.
     engine_pool: EnginePool | None = getattr(app.state, "engine_pool", None)
     if engine_pool is not None:
         await engine_pool.start_reaper()
@@ -177,9 +164,8 @@ async def lifespan(app: FastAPI):
     mirror_writer = None
 
     if lab_mode == "lab-host":
-        # Pre-create the operator blocklist so the lab-clients route
-        # never has to do the lazy-init dance. Lifespan runs on one
-        # task before any request handler — no race possible here.
+        # Initialize shared mutable state before request tasks begin, avoiding
+        # concurrent first-write handling in the lab-clients route.
         if not hasattr(app.state, "lab_blocklist"):
             app.state.lab_blocklist = set()
         bind_host, bind_port = _parse_bind(app.state.lab_bind)
@@ -193,14 +179,8 @@ async def lifespan(app: FastAPI):
             WebSocketTransport(),
         )
         await host_engine.start()
-        # The lab-host runs NO agents — only worker processes run
-        # agents.  The host keeps just a *coordination* engine: a bare
-        # Terrarium that holds cross-node channel objects for the
-        # broadcast / output-wire forwarders.  Nothing ever calls
-        # ``add_creature`` on it; ``MultiNodeTerrariumService`` routes
-        # every agent op to a connected worker.
-        # This coordination engine is agent-free and explicitly opts out of
-        # Drive. Workers resolve their own node-local Drive settings.
+        # The host's Terrarium stores only cross-node channel and output-wire
+        # coordination state. Creatures and Drive runtimes remain worker-local.
         coordination_engine = Terrarium(
             session_dir=_session_dir(),
             drive_config=DriveRuntimeConfig(enabled=False),
@@ -208,77 +188,56 @@ async def lifespan(app: FastAPI):
         multi_node_service = MultiNodeTerrariumService(
             host=host_engine, coordination_engine=coordination_engine
         )
-        # Wire the meta-lookup so ``runtime_graph_snapshot`` enriches
-        # each worker graph with the studio-tier session metadata (name
-        # / kind / created_at / config_path).  Terrarium tier can't
-        # reach studio directly, so we inject the callable here at boot.
+        # Inject Studio metadata at the API composition boundary because the
+        # Terrarium tier must not depend directly on Studio.
         multi_node_service.set_runtime_graph_meta_lookup(
             partial(get_session_meta, multi_node_service)
         )
         set_service(multi_node_service)
-        # Host-side adapters that workers query.
+        # Workers query host-owned identity and catalog state through adapters.
         identity_adapter = StudioIdentityAdapter(host_engine)
-        # Catalog adapter on the host answers "what's installed here"
-        # reads from the aggregator.  ``is_host=True`` rejects the
-        # mutating ops (install/uninstall) from any worker — the host's
-        # local installs go through the operator-facing Studio API, not
-        # through this RPC, so an authed worker can't ``git clone`` on
-        # the operator's machine.
+        # Host catalog RPC is read-only: package mutations must pass through the
+        # operator-facing Studio API rather than execute on behalf of a worker.
         catalog_adapter = StudioCatalogAdapter(host_engine, is_host=True)
-        # Cross-node channel forwarder on the host side.  Binds the
-        # coordination engine so cross-node channel objects have a home,
-        # and answers ``subscribe`` / ``inject`` RPCs from workers
-        # wiring up cross-node connects.
+        # Cross-node channel objects live in the coordination engine and are
+        # exposed to workers through subscribe and inject RPCs.
         broadcast_adapter = TerrariumBroadcastAdapter(coordination_engine, host_engine)
-        # Cross-node output-wiring forwarder on the host side.  The
-        # controller installs a target resolver driven by the multi-
-        # node service's ``_home`` registry so an emit can be forwarded
-        # to the worker that hosts the target name.
+        # Output-wire emissions use the service's cached creature locations to
+        # select the worker that owns each remote target.
         output_wire_adapter = TerrariumOutputWireAdapter(
             coordination_engine, host_engine
         )
         output_wire_adapter.set_target_resolver(
             _make_output_wire_target_resolver(multi_node_service)
         )
-        # Session mirror — workers tee their session events here so
-        # Studio's persistence reads stay local-fast.  Mirror dir is
-        # under the controller's configured session dir.
+        # Mirror worker events under the host session directory so Studio reads
+        # do not require a remote round trip.
         mirror_dir = Path(_session_dir()) / "mirror"
         mirror_writer = SessionMirrorWriter(host_engine, mirror_dir)
-        # Membership watcher: keep the multi-node service's remote
-        # registry in sync with the host's connected clients.
+        # Membership events are the source of truth for the service's remote registry.
         membership_task = asyncio.create_task(
             _watch_membership(host_engine, multi_node_service)
         )
-        # Stash on app.state so a programmatic caller (or a follow-up
-        # admin route) can reach them without poking module globals.
+        # App state exposes lifecycle-owned resources without module-level globals.
         app.state.lab_host_engine = host_engine
         app.state.identity_adapter = identity_adapter
         app.state.session_mirror = mirror_writer
 
-    # The runtime-graph prompt block is a host-agent feature.  In
-    # lab-host mode the host runs no agents, so there is nothing to
-    # attach it to — only standalone mode has a host-local engine.
+    # Only standalone mode has a local agent engine that can consume this prompt.
     if multi_node_service is None:
         get_engine()._runtime_prompt.attach()
     try:
         yield
     finally:
-        # Detach loop-bound listeners so repeated lifespan cycles can
-        # reattach them to the next event loop.  Standalone only — the
-        # lab-host never attached one.
+        # Loop-bound listeners must detach before a later lifespan uses another loop.
         if multi_node_service is None:
             try:
                 engine = get_engine()
                 engine._runtime_prompt.detach()
             except Exception:  # pragma: no cover - defensive
                 pass
-        # Tear down the engine pool's reaper + any cached engines so
-        # repeated lifespan cycles don't leak background tasks.
-        # ``evict_all_async`` actually awaits the engine shutdown
-        # coroutines (audit-caught: the sync variant just scheduled
-        # them with create_task, leaving them to "Task exception was
-        # never retrieved" warnings when the loop closed).
+        # Await both the reaper and cached-engine shutdowns so no tasks outlive
+        # the event loop that owns them.
         if engine_pool is not None:
             try:
                 await engine_pool.stop_reaper()
@@ -288,15 +247,12 @@ async def lifespan(app: FastAPI):
                 await engine_pool.evict_all_async()
             except Exception:  # pragma: no cover - defensive
                 logger.exception("engine_pool.evict_all_async raised")
-        # Cancel the membership watcher first so it stops feeding the
-        # service while we're tearing it down, then ``await`` the
-        # cancellation to avoid "Task was destroyed but is pending".
+        # Stop membership updates before dismantling the service, and await
+        # cancellation so the watcher cannot remain pending at loop shutdown.
         if membership_task is not None:
             membership_task.cancel()
             await asyncio.gather(membership_task, return_exceptions=True)
-        # Close the mirror writer before stopping the host so any
-        # in-flight session-sync events stop being dispatched to a
-        # half-closed SessionStore.
+        # Stop session dispatch before the host and its stores become unavailable.
         if mirror_writer is not None:
             try:
                 mirror_writer.close()
@@ -322,10 +278,8 @@ async def lifespan(app: FastAPI):
                 output_wire_adapter.detach()
             except Exception:  # pragma: no cover - defensive
                 logger.exception("output_wire_adapter.detach failed")
-        # In lab-host mode the service runs no host agent engine — its
-        # shutdown() is a no-op.  What DOES need tearing down is the
-        # coordination engine (cross-node channel objects).  Standalone
-        # mode falls through to the host-local engine path.
+        # Laboratory mode owns a separate coordination engine; standalone mode
+        # instead owns the process-local agent engine.
         if multi_node_service is not None:
             try:
                 await multi_node_service.shutdown()
@@ -347,10 +301,7 @@ async def lifespan(app: FastAPI):
             except Exception:  # pragma: no cover - defensive
                 logger.exception("host_engine.stop failed")
 
-        # Release the session-index sidecar's native SQLite handles.
-        # Doing it here (last) means any other shutdown step that
-        # touches the listing endpoint (e.g. a final reconcile) still
-        # has the index open.
+        # Close the session index last because earlier shutdown work may still read it.
         try:
             close_session_index()
         except Exception:  # pragma: no cover - defensive
@@ -358,12 +309,10 @@ async def lifespan(app: FastAPI):
 
 
 def kt_error_status(exc: KTError) -> int:
-    """Map a typed studio/framework error onto an HTTP status code.
+    """Map framework errors to HTTP while keeping Studio transport-agnostic.
 
-    This is the ONE exception→status table for the whole API adapter —
-    the studio tier raises ``kohakuterrarium.errors`` types and knows
-    nothing about HTTP.  Order matters: not-found flavours win over
-    value flavours (``ConfigNotFoundError`` is both).
+    Not-found checks must precede value checks because some configuration errors
+    inherit from both families.
     """
     if isinstance(exc, (NotFoundError, FileNotFoundError)):
         return 404
@@ -375,21 +324,17 @@ def kt_error_status(exc: KTError) -> int:
 
 
 async def kt_error_handler(request: Request, exc: KTError) -> JSONResponse:
-    """Convert an escaped :class:`KTError` into the legacy
-    ``HTTPException``-shaped ``{"detail": ...}`` JSON body so the wire
-    contract is byte-equivalent with the pre-typed-error surface."""
+    """Return a :class:`KTError` using the API's stable ``detail`` body shape."""
     _ = request
     return JSONResponse(status_code=kt_error_status(exc), content={"detail": str(exc)})
 
 
 def drive_error_status(exc: DriveError) -> int:
-    """Map a typed Drive error onto an HTTP status (design §12.5; impl-plan J).
+    """Map Drive-specific failure semantics onto HTTP statuses.
 
-    Registration-missing/disabled/incompatible and invalid transitions are 422
-    (semantically unprocessable, not a plain 400); permission is 403; the
-    ``ConflictError`` family (revision/idempotency/settings) is 409; backpressure
-    is 429. Everything else falls back to the generic ``KTError`` table so the
-    ordering (not-found before value) stays consistent.
+    Invalid registration state and transitions are unprocessable, permission
+    failures are forbidden, backpressure requests a retry, and all remaining
+    cases retain the generic framework mapping.
     """
     if isinstance(exc, DrivePermissionError):
         return 403
@@ -440,19 +385,10 @@ def _parse_bind(bind: str) -> tuple[str, int]:
 
 
 def _make_output_wire_target_resolver(service: MultiNodeTerrariumService):
-    """Build a ``target_name -> (node_id, creature_id)`` lookup.
+    """Build a non-blocking target lookup from cached creature locations.
 
-    Used by the controller's :class:`TerrariumOutputWireAdapter` when a
-    local output-wiring emit can't resolve a target locally.  We scan
-    every connected node's last-known ``_home`` mapping plus the
-    creatures cached from prior ``list_creatures`` fan-outs.  The
-    resolver does NOT block — it reads what the service already knows.
-    A miss is fine: the resolver returns ``None`` and the source's emit
-    falls through to its existing "log and skip" branch.
-
-    Returned tuple's ``node_id`` is ``"_host"`` for host-local creatures,
-    which the adapter then treats as "don't forward, prefer local" by
-    surfacing ``None`` to the resolver.
+    Cache misses return ``None`` because this synchronous resolver cannot perform
+    the asynchronous discovery needed to refresh the service cache.
     """
 
     def resolve(target_name: str) -> tuple[str, str] | None:
@@ -460,10 +396,8 @@ def _make_output_wire_target_resolver(service: MultiNodeTerrariumService):
         entry = cache.get(target_name)
         if entry is not None:
             return entry
-        # No cache miss-walk: building one would require an async
-        # call, which we can't do from a sync resolver.  Callers can
-        # populate the cache by running ``list_creatures`` (the
-        # multi-node service already refreshes it as a side effect).
+        # ``list_creatures`` refreshes this cache; synchronous wire resolution
+        # cannot initiate that asynchronous discovery on a miss.
         return None
 
     return resolve
@@ -473,11 +407,10 @@ async def _watch_membership(
     host_engine: HostEngine,
     service: MultiNodeTerrariumService,
 ) -> None:
-    """Keep the multi-node service in sync with the host's membership.
+    """Mirror host membership into remote routing state.
 
-    Cancellation (during lifespan teardown) propagates naturally; any
-    other exception is logged before silencing so a buggy subscriber
-    doesn't take the rest of the FastAPI app down with it.
+    Lifecycle cancellation propagates, while subscriber failures are contained so
+    they do not terminate the FastAPI application.
     """
     try:
         async for event, node_id in host_engine.membership.subscribe():
@@ -562,22 +495,13 @@ def create_app(
     app.state.lab_bind = lab_bind or "127.0.0.1:8100"
     app.state.lab_token = lab_token or ""
 
-    # Snapshot the auth config once at boot.  ``get_auth_config``
-    # dependency reads from ``app.state.auth_config`` so all per-request
-    # auth decisions see one coherent view even if env vars change
-    # mid-process.  Tests that flip env mid-suite construct a fresh
-    # app or reassign ``app.state.auth_config`` explicitly.
+    # Freeze one auth configuration per application instance so all requests
+    # observe coherent policy even if process environment variables change.
     app.state.auth_config = load_auth_config()
 
-    # Per-user engine pool — drives ``deps.get_service`` to a
-    # per-user :class:`Terrarium` when L4 is enabled.  When L4 is
-    # off, the pool exists but is bypassed by the dependency (a
-    # single shared engine handles every request).  Building the
-    # pool here unconditionally keeps the lifespan path identical
-    # across modes.  Capacity values are tunable via future
-    # ``[auth]`` config knobs; defaults work for family-server scale.
-    # Each per-user engine gets a fresh immutable resolution of the shared
-    # operator Drive policy (design §8.4) via the resolver.
+    # User-authenticated requests receive isolated Terrarium instances; other
+    # modes bypass this pool. Each engine resolves a fresh immutable snapshot of
+    # the operator's shared Drive policy.
     app.state.engine_pool = EnginePool(
         max_active=10,
         idle_timeout_s=1800,
@@ -603,18 +527,12 @@ def create_app(
         catalog_creatures_scan.set_creatures_dirs(creatures_dirs or [])
         catalog_terrariums_scan.set_terrariums_dirs(terrariums_dirs or [])
 
-    # Auth router — mounted under ``/api/auth`` exposing
-    # ``/capabilities`` (Phase A) and later phases'
-    # ``/register`` / ``/login`` / ``/me`` / ``/tokens`` / ...
+    # Authentication endpoints share one namespace for capabilities, identity,
+    # sessions, invitations, and API tokens.
     app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 
-    # Sessions URL preservation — the new persistence + sessions/memory
-    # routers carry the legacy ``/api/sessions/*`` URL surface that the
-    # frontend's ``sessionAPI`` already calls. They are also mounted
-    # under their per-concern ``/api/persistence/*`` and
-    # ``/api/sessions/memory`` prefixes by ``_mount_phase0_stubs`` so
-    # the studio-cleanup target shape is reachable. Both prefixes hit
-    # the same router — there is no shim layer.
+    # Session-facing and concern-specific prefixes mount the same router objects,
+    # preserving the frontend contract without a forwarding shim.
     app.include_router(
         persistence_saved.router, prefix="/api/sessions", tags=["sessions"]
     )
@@ -642,10 +560,8 @@ def create_app(
         persistence_memory_index.router, prefix="/api/sessions", tags=["sessions"]
     )
 
-    # Legacy URL preservation — the new catalog routers also serve under
-    # the original ``/api/registry`` and ``/api/configs/*`` prefixes the
-    # frontend already calls. This is URL preservation, not a shim:
-    # there is exactly one router behind each URL.
+    # Registry and config prefixes mount the catalog routers directly so existing
+    # frontend URLs and concern-specific URLs share one implementation.
     app.include_router(
         catalog_packages.router, prefix="/api/registry", tags=["registry"]
     )
@@ -682,10 +598,8 @@ def create_app(
         catalog_commands.router, prefix="/api/configs/commands", tags=["configs"]
     )
 
-    # Studio (embedded authoring tool) — touch point T1.
-    # Mounted under /api/studio: the composite uses relative /<slug>
-    # prefixes, and the non-empty mount prefix keeps its empty-path index
-    # routes legal under FastAPI's no-empty-prefix-and-path rule.
+    # The non-empty Studio prefix permits composite routers to expose empty-path
+    # index routes under FastAPI's prefix/path validation rules.
     app.include_router(build_studio_router(), prefix="/api/studio")
 
     # Process-wide metrics snapshot — read by the Stats tab + the
@@ -714,10 +628,7 @@ def create_app(
         runtime_graph_route.router, prefix="/api/runtime", tags=["runtime"]
     )
 
-    # ── Phase 0 stub routers (empty APIRouter()s pre-mounted) ────────
-    # Phase 1 agents will populate the handler bodies; mounting here
-    # so URL prefixes are stable and ``app.py`` does not need to be
-    # touched again.
+    # Mount the concern-specific API surfaces under their canonical prefixes.
     _mount_phase0_stubs(app)
 
     # WebSocket routes
@@ -739,15 +650,7 @@ def create_app(
 
 
 def _mount_phase0_stubs(app: FastAPI) -> None:
-    """Mount the Phase 0 stub routers under their target prefixes.
-
-    Each include_router call attaches an empty router; the URL prefix
-    is reserved so Phase 1 agents only have to write the handler
-    bodies. Existing legacy routes (``/api/agents``, ``/api/terrariums``,
-    ``/api/sessions``, ``/api/settings``, ``/api/registry``,
-    ``/api/configs``, ``/api/files``) continue to serve traffic
-    alongside these stubs until the cutover lands.
-    """
+    """Mount catalog, identity, session, persistence, and attach routers."""
     # Catalog — read-only discovery
     app.include_router(
         catalog_packages.router, prefix="/api/catalog/packages", tags=["catalog"]
@@ -813,9 +716,8 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
         catalog_manifest.router, prefix="/api/catalog/manifest", tags=["catalog"]
     )
 
-    # Identity — configuration state. All identity routes mount under
-    # ``/api/settings`` so Phase 1's URL contract matches the legacy
-    # ``/api/settings/*`` shape that ``settingsAPI`` already calls.
+    # Identity configuration remains under ``/api/settings`` to match the
+    # frontend settings contract.
     app.include_router(identity_llm.router, prefix="/api/settings", tags=["identity"])
     app.include_router(
         identity_api_keys.router, prefix="/api/settings", tags=["identity"]
@@ -833,11 +735,8 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
         identity_config_files.router, prefix="/api/settings", tags=["identity"]
     )
 
-    # Sessions — engine-backed creature ops. Stub routers live in
-    # ``api/routes/sessions_v2/`` (the directory name avoids a Python
-    # collision with the legacy ``api/routes/sessions.py`` module).
-    # The per-creature router groups all share the URL shape
-    # ``/api/sessions/{sid}/creatures/{cid}/...`` per plan §6.
+    # Engine-backed creature operations share the
+    # ``/api/sessions/{sid}/creatures/{cid}/...`` URL hierarchy.
     app.include_router(
         sessions_active.router, prefix="/api/sessions/active", tags=["sessions"]
     )
@@ -913,8 +812,7 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
         tags=["persistence"],
     )
 
-    # Attach — workspace files HTTP shell. Mounts at ``/api/files``
-    # (the legacy URL); Phase 1 Agent D's attach/files takes over.
+    # Workspace file operations retain the frontend's ``/api/files`` namespace.
     app.include_router(
         catalog_attach_files.router, prefix="/api/files", tags=["attach"]
     )
@@ -925,25 +823,11 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
 
 
 def _mount_spa(app: FastAPI, static_dir: Path) -> None:
-    """Mount built Vue SPA with static assets and catch-all fallback.
+    """Mount static assets and an SPA fallback after API and WebSocket routes.
 
-    API and WebSocket routes are already registered above, so they take
-    precedence. The catch-all only fires for unmatched paths.
-
-    Performance: the per-request filesystem checks (``is_file`` + two
-    ``resolve()`` calls) used to run synchronously on the event loop —
-    under concurrent traffic ``GET /`` could block other requests by
-    dozens of milliseconds (Windows path resolution + symlink traversal
-    is not free).  We now:
-
-    1. Cache ``static_dir.resolve()`` once at mount time.
-    2. Short-circuit ``GET /`` (empty path) straight to ``index.html``
-       — the common SPA-entry case never touches ``is_file``.
-    3. Cheap-string traversal-defence (``..`` / leading slash) skips
-       the resolve dance for obviously-malicious paths.
-    4. Off-load the existence check to the dedicated I/O executor for
-       genuine asset requests, so a slow filesystem call doesn't stall
-       every concurrent route.
+    The root path avoids filesystem discovery, obvious traversal paths are rejected
+    before resolution, and genuine asset checks run on the dedicated I/O pool so
+    filesystem latency cannot stall the event loop.
     """
     # Serve hashed build assets (JS, CSS, images)
     assets_dir = static_dir / "assets"
@@ -954,11 +838,7 @@ def _mount_spa(app: FastAPI, static_dir: Path) -> None:
     static_dir_resolved = static_dir.resolve()
 
     def _resolve_static_path(full_path: str) -> Path | None:
-        """Sync helper run on the I/O executor.
-
-        Returns the file path to serve if ``full_path`` resolves to a
-        real file under ``static_dir``, else ``None``.
-        """
+        """Return an existing file only when it resolves beneath ``static_dir``."""
         if not full_path or full_path.startswith("/"):
             return None
         if ".." in full_path.split("/"):

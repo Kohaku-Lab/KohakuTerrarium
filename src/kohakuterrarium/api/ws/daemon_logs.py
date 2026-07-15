@@ -46,11 +46,11 @@ _LEVEL_REGEX = re.compile(r"\[(DEBUG|INFO|WARNING|WARN|ERROR|CRITICAL)\]")
 
 
 def _line_level(line: str) -> int:
+    """Return the numeric severity encoded in a structured log line."""
     m = _LEVEL_REGEX.search(line)
     if not m:
-        # Lines without a recognisable level (raw stack traces, blank
-        # lines) ride through — treat as INFO so the default filter
-        # doesn't silently drop them.
+        # Stack-trace continuations and unstructured lines should remain visible
+        # under the default filter, so they inherit INFO severity.
         return 20
     return _LEVEL_ORDER.get(m.group(1), 20)
 
@@ -61,7 +61,6 @@ def _read_backlog(path: Path, lines: int) -> list[str]:
         return []
     try:
         with open(path, "rb") as f:
-            # For very small / typical log files, just read all.
             data = f.read()
     except OSError:
         return []
@@ -70,11 +69,7 @@ def _read_backlog(path: Path, lines: int) -> list[str]:
 
 
 async def _tail(path: Path, send) -> None:
-    """Follow ``path`` for new lines until the WS closes.
-
-    Polls every 0.5s — cheap on the local FS and avoids the
-    cross-platform headaches of file-watch libraries.
-    """
+    """Poll a local log file for complete new lines until the socket closes."""
     pos = path.stat().st_size if path.is_file() else 0
     buf = ""
     try:
@@ -82,11 +77,8 @@ async def _tail(path: Path, send) -> None:
             if path.is_file():
                 try:
                     size = path.stat().st_size
-                    # Detect rotation / truncation: a smaller-than-pos
-                    # file means the operator (or the logging
-                    # framework's RotatingFileHandler) replaced it.
-                    # Reset so we pick up from the start of the new
-                    # file instead of silently dropping everything.
+                    # Rotation or truncation invalidates the saved offset; reset
+                    # to preserve the beginning of the replacement file.
                     if size < pos:
                         pos = 0
                     with open(path, "rb") as f:
@@ -109,6 +101,7 @@ async def _tail(path: Path, send) -> None:
 
 @router.websocket("/ws/daemon/logs")
 async def ws_daemon_logs(ws: WebSocket) -> None:
+    """Send a filtered log backlog and optionally follow new entries."""
     await accept_with_auth_echo(ws)
     q = dict(ws.query_params)
     follow = q.get("follow", "true").lower() in ("1", "true", "yes")
@@ -119,13 +112,12 @@ async def ws_daemon_logs(ws: WebSocket) -> None:
     level_name = q.get("level", "INFO").upper()
     min_level = _LEVEL_ORDER.get(level_name, 20)
 
-    # SECURITY: the log path is fixed — clients cannot point this WS at
-    # arbitrary files via a query string. Tests monkeypatch the
-    # ``_DEFAULT_LOG_PATH`` module-level constant when they need to
-    # redirect, which is what the tail-rotation test relies on.
+    # The fixed path prevents clients from using this endpoint to read arbitrary
+    # files; tests may replace the module constant without exposing a query input.
     path = _DEFAULT_LOG_PATH
 
     async def send_line(line: str) -> None:
+        """Send a line when it satisfies the requested severity threshold."""
         if _line_level(line) < min_level:
             return
         try:
@@ -134,7 +126,6 @@ async def ws_daemon_logs(ws: WebSocket) -> None:
             raise
 
     try:
-        # Backlog first.
         for line in _read_backlog(path, lines):
             await send_line(line)
         if not follow:

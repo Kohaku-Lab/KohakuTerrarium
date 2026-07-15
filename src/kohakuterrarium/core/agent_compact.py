@@ -1,8 +1,6 @@
 """Agent compact-model helpers.
 
-Split out of :mod:`agent` to keep the main orchestrator file below the
-repository file-size guard while keeping compaction-specific LLM logic in one
-place.
+Agent compaction helpers for overflow recovery and dedicated LLM selection.
 """
 
 import asyncio
@@ -94,14 +92,10 @@ class AgentCompactMixin:
 def restore_compact_state_from_session(
     manager: CompactManager, session_store: Any, agent_name: str
 ) -> None:
-    """Restore persisted compact state (count + cooldown) from the store.
+    """Restore the persisted compact count and cooldown timestamp.
 
-    Audit finding 3j: ``last_compact_time`` was previously not
-    persisted, so a quick resume after a successful compact would
-    bypass the cooldown and immediately re-trigger. This restores both
-    the round counter (display continuity) and the cooldown watermark
-    (rate-limit continuity) from the same save_state slot the manager
-    writes after each successful run.
+    Restoring both values prevents a quick resume from bypassing the cooldown
+    while retaining display continuity for the compact count.
     """
     state = getattr(session_store, "state", None)
     if state is None:

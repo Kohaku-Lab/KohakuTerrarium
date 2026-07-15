@@ -1,9 +1,8 @@
-"""In-process HTTP server feeding the splash page progress frames.
+"""Serve splash progress frames over an ephemeral loopback endpoint.
 
-Binds to ``127.0.0.1:0`` (kernel picks an ephemeral port) so two
-splash instances can't collide.  Only handles ``GET /progress``;
-anything else returns 404.  Single-threaded — the splash page polls
-at 250-800ms intervals so a single thread is plenty.
+The server accepts only progress polling requests. An ephemeral port avoids
+collisions between concurrent launcher instances, and a single request thread
+is sufficient for the splash page's periodic polling.
 """
 
 import json
@@ -17,41 +16,28 @@ from kohakuterrarium.launcher.log import get_logger
 
 @dataclass
 class ProgressFrame:
-    """One progress update the splash page renders."""
+    """Represent one renderable splash progress update."""
 
     seq: int = 0
     phase: str = ""
     percent: float = 0.0
     message: str = ""
-    # Terminal frames carry ``"ok"`` / ``"failed"``; in-progress frames
-    # have ``None`` here so the page keeps polling.
+    # A missing status keeps polling active; terminal frames use ``ok`` or
+    # ``failed`` to stop the splash page.
     status: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
 class SplashServer:
-    """Encapsulates the HTTP server + the in-memory current frame.
-
-    Caller pattern::
-
-        srv = SplashServer().start()
-        srv.publish("Creating venv", percent=10)
-        ...
-        srv.publish("Done", percent=100, status="ok")
-        srv.stop()
-    """
+    """Manage the splash HTTP endpoint and its current progress frame."""
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._frame = ProgressFrame()
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
-        # Backend-specific window teardown callbacks.  pywebview /
-        # Tk register theirs at open time so ``stop()`` can close the
-        # window — without this the HTTP server shuts down but the
-        # pywebview splash sits on screen forever (Tk auto-closes on
-        # terminal status from inside its own poll loop, so it
-        # registers a no-op here).
+        # UI backends register teardown here so stopping the progress server
+        # cannot leave a detached splash window open.
         self._close_callbacks: list = []
 
     def register_close_callback(self, callback) -> None:
@@ -74,6 +60,7 @@ class SplashServer:
         status: str | None = None,
         extra: dict[str, Any] | None = None,
     ) -> None:
+        """Publish a new frame, retaining fields omitted by the caller."""
         with self._lock:
             self._frame = ProgressFrame(
                 seq=self._frame.seq + 1,
@@ -85,11 +72,12 @@ class SplashServer:
             )
 
     def snapshot(self) -> ProgressFrame:
+        """Return an independent copy of the current progress frame."""
         with self._lock:
-            # Return a copy so callers can mutate freely.
             return ProgressFrame(**asdict(self._frame))
 
     def start(self) -> "SplashServer":
+        """Start the loopback server once and return this instance."""
         if self._server is not None:
             return self
         srv_ref = self
@@ -101,13 +89,8 @@ class SplashServer:
                 pass
 
             def _emit_cors(self) -> None:
-                # The splash page is loaded into pywebview via the
-                # ``html=`` argument, which gives it an ``about:blank`` /
-                # ``data:`` origin.  A ``fetch`` from that origin to
-                # ``http://127.0.0.1:<port>/progress`` is cross-origin,
-                # and without these headers the browser drops the
-                # response so the page sits forever on its hardcoded
-                # "Starting…" / 0% defaults.
+                # Inline pywebview content has a non-loopback origin, so its
+                # progress fetch requires explicit cross-origin permission.
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
@@ -144,11 +127,9 @@ class SplashServer:
         return self
 
     def stop(self) -> None:
-        # Close the window FIRST so the user sees the splash disappear
-        # immediately; the HTTP server teardown happens after.  Order
-        # matters: if we kill the HTTP server first, the still-open
-        # pywebview window's JS poll starts failing and the page
-        # visibly degrades before the window itself disappears.
+        """Close registered splash windows, then stop the HTTP server."""
+        # Close the UI before its progress endpoint so the visible page never
+        # enters a failed polling state during teardown.
         for cb in self._close_callbacks:
             try:
                 cb()

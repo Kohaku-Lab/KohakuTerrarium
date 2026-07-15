@@ -18,9 +18,8 @@ from kohakuterrarium.studio.catalog.packages import list_installed_packages
 router = APIRouter()
 
 
-# Manifest keys that map 1:1 to a discovery endpoint below. ``skills`` is
-# listed here too so the endpoint exists today (returns ``[]`` until the
-# skills manifest slot is landed in T2 / A.4).
+# These manifest keys map directly to discovery endpoints. ``skills`` remains
+# included so packages without that optional slot consistently return an empty list.
 _EXTENSION_KINDS: tuple[str, ...] = (
     "plugins",
     "tools",
@@ -31,6 +30,7 @@ _EXTENSION_KINDS: tuple[str, ...] = (
 
 
 def _require_package_root(name: str):
+    """Return an installed package root or raise the route's canonical 404."""
     root = get_package_root(name)
     if root is None:
         raise HTTPException(
@@ -51,16 +51,12 @@ async def list_all_packages() -> list[dict]:
 
 @router.get("/{name}")
 async def get_package_summary(name: str) -> dict:
-    """Rich summary card for a single package.
-
-    Returns counts for every extension kind plus creature / terrarium
-    counts so the Studio UI can render a package card without N round
-    trips. 404 when the package is not installed.
-    """
+    """Return package metadata and extension counts for one Studio card."""
     root = _require_package_root(name)
     manifest = _load_manifest(root)
 
     def _count(key: str) -> int:
+        """Count list-valued manifest entries and ignore malformed values."""
         value = manifest.get(key)
         return len(value) if isinstance(value, list) else 0
 
@@ -83,6 +79,7 @@ async def get_package_summary(name: str) -> dict:
 
 @router.get("/{name}/creatures")
 async def list_package_creatures(name: str) -> list[dict]:
+    """List config-backed creatures exported by an installed package."""
     root = _require_package_root(name)
     results: list[dict] = []
     creatures_dir = root / "creatures"
@@ -107,6 +104,7 @@ async def list_package_creatures(name: str) -> list[dict]:
 
 @router.get("/{name}/modules/{kind}")
 async def list_package_modules(name: str, kind: str) -> list[dict]:
+    """List file-backed modules of a requested package kind."""
     root = _require_package_root(name)
     kind_dir = root / "modules" / kind
     if not kind_dir.is_dir():
@@ -124,11 +122,10 @@ async def list_package_modules(name: str, kind: str) -> list[dict]:
 
 
 def _normalize_extension_entry(kind: str, entry: object) -> dict:
-    """Coerce a manifest entry into the shape the Studio UI expects.
+    """Normalize hand-authored extension entries for Studio consumers.
 
-    Manifests are authored by hand and sometimes use ``class_name``
-    instead of ``class``; older entries may be plain strings. Keep
-    extra keys through so the UI can surface them as advanced details.
+    Legacy string entries and ``class_name`` aliases are accepted, while unknown
+    keys remain available for advanced package details.
     """
     if isinstance(entry, str):
         return {"name": entry, "module": None, "class": None, "description": ""}
@@ -149,9 +146,9 @@ def _normalize_extension_entry(kind: str, entry: object) -> dict:
 
 
 async def _list_extension(name: str, kind: str) -> list[dict]:
-    # Enforce 404 for missing packages up front so an unknown package
-    # does not silently look like a package that simply declares no
-    # modules of this kind.
+    """Return normalized manifest entries for one extension kind."""
+    # Missing packages must remain distinguishable from installed packages that
+    # declare no extensions of the requested kind.
     _require_package_root(name)
     entries = get_package_modules(name, kind)
     if not isinstance(entries, list):
@@ -185,9 +182,5 @@ async def list_package_io(name: str) -> list[dict]:
 
 @router.get("/{name}/skills")
 async def list_package_skills(name: str) -> list[dict]:
-    """Skills declared in the package's ``kohaku.yaml``.
-
-    The ``skills`` manifest slot lands with A.4 / T2; until then
-    packages simply return ``[]`` here.
-    """
+    """Skills declared in the package's optional ``kohaku.yaml`` slot."""
     return await _list_extension(name, "skills")

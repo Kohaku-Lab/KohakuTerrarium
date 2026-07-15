@@ -37,7 +37,7 @@ class EventKind(str, Enum):
     OUTPUT_WIRE_REMOVED = "output_wire_removed"
     PARENT_LINK_CHANGED = "parent_link_changed"
 
-    # Drive runtime structural events (design §9.4). Payloads carry ids /
+    # Drive runtime structural events. Payloads carry ids /
     # revision / status / actor / reason / timestamps — never the full
     # ``spec``; a subscriber fetches an authorized DTO for details.
     DRIVE_CREATED = "drive_created"

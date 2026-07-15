@@ -1,9 +1,4 @@
-"""
-Resume agents and terrariums from .kohakutr session files.
-
-Rebuilds from config, injects saved conversation + scratchpad,
-re-attaches session store for continued recording.
-"""
+"""Rebuild agents from session files and restore their persisted runtime state."""
 
 import os
 from pathlib import Path
@@ -29,7 +24,6 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Valid IO modes and their module types
 IO_MODES = ("cli", "plain", "tui")
 
 
@@ -38,14 +32,8 @@ def _create_io_modules(
 ) -> tuple[InputModule, OutputModule]:
     """Create input and output modules for a given IO mode.
 
-    Returns (input_module, output_module).
-
-    Note: ``cli`` mode is handled by the caller (``cli/resume.py``)
-    because the rich CLI lives in the ``builtins.cli_rich`` tier, which
-    this module cannot import without creating a cycle (``session/`` is
-    below ``builtins/`` in the layering, and ``cli_rich`` reaches up
-    into ``studio.identity``).  Pass ``input_module`` / ``output_module``
-    keyword arguments to :func:`resume_agent` instead.
+    Rich ``cli`` modules must be supplied by the caller because importing their
+    higher-level dependencies here would create a package cycle.
     """
     match mode:
         case "plain":
@@ -61,10 +49,9 @@ def _create_io_modules(
 
 
 def _build_conversation(messages: list[dict]) -> Conversation:
-    """Build a Conversation from a list of message dicts.
+    """Build a conversation from persisted message dictionaries.
 
-    Each dict has at minimum {role, content}. May also have
-    tool_calls, tool_call_id, name, metadata.
+    Tool-call identifiers, names, and metadata are retained when present.
     """
     conv = Conversation()
     for msg in messages:
@@ -80,12 +67,7 @@ def _build_conversation(messages: list[dict]) -> Conversation:
         if msg.get("metadata"):
             kwargs["metadata"] = msg["metadata"]
         conv.append(role, content, **kwargs)
-    # Old snapshots / replays may carry orphan tool fragments — drop
-    # them once here so every later ``to_messages`` stops re-warning.
-    # The trailing announcement is preserved: a compact snapshot saved
-    # mid-turn legitimately ends with an in-flight call whose result
-    # arrives via the post-watermark tail (or a stop-sweep terminal).
-    # Wire serialization still drops a genuinely dead one per call.
+    # Preserve a trailing in-flight call while removing stale orphaned fragments.
     conv.prune_orphan_tool_pairs(preserve_pending_tail=True)
     return conv
 
@@ -93,12 +75,10 @@ def _build_conversation(messages: list[dict]) -> Conversation:
 def _load_conversation_with_replay_fallback(
     store: SessionStore, agent_name: str
 ) -> list[dict] | None:
-    """Wave C: prefer the snapshot; replay the event log if it's stale.
+    """Load the conversation snapshot and replay events when it is stale.
 
-    The runtime now keeps the live in-memory conversation snapshot fresh
-    at processing end and after compaction. Replay remains the fallback
-    for sessions whose saved snapshot is missing or older than the event
-    stream.
+    Post-snapshot events are appended when branch ancestry is unchanged; new
+    branch forks require a full replay to preserve coherent selection.
     """
     snapshot = store.load_conversation(agent_name)
     events = store.get_events(agent_name)
@@ -116,23 +96,14 @@ def _load_conversation_with_replay_fallback(
     if snapshot is not None and isinstance(cached_up_to, int):
         if cached_up_to >= last_event_id:
             return snapshot
-        # The snapshot is the only artifact reflecting compaction — a
-        # full replay would resurrect compacted history. Keep the
-        # snapshot as the prefix and replay only the post-watermark
-        # tail (normalized so tool results arrive paired).
+        # Compaction exists only in the snapshot, so replay just its normalized tail.
         tail = [
             evt
             for evt in events
             if isinstance(evt.get("event_id"), int) and evt["event_id"] > cached_up_to
         ]
-        # A branch fork in the tail (edit / regenerate after the
-        # snapshot) rewrites EARLIER turns — blind append would retain
-        # the superseded turns from the snapshot AND add the fork's.
-        # Fall back to full replay for those sessions; it loses any
-        # compaction splice but keeps branch semantics coherent.
-        # A fork is a (turn, branch) pair the pre-watermark log never
-        # saw — ordinary continuation events on an ALREADY-forked
-        # branch must not discard the compacted snapshot.
+        # A new post-snapshot branch can supersede earlier turns; appending it to
+        # the snapshot would retain incompatible history.
         pre_pairs = {
             (evt.get("turn_index"), evt.get("branch_id"))
             for evt in events
@@ -191,10 +162,7 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
             exc_info=True,
         )
         return
-    # Use the SAME path-aware selector replay_conversation uses — a
-    # per-turn independent max can compose an ancestry that never
-    # existed (turn N's only branch living under an unselected prior
-    # branch), and new events would then stamp into an orphan subtree.
+    # Use replay's path-aware selector so restored branch ancestry actually existed.
     events_list = list(events)
     parent_paths = _index_parent_paths(events_list)
     selected = _resolve_selected_branches(events_list, parent_paths, None)
@@ -218,18 +186,9 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
 def align_agent_name(agent, agent_name: str) -> None:
     """Force ``agent`` to identify as ``agent_name`` after resume.
 
-    All session-store keys are namespaced by the *runtime* agent name
-    (e.g. ``crisp-willow:e:42``). When the agent was first started the
-    name was a fresh random label; on resume :func:`Agent.from_path`
-    rebuilds the agent from the config, which generates a *new* random
-    label. Without re-aligning the name, the resumed agent looks up its
-    history under one key and writes new events under another — every
-    history endpoint then sees 0 events.
-
-    Updates every cached copy of the name that the agent's subsystems
-    keep, so subsequent lookups via ``creature.name`` /
-    ``agent.config.name`` (used by the chat history route, channel
-    routing, trigger ids, etc.) all converge on the saved name.
+    Rebuilding can generate a different runtime name, which would split reads and
+    writes across namespaces. All subsystem name caches are aligned to the saved
+    namespace.
     """
     if getattr(agent, "config", None) is not None:
         agent.config.name = agent_name
@@ -245,17 +204,10 @@ def align_agent_name(agent, agent_name: str) -> None:
 
 
 def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
-    """Inject saved conversation, scratchpad, triggers, and resumable
-    events from ``store`` into a freshly-rebuilt ``agent``.
+    """Restore identity, conversation, branch state, scratchpad, and triggers.
 
-    Shared by :func:`resume_agent` (low-tier, builds Agent from config)
-    and ``studio.persistence.resume.resume_into_engine`` (Studio,
-    builds Creature graph via the engine then injects per-creature).
-
-    Also realigns ``agent.config.name`` (and the executor / trigger /
-    compact-manager name caches) to ``agent_name`` so the rebuilt
-    agent's *future* writes go to the same store key namespace as the
-    saved events we're injecting now.
+    Future writes remain in the saved namespace, and interrupted events are
+    queued for the rebuilt agent's resume flow.
     """
     align_agent_name(agent, agent_name)
     saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
@@ -286,7 +238,7 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     if native_tool_options is not None:
         try:
             native_tool_options.apply()
-        except Exception as exc:  # pragma: no cover - defensive
+        except Exception as exc:  # pragma: no cover - resume continues without options
             logger.warning(
                 "Failed to reapply native tool options",
                 agent=agent_name,
@@ -318,17 +270,9 @@ def _rebuild_agent(
 ) -> Agent:
     """Build the ``Agent`` from saved meta.
 
-    Prefer ``config_path`` when present and points at a readable folder
-    on this machine (``@pkg/...`` refs resolve against this node's
-    installed packages).  Fall back to ``config_snapshot`` (set by the
-    Lab worker-side store attach for inline-spawn creatures and by the
-    Studio attach for host spawns) — this is what makes resume work on
-    a node that does not have the original recipe folder on disk.
-
-    Resume always builds ``strict=False``: the saved conversation is
-    the asset; a model whose key is gone must not block reopening it
-    (the deferred provider raises with a "pick a model" message on the
-    next turn instead).
+    Prefer a resolvable config path, then fall back to the embedded snapshot for
+    cross-node or inline-spawn sessions. Non-strict construction lets users open
+    saved history even when the original model profile is unavailable.
     """
     if config_path:
         try:
@@ -340,9 +284,7 @@ def _rebuild_agent(
                 str(path_obj), llm=llm, pwd=pwd, strict=False, **io_kwargs
             )
     if not config_snapshot:
-        # config_path was set but unreachable, and no snapshot to fall
-        # back on — surface the original error so callers can deploy the
-        # recipe to this node before retrying.
+        # Without a snapshot, callers must deploy the original config before retrying.
         raise FileNotFoundError(
             f"Agent config folder not found at {config_path!r} and the "
             "session has no config_snapshot to rebuild from"
@@ -356,16 +298,9 @@ def _open_store_with_migration(
 ) -> SessionStore:
     """Open a session file, auto-migrating older formats upward first.
 
-    Wraps ``ensure_latest_version`` so resume transparently uses the
-    newest readable version on disk. If migration raises, the error
-    message carries the original v1 path so the user can re-run
-    against the preserved file after fixing the cause.
-
-    ``writer_lock=True`` is passed by the resume paths that hand the
-    store to a live engine, so a second writer on the same file is
-    refused (:class:`~kohakuterrarium.errors.SessionLockedError`).
-    Read-only callers (status/preview, e.g. ``open_store``) leave it
-    ``False``.
+    Migration resolves the newest readable file while preserving the original
+    path in failures. Live resumes may request a writer lock; preview consumers
+    remain lock-free.
     """
     try:
         resolved = ensure_latest_version(session_path)
@@ -391,21 +326,10 @@ def resume_agent(
     input_module: InputModule | None = None,
     output_module: OutputModule | None = None,
 ) -> tuple[Agent, SessionStore]:
-    """Resume a standalone agent from a session file.
+    """Resume a standalone agent and return it with its writable store.
 
-    Args:
-        session_path: Path to the session file.
-        pwd_override: Override the working directory (uses saved pwd if None).
-        io_mode: Override input/output mode (``"plain"`` or ``"tui"``).
-            Pass ``None`` to keep the config's defaults.  ``cli`` mode
-            (the rich prompt_toolkit CLI) must be constructed by the
-            caller — pass ``input_module`` / ``output_module`` directly.
-        llm: Override LLM profile (from --llm flag or saved session).
-        input_module: Pre-built input module (overrides ``io_mode``).
-        output_module: Pre-built output module (overrides ``io_mode``).
-
-    Returns:
-        (agent, store) tuple. Caller should run agent.run_forever() then store.close().
+    Explicit input or output modules override ``io_mode``. The caller owns the
+    resumed agent loop and must close the returned store.
     """
     store = _open_store_with_migration(session_path, writer_lock=True)
     try:
@@ -419,10 +343,7 @@ def resume_agent(
             output_module=output_module,
         )
     except BaseException:
-        # Any failure after the store opened (invalid metadata, config
-        # rebuild, state injection, or task cancellation) must release the
-        # writer lock; a leaked lock leaves the .kohakutr unopenable by a
-        # fresh writer on Windows.
+        # Any post-open failure must release the writer lock before propagating.
         try:
             store.close(update_status=False)
         except Exception:
@@ -443,20 +364,10 @@ def _resume_agent_from_open_store(
     input_module: InputModule | None,
     output_module: OutputModule | None,
 ) -> tuple[Agent, SessionStore]:
-    """Rebuild + rehydrate the agent from an already-open ``store``.
-
-    Split out of :func:`resume_agent` so the caller can guard the whole
-    post-open flow with one close-on-failure handler.
-    """
+    """Rebuild and rehydrate an agent from an already-open session store."""
     meta = store.load_meta()
 
-    # Accept "agent" (worker-spawned single creature, host-spawned solo
-    # agent) and missing ``config_type`` (un-synced mirror file — the
-    # field never made it through ``terrarium.session.sync.meta`` before
-    # the file was checkpointed and pushed). ``detect_session_type``
-    # already defaults the unset case to "agent"; these two paths MUST
-    # agree or a worker-side resume 502s with the very error this guard
-    # used to raise.
+    # Missing type metadata follows detection's agent default for partial mirrors.
     config_type = meta.get("config_type")
     if config_type not in (None, "", "agent"):
         raise ValueError(
@@ -473,9 +384,7 @@ def _resume_agent_from_open_store(
     if not config_path and not config_snapshot:
         raise ValueError("Session has no config_path or config_snapshot in metadata")
 
-    # ``pwd`` flows into the rebuilt agent's workspace (E8) — the old
-    # process-wide ``os.chdir`` here raced concurrent multi-session
-    # programs and contradicted core/agent_workspace's design note.
+    # Pass workspace explicitly; process-wide directory changes race other sessions.
     pwd = pwd_override or meta.get("pwd", ".")
     if not (pwd and os.path.isdir(pwd)):
         if pwd and not pwd_override:
@@ -485,7 +394,7 @@ def _resume_agent_from_open_store(
             )
         pwd = None
 
-    # IO module overrides — explicit instances win over io_mode shortcut.
+    # Explicit module instances take precedence over the mode shortcut.
     io_kwargs: dict[str, Any] = {}
     if input_module is not None or output_module is not None:
         if input_module is not None:
@@ -497,7 +406,7 @@ def _resume_agent_from_open_store(
         io_kwargs["input_module"] = inp
         io_kwargs["output_module"] = out
 
-    # Restore LLM profile: CLI override > saved session > default
+    # Resolution order is caller override, saved profile, then provider default.
     effective_llm = llm
     if not effective_llm:
         try:
@@ -507,9 +416,7 @@ def _resume_agent_from_open_store(
         except (KeyError, Exception):
             pass
 
-    # Rebuild agent: prefer ``config_path`` when present and reachable;
-    # fall back to ``config_snapshot`` for inline-spawn / cross-node
-    # resume where the original folder may not exist on this filesystem.
+    # Embedded snapshots support inline-spawn and cross-node resume.
     agent = _rebuild_agent(
         config_path=config_path,
         config_snapshot=config_snapshot,
@@ -519,10 +426,9 @@ def _resume_agent_from_open_store(
     )
     agent_name = meta.get("agents", [agent.config.name])[0]
 
-    # Inject every state slot from the store.
     inject_saved_state(agent, store, agent_name)
 
-    # Re-attach session store for continued recording
+    # Continued turns append to the same session file.
     store.update_status("running")
     agent.attach_session_store(store)
 
@@ -533,10 +439,8 @@ def _resume_agent_from_open_store(
 def detect_session_type(session_path: str | Path) -> str:
     """Detect whether a session file is an agent or terrarium.
 
-    Returns "agent" or "terrarium". Resolves to the newest version on
-    disk so a v1 file with an ``alice.kohakutr.v2`` neighbour reports
-    the v2 file's type (they are guaranteed to match today, but the
-    abstraction holds for future format changes too).
+    Resolve migrations first so detection reflects the newest readable file.
+    Missing type metadata defaults to ``"agent"``.
     """
     try:
         resolved = ensure_latest_version(session_path)

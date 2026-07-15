@@ -1,11 +1,4 @@
-"""Session attachment service.
-
-Owns the concrete attach/detach runtime for binding an agent to a host
-session namespace. This module is the single implementation backend used by
-both ``Agent.attach_to_session`` and ``Session.attach_agent`` so the session
-stack can depend on one lower-level service directly, without function-local
-imports or sibling-module workaround patterns.
-"""
+"""Attach agents to host-scoped session namespaces and detach them safely."""
 
 import time
 from typing import TYPE_CHECKING, Any
@@ -36,7 +29,7 @@ def _host_agent_name(session: "Session") -> str:
     if store is not None:
         try:
             meta = store.load_meta()
-        except Exception as e:  # pragma: no cover — defensive
+        except Exception as e:  # pragma: no cover - attachment uses fallback identity
             logger.warning("load_meta failed in attach", error=str(e), exc_info=True)
             meta = {}
         agents = meta.get("agents") if isinstance(meta, dict) else None
@@ -63,7 +56,7 @@ def _next_attach_seq(store: "SessionStore", host: str, role: str) -> int:
         next_seq = 0
     try:
         store.state[key] = next_seq
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - sequence persistence is best-effort
         logger.warning("Failed to persist attach_seq", error=str(e), exc_info=True)
     return next_seq
 
@@ -93,7 +86,7 @@ def _emit_lineage(
     }
     try:
         store.append_event(host, event_type, payload)
-    except Exception as e:  # pragma: no cover — observability
+    except Exception as e:  # pragma: no cover - lineage must not block attachment
         logger.warning(
             "Lineage event emit failed",
             event_type=event_type,
@@ -109,7 +102,11 @@ def attach_agent_to_session(
     *,
     attached_by: str | None = None,
 ) -> None:
-    """Attach ``agent`` to ``session`` under ``role``."""
+    """Attach an agent under a unique host-and-role namespace.
+
+    Reattaching to the same session is idempotent; attachment to another session
+    requires explicit detachment first.
+    """
     store: "SessionStore | None" = getattr(session, "store", None)
     if store is None:
         raise ValueError("Session has no backing SessionStore")
@@ -152,7 +149,7 @@ def attach_agent_to_session(
     session_id = ""
     try:
         session_id = store.session_id
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - lineage tolerates missing session id
         logger.warning("session_id read failed", error=str(e), exc_info=True)
 
     _emit_lineage(
@@ -166,15 +163,11 @@ def attach_agent_to_session(
         session_id=session_id,
     )
 
-    # Tell the session viewer to dispatch under the attach namespace
-    # by default; otherwise the host namespace (which only carries
-    # lineage events) wins and the conversation tab renders empty.
-    # Last-attach wins; earlier attaches stay reachable via explicit
-    # ``?agent=``. Stored in a viewer-only meta field so resume /
-    # hot-plug / token-loop enumeration keep ``meta["agents"]`` clean.
+    # The host namespace contains lineage only, so viewers default to the latest
+    # attached conversation without adding it to the main-agent registry.
     try:
         store.set_viewer_default_agent(prefix)
-    except Exception as e:  # pragma: no cover — observability
+    except Exception as e:  # pragma: no cover - viewer metadata is best-effort
         logger.warning(
             "set_viewer_default_agent failed",
             namespace=prefix,
@@ -193,7 +186,7 @@ def attach_agent_to_session(
 
 
 def detach_agent_from_session(agent: "Agent") -> None:
-    """Detach ``agent`` from its currently attached session."""
+    """Remove the attachment output, flush pending data, and record lineage."""
     state = getattr(agent, _ATTACHED_STATE_ATTR, None)
     if state is None:
         raise NotAttachedError("Agent is not attached to a session.")
@@ -211,13 +204,13 @@ def detach_agent_from_session(agent: "Agent") -> None:
     try:
         if hasattr(store, "flush"):
             store.flush()
-    except Exception as e:  # pragma: no cover — observability
+    except Exception as e:  # pragma: no cover - detachment must still complete
         logger.warning("Store flush on detach failed", error=str(e), exc_info=True)
 
     session_id = ""
     try:
         session_id = store.session_id
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - lineage tolerates missing session id
         logger.warning("session_id read failed", error=str(e), exc_info=True)
 
     _emit_lineage(

@@ -1,22 +1,9 @@
-"""Per-node routing for identity-management ops.
+"""Route identity operations to the host store or a connected worker.
 
-In lab-host mode the user picks WHICH node's credentials they're
-managing (host or any connected worker).  Settings > Providers passes
-the target via a ``?node=<id>`` query param.
-
-When ``node == "_host"`` (or unspecified): the existing host-local
-helpers run unchanged.
-
-When ``node`` names a connected worker: the operation is forwarded
-over Lab APP namespace ``studio.identity`` to the worker, whose
-:class:`StudioIdentityAdapter` writes to its OWN ``KT_CONFIG_DIR``
-(api_keys.yaml / codex-auth.json / …).  This is the only sound way
-to manage Codex on a worker: OAuth tokens are process-scoped, so the
-worker MUST run the login in its own process and keep the resulting
-tokens on its own disk.
-
-The helper raises :class:`fastapi.HTTPException` on transport / target
-errors so route handlers can ``raise`` it directly.
+Worker operations execute through the ``studio.identity`` lab namespace so each
+node reads and writes its own configuration directory. This is required for
+process-local credentials such as Codex OAuth tokens. Routing and transport
+failures are normalized to HTTP errors for route handlers.
 """
 
 from typing import Any
@@ -42,11 +29,11 @@ async def call_node_identity(
     *,
     timeout: float = 30.0,
 ) -> dict[str, Any]:
-    """Route a ``studio.identity`` op to ``node``'s adapter.
+    """Invoke a worker's ``studio.identity`` adapter and normalize failures.
 
-    ``service`` must be a ``MultiNodeTerrariumService`` (lab-host
-    mode); standalone runs have no remotes so this is reached only
-    when the caller already validated the mode.
+    The target must be connected through a multi-node service. Adapter error
+    kinds map to client-facing status codes; transport and unknown failures map
+    to 502.
     """
     host = getattr(service, "host", None)
     connected = (

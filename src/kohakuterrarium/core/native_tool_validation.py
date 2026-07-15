@@ -1,4 +1,4 @@
-"""Validation helpers for provider-native tool option overrides."""
+"""Validation and coercion of provider-native tool options."""
 
 import re
 from typing import Any
@@ -10,7 +10,7 @@ _MAX_IMAGE_SIDE = 4096
 
 
 class NativeToolOptionError(ValueError):
-    """Raised when provider-native option input is invalid."""
+    """Raised when provider-native tool options violate their schema."""
 
 
 def validate_native_tool_options(
@@ -18,11 +18,10 @@ def validate_native_tool_options(
     values: dict[str, Any],
     schema: dict[str, dict[str, Any]],
 ) -> dict[str, Any]:
-    """Validate and coerce provider-native option overrides.
+    """Validate schema keys and coerce supported primitive option values.
 
-    Rejects unknown keys, invalid enum members, wrong primitive types,
-    overly-long strings, and image-generation ``size`` values outside a
-    conservative ``64..4096`` pixel side range.
+    Image dimensions are additionally bounded to protect providers from invalid or
+    unexpectedly large requests.
     """
     if not isinstance(values, dict):
         raise NativeToolOptionError("values must be an object")

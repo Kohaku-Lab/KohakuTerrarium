@@ -38,9 +38,11 @@ from kohakuterrarium.studio.identity.llm_profiles import (
 
 
 def list_cli(include_builtins: bool = False) -> int:
+    """List user presets and optionally built-in models."""
     default_name = get_default()
 
     def _print_row(entry: dict[str, Any]) -> None:
+        """Print one model summary row."""
         marker = "*" if entry["name"] == default_name else ""
         group_summary = ",".join(sorted((entry.get("variation_groups") or {}).keys()))
         avail = "✓" if entry.get("available") else "·"
@@ -106,6 +108,7 @@ def list_cli(include_builtins: bool = False) -> int:
 
 
 def show_cli(name: str) -> int:
+    """Show one resolved LLM preset."""
     try:
         profile = get_profile_for_identifier(name)
     except ValueError as e:
@@ -119,6 +122,7 @@ def show_cli(name: str) -> int:
 
 
 def add_or_update_cli(name: str | None = None) -> int:
+    """Interactively add or update an LLM preset."""
     arg_provider, arg_name = split_identifier(name) if name else ("", "")
     existing = None
     if arg_name:
@@ -181,6 +185,7 @@ def add_or_update_cli(name: str | None = None) -> int:
 
 
 def delete_cli(name: str) -> int:
+    """Delete a user-defined LLM preset after confirmation."""
     try:
         profile = get_profile_for_identifier(name)
     except ValueError as e:
@@ -202,6 +207,7 @@ def delete_cli(name: str) -> int:
 
 
 def default_cli(name: str | None) -> int:
+    """Print or update the default model identifier."""
     if not name:
         print(get_default() or "")
         return 0

@@ -1,23 +1,14 @@
 """Persistence resume — adopt a saved session into the live engine.
 
-Path is ``/{session_name}/resume`` so the router can be mounted under
-``/api/sessions`` (legacy URL preservation: the frontend's
-``sessionAPI.resumeSession`` calls ``POST /sessions/{name}/resume``).
+The ``/{session_name}/resume`` path allows this router to mount under
+``/api/sessions`` while preserving the frontend session API URL.
 
-Returns the legacy resume response shape ``{instance_id, type,
-session_name}`` expected by ``sessionAPI.resume`` (api.js:399) plus
-the full :class:`Session` handle under ``session`` for callers that
-want it.
+Responses retain ``{instance_id, type, session_name}`` and include the full
+:class:`Session` handle under ``session``.
 
-Lab-host mode:
-
-- ``on_node = "_host"`` (or absent) — current behaviour: resume into
-  the host's engine.
-- ``on_node = "<worker-id>"`` — push the ``.kohakutr`` bytes to the
-  worker via ``terrarium.files.write``, then call
-  ``terrarium.session.resume`` so the worker's engine adopts the
-  session locally.  Returns the same response shape so the frontend
-  can render the resumed creature uniformly.
+In standalone mode, ``on_node="_host"`` resumes into the local engine. In
+lab-host mode, a worker target receives the ``.kohakutr`` file and adopts it
+through ``terrarium.session.resume``; the host itself does not run agents.
 """
 
 import asyncio
@@ -50,24 +41,17 @@ class ClusterMember(BaseModel):
 
 
 class ResumeRequest(BaseModel):
-    """Optional body for ``POST .../{name}/resume``.
+    """Optional target, cluster membership, and working-directory overrides.
 
-    The legacy frontend posts no body; the new field is optional and
-    defaults to ``"_host"`` so existing callers are unaffected.
-
-    ``members`` is the CF-6 cluster-resume extension: when the saved
-    session was part of a cross-node cluster, the caller MUST provide
-    one ``(sid, on_node)`` entry per member so every worker re-adopts
-    its own ``.kohakutr`` and the host can relink them via
-    :meth:`service.connect`. The route can also auto-fill this list
-    from the primary's saved ``cluster_members`` meta when present.
+    An omitted body targets ``"_host"`` for compatibility. Cluster resumes
+    require one ``(sid, on_node)`` pair per member so each worker adopts its
+    own store before the host relinks them. Persisted ``cluster_members``
+    metadata supplies the list when the caller does not.
     """
 
     on_node: str = "_host"
     members: list[ClusterMember] | None = None
-    # Replacement working dir when the saved one no longer exists —
-    # applied to EVERY rebuilt creature BEFORE it starts (flows into
-    # ``adopt_session(pwd=...)`` / the worker's ``pwd_override``).
+    # The override applies to every rebuilt creature before it starts.
     pwd: str | None = None
 
 
@@ -78,23 +62,16 @@ async def resume_session(
     req: ResumeRequest | None = None,
     service: TerrariumService = Depends(get_service),
 ):
-    """Resume a saved session into the engine.
+    """Resume a saved session locally or on connected worker nodes.
 
-    ``get_engine`` is resolved *lazily* — only the standalone
-    ``on_node="_host"`` branch needs a host engine, and lab-host mode
-    rejects that branch outright.  Eagerly ``Depends(get_engine)`` here
-    would resolve it on every request, emitting the spurious lab-host
-    "route needs Depends(get_service)" warning even though this route
-    never touches a host engine in lab-host mode.
+    ``get_engine`` is resolved lazily because only standalone host resumes need
+    a local engine. Lab-host requests reject that target, so eager dependency
+    resolution would initialize an engine the route cannot use.
     """
     on_node = (req.on_node if req is not None else "_host") or "_host"
 
-    # Local-is-local, multi-node-is-multi-node — never mixed. In
-    # lab-host mode (the service exposes ``connected_nodes`` — a
-    # ``MultiNodeTerrariumService``) the host process runs NO agents.
-    # A host-targeted resume would adopt the session into the host's
-    # own engine — exactly the dual-path mixing that wedges the
-    # cluster. Reject it up front; the caller must resume on a worker.
+    # Lab hosts run no agents. Adopting into the host engine would mix local
+    # and worker execution paths, so multi-node sessions must target a worker.
     if on_node == "_host" and hasattr(service, "connected_nodes"):
         raise HTTPException(
             status_code=400,
@@ -111,7 +88,7 @@ async def resume_session(
         )
 
     if on_node == "_host":
-        # Standalone-only branch — lab-host rejected ``_host`` above.
+        # The host target is valid only for a standalone service.
         engine = get_engine()
         try:
             session = await studio_resume(
@@ -129,11 +106,8 @@ async def resume_session(
             "session": asdict(session),
         }
 
-    # Remote-node resume: push the .kohakutr bytes to the worker, then
-    # ask its terrarium.session.resume adapter to adopt locally.  The
-    # service surface is ``MultiNodeTerrariumService`` in lab-host
-    # mode; standalone has no remotes and would have failed the
-    # ``on_node`` validation below.
+    # Remote adoption requires both the lab transport host and a currently
+    # connected target node.
     host = getattr(service, "host", None)
     connected = (
         list(service.connected_nodes()) if hasattr(service, "connected_nodes") else []
@@ -144,20 +118,14 @@ async def resume_session(
             detail=f"on_node={on_node!r} is not a connected lab node",
         )
 
-    # CF-6: cluster resume. The primary's saved meta may carry a
-    # ``cluster_members`` list (persisted at ``stop_session`` time).
-    # When present — and the caller didn't already specify the full
-    # member list — we resume EVERY member on its own worker and then
-    # relink them via ``service.connect`` so ``_cluster_links`` is
-    # repopulated. Without this, the resume silently downgrades a
-    # multi-worker cluster session to a singleton.
+    # Persisted cluster membership prevents a multi-worker session from being
+    # resumed as an isolated singleton when the caller omits ``members``.
     requested_members = req.members if (req is not None and req.members) else None
     saved_members = await asyncio.to_thread(_read_saved_cluster_members, path)
     cluster_members = requested_members or saved_members
     if cluster_members and len(cluster_members) > 1:
-        # Validate every targeted worker is currently connected before
-        # we start pushing files — otherwise we'd push to some, fail on
-        # others, and leave the cluster half-resumed.
+        # Validate all targets before mutating workers to avoid a partially
+        # resumed cluster.
         missing = [m for m in cluster_members if m.on_node not in connected]
         if missing:
             raise HTTPException(
@@ -188,14 +156,9 @@ async def resume_session(
         pwd_override=req.pwd if req is not None else None,
     )
 
-    # The worker adopted the session and now hosts its creature(s) — but
-    # the multi-node service's ``_home`` / ``_creature_name_cache`` were
-    # populated only at spawn time and know nothing about a resumed
-    # creature.  Without a refresh, follow-up lookups by creature_id
-    # (``get_creature_info``, history, chat) all 404 because the home
-    # registry returns no node for the resumed id.  Fan out
-    # ``list_creatures`` to repopulate both caches authoritatively from
-    # every worker's current roster.
+    # Resumed creatures bypass spawn-time home and name cache population.
+    # Refreshing the worker roster makes subsequent creature, history, and
+    # chat lookups route to the correct node.
     resumed_creatures: list[dict] = []
     list_creatures = getattr(service, "list_creatures", None)
     if callable(list_creatures):
@@ -216,12 +179,8 @@ async def resume_session(
                 }
             )
 
-    # Register the resumed remote session in the controller's _meta so
-    # ``list_sessions`` surfaces it alongside host-local sessions, and
-    # so ``get_session`` / ``list_creatures`` (the studio-tier helpers)
-    # can resynthesise the Session handle with a real worker creature
-    # id.  Prefer the live roster's first creature_id; fall back to the
-    # config-name path only when the roster fan-out came back empty.
+    # Controller metadata is the source for remote session listings and
+    # synthesized handles. Prefer the live roster identity when available.
     primary_cid = (
         resumed_creatures[0]["creature_id"]
         if resumed_creatures
@@ -241,12 +200,8 @@ async def resume_session(
     )
 
     name = meta.get("terrarium_name") or session_name
-    # Worker-side resume already attached the creature(s); surface a
-    # Session handle whose ``creatures`` carry real worker creature
-    # ids so the frontend's chat / history endpoints can address them.
-    # When the roster fan-out came back empty (unlikely — defensive),
-    # fall back to the meta-derived placeholder shape so the response
-    # is still well-formed.
+    # Real worker creature IDs keep chat and history addressable. Metadata
+    # provides a well-formed fallback when roster discovery is unavailable.
     creatures_payload = resumed_creatures or [
         {"creature_id": agent, "name": agent} for agent in (meta.get("agents") or [])
     ]
@@ -261,8 +216,8 @@ async def resume_session(
         config_path=meta.get("config_path", ""),
         home_node=on_node,
     )
-    # __post_init__ stat'd the CONTROLLER's filesystem — the session
-    # lives on the worker; prefer its report when present.
+    # ``Session.__post_init__`` checks the controller filesystem, so a remote
+    # worker's working-directory result is authoritative when present.
     if worker_pwd_exists is not None:
         synthetic.pwd_exists = worker_pwd_exists
     instance_type = "terrarium" if (meta.get("config_type") == "terrarium") else "agent"
@@ -276,32 +231,22 @@ async def resume_session(
 
 
 def _worker_absolute_for(rel: str) -> str:
-    """Reconstruct the worker-side absolute path under ``config://``.
+    """Reconstruct the worker absolute path for a ``config://`` relative path.
 
-    The worker resolves ``config://`` via
-    :func:`kohakuterrarium.laboratory.adapters.file_scopes.kt_config_home`
-    (the ``KT_CONFIG_DIR`` override, else ``~/.kohakuterrarium``).  We
-    mirror that resolution here so the resume RPC gets an absolute path
-    without an extra round-trip.  In a real multi-node deployment host
-    and worker are different machines — this is correct only when both
-    resolve ``config://`` the same way (same ``KT_CONFIG_DIR`` policy).
+    Mirroring ``kt_config_home`` avoids an extra transport round trip. This
+    requires host and worker nodes to use the same ``KT_CONFIG_DIR`` policy.
     """
     return str(kt_config_home() / rel)
 
 
 def _read_saved_cluster_members(path: Path) -> list[ClusterMember] | None:
-    """Read the persisted ``cluster_members`` entry from a saved store.
+    """Read valid persisted cluster membership from a saved store.
 
-    Returns ``None`` when the meta has no ``cluster_members`` entry
-    (the session was not part of a cluster, or it predates the CF-6
-    persistence path). Otherwise returns one :class:`ClusterMember`
-    per recorded sibling.
-
-    Blocking — call via :func:`asyncio.to_thread`.
+    Missing, malformed, or singleton membership returns ``None``. The blocking
+    store access must run through :func:`asyncio.to_thread`.
     """
-    # SessionStore creates the SQLite file as a side effect of
-    # ``__init__`` — guard so a ghost path stays ghost (the downstream
-    # ``aiofiles.open`` is what produces the canonical 404).
+    # ``SessionStore`` creates missing files, so existence must be checked
+    # before opening to preserve the later canonical 404.
     if not path.exists():
         return None
     try:
@@ -335,19 +280,14 @@ async def _push_and_resume_member(
     on_node: str,
     pwd_override: str | None = None,
 ) -> tuple[str, dict, bool | None]:
-    """Push one ``.kohakutr`` to ``on_node`` and call its resume RPC.
+    """Transfer one session store to a worker and invoke its resume RPC.
 
-    Returns the worker-reported ``(session_id, meta, pwd_exists)``
-    tuple — ``pwd_exists`` is evaluated on the WORKER's filesystem
-    (``None`` from legacy workers). Raises :class:`HTTPException` on
-    any push / resume failure (same shape the single-member path used
-    inline before CF-6).
+    ``pwd_exists`` reflects the worker filesystem and is ``None`` when an older
+    worker does not report it. Transfer and adoption failures are translated to
+    :class:`HTTPException`.
     """
-    # The session file may be a *live* mirror store the
-    # ``SessionMirrorWriter`` still holds open — its meta + recent
-    # events sit in a write cache / the SQLite ``-wal`` sidecar and a
-    # raw byte read would miss them (the worker then rejects the push
-    # as "Session is a None"). Checkpoint the open mirror store first.
+    # A live mirror may still hold metadata and events in SQLite's WAL. A
+    # checkpoint makes the transferred main file self-contained.
     mirror = getattr(request.app.state, "session_mirror", None)
     if mirror is not None and hasattr(mirror, "checkpoint"):
         try:
@@ -391,14 +331,9 @@ async def _push_and_resume_member(
         )
         if isinstance(worker_path_resp, dict) and "error" in worker_path_resp:
             err = worker_path_resp["error"]
-            # The worker classifies errors via its dispatch handler:
-            # ValueError → "invalid", KeyError → "not_found", anything
-            # else → "session"/"engine".  "invalid" is the user-input
-            # failure case (e.g. the saved session has no rebuildable
-            # config — split-graph mirrors that pre-date config_snapshot
-            # inheritance), so surface it as a client error so the UI
-            # can show an actionable message instead of a transport-
-            # error 502.
+            # Worker ``invalid`` and ``not_found`` failures describe request or
+            # saved-session problems; other kinds represent transport-side or
+            # worker failures.
             kind = err.get("kind") if isinstance(err, dict) else None
             status = 400 if kind in ("invalid", "not_found") else 502
             raise HTTPException(
@@ -439,22 +374,14 @@ async def _resume_cluster(
     primary_sid: str,
     pwd_override: str | None = None,
 ) -> dict:
-    """CF-6 — resume every cluster member then relink them.
+    """Resume all cluster members on their workers and restore their links.
 
-    Steps:
-
-    1. Resume each member's ``.kohakutr`` on its respective worker.
-    2. Refresh ``service.list_creatures`` so the home / name caches
-       authoritatively reflect the resumed roster.
-    3. For every non-primary member, call ``service.connect()`` with
-       the primary's first creature_id and the member's first
-       creature_id so :attr:`MultiNodeTerrariumService._cluster_links`
-       is repopulated.
-    4. Return the primary's session payload (the rest are reachable
-       via the service's normal listing endpoints).
+    Store paths and worker connectivity are validated before mutation. The
+    refreshed roster supplies authoritative creature IDs for routing and
+    relinking, while the response represents the primary member.
     """
-    # Resolve every member's saved ``.kohakutr`` upfront so a missing
-    # mirror surfaces as 404 before we mutate any worker state.
+    # Resolve every store before mutating workers so a missing mirror cannot
+    # leave a partially resumed cluster.
     paths: dict[str, Path] = {}
     for m in members:
         resolved = await asyncio.to_thread(resolve_session_path_default, m.sid)
@@ -465,8 +392,7 @@ async def _resume_cluster(
             )
         paths[m.sid] = resolved
 
-    # Resume every member.  Order primary first so its meta is the
-    # canonical response shape.
+    # Primary-first ordering makes its metadata the canonical response source.
     primary_member = next(
         (m for m in members if m.sid == primary_sid),
         members[0],
@@ -476,7 +402,7 @@ async def _resume_cluster(
     ]
     resumed: dict[str, tuple[str, dict, str]] = (
         {}
-    )  # original_sid -> (new_sid, meta, on_node)
+    )  # Maps original IDs to the adopted ID, metadata, and worker node.
     for m in ordered:
         new_sid, new_meta, _member_pwd_exists = await _push_and_resume_member(
             host=host,
@@ -487,10 +413,7 @@ async def _resume_cluster(
         )
         resumed[m.sid] = (new_sid, new_meta, m.on_node)
 
-    # Refresh the service roster so the home registry / name cache
-    # carry the resumed creature ids.  Subsequent ``connect`` calls
-    # route by home — without this the lookup falls back to caches
-    # that still point at the pre-stop creatures.
+    # Roster refresh replaces stale pre-stop routing identities before relink.
     new_creature_by_member: dict[str, str] = {}
     list_creatures = getattr(service, "list_creatures", None)
     roster: tuple = ()
@@ -505,10 +428,8 @@ async def _resume_cluster(
                 new_creature_by_member[original_sid] = c.creature_id
                 break
 
-    # Register each resumed remote session in studio meta so the
-    # listing / get_session endpoints surface it.  Done before the
-    # cross-node connect so the meta-driven helpers see consistent
-    # state during the relink.
+    # Register every adopted member before relinking so metadata-backed
+    # lookups observe a complete cluster.
     for original_sid, (new_sid, new_meta, node) in resumed.items():
         creature_id = new_creature_by_member.get(original_sid) or (
             (new_meta.get("agents") or [""])[0]
@@ -528,13 +449,9 @@ async def _resume_cluster(
             },
         )
 
-    # Relink: call ``service.connect`` between the primary creature and
-    # every other member's creature so cross_node_connect repopulates
-    # ``_cluster_links``.  Channel name is left default — the wire
-    # uses the cluster_members meta + auto-name. Failures are logged
-    # but do not abort the response: the per-member resume already
-    # succeeded; a relink failure just degrades to two singletons,
-    # which is recoverable by manual /connect.
+    # Default-channel connections rebuild cluster links from the primary.
+    # Relink failures are returned without discarding successful adoptions;
+    # disconnected members remain recoverable through a manual connection.
     primary_cid = new_creature_by_member.get(primary_member.sid)
     relink_errors: list[str] = []
     if primary_cid and hasattr(service, "connect"):

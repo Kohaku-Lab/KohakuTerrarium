@@ -1,17 +1,9 @@
-"""Node-targeted Drive settings routes (design §8.4, §8.5, Phase H).
+"""Expose node-targeted Drive settings and runtime application routes.
 
-Mounted under ``/api/settings`` → ``/api/settings/drives*``. Every endpoint takes
-an optional ``node`` query param:
-
-- absent / ``_host`` / standalone mode -> the host's own config home + engine
-  (via :class:`~kohakuterrarium.studio.nodes._LocalNodeDriveSettings`);
-- a connected worker id -> that worker's ``studio.settings`` adapter through
-  ``Studio.nodes[node].settings.drives`` (the worker reads/applies its own file).
-
-Reads are open; mutations (save/apply) sit behind the existing admin-token
-dependency, matching the config-file editor routes. Typed Drive/settings errors
-(validation, optimistic-concurrency conflict, home offline) propagate to the
-global ``KTError`` -> HTTP mapper (409/400/404/500).
+The optional ``node`` parameter resolves either the host's local settings
+surface or a connected worker's adapter. Reads are open, while persistence and
+live application require admin authorization. Saving is optimistic and does not
+imply that the running Drive runtime has accepted the new configuration.
 """
 
 from typing import Any
@@ -37,10 +29,14 @@ _LOCAL_NODES = {None, "", "_host"}
 
 
 class DriveSettingsBody(BaseModel):
+    """Carry a candidate Drive settings mapping for validation."""
+
     settings: dict[str, Any]
 
 
 class SaveDriveSettingsBody(BaseModel):
+    """Carry Drive settings and their optimistic concurrency precondition."""
+
     settings: dict[str, Any]
     expected_revision: str | None = None
     expected_exists: bool | None = None
@@ -61,7 +57,7 @@ async def drive_settings_status(
     node: str | None = Query(default=None),
     service: TerrariumService = Depends(get_service),
 ):
-    """Settings-file view (available/enabled/load-error) for the target node."""
+    """Return availability, enablement, and load status for the target node."""
     return await _drive_settings_for(service, node).status()
 
 
@@ -70,7 +66,7 @@ async def drive_settings_config(
     node: str | None = Query(default=None),
     service: TerrariumService = Depends(get_service),
 ):
-    """The raw validated settings + revision for the target node."""
+    """Return the target node's validated settings and revision."""
     return await _drive_settings_for(service, node).get()
 
 
@@ -79,7 +75,7 @@ async def drive_runtime_status(
     node: str | None = Query(default=None),
     service: TerrariumService = Depends(get_service),
 ):
-    """The *running* Drive runtime snapshot on the target node."""
+    """Return the target node's currently running Drive runtime snapshot."""
     return await _drive_settings_for(service, node).runtime_status()
 
 
@@ -99,7 +95,7 @@ async def drive_settings_save(
     node: str | None = Query(default=None),
     service: TerrariumService = Depends(get_service),
 ):
-    """Persist validated settings with an explicit optimistic precondition."""
+    """Persist validated settings under an explicit optimistic precondition."""
     if body.expected_revision is None and body.expected_exists is not False:
         raise HTTPException(
             400,
@@ -118,22 +114,12 @@ async def drive_settings_apply(
     node: str | None = Query(default=None),
     service: TerrariumService = Depends(get_service),
 ):
-    """Apply the persisted settings to the target node's live runtime. Admin-gated.
+    """Apply persisted settings and report their actual live scope.
 
-    Returns ``applied_live`` / ``restart_required`` / ``rejected`` plus desired /
-    running revisions and warnings; a save never implies a live apply (design §8.6).
-
-    Under L4 the request engine is one of many pooled per-user engines that all
-    resolve the shared host ``drive-settings.yaml``. The cross-engine scope is
-    reported honestly, keyed on the actual apply outcome (R1-30):
-
-    - ``applied_live`` — the request engine took the change live; the other
-      pooled engines are evicted so they rebuild from the new settings on next
-      use, and the applied scope is the request engine.
-    - ``restart_required`` — no running engine was updated (a live apply is not
-      possible without a restart), so no engine is evicted and no live scope is
-      claimed; the persisted settings take effect when engines are restarted.
-    - ``rejected`` — nothing changed, so nothing is evicted.
+    A local ``applied_live`` result evicts other pooled user engines so they
+    rebuild from the shared settings file on next use. ``restart_required`` and
+    ``rejected`` update no running engine, so they evict nothing and claim no
+    live application scope.
     """
     result = await _drive_settings_for(service, node).apply()
     if node in _LOCAL_NODES:
@@ -145,8 +131,8 @@ async def drive_settings_apply(
                 evicted = pool.evict_others(keep)
                 applied_engine: str | None = "request"
             else:
-                # restart_required / rejected changed no running engine; evict
-                # none and claim no live scope (R1-30).
+                # No running engine changed, so retaining pooled engines avoids
+                # implying that the persisted settings are already active.
                 evicted = []
                 applied_engine = None
             result = {

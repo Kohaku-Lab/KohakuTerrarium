@@ -1,8 +1,7 @@
 """Overview-tab summary builder for the Session Viewer.
 
-Verbatim port of ``_session_viewer.py:build_summary_payload`` plus the
-private helpers it uses (``_aggregate_rollups``,
-``_scan_events_for_summary``, ``_agents_for_summary``).
+Builds overview totals, hot turns, and event-derived counters for persisted
+sessions.
 """
 
 from collections.abc import Iterable
@@ -35,17 +34,11 @@ def _subagent_failed(evt: dict) -> bool:
 def _agents_for_summary(
     meta: dict[str, Any], store: SessionStore, requested: str | None
 ) -> list[str]:
-    """Return the agent list to summarise.
+    """Select and order agent namespaces for the overview.
 
-    ``requested`` narrows to one agent (404 if not present); ``None``
-    summarises every main creature in ``meta["agents"]`` plus every
-    Wave F attached namespace, with ``meta["viewer_default_agent"]``
-    moved to the front when set so attach-driven sessions surface the
-    active namespace first in the Overview tab.
-
-    ``meta["agents"]`` already unions ``discover_agents_from_events``
-    (folded in by ``SessionStore.load_meta``), so event-only creatures —
-    the ones the graph token total aggregates over — are listed here too.
+    A requested agent must belong to the session. Without one, all main and
+    attached namespaces are included, with ``viewer_default_agent`` first.
+    ``load_meta`` already includes event-discovered creatures in ``agents``.
     """
     main_agents = list(meta.get("agents") or [])
     attached_namespaces = [
@@ -68,11 +61,10 @@ def _agents_for_summary(
 def _aggregate_rollups(
     rollups: Iterable[dict], *, count_by_agent: bool = False
 ) -> dict[str, Any]:
-    """Sum turn-rollup rows into one totals dict.
+    """Sum rollup rows while preserving the selected turn-count semantics.
 
-    Normal views count one user turn per turn_index. Session-wide
-    summaries historically counted per-agent turn rows; preserve that
-    when requested so multi-agent sessions still report each agent loop.
+    Agent views count unique turn indexes. Session-wide views count each
+    non-sub-agent controller contribution to preserve multi-agent loop totals.
     """
     prompt = completion = cached = 0
     cost_usd = 0.0
@@ -159,12 +151,9 @@ def build_summary_payload(
     totals = _aggregate_rollups(flat_rollups, count_by_agent=agent is None)
 
     if agent is None:
-        # The turn-bucketed aggregate omits turn-less usage — channel-
-        # driven creatures never bump turn_index, so their spend would
-        # leave the graph total counting only the (user-driven) root.
-        # Replace the token/cost total with the turn-agnostic graph sum
-        # (each sub-agent job counted once across all turns); ``turns``
-        # and ``hot_turns`` keep their turn_index > 0 semantics.
+        # Channel-driven cycles lack turn indexes, so graph token and cost
+        # totals use the turn-agnostic sum. Turn counts and hot turns retain
+        # their positive-turn-index semantics.
         graph = graph_total_usage(store)
         totals["tokens"] = {
             "prompt": graph["tokens_in"],
@@ -174,7 +163,6 @@ def build_summary_payload(
         if graph["cost_usd"] is not None:
             totals["cost_usd"] = graph["cost_usd"]
 
-    # Hot turns — by cost when available, else by token volume.
     def _hot_key(r: dict) -> tuple[int, float]:
         c = r.get("cost_usd")
         if c is not None:
@@ -196,7 +184,6 @@ def build_summary_payload(
         for r in hot_sorted
     ]
 
-    # Event-derived counters: tool_calls, errors, compacts.
     event_totals = {"tool_calls": 0, "error_turns": [], "compact_turns": []}
     for a in agents:
         per_agent = _scan_events_for_summary(store.get_events(a))

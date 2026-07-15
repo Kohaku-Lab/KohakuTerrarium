@@ -1,14 +1,8 @@
 """
-Tool initialization factory.
+Resolve configured tools and register them with the agent.
 
-Registers tools from agent config into the module registry.
-
-``strict`` semantics (E4): programmatic construction defaults to
-strict — a misconfigured tool raises :class:`ConfigError` instead of
-being warn-skipped, because a silently missing tool turns into "the
-agent ran and produced nothing" hours later.  Interactive frontends
-(Studio / Lab managed spawns) pass ``strict=False`` to keep
-degrade-and-continue.
+Strict mode rejects misconfigured tools; lenient interactive construction logs
+and skips them.
 """
 
 from typing import Any
@@ -28,14 +22,14 @@ logger = get_logger(__name__)
 
 
 def _fail(strict: bool, message: str, **log_fields: Any) -> None:
-    """Raise :class:`ConfigError` in strict mode; warn otherwise."""
+    """Raise configuration failures in strict mode and log them otherwise."""
     if strict:
         raise ConfigError(message)
     logger.warning(message, **log_fields)
 
 
 def _coerce_tool_config_value(key: str, value: Any) -> Any:
-    """Coerce common ToolConfig fields from config-file values."""
+    """Normalize typed ToolConfig fields loaded from serialized values."""
     if key == "max_output":
         try:
             coerced = int(value)
@@ -55,8 +49,7 @@ def _coerce_tool_config_value(key: str, value: Any) -> Any:
     return value
 
 
-# Universal trigger classes the framework ships. `type: trigger` entries
-# look up the trigger by its `setup_tool_name`.
+# Trigger tools are addressed by each universal trigger's setup name.
 def _universal_trigger_classes() -> list[type[BaseTrigger]]:
     return list_universal_trigger_classes()
 
@@ -74,11 +67,10 @@ def create_tool(
     *,
     strict: bool = False,
 ) -> BaseTool | None:
-    """Create a single tool instance from a tool config entry.
+    """Create one built-in, trigger-backed, custom, or package tool.
 
-    Handles builtin, custom, and package tool types. Returns None
-    if the tool could not be created (lenient mode); raises
-    :class:`ConfigError` instead when ``strict``.
+    Lenient mode returns ``None`` on failure; strict mode raises
+    :class:`ConfigError`.
     """
     match tool_config.type:
         case "builtin":
@@ -177,12 +169,7 @@ def init_tools(
     *,
     strict: bool = False,
 ) -> None:
-    """Register all tools from agent config into the registry.
-
-    Iterates over config.tools and creates each tool via create_tool(),
-    registering successful results in the registry.  ``strict`` raises
-    on the first misconfigured tool instead of skipping it.
-    """
+    """Create and register configured tools, honoring strict failure semantics."""
     for tool_config in config.tools:
         tool = create_tool(tool_config, loader, strict=strict)
         if tool:

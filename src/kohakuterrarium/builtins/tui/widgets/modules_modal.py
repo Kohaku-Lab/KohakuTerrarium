@@ -1,25 +1,7 @@
-"""Textual modal screens for the unified Modules surface (TUI).
+"""Inspect and mutate live plugin and provider-native tool configuration.
 
-Two screens:
-
-- :class:`ModulesModal` — master view. Type tabs (Plugins / Native
-  tools / future), each with a ``DataTable`` of modules. Bindings:
-  ``Enter`` opens the edit modal; ``t`` toggles enable/disable on the
-  highlighted plugin row; ``/`` focuses the search input; ``r``
-  reloads; ``Esc`` closes.
-- :class:`ModuleEditModal` — editor for a single module. Header shows
-  description + toggle button (plugins only). Body is a schema-driven
-  form: ``Switch`` for ``bool``, ``Select`` for ``enum``,
-  ``Input`` for ``string`` / ``int`` / ``float``, ``TextArea`` for
-  ``list`` (newline-separated) and ``dict`` (JSON). Footer has
-  explicit ``Save`` and ``Cancel`` buttons; ``Ctrl+S`` saves and
-  ``Esc`` cancels.
-
-Both screens are pushed by ``AgentTUI.action_open_modules`` (bound to
-``F2``). The agent reference is wired into :class:`TUISession` by
-:meth:`TUIInput.set_user_commands` so screens can mutate options
-through ``agent.plugin_options`` / ``agent.native_tool_options``
-without round-tripping through the slash-command pipeline.
+The inventory normalizes both module kinds into one schema-driven UI; writes go
+through the agent's option helpers so validation and prompt refresh stay centralized.
 """
 
 import json
@@ -46,17 +28,8 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# ── Inventory + apply (talks to the live in-process agent) ───────
-
-
 def _list_modules(agent: Any) -> list[dict[str, Any]]:
-    """Return every configurable module on the agent.
-
-    Mirrors :func:`builtins.user_commands.module._inventory` — kept
-    here as a small duplicate to avoid the TUI screens importing
-    user_commands. The inputs are tiny (4–10 modules typical) so the
-    duplication cost is real but small.
-    """
+    """Normalize configurable plugins and provider-native tools for the UI."""
     out: list[dict[str, Any]] = []
     mgr = getattr(agent, "plugins", None)
     if mgr:
@@ -124,11 +97,8 @@ def _sort_key(m: dict[str, Any]) -> tuple[int, str]:
     return (50 if p is None else int(p), m["name"])
 
 
-# ── Master screen: list with type tabs ────────────────────────────
-
-
 class ModulesModal(ModalScreen[None]):
-    """Browse + open + toggle modules. Pushed by F2 in the TUI app."""
+    """Browse live module inventory and toggle plugin enablement."""
 
     DEFAULT_CSS = """
     ModulesModal {
@@ -177,13 +147,9 @@ class ModulesModal(ModalScreen[None]):
         super().__init__()
         self._agent = agent
         self._modules: list[dict[str, Any]] = []
-        # Per-type row index → module dict. Rebuilt on every
-        # populate_table() so toggle/edit can resolve the highlighted
-        # row to a module without scanning the global list.
+        # Per-type row indexes keep highlighted-row lookup stable after filtering.
         self._row_index: dict[str, list[dict[str, Any]]] = {}
         self._search: str = ""
-
-    # Composition ────────────────────────────────────────────────
 
     def compose(self):
         with Vertical(id="modules-container"):
@@ -206,12 +172,10 @@ class ModulesModal(ModalScreen[None]):
             tbl.add_columns("●", "name", "p", "opts")
         self.reload_modules()
 
-    # Data load ──────────────────────────────────────────────────
-
     def reload_modules(self) -> None:
         try:
             self._modules = _list_modules(self._agent)
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover - defensive boundary
             logger.warning("reload_modules failed", error=str(exc))
             self._modules = []
         self._populate_tables()
@@ -226,7 +190,7 @@ class ModulesModal(ModalScreen[None]):
         plugins = [m for m in self._modules if m["type"] == "plugin"]
         natives = [m for m in self._modules if m["type"] == "native_tool"]
 
-        # Group plugins enabled-on-top, sort by priority ASC.
+        # Enabled plugins precede disabled plugins; priority orders each group.
         plugin_rows: list[dict[str, Any]] = []
         for want in (True, False):
             group = sorted((m for m in plugins if m["enabled"] is want), key=_sort_key)
@@ -241,7 +205,6 @@ class ModulesModal(ModalScreen[None]):
                 continue
             self._add_row("native_tool", m)
 
-        # Update tab labels with counts.
         tabs = self.query_one("#modules-tabs", TabbedContent)
         tabs.get_tab("tab-plugin").label = f"Plugins ({len(self._row_index['plugin'])})"
         tabs.get_tab("tab-native_tool").label = (
@@ -257,8 +220,6 @@ class ModulesModal(ModalScreen[None]):
         opts_text = f"{n_opts}" if n_opts else ""
         tbl.add_row(glyph, m["name"], pr_text, opts_text)
         self._row_index[tid].append(m)
-
-    # Bindings ───────────────────────────────────────────────────
 
     def action_close(self) -> None:
         self.dismiss(None)
@@ -292,11 +253,8 @@ class ModulesModal(ModalScreen[None]):
         else:
             mgr.enable(name)
             self.app.run_worker(mgr.load_pending(), exclusive=False)
-        # Refresh after a microtask so load_pending has a chance to
-        # finish on the next loop tick. ``reload_modules`` is cheap.
+        # Reload after scheduling pending plugin initialization.
         self.reload_modules()
-
-    # Events ─────────────────────────────────────────────────────
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "modules-search":
@@ -304,12 +262,8 @@ class ModulesModal(ModalScreen[None]):
             self._populate_tables()
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        # Mouse-click / Enter selects a row → open edit modal.
-        # event.cursor_row is unreliable across Textual versions; rely
-        # on the active tab + its row index.
+        # The active table's cursor is more portable than event.cursor_row.
         self.action_open_selected()
-
-    # Helpers ────────────────────────────────────────────────────
 
     def _active_tab_id(self) -> str:
         tabs = self.query_one("#modules-tabs", TabbedContent)
@@ -335,11 +289,8 @@ def _matches(m: dict[str, Any], q: str) -> bool:
     return q in m["name"].lower() or q in (m.get("description") or "").lower()
 
 
-# ── Edit screen: schema-driven form ──────────────────────────────
-
-
 class ModuleEditModal(ModalScreen[bool]):
-    """Edit one module's options. Returns ``True`` if changes saved."""
+    """Edit schema-defined options through the agent's runtime option helper."""
 
     DEFAULT_CSS = """
     ModuleEditModal {
@@ -399,8 +350,9 @@ class ModuleEditModal(ModalScreen[bool]):
         super().__init__()
         self._agent = agent
         self._module = module
+        # The snapshot supports change-only writes and stable no-change detection.
         self._initial = dict(module.get("options") or {})
-        # Per-key widget reference so save() can read current values.
+        # Widget references preserve schema keys when generated IDs are sanitized.
         self._widgets: dict[str, Any] = {}
         self._status_text = ""
 
@@ -436,7 +388,7 @@ class ModuleEditModal(ModalScreen[bool]):
         )
 
     def _compose_field(self, key: str, spec: dict[str, Any]):
-        """Yield label + widget rows for one schema entry."""
+        """Compose the label and editor for one schema entry."""
         kind = spec.get("type", "string")
         current = self._initial.get(key, spec.get("default"))
         doc = spec.get("doc") or ""
@@ -461,11 +413,7 @@ class ModuleEditModal(ModalScreen[bool]):
             if current is not None and str(current) in allowed:
                 initial = str(current)
             else:
-                # ``Select.NULL`` is the sentinel for "no selection".
-                # (Older Textual versions exposed ``Select.BLANK`` as
-                # the same thing; in this version that's a broken
-                # alias that resolves to ``False`` and trips the
-                # validator.)
+                # Select.NULL is the valid sentinel for no selection.
                 initial = Select.NULL
             return Select(
                 options=opts,
@@ -483,14 +431,11 @@ class ModuleEditModal(ModalScreen[bool]):
                 except (TypeError, ValueError):
                     text = str(current)
             return TextArea(text, id=f"f-{_safe(key)}", language="json")
-        # int / float / string → Input
         return Input(
             value="" if current is None else str(current),
             id=f"f-{_safe(key)}",
             placeholder=str(spec.get("default") or ""),
         )
-
-    # Bindings + buttons ─────────────────────────────────────────
 
     def action_cancel(self) -> None:
         self.dismiss(False)
@@ -511,7 +456,7 @@ class ModuleEditModal(ModalScreen[bool]):
         except ValueError as exc:
             self._set_status(f"[red]{exc}[/red]")
             return
-        # Send only keys that changed from the initial snapshot.
+        # Persist only values that differ from the opening snapshot.
         diff: dict[str, Any] = {}
         for key in payload:
             if json.dumps(payload[key], sort_keys=True, default=str) != json.dumps(
@@ -528,10 +473,7 @@ class ModuleEditModal(ModalScreen[bool]):
             return
         self._initial = dict(applied)
         self._set_status(f"[green]Saved {len(diff)} key(s).[/green]")
-        # Auto-close on save so the user returns to the list with the
-        # change reflected. Status flash is brief (~500ms) — Textual
-        # actions can't trivially defer; dismiss immediately and let
-        # the parent reload.
+        # Dismissal lets the parent reload the updated module immediately.
         self.dismiss(True)
 
     def _collect_payload(self, schema: dict[str, Any]) -> dict[str, Any]:
@@ -580,7 +522,6 @@ class ModuleEditModal(ModalScreen[bool]):
                 return float(text)
             except ValueError as exc:
                 raise ValueError(f"{key}: not a number") from exc
-        # default: string
         v = widget.value
         return v if v != "" else None
 
@@ -589,9 +530,10 @@ class ModuleEditModal(ModalScreen[bool]):
         try:
             self.query_one("#edit-status", Static).update(text)
         except Exception:
+            # Status updates may occur while the modal is being dismissed.
             pass
 
 
 def _safe(key: str) -> str:
-    """Make a schema key safe for use as a Textual widget id."""
+    """Convert a schema key to a Textual-safe widget ID."""
     return "".join(ch if ch.isalnum() else "_" for ch in key)

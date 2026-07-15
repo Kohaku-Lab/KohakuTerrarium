@@ -1,15 +1,7 @@
-"""Cross-process writer lock for :class:`~kohakuterrarium.session.store.SessionStore`.
+"""Enforce single-writer session access across processes.
 
-Extracted from ``store.py`` (which sits at the file-size cap) so the
-writer-exclusivity policy is one cohesive unit.
-
-A live engine opens its session with ``writer_lock=True`` so a second
-writer — another process, or a second engine in this one — is refused
-with :class:`SessionLockedError` rather than silently corrupting the
-session (overlapping conversation-snapshot writes + colliding event
-counters). Read-only / viewer / listing opens never take the lock, so a
-running session stays viewable. The OS frees the lock when the holder
-exits or crashes, so a killed process never wedges the next opener.
+Read-only consumers remain lock-free, and operating-system lock ownership is
+released automatically when a process exits.
 """
 
 from collections.abc import Callable, Iterable
@@ -24,9 +16,8 @@ logger = get_logger(__name__)
 def acquire_writer_lock(path: str) -> FileLock:
     """Acquire the writer lock for session ``path``.
 
-    Returns the held :class:`FileLock` (release it on store close). Raises
-    :class:`SessionLockedError` — annotated with the holder pid — when the
-    lock is already held by another writer.
+    Return the held lock for release at store close. If another writer owns it,
+    raise :class:`SessionLockedError` with the holder process identifier.
     """
     lock = FileLock(path + ".lock")
     try:
@@ -55,16 +46,9 @@ def close_tables(
 ) -> None:
     """Close every KVault table, drop native handles, release the lock.
 
-    ``companion_closers`` are zero-arg callables registered by sidecar
-    resources that share the store's file (e.g. the Drive runtime's own
-    ``sqlite3`` connection); they run FIRST, in LIFO order (last registered
-    closes first), so their native handles drop too — a failing one logged
-    rather than fatal. The lock release runs in ``finally`` so a failing
-    ``table.close()`` / closer can never strand the writer lock. Dropping the
-    native ``_KVault`` / ``_vault`` handles is required on Windows:
-    ``KVault.close()`` leaves the SQLite handle open until GC (and ``TextVault``
-    has no ``close()`` at all), which keeps the ``.kohakutr`` locked so a later
-    delete / rename fails with WinError 32.
+    Companion resources close first in LIFO order. Native vault handles are
+    explicitly dropped because their public close paths can retain SQLite file
+    handles on Windows. The writer lock is released even if cleanup fails.
     """
     try:
         for closer in reversed(list(companion_closers)):

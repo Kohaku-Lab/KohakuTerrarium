@@ -1,11 +1,8 @@
 """``group_channel`` — channel CRUD + per-creature wiring.
 
-Notes on direction semantics:
-
-The ``direction`` argument toggles the *target*'s edge, not the
-caller's: ``direction="listen"`` makes ``creature_id`` listen on the
-channel, ``direction="send"`` makes them able to send. The privileged
-caller is wiring on someone else's behalf.
+The ``direction`` argument toggles the target's edge, not the caller's.
+``direction="listen"`` makes ``creature_id`` listen; ``direction="send"``
+allows that target to send. The privileged caller wires on its behalf.
 
 When the wire crosses graph boundaries (target is in a different
 graph — typically a freshly-spawned worker still in its own singleton
@@ -36,10 +33,9 @@ from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_err
 
 
 def _emit_intra_graph_wire_event(gctx: GroupContext, target_id: str) -> None:
-    """Emit a TOPOLOGY_CHANGED event for an intra-graph wire/unwire so
-    runtime-graph prompts on caller + target both refresh. The
-    cross-graph case routes through ``engine.connect``/``disconnect``
-    which already emit on their own.
+    """Refresh caller and target prompts after an intra-graph edge change.
+
+    Cross-graph operations route through engine methods that emit their own event.
     """
     gctx.engine._emit(
         EngineEvent(
@@ -134,7 +130,6 @@ class GroupChannelTool(BaseTool):
                 }
             )
 
-        # wire / unwire need a creature_id and direction
         ident = (args.get("creature_id") or "").strip()
         target = resolve_group_target(gctx, ident)
         if target is None:
@@ -156,10 +151,8 @@ async def _wire(
     channel: str,
     direction: str,
 ) -> ToolResult:
-    # Cross-graph wiring: route through ``engine.connect`` which merges
-    # the two graphs as a side effect. ``direction`` controls *target*'s
-    # edge, so caller takes the opposite role: target listens → caller
-    # sends, target sends → caller listens.
+    # Cross-graph wiring merges the graphs; the caller takes the role opposite
+    # the requested target direction.
     if target.graph_id != gctx.graph.graph_id:
         sender = gctx.caller if direction == "listen" else target
         receiver = target if direction == "listen" else gctx.caller
@@ -181,7 +174,7 @@ async def _wire(
             }
         )
 
-    # Intra-graph wire: declare-channel-then-toggle-edge.
+    # A missing intra-graph channel is declared before its edge is enabled.
     graph = gctx.graph
     if channel not in graph.channels:
         try:
@@ -254,15 +247,9 @@ async def _unwire(
         if channel in target.send_channels:
             target.send_channels.remove(channel)
 
-    # Removing one direction of an edge can disconnect two clusters
-    # within the graph. ``engine.disconnect`` removes paired edges and
-    # would over-shoot; we drop one direction only and then re-check
-    # connectivity manually via the same private helper the topology
-    # module uses internally. ``apply_split_bookkeeping`` then mirrors
-    # the engine's split path — fresh envs, repointed creatures,
-    # session-store coordination, and a ``TOPOLOGY_CHANGED`` event.
-    # When no split happens we still emit so the runtime-graph prompt
-    # block refreshes both peers' listen/send lists.
+    # Removing one direction may split the graph. Paired-edge disconnect would
+    # remove too much, so normalize connectivity after the single-edge change and
+    # apply the standard split bookkeeping. Otherwise emit to refresh both prompts.
     delta = _topo._normalize_components(
         gctx.engine._topology,
         graph,

@@ -35,37 +35,22 @@ logger = get_logger(__name__)
 
 
 class TUIOutput(BaseOutputModule):
-    """Output module using Textual full-screen TUI with widget-based chat.
-
-    Tool calls render as Collapsible blocks (accordion).
-    Sub-agents render as nested Collapsible with child tool blocks.
-    Text streams live into a StreamingText widget.
-
-    Config:
-        output:
-          type: tui
-          session_key: my_agent
-    """
+    """Render streamed output, activities, history, and interactive events in Textual."""
 
     def __init__(self, session_key: str | None = None, **options: Any):
         super().__init__()
         self._session_key = session_key
-        self._tui = None  # TUISession, set in _on_start
+        self._tui = None
         self._turn_started = False
-        self._default_target: str = ""  # Override target tab (for creature outputs)
+        self._default_target: str = ""
 
     @property
     def _target(self) -> str:
         return self._default_target
 
     async def _on_start(self) -> None:
-        # If a caller (engine_cli.run_engine_with_tui) already wired
-        # ``self._tui`` directly, keep that assignment — don't clobber
-        # it with a freshly-created TUISession. Without this guard the
-        # engine's pre-mount direct wiring was overwritten the first
-        # time ``output_router.start()`` ran, the user's screen sat on
-        # a TUI rendered against one session while the output stream
-        # went to a separate session (no AgentTUI, no visible response).
+        # Engine-managed sessions are wired before startup and must remain the
+        # same object used by the mounted application.
         if self._tui is not None:
             logger.debug(
                 "TUI output reusing externally-wired session",
@@ -102,7 +87,7 @@ class TUIOutput(BaseOutputModule):
     # -- User input ---------------------------------------------------------
 
     async def on_user_input(self, text: str) -> None:
-        # User message is already added by AgentTUI.on_input_submitted
+        # The input widget renders the message before dispatching it here.
         pass
 
     # -- Text streaming -----------------------------------------------------
@@ -141,17 +126,7 @@ class TUIOutput(BaseOutputModule):
         self._handle_activity(activity_type, detail, metadata)
 
     async def emit(self, event: OutputEvent) -> None:
-        """Native event consumer.
-
-        Each event type maps to the same widget call the legacy hooks
-        invoke, with byte-identical state changes.
-
-        Phase B kinds: ``ask_text``, ``confirm``, ``selection`` open
-        modal screens and submit replies to the agent's output_router
-        when the user activates a button. ``progress``,
-        ``notification``, ``card`` render as inline widgets in the
-        chat scroll.
-        """
+        """Render an output event or collect its interactive reply."""
         match event.type:
             case "text":
                 content = event.content
@@ -189,17 +164,12 @@ class TUIOutput(BaseOutputModule):
             case "card":
                 self._handle_card_event(event)
             case "ui_supersede":
-                # Future: dim a previously-mounted modal/inline widget
-                # for the given event_id. v1 leaves modals up since
-                # the user has already moved on.
+                # Superseded prompts remain mounted; the user may already be
+                # interacting with a modal whose safe replacement is undefined.
                 pass
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 self._handle_activity(event.type, detail, event.payload or {})
-
-    # ─────────────────────────────────────────────────────────────
-    # Phase B handlers
-    # ─────────────────────────────────────────────────────────────
 
     async def _handle_confirm_event(self, event: OutputEvent) -> None:
         if self._tui is None or self._tui._app is None:
@@ -208,8 +178,7 @@ class TUIOutput(BaseOutputModule):
         payload = event.payload or {}
 
         def _build_and_push() -> None:
-            # Built inside the Textual loop so the active_app
-            # ContextVar is set when the modal renders.
+            # Modal construction requires Textual's active_app context.
             modal = BusConfirmModal(
                 prompt=payload.get("prompt", ""),
                 detail=payload.get("detail", ""),
@@ -271,9 +240,7 @@ class TUIOutput(BaseOutputModule):
         result: dict | None,
         default_action: str,
     ) -> None:
-        """Common path: convert a modal's dismiss result to a UIReply
-        and submit via the bus.
-        """
+        """Convert a modal result to a reply and submit it to the router."""
         router = getattr(self, "_router", None)
         if router is None or not event.id:
             return
@@ -340,9 +307,7 @@ class TUIOutput(BaseOutputModule):
             logger.warning("card render failed", error=str(e), exc_info=True)
 
     def _make_card_action_callback(self):
-        """Return a callable that wraps card button presses into a
-        UIReply submission via the agent's output_router.
-        """
+        """Create a callback that submits card button replies."""
 
         def _on_action(event_id: str, action_id: str) -> None:
             router = getattr(self, "_router", None)
@@ -370,7 +335,7 @@ class TUIOutput(BaseOutputModule):
         name, rest = _parse_detail(name_detail)
         args = metadata.get("args", {})
         job_id = metadata.get("job_id", "")
-        t = self._target  # target tab for this output
+        t = self._target
 
         match activity_type:
             case "tool_start":
@@ -394,7 +359,6 @@ class TUIOutput(BaseOutputModule):
             case "compact_start" | "compact_complete" | "compact_skipped":
                 self._handle_compact_activity(activity_type, t, metadata)
             case "background_result":
-                # ``label`` is comma-joined for a combined delivery banner.
                 label = metadata.get("label") or metadata.get("job_id", "")
                 kind = metadata.get("kind", "tool")
                 self._tui.add_trigger_message(
@@ -405,7 +369,7 @@ class TUIOutput(BaseOutputModule):
             case "job_cancelled":
                 self._handle_job_cancelled(t, metadata)
             case "task_promoted":
-                # Task promoted to background — keep in running panel (now bg)
+                # Promotion preserves the existing running-panel entry.
                 pass
             case "context_cleared":
                 msgs_cleared = metadata.get("messages_cleared", 0)
@@ -419,12 +383,11 @@ class TUIOutput(BaseOutputModule):
                 error_msg = metadata.get("error", rest)
                 self._tui.add_error_block(error_type, error_msg, target=t)
             case "interrupt":
-                # End streaming only — sub-agents / bg jobs cancel
-                # themselves via their own lifecycle.
+                # Background jobs and sub-agents own their cancellation lifecycle.
                 self._tui.end_streaming(target=self._target)
                 self._turn_started = False
             case "processing_complete":
-                # Bg jobs may still run; they remove themselves on done.
+                # Background jobs remove their entries when they finish.
                 pass
             case "user_input_injected":
                 self._handle_user_input_injected(metadata, t)
@@ -486,7 +449,6 @@ class TUIOutput(BaseOutputModule):
         job_name = metadata.get("job_name", "")
         if job_id:
             self._tui.update_running(job_id, job_name, remove=True)
-        # Also mark any tool or sub-agent block as cancelled
         self._tui.update_tool_block(
             job_name,
             error="Background task was cancelled by user.",
@@ -550,7 +512,7 @@ class TUIOutput(BaseOutputModule):
             round_num = metadata.get("round", 0)
             self._tui.add_compact_summary(round_num, "(compacting...)", target=t)
             self._tui.update_running("compact", "compacting context")
-        else:  # compact_complete / compact_skipped — both terminal
+        else:
             round_num = metadata.get("round", 0)
             if activity_type == "compact_skipped":
                 summary = f"(skipped: {metadata.get('reason', 'skipped')})"
@@ -568,11 +530,7 @@ class TUIOutput(BaseOutputModule):
     # -- Resume history -----------------------------------------------------
 
     async def on_resume(self, events: list[dict]) -> None:
-        """Render session history as proper widgets.
-
-        Builds all widgets synchronously, then mounts them in one batch
-        to avoid race conditions with deferred _safe_call.
-        """
+        """Render session history in one race-free widget batch."""
         if not self._tui or not events:
             return
 
@@ -596,8 +554,7 @@ class TUIOutput(BaseOutputModule):
                 total_in, total_out, last_prompt, total_cached
             )
 
-        # Build and mount widgets on the Textual thread.
-        # Widgets MUST be created inside the app context (Textual requirement).
+        # Textual widgets must be constructed within the application context.
         if turns and self._tui._app and self._tui._app.is_running:
             app = self._tui._app
             done_event = asyncio.Event()
@@ -610,14 +567,13 @@ class TUIOutput(BaseOutputModule):
                     try:
                         ws = _build_resume_widgets(turns)
                         chat = app.query_one(f"#{scroll_id}", VerticalScroll)
-                        # Only mount the last N widgets; store older for "Load older"
+                        # Bound initial mount cost while retaining older widgets for
+                        # explicit history loading.
                         if len(ws) > CULL_KEEP:
                             older = ws[: len(ws) - CULL_KEEP]
                             mount_ws = ws[-CULL_KEEP:]
-                            # Store older widgets on TUISession for loading later
                             t = self._default_target or "_default"
                             self._tui.store_older_widgets(t, older)
-                            # Add "Load older" button
                             btn = LoadOlderButton(len(older))
                             mount_ws = [btn] + mount_ws
                             ws = mount_ws
@@ -631,7 +587,7 @@ class TUIOutput(BaseOutputModule):
                 asyncio.ensure_future(_inner())
 
             app.call_later(_do_build_and_mount)
-            # Wait for mount to complete before returning
+            # Resume must not race subsequent output against an incomplete mount.
             await asyncio.wait_for(done_event.wait(), timeout=10.0)
 
 
@@ -687,8 +643,7 @@ def _format_args_preview(tool_name: str, args: dict) -> str:
 
 
 def _group_into_turns(events: list[dict]) -> list[dict]:
-    """Group events into turns. Each turn has an ordered list of steps
-    that preserves the interleaving of text and tool calls."""
+    """Group events into turns while preserving step order."""
     events = dedupe_adjacent_duplicate_events(events)
     live_ids = select_live_event_ids(events)
     turns: list[dict] = []
@@ -705,7 +660,7 @@ def _group_into_turns(events: list[dict]) -> list[dict]:
             current = {
                 "input_type": "user_input",
                 "input": evt.get("content", ""),
-                "steps": [],  # ordered list of (type, data) preserving interleaving
+                "steps": [],
             }
         elif etype == "trigger_fired":
             if current:
@@ -720,15 +675,13 @@ def _group_into_turns(events: list[dict]) -> list[dict]:
                 "steps": [],
             }
         elif etype in ("compact_start", "compact_complete", "compact_skipped"):
-            # Compact events may fire between turns (background task)
+            # Background compaction belongs to the nearest active or prior turn.
             target = current if current else (turns[-1] if turns else None)
             if target:
                 target["steps"].append((etype, evt))
         elif current is not None:
             if etype in ("text", "text_chunk"):
-                # Merge consecutive text into one step. ``text_chunk``
-                # events are Wave C's per-chunk streaming format; replay
-                # treats them identically to legacy ``text`` events.
+                # Replay treats streamed chunks and complete text identically.
                 if current["steps"] and current["steps"][-1][0] == "text":
                     current["steps"][-1] = (
                         "text",
@@ -754,18 +707,18 @@ def _group_into_turns(events: list[dict]) -> list[dict]:
 
 
 def _iter_all_steps(turns: list[dict]):
-    """Iterate all (step_type, data) across all turns."""
+    """Yield each step across all turns."""
     for turn in turns:
         for step in turn.get("steps", []):
             yield step
 
 
 def _build_resume_widgets(turns: list[dict]) -> list:
-    """Build all resume widgets synchronously (no mounting, no deferral)."""
+    """Build resume widgets synchronously without mounting them."""
     widgets: list = []
     current_subagent: SubAgentBlock | None = None
     pending_tools: dict[str, str] = {}
-    sa_pending_tools: dict[str, str] = {}  # sub-agent internal tools still "running"
+    sa_pending_tools: dict[str, str] = {}
 
     for turn in turns:
         turn_ws, current_subagent, sa_pending_tools = _build_turn_widgets(
@@ -773,12 +726,10 @@ def _build_resume_widgets(turns: list[dict]) -> list:
         )
         widgets.extend(turn_ws)
 
-    # Mark interrupted sub-agents
     if current_subagent:
         current_subagent.mark_interrupted()
 
-    # Mark any remaining "running" tools as done (session ended, they can't
-    # still be running; their completion events were likely lost or missing)
+    # A restored session cannot retain live tool executions.
     for w in widgets:
         if isinstance(w, ToolBlock) and w.state == "running":
             w.mark_done("")
@@ -789,16 +740,12 @@ def _build_resume_widgets(turns: list[dict]) -> list:
 def _find_matching_block(
     widgets: list, tool_name: str, call_id: str
 ) -> "ToolBlock | None":
-    """Find a ToolBlock matching the given call_id or tool name.
-
-    Searches in reverse order. Tries call_id first, then falls back
-    to matching by name among still-running tools.
-    """
+    """Find the newest matching tool block, preferring its call ID."""
     if call_id:
         for w in reversed(widgets):
             if isinstance(w, ToolBlock) and w.tool_id == call_id:
                 return w
-    # Fallback: match by name among still-running tools
+    # Older histories may lack call IDs, so fall back to the newest running name.
     for w in reversed(widgets):
         if (
             isinstance(w, ToolBlock)
@@ -815,11 +762,7 @@ def _build_turn_widgets(
     pending_tools: dict[str, str],
     sa_pending_tools: dict[str, str],
 ) -> tuple[list, SubAgentBlock | None, dict[str, str]]:
-    """Build widgets for a single turn.
-
-    Returns (widgets, current_subagent, sa_pending_tools) so the caller
-    can carry sub-agent state across turns.
-    """
+    """Build one turn's widgets and return its carried sub-agent state."""
     widgets: list = []
 
     # User/trigger message
@@ -832,7 +775,7 @@ def _build_turn_widgets(
         if step_type == "text":
             text = data if isinstance(data, str) else str(data)
             if text.strip():
-                # Use Textual Markdown widget (selectable text)
+                # Markdown preserves selectable rendered history instead of a stream widget.
                 widgets.append(Markdown(text))
 
         elif step_type == "tool_call":
@@ -904,8 +847,7 @@ def _build_turn_widgets(
             detail = data.get("detail", "")
             if current_subagent:
                 if activity == "tool_start":
-                    # Build the line with its final state directly
-                    # (don't add then update, since we're pre-mount)
+                    # Pre-mount widgets receive their current state directly.
                     sa_pending_tools[tool_name] = detail[:50]
                     current_subagent.add_tool_line(tool_name, detail[:50])
                 elif activity == "tool_done":
@@ -929,10 +871,9 @@ def _build_turn_widgets(
 
 
 def _clean_name(raw: str) -> str:
-    """Strip '[job_id' suffix from stored names. 'info[6f887a' -> 'info'."""
+    """Remove stored job ID and sub-agent prefixes from a name."""
     if "[" in raw:
         return raw[: raw.index("[")]
-    # Also strip 'agent_' prefix from sub-agent names: 'agent_explore[...' -> 'explore'
     if raw.startswith("agent_"):
         return raw[6:]
     return raw
@@ -945,7 +886,7 @@ def _render_turn_to_tui(tui, turn: dict) -> None:
     else:
         tui.add_trigger_message(turn["input"], turn.get("trigger_content", ""))
 
-    pending_tools: dict[str, str] = {}  # call_id -> clean_name
+    pending_tools: dict[str, str] = {}
 
     for step_type, data in turn["steps"]:
         if step_type == "text":

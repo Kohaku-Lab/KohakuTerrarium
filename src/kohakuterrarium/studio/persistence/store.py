@@ -1,14 +1,9 @@
 """Per-session filesystem + history helpers for the persistence layer.
 
-The HTTP route files in ``api/routes/persistence/`` provide the
-FastAPI surface; all filesystem + per-store helpers live here so
-CLI and HTTP share one implementation.
-
-Listing, search, and aggregation no longer live here — they are
-served by the session-index sidecar
-(``studio/persistence/session_index/``).  This module owns only the
-per-session operations: resolve / list-files / delete / history /
-disk-usage.
+Filesystem and per-store operations live here so HTTP and programmatic
+surfaces share one implementation. Listing, search, and aggregation belong to
+the session-index sidecar; this module handles resolution, file enumeration,
+deletion, history, and disk usage for individual sessions.
 """
 
 import gc
@@ -40,37 +35,24 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Default session directory. The HTTP route layer monkey-patches this
-# in tests via ``studio.persistence.store._SESSION_DIR``; the helpers
-# below also accept an explicit ``session_dir`` argument so callers
-# that need full isolation (CLI tooling) can opt out of the singleton.
+# Explicit session directories avoid this process-wide default when callers
+# require namespace isolation. Tests also replace the default directly.
 _SESSION_DIR = Path.home() / ".kohakuterrarium" / "sessions"
 
 
 def _session_dir() -> Path:
-    """Return the live session directory.
+    """Return the session directory shared by persistence and lifecycle APIs.
 
-    Honours the ``KT_SESSION_DIR`` environment variable — the same
-    documented override that ``studio.sessions.lifecycle._session_dir``
-    and ``api.deps._session_dir`` already use to decide *where sessions
-    are written*. Without this, the persistence namespace (resume /
-    saved-list / history / viewer) looked in a different directory than
-    the sessions namespace saved to, so a non-default ``KT_SESSION_DIR``
-    made every saved session invisible to resume.
-
-    Falls back to the module-global ``_SESSION_DIR`` (which the route
-    layer still monkey-patches directly in some tests) when the env var
-    is unset. Read fresh each call so both override mechanisms work.
+    ``KT_SESSION_DIR`` has highest precedence. A replaced module default is
+    honored next; otherwise the configured application directory is used.
+    Values are read on every call so environment and test overrides remain
+    live.
     """
     env = os.environ.get("KT_SESSION_DIR")
     if env:
         return Path(env)
-    # Legacy seam: tests still monkey-patch ``_SESSION_DIR`` directly.
-    # If the live value differs from the documented hard-coded default,
-    # respect the override.  Otherwise fall through to
-    # ``config_dir() / "sessions"`` so a test setting only
-    # ``KT_CONFIG_DIR`` (the conftest autouse fixture) doesn't leak
-    # into the operator's real ``~/.kohakuterrarium/sessions``.
+    # A replaced module default takes precedence; otherwise deriving from
+    # ``config_dir`` keeps configuration-directory overrides isolated.
     _docs_default = Path.home() / ".kohakuterrarium" / "sessions"
     if _SESSION_DIR != _docs_default:
         return _SESSION_DIR
@@ -78,23 +60,15 @@ def _session_dir() -> Path:
 
 
 def all_session_files_default() -> list[Path]:
-    """Every session file under the default ``_SESSION_DIR`` (Wave-D-aware)."""
+    """Return every supported session file under the default directory."""
     return all_session_files(_session_dir())
 
 
 def disk_usage() -> dict[str, Any]:
-    """Aggregate disk usage of the saved-session directory.
+    """Return canonical session count, timestamps, and on-disk byte usage.
 
-    Stats every session file + its ``-wal`` / ``-shm`` sidecars. Pure
-    filesystem; no DB open. Returns:
-
-        {
-            "count": int,            # canonical session entries
-            "total_bytes": int,      # incl. sidecars
-            "oldest_at": float|None, # min mtime across canonical files
-            "newest_at": float|None, # max mtime
-            "session_dir": str,
-        }
+    Byte totals include SQLite ``-wal`` and ``-shm`` sidecars without opening
+    any session database. Timestamps come from canonical session files only.
     """
     session_dir = _session_dir()
     if not session_dir.exists():
@@ -120,8 +94,7 @@ def disk_usage() -> dict[str, Any]:
             oldest = st.st_mtime
         if newest is None or st.st_mtime > newest:
             newest = st.st_mtime
-        # Add sidecars so the surfaced number matches what the user
-        # sees on disk.
+        # Sidecars are part of the session's observable disk footprint.
         for suffix in ("-wal", "-shm"):
             sidecar = str(path) + suffix
             if not os.path.exists(sidecar):
@@ -161,10 +134,10 @@ def all_versions_for_session_default(session_name: str) -> list[Path]:
 
 
 def session_targets(store: SessionStore, meta: dict[str, Any]) -> list[str]:
-    """Return the ordered list of read-only history targets in a session.
+    """Return ordered history targets from metadata or storage discovery.
 
-    Includes every agent listed in meta + every channel + any extra
-    targets discovered from the events / conversation tables.
+    Metadata-listed agents and channels are authoritative when present.
+    Sessions without those records fall back to event and conversation keys.
     """
     targets: list[str] = []
     seen: set[str] = set()
@@ -207,14 +180,11 @@ def session_history_payload(
     *,
     live_job_ids: set[str] | None = None,
 ) -> dict[str, Any]:
-    """Read-only history slice for a given agent/root/channel target.
+    """Return history for an agent, root, or channel target.
 
-    ``live_job_ids`` — currently-in-flight job ids on the LIVE agent(s)
-    backing this session. The live history route passes them so an
-    in-flight background tool / sub-agent isn't synthesised as
-    ``interrupted``; the saved-session path leaves it ``None`` (at read
-    time every unfinished job is genuinely dead, so the synthetic
-    terminal is correct).
+    ``live_job_ids`` identifies work still running in a live session so it is
+    not synthesized as interrupted. Saved-session callers omit it because any
+    unfinished persisted job is no longer active.
     """
     if target.startswith("ch:"):
         channel = target[3:]
@@ -247,22 +217,12 @@ def session_history_payload(
 
 
 def _unlink_with_retry(path: Path, attempts: int = 5, base_delay: float = 0.05) -> None:
-    """Best-effort ``unlink`` with exponential backoff.
+    """Unlink a file, retrying transient Windows handle contention.
 
-    The motivating bug (#59): on Windows the user views a session in
-    the viewer, the viewer route closes its ``SessionStore`` (which
-    ``del``s the native ``_inner`` handles), but the OS-level file
-    lock on ``.kohakutr`` / ``-wal`` / ``-shm`` can linger for a few
-    milliseconds while Python's refcount-driven destructor finishes
-    inside the worker thread.  A delete fired immediately after the
-    view close then races and raises ``PermissionError`` (WinError
-    32, "the process cannot access the file because it is being
-    used by another process").
-
-    Five attempts with 50 / 100 / 200 / 400 / 800 ms gaps cover that
-    window cheaply (worst-case ~1.5 s before re-raise — still a
-    snappy interaction).  POSIX never hits this branch because
-    ``unlink`` succeeds on first try regardless of open handles.
+    Native store handles can outlive ``SessionStore.close`` briefly while
+    refcount-driven cleanup finishes. Exponential backoff gives those handles
+    time to close; persistent permission failures are re-raised after the
+    bounded retry window. POSIX normally succeeds on the first attempt.
     """
     last_exc: OSError | None = None
     for i in range(attempts):
@@ -270,12 +230,11 @@ def _unlink_with_retry(path: Path, attempts: int = 5, base_delay: float = 0.05) 
             path.unlink()
             return
         except FileNotFoundError:
-            return  # already gone — idempotent.
+            return
         except PermissionError as e:
             last_exc = e
-            # Nudge CPython to release any straggling C-side handles
-            # before the next try (KohakuVault's native ``_KVault``
-            # holds the SQLite connection via refcount).
+            # Collection can release refcount-owned native SQLite handles
+            # before the next attempt.
             gc.collect()
             time.sleep(base_delay * (2**i))
     assert last_exc is not None
@@ -293,10 +252,10 @@ def _sidecars_for(path: Path) -> list[Path]:
 
 
 def _drive_sidecars_for(path: Path) -> list[Path]:
-    """Existing, deletable Drive sidecars paired with a session database.
+    """Return deletable Drive sidecars paired with a session database.
 
-    The persistent ``.drives.migrate-lock`` is deliberately excluded; deleting
-    it can let two processes lock different inodes.
+    The persistent ``.drives.migrate-lock`` is excluded because replacing its
+    inode would allow processes to hold mutually ineffective locks.
     """
     return [
         candidate
@@ -306,17 +265,11 @@ def _drive_sidecars_for(path: Path) -> list[Path]:
 
 
 def delete_session_files(session_name: str) -> list[Path]:
-    """Delete every on-disk file belonging to ``session_name``.
+    """Delete a session file family and return the removed paths.
 
-    Returns the list of deleted paths. Returns an empty list when no
-    matching file exists; the caller maps that to a 404. Falls back to
-    fuzzy lookup if the user passes a legacy raw stem.
-
-    Also drops the deleted entries from the session-index sidecar
-    so the next ``list``/``stats`` call doesn't surface them.  Both
-    callers (the FastAPI route and ``Studio.persistence.delete``)
-    flow through here; without this purge the Studio surface returns
-    deleted sessions until the next ``reconcile()``.
+    Legacy raw stems use fuzzy resolution. An empty result means no matching
+    session exists. Index entries are purged immediately so list and stats
+    views do not retain deleted sessions until reconciliation.
     """
     targets = all_versions_for_session_default(session_name)
     if not targets:
@@ -329,11 +282,9 @@ def delete_session_files(session_name: str) -> list[Path]:
     if not targets:
         return []
 
-    # Acquire every target's Drive migration lock before inspecting any sidecar
-    # or removing a parent. This closes the check/delete/rename race: a migrator
-    # cannot publish a newly built sidecar after deletion. Acquisition is bounded
-    # by the migration timeout and therefore fails before deleting anything when
-    # a live migration remains busy.
+    # Holding every writer and Drive migration lock before inspection makes
+    # deletion atomic with sidecar publication. Bounded acquisition fails before
+    # any removal when an active migration remains busy.
     with ExitStack() as guards:
         for path in sorted(targets, key=str):
             lock = acquire_writer_lock(str(path))
@@ -353,13 +304,10 @@ def delete_session_files(session_name: str) -> list[Path]:
 
 
 def _purge_index_entries(deleted_paths: list[Path]) -> None:
-    """Drop the just-deleted filenames from the session-index sidecar.
+    """Best-effort removal of deleted filenames from the session index.
 
-    Best-effort: an exception here doesn't block the delete from
-    succeeding — the next ``reconcile`` would catch the orphans
-    anyway.  The previously-route-side eager purge moved here so
-    every caller path (FastAPI, ``Studio.persistence.delete``) goes
-    through the same flow.
+    Index failure cannot undo file deletion; reconciliation later removes any
+    stale entries left behind.
     """
     try:
         session_dir = _session_dir()

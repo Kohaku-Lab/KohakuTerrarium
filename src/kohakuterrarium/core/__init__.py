@@ -43,43 +43,33 @@ from kohakuterrarium.core.loader import (
 from kohakuterrarium.core.registry import Registry
 
 __all__ = [
-    # Agent
     "Agent",
     "run_agent",
-    # Environment
     "Environment",
-    # Config
     "AgentConfig",
     "InputConfig",
     "OutputConfig",
     "ToolConfigItem",
     "TriggerConfig",
     "load_agent_config",
-    # Events
     "TriggerEvent",
     "EventType",
     "create_user_input_event",
     "create_tool_complete_event",
     "create_error_event",
-    # Conversation
     "Conversation",
     "ConversationConfig",
-    # Controller
     "Controller",
     "ControllerConfig",
     "ControllerContext",
-    # Executor
     "Executor",
-    # Jobs
     "JobStatus",
     "JobResult",
     "JobState",
     "JobType",
     "JobStore",
     "generate_job_id",
-    # Registry
     "Registry",
-    # Loader
     "ModuleLoader",
     "ModuleLoadError",
     "load_custom_module",
@@ -87,13 +77,12 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy export for ``Agent`` / ``run_agent`` to avoid an import cycle.
+    """Resolve the lazily exported ``Agent`` and ``run_agent`` attributes.
 
     ``builtins.inputs.cli`` imports ``core.events`` via ``core.__init__``;
     eagerly importing ``core.agent`` here would pull in ``bootstrap.io`` which
-    imports ``builtins.inputs`` while it is still initialising. This module-level
-    ``__getattr__`` is a language feature (not an in-function import), so it does
-    not violate the "no function-local imports" rule the dep-graph audit enforces.
+    imports ``builtins.inputs`` while it is still initialising. Module-level
+    ``__getattr__`` is the deliberate exception to the local-import audit.
     """
     if name in ("Agent", "run_agent"):
         from kohakuterrarium.core.agent import Agent, run_agent

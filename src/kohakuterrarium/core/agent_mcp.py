@@ -1,8 +1,4 @@
-"""MCP initialization and prompt wiring helpers for Agent.
-
-Extracted from ``core/agent.py`` to keep the main Agent module under the
-file-size cap while keeping MCP-specific startup logic in one place.
-"""
+"""Initialize MCP connections and expose their tools to agents."""
 
 from typing import Any
 
@@ -15,12 +11,10 @@ _DEFAULT_MCP_CONNECT_TIMEOUT = 20
 
 
 async def init_mcp(agent: Any) -> None:
-    """Initialize MCP client manager and connect configured servers.
+    """Initialize the MCP manager and connect configured servers.
 
-    The manager is ALWAYS constructed (E7) — the ``mcp_connect``
-    runtime tool must work on a configless agent; the old
-    ``mcp_servers``-gated init left ``_mcp_manager = None`` so that
-    tool could never succeed.
+    The manager exists even without configured servers so the ``mcp_connect``
+    runtime tool can establish connections later.
     """
     agent._mcp_manager = MCPClientManager()
     mcp_configs = agent.config.mcp_servers

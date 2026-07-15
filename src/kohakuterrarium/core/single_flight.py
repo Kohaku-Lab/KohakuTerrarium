@@ -1,8 +1,7 @@
-"""Single-flight dispatch helpers for background jobs.
+"""Thread-safe non-queued gating for fire-and-forget jobs.
 
-A single-flight dispatcher guarantees that only one job of a given kind can be
-started at once. Later attempts are ignored immediately: they are not queued,
-coalesced, or retried automatically.
+Concurrent acquisition attempts fail immediately rather than queueing, coalescing,
+or retrying the work.
 """
 
 from dataclasses import dataclass
@@ -11,13 +10,13 @@ from threading import Lock
 
 @dataclass(frozen=True)
 class SingleFlightLease:
-    """Opaque lease identifying the currently-running single-flight job."""
+    """Identify the acquisition authorized to release the active job."""
 
     token: int
 
 
 class SingleFlightDispatch:
-    """Small thread-safe gate for fire-and-forget single-flight jobs."""
+    """Allow at most one fire-and-forget job through at a time."""
 
     def __init__(self) -> None:
         self._lock = Lock()

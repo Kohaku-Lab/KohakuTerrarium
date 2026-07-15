@@ -1,16 +1,9 @@
-"""The privileged ``group_drive`` administration tool (design §9.3).
+"""Expose graph-scoped Drive administration to privileged creatures.
 
-Injected ONLY onto privileged creatures of a Drive-enabled Terrarium (see
-:mod:`drive.injection`). It is the graph-scoped counterpart to the five
-self-service tools: a privileged creature uses it to create graph-owned Drives
-and to inspect / assign / reassign / unassign / transfer / wake / retire / replay
-Drives **within its own graph**.
-
-Like every ``group_*`` tool it resolves the caller from the trusted
-:class:`GroupContext` (never from arguments) and requires a privileged caller.
-Tool presence is not authorization (rule §4.15): the ``DriveManager`` re-checks
-graph-privilege ACL on every call, so even a mis-registered non-privileged caller
-who reached the manager would be denied.
+Privileged creatures use this graph-scoped counterpart to the self-service tools
+to create and administer Drives within their own graph. Caller identity and
+privilege come from trusted group context, while the Drive manager rechecks ACL
+for every operation.
 """
 
 from typing import Any
@@ -52,7 +45,7 @@ _ACTIONS = frozenset(
 
 
 class _GroupDriveCall:
-    """Resolved, trusted context for one ``group_drive`` call."""
+    """Hold trusted graph context for one privileged Drive tool invocation."""
 
     __slots__ = ("manager", "runtime", "gctx", "caller", "actor", "graph_id")
 
@@ -66,8 +59,7 @@ class _GroupDriveCall:
 
 
 def _resolve_call(ctx: ToolContext | None) -> _GroupDriveCall:
-    """Resolve the privileged caller + engine + DriveManager, or raise
-    :class:`GroupToolError` with a model-shaped message."""
+    """Resolve the privileged caller and its graph-scoped Drive manager."""
     gctx = resolve_group_context(ctx, require_privileged=True)
     runtime = ctx.environment.get(DRIVE_SERVICE_KEY) if ctx.environment else None
     if runtime is None:
@@ -91,8 +83,8 @@ async def _summary(call: _GroupDriveCall, record: DriveRecord) -> dict[str, Any]
         "scope_id": record.scope_id,
         "owner": record.owner.format(),
         "priority": record.priority,
-        # Per-record durability for THIS record's graph, not the mixed-engine
-        # aggregate (R1-41): group_drive only administers its own graph's rows.
+        # Durability must describe the caller's graph rather than a mixed engine
+        # aggregate.
         "durability": call.runtime.durability_for(call.graph_id),
         "availability": availability.value,
         "assignee": (
@@ -179,10 +171,8 @@ class GroupDriveTool(BaseTool):
                 return await self._wake(call, args)
             case "retire":
                 return await self._retire(call, args)
-            case _:  # replay
+            case _:
                 return await self._replay(call, args)
-
-    # -- actions -------------------------------------------------------------
 
     async def _create(self, call: _GroupDriveCall, args: dict[str, Any]) -> ToolResult:
         title = (args.get("title") or "").strip()
@@ -228,11 +218,7 @@ class GroupDriveTool(BaseTool):
     async def _require_in_graph(
         self, call: _GroupDriveCall, drive_id: str
     ) -> ToolResult | None:
-        """group_drive only administers Drives in the caller's own graph (§9.3).
-
-        The repository tracks each Drive's graph, so a graph-scoped list is the
-        authoritative membership check — a foreign-graph ``drive_id`` is denied
-        even though the caller is privileged."""
+        """Require a Drive to belong to the privileged caller's graph."""
         records = await call.manager.list_drives(DriveQuery(graph_id=call.graph_id))
         if not any(r.drive_id == drive_id for r in records):
             return _err(f"drive {drive_id!r} is not in your graph")
@@ -356,7 +342,7 @@ class GroupDriveTool(BaseTool):
 
 
 def build_group_drive_tools() -> list[BaseTool]:
-    """Instantiate the privileged Drive tools (injection order)."""
+    """Create privileged Drive tools in prompt injection order."""
     return [GroupDriveTool()]
 
 

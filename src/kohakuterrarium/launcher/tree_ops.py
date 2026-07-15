@@ -1,30 +1,9 @@
-"""Per-version tree primitives — side-by-side installs + pointer file.
+"""Manage side-by-side release trees and the active-version pointer.
 
-Replaces the old ``venv_ops.py`` (which created venvs via stdlib
-``venv``, broken on briefcase shells that strip it). The new model:
-every installed version lives at ``runtime/versions/<X.Y.Z>/`` and the
-``runtime/active`` pointer file names the one to launch.
-
-The pointer file is a JSON dict::
-
-    {"version": "1.5.1", "build_id": "...", "installed_at": "..."}
-
-Atomic ops:
-
-- :func:`write_active_pointer` — tmp+rename, POSIX + Windows atomic.
-- :func:`promote_partial` — rename ``X.partial/`` to ``X/`` after smoke.
-- :func:`revert_active_pointer` — pick the previous version dir and
-  point at it (rollback).
-
-GC: :func:`gc_old_versions` keeps the active + previous + N most-recent
-on disk; the rest get ``shutil.rmtree``'d.
-
-Smoke test: :func:`smoke_test_tree` spawns the briefcase-shell python
-with PYTHONPATH pointing at ``<dir>/site-packages`` and asserts that
-``import kohakuterrarium`` succeeds. The launcher runs this BEFORE the
-pointer swap so a broken extract never becomes the live install. No
-shim files involved — there's nothing inside the version tree that
-needs to be invoked as an executable.
+Installed releases live under ``runtime/versions`` while an atomically replaced
+JSON pointer selects the release to launch. Partial directories are promoted
+only after structural validation, and rollback and garbage collection operate
+without mutating release contents.
 """
 
 import datetime as _dt
@@ -45,14 +24,13 @@ from kohakuterrarium.launcher.paths import (
 
 
 class TreeOpError(RuntimeError):
-    """Anything tree-lifecycle related that should surface to UI."""
-
-
-# ── Pointer file ────────────────────────────────────────────────────
+    """Report a release-tree lifecycle failure suitable for user display."""
 
 
 @dataclass
 class ActivePointer:
+    """Identify an installed release selected by an active pointer."""
+
     version: str
     build_id: str
     installed_at: str
@@ -104,15 +82,12 @@ def clear_active_pointer() -> None:
         p.unlink()
 
 
-# ── Version directory lifecycle ─────────────────────────────────────
-
-
 def partial_dir_for(version: str) -> Path:
     return version_dir(f"{version}.partial")
 
 
 def promote_partial(version: str) -> Path:
-    """Rename ``<v>.partial/`` to ``<v>/``. Returns the final path."""
+    """Replace any existing release with its validated partial tree."""
     partial = partial_dir_for(version)
     final = version_dir(version)
     if not partial.is_dir():
@@ -127,14 +102,14 @@ def promote_partial(version: str) -> Path:
 
 
 def remove_partial(version: str) -> None:
-    """Idempotently remove a ``<v>.partial/`` dir."""
+    """Remove a version's partial directory if it exists."""
     p = partial_dir_for(version)
     if p.exists():
         shutil.rmtree(p, ignore_errors=True)
 
 
 def sweep_stale_partials() -> list[str]:
-    """Remove every ``*.partial/`` under ``versions/``. Returns the names."""
+    """Remove all partial release directories and return their names."""
     root = versions_dir()
     if not root.is_dir():
         return []
@@ -197,9 +172,6 @@ def _iso_from_mtime(p: Path) -> str:
     return ts.isoformat(timespec="seconds")
 
 
-# ── Smoke + swap + rollback ─────────────────────────────────────────
-
-
 _VERSION_RE = re.compile(
     r"""^__version__\s*=\s*['"]([^'"]+)['"]""",
     re.MULTILINE,
@@ -207,29 +179,14 @@ _VERSION_RE = re.compile(
 
 
 def smoke_test_tree(version_root: Path) -> str:
-    """Validate the freshly-extracted version tree by file inspection.
+    """Validate an extracted release structurally and return its version.
 
-    Returns the framework's ``__version__`` from
-    ``site-packages/kohakuterrarium/__init__.py``. Raises
-    :class:`TreeOpError` when site-packages or kohakuterrarium is
-    missing.
-
-    **Why file inspection instead of an import subprocess.** Briefcase
-    Windows shells ship a ``python313._pth`` with ``import site``
-    disabled, which means ``PYTHONPATH`` doesn't take effect — there's
-    no way to point a subprocess at the version tree's site-packages
-    from outside the process. And ``sys.executable`` on briefcase is
-    the stub exe (``KohakuTerrarium.exe``), which dispatches into the
-    framework's CLI parser rather than acting as a plain Python.
-    Both make subprocess-based smoke impossible on the briefcase
-    target. CI ensures ABI matching at build time; the runtime check
-    that genuinely matters here is "did the extract land structurally"
-    — present-on-disk verification covers that.
-
-    The version string the function returns is informational; the
-    launcher persists it into the active pointer's ``build_id`` slot
-    only when the manifest didn't carry one. Failing to parse it is
-    not a fatal error.
+    The release must contain site-packages and the framework package. Briefcase
+    cannot reliably launch an import subprocess because its isolated path file
+    ignores ``PYTHONPATH`` and its executable is an application stub, so this
+    check inspects package files directly. A missing version assignment returns
+    ``<no-version>``; missing or unreadable package structure raises
+    :class:`TreeOpError`.
     """
     site = site_packages_dir(version_root)
     if not site.is_dir():
@@ -248,9 +205,10 @@ def smoke_test_tree(version_root: Path) -> str:
 
 
 def gc_old_versions(*, keep: int, always_keep: set[str]) -> list[str]:
-    """Delete old version dirs, retaining ``always_keep`` + ``keep`` most recent.
+    """Delete old releases while retaining required and recent versions.
 
-    Returns the list of version names that were removed.
+    Return the names of directories removed. ``keep`` counts additional recent
+    releases beyond the versions in ``always_keep``.
     """
     log = get_logger()
     installed = list_installed_versions()
@@ -289,9 +247,6 @@ def revert_active_pointer() -> ActivePointer:
     return target
 
 
-# ── Standalone use by API / CLI ─────────────────────────────────────
-
-
 def active_install_path() -> Path | None:
     """Return ``versions/<active>/`` if the pointer resolves, else ``None``."""
     ptr = read_active_pointer()
@@ -302,7 +257,7 @@ def active_install_path() -> Path | None:
 
 
 def python_for_active() -> Path:
-    """Convenience — the python interpreter to spawn for smoke / probes."""
+    """Return the interpreter path used for active-release probes."""
     return python_for(versions_dir())
 
 

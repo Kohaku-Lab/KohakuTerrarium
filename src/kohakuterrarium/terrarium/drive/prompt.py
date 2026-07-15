@@ -1,14 +1,8 @@
-"""The Drive runtime prompt contributor (design §8.7, §9.3).
+"""Contribute bounded Drive guidance to creature system prompts.
 
-:class:`DriveRuntimePromptPlugin` is an ordinary :class:`BasePlugin` — not a
-lifecycle authority — that a Drive-enabled Terrarium injects into every creature.
-It contributes one bounded generic Drive contract plus the pre-normalized prose
-from the enabled registrations, in stable registration-name order, reading an
-immutable :class:`EnabledRegistrySnapshot` handle supplied by the Drive runtime.
-
-It never dumps current Drive records: those arrive through bounded ``drive_ready``
-event projections and the ``drive_status`` tool. A registry swap (reconfigure)
-replaces the handle via :meth:`set_snapshot` and refreshes live agents.
+The plugin combines a generic Drive contract with normalized prose from enabled
+registrations in stable name order. Current Drive records stay out of the system
+prompt and arrive through event projections or status tools instead.
 """
 
 from typing import Any
@@ -16,9 +10,8 @@ from typing import Any
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
 
-# Bounded, kind-agnostic Drive contract. Guidance the model needs whenever the
-# generic self-service Drive tools are injected — ownership, recovery, and the
-# propose-don't-assert / obey-budgets discipline (design §9.3). Kept short.
+# This contract stays kind-agnostic and bounded because registration-specific
+# guidance is appended separately.
 _GENERIC_CONTRACT = (
     "## Drive runtime\n"
     "A drive is a durable, assignable commitment the runtime delivers to you as "
@@ -41,12 +34,11 @@ _GENERIC_CONTRACT = (
 
 
 class DriveRuntimePromptPlugin(BasePlugin):
-    """Contributes the generic Drive contract + enabled-registration prose."""
+    """Add generic and registration-specific Drive guidance to the prompt."""
 
     name = "drive_runtime"
     description = "Bounded Drive runtime guidance from enabled registrations."
-    # After tool guidance, before framework hints — same slot as other runtime
-    # prompt contributors.
+    # Runtime guidance belongs after tool instructions and before framework hints.
     priority = 55
 
     def __init__(self, snapshot: EnabledRegistrySnapshot | None = None) -> None:
@@ -54,10 +46,7 @@ class DriveRuntimePromptPlugin(BasePlugin):
         self._snapshot = snapshot
 
     def set_snapshot(self, snapshot: EnabledRegistrySnapshot | None) -> None:
-        """Swap the enabled-registry snapshot after an applied reconfigure.
-
-        The caller refreshes live agents' system prompts afterwards; the new
-        prose is produced on the next :meth:`get_prompt_content`."""
+        """Replace the enabled-registration snapshot used for prompt content."""
         self._snapshot = snapshot
 
     def get_prompt_content(self, context: PluginContext) -> str | None:
@@ -69,8 +58,8 @@ class DriveRuntimePromptPlugin(BasePlugin):
         return "\n\n".join(parts)
 
     def runtime_services(self, context: Any) -> dict[str, Any]:
-        # The Drive service handle is exposed through the graph environment,
-        # not per-call plugin services; this stays empty by design.
+        # The graph environment owns the Drive service handle, so this plugin
+        # exposes no per-call runtime services.
         return {}
 
 

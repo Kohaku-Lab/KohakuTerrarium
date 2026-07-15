@@ -1,7 +1,7 @@
 """Actor authorization + registration-availability fail-closed gate.
 
-This is the enforcement point Phase D's DriveManager calls on every mutation
-(design §3.6 ACL, §8.6 availability, §8.8 pipeline). It composes two checks:
+The Drive manager calls this enforcement layer for every mutation. It composes
+two checks:
 
 1. **core ACL** — the owner/assignee/privileged capability model. The canonical
    capability enum, operation table, and default-capability derivation already
@@ -14,9 +14,8 @@ This is the enforcement point Phase D's DriveManager calls on every mutation
    registration is disabled/unavailable (§8.6): records stay administratively
    pausable / cancellable / retirable.
 
-Tool presence is never authorization (design §3.6, rule §4.15): a tool being
-injected exposes an operation; this module decides whether it may run. Leaf
-module — no Agent/engine/LLM imports.
+Tool presence only exposes an operation; authorization still depends on actor,
+record, assignment, and registration availability.
 """
 
 from kohakuterrarium.terrarium.drive.errors import (
@@ -46,15 +45,11 @@ from kohakuterrarium.terrarium.drive.snapshot import (
     derive_availability,
 )
 
-# The 11 core capabilities (design §3.6); re-exported so callers depend on one
-# authorization module rather than reaching into drive_policy.
+# Re-export capabilities so callers depend on one authorization surface.
 CORE_CAPABILITIES: frozenset[DriveCapability] = frozenset(DriveCapability)
 
-# The graph-authority capabilities an explicit, audited operator elevation
-# confers (design §3.6 "Studio/application operators may be granted all
-# capabilities"; §13 audited widening). These are exactly the cross-actor /
-# graph-scoped rights a plain owner lacks — they are passed as ``extra_grants``
-# from a TRUSTED service context and never inferred from a request payload.
+# Trusted operator elevation grants graph-wide capabilities that request payloads
+# can never self-assert.
 OPERATOR_GRANTS: frozenset[DriveCapability] = frozenset(
     {
         DriveCapability.CREATE_GRAPH,
@@ -65,8 +60,8 @@ OPERATOR_GRANTS: frozenset[DriveCapability] = frozenset(
     }
 )
 
-# Operations whose meaning is kind-specific: they fail closed when the record's
-# registration is disabled / unavailable / incompatible (design §8.6, §8.8).
+# Kind-semantic operations fail closed without an available compatible
+# registration.
 KIND_SEMANTIC_OPERATIONS: frozenset[DriveOperation] = frozenset(
     {
         DriveOperation.CREATE_SELF,
@@ -77,19 +72,17 @@ KIND_SEMANTIC_OPERATIONS: frozenset[DriveOperation] = frozenset(
     }
 )
 
-# Transition targets that suspend a Drive without re-enabling pursuit; allowed
-# without an available registration so records stay administratable (§8.6).
+# Suspension targets remain available for administration even when kind policy is
+# unavailable.
 ADMIN_TRANSITION_TARGETS: frozenset[DriveStatus] = frozenset(
     {DriveStatus.PAUSED, DriveStatus.BLOCKED, DriveStatus.CANCELLED}
 )
-# Transition targets that re-enable pursuit/scheduling and therefore require an
-# available registration.
+# Resuming pursuit requires available kind policy.
 SEMANTIC_TRANSITION_TARGETS: frozenset[DriveStatus] = frozenset(
     {DriveStatus.ACTIVE, DriveStatus.WAITING}
 )
 
-# Operations surfaced to UI/API as per-record actions (design §9.4). Creation is
-# not per-record, so it is omitted here.
+# Per-record action lists omit creation because it has no existing record.
 _DTO_OPERATIONS: tuple[DriveOperation, ...] = (
     DriveOperation.READ,
     DriveOperation.UPDATE,
@@ -105,11 +98,6 @@ _DTO_OPERATIONS: tuple[DriveOperation, ...] = (
     DriveOperation.REPLAY,
     DriveOperation.ADMIN,
 )
-
-
-# ---------------------------------------------------------------------------
-# Capability derivation
-# ---------------------------------------------------------------------------
 
 
 def capabilities_for(
@@ -167,11 +155,6 @@ def _caps_allow(
     return _OPERATION_CAPABILITY[operation] in caps
 
 
-# ---------------------------------------------------------------------------
-# Registration availability gate
-# ---------------------------------------------------------------------------
-
-
 def _operation_needs_registration(
     operation: DriveOperation, target_status: DriveStatus | None
 ) -> bool:
@@ -190,11 +173,6 @@ def _registration_error(availability: DriveAvailability, kind: str) -> DriveErro
     return DriveRegistrationDisabledError(
         f"no available registration serves kind {kind!r} ({availability.value})"
     )
-
-
-# ---------------------------------------------------------------------------
-# Authorization
-# ---------------------------------------------------------------------------
 
 
 def authorize(
@@ -255,7 +233,7 @@ def is_authorized(
     schema_version: int | None = None,
     extra_grants: frozenset[DriveCapability] = frozenset(),
 ) -> bool:
-    """Boolean form of :func:`authorize` for UI/planning (no raise)."""
+    """Return whether authorization succeeds without propagating its error."""
     try:
         authorize(
             operation,
@@ -314,8 +292,8 @@ def allowed_actions(
 
 def _dto_op_allowed(caps: frozenset[DriveCapability], op: DriveOperation) -> bool:
     if op == DriveOperation.TRANSITION:
-        # A transition control is offered if the actor can drive any transition:
-        # owner/privileged (full) or assignee (waiting/blocked only).
+        # Offer transition controls when the actor can perform at least one
+        # permitted transition.
         return bool(
             caps & {DriveCapability.TRANSITION, DriveCapability.MANAGE_ASSIGNED}
         )

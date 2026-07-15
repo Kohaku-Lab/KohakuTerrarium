@@ -1,18 +1,9 @@
 """CONTROL envelope payload helpers for the Laboratory layer.
 
-Control envelopes carry framework-internal messages that don't fit the
-L4 verb model — client capability changes, name binding updates, reject
-notifications, etc. Each control payload is a msgpack-encoded dict with
-a discriminator key (``"control"``).
+Build and parse framework-internal CONTROL envelopes.
 
-Standard control types defined here:
-
-- ``subscribe`` / ``unsubscribe`` — a client (un)registers as a
-  listener on a channel.
-- ``register_creature`` / ``unregister_creature`` — a client claims (or
-  releases) a creature ref so other nodes can address it.
-
-Reject control (``"control": "reject"``) is defined in
+Each payload is a msgpack map whose ``control`` key discriminates subscription
+and creature-registration operations. Handshake rejection controls live in
 :mod:`kohakuterrarium.laboratory._internal.protocol`.
 """
 
@@ -111,14 +102,9 @@ def build_unregister_creature(
 
 
 def parse_control(env: Envelope) -> tuple[str, dict[str, Any]]:
-    """Decode the control body of an envelope.
+    """Return a CONTROL envelope's discriminator and remaining fields.
 
-    Returns ``(control_type, fields)``. ``control_type`` is the value of
-    the ``"control"`` key (e.g. ``"subscribe"``); ``fields`` is the
-    remaining payload keys.
-
-    Raises :class:`ControlError` if the envelope is not CONTROL or the
-    body is malformed.
+    Raises :class:`ControlError` for a non-CONTROL envelope or malformed body.
     """
     if env.kind is not EnvelopeKind.CONTROL:
         raise ControlError(f"expected CONTROL envelope, got {env.kind.value}")

@@ -67,12 +67,10 @@ class RichCLIOutput(BaseOutputModule):
             logger.exception("on_processing_end failed", error=str(e))
 
     async def on_user_input(self, text: str) -> None:
-        # The CLI app already prints user input when it receives it from
-        # the composer; ignore here to avoid duplication.
+        # Composer submissions are already rendered by the app.
         pass
 
     def on_activity(self, activity_type: str, detail: str) -> None:
-        # Fallback path with no metadata
         self.on_activity_with_metadata(activity_type, detail, {})
 
     def on_activity_with_metadata(
@@ -89,19 +87,7 @@ class RichCLIOutput(BaseOutputModule):
             )
 
     async def emit(self, event: OutputEvent) -> None:
-        """Native event consumer.
-
-        Each event type maps to the same ``app.on_*`` widget callback
-        the legacy hooks would invoke, with byte-identical arguments.
-
-        Interactive events (``confirm`` / ``ask_text`` / ``selection``
-        and ``card`` events with non-link actions) route through the
-        :class:`BusInteractiveOverlay` which captures keyboard input
-        in the live region and submits a real :class:`UIReply` back
-        to the agent's output_router. Display-only events
-        (``progress``, ``notification``, link-only ``card``) render
-        as inline Rich panels in scrollback.
-        """
+        """Route output events to interactive overlays or scrollback panels."""
         match event.type:
             case "text":
                 content = event.content
@@ -112,7 +98,7 @@ class RichCLIOutput(BaseOutputModule):
             case "processing_end":
                 await self.on_processing_end()
             case "user_input":
-                # CLI app prints user input itself; preserve no-op.
+                # Composer submissions are already rendered by the app.
                 pass
             case "assistant_image":
                 payload = event.payload
@@ -132,10 +118,7 @@ class RichCLIOutput(BaseOutputModule):
             case "notification":
                 self._render_notification(event)
             case "card":
-                # Interactive cards (with non-link actions) route
-                # through the bus overlay so the user can pick an
-                # option. Display-only cards render as inline Rich
-                # panels in scrollback.
+                # Only non-link actions require keyboard input from the overlay.
                 actions = (event.payload or {}).get("actions") or []
                 has_replyable_action = any(a.get("style") != "link" for a in actions)
                 if has_replyable_action and event.interactive:
@@ -143,8 +126,7 @@ class RichCLIOutput(BaseOutputModule):
                 else:
                     self._render_card(event)
             case "ui_supersede":
-                # CLI is display-only; superseded panels stay in
-                # scrollback but don't get cleared. No-op for now.
+                # Committed scrollback cannot retract superseded panels.
                 pass
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
@@ -158,24 +140,13 @@ class RichCLIOutput(BaseOutputModule):
                         error=str(e),
                     )
 
-    # ─────────────────────────────────────────────────────────────
-    # Phase B renderers — display-only Rich Panels in v1.
-    # ─────────────────────────────────────────────────────────────
-
     def _open_bus_overlay(self, event: OutputEvent) -> None:
-        """Push an interactive event onto the CLI's bus overlay queue.
-
-        The overlay (``cli_rich/dialogs/bus_overlay.py``) takes over the
-        live region, captures keyboard input, and submits a UIReply to
-        the agent's output_router on apply. Multiple events stack via
-        the overlay's internal queue.
-        """
+        """Queue an interactive event for keyboard input in the live region."""
         if self.app is None:
             return
         overlay = getattr(self.app, "bus_overlay", None)
         if overlay is None:
-            # No overlay wired (older app variant) — fall back to the
-            # display-only panel path so the user still sees something.
+            # App variants without an overlay must still expose the event.
             handler = getattr(self.app, "on_ui_event_panel", None)
             if handler is not None:
                 try:
@@ -237,8 +208,7 @@ class RichCLIOutput(BaseOutputModule):
         name_from_label = self._extract_name(detail)
         args_preview = self._extract_args_preview(metadata)
 
-        # Sub-agent's nested tool activity (job_id is the SUB-AGENT's id,
-        # which is our parent block id; tool_name comes from metadata).
+        # Nested tool events identify their parent sub-agent block by job_id.
         if activity_type == "subagent_tool_start":
             tool_name = metadata.get("tool", "") or name_from_label
             child_args = metadata.get("detail", "") or ""
@@ -331,8 +301,7 @@ class RichCLIOutput(BaseOutputModule):
             return
 
         if activity_type == "token_usage":
-            # Pass cached_tokens through so the footer can show
-            # ``in↑ (cache N) out↓`` — matches TUI / web semantics.
+            # Cached input is reported separately from uncached prompt usage.
             prompt = metadata.get("prompt_tokens", 0)
             completion = metadata.get("completion_tokens", 0)
             max_ctx = metadata.get("max_context", 0)
@@ -371,10 +340,7 @@ class RichCLIOutput(BaseOutputModule):
             return
 
         if activity_type == "session_info":
-            # Prefer the canonical ``provider/name[@variations]``
-            # identifier (``llm_name``) over the raw API model id
-            # (``model``) so the footer matches what ``/model`` shows
-            # and what the picker emits.
+            # The canonical profile name keeps the footer consistent with /model.
             display_model = metadata.get("llm_name") or metadata.get("model", "")
             self.app.on_session_info(
                 model=display_model,
@@ -383,12 +349,7 @@ class RichCLIOutput(BaseOutputModule):
             return
 
         if activity_type == "user_input_injected":
-            # Mid-turn injection (Feat 3) — backend's drain just folded
-            # a buffered input into the running turn. Clear the matching
-            # queued indicator in the live region (added by
-            # ``RichCLIApp._handle_submit``) and commit the canonical
-            # user-message line to scrollback so the transcript shows
-            # the message at the moment it lands in the turn.
+            # Move injected input from the pending indicator into the transcript.
             text = self._extract_injected_text(metadata.get("content", ""))
             if text:
                 live_region = getattr(self.app, "live_region", None)
@@ -400,12 +361,9 @@ class RichCLIOutput(BaseOutputModule):
                     invalidate()
             return
 
-        # Other activity types: ignore silently in v1
-
     @staticmethod
     def _extract_injected_text(content: Any) -> str:
-        """Resolve text from a ``user_input_injected`` content field —
-        either a plain string or an OpenAI-shape list of content parts."""
+        """Extract injected text from a string or structured content parts."""
         if isinstance(content, str):
             return content
         if isinstance(content, list):
@@ -423,7 +381,6 @@ class RichCLIOutput(BaseOutputModule):
             try:
                 end = detail.index("] ", 1)
                 inner = detail[1:end]
-                # Strip the [short_id] suffix if present
                 if "[" in inner:
                     return inner[: inner.index("[")]
                 return inner

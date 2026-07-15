@@ -60,9 +60,6 @@ def _render_syntax(body: str, lexer: str) -> RenderableType:
         return Text(body)
 
 
-# ── Specific renderers ────────────────────────────────────────────────
-
-
 def render_diff(body: str, max_lines: int) -> RenderableType:
     """edit / multi_edit / patch: unified diff with gutter + highlight."""
     return render_unified_diff(body, max_lines=max_lines)
@@ -81,11 +78,8 @@ def render_python(body: str, max_lines: int) -> RenderableType:
 
 
 def render_read(body: str, max_lines: int) -> RenderableType:
-    """read: file content preview. First line commonly has a path hint
-    ("File: /abs/path") — we keep it verbatim and try python as a
-    reasonable default when no hint is present."""
+    """Render a truncated file-content preview."""
     trimmed, overflow = _truncate(body, max_lines)
-    # No filename available here — let the block header supply path info.
     return _append_truncation_notice(Text(trimmed), overflow)
 
 
@@ -98,7 +92,6 @@ def render_grep(body: str, max_lines: int) -> RenderableType:
     trimmed, overflow = _truncate(body, max_lines)
     t = Text()
     for ln in trimmed.splitlines():
-        # ``path:line:rest`` convention (rg / grep -n)
         first, sep, rest = ln.partition(":")
         second, sep2, tail = rest.partition(":")
         if sep and sep2 and second.isdigit():
@@ -130,22 +123,17 @@ def render_plain(body: str, max_lines: int) -> RenderableType:
     return _append_truncation_notice(Text(trimmed), overflow)
 
 
-# ── Registry ──────────────────────────────────────────────────────────
-
 _TOOL_RENDERERS: dict[str, ToolRenderer] = {
-    # file edit family → unified-diff view
     "edit": render_diff,
     "multi_edit": render_diff,
     "multiedit": render_diff,
     "patch": render_diff,
     "apply_patch": render_diff,
-    # shell / python
     "bash": render_bash,
     "shell": render_bash,
     "sh": render_bash,
     "python": render_python,
     "py": render_python,
-    # read / grep / glob / write
     "read": render_read,
     "view": render_read,
     "cat": render_read,
@@ -163,8 +151,7 @@ _TOOL_RENDERERS: dict[str, ToolRenderer] = {
 
 
 def _normalise(tool_name: str) -> str:
-    # Strip namespace prefixes ("my.tools.bash" → "bash"), bracket
-    # parameters ("bash[cwd=/tmp]" → "bash"), and normalise separators.
+    """Normalize namespaces, bracket suffixes, and separators."""
     base = tool_name.split("[")[0].split(".")[-1]
     return base.replace("-", "_").lower()
 

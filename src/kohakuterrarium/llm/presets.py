@@ -1,38 +1,10 @@
 """
-Built-in LLM presets and model aliases.
+Define built-in model presets, provider routing, variations, and aliases.
 
-A preset references a **provider by name** (codex, openai, openrouter,
-anthropic, gemini, mimo, kimi-code, glm-coding, …). The provider owns the
-backend_type, base_url, and api_key_env. Presets only carry model-facing
-metadata (model id, context window, reasoning effort, extra_body, variation
-groups).
-
-Variation groups let one preset expose multiple knobs (reasoning effort,
-fast mode, thinking level, …) without duplicating the entry. Selection is
-``preset_name@group=option,group2=option2``. Patches target one of:
-``temperature``, ``reasoning_effort``, ``service_tier``, ``max_context``,
-``max_output``, ``extra_body``. Variation values were researched against
-the relevant provider docs (effective 2026-07-09) — see the per-provider
-notes inline below.
-
-Naming convention (post-2026-04 refactor):
-    - The **direct / native-API** variant is the primary name
-      (``claude-opus-4.8``, ``gemini-3.1-pro``, ``mimo-v2.5-pro``).
-    - The **OpenRouter-routed** variant uses the ``-or`` suffix
-      (``claude-opus-4.8-or``).
-    - OpenAI is an exception: the primary ``gpt-5.5`` stays bound to
-      the **codex OAuth** provider (ChatGPT-subscription path — the
-      headline feature); the direct OpenAI API variant uses ``-api``,
-      and OpenRouter uses ``-or``.
-    - Legacy names (``claude-opus-4.6-direct``, ``or-gpt-5.4``, …) are
-      preserved via ``ALIASES`` at the bottom of this file.
-
-NOTE on ``max_context``: values are the *operating point we choose*, not
-always the vendor-advertised maximum. Notable deliberate caps:
-    - ``gpt-5.5``: 272K usable input (128K output) — the ~1M figure some
-      aggregators list is not the real input capacity.
-    - ``gpt-5.4``: advertises 1M but degrades hard at long context; we
-      cap it at the 400K sweet spot.
+Direct API variants use the primary name, OpenRouter variants use ``-or``,
+and direct OpenAI variants use ``-api`` because the primary GPT names route
+through Codex OAuth. ``max_context`` records the chosen operating limit, which
+may be lower than the vendor-advertised maximum for reliability.
 """
 
 from typing import Any
@@ -72,8 +44,6 @@ __all__ = [
 
 logger = get_logger(__name__)
 
-# ── Built-in Presets ──────────────────────────────────────────
-
 PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  OpenAI via Codex OAuth (ChatGPT subscription auth)
@@ -111,7 +81,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_output": 128000,
         "reasoning_effort": "xhigh",
         "variation_groups": {
-            # Luna has no ``ultra`` level (catalog-verified).
+            # Luna exposes max but not the CLI-only ultra mode.
             "reasoning": _GPT56_LUNA_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
         },
@@ -119,8 +89,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gpt-5.5": {
         "provider": "codex",
         "model": "gpt-5.5",
-        # Real usable input is 272K (output 128K); ignore the ~1M figure
-        # some aggregators list.
+        # Use the documented 272K input capacity rather than aggregator estimates.
         "max_context": 272000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
@@ -132,8 +101,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     "gpt-5.4": {
         "provider": "codex",
         "model": "gpt-5.4",
-        # Advertised 1M, but long-context quality falls off a cliff —
-        # deliberately capped at the 400K sweet spot.
+        # Cap below the advertised maximum to avoid long-context quality degradation.
         "max_context": 400000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
@@ -148,7 +116,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 400000,
         "max_output": 128000,
         "reasoning_effort": "high",
-        # Fast mode is documented for gpt-5.5 / gpt-5.4 only.
+        # Mini does not expose the priority-backed fast-mode variation.
         "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
     },
     # ═══════════════════════════════════════════════════════
@@ -789,10 +757,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
 }
 
-# ── Nested view + package preset merging ─────────────────────
-#
-# ``_CANONICAL_NAMES`` and ``ALIASES`` live in :mod:`preset_aliases`
-# so this module stays under the file-size guard.
+# Aliases stay separate from the canonical provider/name view.
 _package_presets_merged: bool = False
 _all_presets_cache: dict[tuple[str, str], dict[str, Any]] | None = None
 
@@ -800,11 +765,7 @@ _all_presets_cache: dict[tuple[str, str], dict[str, Any]] | None = None
 def _canonical_entry(
     legacy_name: str, data: dict[str, Any]
 ) -> tuple[str, str, dict[str, Any]] | None:
-    """Return ``(provider, canonical_name, data_without_provider)`` or ``None``.
-
-    Entries missing a ``provider`` field can't be mapped into the
-    nested ``(provider, name)`` space and are dropped.
-    """
+    """Map a preset into the canonical provider/name key space."""
     provider = data.get("provider", "") or ""
     if not provider:
         return None
@@ -814,12 +775,7 @@ def _canonical_entry(
 
 
 def _merge_package_presets() -> dict[tuple[str, str], dict[str, Any]]:
-    """Scan installed packages for llm_presets.
-
-    Package presets do NOT override built-in presets; they only add
-    new entries under their declared ``provider``. Each package entry
-    must carry ``name`` + ``provider`` — without both, it is skipped.
-    """
+    """Load valid package presets without allowing them to override built-ins."""
     global _package_presets_merged
     if _package_presets_merged:
         return {}
@@ -869,11 +825,7 @@ def _merge_package_presets() -> dict[tuple[str, str], dict[str, Any]]:
 
 
 def get_all_presets() -> dict[tuple[str, str], dict[str, Any]]:
-    """Return every built-in + package preset keyed by ``(provider, name)``.
-
-    Cached after first call. Entry values do NOT include the
-    ``provider`` key — it is already the first element of the tuple.
-    """
+    """Return cached built-in and package presets keyed by provider and name."""
     global _all_presets_cache
     if _all_presets_cache is not None:
         return _all_presets_cache
@@ -897,9 +849,5 @@ def iter_all_presets() -> list[tuple[str, str, dict[str, Any]]]:
 
 
 def resolve_alias(name: str) -> tuple[str, str] | None:
-    """Resolve a short / legacy alias to its ``(provider, canonical_name)``.
-
-    Returns ``None`` if the name is not an alias. Callers should treat
-    non-alias inputs as already-canonical names.
-    """
+    """Resolve a legacy alias, returning ``None`` for canonical inputs."""
     return ALIASES.get(name)

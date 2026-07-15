@@ -9,7 +9,7 @@ from kohakuterrarium.modules.output.event import OutputEvent
 
 @dataclass
 class ActivityRecord:
-    """Record of an on_activity call."""
+    """Capture one legacy activity notification."""
 
     activity_type: str
     detail: str
@@ -17,7 +17,7 @@ class ActivityRecord:
 
 @dataclass
 class EventRecord:
-    """Record of an OutputEvent emit() call."""
+    """Capture one typed output event."""
 
     type: str
     content: str | Any = ""
@@ -25,22 +25,7 @@ class EventRecord:
 
 
 class OutputRecorder(BaseOutputModule):
-    """
-    Records all output for test assertions.
-
-    Captures writes, streaming chunks, activity notifications,
-    and processing lifecycle events separately.
-
-    Usage:
-        recorder = OutputRecorder()
-        await recorder.write("hello")
-        await recorder.write_stream("chunk1")
-        await recorder.write_stream("chunk2")
-
-        assert recorder.all_text == "chunk1chunk2hello"
-        assert recorder.writes == ["hello"]
-        assert recorder.streams == ["chunk1", "chunk2"]
-    """
+    """Capture text, activities, typed events, flushes, and lifecycle calls."""
 
     def __init__(self):
         super().__init__()
@@ -73,12 +58,7 @@ class OutputRecorder(BaseOutputModule):
         )
 
     async def emit(self, event: OutputEvent) -> None:
-        """Record the typed event AND forward to legacy hooks.
-
-        Tests that assert on ``recorder.activities`` / ``recorder.streams``
-        keep working because we still drive the legacy methods. Tests
-        that want to assert on typed events use ``recorder.events``.
-        """
+        """Record a typed event and forward it through legacy output hooks."""
         detail = event.content if isinstance(event.content, str) else ""
         self.events.append(
             EventRecord(type=event.type, content=detail, payload=dict(event.payload))
@@ -86,63 +66,59 @@ class OutputRecorder(BaseOutputModule):
         await super().emit(event)
 
     def reset(self) -> None:
-        """Reset all recorded state. Called between turns by OutputRouter."""
+        """Clear per-turn text and flush state while retaining history."""
         self.writes.clear()
         self.streams.clear()
-        # Note: activities and events NOT cleared on reset (accumulate across turns)
+        # Activities and typed events intentionally accumulate across turns.
         self._flushed = 0
 
     def clear_all(self) -> None:
-        """Clear everything including activities and events."""
+        """Clear per-turn state and accumulated history."""
         self.reset()
         self.activities.clear()
         self.events.clear()
         self.processing_starts = 0
         self.processing_ends = 0
 
-    # =========================================================================
-    # Assertion Helpers
-    # =========================================================================
-
     @property
     def all_text(self) -> str:
-        """All streamed + written text concatenated."""
+        """Return streamed text followed by completed writes."""
         return "".join(self.streams) + "".join(self.writes)
 
     @property
     def stream_text(self) -> str:
-        """All streamed chunks concatenated."""
+        """Concatenate all streamed chunks."""
         return "".join(self.streams)
 
     @property
     def has_output(self) -> bool:
-        """Whether any text was outputted."""
+        """Return whether any text was written or streamed."""
         return bool(self.writes or self.streams)
 
     def activity_types(self) -> list[str]:
-        """Get list of activity types in order."""
+        """Return activity types in recorded order."""
         return [a.activity_type for a in self.activities]
 
     def activities_of_type(self, activity_type: str) -> list[ActivityRecord]:
-        """Filter activities by type."""
+        """Return activities of the requested type."""
         return [a for a in self.activities if a.activity_type == activity_type]
 
     def assert_no_text(self, msg: str = "") -> None:
-        """Assert no text was written or streamed."""
+        """Assert that no text was written or streamed."""
         detail = f"Expected no output, got: {self.all_text[:100]}"
         if msg:
             detail += f" — {msg}"
         assert not self.has_output, detail
 
     def assert_text_contains(self, substring: str, msg: str = "") -> None:
-        """Assert output contains substring."""
+        """Assert that combined output contains a substring."""
         detail = f"Expected '{substring}' in output: {self.all_text[:200]}"
         if msg:
             detail += f" — {msg}"
         assert substring in self.all_text, detail
 
     def assert_activity_count(self, activity_type: str, expected: int) -> None:
-        """Assert specific activity type occurred N times."""
+        """Assert an activity type occurred the expected number of times."""
         actual = len(self.activities_of_type(activity_type))
         assert (
             actual == expected

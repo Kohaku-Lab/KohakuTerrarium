@@ -1,26 +1,8 @@
-"""Auth configuration — single ``[auth]`` section across env / file / TOML.
+"""Resolve authentication policy from environment, secret files, and TOML.
 
-The config is read fresh on each :func:`load_auth_config` call so tests
-that flip env vars between cases see the change without restarting the
-process.  Operators get three input shapes:
-
-1. **Env vars** — ``KT_AUTH_HOST_TOKEN``, ``KT_AUTH_ADMIN_TOKEN``,
-   ``KT_AUTH_MULTI_USER``, ``KT_AUTH_REGISTRATION``,
-   ``KT_AUTH_LOOPBACK_BYPASS``, ``KT_AUTH_SESSION_EXPIRE_HOURS``,
-   ``KT_AUTH_BCRYPT_ROUNDS``.
-2. **Secret files** — ``KT_AUTH_HOST_TOKEN_FILE`` / ``KT_AUTH_ADMIN_TOKEN_FILE``
-   point at a file whose first line is the secret.  Used by Docker
-   ``secrets:`` and systemd ``LoadCredential=`` so secrets never appear
-   in ``/proc/<pid>/environ``.
-3. **TOML** — the ``[auth]`` section of ``<config_dir>/config.toml``.
-
-Precedence: env var > ``*_FILE`` > TOML > default.  Each layer is
-applied in order; a higher-precedence layer overrides only the keys it
-sets.
-
-Empty-string tokens mean "off" — the gate skips entirely.  This keeps
-existing operators' deployments working bit-for-bit when they upgrade
-without setting any new config.
+Each load returns a fresh immutable snapshot. Field precedence is environment,
+secret file, TOML, then default; an explicitly empty token disables its gate and
+must not fall through to a lower-precedence secret.
 """
 
 import os
@@ -41,12 +23,7 @@ _VALID_REGISTRATION_MODES: frozenset[str] = frozenset(
 
 @dataclass(frozen=True)
 class AuthConfig:
-    """Frozen snapshot of the four-layer auth configuration.
-
-    Frozen so two calls in the same request observe identical values
-    even if env vars change mid-request — every entry point reads
-    fresh via :func:`load_auth_config` and passes the snapshot down.
-    """
+    """Immutable authentication policy shared throughout one request or app."""
 
     host_token: str = ""
     """L2 — bearer token gating every ``/api/*`` and ``/ws/*`` request.  Empty = off."""
@@ -55,41 +32,25 @@ class AuthConfig:
     """L3 — ``X-Admin-Token`` header gating config-mutation routes.  Empty = off."""
 
     multi_user: str = "off"
-    """L4 — ``off`` | ``optional`` | ``required``.
+    """User-isolation mode: ``off``, ``optional``, or ``required``.
 
-    - ``off``: anonymous one-shared-engine mode (current behaviour).
-    - ``optional``: anonymous reads allowed; authenticated callers get
-      per-user routing.
-    - ``required``: routes that hand out a per-user engine
-      (every ``Depends(get_service)`` consumer — chat, sessions,
-      runtime ops) require a user identity.  **Not** a blanket
-      "every ``/api/*`` needs a user": shared-resource reads
-      (catalogs, installed packages, LLM model lists, capabilities)
-      remain reachable to anyone past L2 because they're host-wide
-      configuration, not user data.  See the authentication guide
-      §"What 'required' gates" for the exact route catalogue.
-
-      If you need the stricter "every route needs login" posture,
-      front the host with a reverse proxy enforcing HTTP basic auth
-      on top — that's the conventional way to layer two access
-      policies for container deployments.
+    Required mode protects routes that resolve user-scoped engines and sessions;
+    host-wide catalog and configuration reads remain governed by the host-token
+    layer rather than user identity.
     """
 
     registration: str = "admin_only"
-    """``open`` | ``invite_only`` | ``admin_only``.
+    """Registration policy used only when user isolation is enabled.
 
-    Only meaningful when ``multi_user != "off"``.  ``open`` means
-    anyone can POST ``/auth/register``; ``invite_only`` requires a
-    valid invitation token; ``admin_only`` rejects self-registration
-    (operator runs ``kt admin users add`` instead).
+    Open registration accepts self-service sign-up, invite-only requires a valid
+    invitation, and admin-only disables the public registration path.
     """
 
     loopback_bypass: bool = True
-    """When true, requests from ``127.0.0.1`` / ``::1`` skip L2 only.
+    """Allow loopback requests to bypass only the host-token gate.
 
-    L3 and L4 are NOT bypassed — those gate semantics matter even on
-    loopback (an attacker running code in the same UID shouldn't be
-    able to silently change LLM configs).
+    Administrative and user-identity checks still apply on loopback because local
+    processes must not gain configuration or user-data privileges implicitly.
     """
 
     session_expire_hours: int = 168
@@ -114,11 +75,7 @@ class AuthConfig:
         return self.multi_user != "off"
 
     def as_capabilities_dict(self) -> dict[str, dict[str, object]]:
-        """Shape used by the ``/api/auth/capabilities`` response.
-
-        Carries NO secrets — only the enabled flag + mode metadata so
-        the frontend can decide what to prompt for.
-        """
+        """Return non-secret policy metadata for frontend authentication prompts."""
         return {
             "host_token": {
                 "enabled": self.host_token_enabled,
@@ -133,18 +90,14 @@ class AuthConfig:
         }
 
 
-# ---------------------------------------------------------------------------
-# Loading
-# ---------------------------------------------------------------------------
+# Configuration source readers and coercion rules.
 
 
 def _read_secret_file(path_str: str) -> str:
-    """Read the first line of a secret file; empty string on any error.
+    """Return the first non-empty secret line, or disable the gate on read error.
 
-    Trailing whitespace / newlines are stripped — common when secrets
-    are echoed into the file by deployment tooling.  Read errors log a
-    warning and return ``""`` (gate stays off) rather than raising —
-    boot must not fail on a missing-but-optional secret.
+    Deployment tooling commonly adds surrounding whitespace, which is stripped.
+    Optional secret-file failures are logged rather than preventing server startup.
     """
     if not path_str:
         return ""
@@ -157,7 +110,7 @@ def _read_secret_file(path_str: str) -> str:
             error=str(e),
         )
         return ""
-    # First line, stripped — multi-line files take the first non-empty line.
+    # Credential files may include blank framing lines; the first value is authoritative.
     for line in text.splitlines():
         stripped = line.strip()
         if stripped:
@@ -215,14 +168,10 @@ def _coerce_int(value: object, default: int) -> int:
 
 
 def _resolve_secret(*, env_var: str, env_file_var: str, toml_value: object) -> str:
-    """Resolve a secret with documented precedence.
+    """Resolve a secret while preserving explicit empty environment values.
 
-    Audit fix — the prior "or"-chained fallback let
-    ``KT_AUTH_HOST_TOKEN=""`` (explicit empty) silently fall through
-    to a TOML token, which surprises operators who set the env to
-    disable the gate.  Now: if ``env_var`` is **present** in the
-    environment, its value wins (even when empty).  Only an
-    *unset* env var falls through to the file / TOML chain.
+    Presence and truthiness are intentionally distinct: an empty environment value
+    disables the gate instead of reviving a file or TOML secret.
     """
     if env_var in os.environ:
         return os.environ[env_var].strip()
@@ -257,25 +206,12 @@ def _validate_registration(value: object, default: str) -> str:
 
 
 def load_auth_config() -> AuthConfig:
-    """Read env + secret files + TOML and freeze into an :class:`AuthConfig`.
-
-    Precedence per field (highest wins): env var > ``*_FILE`` > TOML >
-    dataclass default.  Logs a single line at INFO with the resolved
-    summary on each call — useful for boot diagnostics but not noisy
-    enough to spam request paths (the middleware caches via
-    ``app.state.auth_config`` in real serving).
-    """
+    """Load and validate an immutable authentication configuration snapshot."""
     toml_section = _read_toml_auth_section()
     defaults = AuthConfig()
 
-    # Tokens — explicit env override semantics:
-    #   1. ``KT_AUTH_*_TOKEN`` set (even to empty string) → use env value
-    #      verbatim.  The audit caught this case: an operator who sets
-    #      ``KT_AUTH_HOST_TOKEN=""`` expects the gate OFF, but the old
-    #      fall-through logic would silently revive the TOML value.
-    #   2. ``KT_AUTH_*_TOKEN_FILE`` set → read the file's first line.
-    #   3. TOML ``[auth] host_token`` → use it.
-    #   4. Default ("" = off).
+    # Token precedence is environment presence, secret file, TOML, then disabled.
+    # Empty environment values are authoritative because they intentionally turn gates off.
     host_token = _resolve_secret(
         env_var="KT_AUTH_HOST_TOKEN",
         env_file_var="KT_AUTH_HOST_TOKEN_FILE",
@@ -287,7 +223,7 @@ def load_auth_config() -> AuthConfig:
         toml_value=toml_section.get("admin_token", ""),
     )
 
-    # Modes — env wins, else TOML, else default.
+    # Enumerated modes use environment, TOML, then validated defaults.
     multi_user_raw = os.environ.get(
         "KT_AUTH_MULTI_USER", toml_section.get("multi_user", defaults.multi_user)
     )
@@ -299,7 +235,7 @@ def load_auth_config() -> AuthConfig:
     )
     registration = _validate_registration(registration_raw, defaults.registration)
 
-    # Bools / ints.
+    # Scalar policy values tolerate common environment and TOML representations.
     loopback_bypass = _coerce_bool(
         os.environ.get(
             "KT_AUTH_LOOPBACK_BYPASS",

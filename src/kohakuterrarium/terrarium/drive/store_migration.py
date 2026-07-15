@@ -1,13 +1,6 @@
-"""Drive sidecar schema, paths, and one-way legacy migration (design §7).
+"""Drive sidecar schema, paths, validation, and legacy migration.
 
-The durable Drive store lives in a sidecar file paired with a session
-(``<name>.kohakutr.drives``), not inside the ``.kohakutr`` (Phase-0 addendum:
-the same-file "tenth WAL connection" livelocked under resume). This leaf module
-holds the sidecar schema, the sidecar-path helpers, the schema-version parser,
-and the one-way legacy-same-file migration — everything the durable
-:class:`~kohakuterrarium.terrarium.drive.store.SqliteDriveRepository` needs at
-open time. Split out of ``drive.store`` to respect the file-size cap; nothing
-here imports the repository (store -> store_migration is one-directional).
+Drive sidecar schema, path helpers, validation, and legacy migration.
 """
 
 import sqlite3
@@ -29,9 +22,7 @@ logger = get_logger(__name__)
 
 DRIVE_SCHEMA_VERSION = 1
 
-# Additive sidecar tables; ``IF NOT EXISTS`` so an old session file with no
-# Drive tables opens cleanly and gains them on first Drive use (no session
-# FORMAT_VERSION bump — KVault never touches drive_* names).
+# Additive tables let existing sessions initialize Drive storage on first use.
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS drive_meta (key TEXT PRIMARY KEY, value TEXT);
 CREATE TABLE IF NOT EXISTS drives (drive_id TEXT PRIMARY KEY, blob TEXT NOT NULL);
@@ -65,34 +56,29 @@ CREATE INDEX IF NOT EXISTS ix_proposals_drive ON drive_proposals(drive_id);
 
 
 def drive_sidecar_path(session_path: str | Path) -> str:
-    """The Drive sidecar file that pairs with a session ``.kohakutr`` file.
+    """Return the dedicated Drive sidecar path paired with a session file.
 
-    ``<name>.kohakutr`` -> ``<name>.kohakutr.drives`` (design §7, Phase-0
-    addendum). The Drive repository lives in its OWN sqlite file, not a tenth
-    WAL connection inside the ``.kohakutr``, so the agent's ``save_state``
-    (KohakuVault) and the Drive dispatcher never contend on one file's lock.
+    Keeping Drive storage separate prevents session and dispatcher writes from
+    contending on the same SQLite file.
     """
     return str(session_path) + ".drives"
 
 
-# The Drive sidecar's own WAL companions, so session deletion can remove the
-# whole family (the sidecar is itself a WAL sqlite file).
+# Session deletion includes the sidecar's WAL and shared-memory companions.
 _DRIVE_SIDECAR_SUFFIXES: tuple[str, ...] = (".drives", ".drives-wal", ".drives-shm")
 
 
 def drive_sidecar_family(session_path: str | Path) -> list[str]:
-    """Every deletable Drive sidecar paired with a session file.
+    """Return every deletable Drive sidecar file paired with a session.
 
-    This deliberately excludes the persistent ``.drives.migrate-lock``. Removing
-    that pathname can split lock ownership across two inodes; it must survive
-    deletion so recreating the same session name keeps using the same lock.
+    The persistent migration lock is excluded because unlinking it can split lock
+    ownership across different inodes.
     """
     base = str(session_path)
     return [base + suffix for suffix in _DRIVE_SIDECAR_SUFFIXES]
 
 
-# Drive data tables copied by the one-way legacy migration (drive_meta holds
-# only schema_version and is (re)seeded on the fresh sidecar, so it is skipped).
+# Migration reseeds metadata, so only data tables are copied from legacy storage.
 _DRIVE_DATA_TABLES = (
     "drives",
     "drive_assignments",
@@ -107,11 +93,7 @@ _DRIVE_DATA_TABLES = (
 
 
 def _parse_schema_version(value: Any) -> int:
-    """Parse a stored ``drive_meta.schema_version`` into an int (>= 1).
-
-    Raises :class:`ValueError` for a non-integer / out-of-range marker so the
-    caller can reject or rebuild rather than opening an unrecognized store.
-    """
+    """Parse a positive integer Drive schema version."""
     parsed = int(str(value).strip())
     if parsed < 1:
         raise ValueError(f"schema version must be >= 1, got {parsed}")
@@ -119,11 +101,10 @@ def _parse_schema_version(value: Any) -> int:
 
 
 def _sidecar_is_complete(sidecar_path: str, *, timeout_s: float | None = None) -> bool:
-    """True only if the sidecar exists AND carries a valid completion marker.
+    """Return whether a sidecar exists with a valid schema marker.
 
-    ``timeout_s`` bounds SQLite's busy wait when this is an acquisition probe;
-    callers must also check their monotonic deadline after the probe because the
-    database open and scheduler can consume a small amount of non-busy time.
+    ``timeout_s`` bounds SQLite's busy wait, but callers must separately enforce
+    wall-clock deadlines because opening and scheduling also consume time.
     """
     p = Path(sidecar_path)
     if not p.exists() or p.stat().st_size == 0:
@@ -163,11 +144,7 @@ def _sidecar_is_complete(sidecar_path: str, *, timeout_s: float | None = None) -
 
 
 def _quarantine_incomplete_sidecar(sidecar_path: str) -> None:
-    """Move an incomplete migration destination aside so migration can rebuild.
-
-    The bad file is preserved as ``<sidecar>.corrupt`` (any prior quarantine is
-    replaced) rather than blindly skipped or silently overwritten (R1-14).
-    """
+    """Quarantine an incomplete sidecar so migration can rebuild it."""
     if not any(Path(sidecar_path + suffix).exists() for suffix in ("", "-wal", "-shm")):
         return
     for suffix in ("", "-wal", "-shm"):
@@ -187,16 +164,10 @@ def _quarantine_incomplete_sidecar(sidecar_path: str) -> None:
 
 
 def _legacy_same_file_drives(kohakutr_path: str) -> bool:
-    """True if a pre-sidecar ``.kohakutr`` still holds same-file Drive rows.
+    """Return whether a session database still contains legacy Drive rows.
 
-    Opened ``immutable=1``: this probe runs while kohakuvault's own SQLite
-    library may hold LIVE connections on the file, and a second SQLite
-    library (CPython's) must never take POSIX locks on it or
-    checkpoint-and-unlink its WAL/SHM on close — that destroys the live
-    writer's state and every later reader gets ``SQLITE_IOERR``. An
-    immutable open touches neither locks nor WAL. A file actively written
-    by current code cannot hold legacy rows, so a torn read answering
-    ``False`` is correct.
+    The immutable probe avoids locks and WAL handling while another SQLite
+    implementation may hold live connections to the session database.
     """
     path = Path(kohakutr_path)
     if not path.exists():
@@ -220,19 +191,12 @@ def _legacy_same_file_drives(kohakutr_path: str) -> bool:
 
 @contextmanager
 def _migration_lock(sidecar_path: str):
-    """Serialize the quarantine+rebuild across processes and threads (R1-14).
+    """Serialize sidecar quarantine and rebuild across processes and threads.
 
-    Yields ``True`` to the one opener that holds the OS lock (it must migrate) and
-    ``False`` to any opener that, while waiting, observed a peer complete the
-    migration. The lock is a cross-platform OS-level exclusive lock
-    (:class:`~kohakuterrarium.utils.file_lock.FileLock`: ``fcntl.flock`` on POSIX,
-    ``msvcrt.locking`` on Windows) held via an open handle for the ENTIRE
-    migration, so the kernel releases it automatically on holder death — there is
-    no unlink-based stale takeover for a replacement / unstamped lock file to
-    race. A contending opener polls until it either acquires the handle or sees the
-    sidecar finished; a lock still held past ``_MIGRATE_LOCK_TIMEOUT_S`` is a
-    live-but-stuck migrator (a dead holder's lock is already freed by the OS), so
-    the waiter fails loudly rather than wait forever."""
+    Yields whether the caller acquired the migration lock. Waiters may return
+    ``False`` after observing a peer complete migration, and fail on the deadline
+    rather than waiting indefinitely for a live but stuck holder.
+    """
     lock = FileLock(sidecar_path + ".migrate-lock")
     deadline = time.monotonic() + _MIGRATE_LOCK_TIMEOUT_S
     while True:
@@ -247,8 +211,7 @@ def _migration_lock(sidecar_path: str):
                     "deadline by a live process; refusing to wait longer"
                 )
             complete = _sidecar_is_complete(sidecar_path, timeout_s=remaining)
-            # SQLite's timeout bounds its busy handler, not connection setup or
-            # scheduling, so enforce the wall-clock deadline again afterward.
+            # SQLite's busy timeout excludes connection setup and scheduling time.
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise TimeoutError(
@@ -256,7 +219,7 @@ def _migration_lock(sidecar_path: str):
                     "deadline by a live process; refusing to wait longer"
                 )
             if complete:
-                yield False  # a peer already finished; caller does nothing
+                yield False  # The waiting peer completed migration.
                 return
             time.sleep(min(_MIGRATE_POLL_S, remaining))
     try:
@@ -266,15 +229,10 @@ def _migration_lock(sidecar_path: str):
 
 
 def _reject_invalid_sidecar_marker(sidecar_path: str) -> None:
-    """Reject a sidecar carrying a PRESENT-but-invalid schema marker READ-ONLY,
-    before any lock / quarantine / rebuild side effect, mirroring the repository's
-    open-time schema guard (R1-14).
+    """Reject invalid or unsupported schema markers without mutating the sidecar.
 
-    A readable sidecar whose ``drive_meta.schema_version`` is unparseable, < 1, or
-    a future version raises :class:`DriveSchemaVersionError` without moving,
-    mutating, or creating anything. An ABSENT marker — no file, zero-byte,
-    unreadable, no ``drive_meta`` table, or no ``schema_version`` row — is an
-    interrupted destination the caller rebuilds, so this returns silently.
+    Missing markers identify incomplete destinations and are left for migration to
+    rebuild.
     """
     p = Path(sidecar_path)
     if not p.exists() or p.stat().st_size == 0:
@@ -314,12 +272,7 @@ def _reject_invalid_sidecar_marker(sidecar_path: str) -> None:
 
 
 def _sweep_abandoned_migration_temps(sidecar_path: str) -> None:
-    """Remove temp databases abandoned by a killed migration process.
-
-    Called only while holding the persistent migration lock, after the kernel has
-    released any dead holder's ownership. SQLite journal/WAL/SHM companions share
-    the same ``.migrating.<uuid>`` prefix and are swept with their database.
-    """
+    """Remove abandoned migration databases and their SQLite companions."""
     sidecar = Path(sidecar_path)
     prefix = sidecar.name + ".migrating."
     for candidate in sidecar.parent.glob(prefix + "*"):
@@ -339,31 +292,23 @@ def _sweep_abandoned_migration_temps(sidecar_path: str) -> None:
 
 
 def _migrate_same_file_drives(kohakutr_path: str, sidecar_path: str) -> None:
-    """One-way copy of legacy same-file ``drive_*`` rows into a fresh sidecar.
+    """Atomically copy legacy same-file Drive rows into a sidecar.
 
-    Runs at most once per session: skipped the moment the sidecar exists, and
-    made atomic via a UNIQUE temp file + rename so a crash mid-copy re-runs from
-    the still-intact legacy ``.kohakutr`` rather than stranding a partial sidecar.
-    The whole quarantine+rebuild is serialized by an inter-process/thread lock so
-    two concurrent opens never race the temp (R1-14). The legacy tables are left
-    in place; this migration never mutates the ``.kohakutr``.
+    A unique temporary database and rename make retries crash-safe. The migration
+    lock prevents concurrent rebuilds, and the source session remains unchanged.
     """
-    # A present-but-invalid sidecar marker (malformed / future) is rejected
-    # READ-ONLY here, before any lock / quarantine / rebuild side effect, so a
-    # newer-format store is never silently destroyed by an older build (R1-14).
+    # Validate before locking or quarantine so older builds cannot destroy newer data.
     _reject_invalid_sidecar_marker(sidecar_path)
     if _sidecar_is_complete(sidecar_path):
         return
     with _migration_lock(sidecar_path) as acquired:
-        # Re-check under the lock: a peer may have completed the migration while
-        # this opener waited to acquire it (or already did, ``acquired=False``).
+        # A peer may complete migration while this opener waits for the lock.
         if not acquired:
             return
         _sweep_abandoned_migration_temps(sidecar_path)
         if _sidecar_is_complete(sidecar_path):
             return
-        # An existing but incomplete/interrupted destination is quarantined and
-        # rebuilt from the still-intact legacy rows rather than blindly skipped.
+        # Preserve an incomplete destination before rebuilding from the legacy source.
         if any(Path(sidecar_path + suffix).exists() for suffix in ("", "-wal", "-shm")):
             _quarantine_incomplete_sidecar(sidecar_path)
         if not _legacy_same_file_drives(kohakutr_path):
@@ -372,22 +317,16 @@ def _migrate_same_file_drives(kohakutr_path: str, sidecar_path: str) -> None:
 
 
 def _rebuild_sidecar_from_legacy(kohakutr_path: str, sidecar_path: str) -> None:
-    """Copy the legacy same-file ``drive_*`` rows into a fresh sidecar via a
-    per-attempt UNIQUE temp file (never a shared ``.migrating`` path, so two
-    migrators can never open one temp), then atomically rename into place.
+    """Rebuild a sidecar through a unique temporary database and atomic rename.
 
-    A failed attempt strands no ``.migrating.<uuid>`` artifact: on any error
-    before the rename lands, the temp DB and its SQLite journal companions are
-    removed before the error propagates."""
+    Failed attempts remove the temporary database and all SQLite companions.
+    """
     tmp = Path(sidecar_path + f".migrating.{uuid4().hex}")
     tmp.unlink(missing_ok=True)
     copied = 0
     renamed = False
     try:
-        # uri=True so the legacy ATTACH below can be ``immutable=1`` — the
-        # copy is read-only by design, and CPython's SQLite must never take
-        # POSIX locks on a ``.kohakutr`` kohakuvault may hold live (see
-        # ``_legacy_same_file_drives``).
+        # Immutable attachment prevents migration from locking a live session database.
         dest = sqlite3.connect(tmp.resolve().as_uri(), uri=True, isolation_level=None)
         try:
             dest.executescript(_SCHEMA)

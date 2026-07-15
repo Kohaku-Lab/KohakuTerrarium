@@ -1,9 +1,4 @@
-"""``/spawn <recipe>`` — spawn a new creature into the engine.
-
-Requires the focused creature to be **privileged** (the recipe-root
-or a user-spawned top-level creature). The engine's ``add_creature``
-loads the recipe and starts the new creature.
-"""
+"""Spawn a creature from a recipe when the focused creature is privileged."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (
@@ -41,7 +36,7 @@ class SpawnCommand(BaseUserCommand):
             )
         try:
             spawned = await engine.add_creature(recipe)
-        except Exception as e:  # pragma: no cover - depends on engine errors
+        except Exception as e:  # pragma: no cover
             return UserCommandResult(error=f"spawn failed: {e}")
         name = getattr(spawned, "name", recipe)
         return UserCommandResult(output=f"Spawned {name}")

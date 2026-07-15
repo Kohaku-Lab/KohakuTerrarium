@@ -1,10 +1,7 @@
-"""Drive runtime resource: domain model, errors, policy, and wire (design §3-6).
+"""Expose the stable public vocabulary of the Drive runtime.
 
-Cheap public re-exports of the stable Drive vocabulary. Runtime policy and the
-Phase B/C/D modules (policy, repository, store, registration, config, manager)
-are imported directly from their submodules — for example
-``from kohakuterrarium.terrarium.drive.policy import validate_transition`` — so
-this package root stays free of logic.
+This package root re-exports stable Drive vocabulary only. Runtime policy,
+storage, registration, and management APIs remain in their focused submodules.
 """
 
 from kohakuterrarium.terrarium.drive.errors import (

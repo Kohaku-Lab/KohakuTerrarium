@@ -1,14 +1,12 @@
 """Studio tier — programmatic façade over the studio sub-packages.
 
-The :class:`Studio` class wraps a :class:`Terrarium` engine and
-exposes catalog / identity / sessions / persistence / editors /
-attach as nested namespaces.
+The :class:`Studio` facade exposes catalog, identity, session, persistence,
+editor, and attachment services over a Terrarium runtime.
 
-Importing this package also registers the studio-supplied hooks the
-``terrarium`` group tools call into (session-store auto-attach,
-creature-name propagation, spawnable creature catalog). The terrarium
-layer never imports ``studio`` directly — it consumes whatever has
-been registered, and degrades gracefully when nothing has.
+Importing the package registers Studio-owned group-tool integrations for session
+attachment, creature naming, workspace discovery, and spawnable catalogs. The
+Terrarium layer consumes these optional hooks without importing Studio, preserving
+the lower layer's independence and graceful behavior when Studio is absent.
 """
 
 from kohakuterrarium.studio.catalog.spawnable import list_spawnable_creatures
@@ -47,7 +45,7 @@ def _resolve_workspace_hook(engine, creature):
 
 
 def _wire_group_hooks() -> None:
-    """Register studio-side implementations of the group_hooks contract."""
+    """Bind optional Studio behavior to Terrarium's dependency-inversion hooks."""
     _group_hooks.register_store_attach(_store_attach_hook)
     _group_hooks.register_name_apply(_apply_creature_name)
     _group_hooks.register_spawnable(_spawnable_hook)

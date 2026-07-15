@@ -1,9 +1,4 @@
-"""
-Conversation management for KohakuTerrarium.
-
-Handles message history, context length tracking, and serialization.
-Supports multimodal messages (text + images).
-"""
+"""Multimodal conversation history, retention, and serialization."""
 
 import json
 from dataclasses import dataclass, field
@@ -46,17 +41,7 @@ def _get_content_text_length(content: MessageContent) -> int:
 
 @dataclass
 class ConversationConfig:
-    """
-    Configuration for conversation management.
-
-    Attributes:
-        max_messages: Maximum number of messages to keep (0 = unlimited)
-        keep_system: Always keep system message(s) even when truncating
-        sanitize_orphan_tool_calls: Strip mismatched tool_call / tool-result
-            pairs from the wire payload. Most OpenAI-compatible providers
-            return HTTP 400 when either side of a pair is missing; compaction
-            occasionally produces this. Pure, opt-out, on by default.
-    """
+    """Configure retention and provider-safe tool-pair sanitization."""
 
     max_messages: int = 0
     keep_system: bool = True
@@ -74,35 +59,10 @@ class ConversationMetadata:
 
 
 class Conversation:
-    """
-    Manages a conversation with message history and context tracking.
-
-    Supports:
-    - Adding messages (system, user, assistant, tool)
-    - Context length tracking
-    - Serialization to/from JSON
-    - Message truncation when context grows too large
-
-    Usage:
-        conv = Conversation()
-        conv.append("system", "You are a helpful assistant.")
-        conv.append("user", "Hello!")
-        conv.append("assistant", "Hi! How can I help?")
-
-        # Get messages for API call
-        messages = conv.to_messages()
-
-        # Check context length
-        print(f"Context: {conv.get_context_length()} chars")
-    """
+    """Maintain message history, context metadata, and JSON persistence."""
 
     def __init__(self, config: ConversationConfig | None = None):
-        """
-        Initialize a conversation.
-
-        Args:
-            config: Optional configuration for context management
-        """
+        """Initialize an empty conversation with optional retention settings."""
         self.config = config or ConversationConfig()
         self._messages: MessageList = []
         self._metadata = ConversationMetadata()
@@ -127,13 +87,11 @@ class Conversation:
         msg = create_message(role, content, **kwargs)  # type: ignore
         self._messages.append(msg)
 
-        # Update metadata
         content_length = _get_content_text_length(content)
         self._metadata.message_count += 1
         self._metadata.total_chars += content_length
         self._metadata.updated_at = datetime.now()
 
-        # Check for multimodal content
         is_multimodal = isinstance(content, list)
         image_count = 0
         if is_multimodal:
@@ -148,7 +106,6 @@ class Conversation:
             images=image_count if image_count else None,
         )
 
-        # Check if truncation needed
         self._maybe_truncate()
 
         return msg
@@ -166,7 +123,7 @@ class Conversation:
         if self.config.max_messages <= 0:
             return
 
-        # Keep system messages if configured
+        # System prompts remain at the front even when recent history is trimmed.
         system_messages: list[Message] = []
         other_messages: list[Message] = []
 
@@ -179,13 +136,11 @@ class Conversation:
         else:
             other_messages = list(self._messages)
 
-        # Truncate by message count
         max_other = self.config.max_messages - len(system_messages)
         if len(other_messages) > max_other:
             other_messages = other_messages[-max_other:]
             logger.debug("Truncated by message count", kept=len(other_messages))
 
-        # Rebuild messages list
         self._messages = system_messages + other_messages
         self._metadata.total_chars = sum(
             _get_content_text_length(m.content) for m in self._messages
@@ -194,23 +149,10 @@ class Conversation:
     def to_messages(
         self, *, preserve_pending_tail: bool = False
     ) -> list[dict[str, Any]]:
-        """
-        Convert conversation to OpenAI API message format.
+        """Return provider message dictionaries with valid native tool pairs.
 
-        Applies the orphan tool-call sanitiser when
-        ``config.sanitize_orphan_tool_calls`` is True so the payload
-        sent to the provider never violates the OpenAI contract of
-        ``assistant.tool_calls`` pairing with matching ``role=tool``
-        messages. See :meth:`sanitize_orphan_tool_pairs`.
-
-        ``preserve_pending_tail`` keeps a trailing in-flight tool
-        announcement: WRONG for a provider payload (unanswered
-        ``tool_calls`` are rejected on generation) but REQUIRED for
-        persistence — a snapshot that drops it can't reconstruct the
-        active round on resume.
-
-        Returns:
-            List of message dicts suitable for API calls
+        ``preserve_pending_tail`` retains an in-flight tool announcement only for
+        persistence; provider generation rejects unanswered trailing calls.
         """
         messages = messages_to_dicts(self._messages)
         if self.config.sanitize_orphan_tool_calls:
@@ -225,22 +167,16 @@ class Conversation:
         *,
         preserve_pending_tail: bool = False,
     ) -> list[dict[str, Any]]:
-        """Strip unmatched tool_call / tool-result pairs.
-
-        Delegates to :func:`conversation_sanitize.sanitize_orphan_tool_pairs`
-        (split out for the file-size guard) — see it for the full rules.
-        """
+        """Return messages with unmatched native tool calls and results removed."""
         return _sanitize_orphan_tool_pairs(
             messages, preserve_pending_tail=preserve_pending_tail
         )
 
     def prune_orphan_tool_pairs(self, *, preserve_pending_tail: bool = False) -> int:
-        """Apply the orphan sanitiser to the in-memory list itself.
+        """Prune in-memory orphan tool pairs and return the removal count.
 
-        ``to_messages`` sanitizes a fresh copy on every call, so orphans
-        left in ``_messages`` re-warn on every LLM request. This prunes
-        them once (the session store is untouched). Returns the number
-        of messages removed.
+        This prevents repeated warnings from copy-only wire sanitization; persisted
+        session data remains untouched.
         """
         return _prune_orphan_tool_pairs(
             self, preserve_pending_tail=preserve_pending_tail
@@ -347,8 +283,6 @@ class Conversation:
         """Return True if conversation has messages."""
         return len(self._messages) > 0
 
-    # Serialization
-
     def _serialize_content(self, content: MessageContent) -> Any:
         """Serialize message content to JSON-compatible format.
 
@@ -386,7 +320,7 @@ class Conversation:
             if kind == "text":
                 parts.append(TextPart(text=item.get("text", "")))
             elif kind == "image_url":
-                # Nested (current) vs flat (legacy) shape.
+                # Accept the legacy flat shape so older sessions remain readable.
                 if "image_url" in item and isinstance(item["image_url"], dict):
                     img = item["image_url"]
                     url = img.get("url", "")

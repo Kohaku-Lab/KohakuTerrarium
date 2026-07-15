@@ -1,24 +1,15 @@
 """Shared session-file path resolution for the persistence routes.
 
-Single canonical paths helper for the studio-cleanup refactor (P3).
-Every call-site asks "give me the file for session ``foo``" and the
-helpers transparently honor Wave D auto-migration's
-``foo.kohakutr.v2`` (live) + bare ``foo.kohakutr`` (v1 rollback)
-pair. Tests pass an explicit ``session_dir`` so no module-level state
-is required.
+Centralizes logical-session naming and file resolution across unversioned,
+versioned, legacy-short, and mirrored session files. Every helper accepts an
+explicit directory and prefers the highest available format version.
 """
 
 from pathlib import Path
 
 
 def normalize_session_stem(path: Path) -> str:
-    """Return the stable session name regardless of which version
-    suffix the file carries.
-
-    ``foo.kohakutr.v2`` → ``foo`` (Wave D-migrated v2 file).
-    ``foo.kohakutr``     → ``foo`` (v1 / unversioned).
-    ``foo.kt``           → ``foo`` (legacy short form).
-    """
+    """Return the logical session name without format or legacy suffixes."""
     name = path.name
     if name.endswith(".kohakutr"):
         return name[: -len(".kohakutr")]
@@ -31,15 +22,10 @@ def normalize_session_stem(path: Path) -> str:
 
 
 def all_session_files(session_dir: Path) -> list[Path]:
-    """Every ``.kohakutr`` / ``.kohakutr.v*`` / ``.kt`` file on disk.
+    """Return supported session files from the main and mirror directories.
 
-    Also scans the ``mirror/`` subdir: in lab-host mode the
-    ``SessionMirrorWriter`` writes worker-session mirrors under
-    ``<session_dir>/mirror/``, and the saved-session listing / history
-    endpoints are meant to surface them — the session-index sidecar
-    reads ``meta['on_node']`` into each entry's ``node_id`` field
-    precisely so mirrored sessions show up tagged by their originating
-    worker.
+    Lab-host mirrors are included so listing and history can surface worker
+    sessions with their recorded node IDs.
     """
     if not session_dir.exists():
         return []
@@ -65,12 +51,10 @@ def _version_rank(path: Path) -> int:
 
 
 def resolve_session_path(session_name: str, session_dir: Path) -> Path | None:
-    """Shared session file lookup (name, prefix, or full path).
+    """Resolve a logical session name, preferring its highest version.
 
-    Honors Wave D auto-migration: when the same logical session has
-    both ``foo.kohakutr`` and ``foo.kohakutr.v2`` on disk, prefer the
-    highest version (``.v2`` > bare ``.kohakutr``). Bare ``.kohakutr``
-    is preserved as the rollback file.
+    Exact versioned and legacy names take precedence over unique normalized or
+    fuzzy matches. Unversioned files remain available as rollback companions.
     """
     if not session_dir.exists():
         return None
@@ -113,11 +97,7 @@ def resolve_session_path(session_name: str, session_dir: Path) -> Path | None:
 
 
 def all_versions_for_session(session_name: str, session_dir: Path) -> list[Path]:
-    """Every on-disk file that belongs to the given session name.
-
-    Used by delete to clean up both the live ``.v2`` AND its v1
-    rollback companion in one shot.
-    """
+    """Return every version and legacy file for one logical session."""
     return [
         p
         for p in all_session_files(session_dir)
@@ -126,12 +106,7 @@ def all_versions_for_session(session_name: str, session_dir: Path) -> list[Path]
 
 
 def pick_canonical_per_session(session_dir: Path) -> list[Path]:
-    """Return one path per logical session — the highest-versioned file
-    when both v1 + v2 are present.
-
-    Used by the listing endpoint so the user sees one row per session
-    even when Wave D has left a v1 rollback alongside the v2 file.
-    """
+    """Return the highest-versioned path for each logical session."""
     by_canonical: dict[str, Path] = {}
     for path in all_session_files(session_dir):
         key = normalize_session_stem(path)

@@ -1,25 +1,8 @@
-"""Structural typing protocols for Laboratory APP integration.
+"""Structural protocols for Laboratory APP integration.
 
-Adapters, services, and helpers all need slim references to a "lab
-node" — sometimes a :class:`~kohakuterrarium.laboratory._internal.host.HostEngine`,
-sometimes a :class:`~kohakuterrarium.laboratory._internal.client.ClientConnector`.
-Both expose enough surface to satisfy structural duck-typing; this
-module names that surface explicitly so each adapter / client / cache
-doesn't redefine its own near-identical protocol.
-
-Four runtime-checkable protocols, each capturing the *minimum* a
-caller needs:
-
-- :class:`LabSender` — request/response APP RPC initiator.
-- :class:`LabNotifier` — fire-and-forget APP messaging.
-- :class:`LabRegistrar` — APP-extension registration surface.
-- :class:`LabNode` — union of the three; the typical "I am a lab node
-  and I do everything" handle, satisfied by both HostEngine and
-  ClientConnector.
-
-All protocols are :func:`typing.runtime_checkable`, so ``isinstance``
-checks work without import cycles between the typed callers and the
-concrete implementations.
+The capability-specific protocols keep callers decoupled from concrete host and
+client implementations. They are runtime-checkable to support capability tests
+without introducing import cycles.
 """
 
 from typing import Any, Protocol, runtime_checkable
@@ -27,11 +10,7 @@ from typing import Any, Protocol, runtime_checkable
 
 @runtime_checkable
 class LabSender(Protocol):
-    """Anything that can issue an APP request and await the response.
-
-    Both :class:`HostEngine` and :class:`ClientConnector` satisfy this
-    via their ``request()`` method.
-    """
+    """APP request/response capability."""
 
     async def request(
         self,
@@ -46,7 +25,7 @@ class LabSender(Protocol):
 
 @runtime_checkable
 class LabNotifier(Protocol):
-    """Anything that can fire-and-forget an APP message."""
+    """Fire-and-forget APP messaging capability."""
 
     async def notify(
         self,
@@ -60,7 +39,7 @@ class LabNotifier(Protocol):
 
 @runtime_checkable
 class LabRegistrar(Protocol):
-    """Anything that hosts APP extension handlers."""
+    """APP extension registration capability."""
 
     def register_app_extension(self, namespace: str, handler: Any) -> None: ...
 
@@ -69,13 +48,7 @@ class LabRegistrar(Protocol):
 
 @runtime_checkable
 class LabNode(LabSender, LabNotifier, LabRegistrar, Protocol):
-    """Full lab-node surface — request + notify + extension registration.
-
-    Both :class:`HostEngine` and :class:`ClientConnector` implement
-    every method named here.  Use this when an adapter / cache needs
-    *all* three capabilities (e.g. a client that registers its own
-    handler and also issues outbound requests).
-    """
+    """Combined request, notification, and extension-registration capability."""
 
 
 __all__ = ["LabNode", "LabNotifier", "LabRegistrar", "LabSender"]

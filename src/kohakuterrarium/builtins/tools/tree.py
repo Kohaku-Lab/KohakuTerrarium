@@ -1,9 +1,4 @@
-"""
-Tree tool - list files with frontmatter summaries.
-
-Shows directory structure and extracts summary from YAML frontmatter.
-Respects .gitignore by default and limits output to avoid flooding context.
-"""
+"""Directory tree listings with optional Markdown frontmatter summaries."""
 
 import re
 from pathlib import Path
@@ -23,16 +18,11 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Regex to extract YAML frontmatter
 FRONTMATTER_PATTERN = re.compile(r"^---\s*\n(.*?)\n---", re.DOTALL)
 
 
 def parse_frontmatter(content: str) -> dict[str, Any]:
-    """
-    Parse YAML frontmatter from markdown content.
-
-    Simple parser that handles common cases without full YAML dependency.
-    """
+    """Parse the supported scalar and list subset of YAML frontmatter."""
     match = FRONTMATTER_PATTERN.match(content)
     if not match:
         return {}
@@ -45,24 +35,20 @@ def parse_frontmatter(content: str) -> dict[str, Any]:
         if not line or line.startswith("#"):
             continue
 
-        # Simple key: value parsing
         if ":" in line:
             key, _, value = line.partition(":")
             key = key.strip()
             value = value.strip()
 
-            # Handle quoted strings
             if value.startswith('"') and value.endswith('"'):
                 value = value[1:-1]
             elif value.startswith("'") and value.endswith("'"):
                 value = value[1:-1]
 
-            # Handle arrays [item1, item2]
             if value.startswith("[") and value.endswith("]"):
                 items = value[1:-1].split(",")
                 value = [item.strip().strip("\"'") for item in items if item.strip()]
 
-            # Handle booleans
             if value in ("true", "True", "yes", "Yes"):
                 value = True
             elif value in ("false", "False", "no", "No"):
@@ -92,19 +78,19 @@ class _TreeBuilder:
         self.lines: list[str] = []
         self.truncated = False
         self.total_skipped = 0
-        # Collect gitignore patterns per directory (inherited + local)
+        # Each recursion level contributes patterns inherited by its descendants.
         self._ignore_stack: list[list[str]] = [[]]
         self.ignored_dirs: list[str] = []
 
     def _current_patterns(self) -> list[str]:
-        """Flat list of all active ignore patterns."""
+        """Return the ignore patterns inherited at the current tree level."""
         result: list[str] = []
         for patterns in self._ignore_stack:
             result.extend(patterns)
         return result
 
     def _add_line(self, line: str) -> bool:
-        """Append a line. Returns False if limit reached."""
+        """Append one output line unless the configured limit is exhausted."""
         if self.limit > 0 and len(self.lines) >= self.limit:
             self.truncated = True
             return False
@@ -120,7 +106,6 @@ class _TreeBuilder:
         if depth >= self.max_depth or self.truncated:
             return
 
-        # Load .gitignore at this level
         local_patterns: list[str] = []
         if self.follow_gitignore:
             gi = path / ".gitignore"
@@ -137,11 +122,9 @@ class _TreeBuilder:
             self._ignore_stack.pop()
             return
 
-        # Filter hidden
         if not self.show_hidden:
             entries = [e for e in entries if not e.name.startswith(".")]
 
-        # Filter unconditionally-skipped directories + gitignore patterns
         patterns = self._current_patterns() if self.follow_gitignore else []
         filtered = []
         for e in entries:
@@ -199,11 +182,7 @@ class _TreeBuilder:
 
 @register_builtin("tree")
 class TreeTool(BaseTool):
-    """
-    Tool for listing directory structure with frontmatter summaries.
-
-    Respects .gitignore and limits output to avoid flooding context.
-    """
+    """List a bounded directory tree and annotate Markdown metadata."""
 
     needs_context = True
 
@@ -245,7 +224,6 @@ class TreeTool(BaseTool):
         path_str = args.get("path") or args.get("_body", ".").strip() or "."
         path = resolve_tool_path(path_str, context)
 
-        # Path boundary guard
         if context and context.path_guard:
             msg = context.path_guard.check(str(path))
             if msg:
@@ -274,19 +252,14 @@ class TreeTool(BaseTool):
                 show_hidden=show_hidden,
                 follow_gitignore=follow_gitignore,
             )
-            # Preserve the user's input string for the root label so a
-            # plain "." doesn't get resolved into the CWD's basename
-            # (e.g. ``KohakuTerrarium/``). Rule: either absolute or
-            # relative — whatever the caller typed wins. Trailing slash
-            # is appended for non-"." paths to match the per-line
-            # directory convention below; "." prints bare.
+            # The root label preserves the caller's path spelling; resolving "."
+            # to the working-directory basename would change the requested view.
             display_root = path_str if path_str == "." else path_str.rstrip("/") + "/"
             builder._add_line(display_root)
             await builder.build(path)
 
             output = "\n".join(builder.lines)
 
-            # Append footer with useful info
             footer_parts: list[str] = []
             if builder.truncated:
                 footer_parts.append(

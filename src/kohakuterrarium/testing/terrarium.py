@@ -1,22 +1,4 @@
-"""Test infrastructure for the Terrarium runtime engine.
-
-Mirrors :class:`kohakuterrarium.testing.TestAgentBuilder` for the
-multi-agent surface — lets user code exercise the engine end-to-end
-without spinning up real LLM providers.
-
-Example::
-
-    builder = (
-        TestTerrariumBuilder()
-        .with_creature("alice")
-        .with_creature("bob")
-        .with_channel("chat")
-        .with_connection("alice", "bob", channel="chat")
-    )
-    async with await builder.build() as t:
-        async for chunk in t["alice"].chat("hi"):
-            ...
-"""
+"""Build Terrarium engine test fixtures with lightweight fake agents."""
 
 from dataclasses import dataclass, field
 from types import SimpleNamespace
@@ -25,11 +7,6 @@ from typing import Any
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
-
-# ---------------------------------------------------------------------------
-# fake-agent stand-in — reused inside ``TestTerrariumBuilder``
-# ---------------------------------------------------------------------------
-
 
 class _FakeTriggerManager:
     def __init__(self) -> None:
@@ -52,12 +29,7 @@ class _FakeOutputRouter:
 
 
 class _FakeAgent:
-    """Minimal Agent stand-in for unit tests of the engine layer.
-
-    Implements only what :class:`Creature` reads in
-    ``start`` / ``stop`` / ``chat`` / ``get_status`` and what
-    channel-trigger / output-sink injection touches.
-    """
+    """Implement only the Agent surface consumed by engine-layer tests."""
 
     def __init__(
         self,
@@ -65,10 +37,7 @@ class _FakeAgent:
         model: str = "test/model",
         responses: list[str] | None = None,
     ) -> None:
-        # The real Agent stores ``_running`` and exposes ``is_running``
-        # as a property over it — mirror that so collaborators reading
-        # *either* name (output-wiring checks ``_running``; Creature
-        # checks ``is_running``) see a consistent value.
+        # Both private and public running-state readers must agree.
         self._running = False
         self.config = SimpleNamespace(name=name, model=model, pwd=None)
         self.llm = SimpleNamespace(
@@ -92,14 +61,11 @@ class _FakeAgent:
         self._chat_index = 0
         self.start_calls = 0
         self.stop_calls = 0
-        # Events delivered via ``_process_event`` — the real Agent
-        # method ``group_send`` / output-wiring fan-out push into.
         self.processed_events: list[Any] = []
 
     @property
     def is_running(self) -> bool:
-        """Mirror :attr:`Agent.is_running` — a read-only view of
-        ``_running``."""
+        """Expose the same read-only running state as a real Agent."""
         return self._running
 
     def set_output_handler(self, handler: Any, replace_default: bool = False) -> None:
@@ -119,26 +85,15 @@ class _FakeAgent:
     def attach_session_store(
         self, store: Any, *, capture_activity: bool = True
     ) -> None:
-        """Attach a session store — the real :class:`Agent` also wires a
-        :class:`SessionOutput` sink; the fake only needs the store
-        reference so collaborators (worker-side auto-attach) can verify
-        it landed."""
+        """Retain the attached store without installing production output sinks."""
         self.session_store = store
 
     async def _process_event(self, event: Any) -> None:
-        """Record a delivered :class:`TriggerEvent`.
-
-        The real :class:`Agent` runs the controller loop here; the fake
-        only needs to prove the event arrived (``group_send`` and
-        output-wiring fan-out both push synthetic events through this
-        method on the *target* agent).
-        """
+        """Record synthetic events delivered by group send or output wiring."""
         self.processed_events.append(event)
 
     async def inject_input(self, message, *, source: str = "chat") -> None:
-        """Record the input and replay the next scripted response (if any)
-        through every registered output handler so ``Creature.chat``
-        sees text chunks back."""
+        """Record input and replay the next response through output handlers."""
         self.injected.append((message, source))
         if self.responses and self._chat_index < len(self.responses):
             response = self.responses[self._chat_index]
@@ -148,11 +103,6 @@ class _FakeAgent:
                     handler(response)
                 except Exception:
                     pass
-
-
-# ---------------------------------------------------------------------------
-# TestTerrariumBuilder — declarative builder for engine tests
-# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -175,19 +125,11 @@ class _ConnectionSpec:
 
 
 class TestTerrariumBuilder:
-    """Declarative builder for a :class:`Terrarium` engine pre-loaded
-    with fake-agent creatures, channels, and wiring.
+    """Build a Terrarium preloaded with fake creatures, channels, and wiring.
 
-    Each ``with_*`` method returns ``self`` for chaining.  Call
-    ``await builder.build()`` to materialise the engine — the engine
-    is returned ready-started so tests can ``async with`` it directly.
+    ``__test__ = False`` prevents pytest from collecting this public helper.
     """
 
-    # Tell pytest to skip auto-collection — the class name starts with
-    # "Test" only because it BUILDS test fixtures, it isn't itself a
-    # test class.  Without this, pytest emits a ``PytestCollectionWarning``
-    # at every importing test module ("cannot collect TestTerrariumBuilder
-    # because it has a __init__ constructor").
     __test__ = False
 
     def __init__(self) -> None:
@@ -202,7 +144,7 @@ class TestTerrariumBuilder:
         *,
         responses: list[str] | None = None,
     ) -> "TestTerrariumBuilder":
-        """Add a creature that will be wrapped around a fake agent."""
+        """Add a fake-agent creature with optional scripted responses."""
         self._creatures.append(
             _CreatureSpec(name=name, responses=list(responses or []))
         )
@@ -214,7 +156,7 @@ class TestTerrariumBuilder:
         *,
         description: str = "",
     ) -> "TestTerrariumBuilder":
-        """Declare a channel inside the (single) graph."""
+        """Declare a channel in the shared graph."""
         self._channels.append(_ChannelSpec(name=name, description=description))
         return self
 
@@ -225,21 +167,19 @@ class TestTerrariumBuilder:
         *,
         channel: str | None = None,
     ) -> "TestTerrariumBuilder":
-        """Wire ``sender → receiver`` over ``channel`` (or auto-named)."""
+        """Connect two creatures over a named or generated channel."""
         self._connections.append(
             _ConnectionSpec(sender=sender, receiver=receiver, channel=channel)
         )
         return self
 
     def with_separate_graphs(self) -> "TestTerrariumBuilder":
-        """Each creature gets its own singleton graph instead of all
-        landing in one shared graph.  Useful for testing cross-graph
-        connect (which forces a graph merge)."""
+        """Place each creature in a singleton graph before applying connections."""
         self._all_in_one_graph = False
         return self
 
     async def build(self) -> Terrarium:
-        """Materialise the engine.  Returns it already started."""
+        """Materialize and return the configured engine."""
         engine = Terrarium()
         first_graph_id: str | None = None
         for spec in self._creatures:

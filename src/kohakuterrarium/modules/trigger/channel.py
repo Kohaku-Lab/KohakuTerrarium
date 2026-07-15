@@ -18,20 +18,7 @@ logger = get_logger(__name__)
 
 
 class ChannelTrigger(BaseTrigger):
-    """
-    Trigger that fires when a message arrives on a named channel.
-
-    Supports both queue (SubAgentChannel) and broadcast (AgentChannel) channels.
-    For broadcast channels, a subscriber_id is used to create a subscription.
-
-    Usage:
-        trigger = ChannelTrigger(
-            channel_name="inbox",
-            prompt="Handle incoming message: {content}",
-        )
-        await trigger.start()
-        event = await trigger.wait_for_trigger()
-    """
+    """Fire when a named queue or broadcast channel receives a message."""
 
     resumable = True
     universal = True
@@ -109,25 +96,7 @@ class ChannelTrigger(BaseTrigger):
         session: Any | None = None,
         **options: Any,
     ):
-        """
-        Initialize channel trigger.
-
-        Args:
-            channel_name: Name of the channel to listen on
-            subscriber_id: Subscriber ID for broadcast channels (auto-generated if None)
-            prompt: Prompt template to include in event. Supports
-                ``{content}``, ``{channel}``, ``{sender}``, ``{message_id}``,
-                and message metadata placeholders.
-            filter_sender: Only fire for messages from this sender (whitelist)
-            ignore_sender: Skip messages whose ``sender`` (display name) matches.
-                Kept for backward compat — when two creatures share a config
-                name, prefer ``ignore_sender_id`` instead.
-            ignore_sender_id: Skip messages whose ``sender_id`` (stable creature
-                identity) matches. Robust against display-name collisions.
-            registry: Optional channel registry (defaults to global singleton)
-            session: Optional session whose channel registry to use
-            **options: Additional options
-        """
+        """Initialize channel selection, filtering, and registry resolution."""
         super().__init__(prompt=prompt, **options)
         self.channel_name = channel_name
         self.subscriber_id = subscriber_id
@@ -186,7 +155,7 @@ class ChannelTrigger(BaseTrigger):
 
         while self._running:
             try:
-                # Use a timeout so we periodically check if still running
+                # Bounded receives let stop requests terminate an otherwise idle wait.
                 if isinstance(channel, AgentChannel):
                     if self._subscription is None:
                         sub_id = self.subscriber_id or f"trigger_{self.channel_name}"
@@ -204,16 +173,7 @@ class ChannelTrigger(BaseTrigger):
         return None
 
     def drain_ready(self) -> list[TriggerEvent]:
-        """Non-blocking drain of every message already queued for this
-        trigger's subscription — the events left behind after
-        :meth:`wait_for_trigger` returned the first one.
-
-        The trigger manager admits these into the receiver's mid-turn
-        buffer so a channel backlog costs ONE turn instead of one round
-        per message (UXI-08). Self / filtered senders are dropped the
-        same way :meth:`wait_for_trigger` drops them; each surviving
-        message keeps its own sender / metadata in the built event.
-        """
+        """Drain queued messages while applying the normal sender filters."""
         if not self._running or self._registry is None:
             return []
         channel = self._registry.get_or_create(self.channel_name)
@@ -234,10 +194,7 @@ class ChannelTrigger(BaseTrigger):
         return events
 
     def _should_skip(self, msg: Any) -> bool:
-        """Whether a delivered message is filtered out (sender whitelist
-        or self-ignore). Prefer the stable ``sender_id`` check —
-        ``ignore_sender`` (display name) collides when two creatures
-        share a config name."""
+        """Return whether sender filters exclude a delivered message."""
         if self.filter_sender and msg.sender != self.filter_sender:
             return True
         if (
@@ -250,18 +207,7 @@ class ChannelTrigger(BaseTrigger):
         return False
 
     def _message_to_event(self, msg: Any) -> TriggerEvent:
-        """Build the CHANNEL_MESSAGE event for a delivered message.
-
-        Terrarium channel injection uses the default template
-        ``[Channel '{channel}' from {sender}]: {content}``, so all
-        placeholders are rendered before the event reaches the
-        controller. ``BaseTrigger._create_event`` defaults
-        ``prompt_override`` to ``self.prompt`` (the raw template); the
-        controller prefers ``prompt_override`` over ``content`` when
-        assembling the LLM input, so the rendered string is pinned onto
-        the override too — otherwise the receiver sees unfilled
-        ``{placeholders}``.
-        """
+        """Build an event whose prompt override contains rendered placeholders."""
         content = msg.content if isinstance(msg.content, str) else str(msg.content)
         event_prompt = self._render_prompt(msg, content)
         event = self._create_event(

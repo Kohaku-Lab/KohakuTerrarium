@@ -25,10 +25,7 @@ from kohakuterrarium.terrarium.drive.models import (
 
 
 class _Unset:
-    """Sentinel: a :class:`DrivePatch` field the caller did not touch.
-
-    Distinct from ``None``, which for a nullable field means "clear it".
-    """
+    """Distinguish an omitted patch field from an explicit null value."""
 
     _instance: "_Unset | None" = None
 
@@ -48,20 +45,16 @@ UNSET = _Unset()
 
 
 def _aware_or_clear(value: object, name: str) -> None:
-    # Patch datetime fields: None clears the value; anything else must be aware.
+    # Null clears a datetime field; non-null values must carry timezone
+    # information.
     if value is None:
         return
     _require_aware(value, name, allow_none=False)
 
 
-# ---------------------------------------------------------------------------
-# CreateDriveRequest
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class CreateDriveRequest:
-    """Everything a caller supplies to mint a new Drive (design §9.1)."""
+    """Describe caller-supplied fields for creating a Drive."""
 
     kind: str
     title: str
@@ -111,11 +104,6 @@ class CreateDriveRequest:
             _require_nonempty(self.idempotency_key, "idempotency_key")
 
 
-# ---------------------------------------------------------------------------
-# DrivePatch
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DrivePatch:
     """A partial update to a Drive's non-identity fields (design §4.1).
@@ -152,7 +140,7 @@ class DrivePatch:
                 _require_nonempty(dep, "dependency_ids entry")
 
     def changes(self) -> dict[str, Any]:
-        """Map of field name -> new value, for fields the caller set."""
+        """Return only fields explicitly set by the caller."""
         out: dict[str, Any] = {}
         for name in (
             "title",
@@ -175,14 +163,9 @@ class DrivePatch:
         return not self.changes()
 
 
-# ---------------------------------------------------------------------------
-# DriveQuery
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveQuery:
-    """Filter for a list/read over Drive records (design §7.2, §9.1)."""
+    """Filter Drive records for list and read operations."""
 
     graph_id: str | None = None
     scope_type: Literal["creature", "graph"] | None = None
@@ -218,18 +201,9 @@ class DriveQuery:
             _require_int(self.limit, "limit", minimum=1)
 
 
-# ---------------------------------------------------------------------------
-# DriveTransitionProposal
-# ---------------------------------------------------------------------------
-
-
 @dataclass(frozen=True)
 class DriveTransitionProposal:
-    """A proposed status transition awaiting validation (design §4.2).
-
-    Terminal transitions (completed/failed) go through this instead of a direct
-    status write so registration validators and verifiers can run first.
-    """
+    """Describe a status transition awaiting policy validation and verification."""
 
     proposal_id: str
     drive_id: str
@@ -240,8 +214,8 @@ class DriveTransitionProposal:
     reason: str | None = None
     evidence: dict[str, Any] = field(default_factory=dict)
     expected_revision: int | None = None
-    # Pinned lifecycle epoch at proposal creation. Persisted so approval can
-    # reject a proposal whose Drive has since been reassigned (R1-08).
+    # The creation epoch lets approval reject proposals invalidated by later
+    # reassignment.
     lifecycle_epoch: int = 0
 
     def __post_init__(self) -> None:

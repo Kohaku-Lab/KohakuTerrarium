@@ -1,9 +1,8 @@
 """Agent constructor classmethods (``Agent.build`` / ``Agent.from_path``).
 
-Split out of :mod:`agent` to keep that module under the 1000-line hard
-cap — the same pattern as :mod:`agent_model` / :mod:`agent_compact`.
-Both classmethods return ``cls(...)`` so subclasses construct
-themselves.
+Public construction and asynchronous context-management helpers for agents.
+
+The constructors return ``cls(...)`` so subclasses retain their concrete type.
 """
 
 from pathlib import Path
@@ -25,11 +24,7 @@ class AgentConstructMixin:
     """Mixin providing the public construction entry points."""
 
     async def __aenter__(self) -> "Agent":
-        """``async with await Agent.build(...) as agent`` — starts the agent.
-
-        Idempotent on an already-started agent so the context manager
-        composes with an explicit ``await agent.start()``.
-        """
+        """Start the agent if needed and enter its asynchronous context."""
         if not getattr(self, "is_running", False):
             await self.start()
         return self  # type: ignore[return-value]

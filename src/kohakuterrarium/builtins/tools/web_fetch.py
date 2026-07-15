@@ -1,12 +1,4 @@
-"""
-Web fetch tool: read a web page and return LLM-friendly content.
-
-Tiered fallback (uses best available):
-  1. Crawl4AI (pip install crawl4ai): JS rendering, anti-bot, best quality
-  2. trafilatura (pip install trafilatura): good extraction, no JS
-  3. Jina Reader (r.jina.ai): zero deps, JS server-side, may fail
-  4. Naive httpx + html2text: always works, lowest quality
-"""
+"""Fetch web pages through progressively simpler Markdown extractors."""
 
 from typing import Any
 
@@ -19,11 +11,10 @@ from kohakuterrarium.utils.logging import DEFAULT_LOG_DIR, get_logger
 
 logger = get_logger(__name__)
 
-MAX_CONTENT_SIZE = 100_000  # 100k chars max returned to model
+MAX_CONTENT_SIZE = 100_000  # Bound fetched pages before adding them to context.
 FETCH_TIMEOUT = 30.0
 USER_AGENT = "Mozilla/5.0 (compatible; KohakuTerrarium/1.0)"
 
-# Detect available backends at import time
 _HAS_CRAWL4AI = False
 _HAS_TRAFILATURA = False
 
@@ -44,11 +35,7 @@ except ImportError:
 
 @register_builtin("web_fetch")
 class WebFetchTool(BaseTool):
-    """Fetch a web page and return clean, readable content.
-
-    Automatically uses the best available backend:
-    crawl4ai > trafilatura > jina reader > naive httpx.
-    """
+    """Return a web page as bounded Markdown using the best available backend."""
 
     @property
     def tool_name(self) -> str:
@@ -69,11 +56,9 @@ class WebFetchTool(BaseTool):
                 error="No URL provided. Usage: web_fetch(url='https://...')"
             )
 
-        # Normalize URL
         if not url.startswith(("http://", "https://")):
             url = "https://" + url
 
-        # Try backends in order
         for backend_name, backend_fn in [
             ("crawl4ai", _fetch_crawl4ai),
             ("trafilatura", _fetch_trafilatura),
@@ -83,7 +68,6 @@ class WebFetchTool(BaseTool):
             try:
                 content = await backend_fn(url)
                 if content and content.strip():
-                    # Truncate if too long
                     if len(content) > MAX_CONTENT_SIZE:
                         content = (
                             content[:MAX_CONTENT_SIZE]
@@ -111,18 +95,11 @@ class WebFetchTool(BaseTool):
 
 
 class _SkipBackend(Exception):
-    """Raised when a backend is not available."""
-
-
-# ── Backend implementations ────────────────────────────────────
+    """Signal that resolution should continue with the next backend."""
 
 
 async def _fetch_crawl4ai(url: str) -> str:
-    """Fetch with Crawl4AI browser + trafilatura extraction.
-
-    Crawl4AI renders JS pages, then trafilatura extracts clean content.
-    If trafilatura is not installed, falls back to crawl4ai's raw markdown.
-    """
+    """Render with Crawl4AI and prefer trafilatura extraction."""
     if not _HAS_CRAWL4AI:
         raise _SkipBackend
 
@@ -138,7 +115,6 @@ async def _fetch_crawl4ai(url: str) -> str:
         if not result.success:
             raise _SkipBackend
 
-        # Best path: use trafilatura to extract content from rendered HTML
         if _HAS_TRAFILATURA and result.html:
             import trafilatura
 
@@ -152,7 +128,6 @@ async def _fetch_crawl4ai(url: str) -> str:
             if content and content.strip():
                 return content
 
-        # Fallback: crawl4ai's own markdown (includes page chrome)
         md = result.markdown
         text = str(md) if md else ""
         if not text.strip():
@@ -161,13 +136,12 @@ async def _fetch_crawl4ai(url: str) -> str:
 
 
 async def _fetch_trafilatura(url: str) -> str:
-    """Fetch with trafilatura (content extraction, no JS)."""
+    """Fetch static HTML and extract its main content with trafilatura."""
     if not _HAS_TRAFILATURA:
         raise _SkipBackend
 
     import trafilatura
 
-    # Fetch HTML with httpx (async), then extract with trafilatura (sync)
     async with httpx.AsyncClient(
         timeout=FETCH_TIMEOUT,
         follow_redirects=True,
@@ -177,7 +151,6 @@ async def _fetch_trafilatura(url: str) -> str:
         resp.raise_for_status()
         html = resp.text
 
-    # Extract content as markdown
     content = trafilatura.extract(
         html,
         output_format="markdown",
@@ -191,7 +164,7 @@ async def _fetch_trafilatura(url: str) -> str:
 
 
 async def _fetch_jina(url: str) -> str:
-    """Fetch via Jina Reader API (zero deps, JS server-side)."""
+    """Fetch server-rendered Markdown through the Jina Reader API."""
     jina_url = f"https://r.jina.ai/{url}"
     async with httpx.AsyncClient(
         timeout=FETCH_TIMEOUT,
@@ -211,7 +184,7 @@ async def _fetch_jina(url: str) -> str:
 
 
 async def _fetch_naive(url: str) -> str:
-    """Naive fetch: httpx + basic HTML stripping."""
+    """Fetch HTML directly and convert it with basic structural stripping."""
     async with httpx.AsyncClient(
         timeout=FETCH_TIMEOUT,
         follow_redirects=True,
@@ -224,5 +197,5 @@ async def _fetch_naive(url: str) -> str:
     h = html2text.HTML2Text()
     h.ignore_links = False
     h.ignore_images = True
-    h.body_width = 0  # no wrapping
+    h.body_width = 0  # Preserve source line structure for model readability.
     return h.handle(html)

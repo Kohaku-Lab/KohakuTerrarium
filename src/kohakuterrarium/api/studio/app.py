@@ -1,12 +1,9 @@
 """Composite router for the studio backend.
 
-URL preservation: while the catalog read/write routes physically live
-under ``api/routes/catalog/`` (and are mounted at ``/api/catalog/*``),
-they are also mounted here at ``/api/studio/*`` so existing frontend
-code (``frontend/src/utils/studio/*``) keeps working.
-
-The remaining studio-only endpoints (``meta``, ``packages``) live under
-``api/studio/routes/`` and are included as before.
+Catalog routes are also mounted under ``/api/studio/*`` to preserve the
+frontend contract even though their implementation lives under
+``api/routes/catalog/``. Studio-specific ``meta`` and ``packages`` routes remain
+in this package.
 """
 
 from fastapi import APIRouter
@@ -24,17 +21,11 @@ from kohakuterrarium.api.studio.routes import meta, packages
 
 
 def build_studio_router() -> APIRouter:
-    """Build the composite router for studio endpoints.
+    """Build the Studio router with relative prefixes for external mounting.
 
-    Sub-routers are included with a *relative* ``/<slug>`` prefix; the
-    caller mounts this composite under ``/api/studio`` (see
-    ``create_app``), so the public URLs are ``/api/studio/<slug>/...``.
-
-    The ``/api/studio`` prefix must be applied at the *mount* point, not
-    here: several sub-routers expose an index route with an empty path
-    (``@router.get("")``), and FastAPI rejects a router that carries an
-    empty-path route when it is included without a prefix. Mounting the
-    composite under a non-empty prefix keeps those index routes legal.
+    The caller must mount the composite at ``/api/studio``. Keeping that prefix
+    outside this router allows sub-routers with empty index paths to remain valid
+    under FastAPI's inclusion rules.
     """
     r = APIRouter()
     r.include_router(meta.router, prefix="/meta", tags=["studio.meta"])

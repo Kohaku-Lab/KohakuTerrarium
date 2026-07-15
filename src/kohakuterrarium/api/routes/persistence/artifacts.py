@@ -1,7 +1,7 @@
 """Persistence artifacts — serve files from a session's artifacts dir.
 
-Path is ``/{session_name}/artifacts/{filepath:path}`` so the router can
-be mounted under ``/api/sessions`` for URL preservation.
+The ``/{session_name}/artifacts/{filepath:path}`` path preserves the public URL
+when this router is mounted under ``/api/sessions``.
 """
 
 import asyncio
@@ -21,10 +21,10 @@ router = APIRouter()
 
 
 def _resolve_artifact(session_name: str, decoded: str):
-    """Resolve the artifacts dir + the candidate file in one sync hop.
+    """Resolve an artifact directory and candidate in one synchronous unit.
 
-    Both helpers stat the filesystem; bundling them keeps the
-    off-loop hand-off to a single ``to_thread`` call.
+    Both operations inspect the filesystem, so grouping them requires only one
+    event-loop-to-worker handoff.
     """
     artifacts = resolve_artifacts_dir(session_name, persistence_store._SESSION_DIR)
     return resolve_artifact_file(artifacts, decoded)
@@ -32,14 +32,12 @@ def _resolve_artifact(session_name: str, decoded: str):
 
 @router.get("/{session_name}/artifacts/{filepath:path}")
 async def get_session_artifact(session_name: str, filepath: str):
-    """Serve a file from ``<session>.artifacts/`` with path-traversal guards.
+    """Serve a session artifact while enforcing directory containment.
 
-    ``filepath`` is the path relative to the session's artifacts
-    directory (e.g. ``generated_images/cat.png``). The resolved
-    location must stay inside the artifacts dir — any ``..`` or
-    absolute path is rejected. Path resolution does sync stat work,
-    so it runs in a worker thread; ``FileResponse`` itself already
-    streams the body off-loop.
+    ``filepath`` is relative to ``<session>.artifacts/``. Absolute paths and
+    traversal outside that directory are rejected by resolution. Filesystem
+    inspection runs in a worker thread, while ``FileResponse`` handles streaming
+    without blocking the event loop.
     """
     decoded = unquote(filepath)
     candidate = await asyncio.to_thread(_resolve_artifact, session_name, decoded)

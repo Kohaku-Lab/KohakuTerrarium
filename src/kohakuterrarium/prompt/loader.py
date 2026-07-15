@@ -1,8 +1,4 @@
-"""
-Prompt loading utilities.
-
-Load markdown prompts from files and folders.
-"""
+"""Load UTF-8 prompt text from files and prompt directories."""
 
 from pathlib import Path
 
@@ -12,18 +8,7 @@ logger = get_logger(__name__)
 
 
 def load_prompt(path: str | Path) -> str:
-    """
-    Load a single prompt file.
-
-    Args:
-        path: Path to markdown/text file
-
-    Returns:
-        File contents as string
-
-    Raises:
-        FileNotFoundError: If file doesn't exist
-    """
+    """Read one UTF-8 prompt file, raising when it does not exist."""
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Prompt file not found: {path}")
@@ -36,17 +21,7 @@ def load_prompt(path: str | Path) -> str:
 
 
 def load_prompts_folder(folder: str | Path) -> dict[str, str]:
-    """
-    Load all prompts from a folder.
-
-    Loads all .md and .txt files, using filename (without extension) as key.
-
-    Args:
-        folder: Path to folder containing prompt files
-
-    Returns:
-        Dict mapping filename to content
-    """
+    """Load top-level Markdown and text files keyed by filename stem."""
     folder = Path(folder)
     if not folder.exists():
         logger.warning("Prompts folder not found", path=str(folder))
@@ -66,16 +41,7 @@ def load_prompt_with_fallback(
     primary: str | Path | None,
     fallback: str,
 ) -> str:
-    """
-    Load prompt from file, falling back to default string.
-
-    Args:
-        primary: Path to prompt file (can be None)
-        fallback: Default prompt if file not found
-
-    Returns:
-        Prompt content
-    """
+    """Load a prompt file or return fallback when no readable path exists."""
     if primary is None:
         return fallback
 

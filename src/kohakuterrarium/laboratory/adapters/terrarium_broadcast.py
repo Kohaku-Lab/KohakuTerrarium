@@ -1,43 +1,8 @@
-"""APP extension adapter for ``terrarium.broadcast``.
+"""Forward channel messages between Laboratory nodes.
 
-Cross-node channel forwarding.  When a graph spans multiple nodes
-(``MultiNodeTerrariumService.connect`` was invoked with sender +
-receiver on different workers), each node hosts its half of the
-graph: sender on node A, receiver on node B, both with a local
-``Channel`` object of the same name.  Engine-level channel sends
-fire ``on_send`` callbacks locally, but a peer node's listeners get
-nothing — without forwarding the cross-node connect is a paper
-contract.
-
-This adapter on every node tracks per-channel subscriptions:
-
-    self._subs: dict[(graph_id, channel), set[peer_node_id]]
-
-When a peer wants to receive forwarded sends for ``(graph_id,
-channel)``, it issues ``terrarium.broadcast.subscribe(graph_id,
-channel)`` and this node records ``msg.sender_node`` in the set.
-On every LOCAL channel send the persistence callback in
-``terrarium/channels.py`` looks up the subs set and forwards via
-``terrarium.broadcast.inject`` to each peer.  Peers receive
-``inject`` and replay the send into their local channel — but
-WITHOUT re-broadcasting (the ``injected`` flag suppresses the
-forward chain) to avoid loops.
-
-Operations:
-
-- ``subscribe({graph_id, channel})`` — record ``sender_node`` as a
-  subscriber to local sends on ``(graph_id, channel)``.
-- ``unsubscribe({graph_id, channel})`` — drop the subscription.
-- ``inject({graph_id, channel, message})`` — peer is forwarding a
-  send to me; replay into my local channel registry without
-  re-broadcasting.
-
-Wire shape of ``message`` body matches what ``terrarium.channels``
-sends on the persistence path (see
-``terrarium/channels.py:_persist``):
-
-    {"sender": str, "sender_id": str|None, "content": Any,
-     "message_id": str, "timestamp": str-iso, "ts": float}
+Each node owns its local half of a cross-node channel and subscribes to sends
+from the remote half. Injected messages retain normal local listener behavior
+but are marked so the persistence hook does not broadcast them again.
 """
 
 from datetime import datetime
@@ -53,21 +18,11 @@ logger = get_logger(__name__)
 
 
 class TerrariumBroadcastAdapter:
-    """Per-node ``terrarium.broadcast`` extension.  Both controller
-    (lab host) and workers (lab clients) install one.
+    """Per-node channel subscription and message-forwarding extension.
 
-    Holds two pieces of state:
-
-    - ``_subs``: subscriptions FROM peers — used by the local
-      channel persistence hook to decide who to forward LOCAL sends
-      to.
-    - ``_my_subs``: subscriptions THIS node has on peers — used by
-      :meth:`subscribe_remote` / :meth:`unsubscribe_remote` to know
-      what to tear down on disconnect.
-
-    Forwarding loops are prevented by tagging injected messages with
-    a ``_injected`` flag so the local on_send hook skips re-forward
-    when replaying them.
+    ``_subs`` records peers receiving this node's sends; ``_my_subs`` records
+    this node's remote subscriptions for teardown. Injected messages are marked
+    to prevent forwarding loops.
     """
 
     NAMESPACE = "terrarium.broadcast"
@@ -79,8 +34,7 @@ class TerrariumBroadcastAdapter:
         self._subs: dict[tuple[str, str], set[str]] = {}
         self._my_subs: dict[tuple[str, str], set[str]] = {}
         lab_node.register_app_extension(self.NAMESPACE, self._dispatch)
-        # Stash on engine so the channel persistence hook can find it
-        # without an import cycle.  Single per-engine instance.
+        # Engine discovery avoids an import cycle in the persistence hook.
         engine._broadcast_adapter = self
         logger.info("lab adapter registered", namespace=self.NAMESPACE)
 
@@ -92,10 +46,6 @@ class TerrariumBroadcastAdapter:
         self._my_subs.clear()
         logger.info("lab adapter detached", namespace=self.NAMESPACE)
 
-    # ------------------------------------------------------------------
-    # Local hooks called from ``terrarium/channels.py:_persist``.
-    # ------------------------------------------------------------------
-
     def peers_for(self, graph_id: str, channel: str) -> set[str]:
         return self._subs.get((graph_id, channel), set())
 
@@ -105,13 +55,7 @@ class TerrariumBroadcastAdapter:
         channel: str,
         wire_message: dict[str, Any],
     ) -> None:
-        """Notify every subscribed peer of a local channel send.
-
-        ``wire_message`` is the persistence payload (sender, content,
-        etc.) — see this module's docstring for the shape.  We never
-        ``await`` per-peer notify serially; each fan-out is a
-        fire-and-forget so a slow peer doesn't stall the producer.
-        """
+        """Forward a local channel message to every subscribed peer."""
         peers = self._subs.get((graph_id, channel))
         if not peers:
             return
@@ -131,9 +75,7 @@ class TerrariumBroadcastAdapter:
                     graph_id=graph_id,
                     channel=channel,
                 )
-                # The peer is gone — remove it from the sub set so we
-                # don't keep notifying a dead node every send.  If the
-                # set empties, drop the (graph_id, channel) key too.
+                # Stop retrying a peer that failed and remove empty buckets.
                 sub_set = self._subs.get((graph_id, channel))
                 if sub_set is not None:
                     sub_set.discard(peer)
@@ -146,13 +88,10 @@ class TerrariumBroadcastAdapter:
         graph_id: str,
         channel: str,
     ) -> None:
-        """Tell ``peer_node`` to forward its local sends on
-        ``(graph_id, channel)`` to me.  Tracked in ``_my_subs`` so we
-        can issue ``unsubscribe`` on teardown.
+        """Subscribe this node to a peer's channel sends.
 
-        Uses ``request`` not ``notify`` because the subscription is
-        state-establishing — silent failure here means cross-node
-        forwarding never happens, with no observability.
+        A request confirms that the remote subscription state exists before it
+        is recorded locally for teardown.
         """
         resp = await self._node.request(
             to_node=peer_node,
@@ -180,9 +119,7 @@ class TerrariumBroadcastAdapter:
                 timeout=self.REQUEST_TIMEOUT,
             )
         except Exception:
-            # Teardown best-effort — the peer may already be gone.  We
-            # still want to clear local bookkeeping so a re-subscribe
-            # doesn't double-track.
+            # Clear local state even when the peer has already disappeared.
             logger.debug(
                 "unsubscribe RPC failed; clearing local state anyway",
                 peer=peer_node,
@@ -194,13 +131,6 @@ class TerrariumBroadcastAdapter:
             subs.discard(peer_node)
             if not subs:
                 self._my_subs.pop((graph_id, channel), None)
-
-    # ------------------------------------------------------------------
-    # Proxy helpers — used by the controller to ask a third node to
-    # subscribe to another.  Cross-node connect goes alice@A → bob@B;
-    # the right party to subscribe on A is B (so A's sends fan out to
-    # B).  The controller isn't A or B, so it asks B to do the subscribe.
-    # ------------------------------------------------------------------
 
     async def proxy_subscribe(
         self,
@@ -246,10 +176,6 @@ class TerrariumBroadcastAdapter:
                 channel=channel,
             )
 
-    # ------------------------------------------------------------------
-    # APP dispatch
-    # ------------------------------------------------------------------
-
     async def _dispatch(self, msg: AppMessage) -> dict[str, Any]:
         try:
             return await self._handle(msg)
@@ -278,10 +204,8 @@ class TerrariumBroadcastAdapter:
                         self._subs.pop((graph_id, channel), None)
                 return {"unsubscribed": True}
             case "proxy_subscribe":
-                # Controller asks us to subscribe ourselves to a peer.
-                # The receiving node calls its own subscribe_remote so
-                # the peer records THIS node (the receiver of the
-                # ``proxy_subscribe`` RPC) as the subscriber.
+                # The proxy must subscribe itself so the peer records the
+                # receiving node, not the controller, as the subscriber.
                 await self.subscribe_remote(
                     msg.body["peer"], msg.body["graph_id"], msg.body["channel"]
                 )
@@ -302,26 +226,16 @@ class TerrariumBroadcastAdapter:
                 }
 
     async def _op_inject(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Replay a peer's channel send into my local channel.
+        """Replay a peer's send through the matching local channel.
 
-        The local channel's ``on_send`` callbacks fire normally — so
-        ``listen_channels``-trigger callbacks deliver to my local
-        creatures.  The persistence ``_persist`` callback in
-        ``terrarium/channels.py`` checks the ``injected`` flag on the
-        message and skips re-broadcasting to avoid forward-loops.
+        Local listeners run normally; the injected marker prevents the
+        persistence callback from forwarding the message again.
         """
         channel_name = body["channel"]
         message = body.get("message") or {}
-        # Per the cross-node design, each node hosts its own half of
-        # the connection: sender on A, receiver on B, both with a
-        # local ``Channel`` object of the same name.  The
-        # ``graph_id`` in the forward body is the SENDER's graph id,
-        # which the receiver does not (and must not) recognize — its
-        # own graph id is different.  So look up by ``channel_name``
-        # across every local graph and use the first match.  Multiple
-        # local channels with the same name across disjoint graphs is
-        # an operator error the cluster topology rules forbid; we
-        # take the first hit and log if there are more than one.
+        # The transmitted graph ID belongs to the sender and differs from the
+        # receiver's graph ID. Channel names are cluster-unique, so search local
+        # graphs by name and use the first match.
         channel = None
         for env in self._engine._environments.values():
             registry = getattr(env, "shared_channels", None)
@@ -335,13 +249,8 @@ class TerrariumBroadcastAdapter:
             raise KeyError(
                 f"channel {channel_name!r} not in any local graph on this node"
             )
-        # Build a real ChannelMessage so the receiver's listener
-        # triggers (anti-echo filters, etc.) see the same shape they
-        # would for a local send.  Set ``_injected`` as a runtime
-        # attribute (the dataclass doesn't define a slot, but it's
-        # not slotted either, so attribute assignment works); the
-        # persistence callback in ``terrarium/channels.py:_persist``
-        # reads via ``getattr`` and skips re-forwarding.
+        # Preserve the local message shape for listener filters. ChannelMessage
+        # is not slotted, allowing the persistence hook's runtime marker.
         ts_raw = message.get("timestamp", "")
         if isinstance(ts_raw, str) and ts_raw:
             try:

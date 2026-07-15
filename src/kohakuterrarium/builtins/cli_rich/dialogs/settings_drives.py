@@ -34,7 +34,6 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-# Runtime int fields exposed inline (label, config attribute).
 _INT_FIELDS: list[tuple[str, str]] = [
     ("Max active / creature", "max_active_per_creature"),
     ("Max pending / graph", "max_pending_per_graph"),
@@ -50,7 +49,7 @@ _APPLY_STYLE = {
 
 
 class DriveSettingsSection:
-    """Runtime + registration editor rendered inside the ``Drives`` tab."""
+    """Edit drive runtime and registration settings in the Drives tab."""
 
     def __init__(self, get_engine: Callable[[], Any] | None = None) -> None:
         self._get_engine = get_engine or (lambda: None)
@@ -62,8 +61,6 @@ class DriveSettingsSection:
         self._edit_buffer = ""
         self.flash = ""
         self.apply_result: dict[str, Any] | None = None
-
-    # ── Data ────────────────────────────────────────────────────
 
     def reload(self) -> None:
         try:
@@ -77,7 +74,7 @@ class DriveSettingsSection:
         self._edit_buffer = ""
         if self.cursor >= len(self._rows):
             self.cursor = max(0, len(self._rows) - 1)
-        # Never rest the cursor on a non-interactive header row.
+        # Header rows cannot receive keyboard actions.
         while (
             self.cursor < len(self._rows)
             and self._rows[self.cursor]["type"] == "header"
@@ -135,8 +132,6 @@ class DriveSettingsSection:
     @property
     def parse_error(self) -> str | None:
         return self._status.get("parse_error")
-
-    # ── Keyboard ────────────────────────────────────────────────
 
     def handle_key(self, key: str) -> bool:
         if self.editing:
@@ -229,8 +224,6 @@ class DriveSettingsSection:
             self.flash = "not a number"
         self._edit_buffer = ""
 
-    # ── Save / apply ────────────────────────────────────────────
-
     def _save(self) -> None:
         if self._settings is None:
             self.flash = "cannot save over an invalid settings file; fix it first"
@@ -266,7 +259,7 @@ class DriveSettingsSection:
         engine = self._get_engine()
         try:
             self.apply_result = apply_runtime(engine)
-        except Exception as exc:  # pragma: no cover — defensive
+        except Exception as exc:  # pragma: no cover - runtime apply is defensive
             logger.warning("drive settings apply failed", error=str(exc))
             self.apply_result = {"result": "rejected", "warnings": [str(exc)]}
         result = (self.apply_result or {}).get("result", "rejected")
@@ -297,8 +290,6 @@ class DriveSettingsSection:
             existing = new_regs.get(name) or RegistrationSetting()
             new_regs[name] = replace(existing, enabled=bool(row.get("enabled", False)))
         return replace(self._settings, runtime=new_runtime, registrations=new_regs)
-
-    # ── Rendering ───────────────────────────────────────────────
 
     def render_body(self) -> RenderableType:
         if self.parse_error:

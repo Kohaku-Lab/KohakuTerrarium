@@ -1,14 +1,8 @@
-"""Active sessions — engine-backed lifecycle endpoints.
+"""Expose lifecycle operations for engine-backed sessions.
 
-Mounted at ``/api/sessions/active``.
-
-A *session* is one engine graph regardless of how many creatures live
-in it. There is no creature-vs-terrarium distinction at the API level —
-both creation paths (one starts from a creature config, the other from
-a recipe) produce the same shape, and a single ``GET /{id}`` route
-returns it. Legacy ``/agents`` / ``/terrariums`` endpoints stay as
-thin shims so older clients keep working without forking the wire
-contract.
+A session represents one engine graph regardless of creature count or whether it
+originated from a creature config or a recipe. Legacy agent and terrarium routes
+adapt the same session model for older clients.
 """
 
 import asyncio
@@ -32,26 +26,22 @@ router = APIRouter()
 
 
 class CreaturePayload(BaseModel):
-    """Body for ``POST /api/sessions/active/creature``."""
+    """Describe a single-creature session to start."""
 
     config_path: str
     llm: str | None = None
     pwd: str | None = None
     name: str | None = None
-    on_node: str | None = None  # Lab target node; absent = ``_host``
-
-
-# ─── creation ─────────────────────────────────────────────────────────
+    on_node: str | None = None  # Omission targets the lab host.
 
 
 @router.post("/creature")
 async def create_creature_session(
     req: CreaturePayload, service: TerrariumService = Depends(get_service)
 ):
-    """Start a 1-creature session.  Returns the new session handle.
+    """Start a single-creature session on the host or a selected worker.
 
-    Pass ``on_node`` to target a worker (lab-host mode); absent =
-    ``_host``.  Standalone mode silently ignores it.
+    Standalone services ignore the worker target.
     """
     try:
         session = await lifecycle.start_creature(
@@ -71,12 +61,10 @@ async def create_creature_session(
 async def create_terrarium_session(
     req: TerrariumCreate, service: TerrariumService = Depends(get_service)
 ):
-    """Start a multi-creature terrarium session from a recipe.
+    """Start a multi-creature session from a host-local recipe.
 
-    NOTE: recipe-spawn-on-worker is not yet wired — terrarium recipes
-    apply on the host engine.  If a non-host ``on_node`` is supplied
-    we 501 so the frontend's SitePicker selection isn't silently
-    dropped.
+    Remote recipe spawning is rejected rather than silently ignoring the selected
+    worker.
     """
     if req.on_node and req.on_node != "_host":
         raise HTTPException(
@@ -97,10 +85,8 @@ async def create_terrarium_session(
         raise HTTPException(400, str(e))
 
 
-# Legacy creation aliases — preserved so older frontend callers still
-# work without a forced cutover. They both produce the same Session
-# shape; the only divergence is the response key (``agent_id`` /
-# ``terrarium_id``) the historical caller expected.
+# Compatibility routes preserve historical response identifiers while using the
+# unified session model.
 
 
 @router.post("/agents")
@@ -149,9 +135,6 @@ async def create_terrarium_compat(
         return {"terrarium_id": session.session_id, "status": "running"}
     except (ValueError, KeyError, FileNotFoundError) as e:
         raise HTTPException(400, str(e))
-
-
-# ─── rename ──────────────────────────────────────────────────────────
 
 
 @router.post("/agents/{creature_id}/rename")
@@ -204,24 +187,12 @@ async def rename_session_creature(
         raise HTTPException(400, str(e))
 
 
-# ─── unified session resolution / read ───────────────────────────────
-
-
 async def _resolve_session(service: TerrariumService, identifier: str):
-    """Return the live :class:`Session` for ``identifier``, accepting
-    either a session_id (graph_id) or a creature_id. The runtime
-    engine has no agent-vs-terrarium distinction; this resolver lets
-    bookmarked URLs from before a graph grew past one member keep
-    resolving to the same session without a forced redirect.
+    """Resolve a live session from either a graph or creature identifier.
 
-    Creature resolution routes through the service Protocol so a
-    creature on a worker node resolves the same as a host-local one.
-
-    Uses the async variant of :func:`lifecycle.get_session` so remote
-    sessions refresh their cached ``model`` / ``llm_name`` from the
-    worker before returning — this is what makes the model chip
-    survive a chat-tab close + reopen for worker-hosted creatures
-    (B3 / B4).
+    Creature lookup is service-routed for worker-hosted sessions. Async session
+    reads refresh cached remote model metadata before returning, preserving
+    bookmarked creature URLs as graphs grow.
     """
     try:
         return await lifecycle.get_session_async(service, identifier)
@@ -259,13 +230,11 @@ async def stop_terrarium_session(
 
 @router.get("/agents")
 async def list_active_agents(service: TerrariumService = Depends(get_service)):
-    """Legacy alias — returns sessions whose graph holds exactly one
-    creature (the original ``agent`` shape). Multi-creature sessions
-    that grew via ``group_add_node`` migrate to the terrarium list.
+    """Return single-creature sessions in the legacy agent shape.
 
-    Refreshes remote ``_meta`` before reading so worker-side
-    ``switch_model`` paths that bypass the host route do not leave
-    this listing surfacing the stale identifier (S6-2)."""
+    Refresh remote metadata first so worker-side model switches appear in the
+    listing. Sessions leave this view after gaining additional creatures.
+    """
     await remote_meta.refresh_all_remote_creature_meta(
         lifecycle.meta_for(service), service
     )
@@ -274,12 +243,11 @@ async def list_active_agents(service: TerrariumService = Depends(get_service)):
 
 @router.get("/terrariums")
 async def list_active_terrariums(service: TerrariumService = Depends(get_service)):
-    """Legacy alias — returns sessions whose graph holds 2+ creatures
-    OR was created from a terrarium recipe.
+    """Return multi-creature sessions in the legacy terrarium shape.
 
-    Refreshes remote ``_meta`` before reading so worker-side
-    ``switch_model`` paths that bypass the host route do not leave
-    this listing surfacing the stale identifier (S6-2)."""
+    Refresh remote metadata first so worker-side model switches appear in the
+    listing.
+    """
     await remote_meta.refresh_all_remote_creature_meta(
         lifecycle.meta_for(service), service
     )
@@ -290,8 +258,7 @@ async def list_active_terrariums(service: TerrariumService = Depends(get_service
 async def get_creature_status(
     creature_id: str, service: TerrariumService = Depends(get_service)
 ):
-    """Legacy ``/agents/{id}`` accessor. Accepts either a creature_id
-    or a session_id and returns the unified session shape."""
+    """Return a graph or creature identifier in the legacy agent shape."""
     try:
         sess = await _resolve_session(service, creature_id)
     except KeyError:
@@ -303,9 +270,7 @@ async def get_creature_status(
 async def get_terrarium_session(
     session_id: str, service: TerrariumService = Depends(get_service)
 ):
-    """Legacy ``/terrariums/{id}`` accessor. Accepts either a
-    session_id or a creature_id and returns the unified session
-    shape under the historical terrarium-style keys."""
+    """Return a graph or creature identifier in the legacy terrarium shape."""
     try:
         sess = await _resolve_session(service, session_id)
     except KeyError:
@@ -315,13 +280,11 @@ async def get_terrarium_session(
 
 @router.get("")
 async def list_active_sessions(service: TerrariumService = Depends(get_service)):
-    """Canonical list endpoint — every active session in the unified
-    shape. Frontend stores prefer this over the legacy aliases.
+    """Return every active session in the unified shape.
 
-    Refreshes remote ``_meta`` before reading so worker-side
-    ``switch_model`` paths that bypass the host route (``/model`` slash
-    command, ``PluginContext.switch_model``, compact-LLM swap) still
-    surface on the next list read (S6-2)."""
+    Refresh remote metadata first so model changes made directly on workers are
+    visible on the next read.
+    """
     await remote_meta.refresh_all_remote_creature_meta(
         lifecycle.meta_for(service), service
     )
@@ -333,8 +296,7 @@ async def list_active_sessions(service: TerrariumService = Depends(get_service))
 async def get_active_session(
     session_id: str, service: TerrariumService = Depends(get_service)
 ):
-    """Canonical session getter. Accepts either a session_id or a
-    creature_id; both resolve to the same unified shape."""
+    """Return one unified session by graph or creature identifier."""
     try:
         sess = await _resolve_session(service, session_id)
     except KeyError as e:
@@ -353,15 +315,11 @@ async def stop_active_session(
         raise HTTPException(404, str(e))
 
 
-# ─── per-session creature CRUD (hot-plug) ────────────────────────────
-
-
 @router.get("/{session_id}/creatures")
 async def list_session_creatures(
     session_id: str, service: TerrariumService = Depends(get_service)
 ):
-    # S6-2: refresh the cached model from the worker before reading so
-    # ``/model`` slash, plugin, and compact swap paths surface.
+    # Refresh worker metadata so out-of-band model switches are visible.
     try:
         await lifecycle.refresh_remote_creature_meta(service, session_id)
         return await asyncio.to_thread(lifecycle.list_creatures, service, session_id)
@@ -373,12 +331,8 @@ async def list_session_creatures(
 async def add_session_creature(
     session_id: str, req: CreatureAdd, service: TerrariumService = Depends(get_service)
 ):
-    # ``CreatureConfig`` is ``(name, config_data: dict, base_dir: Path,
-    # listen_channels, send_channels, ...)`` — NOT a ``config_path``
-    # field. The request carries a path, so wrap it as a ``base_config``
-    # reference in the config dict and let ``build_agent_config`` resolve
-    # the inheritance (same shape ``terrarium.config._parse_creature``
-    # produces for recipe creatures).
+    # CreatureConfig accepts inherited config data rather than a path field, so
+    # preserve recipe parsing semantics by passing the request path as base_config.
     cfg = CreatureConfig(
         name=req.name,
         config_data={"name": req.name, "base_config": req.config_path},
@@ -406,14 +360,8 @@ async def remove_session_creature(
     return {"status": "removed"}
 
 
-# ─── legacy shape adapters ───────────────────────────────────────────
-
-
 def _session_legacy_agent_response(sess) -> dict:
-    """Shape a Session into the legacy agent response — preserves the
-    fields ``stores/instances._mapAgent`` reads. The full graph roster
-    is surfaced under ``graph_*`` so the frontend can transparently
-    show multi-creature panels for a graph that grew past one member."""
+    """Convert a session to the legacy agent shape with full graph metadata."""
     primary = sess.creatures[0] if sess.creatures else {}
     out = dict(primary)
     out["agent_id"] = primary.get("creature_id") or primary.get("agent_id") or ""
@@ -466,8 +414,7 @@ def _list_solo_legacy_sync(service: TerrariumService) -> list[dict]:
 
 
 def _list_multi_legacy_sync(service: TerrariumService) -> list[dict]:
-    """Sessions with 2+ creatures (or recipe-loaded), in legacy
-    terrarium shape."""
+    """Return multi-creature sessions in the legacy terrarium shape."""
     out: list[dict] = []
     for listing in lifecycle.list_sessions(service):
         if listing.creatures < 2:

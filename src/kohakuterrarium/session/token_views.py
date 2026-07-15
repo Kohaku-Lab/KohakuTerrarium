@@ -1,13 +1,7 @@
-"""Wave G — read-side token-usage helpers for :class:`SessionStore`.
+"""Read token usage for individual agents and complete session trees.
 
-No aggregation by default, opt-in roll-up across sub-agents / attached
-agents, plus a flat enumeration of every controller loop in the session
-tree for consumers that want to display or sum tokens themselves.
-
-This module is the implementation heart of Wave G. Both
-``SessionStore.token_usage`` and ``SessionStore.token_usage_all_loops``
-are thin facades over the helpers below. Nothing here mutates the store
-— every function is a pure read.
+Helpers in this module are read-only and support optional aggregation across
+sub-agents and attached agents.
 """
 
 from typing import TYPE_CHECKING, Any
@@ -21,9 +15,6 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
-# ─── Key helpers ──────────────────────────────────────────────────────
-
-
 def _decode_key(key_bytes: Any) -> str:
     """Decode a KVault key (bytes or str) to a native string."""
     if isinstance(key_bytes, bytes):
@@ -31,11 +22,8 @@ def _decode_key(key_bytes: Any) -> str:
     return str(key_bytes)
 
 
-# ─── Counter shape ────────────────────────────────────────────────────
-
-
 def _empty_usage() -> dict[str, int]:
-    """Zero-initialised token counter dict, the canonical return shape."""
+    """Return the canonical zero-valued token counter shape."""
     return {
         "total_tokens": 0,
         "prompt_tokens": 0,
@@ -119,9 +107,6 @@ def _own_usage_for_namespace(store: "SessionStore", namespace: str) -> dict[str,
     return _empty_usage()
 
 
-# ─── Sub-agent enumeration ────────────────────────────────────────────
-
-
 def _iter_subagent_runs(store: "SessionStore", parent: str) -> list[tuple[str, int]]:
     """Return every ``(name, run)`` for sub-agents spawned by ``parent``.
 
@@ -170,10 +155,8 @@ def _subagent_tokens_from_events(
 ) -> dict[str, list[dict[str, int]]]:
     """Group per-sub-agent-name ``subagent_result`` token fields in order.
 
-    Each returned list is ordered by event appearance, which matches
-    run index for well-behaved ``SubAgentManager`` usage: ``next_subagent_run``
-    hands out monotonically increasing indices, and events are appended
-    in completion order. See note in module docstring.
+    Each list follows event order, which corresponds to run order when run
+    indices and result events are emitted monotonically.
     """
     per_name: dict[str, list[dict[str, int]]] = {}
     pending_updates: dict[str, dict] = {}
@@ -233,8 +216,7 @@ def _subagent_usage_map(
     runs = _iter_subagent_runs(store, parent)
     events = dedupe_adjacent_duplicate_events(store.get_events(parent))
     per_name = _subagent_tokens_from_events(events)
-    # Track consumed positions per name so unrecorded extra events can
-    # still be surfaced after the known runs.
+    # Preserve event-only runs after matching authoritative metadata rows.
     consumed: dict[str, int] = {}
     for name, run in runs:
         path = f"{parent}:subagent:{name}:{run}"
@@ -245,9 +227,7 @@ def _subagent_usage_map(
             consumed[name] = idx + 1
         else:
             results[path] = _empty_usage()
-    # Surface any events that had no matching meta row (defensive — the
-    # plugin/attach flow may emit results without going through
-    # ``SubAgentManager``).
+    # Plugin and attachment flows may emit results without sub-agent metadata.
     for name, token_rows in per_name.items():
         start = consumed.get(name, 0)
         for extra_idx in range(start, len(token_rows)):
@@ -258,26 +238,21 @@ def _subagent_usage_map(
     return results
 
 
-# ─── Attached-agent enumeration (Wave F) ──────────────────────────────
-
-
 def _attached_usage_map(store: "SessionStore") -> dict[str, dict[str, int]]:
     """Return ``{<host>:attached:<role>:<seq>: usage}`` for every attached agent.
 
-    Delegates to :meth:`SessionStore.discover_attached_agents` so
-    hot-plugged / plugin-spawned creatures (whose namespaces never land
-    in ``meta["agents"]``) are picked up. Flushes the events cache
-    first — Wave F events land via a flush-interval-buffered KVault and
-    may be invisible to discovery otherwise.
+    Discovery includes hot-plugged and plugin-spawned creatures absent from
+    ``meta["agents"]``. The event cache is flushed first so buffered namespace
+    events are visible.
     """
     results: dict[str, dict[str, int]] = {}
     try:
         store.events.flush_cache()
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - token reporting is best-effort
         logger.warning("events.flush_cache failed", error=str(e), exc_info=True)
     try:
         attached = store.discover_attached_agents()
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - token reporting is best-effort
         logger.warning("discover_attached_agents failed", error=str(e), exc_info=True)
         attached = []
     for entry in attached:
@@ -288,18 +263,15 @@ def _attached_usage_map(store: "SessionStore") -> dict[str, dict[str, int]]:
     return results
 
 
-# ─── Per-turn breakdown ───────────────────────────────────────────────
-
-
 def _by_turn_from_rollup(store: "SessionStore", agent: str) -> list[dict[str, int]]:
     """Return per-turn counters from the ``turn_rollup`` table.
 
-    Empty list when Wave B's rollup emitter hasn't fired for this
-    agent yet — the caller then falls back to event-walking.
+    Return an empty list when no rollups exist so callers can fall back to
+    reconstructing usage from events.
     """
     try:
         rows = store.list_turn_rollups(agent)
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - token reporting is best-effort
         logger.warning("list_turn_rollups failed", error=str(e), exc_info=True)
         return []
     out: list[dict[str, int]] = []
@@ -324,11 +296,8 @@ def _by_turn_from_rollup(store: "SessionStore", agent: str) -> list[dict[str, in
 def _by_turn_from_events(store: "SessionStore", agent: str) -> list[dict[str, int]]:
     """Group token and sub-agent-result events by turn (fallback path).
 
-    Used when the rollup table has nothing for ``agent``; Wave B
-    documented this as acceptable because the emitter is not yet wired
-    on every code path. Events without a ``turn_index`` land under turn
-    ``0`` — consumers should treat ``0`` as "pre-conversation / unknown"
-    per Q6 in the plan.
+    Events without a ``turn_index`` are grouped under turn ``0``, representing
+    pre-conversation or otherwise unknown attribution.
 
     Parent ``token_usage`` rows are per-call deltas and sum directly.
     Sub-agent ``subagent_token_usage`` / ``subagent_result`` rows are
@@ -372,9 +341,6 @@ def _by_turn_from_events(store: "SessionStore", agent: str) -> list[dict[str, in
     return [buckets[t] for t in sorted(buckets.keys())]
 
 
-# ─── Public helpers (imported by SessionStore) ────────────────────────
-
-
 def token_usage(
     store: "SessionStore",
     agent: str | None,
@@ -383,14 +349,10 @@ def token_usage(
     include_attached: bool = False,
     by_turn: bool = False,
 ) -> dict[str, Any]:
-    """Return token counters for ``agent`` — Wave G primary read API.
+    """Return token counters and requested breakdowns for one explicit agent.
 
-    See :meth:`SessionStore.token_usage` for the public docstring. A
-    missing ``agent`` raises :class:`ValueError` (Q2: "no silent main
-    pick"). Sub-dicts are only present when the matching flag is set,
-    and are always dicts (never ``None``) when the flag is on — callers
-    can rely on ``result["attached"]`` being iterable regardless of
-    whether any attached agents exist.
+    Optional sub-agent and attached-agent mappings are always dictionaries when
+    requested, including when no matching agents exist.
     """
     if agent is None:
         raise ValueError(
@@ -420,19 +382,14 @@ def token_usage_all_loops(
 ) -> list[tuple[str, dict[str, int]]]:
     """Flat enumeration of every controller loop (main + sub + attached).
 
-    See :meth:`SessionStore.token_usage_all_loops` for the public
-    docstring. Order:
-
-    1. Main agents (``meta["agents"]`` union with
-       ``discover_agents_from_events``).
-    2. Sub-agents per main agent (sorted by name then run).
-    3. Attached agents (discover order — Wave F guarantees first-seen).
+    Main agents appear first, followed by their sorted sub-agent runs and then
+    attached agents in discovery order.
     """
     result: list[tuple[str, dict[str, int]]] = []
 
     try:
         meta = store.load_meta()
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - token reporting is best-effort
         logger.warning("load_meta failed in all_loops", error=str(e), exc_info=True)
         meta = {}
 
@@ -445,10 +402,10 @@ def token_usage_all_loops(
                 mains.append(name)
                 seen_mains.add(name)
 
-    # ``discover_agents_from_events`` already skips attached namespaces.
+    # Event discovery excludes attached namespaces to avoid duplicate loops.
     try:
         extra_mains = store.discover_agents_from_events()
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - token reporting is best-effort
         logger.warning(
             "discover_agents_from_events failed in all_loops",
             error=str(e),
@@ -467,10 +424,10 @@ def token_usage_all_loops(
             result.append((path, subagents[path]))
 
     attached = _attached_usage_map(store)
-    # Preserve discovery order (which matches ``discover_attached_agents``).
+    # Preserve attachment discovery order in the flattened result.
     try:
         attached_entries = store.discover_attached_agents()
-    except Exception as e:  # pragma: no cover — defensive
+    except Exception as e:  # pragma: no cover - token reporting is best-effort
         logger.warning(
             "discover_attached_agents failed in all_loops",
             error=str(e),

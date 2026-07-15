@@ -1,6 +1,6 @@
 """``kt self-update`` — CLI parity for the launcher's update flow.
 
-The 06b launcher is the *only* thing that updates this install. This
+The launcher is the only component that updates a managed install. This
 verb is a thin client over :mod:`launcher.update_runner`:
 
 - **Launcher install** (active pointer + interpreter under
@@ -31,11 +31,13 @@ from kohakuterrarium.launcher.update_runner import (
 
 
 def _print(line: str) -> None:
+    """Write and flush one status line."""
     sys.stdout.write(line + "\n")
     sys.stdout.flush()
 
 
 def _current_version() -> str | None:
+    """Return the installed distribution version when available."""
     try:
         return importlib.metadata.version("kohakuterrarium")
     except importlib.metadata.PackageNotFoundError:
@@ -65,6 +67,7 @@ def _apply_overrides(args: argparse.Namespace) -> None:
 
 
 def _refuse_non_launcher() -> int:
+    """Explain why unmanaged installations cannot self-update."""
     _print("kt self-update: this process is not running inside a launcher install.")
     _print(
         "  - Developer checkout?  Run `git pull` (or `pip install -e .`) in your tree."
@@ -75,6 +78,7 @@ def _refuse_non_launcher() -> int:
 
 
 def self_update_cli(args: argparse.Namespace) -> int:
+    """Run update, probe, dry-run, or rollback for a launcher install."""
     cur = _current_version() or "unknown"
 
     if not is_launcher_install():
@@ -132,6 +136,7 @@ def self_update_cli(args: argparse.Namespace) -> int:
 
 
 def add_self_update_subparser(subparsers) -> None:
+    """Register launcher-managed self-update options."""
     parser = subparsers.add_parser(
         "self-update",
         help="Update KohakuTerrarium via the launcher's release feed",

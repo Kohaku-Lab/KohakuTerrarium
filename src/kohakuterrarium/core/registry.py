@@ -1,8 +1,4 @@
-"""
-Module and tool registration system.
-
-Provides global registry for tools, sub-agents, and other modules.
-"""
+"""Per-agent registration of tools, commands, and sub-agents."""
 
 from typing import Any, Callable, TypeVar
 
@@ -15,19 +11,13 @@ T = TypeVar("T")
 
 
 class Registry:
-    """
-    Central registry for all module types.
-
-    Stores tools, sub-agents, triggers, and other modules.
-    """
+    """Store the callable modules exposed by one agent."""
 
     def __init__(self):
         self._tools: dict[str, Tool] = {}
         self._tool_infos: dict[str, ToolInfo] = {}
         self._subagents: dict[str, Any] = {}  # SubAgent type defined later
         self._commands: dict[str, Any] = {}  # Command handlers
-
-    # Tool registration
 
     def register_tool(self, tool: Tool) -> None:
         """Register a tool instance."""
@@ -37,7 +27,7 @@ class Registry:
         logger.debug("Registered tool", tool_name=tool_name)
 
     def unregister_tool(self, tool_name: str) -> bool:
-        """Remove a previously registered tool. Returns True if present."""
+        """Remove a tool and report whether it was registered."""
         existed = tool_name in self._tools
         self._tools.pop(tool_name, None)
         self._tool_infos.pop(tool_name, None)
@@ -67,8 +57,6 @@ class Registry:
             lines.append(info.to_prompt_line())
         return "\n".join(lines)
 
-    # Command registration
-
     def register_command(
         self,
         command_name: str,
@@ -86,8 +74,6 @@ class Registry:
         """List all registered command names."""
         return list(self._commands.keys())
 
-    # Sub-agent registration (placeholder for Phase 6)
-
     def register_subagent(self, subagent_name: str, subagent: Any) -> None:
         """Register a sub-agent."""
         self._subagents[subagent_name] = subagent
@@ -101,19 +87,9 @@ class Registry:
         """List all registered sub-agent names."""
         return list(self._subagents.keys())
 
-    # Utility methods
-
     def clear(self) -> None:
         """Clear all registrations."""
         self._tools.clear()
         self._tool_infos.clear()
         self._subagents.clear()
         self._commands.clear()
-
-
-# NOTE: the old module-level "global registry" (``get_registry`` /
-# ``register_tool`` / ``@tool`` / ``@command``) was dead surface —
-# nothing ever read it into an agent.  ``@kohakuterrarium.tool``
-# (modules/tool/function.py) is the real function→tool adapter, and
-# ``Agent.add_tool`` / ``Agent.build(tools=[...])`` are the real
-# registration paths (E7).

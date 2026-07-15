@@ -1,8 +1,4 @@
-"""
-Job status tracking for background tasks.
-
-Jobs represent running tools or sub-agents with their status and output.
-"""
+"""Status and result tracking for background runtime jobs."""
 
 import uuid
 from dataclasses import dataclass, field
@@ -17,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class JobType(Enum):
-    """Type of job."""
+    """Kinds of executable work tracked by the runtime."""
 
     TOOL = "tool"
     SUBAGENT = "subagent"
@@ -25,7 +21,7 @@ class JobType(Enum):
 
 
 class JobState(Enum):
-    """State of a job."""
+    """Lifecycle states for tracked jobs."""
 
     PENDING = "pending"
     RUNNING = "running"
@@ -36,22 +32,7 @@ class JobState(Enum):
 
 @dataclass
 class JobStatus:
-    """
-    Status information for a running or completed job.
-
-    Attributes:
-        job_id: Unique identifier for this job
-        job_type: Type of job (tool, subagent, command)
-        type_name: Name of the tool/subagent/command
-        state: Current state
-        start_time: When the job started
-        end_time: When the job completed (if done)
-        output_lines: Number of output lines
-        output_bytes: Total output size in bytes
-        preview: First/last N chars of output (without full content)
-        error: Error message if state is ERROR
-        context: Additional context data
-    """
+    """Track lifecycle, output statistics, and context for one job."""
 
     job_id: str
     job_type: JobType
@@ -67,18 +48,18 @@ class JobStatus:
 
     @property
     def duration(self) -> float:
-        """Get duration in seconds."""
+        """Return elapsed seconds, using the current time while active."""
         end = self.end_time or datetime.now()
         return (end - self.start_time).total_seconds()
 
     @property
     def is_complete(self) -> bool:
-        """Check if job is complete (done or error)."""
+        """Return whether the job reached a terminal state."""
         return self.state in (JobState.DONE, JobState.ERROR, JobState.CANCELLED)
 
     @property
     def is_running(self) -> bool:
-        """Check if job is currently running."""
+        """Return whether the job is currently running."""
         return self.state == JobState.RUNNING
 
     def to_context_string(self) -> str:
@@ -100,7 +81,6 @@ class JobStatus:
             parts.append(f"bytes={self.output_bytes}")
 
         if self.preview:
-            # Truncate preview for context
             preview = self.preview[:100]
             if len(self.preview) > 100:
                 preview += "..."
@@ -120,16 +100,7 @@ class JobStatus:
 
 @dataclass
 class JobResult:
-    """
-    Complete result of a finished job.
-
-    Attributes:
-        job_id: Job identifier
-        output: Full output content
-        exit_code: Exit code (for tools like bash)
-        error: Error message if failed
-        metadata: Additional result metadata
-    """
+    """Store the complete output and completion metadata for a job."""
 
     job_id: str
     output: "str | list[ContentPart]" = ""
@@ -139,7 +110,7 @@ class JobResult:
 
     @property
     def success(self) -> bool:
-        """Check if job completed successfully."""
+        """Return whether the job has no error or nonzero exit code."""
         return self.error is None and (self.exit_code is None or self.exit_code == 0)
 
     def get_text_output(self) -> str:
@@ -168,19 +139,10 @@ def generate_job_id(prefix: str = "job") -> str:
 
 
 class JobStore:
-    """
-    In-memory store for job statuses and results.
-
-    Thread-safe storage for job tracking.
-    """
+    """Retain active jobs and a bounded history of completed results."""
 
     def __init__(self, max_completed: int = 100):
-        """
-        Initialize job store.
-
-        Args:
-            max_completed: Maximum number of completed jobs to keep
-        """
+        """Initialize the store with a completed-job retention limit."""
         self._statuses: dict[str, JobStatus] = {}
         self._results: dict[str, JobResult] = {}
         self._max_completed = max_completed
@@ -252,7 +214,6 @@ class JobStore:
         """Remove old completed jobs if over limit."""
         completed = self.get_completed_jobs()
         if len(completed) > self._max_completed:
-            # Sort by end_time and remove oldest
             completed.sort(key=lambda j: j.end_time or j.start_time)
             to_remove = completed[: len(completed) - self._max_completed]
             for job in to_remove:
@@ -281,7 +242,7 @@ class JobStore:
                 lines.append(f"- {job.to_context_string()}")
 
         if include_completed:
-            completed = self.get_completed_jobs()[-10:]  # Last 10
+            completed = self.get_completed_jobs()[-10:]
             if completed:
                 lines.append("\n## Recent Completed Jobs")
                 for job in completed:

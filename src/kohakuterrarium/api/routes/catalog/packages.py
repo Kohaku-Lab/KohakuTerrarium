@@ -1,13 +1,7 @@
-"""Catalog packages — list / install / uninstall / update / browse / edit.
+"""List, manage, browse, and edit packages through the Studio catalog.
 
-Replaces the legacy ``api.routes.registry`` module: every reader
-projects from the canonical
-``studio.catalog.packages_scan.scan_catalog`` and every operation
-delegates to ``studio.catalog.packages``.
-
-Mounted twice by ``api/app.py``:
-- ``/api/catalog/packages`` (new canonical prefix)
-- ``/api/registry``         (legacy URL preservation; same router)
+The same router serves both ``/api/catalog/packages`` and the compatible
+``/api/registry`` prefix.
 """
 
 import hashlib
@@ -48,7 +42,7 @@ class UninstallRequest(BaseModel):
 
 
 class FileEntry(BaseModel):
-    path: str  # relative to the package root
+    path: str  # Package-root-relative path exposed to clients.
     size: int
     mtime: float
     is_dir: bool
@@ -62,10 +56,10 @@ class FileContent(BaseModel):
 
 class FileWrite(BaseModel):
     content: str
-    sha256_expected: str | None = None  # optimistic concurrency
+    sha256_expected: str | None = None  # Rejects writes against stale content.
 
 
-_MAX_FILE_BYTES = 1_048_576  # 1 MiB
+_MAX_FILE_BYTES = 1_048_576  # Bounds editor memory use and request size.
 _TEXT_SUFFIXES = {
     ".yaml",
     ".yml",
@@ -89,11 +83,7 @@ _TEXT_SUFFIXES = {
 
 @router.get("")
 async def list_local():
-    """List all locally available creature and terrarium configs with details.
-
-    Off-loaded to the shared I/O executor — ``scan_catalog`` walks the
-    packages dir and reads metadata for every installed entry.
-    """
+    """List installed catalog entries without blocking the event loop."""
     entries = await run_in_io_executor(scan_catalog)
     return [entry.as_registry_dict() for entry in entries]
 
@@ -122,11 +112,7 @@ async def uninstall(req: UninstallRequest):
 
 @router.post("/{name}/update", dependencies=[Depends(verify_admin_token)])
 async def update_one(name: str):
-    """Update a single git-backed installed package.
-
-    409 for non-git / editable packages (skipped, not an error); 500
-    for actual update failures.
-    """
+    """Update one installed package and surface updater failures."""
     rc, msg = await run_in_io_executor(update_package_op, name)
     if rc == 0:
         return {"status": "ok", "name": name, "message": msg}
@@ -143,11 +129,6 @@ async def update_all():
         "skipped": skipped,
         "messages": messages,
     }
-
-
-# ---------------------------------------------------------------------------
-# Package file browsing + editing
-# ---------------------------------------------------------------------------
 
 
 def _resolve_pkg_root(name: str) -> Path:
@@ -177,7 +158,7 @@ def _list_files_sync(name: str) -> list[FileEntry]:
     out: list[FileEntry] = []
     for p in sorted(root.rglob("*")):
         if any(part.startswith(".") for part in p.relative_to(root).parts):
-            # Skip dot-dirs (.git, .venv, __pycache__-adjacent)
+            # Hidden package internals are not part of the editable catalog surface.
             continue
         if any(part == "__pycache__" for part in p.relative_to(root).parts):
             continue
@@ -211,7 +192,7 @@ def _read_file_sync(name: str, rel_path: str) -> FileContent:
             )
         except UnicodeDecodeError:
             pass
-    # Binary fallback — surface as opaque length info, not the bytes.
+    # The editor accepts only recognized UTF-8 text and never exposes binary bytes.
     raise HTTPException(415, "binary files cannot be read via this endpoint")
 
 

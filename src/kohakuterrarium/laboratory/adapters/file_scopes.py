@@ -1,25 +1,8 @@
-"""Scope resolvers for ``terrarium.files`` namespace.
+"""Resolve ``terrarium.files`` scope URIs to constrained local paths.
 
-Five scopes; each resolves a ``<scope>://<arg>`` URI to an absolute
-local path on the node, then optionally appends a relative path that
-must stay within the scope root.
-
-| Scope        | Arg form         | Root                                          |
-|--------------|------------------|-----------------------------------------------|
-| workspace    | <creature_id>    | creature's working directory                  |
-| memory       | <creature_id>    | <creature workspace>/memory/                  |
-| package      | <package name>   | ``~/.kohakuterrarium/packages/<name>/``        |
-| recipe       | <recipe id>      | ``~/.kohakuterrarium/recipes/<id>/`` (staging) |
-| config       | (empty)          | ``~/.kohakuterrarium/``                        |
-
-All resolvers enforce three rules on the ``rel`` argument: it must
-not be absolute, it must not contain ``..`` segments, and the
-resolved absolute path must remain inside the scope root.
-
-Errors surface as :class:`ScopeError` (a ``ValueError``).  Callers in
-:mod:`kohakuterrarium.laboratory.adapters.terrarium_files` catch
-``ValueError`` and translate to the ``{"error":{"kind":"invalid",…}}``
-wire envelope.
+Workspace and memory scopes are creature-relative; package, recipe, and config
+scopes live under the node's configuration root. Relative paths must remain
+inside the resolved root and may not be absolute or contain parent traversal.
 """
 
 import os
@@ -37,26 +20,16 @@ SCOPE_NAMES = ("workspace", "memory", "package", "recipe", "config")
 
 
 def kt_config_home() -> Path:
-    """The node's KohakuTerrarium config root.
+    """Return the node's current configuration root.
 
-    Thin alias over :func:`kohakuterrarium.utils.config_dir.config_dir`
-    — the single source of truth for the per-user config root,
-    honouring the ``KT_CONFIG_DIR`` environment variable and defaulting
-    to ``~/.kohakuterrarium``.  Multi-node is multi-node: two workers
-    on one machine (and the test harness) need *isolated* config roots,
-    and ``KT_CONFIG_DIR`` provides that without clobbering each other's
-    recipe staging / resume drops / package installs.  Resolved fresh
-    each call so the override always wins.
+    Resolving on every call honors runtime ``KT_CONFIG_DIR`` changes and allows
+    colocated workers to use isolated package, recipe, and resume storage.
     """
     return config_dir()
 
 
 def parse_scope(scope_uri: str) -> tuple[str, str]:
-    """Split ``"<name>://<arg>"`` into ``(name, arg)``.
-
-    ``arg`` may be empty (e.g. ``"config://"``).  Trailing slashes are
-    tolerated.
-    """
+    """Split a supported scope URI into its name and optional argument."""
     if "://" not in scope_uri:
         raise ScopeError(f"missing '://' in scope URI: {scope_uri!r}")
     name, _, arg = scope_uri.partition("://")
@@ -68,29 +41,16 @@ def parse_scope(scope_uri: str) -> tuple[str, str]:
 
 
 def resolve_scope_root(scope_uri: str, engine: Terrarium) -> Path:
-    """Return the absolute root directory of ``scope_uri``.
-
-    Raises :class:`ScopeError` for unknown scopes or missing scope
-    arguments (e.g. ``workspace://`` with no creature_id).
-    """
+    """Return the absolute root directory represented by a scope URI."""
     name, arg = parse_scope(scope_uri)
     resolver = _RESOLVERS[name]
     return resolver(arg, engine)
 
 
 def resolve_in_scope(scope_uri: str, rel: str, engine: Terrarium) -> Path:
-    """Resolve ``rel`` within ``scope_uri``'s root, guarding traversal.
-
-    Returns the absolute path of the file or directory.  Use this for
-    every file operation — never construct paths from raw user input.
-    """
+    """Resolve a relative path within a scope without allowing traversal."""
     root = resolve_scope_root(scope_uri, engine)
     return _ensure_in_root(root, rel)
-
-
-# ---------------------------------------------------------------------------
-# Per-scope resolvers
-# ---------------------------------------------------------------------------
 
 
 def _resolve_workspace(arg: str, engine: Terrarium) -> Path:
@@ -147,20 +107,12 @@ _RESOLVERS = {
 }
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _creature_pwd(creature) -> str | None:
-    """Best-effort working-dir lookup that copes with the executor-less FakeAgent."""
+    """Find a creature working directory across complete and partial agents."""
     executor = getattr(creature.agent, "executor", None)
     if executor is not None and hasattr(executor, "_working_dir"):
         wd = str(executor._working_dir)
-        # Real executors always have a non-empty working dir; an empty
-        # string usually means a stub agent (tests, partially-initialised
-        # agent).  Fall through to ``config.pwd`` in that case rather
-        # than returning ``""`` and breaking ``workspace://`` resolution.
+        # Empty executor paths occur during partial initialization; use config fallbacks.
         if wd:
             return wd
     cfg = getattr(creature.agent, "config", None)
@@ -175,18 +127,14 @@ def _creature_pwd(creature) -> str | None:
 
 
 def _ensure_in_root(root: Path, rel: str) -> Path:
-    """Resolve ``rel`` under ``root`` and assert it stays inside.
-
-    Empty ``rel`` returns the root itself.  Absolute or ``..``-bearing
-    inputs are rejected.
-    """
+    """Resolve a relative path under a root and reject escaping inputs."""
     root_resolved = root.resolve()
     if not rel:
         return root_resolved
     p = Path(rel)
     if p.is_absolute():
         raise ScopeError(f"absolute path not allowed in scope: {rel!r}")
-    # Normalise separators; reject parent-dir traversal.
+    # Normalize both platform separators before checking parent traversal.
     parts = [seg for seg in str(p).replace("\\", "/").split("/") if seg]
     if ".." in parts:
         raise ScopeError(f"'..' segment not allowed in scope path: {rel!r}")

@@ -1,25 +1,11 @@
 """Reconciler — sync the central session index against the disk.
 
-Two modes:
+Full reconciliation rereads every canonical session file; incremental
+reconciliation only rereads files whose WAL-aware ``(mtime, size)`` fingerprint
+changed. Both modes remove entries for missing files.
 
-* ``full=True``      — re-read every file regardless of fingerprint.
-                       Used for the initial bootstrap (when the
-                       sidecar is empty) and for the explicit
-                       "Rebuild index" button in the UI.
-* ``full=False``     — only re-read files whose ``(mtime, size)``
-                       fingerprint differs from what the sidecar
-                       has cached.  Used by the periodic /
-                       on-demand reconcile path that backs
-                       ``?refresh=true`` on the listing endpoint.
-
-In both modes we drop sidecar entries whose backing file is gone.
-Parallelism uses a ``ThreadPoolExecutor`` capped at ``cpus * 4`` (32
-ceiling) to keep the cold-bootstrap cost in line.
-
-Lives in the ``session_index`` package so it can pull in
-``SessionStore`` lazily — the reconciler is the one place that
-opens individual session files; everything else reads from the
-sidecar.
+Session files are opened only here. Parallel reads are bounded to four workers
+per CPU and at most 32 to limit cold-start latency and file-handle pressure.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -37,10 +23,8 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# SQLite-over-files is GIL-friendly because most time is in I/O
-# wait.  ``cpus * 4`` per Python's default ThreadPoolExecutor
-# heuristic, capped at 32 so a pathological session dir doesn't open
-# thousands of file handles.
+# SQLite reads spend most time waiting on I/O; the cap prevents excessive
+# file-handle pressure in large session directories.
 _MAX_WORKERS = min(32, (os.cpu_count() or 4) * 4)
 
 
@@ -55,12 +39,10 @@ class ReconcileReport:
 
 
 def _extract_text_preview(content, limit: int = 200) -> str:
-    """Flatten an event ``content`` (str / list-of-parts / dict / other)
-    into a short text preview suitable for the listing payload.
+    """Flatten event content into a bounded listing preview.
 
-    Multimodal parts (``image_url`` / ``file`` / unknown) contribute a
-    bracketed token (``[image]`` / ``[file]`` / ``[<kind>]``) so the
-    listing surface never embeds raw base64 blobs.
+    Multimodal and unknown parts become bracketed markers so previews never
+    embed binary or base64 payloads.
     """
     if content is None:
         return ""
@@ -88,14 +70,7 @@ def _extract_text_preview(content, limit: int = 200) -> str:
 
 
 def _first_user_input_preview(store: SessionStore) -> str:
-    """Read the first user input for the preview column.
-
-    Scans the primary agent's (``meta['agents'][0]``) resumable
-    events for the first ``user_input`` entry and feeds it through
-    :func:`_extract_text_preview`.  Returns ``""`` when the session
-    has no user input yet (e.g. a fresh ``init_meta`` with nothing
-    typed).
-    """
+    """Return the primary agent's first resumable user-input preview."""
     try:
         meta = store.load_meta()
         agent = (meta.get("agents") or [""])[0]
@@ -114,10 +89,10 @@ def _first_user_input_preview(store: SessionStore) -> str:
 
 
 def _max_mtime_with_wal(path: Path, *, fallback: float = 0.0) -> float:
-    """Same logic as ``entry._max_mtime_with_wal`` but takes the
-    main-file mtime as a precomputed fallback to save one ``stat``
-    call inside the reconcile hot loop (the caller has already
-    stat'd ``path`` for the size).
+    """Return the newest main or SQLite-sidecar mtime.
+
+    The caller supplies the already-read main-file mtime to avoid another stat
+    in the reconciliation hot path.
     """
     best = fallback
     for suffix in ("-wal", "-shm"):
@@ -134,11 +109,10 @@ def _max_mtime_with_wal(path: Path, *, fallback: float = 0.0) -> float:
 
 
 def _has_vector_index(store: SessionStore) -> bool:
-    """Cheap probe: did the embedder ever write the dimensions row?
+    """Probe vector-index existence from the dimensions state row.
 
-    Reads one state-table row; doesn't open ``SessionMemory`` (which
-    would open three additional native SQLite handles per session
-    and would dominate the reconcile cost on a populated index).
+    Avoiding ``SessionMemory`` prevents three extra native SQLite handles per
+    session during reconciliation.
     """
     try:
         if "vec_dimensions" in store.state:
@@ -150,21 +124,12 @@ def _has_vector_index(store: SessionStore) -> bool:
 
 
 def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
-    """Open a ``.kohakutr`` file and build a sidecar entry from it.
+    """Build an index entry from a session file, or return ``None`` on failure.
 
-    Returns ``None`` when the file can't be opened (corrupt, locked,
-    permission denied).  Caller treats ``None`` as "skip this file
-    for now" — the next reconcile retries.
-
-    Uses ``close(update_status=False)`` to avoid the read-only side
-    effect of bumping ``last_active`` (which would flip our cache
-    invalidator every time we scanned).
-
-    The fingerprint (file_mtime, file_size) is captured BEFORE opening
-    the store.  SQLite's read-side WAL initialisation can touch the
-    ``-wal`` / ``-shm`` mtimes during ``SessionStore(path)``; using
-    the post-open stat would make every successful read invalidate
-    its own cache entry on the next reconcile.
+    Failures are retried by later reconciliation. The fingerprint is captured
+    before opening because SQLite read initialization may touch WAL sidecars
+    and otherwise invalidate the new entry immediately. Closing without a
+    status update preserves read-only behavior and ``last_active`` stability.
     """
     try:
         try:
@@ -208,14 +173,11 @@ def reconcile(
     full: bool = False,
     workers: int | None = None,
 ) -> ReconcileReport:
-    """Sync the sidecar against the on-disk truth of ``session_dir``.
+    """Synchronize the sidecar with canonical files in ``session_dir``.
 
-    See module docstring for ``full`` semantics.  Always drops
-    sidecar entries whose backing file is gone — this is the only
-    code path that removes index entries automatically.
-
-    The return value is the small ``ReconcileReport`` dataclass —
-    routes can surface it to the user (`"Rebuilt 12, dropped 3"`).
+    Missing files are always removed. ``full`` controls whether unchanged
+    fingerprints may skip reads. The report exposes read, deletion, and timing
+    counts to callers.
     """
     started = time.monotonic()
     if not session_dir.exists():
@@ -224,19 +186,14 @@ def reconcile(
     on_disk_paths = {p.name: p for p in pick_canonical_per_session(session_dir)}
     in_index = set(index.all_filenames())
 
-    # 1. Drop entries whose file is gone.  Doing this first means a
-    #    subsequent fingerprint-skip can't accidentally resurrect
-    #    them (it can't anyway, but ordering matters for invariants).
+    # Remove missing files before fingerprint checks so the sidecar reflects
+    # current disk membership throughout reconciliation.
     gone = in_index - on_disk_paths.keys()
     for fname in gone:
         index.delete(fname)
 
-    # 2. Decide which on-disk files need a re-read.  Use the WAL-
-    #    aware mtime helper so an active session that's only writing
-    #    to ``-wal`` (no checkpoint yet → main file untouched) still
-    #    invalidates its cache entry.  Pre-fix this missed every
-    #    in-flight session between WAL checkpoints — preview /
-    #    last_active / status fields could lag minutes behind.
+    # WAL-aware mtimes invalidate active sessions before checkpointing updates
+    # the main file, keeping preview, status, and activity metadata current.
     to_read: list[Path] = []
     for fname, path in on_disk_paths.items():
         if full or fname not in in_index:
@@ -257,10 +214,8 @@ def reconcile(
         if not cached or abs(cached[0] - live_mtime) > 0.001 or cached[1] != st.st_size:
             to_read.append(path)
 
-    # 3. Parallel re-read of the changed / new files.  ``map``
-    #    preserves order but the order doesn't matter here — the
-    #    sidecar's KV table is unordered and the listing endpoint
-    #    sorts on demand.
+    # Read order is irrelevant because the sidecar is unordered and listings
+    # apply their own sort.
     if to_read:
         worker_count = (
             workers if workers is not None else min(_MAX_WORKERS, len(to_read))

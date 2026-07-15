@@ -1,10 +1,4 @@
-"""``/system_prompt`` slash command — show the current system prompt.
-
-Read-only view of what the agent is currently telling the model in
-its system message (after prompt-aggregation, plugin contributions,
-and runtime hints). Useful for debugging "why is the agent doing
-X?" without poking the LLM.
-"""
+"""Show the agent's effective aggregated system prompt without modifying it."""
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
 from kohakuterrarium.modules.user_command.base import (

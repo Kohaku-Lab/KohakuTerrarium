@@ -52,14 +52,13 @@ _STYLE: dict[StatusState, str] = {
     "stopped": "dim white",
 }
 
-# Focus marker — `▸` (Unicode triangle) before the name when focused.
 _FOCUS_MARKER = "▸"
-_FOCUS_PAD = " "  # space when not focused, to keep slots aligned
+_FOCUS_PAD = " "
 
 _MIN_SLOT_WIDTH = 14
 _NAME_MAX = 10
-_CHROME = 4  # 2 leading + 2 trailing spaces
-_SLOT_SEP = "  "  # two-space separator between slots
+_CHROME = 4
+_SLOT_SEP = "  "
 
 
 def _truncate_name(name: str) -> str:
@@ -91,7 +90,7 @@ def _render_slot(status: CreatureStatus, is_focused: bool, slot_width: int) -> T
     out.append(name, style="bold" if is_focused else "")
     badge_len = 0
     if not is_focused and status.unread > 0:
-        # Cap at 99+ to keep the slot width predictable.
+        # Cap badge width so activity layout remains predictable.
         if status.unread < 100:
             badge_text = f"●{status.unread}"
         else:
@@ -101,7 +100,7 @@ def _render_slot(status: CreatureStatus, is_focused: bool, slot_width: int) -> T
         badge_len = 1 + len(badge_text)
     out.append(" ")
     out.append(_GLYPH[status.state], style=_STYLE[status.state])
-    used = 1 + len(name) + badge_len + 1 + 1  # focus + name + badge + space + glyph
+    used = 1 + len(name) + badge_len + 1 + 1
     remaining = slot_width - used - 1
     if remaining > 0:
         out.append(" ")
@@ -131,7 +130,6 @@ def _partition(
     if not statuses:
         return [], 0, 0
 
-    # Always-show buckets.
     always = []
     optional = []
     for s in statuses:
@@ -141,23 +139,17 @@ def _partition(
         else:
             optional.append(s)
 
-    # If everything fits, return as-is in original order.
     budget = max(0, term_width - _CHROME)
     total_width = _estimate_width(always + optional)
     if total_width <= budget:
-        # Keep the original order, but float "waiting" creatures to
-        # the leftmost slot UNLESS one is focused (the focused
-        # creature stays in its definition slot so Tab feels stable).
+        # Urgent waiting creatures move left while focused position stays stable.
         ordered = _reorder_for_visibility(statuses, focus_id)
         return ordered, 0, 0
 
-    # Drop optional creatures (idle / stopped / failed) until the
-    # always-show set fits; count what we dropped per bucket.
     visible = list(always)
     dropped_idle = 0
     dropped_stopped = 0
     for s in optional:
-        # Try adding — does it still fit at min_slot_width?
         candidate = visible + [s]
         if _estimate_width(candidate) <= budget:
             visible.append(s)
@@ -179,10 +171,6 @@ def _reorder_for_visibility(
     Other states keep definition order.
     """
 
-    # Sort key: lower comes first.
-    # - focused creature: tie-break to its original index (stable).
-    # - waiting: priority 0 — leftmost.
-    # - working / failed / stopped / idle: priority 5 — keep order.
     def key(item: tuple[int, CreatureStatus]) -> tuple[int, int]:
         idx, s = item
         if s.creature_id == focus_id:
@@ -204,12 +192,7 @@ def _estimate_width(statuses: list[CreatureStatus]) -> int:
 
 
 class RosterWidget:
-    """Single-line roster of every creature.
-
-    Stateless wrt the creature list — looks it up via the
-    ``get_statuses`` / ``get_focus_id`` callables on every render so
-    the caller can swap the source without rebuilding the widget.
-    """
+    """Render a width-adaptive single-line creature roster."""
 
     def __init__(
         self,
@@ -223,21 +206,17 @@ class RosterWidget:
         statuses = self.get_statuses() or []
         focus_id = self.get_focus_id() or ""
         if len(statuses) <= 1:
-            # Single-creature behavior is byte-identical to today:
-            # the roster is invisible.
             return Text("")
 
         visible, dropped_idle, dropped_stopped = _partition(
             statuses, focus_id, term_width
         )
 
-        # Compute per-slot width.
         budget = max(0, term_width - _CHROME)
         n = len(visible)
         if n == 0:
             return Text("")
         seps = (n - 1) * len(_SLOT_SEP)
-        # Reserve room for the collapsed tail.
         tail_pieces: list[str] = []
         if dropped_idle:
             tail_pieces.append(f"+{dropped_idle} idle")
@@ -247,10 +226,10 @@ class RosterWidget:
             (len(tail_pieces) - 1) * len(_SLOT_SEP) if tail_pieces else 0
         )
         if tail_pieces:
-            tail_width += len(_SLOT_SEP)  # leading sep before tail
+            tail_width += len(_SLOT_SEP)
         per_slot = max(_MIN_SLOT_WIDTH, (budget - seps - tail_width) // n)
 
-        out = Text("  ")  # leading chrome
+        out = Text("  ")
         for i, status in enumerate(visible):
             if i > 0:
                 out.append(_SLOT_SEP)
@@ -264,7 +243,6 @@ class RosterWidget:
         return out
 
 
-# Re-export for typing convenience.
 RosterCompressMode = Literal["full", "compressed"]
 
 

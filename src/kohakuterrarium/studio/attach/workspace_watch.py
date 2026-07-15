@@ -1,15 +1,7 @@
-"""Workspace files live watcher (filesystem changes over WebSocket).
+"""Stream visible workspace filesystem changes over a websocket.
 
-Drains the body of ``api/ws/files.py`` (110 LoC). The thin WS shell
-in ``api/ws/files.py`` resolves the working directory of the agent
-(or terrarium creature) and hands off to :func:`watch_directory`
-here, which owns the ``watchfiles.awatch`` loop.
-
-Wire format (server → client):
-
-    { "type": "ready",  "root": "..." }
-    { "type": "change", "changes": [{"path": "...", "action": "..."}] }
-    { "type": "error",  "text": "..." }
+The server emits ``ready``, batched ``change``, and ``error`` frames. Change entries
+include relative and absolute paths plus a normalized action name.
 """
 
 import asyncio
@@ -25,7 +17,7 @@ _ACTION_MAP = {1: "added", 2: "modified", 3: "deleted"}
 
 
 async def watch_directory(root: str, websocket: WebSocket) -> None:
-    """Watch a directory for changes and push events via WebSocket."""
+    """Watch a directory recursively and send filtered change batches."""
     try:
         from watchfiles import awatch
     except ImportError:
@@ -48,7 +40,7 @@ async def watch_directory(root: str, websocket: WebSocket) -> None:
         ):
             batch = []
             for action, path_str in changes:
-                # Skip hidden/build directories to reduce noise
+                # Generated and hidden paths are not actionable in workspace navigation.
                 rel = Path(path_str).relative_to(root_path)
                 parts = rel.parts
                 if any(

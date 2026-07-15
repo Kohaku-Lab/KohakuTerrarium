@@ -1,12 +1,8 @@
-"""Lab-only routes — node discovery + per-node status.
+"""Expose lab node discovery, status, and creature deployment routes.
 
-Mounted at ``/api/nodes``. Lab-only: every endpoint returns 404 in
-standalone mode (the service has no ``connected_nodes`` surface) so
-a misconfigured frontend fails loudly instead of silently treating
-the standalone host as a one-node cluster.
-
-Unblocks: the node-picker dropdown in the creature-create dialog,
-per-node admin tab, "is this worker alive" tooltip badges.
+The namespace returns 404 for standalone services rather than representing the
+host as a one-node cluster. Node summaries tolerate unreachable workers so
+operators can still see cluster membership and degraded status.
 """
 
 from typing import Any
@@ -33,11 +29,7 @@ def _multi_node_service(service: TerrariumService):
 
 @router.get("")
 async def list_nodes(service: TerrariumService = Depends(get_service)):
-    """List every connected node (host + remote workers).
-
-    Each entry carries ``node_id`` + ``is_host`` + ``status``. The
-    node-picker dropdown source.
-    """
+    """List the host and connected workers with best-effort creature counts."""
     multi = _multi_node_service(service)
     nodes = list(multi.connected_nodes())
     out: list[dict[str, Any]] = []
@@ -47,8 +39,8 @@ async def list_nodes(service: TerrariumService = Depends(get_service)):
             "is_host": node_id == "_host",
             "status": "online",
         }
-        # Best-effort creature count without blocking on a wire fetch
-        # (the dashboard polls this endpoint).
+        # A node remains visible when its service call fails; status and a null
+        # count distinguish transient unreachability from cluster removal.
         try:
             svc = multi.service_for(node_id)
             entry["creatures"] = len(await svc.list_creatures())
@@ -61,7 +53,7 @@ async def list_nodes(service: TerrariumService = Depends(get_service)):
 
 @router.get("/{node_id}/status")
 async def node_status(node_id: str, service: TerrariumService = Depends(get_service)):
-    """Per-node health + creature count + status snapshot."""
+    """Return one node's status, creature count, and optional Drive state."""
     multi = _multi_node_service(service)
     if node_id not in multi.connected_nodes():
         raise HTTPException(404, f"unknown node: {node_id!r}")
@@ -71,9 +63,8 @@ async def node_status(node_id: str, service: TerrariumService = Depends(get_serv
         creatures = await svc.list_creatures()
     except Exception as e:
         raise HTTPException(503, f"node {node_id!r} unreachable: {e}")
-    # Additive: the node's live Drive runtime (enabled / registrations / counts)
-    # so the per-node admin tab can show Drive availability. Best-effort — a
-    # Drive-disabled or older worker simply reports ``enabled: false`` / ``null``.
+    # Drive status is optional because disabled or older workers may not expose
+    # the runtime surface; node health should not fail for that omission.
     try:
         drive = (await svc.drive_runtime_status()).to_dict()
     except Exception:
@@ -89,6 +80,8 @@ async def node_status(node_id: str, service: TerrariumService = Depends(get_serv
 
 
 class DeployCreatureRequest(BaseModel):
+    """Identify the host-local creature workspace to copy to a worker."""
+
     workspace_path: str
 
 
@@ -98,11 +91,10 @@ async def deploy_creature(
     req: DeployCreatureRequest,
     service: TerrariumService = Depends(get_service),
 ):
-    """Push a local creature workspace folder to a worker.
+    """Copy a local creature workspace to a worker and return its remote path.
 
-    Returns the worker-side absolute path that the subsequent
-    ``add_creature`` body should reference.  Wraps
-    :func:`studio.deploy.deploy_creature_to_node`.
+    The returned absolute path is suitable for a subsequent ``add_creature``
+    request on that worker.
     """
     multi = _multi_node_service(service)
     if node_id == "_host":

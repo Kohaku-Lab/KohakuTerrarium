@@ -1,21 +1,11 @@
 """APP extension adapter for ``studio.deploy``.
 
-Worker-side handler for the headline multi-node workflow: controller
-authors a creature in its local workspace, then asks a worker to
-spawn it.  The controller can't pass the local path directly (the
-worker's filesystem has different file layout), so the bundle is
-pushed first via this adapter and the resolved remote path is
-returned for the subsequent :meth:`add_creature` call.
+Deploy creature bundles from a controller to a worker.
 
-Single op for now:
-
-- ``push_creature_bundle {name, files}`` — install a creature bundle
-  into ``recipe://<name>`` on this worker and return the absolute
-  target path the controller should pass to ``add_creature``.
-
-Reuses the bundle algorithm from
-:mod:`kohakuterrarium.laboratory.adapters.terrarium_files`, just
-adding the convention "creature name → ``recipe://<name>`` scope".
+Controller-local paths are meaningless on a worker, so the adapter installs
+bundle files under ``recipe://<name>`` and returns the worker's resolved path
+for a subsequent ``add_creature`` call. Bundle installation is delegated to
+:class:`TerrariumFilesAdapter`.
 """
 
 import re
@@ -36,19 +26,13 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-# Names are used as a directory under ``~/.kohakuterrarium/recipes/`` on
-# the worker.  Be strict: alphanumerics, underscore, dot, hyphen.  Don't
-# allow a leading dot (no hidden-dirs), no path separators, no drive
-# prefixes, no parent-traversal segments.
+# Names become worker-side recipe directory names. Restricting the alphabet and
+# rejecting a leading dot prevents hidden directories and path traversal.
 _NAME_RE = re.compile(r"^(?!\.)[A-Za-z0-9_.-]+$")
 
 
 class StudioDeployAdapter:
-    """Worker-side ``studio.deploy`` APP extension.
-
-    Composes over a :class:`TerrariumFilesAdapter` — either an
-    existing one passed in or a fresh internal instance.
-    """
+    """Handle worker-side ``studio.deploy`` application messages."""
 
     NAMESPACE = "studio.deploy"
 
@@ -115,11 +99,8 @@ class StudioDeployAdapter:
             {"scope": scope, "files": files}
         )
         target_path = resolve_scope_root(scope, self._engine)
-        # Forward the full bundle result so partial-failure state
-        # (``partial`` / ``remaining`` / ``error``) reaches the
-        # controller.  Without this the caller sees ``conflicts: []``
-        # and assumes a clean deploy even though half the files never
-        # made it onto disk.
+        # Preserve partial-failure fields so the controller cannot mistake an
+        # incomplete write for a conflict-free deployment.
         response: dict[str, Any] = {
             "target_path": str(target_path),
             "deployed": bundle_result.get("deployed", []),

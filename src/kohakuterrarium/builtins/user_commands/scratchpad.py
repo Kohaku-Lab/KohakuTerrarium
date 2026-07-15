@@ -27,15 +27,15 @@ class ScratchpadCommand(BaseUserCommand):
         scratch = getattr(agent, "scratchpad", None)
         if scratch is None:
             return UserCommandResult(output="No scratchpad on this creature")
-        # The scratchpad API is duck-typed across implementations;
-        # try the common reads and fall back to repr().
+        # Scratchpad implementations expose different read methods, so use the
+        # first supported method and fall back to their representation.
         text = ""
         for getter in ("get_all", "all", "render", "to_text"):
             fn = getattr(scratch, getter, None)
             if callable(fn):
                 try:
                     out = fn()
-                except Exception as e:  # pragma: no cover - defensive
+                except Exception as e:  # pragma: no cover
                     return UserCommandResult(error=f"scratchpad read failed: {e}")
                 if isinstance(out, str):
                     text = out
