@@ -194,24 +194,36 @@ class TestApplyMerge:
                 s.close()
             s1.close()
 
-    def test_merge_without_persistence_keeps_first(self, tmp_path):
-        # No session_dir set on engine.
+    def test_merge_without_persistence_preserves_all_histories(self, tmp_path):
         eng = _make_engine(tmp_path, session_dir=False)
         s1 = SessionStore(str(tmp_path / "a.kohakutr"))
-        s1.init_meta("a", "agent", "/p", "/w", ["alice"])
-        eng._session_stores["g1"] = s1
+        s2 = SessionStore(str(tmp_path / "b.kohakutr"))
+        s1.init_meta("a", "agent", "/stale/a", "/w", ["alice"])
+        s2.init_meta("b", "agent", "/stale/b", "/w", ["bob"])
+        s1.meta["config_snapshot"] = {"name": "stale"}
+        s1.append_event("alice", "user_message", {"content": "left"})
+        s2.append_event("bob", "user_message", {"content": "right"})
+        eng._session_stores.update({"g1": s1, "g2": s2})
         try:
             sc.apply_merge(
                 eng,
                 TopologyDelta(
                     kind="merge",
-                    old_graph_ids=["g1"],
+                    old_graph_ids=["g1", "g2"],
                     new_graph_ids=["g1"],
                 ),
             )
             assert eng._session_stores["g1"] is s1
+            assert "g2" not in eng._session_stores
+            assert len(list(s1.events.keys())) == 2
+            assert s1.get_events("alice")[0]["content"] == "left"
+            assert s1.get_events("bob")[0]["content"] == "right"
+            assert set(s1.meta["parent_session_ids"]) == {"a", "b"}
+            assert s1.meta["config_path"] is None
+            assert not s1.meta.exists("config_snapshot")
         finally:
             s1.close()
+            s2.close()
 
     def test_merge_transfers_ownership_and_closes_dropped(self, tmp_path):
         # Two owned graphs merge. The survivor (kept graph's own file)
@@ -427,13 +439,17 @@ class TestRefreshAndAttach:
         finally:
             store.close()
 
-    def test_refresh_writes_meta(self, tmp_path):
+    def test_refresh_writes_meta_and_clears_stale_reconstruction(self, tmp_path):
         eng = _make_engine(tmp_path)
         store = SessionStore(str(tmp_path / "s.kohakutr"))
         try:
+            store.meta["config_path"] = "/stale/recipe.yaml"
+            store.meta["config_snapshot"] = {"name": "wrong-agent"}
             sc._refresh_meta_for_split_graph(eng, "g1", store)
             assert store.meta["agents"] == ["alice"]
             assert store.meta["config_type"] == "agent"
+            assert store.meta["config_path"] is None
+            assert not store.meta.exists("config_snapshot")
         finally:
             store.close()
 
