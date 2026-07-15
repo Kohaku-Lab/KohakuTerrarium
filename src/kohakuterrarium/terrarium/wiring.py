@@ -20,8 +20,6 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-
-
 def install_output_wiring_resolver(engine: Any) -> Any:
     """Install a live terrarium resolver on every creature in ``engine``.
 

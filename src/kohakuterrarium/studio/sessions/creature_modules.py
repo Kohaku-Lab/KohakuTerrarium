@@ -23,6 +23,7 @@ from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.studio._runtime import as_engine
 
+
 def _inventory_plugins(
     engine: Terrarium, session_id: str, creature_id: str
 ) -> list[dict]:
