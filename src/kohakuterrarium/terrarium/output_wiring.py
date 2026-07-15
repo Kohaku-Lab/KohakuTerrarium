@@ -55,10 +55,8 @@ class TerrariumOutputWiringResolver:
     ) -> None:
         self._creatures = creatures
         self._root_agent = root_agent
-        # Engine reference is optional — only the terrarium runtime
-        # passes it; standalone construction (tests, embedded use) can
-        # leave it as None.  When present, the emit loop falls through
-        # to ``engine._output_wire_adapter`` for remote dispatch.
+        # Standalone resolvers may omit the engine; when present, its adapter
+        # provides remote dispatch after local target resolution fails.
         self._engine = engine
         # Remember which unknown targets we've already warned about so
         # a mis-typed target doesn't spam the log every turn.
@@ -253,36 +251,16 @@ class TerrariumOutputWiringResolver:
                 turn_index=turn_index,
                 prompt_override=prompt_text,
             )
-            # Surface the delivery as an activity event on the
-            # receiver's output bus so its chat tab can render an
-            # "inbound wire from <source>" block (instead of leaving
-            # the user wondering why the receiver suddenly started
-            # processing). This runs before the actual delivery task
-            # so the visual cue lands first.
-            try:
-                target_router = getattr(target_agent, "output_router", None)
-                if target_router is not None and hasattr(
-                    target_router, "notify_activity"
-                ):
-                    preview = (delivered_content or "").strip()
-                    if len(preview) > 240:
-                        preview = preview[:239] + "…"
-                    target_router.notify_activity(
-                        "wire_inbound",
-                        f"Inbound from {source}",
-                        metadata={
-                            "from": source,
-                            "to": entry.to,
-                            "with_content": entry.with_content,
-                            "content_preview": preview,
-                            "source_event_type": source_event_type,
-                            "turn_index": turn_index,
-                        },
-                    )
-            except Exception:
-                logger.debug(
-                    "wire_inbound notify failed; receiver router may not support activity emit",
-                )
+            # Runs before the delivery task so the visual cue lands first.
+            notify_inbound_delivery(
+                target_agent,
+                source=source,
+                to=entry.to,
+                content=delivered_content,
+                with_content=entry.with_content,
+                source_event_type=source_event_type,
+                turn_index=turn_index,
+            )
             # Fire-and-forget: don't block the source's finalisation on
             # the target's turn-processing.
             task = asyncio.create_task(
@@ -302,6 +280,55 @@ class TerrariumOutputWiringResolver:
                 with_content=entry.with_content,
                 turn_index=turn_index,
             )
+
+
+def notify_inbound_delivery(
+    target_agent: "Agent",
+    *,
+    source: str,
+    to: str,
+    content: str,
+    with_content: bool,
+    source_event_type: str,
+    turn_index: int,
+) -> None:
+    """Surface an inbound delivery as a ``wire_inbound`` activity on the
+    receiver's output bus, so its chat tab (live stream and history
+    replay alike) renders an "Inbound from <source>" block instead of
+    the receiver visibly starting a turn with no explanation.
+
+    Shared by output wiring, ``group_send``, and ``group_spawn_child``
+    initial-task delivery — every path that pushes a ``creature_output``
+    event into another creature. Best-effort: a router without activity
+    support is skipped silently.
+    """
+    try:
+        router = getattr(target_agent, "output_router", None)
+        if router is None or not hasattr(router, "notify_activity"):
+            return
+        preview = (content or "").strip()
+        if len(preview) > 240:
+            preview = preview[:239] + "…"
+        router.notify_activity(
+            "wire_inbound",
+            f"Inbound from {source}",
+            metadata={
+                "from": source,
+                "to": to,
+                "with_content": with_content,
+                "content_preview": preview,
+                "source_event_type": source_event_type,
+                # The SOURCE's turn number. Never emitted as ``turn_index``:
+                # stream frames and store rows interpret that key as
+                # receiver-timeline coordinates, and the frontend's branch
+                # gate drops frames whose turn/branch pair mixes timelines.
+                "source_turn_index": turn_index,
+            },
+        )
+    except Exception:
+        logger.debug(
+            "wire_inbound notify failed; receiver router may not support activity emit",
+        )
 
 
 async def _safe_deliver(target_agent: "Agent", event) -> None:

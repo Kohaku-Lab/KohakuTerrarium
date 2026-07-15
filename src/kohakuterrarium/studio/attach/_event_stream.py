@@ -1,10 +1,4 @@
-"""Stream output bridge — :class:`OutputModule` over an asyncio.Queue.
-
-Was ``api/events.py:StreamOutput`` + ``get_event_log``.  Lives under
-``studio/attach`` because it is the bridge the IO attach uses to
-translate engine events to WS frames.  Other transports (CLI tail,
-TTS) may grow their own variants — this one is the WS-shaped one.
-"""
+"""Translate output events into websocket frames on an asynchronous queue."""
 
 import asyncio
 import time
@@ -13,19 +7,19 @@ from typing import Any
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 
-# In-memory event logs keyed by ``"{session_id}:{creature_id}"``.
+# The session and creature pair isolates replay history for each attachment target.
 _event_logs: dict[str, list] = {}
 
 
 def get_event_log(key: str) -> list:
-    """Get or create an event log for a mount key."""
+    """Return the persistent in-memory replay list for an attachment key."""
     if key not in _event_logs:
         _event_logs[key] = []
     return _event_logs[key]
 
 
 def _parse_detail(detail: str) -> tuple[str, str]:
-    """Extract a ``[name]`` prefix from a detail string."""
+    """Split an optional ``[name]`` prefix from activity detail text."""
     try:
         if detail.startswith("["):
             end = detail.index("] ", 1)
@@ -40,15 +34,11 @@ def _parse_detail(detail: str) -> tuple[str, str]:
 
 
 class StreamOutput(OutputModule):
-    """Secondary output that tags events with source and pushes to a
-    shared queue.  Attached to creatures' agents as a secondary sink.
+    """Queue source-tagged websocket frames as a secondary agent output.
 
-    ``agent`` (optional) is the live ``Agent`` whose ``_turn_index`` /
-    ``_branch_id`` are snapshotted into every emitted frame. Required
-    for branch-aware streaming on the frontend — without it the WS
-    chunks arrive with no branch info and the chat panel cannot tell
-    which branch a chunk belongs to when the user has switched away
-    from the streaming branch during a regen / edit-rerun.
+    When supplied, the live agent provides turn and branch identifiers for every
+    frame. Those identifiers keep regeneration and edit-rerun streams attached to
+    their originating branch even if the viewer switches branches mid-turn.
     """
 
     def __init__(
@@ -65,10 +55,7 @@ class StreamOutput(OutputModule):
         self._agent = agent
 
     def _current_turn_branch(self) -> tuple[int | None, int | None]:
-        """Return ``(turn_index, branch_id)`` from the agent, or
-        ``(None, None)`` when no agent is attached or the agent has
-        not assigned its turn/branch ids yet (very early startup).
-        """
+        """Return positive current turn and branch IDs when both are assigned."""
         agent = self._agent
         if agent is None:
             return None, None
@@ -81,11 +68,8 @@ class StreamOutput(OutputModule):
     def _put(self, msg: dict) -> None:
         msg["source"] = self._src
         msg["ts"] = time.time()
-        # Tag every frame with the agent's current (turn, branch) so
-        # the frontend can route streaming chunks to the right branch
-        # — without this the chat panel mis-renders a regen / edit-
-        # rerun stream onto whichever branch the user happens to be
-        # viewing.
+        # Explicit frame metadata wins; otherwise snapshot the live branch so delayed
+        # rendering cannot attach output to the branch currently being viewed.
         ti, bi = self._current_turn_branch()
         if ti is not None and "turn_index" not in msg:
             msg["turn_index"] = ti
@@ -181,19 +165,12 @@ class StreamOutput(OutputModule):
         frame_id: str,
         metadata: dict | None,
     ) -> None:
-        """Emit a duplicate frame whose ``type`` field literally equals
-        the activity_type, for tool / sub-agent lifecycle events.
+        """Mirror tool and sub-agent lifecycle activities with a raw type.
 
-        The legacy WS contract wraps every activity in ``{type:
-        "activity", activity_type: ...}`` — the frontend dispatches on
-        ``activity_type`` so the wrapping stays.  But programmatic
-        consumers (the multi-node journey, future automation hooks)
-        match on ``frame.type.startswith("tool")``, which the wrapped
-        shape never satisfies.  Emitting an additional frame whose
-        ``type`` field is the raw activity_type lets both consumers
-        observe the same event without breaking the frontend dispatch.
-        Only the lifecycle-style events get the mirror; high-volume
-        events (text_chunk, processing_*) do not.
+        The frontend requires the wrapped ``type="activity"`` contract, while
+        programmatic consumers dispatch on raw ``tool_*`` and ``subagent_*`` types.
+        Mirroring only lifecycle events preserves both contracts without duplicating
+        high-volume text or processing frames.
         """
         if not (
             activity_type.startswith("tool_") or activity_type.startswith("subagent_")
@@ -213,14 +190,11 @@ class StreamOutput(OutputModule):
         self._put(mirror)
 
     async def emit(self, event: OutputEvent) -> None:
-        """Native event consumer. WS JSON frames stay byte-identical
-        to those produced via the legacy hooks: same keys, same
-        whitelist of metadata fields propagated, same ``id`` counter.
+        """Convert a native output event without changing websocket compatibility.
 
-        Phase B kinds (``ask_text``, ``confirm``, ``selection``,
-        ``progress``, ``notification``, ``card``, ``ui_supersede``)
-        are emitted as their own JSON frame shape that the frontend
-        dispatches on directly.
+        Legacy activity keys, metadata filtering, and ID sequencing remain stable.
+        Rich UI event kinds use their own top-level frame types so the client can
+        dispatch them directly.
         """
         match event.type:
             case "text":
@@ -232,7 +206,7 @@ class StreamOutput(OutputModule):
             case "processing_end":
                 self._put({"type": "processing_end"})
             case "user_input":
-                # StreamOutput historically does not surface user_input.
+                # User input is echoed by the attachment loop to avoid duplicate frames.
                 pass
             case "assistant_image":
                 payload = event.payload
@@ -253,9 +227,7 @@ class StreamOutput(OutputModule):
                 | "notification"
                 | "card"
             ):
-                # Phase B kinds — preserve the rich payload verbatim
-                # so the frontend can dispatch on event.type and read
-                # payload keys directly.
+                # Rich UI payloads remain nested and unfiltered for direct client dispatch.
                 msg: dict = {
                     "type": event.type,
                     "event_id": event.id,
@@ -285,9 +257,7 @@ class StreamOutput(OutputModule):
                     self.on_activity(event.type, detail)
 
     def on_supersede(self, event_id: str) -> None:
-        """Sync hook invoked by the router when an event is no longer
-        awaiting a reply. The frontend uses this to dim its widget.
-        """
+        """Notify the client that an interactive event no longer accepts replies."""
         self._put({"type": "ui_supersede", "event_id": event_id})
 
 
@@ -324,16 +294,16 @@ _STREAM_METADATA_KEYS = (
     "subagent",
     "tool",
     "interrupted",
-    # output_wiring delivery metadata (``wire_inbound`` activity)
+    # Output-wiring frames need endpoint and source-event context for visualization.
     "from",
     "to",
     "with_content",
     "content_preview",
     "source_event_type",
+    "source_turn_index",
     "turn_index",
     "branch_id",
     "final_state",
-    # Feat 1 — write / edit / multi_edit tools attach a ``canvas_preview``
-    # dict so the frontend canvas panel can render the just-touched file.
+    # File-mutating tools may include a preview for immediate canvas rendering.
     "canvas_preview",
 )

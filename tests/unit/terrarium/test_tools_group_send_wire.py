@@ -5,6 +5,7 @@ Patches resolve_* helpers to avoid full engine setup; focuses on
 branch behaviour (privilege gates, error formatting, dispatch).
 """
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -141,6 +142,34 @@ class TestGroupSend:
         body = _parse(r)
         assert body["delivered"] is True
         assert body["to"] == "cid"
+
+    async def test_delivery_notifies_inbound_on_receiver(self, monkeypatch):
+        # Direct sends must surface on the receiver's output bus the same
+        # way an output-wire delivery does — otherwise the receiver's chat
+        # tab shows a turn starting with no visible cause.
+        gctx = _gctx()
+        monkeypatch.setattr(send_mod, "resolve_or_error", lambda c, **_: (gctx, None))
+        target = _FakeCreature(name="bob")
+        activities = []
+        target.agent.output_router = SimpleNamespace(
+            notify_activity=lambda t, d, metadata=None: activities.append(
+                (t, d, metadata)
+            )
+        )
+        monkeypatch.setattr(send_mod, "resolve_group_target", lambda g, n: target)
+        r = await send_mod.GroupSendTool()._execute({"to": "bob", "message": "hi"})
+        assert _parse(r)["delivered"] is True
+        assert [t for t, _, _ in activities] == ["wire_inbound"]
+        _, detail, meta = activities[0]
+        assert detail == "Inbound from root"
+        assert meta["from"] == "root"
+        assert meta["to"] == "bob"
+        assert meta["source_event_type"] == "group_send"
+        assert meta["content_preview"] == "hi"
+        assert meta["source_turn_index"] == 0
+        assert "turn_index" not in meta
+        await asyncio.sleep(0.01)
+        target.agent._process_event.assert_awaited()
 
 
 # ─── log_send_error helper ───────────────────────────────────

@@ -1,9 +1,4 @@
-"""Lifecycle tools for non-privileged workers.
-
-``group_add_node`` / ``group_spawn_child`` (spawn), ``group_remove_node``
-(destroy), ``group_start_node`` / ``group_stop_node`` (start / force-stop),
-``group_pause_node`` / ``group_resume_node`` (warm pause), and
-``group_kill_node`` (force-stop + killed marker)."""
+"""Implement privileged tools that manage non-privileged worker lifecycles."""
 
 import asyncio
 from typing import Any
@@ -41,11 +36,7 @@ def _caller_pwd(gctx: GroupContext) -> str:
 def _resolve_worker_target(
     gctx: GroupContext, ident: str, verb: str
 ) -> tuple[Any, ToolResult | None]:
-    """Resolve a NON-privileged target in the caller's group, or an error.
-
-    Privileged targets are refused for every lifecycle verb — only the
-    user (Studio) may drive their lifecycle. Shared by the pause / resume
-    / kill tools."""
+    """Resolve a worker while reserving privileged lifecycle control for Studio."""
     target = resolve_group_target(gctx, ident)
     if target is None:
         return None, err(cross_cluster_target_error(gctx.engine, ident))
@@ -100,20 +91,11 @@ class GroupAddNodeTool(BaseTool):
         config_path = (args.get("config_path") or "").strip()
         if not config_path:
             return err("config_path is required")
-        # ``@pkg/...`` refs resolve inside ``load_agent_config`` (with
-        # traversal hardening) — no pre-resolution here.
+        # Configuration loading resolves and validates package references.
 
         pwd = args.get("pwd") or _caller_pwd(gctx)
         try:
-            # Spawn directly into the caller's graph so the new creature
-            # is a group member from birth — never a homeless singleton.
-            # Without ``graph=``, ``add_creature`` mints a fresh graph
-            # for every spawn, which (a) leaves the spawned creature
-            # outside the caller's group until something wires it,
-            # (b) inflates ``_session_stores`` with one empty entry
-            # per spawn, and (c) makes the frontend rail show N+1
-            # instances. Joining the caller's graph at creation time
-            # is the simpler, correct shape.
+            # Joining at creation avoids a transient singleton graph and session.
             new = await gctx.engine.add_creature(
                 config_path,
                 graph=gctx.caller.graph_id,
@@ -189,8 +171,7 @@ class GroupRemoveNodeTool(BaseTool):
                 f"cannot remove privileged creature {target.name!r}; "
                 "only the user can do that via Studio"
             )
-        # Capture parent before removal — the engine drops the creature
-        # so we can't read it back afterward.
+        # Removal invalidates the creature handle needed for the unlink event.
         parent_id = getattr(target, "parent_creature_id", None)
         try:
             await gctx.engine.remove_creature(target.creature_id)
@@ -311,13 +292,12 @@ class GroupStopNodeTool(BaseTool):
 
 
 def _default_link_channel(caller: Any, child: Any) -> str:
-    """Stable name for the default creator<->child channel."""
+    """Return the stable channel name for a creator-child link."""
     return f"link-{caller.creature_id}-{child.creature_id}"
 
 
 def _log_spawn_task_error(task: asyncio.Task, child_name: str) -> None:
-    """Surface a spawn-task delivery failure at warning level so it does
-    not vanish into the asyncio 'never retrieved' stream."""
+    """Log failures from the detached initial-task delivery."""
     if task.cancelled():
         return
     exc = task.exception()
@@ -331,9 +311,7 @@ def _log_spawn_task_error(task: asyncio.Task, child_name: str) -> None:
 
 
 def _deliver_initial_task(caller: Any, child: Any, task: str) -> bool:
-    """Deliver the spawn task directly to the child (immediate, no
-    channel-subscription race — the default channel carries ongoing
-    two-way traffic once the child's listen trigger is live)."""
+    """Deliver the initial task directly before channel listening is ready."""
     prompt = f"[direct from {caller.name}] {task}"
     event = create_creature_output_event(
         source=caller.name,
@@ -373,8 +351,7 @@ class GroupSpawnChildTool(BaseTool):
         return ExecutionMode.DIRECT
 
     def get_parameters_schema(self) -> dict:
-        # Native schema lives here on the tool class (build_tool_schemas
-        # falls back to get_parameters_schema); NOT in llm/tool_schemas.py.
+        # Tool schema construction falls back to this native definition.
         return {
             "type": "object",
             "properties": {
@@ -425,9 +402,7 @@ class GroupSpawnChildTool(BaseTool):
             gctx.engine, child, config_path=config_ref, config_type="agent"
         )
 
-        # Default creator<->child channel. Two connects on one broadcast
-        # channel wire BOTH directions (caller sends + listens, child sends
-        # + listens) so the pair can talk without further wiring.
+        # Reciprocal connections make both endpoints senders and listeners.
         channel = _default_link_channel(gctx.caller, child)
         try:
             await gctx.engine.connect(
