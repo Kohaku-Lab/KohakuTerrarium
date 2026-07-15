@@ -498,7 +498,9 @@ class SqliteDriveRepository(BaseDriveRepository):
             try:
                 closer = snapshot.close if snapshot is not None else conn.close
                 self._executor.submit(closer).result()
-            except Exception as exc:  # pragma: no cover - close failures are non-recoverable here
+            except (
+                Exception
+            ) as exc:  # pragma: no cover - close failures are non-recoverable here
                 logger.warning("Drive connection close failed", error=str(exc))
         self._snapshot = None
         self._conn = None

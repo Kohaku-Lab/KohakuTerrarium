@@ -23,6 +23,7 @@ from kohakuterrarium.terrarium.drive.wire import (
     unpack_drive_record,
 )
 
+
 @dataclass(frozen=True)
 class DriveView:
     """Combine a Drive record with assignment, availability, and allowed actions."""
