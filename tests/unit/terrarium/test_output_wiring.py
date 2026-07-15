@@ -259,6 +259,12 @@ class TestEmit:
         # Receiver router got a wire_inbound activity.
         types = [t for t, _, _ in bob.agent.output_router.activities]
         assert "wire_inbound" in types
+        # Sender turn travels as source_turn_index; a plain turn_index
+        # would collide with receiver-timeline frame/row stamps and the
+        # frontend branch gate drops such mixed-coordinate frames.
+        meta = bob.agent.output_router.activities[types.index("wire_inbound")][2]
+        assert meta["source_turn_index"] == 1
+        assert "turn_index" not in meta
 
 
 # ── _safe_deliver ────────────────────────────────────────────────

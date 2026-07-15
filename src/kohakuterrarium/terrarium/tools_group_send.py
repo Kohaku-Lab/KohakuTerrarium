@@ -30,6 +30,7 @@ from kohakuterrarium.terrarium.group_tool_context import (
     cross_cluster_target_error,
     resolve_group_target,
 )
+from kohakuterrarium.terrarium.output_wiring import notify_inbound_delivery
 from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
 from kohakuterrarium.utils.logging import get_logger
 
@@ -39,9 +40,8 @@ _logger = get_logger(__name__)
 def _log_send_error(task: asyncio.Task, source: str, target: str) -> None:
     """Done-callback for ``group_send`` delivery tasks.
 
-    Mirrors ``terrarium.output_wiring._log_task_error`` — surfaces
-    receiver-side exceptions at warning-level so they don't disappear
-    into the asyncio "Task exception was never retrieved" stream.
+    Retrieve and log receiver-side exceptions so detached task failures are not
+    reported only by asyncio.
     """
     if task.cancelled():
         return
@@ -117,6 +117,17 @@ class GroupSendTool(BaseTool):
             source_event_type="group_send",
             turn_index=0,
             prompt_override=prompt,
+        )
+        # Runs before the delivery task so the receiver's chat tab shows
+        # the inbound banner ahead of any turn output it provokes.
+        notify_inbound_delivery(
+            target.agent,
+            source=gctx.caller.name,
+            to=target.name,
+            content=message,
+            with_content=True,
+            source_event_type="group_send",
+            turn_index=0,
         )
         task = asyncio.create_task(
             target.agent._process_event(event),
