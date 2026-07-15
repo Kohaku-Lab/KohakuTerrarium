@@ -13,8 +13,12 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.errors import SessionNotResumableError
+from kohakuterrarium.errors import (
+    GraphManifestCollisionError,
+    SessionNotResumableError,
+)
 from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.resume import (
     _open_store_with_migration,
     detect_session_type,
@@ -22,8 +26,16 @@ from kohakuterrarium.session.resume import (
     resume_agent,
 )
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium import channels as _channels
+from kohakuterrarium.terrarium import graph_checkpoint as _checkpoint
+from kohakuterrarium.terrarium import graph_manifest as _manifest
+from kohakuterrarium.terrarium import topology as _topology
 from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.creature_host import Creature, _safe_creature_id
+from kohakuterrarium.terrarium.creature_host import (
+    Creature,
+    _safe_creature_id,
+    apply_creature_name,
+)
 import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
 from kohakuterrarium.utils.logging import get_logger
 
@@ -66,6 +78,32 @@ async def resume_into_engine(
     path = _resolve_store_path(store)
     if isinstance(store, SessionStore):
         store.close(update_status=False)
+    probe = _open_store_with_migration(path)
+    meta = probe.load_meta()
+    if _manifest.MANIFEST_KEY in meta:
+        _manifest.parse_manifest(meta[_manifest.MANIFEST_KEY])
+        close = getattr(probe, "close", None)
+        if close is not None:
+            close(update_status=False)
+        locked = _open_store_with_migration(path, writer_lock=True)
+        try:
+            locked_manifest = _manifest.parse_manifest(
+                locked.load_meta()[_manifest.MANIFEST_KEY]
+            )
+        except BaseException:
+            locked.close(update_status=False)
+            raise
+        return await _resume_manifest_into_engine(
+            engine,
+            path,
+            locked_manifest,
+            pwd=pwd,
+            llm=llm,
+            store=locked,
+        )
+    close = getattr(probe, "close", None)
+    if close is not None:
+        close(update_status=False)
     session_type = detect_session_type(path)
 
     if session_type == "agent":
@@ -82,6 +120,135 @@ def _resolve_store_path(store: SessionStore | str | Path) -> Path:
         # store implementation.
         return Path(getattr(store, "path", str(store)))
     return Path(str(store))
+
+
+async def _resume_manifest_into_engine(
+    engine: "Terrarium",
+    path: Path,
+    manifest: _manifest.GraphManifest,
+    *,
+    pwd: str | None,
+    llm: Any = None,
+    store: SessionStore | None = None,
+) -> str:
+    """Restore a graph exactly from an authoritative manifest."""
+    store = store or _open_store_with_migration(path, writer_lock=True)
+    if manifest.graph_id in engine._topology.graphs:
+        store.close(update_status=False)
+        raise GraphManifestCollisionError("graph_id", manifest.graph_id)
+    for item in manifest.creatures:
+        if (
+            item.creature_id in engine._creatures
+            or item.creature_id in engine._topology.creature_to_graph
+        ):
+            store.close(update_status=False)
+            raise GraphManifestCollisionError("creature_id", item.creature_id)
+
+    created: list[Creature] = []
+    attached = False
+    engine._create_restore_graph(manifest.graph_id)
+    try:
+        for item in manifest.creatures:
+            creature = await engine.add_creature(
+                _manifest.unpack_creature_config(item),
+                llm=llm,
+                pwd=pwd or item.pwd,
+                io="none",
+                strict=False,
+                session=False,
+                start=False,
+                graph=manifest.graph_id,
+                creature_id=item.creature_id,
+                name=item.name,
+                is_privileged=item.is_privileged,
+                parent_creature_id=item.parent_creature_id,
+            )
+            creature.injected_runtime = ()
+            created.append(creature)
+
+        graph = engine._topology.graphs[manifest.graph_id]
+        environment = engine._environments[manifest.graph_id]
+        for channel in manifest.channels:
+            info = _topology.add_channel(
+                engine._topology,
+                manifest.graph_id,
+                channel.name,
+                description=channel.description,
+            )
+            _channels.register_channel_in_environment(
+                environment.shared_channels,
+                info,
+                engine=engine,
+                graph_id=manifest.graph_id,
+            )
+        for creature_id, channel_name in manifest.listen:
+            _topology.set_listen(
+                engine._topology, creature_id, channel_name, listening=True
+            )
+        for creature_id, channel_name in manifest.send:
+            _topology.set_send(
+                engine._topology, creature_id, channel_name, sending=True
+            )
+
+        for creature in created:
+            creature.listen_channels = sorted(
+                graph.listen_edges.get(creature.creature_id, set())
+            )
+            creature.send_channels = sorted(
+                graph.send_edges.get(creature.creature_id, set())
+            )
+            _channels.bind_creature_to_environment(creature, environment)
+            for channel_name in creature.listen_channels:
+                _channels.inject_channel_trigger(
+                    creature.agent,
+                    subscriber_id=creature.name,
+                    channel_name=channel_name,
+                    registry=environment.shared_channels,
+                    ignore_sender_id=creature.creature_id,
+                )
+
+        await engine.attach_session(manifest.graph_id, store)
+        attached = True
+        engine._owned_sessions.add(manifest.graph_id)
+        for creature in created:
+            inject_saved_state(creature.agent, store, creature.name)
+            apply_creature_name(creature, creature.name)
+            await creature.start()
+            _schedule_drive_reconcile(engine, creature)
+        store.update_status("running")
+        await _checkpoint.checkpoint(engine, manifest.graph_id)
+        return manifest.graph_id
+    except BaseException:
+        environment = engine._environments.get(manifest.graph_id)
+        for creature in reversed(created):
+            try:
+                if creature.is_running:
+                    await creature.stop()
+                registry = getattr(environment, "shared_channels", None)
+                for channel_name in creature.listen_channels:
+                    channel = (
+                        registry.get(channel_name) if registry is not None else None
+                    )
+                    if channel is not None:
+                        channel.unsubscribe(creature.name)
+            except BaseException:
+                pass
+            engine._creatures.pop(creature.creature_id, None)
+            getattr(engine, "_runtime_contexts", {}).pop(creature.creature_id, None)
+            engine._topology.creature_to_graph.pop(creature.creature_id, None)
+        if attached:
+            engine._session_stores.pop(manifest.graph_id, None)
+            engine._owned_sessions.discard(manifest.graph_id)
+        runtime = getattr(engine, "_drive_runtime", None)
+        if runtime is not None:
+            try:
+                await runtime.detach_graph(manifest.graph_id)
+            except BaseException:
+                pass
+        engine._environments.pop(manifest.graph_id, None)
+        engine._topology.graphs.pop(manifest.graph_id, None)
+        store.close(update_status=False)
+        raise
 
 
 async def _resume_agent_into_engine(
@@ -114,11 +281,25 @@ async def _resume_agent_into_engine(
     )
     created: list[str] = []
     try:
+        meta = getattr(store, "meta", {})
+        snapshot = meta.get("config_snapshot") if hasattr(meta, "get") else None
+        if snapshot is None:
+            try:
+                snapshot = pack_agent_config(agent.config)
+            except (AttributeError, TypeError):
+                snapshot = {"name": agent.config.name}
         creature_obj = Creature(
             creature_id=_safe_creature_id(agent.config.name),
             name=agent.config.name,
             agent=agent,
             config=agent.config,
+            config_snapshot=snapshot,
+            source_ref=meta.get("config_path") if hasattr(meta, "get") else None,
+            build_pwd=str(
+                pwd
+                or (meta.get("pwd") if hasattr(meta, "get") else None)
+                or os.getcwd()
+            ),
         )
         # ``session=False``: the SAVED store attaches below — autosession
         # minting a fresh sibling file here would orphan it on disk.
@@ -142,6 +323,7 @@ async def _resume_agent_into_engine(
         # and Drive repository are already attached, so persisted Drives
         # redeliver only after startup settles.
         _schedule_drive_reconcile(engine, creature)
+        await _checkpoint.checkpoint(engine, creature.graph_id)
 
         logger.info(
             "Agent session resumed into engine",
@@ -304,6 +486,8 @@ async def _resume_terrarium_body(
         # only once each creature's startup settles.
         _schedule_drive_reconcile(engine, creature)
 
+    if sid in engine._topology.graphs:
+        await _checkpoint.checkpoint(engine, sid)
     logger.info(
         "Terrarium session resumed into engine",
         session_id=sid,
