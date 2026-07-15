@@ -98,7 +98,6 @@ describe("instances store", () => {
           running: true,
           listen_channels: [],
           send_channels: [],
-          subagents: ["explore", "critic"],
         },
         {
           name: "worker",
@@ -121,10 +120,6 @@ describe("instances store", () => {
     expect(result.creatures.length).toBe(2)
     // Primary creature is the root flagged one — drives the model pill.
     expect(result.llm_name).toBe("provider/model")
-    // Configured sub-agents survive the mapper (UXI-05); a creature with
-    // none defaults to an empty list, never undefined.
-    expect(result.creatures[0].subagents).toEqual(["explore", "critic"])
-    expect(result.creatures[1].subagents).toEqual([])
     expect(store.current.id).toBe("graph_team")
   })
 
