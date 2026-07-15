@@ -120,6 +120,68 @@ describe("chat store — Phase B UI event dispatch", () => {
     expect(chat.messagesByTab.main[0].crossNode).toBe(false)
   })
 
+  it("wire_inbound reads the sender turn from source_turn_index, not turn_index", () => {
+    // turn_index/branch_id on a frame are receiver-timeline stamps; the
+    // sender's turn arrives under source_turn_index.
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [] }
+    chat.tabs = ["main"]
+
+    chat._onMessage({
+      type: "activity",
+      source: "main",
+      activity_type: "wire_inbound",
+      from: "alice",
+      to: "main",
+      content_preview: "hello",
+      with_content: true,
+      source_turn_index: 7,
+    })
+
+    expect(chat.messagesByTab.main[0].turnIndex).toBe(7)
+  })
+
+  it("frames tagged with the root creature's real name land on the root tab", () => {
+    // Recipe terrariums key the privileged creature's tab "root" while
+    // every backend frame carries its real name; without the alias every
+    // lookup misses and the frame is dropped.
+    const chat = useChatStore()
+    chat.messagesByTab = { root: [] }
+    chat.tabs = ["root"]
+    chat._rootSourceName = "orchestrator"
+
+    chat._onMessage({
+      type: "activity",
+      source: "orchestrator",
+      activity_type: "wire_inbound",
+      from: "scout",
+      to: "orchestrator",
+      content_preview: "report",
+      with_content: true,
+      source_turn_index: 2,
+    })
+    chat._onMessage({ type: "text", source: "orchestrator", content: "hi" })
+
+    const list = chat.messagesByTab.root
+    expect(list.length).toBe(2)
+    expect(list[0].role).toBe("wire_inbound")
+    expect(list[0].from).toBe("scout")
+    expect(list[1].role).toBe("assistant")
+    expect(chat.processingByTab.root).toBe(true)
+  })
+
+  it("real-name frames keep their own tab when it exists", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { root: [], orchestrator: [] }
+    chat.tabs = ["root", "orchestrator"]
+    chat._rootSourceName = "orchestrator"
+
+    chat._onMessage({ type: "text", source: "orchestrator", content: "hi" })
+
+    expect(chat.messagesByTab.orchestrator.length).toBe(1)
+    expect(chat.messagesByTab.root.length).toBe(0)
+  })
+
   it("_notifyWorkerDisconnect fires toast + markSiteOffline for worker session", () => {
     const chat = useChatStore()
     chat.sessionInfo = { ...chat.sessionInfo, homeNode: "worker-1" }
