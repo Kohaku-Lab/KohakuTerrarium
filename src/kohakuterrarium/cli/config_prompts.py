@@ -11,6 +11,7 @@ from kohakuterrarium.builtins.tool_catalog import list_provider_native_tools
 from kohakuterrarium.llm.profile_types import LLMProfile
 from kohakuterrarium.llm.profiles import _get_preset_definition
 
+
 def prompt(label: str, default: str = "") -> str:
     """Prompt for a string, returning the default on blank input."""
     suffix = f" [{default}]" if default else ""

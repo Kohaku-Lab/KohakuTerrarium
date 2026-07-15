@@ -21,6 +21,7 @@ from kohakuterrarium.studio.editors.codegen_common import (
 )
 from kohakuterrarium.studio.editors.templates import render
 
+
 def render_new(form: dict) -> str:
     """Render a new tool from identity, execution metadata, and method body."""
     name = form.get("name") or form.get("tool_name") or "my_tool"

@@ -215,6 +215,7 @@ def admin_cli(args: argparse.Namespace) -> int:
 
 # CLI and API token rotation share the same TOML writer.
 
+
 def _write_token_or_complain(field: str, value: str) -> int:
     """Wrap ``write_auth_section`` to translate ValueError into a
     clean operator-facing error instead of a raw Python traceback.

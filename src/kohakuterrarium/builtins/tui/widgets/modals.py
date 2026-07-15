@@ -3,6 +3,7 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static
 from textual.widgets.option_list import Option
 
+
 class SelectionModal(ModalScreen[str | None]):
     """Collect one option through keyboard navigation."""
 

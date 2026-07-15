@@ -1,5 +1,4 @@
-"""Inline TUI widgets for Phase B display events: card and progress.
-"""
+"""Inline TUI widgets for Phase B display events: card and progress."""
 
 import webbrowser
 from typing import Any, Callable

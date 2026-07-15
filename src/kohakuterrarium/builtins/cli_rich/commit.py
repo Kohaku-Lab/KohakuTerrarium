@@ -380,7 +380,6 @@ class SessionReplay:
             self._committer.block_renderable(block.to_committed())
             return
 
-
     def _flush_text_buffer(self) -> None:
         if not self._text_buffer:
             return

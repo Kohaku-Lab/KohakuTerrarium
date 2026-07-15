@@ -26,6 +26,7 @@ import sys
 from kohakuterrarium.compose import agent
 from kohakuterrarium.core.config import load_agent_config
 
+
 def make_debater_config(name: str, stance: str, topic: str):
     """Build a tool-free persistent debater configuration for one stance."""
     config = load_agent_config("@kt-biome/creatures/general")

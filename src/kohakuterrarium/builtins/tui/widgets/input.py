@@ -4,6 +4,7 @@ from textual.events import Key
 from textual.message import Message
 from textual.widgets import TextArea
 
+
 class ChatInput(TextArea):
     """Collect multiline chat input with terminal-portable shortcuts."""
 

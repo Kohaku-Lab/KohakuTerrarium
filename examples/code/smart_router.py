@@ -23,6 +23,7 @@ import sys
 from kohakuterrarium.compose import Pure, factory
 from kohakuterrarium.core.config import load_agent_config
 
+
 def make_classifier_config():
     """Build a tool-free classifier that emits one routing key."""
     config = load_agent_config("@kt-biome/creatures/general")
