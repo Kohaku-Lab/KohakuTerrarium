@@ -9,6 +9,7 @@ import pytest
 from kohakuterrarium.core.agent_tools import AgentToolsMixin, _TurnResult
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle, PromotionResult
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.event_inbox import EventInbox
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.parsing import ToolCallEvent
 
@@ -58,6 +59,7 @@ class _FakeAgent(AgentToolsMixin):
         self.subagent_manager = _SubAgentManager()
         self.executor = _FakeExecutor()
         self.controller = _Controller()
+        self._event_inbox = EventInbox()
         self._direct_job_meta = {}
         self._active_handles = {}
         self._bg_controller_notify = {}

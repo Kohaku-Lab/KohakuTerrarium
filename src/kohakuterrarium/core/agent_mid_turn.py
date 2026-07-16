@@ -105,21 +105,23 @@ class AgentMidTurnMixin:
         return self._event_inbox.cancel(pending_id)
 
     async def _drain_mid_turn_pending_inputs(self, controller: Controller) -> int:
-        """Re-claim fire-and-forget stackable events that arrived DURING
-        this turn and fold them in. Called from
-        ``_collect_and_push_feedback`` AFTER tool results land so the
-        native ``tool_calls`` → ``role=tool`` pairing stays valid before a
-        fresh ``role=user`` slot. Drained events concatenate into ONE
-        combined ``role=user`` message; each user-facing entry still
-        produces its own session record + ``user_input_injected`` frame,
-        and every background completion shares ONE combined delivery
-        banner. Returns count drained.
-
-        ``drain_foldable`` leaves any non-stackable or awaiting
-        (future-bearing) envelope in the inbox so it keeps its own turn."""
-        claimed = self._event_inbox.drain_foldable()
+        """Claim every queued event into the active controller turn."""
+        claimed = self._event_inbox.drain_all()
         if not claimed:
             return 0
+
+        active_run = getattr(self, "_active_event_run", None)
+        if active_run is not None:
+            active_run.extend(claimed)
+        active_captures = getattr(self, "_active_event_captures", None)
+        if active_captures is not None:
+            for envelope in claimed:
+                capture = envelope.capture
+                if capture is None:
+                    continue
+                active_captures.append(capture)
+                self.output_router.add_secondary(capture)
+
         drained: list[TriggerEvent] = [env.event for env in claimed]
 
         pairs = [(evt, self._resolve_injected_content(evt)) for evt in drained]
