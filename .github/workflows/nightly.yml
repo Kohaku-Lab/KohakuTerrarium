@@ -370,12 +370,15 @@ jobs:
         shell: bash
         run: |
           tag="${{ needs.version.outputs.tag }}"
+          # --max-releases matches the prune step below: entries must
+          # never outlive the dated release their download URLs point at.
           python scripts/publish_manifest.py \
             --channel nightly \
             --release-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}" \
             --artifacts-dir release-trees/ \
             --previous-manifest previous-nightly.json \
             --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
+            --max-releases 5 \
             --out nightly.json
 
       - name: Publish manifest to manifests-nightly release
@@ -391,3 +394,20 @@ jobs:
               -R "${GITHUB_REPOSITORY}"
           fi
           gh release upload "manifests-nightly" nightly.json --clobber -R "${GITHUB_REPOSITORY}"
+
+      - name: Prune old nightly releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          # Keep the newest 5 dated nightlies (same bound as the manifest's
+          # --max-releases); delete the rest together with their git tags.
+          keep=5
+          tags=$(gh release list -R "${GITHUB_REPOSITORY}" --limit 1000 \
+            --json tagName --jq '.[].tagName' \
+            | { grep -E '^nightly-[0-9]{8}$' || true; } | sort -r)
+          echo "${tags}" | tail -n +$((keep + 1)) | while read -r tag; do
+            [ -n "${tag}" ] || continue
+            echo "pruning ${tag}"
+            gh release delete "${tag}" --cleanup-tag --yes -R "${GITHUB_REPOSITORY}"
+          done

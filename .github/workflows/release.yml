@@ -475,3 +475,22 @@ jobs:
           # to user-supplied tag text instead of the literal
           # ``refs/tags/`` prefix.
           prerelease: ${{ contains(github.ref_name, 'dev') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') }}
+
+      - name: Prune nightly releases
+        # A formal release supersedes the nightly backlog. Keep only the
+        # newest dated nightly — the nightly channel manifest's head entry
+        # still points at it; the next nightly run prunes it in turn.
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          keep=1
+          tags=$(gh release list -R "${GITHUB_REPOSITORY}" --limit 1000 \
+            --json tagName --jq '.[].tagName' \
+            | { grep -E '^nightly-[0-9]{8}$' || true; } | sort -r)
+          echo "${tags}" | tail -n +$((keep + 1)) | while read -r tag; do
+            [ -n "${tag}" ] || continue
+            echo "pruning ${tag}"
+            gh release delete "${tag}" --cleanup-tag --yes -R "${GITHUB_REPOSITORY}"
+          done
