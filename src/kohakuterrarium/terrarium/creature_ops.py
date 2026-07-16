@@ -23,6 +23,7 @@ from typing import Any
 
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
+from kohakuterrarium.session.history import project_branch_metadata
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 import kohakuterrarium.terrarium.channels as _terrarium_channels
 import kohakuterrarium.terrarium.topology as _terrarium_topology
@@ -33,20 +34,6 @@ from kohakuterrarium.terrarium.topology import GraphTopology
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-def branch_status_payload(agent: Any, status: str) -> dict[str, Any]:
-    """Status dict for ``regenerate`` / ``edit_message`` carrying the
-    agent's just-opened ``(turn_index, branch_id)`` so the frontend
-    navigator promotes without waiting for the post-turn resync.
-    """
-    out: dict[str, Any] = {"status": status}
-    ti, bi = getattr(agent, "_turn_index", None), getattr(agent, "_branch_id", None)
-    if isinstance(ti, int):
-        out["turn_index"] = ti
-    if isinstance(bi, int):
-        out["branch_id"] = bi
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -645,10 +632,18 @@ def chat_history_for(engine: Terrarium, creature_id: str) -> dict[str, Any]:
 def chat_branches_for(engine: Terrarium, creature_id: str) -> list[dict[str, Any]]:
     creature = engine.get_creature(creature_id)
     agent = creature.agent
-    fn = getattr(agent, "list_branches", None)
-    if callable(fn):
-        return list(fn())
-    return []
+    live_jobs = agent_live_job_ids(agent)
+    events = _resumable_events(
+        getattr(agent, "session_store", None), creature.name, live_jobs
+    )
+    if not events:
+        fallback = engine._session_stores.get(creature.graph_id)
+        events = _resumable_events(fallback, creature.name, live_jobs)
+    projection = project_branch_metadata(events)
+    return [
+        {"turn_index": turn_index, **metadata}
+        for turn_index, metadata in projection.items()
+    ]
 
 
 # ---------------------------------------------------------------------------

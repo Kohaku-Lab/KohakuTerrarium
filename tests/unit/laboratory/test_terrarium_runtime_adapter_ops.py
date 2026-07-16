@@ -257,8 +257,8 @@ class TestChatOps:
             creature = adapter._engine.get_creature("alice")
             calls = []
 
-            async def _regen(*, turn_index, branch_view):
-                calls.append((turn_index, branch_view))
+            async def _regen(*, turn_index, branch_view, request_id=None):
+                calls.append((turn_index, branch_view, request_id))
 
             creature.agent = SimpleNamespace(
                 is_running=False, regenerate_last_response=_regen
@@ -273,11 +273,12 @@ class TestChatOps:
                     },
                 )
             )
-            # Stub agent has no ``_turn_index`` / ``_branch_id``
-            # attributes, so the dispatcher only echoes the status.
-            assert out == {"status": "regenerating"}
+            assert out["status"] == "completed"
+            assert out["turn_index"] == 0
+            assert out["branch_id"] == 0
+            assert out["request_id"]
             # The turn/branch selectors are passed through verbatim.
-            assert calls == [(3, "v")]
+            assert calls == [(3, "v", None)]
         finally:
             await adapter._engine.shutdown()
 
@@ -292,7 +293,7 @@ class TestChatOps:
         try:
             creature = adapter._engine.get_creature("alice")
 
-            async def _regen(*, turn_index, branch_view):
+            async def _regen(*, turn_index, branch_view, request_id=None):
                 pass
 
             creature.agent = SimpleNamespace(
@@ -311,11 +312,10 @@ class TestChatOps:
                     },
                 )
             )
-            assert out == {
-                "status": "regenerating",
-                "turn_index": 3,
-                "branch_id": 2,
-            }
+            assert out["status"] == "completed"
+            assert out["turn_index"] == 3
+            assert out["branch_id"] == 2
+            assert out["request_id"]
         finally:
             await adapter._engine.shutdown()
 
@@ -344,7 +344,8 @@ class TestChatOps:
             # uses to detect "new-style" replies. Stub agent has no
             # ``_turn_index`` / ``_branch_id`` attributes, so those
             # keys are absent.
-            assert out == {"edited": True, "status": "edited"}
+            assert out["status"] == "completed"
+            assert out["request_id"]
         finally:
             await adapter._engine.shutdown()
 
@@ -375,12 +376,10 @@ class TestChatOps:
                     },
                 )
             )
-            assert out == {
-                "edited": True,
-                "status": "edited",
-                "turn_index": 4,
-                "branch_id": 3,
-            }
+            assert out["status"] == "completed"
+            assert out["turn_index"] == 4
+            assert out["branch_id"] == 3
+            assert out["request_id"]
         finally:
             await adapter._engine.shutdown()
 
@@ -414,7 +413,7 @@ class TestChatOps:
                     },
                 )
             )
-            assert out == {"edited": False}
+            assert out["error"]["kind"] == "invalid"
         finally:
             await adapter._engine.shutdown()
 

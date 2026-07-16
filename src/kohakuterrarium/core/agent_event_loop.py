@@ -136,9 +136,12 @@ class AgentEventLoopMixin:
         events = [env.event for env in run]
         primary = events[0]
         captures = [env.capture for env in run if env.capture is not None]
+        self._active_event_run = run
+        self._active_event_captures = captures
         for cap in captures:
             self.output_router.add_secondary(cap)
         interrupted = False
+        handoff: list[EventEnvelope] = []
         try:
             async with self._processing_lock:
                 self._turn_lock_holder = asyncio.current_task()
@@ -153,14 +156,21 @@ class AgentEventLoopMixin:
                 finally:
                     self._turn_lock_holder = None
                     self._active_turn_stackable = True
+                if interrupted:
+                    self._flush_trigger_backlog_stash()
+                    handoff = self._event_inbox.drain_all()
         finally:
             for cap in captures:
                 self.output_router.remove_secondary(cap)
+            self._active_event_run = None
+            self._active_event_captures = None
         self._resolve_run(
             run,
             status="interrupted" if interrupted else "ok",
             interrupted=interrupted,
         )
+        if handoff and self._running:
+            await self._run_turn_for_batch(handoff)
 
     def _resolve_run(
         self, run: list[EventEnvelope], *, status: str, interrupted: bool = False
@@ -350,7 +360,12 @@ class AgentEventLoopMixin:
         self._prepare_processing_cycle(primary, controller)
         for event in events:
             await controller.push_event(event)
-        await self.output_router.emit(OutputEvent(type="processing_start"))
+        await self.output_router.emit(
+            OutputEvent(
+                type="processing_start",
+                payload={"request_id": self._branch_request_id},
+            )
+        )
 
         all_round_text: list[str] = []
         loop_task = asyncio.create_task(

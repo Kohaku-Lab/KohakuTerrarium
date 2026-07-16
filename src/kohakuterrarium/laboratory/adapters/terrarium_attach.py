@@ -4,6 +4,7 @@ import asyncio
 import time
 from typing import Any
 
+from kohakuterrarium.core.pending_input import new_pending_id
 from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.laboratory.ws_proxy import WSFrameSink, WSProxyAdapter
 from kohakuterrarium.llm.message import (
@@ -158,10 +159,7 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                     continue
                 if frame_type == "ui_dismiss":
                     continue
-                if frame_type != "input":
-                    continue
-                content = _normalize_input_content(frame)
-                if not content:
+                if frame_type not in {"input", "input_edit", "input_cancel"}:
                     continue
                 target_name = (frame.get("target") or "").strip()
                 target_agent = agent
@@ -183,16 +181,36 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                         continue
                     target_agent = sibling.agent
                     target_name_eff = sibling.name
+                if frame_type in {"input_edit", "input_cancel"}:
+                    self._handle_pending_op(
+                        sink,
+                        target_agent,
+                        frame,
+                        frame_type,
+                        target_name_eff,
+                    )
+                    continue
+                content = _normalize_input_content(frame)
+                if not content:
+                    continue
+                pending_id = (frame.get("event_id") or "").strip() or new_pending_id()
                 sink.send_json_nowait(
                     {
                         "type": "user_input",
                         "source": target_name_eff,
                         "content": content,
+                        "event_id": pending_id,
                         "ts": time.time(),
                     }
                 )
                 asyncio.create_task(
-                    self._process_input(sink, target_agent, content, target_name_eff)
+                    self._process_input(
+                        sink,
+                        target_agent,
+                        content,
+                        target_name_eff,
+                        pending_id,
+                    )
                 )
         except asyncio.CancelledError:
             raise
@@ -316,15 +334,50 @@ class TerrariumAttachAdapter(WSProxyAdapter):
             }
         )
 
+    @staticmethod
+    def _handle_pending_op(
+        sink: WSFrameSink,
+        agent: Any,
+        frame: dict[str, Any],
+        frame_type: str,
+        source_name: str,
+    ) -> None:
+        event_id = (frame.get("event_id") or "").strip()
+        committed = False
+        if event_id:
+            if frame_type == "input_edit":
+                committed = agent.edit_pending(
+                    event_id, _normalize_input_content(frame)
+                )
+            else:
+                committed = agent.cancel_pending(event_id)
+        sink.send_json_nowait(
+            {
+                "type": f"{frame_type}_ack",
+                "source": source_name,
+                "event_id": event_id,
+                "status": (
+                    "edited"
+                    if committed and frame_type == "input_edit"
+                    else "cancelled" if committed else "already_sent"
+                ),
+            }
+        )
+
     async def _process_input(
         self,
         sink: WSFrameSink,
         agent: Any,
         content: Any,
         source_name: str,
+        pending_id: str,
     ) -> None:
         try:
-            await agent.inject_input(content, source="web")
+            dispatched = await agent.inject_input(
+                content,
+                source="web",
+                pending_id=pending_id,
+            )
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -333,6 +386,16 @@ class TerrariumAttachAdapter(WSProxyAdapter):
                     "type": "error",
                     "source": source_name,
                     "content": str(e),
+                    "ts": time.time(),
+                }
+            )
+            return
+        if dispatched is False:
+            sink.send_json_nowait(
+                {
+                    "type": "input_queued",
+                    "source": source_name,
+                    "event_id": pending_id,
                     "ts": time.time(),
                 }
             )

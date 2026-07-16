@@ -163,9 +163,12 @@ class TestStreamOutputEmit:
 
     async def test_processing_events(self, _stream):
         so, q, _log = _stream
-        await so.emit(_evt("processing_start"))
+        await so.emit(_evt("processing_start", payload={"request_id": "regen-1"}))
         await so.emit(_evt("processing_end"))
-        assert q.get_nowait()["type"] == "processing_start"
+        started = q.get_nowait()
+        assert started["type"] == "processing_start"
+        assert started["source"] == "src"
+        assert started["request_id"] == "regen-1"
         assert q.get_nowait()["type"] == "processing_end"
 
     async def test_user_input_skipped(self, _stream):

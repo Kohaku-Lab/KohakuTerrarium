@@ -4,6 +4,7 @@ import pytest
 
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.session.history import InvalidBranchViewError
 from kohakuterrarium.session.store import SessionStore
 
 # ── fake agent harness (mirrors production surface) ──────────────
@@ -403,15 +404,12 @@ class TestReloadConversationUnderBranchView:
         roles = [m.role for m in msgs]
         assert "user" in roles
 
-    async def test_no_events_resets_state(self, agent):
-        # No events at all — selected ends up empty → fallback resets state.
+    async def test_no_events_rejects_nonempty_view(self, agent):
         agent._turn_index = 5
         agent._branch_id = 7
         agent._parent_branch_path = [(1, 1)]
-        agent._reload_conversation_under_branch_view({99: 99})
-        # No matching events → falls into the reset branch.
-        assert agent._turn_index == 0
-        assert agent._branch_id == 0
+        with pytest.raises(InvalidBranchViewError):
+            agent._reload_conversation_under_branch_view({99: 99})
 
     async def test_events_read_failure_no_op(self, agent, monkeypatch):
         def boom(name):
@@ -515,14 +513,11 @@ class TestUserMessageContentForTurnBranchView:
         out = agent._user_message_content_for_turn(1, branch_view={1: 1})
         assert out == "u1"
 
-    def test_no_selected_branch_returns_none(self, agent):
+    def test_invalid_branch_view_is_rejected(self, agent):
         agent._apply_user_input("u1")
         agent._emit_assistant("a1")
-        # Branch view selects a non-existent branch for the turn — the
-        # resolver returns no branch for turn 1.
-        out = agent._user_message_content_for_turn(1, branch_view={1: 99})
-        # Falls back to ``None`` because no matching event.
-        assert out in (None, "u1")  # accept either based on resolver semantics
+        with pytest.raises(InvalidBranchViewError):
+            agent._user_message_content_for_turn(1, branch_view={1: 99})
 
 
 class TestEditAndRerunUserPositionFallback:
@@ -957,13 +952,11 @@ class TestLiveUserTurnsFiltering:
 
 
 class TestUserMessageContentForTurnUnmatched:
-    def test_target_branch_none_returns_none(self, agent):
-        # Append a user_message but request a different turn.
+    def test_target_branch_none_is_rejected(self, agent):
         agent._apply_user_input("u1")
         agent._emit_assistant("a1")
-        # branch_view selects a turn that has no events → target_branch None.
-        out = agent._user_message_content_for_turn(99, branch_view={99: 1})
-        assert out is None
+        with pytest.raises(InvalidBranchViewError):
+            agent._user_message_content_for_turn(99, branch_view={99: 1})
 
 
 # ── _reload_conversation_under_branch_view tool message paths ──

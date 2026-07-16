@@ -364,9 +364,11 @@ class TestProcessInput:
             alice = t.get_creature("alice")
             alice.agent.inject_input = AsyncMock()
             sink = _make_sink(node)
-            await adapter._process_input(sink, alice.agent, "hi", "alice")
+            await adapter._process_input(sink, alice.agent, "hi", "alice", "pending-1")
             # Input was forwarded to the agent verbatim with source="web".
-            alice.agent.inject_input.assert_awaited_once_with("hi", source="web")
+            alice.agent.inject_input.assert_awaited_once_with(
+                "hi", source="web", pending_id="pending-1"
+            )
             # On success the sink emits a single ``idle`` frame for the
             # source creature — no error frame.
             frames = _drain(sink)
@@ -383,7 +385,7 @@ class TestProcessInput:
             alice = t.get_creature("alice")
             alice.agent.inject_input = AsyncMock(side_effect=RuntimeError("bad"))
             sink = _make_sink(node)
-            await adapter._process_input(sink, alice.agent, "hi", "alice")
+            await adapter._process_input(sink, alice.agent, "hi", "alice", "pending-1")
             # On failure the sink emits an ``error`` frame carrying the
             # exception text — and no ``idle`` frame.
             frames = _drain(sink)

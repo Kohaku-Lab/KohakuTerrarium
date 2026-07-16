@@ -1351,7 +1351,7 @@ class TestTerrariumIntegration:
         # navigator promote before the post-turn resync lands. ``False``
         # is reserved for refused edits.
         regen = await service.regenerate("writer")
-        assert regen["status"] == "regenerating"
+        assert regen["status"] == "completed"
         assert isinstance(regen["turn_index"], int) and regen["turn_index"] >= 1
         assert isinstance(regen["branch_id"], int) and regen["branch_id"] >= 1
         # find the user message index to edit (the "hello writer" turn).
@@ -1361,7 +1361,7 @@ class TestTerrariumIntegration:
         )
         edited = await service.edit_message("writer", user_idx, "edited writer message")
         assert isinstance(edited, dict)
-        assert edited["status"] == "edited"
+        assert edited["status"] == "completed"
         assert isinstance(edited["branch_id"], int) and edited["branch_id"] >= 1
         hist3 = await service.chat_history("writer")
         joined3 = " ".join(
@@ -1550,7 +1550,7 @@ class TestTerrariumIntegration:
                     "[/drive_create]\n@@title=deploywatch\n[drive_create/]",
                     match="create please",
                 ),
-                "drive is created",
+                "drive is created and acknowledged the drive",
                 "acknowledged the drive",
             ],
         )
@@ -1640,6 +1640,7 @@ class TestTerrariumIntegration:
 
             # 3) Stop the worker; a drive assigned while stopped is deferred.
             await engine.stop("worker")
+            assert worker.stop_requested
             actor = ActorRef("user", "alice")
             drive2 = await manager.create_drive(
                 CreateDriveRequest(
@@ -1666,6 +1667,7 @@ class TestTerrariumIntegration:
 
             # 4) Restart -> reconcile admits it after the restoration barrier.
             await engine.start("worker")
+            assert not worker.stop_requested
             for _ in range(200):
                 d2 = await manager.list_deliveries(drive2.drive_id)
                 if any(x.state == "acknowledged" for x in d2):

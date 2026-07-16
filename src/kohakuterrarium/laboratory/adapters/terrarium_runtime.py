@@ -43,6 +43,7 @@ from kohakuterrarium.terrarium.creature_ops import (
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import (
     LocalTerrariumService,
+    _completed_branch_result,
     _normalize_command_args,
     creature_to_info,
 )
@@ -480,48 +481,32 @@ class TerrariumRuntimeAdapter:
                 return {"branches": chat_branches_for(self._engine, cid)}
 
             case "regenerate":
-                cid = msg.body["creature_id"]
-                creature = self._require_hosted(cid)
-                agent = creature.agent
+                agent = self._require_hosted(msg.body["creature_id"]).agent
                 await agent.regenerate_last_response(
                     turn_index=msg.body.get("turn_index"),
                     branch_view=msg.body.get("branch_view"),
+                    request_id=msg.body.get("request_id"),
                 )
-                regen_out: dict[str, Any] = {"status": "regenerating"}
-                _ti = getattr(agent, "_turn_index", None)
-                _bi = getattr(agent, "_branch_id", None)
-                if isinstance(_ti, int):
-                    regen_out["turn_index"] = _ti
-                if isinstance(_bi, int):
-                    regen_out["branch_id"] = _bi
-                return regen_out
+                return _completed_branch_result(agent, msg.body.get("request_id"))
 
             case "edit_message":
-                cid = msg.body["creature_id"]
-                creature = self._require_hosted(cid)
-                agent = creature.agent
+                agent = self._require_hosted(msg.body["creature_id"]).agent
                 ok = await agent.edit_and_rerun(
                     msg.body["msg_idx"],
                     unpack_content(msg.body["content"]),
                     turn_index=msg.body.get("turn_index"),
                     user_position=msg.body.get("user_position"),
                     branch_view=msg.body.get("branch_view"),
+                    request_id=msg.body.get("request_id"),
                 )
-                edit_out: dict[str, Any] = {"edited": bool(ok)}
-                if ok:
-                    edit_out["status"] = "edited"
-                    _ti = getattr(agent, "_turn_index", None)
-                    _bi = getattr(agent, "_branch_id", None)
-                    if isinstance(_ti, int):
-                        edit_out["turn_index"] = _ti
-                    if isinstance(_bi, int):
-                        edit_out["branch_id"] = _bi
-                return edit_out
+                if not ok:
+                    raise ValueError(f"message {msg.body['msg_idx']} cannot be edited")
+                return _completed_branch_result(agent, msg.body.get("request_id"))
 
             case "rewind":
-                cid = msg.body["creature_id"]
-                creature = self._require_hosted(cid)
-                await creature.agent.rewind_to(msg.body["msg_idx"])
+                await self._require_hosted(msg.body["creature_id"]).agent.rewind_to(
+                    msg.body["msg_idx"]
+                )
                 return {}
 
             case "get_scratchpad":

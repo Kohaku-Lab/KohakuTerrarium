@@ -61,12 +61,13 @@ class TestPerCreatureDelegatesLocal:
     async def test_regenerate(self):
         svc = _make_service(remote_specs={"w1": [_info("c1")]})
         out = await svc.regenerate("c1", turn_index=2)
-        assert out == {"ok": True}
+        assert out["status"] == "completed"
+        assert out["turn_index"] == 2
 
     async def test_edit_message(self):
         svc = _make_service(remote_specs={"w1": [_info("c1")]})
         out = await svc.edit_message("c1", 0, "new")
-        assert out is True
+        assert out["status"] == "completed"
 
     async def test_rewind(self):
         svc = _make_service(remote_specs={"w1": [_info("c1")]})

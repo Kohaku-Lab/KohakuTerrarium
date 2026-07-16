@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from kohakuterrarium.core.config_types import AgentConfig
+from kohakuterrarium.errors import ConflictError, InvalidRequestError
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.remote_service import (
@@ -79,9 +80,13 @@ class TestMaybeRaise:
         with pytest.raises(KeyError):
             _maybe_raise({"error": {"kind": "not_found", "message": "no"}})
 
-    def test_invalid_raises_valueerror(self):
-        with pytest.raises(ValueError):
+    def test_invalid_raises_typed_error(self):
+        with pytest.raises(InvalidRequestError):
             _maybe_raise({"error": {"kind": "invalid", "message": "bad"}})
+
+    def test_conflict_raises_typed_error(self):
+        with pytest.raises(ConflictError):
+            _maybe_raise({"error": {"kind": "conflict", "message": "busy"}})
 
     def test_creature_not_hosted_specific(self):
         with pytest.raises(CreatureNotHostedHere):
@@ -312,13 +317,32 @@ class TestChatOps:
         assert out == [{"t": 1}]
 
     async def test_regenerate(self):
-        svc = _make_service({"regenerate": {"ok": True}})
-        out = await svc.regenerate("cid", turn_index=2)
-        assert out == {"ok": True}
+        result = {
+            "status": "completed",
+            "request_id": "regen-1",
+            "turn_index": 2,
+            "branch_id": 3,
+            "parent_branch_path": [[1, 1]],
+        }
+        svc = _make_service({"regenerate": result})
+        out = await svc.regenerate("cid", turn_index=2, request_id="regen-1")
+        assert out == result
 
     async def test_edit_message(self):
+        result = {
+            "status": "completed",
+            "request_id": "edit-1",
+            "turn_index": 1,
+            "branch_id": 2,
+            "parent_branch_path": [],
+        }
+        svc = _make_service({"edit_message": result})
+        assert await svc.edit_message("cid", 0, "hi", request_id="edit-1") == result
+
+    async def test_branch_mutation_rejects_legacy_response(self):
         svc = _make_service({"edit_message": {"edited": True}})
-        assert await svc.edit_message("cid", 0, "hi") is True
+        with pytest.raises(RemoteEngineError, match="missing"):
+            await svc.edit_message("cid", 0, "hi")
 
     async def test_rewind(self):
         svc = _make_service({"rewind": {}})
@@ -327,8 +351,18 @@ class TestChatOps:
     async def test_turn_blocking_requests_use_long_timeout(self):
         svc = _make_service(
             {
-                "regenerate": {"ok": True},
-                "edit_message": {"edited": True},
+                "regenerate": {
+                    "status": "completed",
+                    "turn_index": 2,
+                    "branch_id": 2,
+                    "parent_branch_path": [],
+                },
+                "edit_message": {
+                    "status": "completed",
+                    "turn_index": 1,
+                    "branch_id": 2,
+                    "parent_branch_path": [],
+                },
                 "chat_history": {"history": {}},
             }
         )

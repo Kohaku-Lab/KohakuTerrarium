@@ -8,7 +8,25 @@ boundary. The live
 """
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol, TypedDict
+
+
+class BranchMutationResult(TypedDict):
+    """Completed branch mutation returned across service boundaries."""
+
+    status: Literal["completed"]
+    request_id: str
+    turn_index: int
+    branch_id: int
+    parent_branch_path: list[list[int]]
+
+
+class RewindResult(TypedDict):
+    """Completed conversation rewind returned across service boundaries."""
+
+    status: Literal["rewound"]
+    position: int
+    request_id: str
 
 
 class CreatureLike(Protocol):
@@ -101,4 +119,9 @@ def creature_to_info(creature: CreatureLike) -> CreatureInfo:
     )
 
 
-__all__ = ["CreatureInfo", "creature_to_info"]
+__all__ = [
+    "BranchMutationResult",
+    "CreatureInfo",
+    "RewindResult",
+    "creature_to_info",
+]

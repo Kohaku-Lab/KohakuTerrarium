@@ -29,6 +29,7 @@ DTOs vs live objects:
   that need access not exposed by the Protocol.
 """
 
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
@@ -36,6 +37,7 @@ from kohakuterrarium.core.channel import ChannelMessage as _ChannelMessage
 from kohakuterrarium.terrarium.drive.service import DriveServiceMixin
 from kohakuterrarium.terrarium.drive.service_protocol import DriveServiceProtocol
 from kohakuterrarium.terrarium.service_dto import (
+    BranchMutationResult,
     CreatureInfo,
     _channel_message_to_dict,
     creature_to_info,
@@ -59,7 +61,6 @@ from kohakuterrarium.terrarium.creature_ops import (
     agent_triggers as _agent_triggers,
     agent_working_dir as _agent_working_dir,
     attach_policies_for as _attach_policies_for,
-    branch_status_payload as _branch_status,
     build_runtime_graph_snapshot_for as _build_runtime_graph_snapshot_for,
     chat_branches_for as _chat_branches_for,
     chat_history_for as _chat_history_for,
@@ -79,6 +80,19 @@ from kohakuterrarium.terrarium.topology import (
     GraphTopology,
     TopologyDelta,
 )
+
+
+def _completed_branch_result(
+    agent: Any, request_id: str | None
+) -> BranchMutationResult:
+    parent_path = getattr(agent, "_branch_parent_path", ()) or ()
+    return {
+        "status": "completed",
+        "request_id": request_id or uuid.uuid4().hex,
+        "turn_index": int(getattr(agent, "_turn_index", 0)),
+        "branch_id": int(getattr(agent, "_branch_id", 0)),
+        "parent_branch_path": [list(pair) for pair in parent_path],
+    }
 
 
 @runtime_checkable
@@ -277,7 +291,8 @@ class TerrariumService(DriveServiceProtocol, Protocol):
         *,
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> dict[str, Any]:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         """Regenerate an assistant response (whole tail by default).
 
         ``turn_index`` opens a new branch under a specific turn instead
@@ -296,7 +311,8 @@ class TerrariumService(DriveServiceProtocol, Protocol):
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         """Edit the user message at ``msg_idx`` and re-run from there."""
         ...
 
@@ -702,12 +718,15 @@ class LocalTerrariumService(DriveServiceMixin):
         *,
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> dict[str, Any]:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         agent = self._agent(creature_id)
         await agent.regenerate_last_response(
-            turn_index=turn_index, branch_view=branch_view
+            turn_index=turn_index,
+            branch_view=branch_view,
+            request_id=request_id,
         )
-        return _branch_status(agent, "regenerating")
+        return _completed_branch_result(agent, request_id)
 
     async def edit_message(
         self,
@@ -718,7 +737,8 @@ class LocalTerrariumService(DriveServiceMixin):
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool | dict[str, Any]:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         agent = self._agent(creature_id)
         ok = await agent.edit_and_rerun(
             msg_idx,
@@ -726,8 +746,11 @@ class LocalTerrariumService(DriveServiceMixin):
             turn_index=turn_index,
             user_position=user_position,
             branch_view=branch_view,
+            request_id=request_id,
         )
-        return _branch_status(agent, "edited") if ok else False
+        if not ok:
+            raise ValueError(f"message {msg_idx} cannot be edited")
+        return _completed_branch_result(agent, request_id)
 
     async def rewind(self, creature_id: str, msg_idx: int) -> None:
         await self._agent(creature_id).rewind_to(msg_idx)

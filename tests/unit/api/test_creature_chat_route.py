@@ -60,15 +60,33 @@ class _FakeService:
 
         return gen()
 
-    async def regenerate(self, cid, *, turn_index=None, branch_view=None):
+    async def regenerate(
+        self, cid, *, turn_index=None, branch_view=None, request_id=None
+    ):
         if "regenerate" in self._raise:
             raise self._raise["regenerate"]
-        return self._regen
+        return self._regen or {
+            "status": "completed",
+            "request_id": request_id or "generated",
+            "turn_index": turn_index or 0,
+            "branch_id": 0,
+            "parent_branch_path": [],
+        }
 
     async def edit_message(self, cid, idx, content, **kw):
         if "edit_message" in self._raise:
             raise self._raise["edit_message"]
-        return self._edit_returns
+        if self._edit_returns is False:
+            raise ValueError("invalid edit target")
+        if self._edit_returns not in (None, True):
+            return self._edit_returns
+        return {
+            "status": "completed",
+            "request_id": kw.get("request_id") or "generated",
+            "turn_index": kw.get("turn_index") or 0,
+            "branch_id": 0,
+            "parent_branch_path": [],
+        }
 
     async def rewind(self, cid, idx):
         if "rewind" in self._raise:
@@ -138,7 +156,7 @@ class TestRegenerate:
         client = _client(_FakeService())
         resp = client.post("/sessions/g/creatures/alice/regenerate", json={})
         assert resp.status_code == 200
-        assert resp.json()["status"] == "regenerating"
+        assert resp.json()["status"] == "completed"
 
     def test_with_turn_index(self):
         client = _client(_FakeService())
@@ -172,7 +190,7 @@ class TestEditMessage:
             json={"content": "new text"},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "edited"
+        assert resp.json()["status"] == "completed"
 
     def test_with_content_list(self):
         client = _client(_FakeService(edit_returns=True))
@@ -188,7 +206,7 @@ class TestEditMessage:
             "/sessions/g/creatures/alice/messages/0/edit",
             json={"content": "x"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 409
 
     def test_keyerror(self):
         svc = _FakeService(raise_on={"edit_message": KeyError("no")})
@@ -228,56 +246,24 @@ class TestHistoryBranches:
         assert resp.status_code == 200
         assert resp.json()["messages"][0]["role"] == "user"
 
-    def test_history_channel_route(self, monkeypatch):
-        # `ch:<name>` prefix prefers the host-engine-backed
-        # _channel_history when it returns non-empty events.
-        captured = []
-
-        def fake_ch(engine, sid, name):
-            captured.append((sid, name))
-            return {
-                "channel": name,
-                "events": [{"type": "channel_message", "content": "hi"}],
-            }
-
-        monkeypatch.setattr(chat_mod, "channel_history", fake_ch)
-        client = _client(_FakeService())
-        resp = client.get("/sessions/g/creatures/ch:chat-ch/history")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert body["channel"] == "chat-ch"
-        assert body["events"][0]["content"] == "hi"
-        assert captured == [("g", "chat-ch")]
-
-    def test_history_channel_route_falls_back_to_service(self, monkeypatch):
-        """CF-9: when the host-engine ``_channel_history`` has nothing
-        (lab-host mode / cluster channel without host-attached store),
-        the route MUST delegate to ``service.channel_history`` so the
-        merged cluster history surfaces. Pre-CF-9 the route returned
-        an empty list and the channel tab rendered blank."""
-        # Force the _channel_history fallback path: simulate lab-host
-        # by patching host_engine_or_none to return None.
-        monkeypatch.setattr(chat_mod, "host_engine_or_none", lambda s: None)
-
-        async def fake_channel_history(self, gid, name):
+    def test_history_channel_route_uses_service(self):
+        async def fake_channel_history(gid, name):
+            assert (gid, name) == ("g", "chat-ch")
             return [
-                {"sender": "alpha", "content": "from-w1", "ts": 1.0},
-                {"sender": "bravo", "content": "from-w2", "ts": 2.0},
+                {"sender": "alpha", "content": "from-w1", "timestamp": 1.0},
+                {"sender": "bravo", "content": "from-w2", "timestamp": 2.0},
             ]
 
-        # Attach an async channel_history method on the fake service.
         svc = _FakeService()
-        svc.channel_history = fake_channel_history.__get__(
-            svc, type(svc)
-        )  # noqa: SLF001
+        svc.channel_history = fake_channel_history
         client = _client(svc)
         resp = client.get("/sessions/g/creatures/ch:chat-ch/history")
         assert resp.status_code == 200
         body = resp.json()
-        # The cluster-routed history surfaced in events.
-        contents = [e["content"] for e in body["events"]]
-        assert "from-w1" in contents
-        assert "from-w2" in contents
+        assert [event["content"] for event in body["events"]] == [
+            "from-w1",
+            "from-w2",
+        ]
 
     def test_history_keyerror(self):
         svc = _FakeService(raise_on={"chat_history": KeyError("no")})

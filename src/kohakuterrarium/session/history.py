@@ -120,6 +120,167 @@ def _resolve_selected_branches(
     return selected
 
 
+class InvalidBranchViewError(ValueError):
+    """Raised when a requested branch view cannot identify a coherent path."""
+
+
+def _coerce_branch_view(branch_view: dict[int, int] | None) -> dict[int, int]:
+    """Normalize branch selections without accepting lossy values."""
+    if branch_view is None:
+        return {}
+    if not isinstance(branch_view, dict):
+        raise InvalidBranchViewError("branch_view must be a mapping")
+
+    selected: dict[int, int] = {}
+    for raw_turn, raw_branch in branch_view.items():
+        values = (raw_turn, raw_branch)
+        if any(
+            isinstance(value, bool)
+            or not isinstance(value, (int, str))
+            or (
+                isinstance(value, str)
+                and (not value.isdigit() or str(int(value)) != value)
+            )
+            for value in values
+        ):
+            raise InvalidBranchViewError("branch_view keys and values must be integers")
+        turn_index = int(raw_turn)
+        branch_id = int(raw_branch)
+        if turn_index < 1 or branch_id < 1:
+            raise InvalidBranchViewError("turn indices and branch ids must be positive")
+        selected[turn_index] = branch_id
+    return selected
+
+
+def resolve_branch_view_strict(
+    events: Iterable[dict[str, Any]],
+    branch_view: dict[int, int] | None,
+) -> dict[int, int]:
+    """Validate a branch view and return its authoritative branch projection."""
+    events_list = list(events)
+    requested = _coerce_branch_view(branch_view)
+    parent_paths = _index_parent_paths(events_list)
+
+    pairs: set[tuple[int, int]] = set()
+    pair_paths: dict[tuple[int, int], tuple[tuple[int, int], ...]] = {}
+    candidates: dict[int, list[tuple[tuple[tuple[int, int], ...], int]]] = {}
+    for evt in events_list:
+        if evt.get("type") not in ("user_message", "user_input"):
+            continue
+        try:
+            pair = (int(evt.get("turn_index")), int(evt.get("branch_id")))
+        except (TypeError, ValueError):
+            continue
+        event_id = evt.get("event_id")
+        path = (
+            parent_paths.get(event_id, ())
+            if isinstance(event_id, int)
+            else _coerce_path(evt.get("parent_branch_path"))
+        )
+        pairs.add(pair)
+        pair_paths.setdefault(pair, path)
+        candidate = (path, pair[1])
+        if candidate not in candidates.setdefault(pair[0], []):
+            candidates[pair[0]].append(candidate)
+
+    for pair in requested.items():
+        if pair not in pairs:
+            raise InvalidBranchViewError(
+                f"branch {pair[1]} does not exist for turn {pair[0]}"
+            )
+
+    constraints = dict(requested)
+    pending = list(requested.items())
+    visited: set[tuple[int, int]] = set()
+    while pending:
+        pair = pending.pop()
+        if pair in visited:
+            continue
+        visited.add(pair)
+        for parent_turn, parent_branch in pair_paths.get(pair, ()):
+            existing = constraints.get(parent_turn)
+            if existing is not None and existing != parent_branch:
+                raise InvalidBranchViewError(
+                    f"branch {pair[1]} at turn {pair[0]} is incompatible with "
+                    f"branch {existing} at turn {parent_turn}"
+                )
+            parent_pair = (parent_turn, parent_branch)
+            if parent_pair not in pairs:
+                raise InvalidBranchViewError(
+                    f"branch {pair[1]} at turn {pair[0]} references missing "
+                    f"branch {parent_branch} at turn {parent_turn}"
+                )
+            if existing is None:
+                constraints[parent_turn] = parent_branch
+                pending.append(parent_pair)
+
+    selected = dict(constraints)
+    for turn_index in sorted(candidates):
+        required = selected.get(turn_index)
+        compatible = [
+            branch_id
+            for path, branch_id in candidates[turn_index]
+            if _path_matches(path, selected)
+            and (required is None or branch_id == required)
+        ]
+        if required is not None and not compatible:
+            raise InvalidBranchViewError(
+                f"branch {required} at turn {turn_index} is incompatible with the view"
+            )
+        if compatible:
+            selected[turn_index] = max(compatible)
+    return selected
+
+
+def project_branch_metadata(
+    events: Iterable[dict[str, Any]],
+    branch_view: dict[int, int] | None = None,
+) -> dict[int, dict[str, Any]]:
+    """Project branch choices, ancestry, and the selected coherent path."""
+    events_list = list(events)
+    selected = resolve_branch_view_strict(events_list, branch_view)
+    parent_paths = _index_parent_paths(events_list)
+    branches: dict[int, dict[int, set[tuple[tuple[int, int], ...]]]] = {}
+
+    for evt in events_list:
+        if evt.get("type") not in ("user_message", "user_input"):
+            continue
+        try:
+            turn_index = int(evt.get("turn_index"))
+            branch_id = int(evt.get("branch_id"))
+        except (TypeError, ValueError):
+            continue
+        event_id = evt.get("event_id")
+        path = (
+            parent_paths.get(event_id, ())
+            if isinstance(event_id, int)
+            else _coerce_path(evt.get("parent_branch_path"))
+        )
+        branches.setdefault(turn_index, {}).setdefault(branch_id, set()).add(path)
+
+    return {
+        turn_index: {
+            "branches": [
+                {
+                    "branch_id": branch_id,
+                    "parent_branch_paths": [
+                        [
+                            [parent_turn, parent_branch]
+                            for parent_turn, parent_branch in path
+                        ]
+                        for path in sorted(paths)
+                    ],
+                    "selected": selected.get(turn_index) == branch_id,
+                }
+                for branch_id, paths in sorted(branches_by_id.items())
+            ],
+            "latest": max(branches_by_id),
+            "selected": selected.get(turn_index),
+        }
+        for turn_index, branches_by_id in sorted(branches.items())
+    }
+
+
 def collect_branch_metadata(
     events: Iterable[dict[str, Any]],
     *,

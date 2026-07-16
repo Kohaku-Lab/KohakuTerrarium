@@ -135,6 +135,17 @@ class RegenerateRequest(BaseModel):
 
     turn_index: int | None = None
     branch_view: dict[int, int] | None = None
+    request_id: str | None = None
+
+
+class BranchMutationResponse(BaseModel):
+    """Completed regenerate/edit result shared by local and remote runtimes."""
+
+    status: Literal["completed"]
+    request_id: str | None = None
+    turn_index: int
+    branch_id: int
+    parent_branch_path: list[list[int]]
 
 
 class MessageEdit(BaseModel):
@@ -148,6 +159,7 @@ class MessageEdit(BaseModel):
     user_position: int | None = None
     # Restore the selected subtree before resolving edits on a non-latest branch.
     branch_view: dict[int, int] | None = None
+    request_id: str | None = None
 
 
 class SlashCommand(BaseModel):

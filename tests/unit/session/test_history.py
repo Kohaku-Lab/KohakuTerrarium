@@ -1,6 +1,9 @@
 """Unit tests for :mod:`kohakuterrarium.session.history`."""
 
+import pytest
+
 from kohakuterrarium.session.history import (
+    InvalidBranchViewError,
     _coerce_path,
     _index_parent_paths,
     _path_matches,
@@ -9,7 +12,9 @@ from kohakuterrarium.session.history import (
     collect_user_groups,
     dedupe_adjacent_duplicate_events,
     normalize_resumable_events,
+    project_branch_metadata,
     replay_conversation,
+    resolve_branch_view_strict,
     select_live_event_ids,
 )
 
@@ -519,6 +524,98 @@ class TestNormalizeResumable:
 
 
 # ── collect_branch_metadata ────────────────────────────────────────
+
+
+class TestStrictBranchView:
+    @staticmethod
+    def _events():
+        return [
+            {
+                "type": "user_message",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [[1, 1]],
+            },
+            {
+                "type": "user_message",
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [[1, 2]],
+            },
+        ]
+
+    def test_rejects_noncanonical_or_nonpositive_view_values(self):
+        events = self._events()
+
+        for view in ({"01": 1}, {1: "01"}, {1: 0}, {1: -1}, {True: 1}):
+            with pytest.raises(InvalidBranchViewError):
+                resolve_branch_view_strict(events, view)
+
+    def test_rejects_nonexistent_selection_but_legacy_read_remains_permissive(self):
+        events = self._events()
+
+        with pytest.raises(InvalidBranchViewError, match="does not exist"):
+            resolve_branch_view_strict(events, {1: 99})
+
+        live_ids = select_live_event_ids(events, branch_view={1: 99})
+        assert live_ids == set()
+
+    def test_rejects_incompatible_ancestor_and_descendant(self):
+        with pytest.raises(InvalidBranchViewError, match="incompatible"):
+            resolve_branch_view_strict(self._events(), {1: 1, 2: 2})
+
+    def test_descendant_selection_projects_required_ancestor(self):
+        assert resolve_branch_view_strict(self._events(), {2: 1}) == {1: 1, 2: 1}
+
+    def test_projects_authoritative_metadata_for_branch_navigation(self):
+        projected = project_branch_metadata(self._events(), {2: 1})
+
+        assert projected == {
+            1: {
+                "branches": [
+                    {
+                        "branch_id": 1,
+                        "parent_branch_paths": [[]],
+                        "selected": True,
+                    },
+                    {
+                        "branch_id": 2,
+                        "parent_branch_paths": [[]],
+                        "selected": False,
+                    },
+                ],
+                "latest": 2,
+                "selected": 1,
+            },
+            2: {
+                "branches": [
+                    {
+                        "branch_id": 1,
+                        "parent_branch_paths": [[[1, 1]]],
+                        "selected": True,
+                    },
+                    {
+                        "branch_id": 2,
+                        "parent_branch_paths": [[[1, 2]]],
+                        "selected": False,
+                    },
+                ],
+                "latest": 2,
+                "selected": 1,
+            },
+        }
 
 
 class TestCollectBranchMetadata:

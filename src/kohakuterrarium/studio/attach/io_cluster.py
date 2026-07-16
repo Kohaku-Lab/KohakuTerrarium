@@ -31,6 +31,32 @@ async def _forward_queue(queue: asyncio.Queue, ws: WebSocket) -> None:
         logger.warning("cluster mux: forward queue error", error=str(e), exc_info=True)
 
 
+async def _forward_client_frame(
+    service: Any,
+    data: dict[str, Any],
+    target_routes: dict[str, tuple[str, str, RemoteStream]],
+    default_route: tuple[str, str, RemoteStream] | None,
+) -> bool:
+    """Forward one input operation to the worker that owns its target."""
+    if data.get("type") not in {"input", "input_edit", "input_cancel"}:
+        return False
+    target_name = (data.get("target") or "").strip()
+    route = target_routes.get(target_name) if target_name else default_route
+    if route is None:
+        route = default_route
+    if route is None:
+        return True
+    node_id, _member_sid, remote_stream = route
+    await service.host.request(
+        to_node=node_id,
+        namespace="terrarium.attach",
+        type="input",
+        body={"stream_id": remote_stream.stream_id, "frame": data},
+        timeout=10.0,
+    )
+    return True
+
+
 async def attach_io_cluster(
     websocket: WebSocket,
     service: "TerrariumService",
@@ -183,29 +209,33 @@ async def attach_io_cluster(
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
-            if msg_type == "input":
+            if msg_type in ("input", "input_edit", "input_cancel"):
                 target_name = (data.get("target") or "").strip()
-                route = default_route
-                if target_name:
-                    if target_name not in target_routes:
-                        try:
-                            queue.put_nowait(
-                                {
-                                    "type": "error",
-                                    "source": target_name,
-                                    "content": (
-                                        f"Cannot route to creature {target_name!r}: "
-                                        "not found in this session."
-                                    ),
-                                    "ts": time.time(),
-                                }
-                            )
-                        except asyncio.QueueFull:
-                            logger.debug("cluster mux: error queue full")
-                        continue
-                    route = target_routes[target_name]
-                if route is not None:
-                    await _send_input(route, dict(data))
+                if target_name and target_name not in target_routes:
+                    try:
+                        queue.put_nowait(
+                            {
+                                "type": "error",
+                                "source": target_name,
+                                "content": (
+                                    f"Cannot route to creature {target_name!r}: "
+                                    "not found in this session."
+                                ),
+                                "ts": time.time(),
+                            }
+                        )
+                    except asyncio.QueueFull:
+                        logger.debug("cluster mux: error queue full")
+                    continue
+                try:
+                    await _forward_client_frame(
+                        service,
+                        data,
+                        target_routes,
+                        default_route,
+                    )
+                except Exception as exc:
+                    logger.warning("cluster mux input forward failed", error=str(exc))
             elif msg_type in ("ui_reply", "ui_dismiss"):
                 for node_id, _sid, rs in upstreams:
                     try:

@@ -230,13 +230,15 @@ class _SessionsChat:
         *,
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> None:
-        await _session_chat.regenerate(
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await _session_chat.regenerate(
             self._studio._service,
             session_id,
             creature_id,
             turn_index=turn_index,
             branch_view=branch_view,
+            request_id=request_id,
         )
 
     async def edit_message(
@@ -249,7 +251,8 @@ class _SessionsChat:
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool | dict[str, object]:
+        request_id: str | None = None,
+    ) -> dict[str, Any]:
         return await _session_chat.edit_message(
             self._studio._service,
             session_id,
@@ -259,6 +262,7 @@ class _SessionsChat:
             turn_index=turn_index,
             user_position=user_position,
             branch_view=branch_view,
+            request_id=request_id,
         )
 
     async def rewind(self, session_id: str, creature_id: str, msg_idx: int) -> None:
@@ -266,11 +270,15 @@ class _SessionsChat:
             self._studio._service, session_id, creature_id, msg_idx
         )
 
-    def history(self, session_id: str, creature_id: str) -> dict[str, Any]:
-        return _session_chat.history(self._studio._service, session_id, creature_id)
+    async def history(self, session_id: str, creature_id: str) -> dict[str, Any]:
+        return await _session_chat.history(
+            self._studio._service, session_id, creature_id
+        )
 
-    def branches(self, session_id: str, creature_id: str) -> dict[str, Any]:
-        return _session_chat.branches(self._studio._service, session_id, creature_id)
+    async def branches(self, session_id: str, creature_id: str) -> list[dict[str, Any]]:
+        return await _session_chat.branches(
+            self._studio._service, session_id, creature_id
+        )
 
 
 class _SessionsCtl:

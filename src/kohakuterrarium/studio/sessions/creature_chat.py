@@ -2,16 +2,9 @@
 
 from typing import Any, AsyncIterator
 
-from kohakuterrarium.session.history import collect_branch_metadata
-from kohakuterrarium.studio.sessions.lifecycle import (
-    find_creature,
-    get_session_store,
-    list_session_stores,
-)
-from kohakuterrarium.terrarium.creature_ops import agent_live_job_ids
+from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
-from kohakuterrarium.studio._runtime import as_engine
 
 
 def _get_agent(engine: Terrarium, session_id: str, creature_id: str) -> Any:
@@ -45,7 +38,8 @@ async def regenerate(
     *,
     turn_index: int | None = None,
     branch_view: dict[int, int] | None = None,
-) -> None:
+    request_id: str | None = None,
+) -> dict[str, Any]:
     """Regenerate an assistant response.
 
     ``turn_index=None`` regenerates the conversation tail (legacy
@@ -65,8 +59,11 @@ async def regenerate(
     method on top of their host engine, so the path collapses to a
     direct call there.
     """
-    await service.regenerate(
-        creature_id, turn_index=turn_index, branch_view=branch_view
+    return await service.regenerate(
+        creature_id,
+        turn_index=turn_index,
+        branch_view=branch_view,
+        request_id=request_id,
     )
 
 
@@ -80,7 +77,8 @@ async def edit_message(
     turn_index: int | None = None,
     user_position: int | None = None,
     branch_view: dict[int, int] | None = None,
-) -> bool | dict[str, object]:
+    request_id: str | None = None,
+) -> dict[str, Any]:
     """Edit a user message at ``msg_idx`` and re-run from there.
 
     ``branch_view`` lets the caller edit a message on a NON-LATEST
@@ -100,6 +98,7 @@ async def edit_message(
         turn_index=turn_index,
         user_position=user_position,
         branch_view=branch_view,
+        request_id=request_id,
     )
 
 
@@ -114,7 +113,7 @@ async def rewind(
     await service.rewind(creature_id, msg_idx)
 
 
-def history(
+async def history(
     service: "TerrariumService", session_id: str, creature_id: str
 ) -> dict[str, Any]:
     """Return the conversation + event log for a creature OR channel.
@@ -124,88 +123,29 @@ def history(
     map to a creature, so we shape a channel-history payload from the
     session store instead of 404ing.  See plan §6 / api-audit row 2.2.
     """
-    engine = as_engine(service)
     if creature_id.startswith("ch:"):
-        return channel_history(engine, session_id, creature_id[3:])
-
-    creature = find_creature(engine, session_id, creature_id)
-    agent = creature.agent
-
-    # Foreground and promoted background jobs must both remain live during
-    # resumable-event normalization to avoid synthetic interruption events.
-    live_job_ids: set[str] = agent_live_job_ids(agent)
-
-    events: list[dict] = []
-    if hasattr(agent, "session_store") and agent.session_store:
-        try:
-            events = agent.session_store.get_resumable_events(
-                creature.name, live_job_ids=live_job_ids
-            )
-        except Exception:
-            events = []
-
-    if not events:
-        # Fall back to the graph store attached by lifecycle bookkeeping.
-        sid = next(
-            (g.graph_id for g in engine.list_graphs() if creature_id in g.creature_ids),
-            session_id,
-        )
-        store = get_session_store(engine, sid)
-        if store is not None:
-            try:
-                events = store.get_resumable_events(
-                    creature.name, live_job_ids=live_job_ids
-                )
-            except Exception:
-                events = []
-
-    return {
-        "creature_id": creature_id,
-        "session_id": session_id,
-        "messages": agent.conversation_history,
-        "events": events,
-        "is_processing": bool(getattr(agent, "_processing_task", None)),
-    }
+        return await channel_history(service, session_id, creature_id[3:])
+    return await service.chat_history(creature_id)
 
 
-def channel_history(engine: Terrarium, session_id: str, channel: str) -> dict[str, Any]:
-    """Build a channel-history payload from the attached session store.
-
-    Mirrors the legacy ``terrarium_history`` body for channel targets:
-    each persisted message becomes a ``channel_message`` event so the
-    frontend's chat replay logic can render them inside the channel
-    tab.  Returns an empty event list when no store is attached or the
-    channel has no recorded messages — the frontend tolerates that.
-    """
-    store = get_session_store(engine, session_id)
-    if store is None:
-        # Wildcard sessions and stale bookkeeping require probing active stores for
-        # the first one that actually contains the channel.
-        for candidate in list_session_stores(engine):
-            try:
-                if candidate.get_channel_messages(channel):
-                    store = candidate
-                    break
-            except Exception:
-                continue
-
-    events: list[dict] = []
-    if store is not None:
-        try:
-            messages = store.get_channel_messages(channel) or []
-        except Exception:
-            messages = []
-        for m in messages:
-            events.append(
-                {
-                    "type": "channel_message",
-                    "channel": channel,
-                    "sender": m.get("sender", ""),
-                    "content": m.get("content", ""),
-                    "ts": m.get("ts", 0),
-                }
-            )
-
+async def channel_history(
+    service: "TerrariumService", session_id: str, channel: str
+) -> dict[str, Any]:
+    """Build a channel-history payload through the service boundary."""
+    try:
+        messages = await service.channel_history(session_id, channel)
+    except KeyError:
+        messages = []
+    events = [
+        {
+            "type": "channel_message",
+            "channel": channel,
+            "sender": message.get("sender", ""),
+            "content": message.get("content", ""),
+            "ts": message.get("timestamp", message.get("ts", 0)),
+        }
+        for message in messages
+    ]
     return {
         "creature_id": f"ch:{channel}",
         "session_id": session_id,
@@ -215,19 +155,8 @@ def channel_history(engine: Terrarium, session_id: str, channel: str) -> dict[st
     }
 
 
-def branches(
+async def branches(
     service: "TerrariumService", session_id: str, creature_id: str
-) -> dict[str, Any]:
-    """Return per-turn branch metadata for the navigator UI."""
-    engine = as_engine(service)
-    payload = history(engine, session_id, creature_id)
-    meta = collect_branch_metadata(payload["events"])
-    turns = [
-        {
-            "turn_index": ti,
-            "branches": info["branches"],
-            "latest_branch": info["latest_branch"],
-        }
-        for ti, info in sorted(meta.items())
-    ]
-    return {"creature_id": creature_id, "turns": turns}
+) -> list[dict[str, Any]]:
+    """Return the authoritative per-turn branch metadata from the runtime."""
+    return await service.chat_branches(creature_id)

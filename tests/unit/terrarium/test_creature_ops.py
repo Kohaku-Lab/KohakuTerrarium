@@ -554,14 +554,28 @@ class TestChatHistoryFor:
         assert out["events"] == []
         assert out["is_processing"] is False
 
-    def test_branches_callable(self):
-        agent = SimpleNamespace(list_branches=lambda: [{"branch": "main"}])
+    def test_branches_project_session_events(self):
+        store = SimpleNamespace()
+        store.get_resumable_events = lambda _name, **_kwargs: [
+            {"event_id": 1, "type": "user_message", "turn_index": 1, "branch_id": 1},
+            {"event_id": 2, "type": "processing_end", "turn_index": 1, "branch_id": 1},
+        ]
+        agent = SimpleNamespace(
+            config=SimpleNamespace(name="agent"),
+            session_store=store,
+            _direct_job_meta={},
+        )
         eng = _Engine(creatures={"c1": _Creature(agent)})
         out = co.chat_branches_for(eng, "c1")
-        assert out == [{"branch": "main"}]
+        assert out[0]["turn_index"] == 1
+        assert out[0]["latest"] == 1
+        assert out[0]["selected"] == 1
+        assert out[0]["branches"] == [
+            {"branch_id": 1, "parent_branch_paths": [[]], "selected": True}
+        ]
 
-    def test_branches_no_method(self):
-        agent = SimpleNamespace()
+    def test_branches_without_store(self):
+        agent = SimpleNamespace(session_store=None, _direct_job_meta={})
         eng = _Engine(creatures={"c1": _Creature(agent)})
         assert co.chat_branches_for(eng, "c1") == []
 
