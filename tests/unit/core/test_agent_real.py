@@ -30,8 +30,10 @@ from kohakuterrarium.core.config_types import (
     OutputConfig,
 )
 from kohakuterrarium.core.events import (
+    create_tool_complete_event,
     create_user_input_event,
 )
+from kohakuterrarium.core.turn import TurnCapture
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -3839,6 +3841,38 @@ class TestRunControllerLoopInterruptAtTop:
             await agent.stop()
 
 
+class TestInterruptQueueHandoff:
+    async def test_interrupt_handoff_keeps_user_and_background_together(
+        self, make_agent
+    ):
+        agent = make_agent()
+        await agent.start()
+        try:
+            interrupted = create_user_input_event("active")
+            interrupted.context["interrupted_by_user"] = True
+            queued_user = EventEnvelope(create_user_input_event("queued user"))
+            background = EventEnvelope(
+                create_tool_complete_event("bg-1", "background done")
+            )
+            agent._event_inbox.put(queued_user)
+            agent._event_inbox.put(background)
+            rounds: list[list[str]] = []
+
+            async def fake_process(events, _controller):
+                rounds.append([event.type for event in events])
+
+            agent._process_batch_with_controller = fake_process  # type: ignore[method-assign]
+            await agent._run_turn_for_batch([EventEnvelope(interrupted)])
+
+            assert rounds == [
+                ["user_input"],
+                ["user_input", "tool_complete"],
+            ]
+            assert len(agent._event_inbox) == 0
+        finally:
+            await agent.stop()
+
+
 class TestRunSingleTurnInterruptMidLoop:
     async def test_interrupt_breaks_inner_async_for(self, make_agent):
         """When _interrupt_requested becomes True between yields from
@@ -4025,6 +4059,148 @@ class TestCollectFeedbackNativeResultsAdded:
 # ── Feat 3: opportunistic input injection ────────────────────────
 
 
+class TestMidTurnDrainDuringDirectWait:
+    """The round boundary must not be starved by a long direct job.
+
+    The only mid-turn drain site runs AFTER ``_wait_handles``, so a
+    direct tool / foreground sub-agent that runs for a long time used to
+    park the turn before the drain — every queued user message and
+    background completion waited for a manual interrupt. Queued USER
+    input now promotes the outstanding direct handles to background so
+    the boundary (and its drain) runs immediately; the promoted job's
+    real result still arrives through the background-completion fold.
+    Background completions alone keep the natural boundary.
+    """
+
+    def _gated_tool(self, started: asyncio.Event, gate: asyncio.Event):
+        class _GatedTool(BaseTool):
+            @property
+            def tool_name(self):
+                return "slowgate"
+
+            @property
+            def description(self):
+                return "slowgate"
+
+            @property
+            def execution_mode(self):
+                return ExecutionMode.DIRECT
+
+            async def _execute(self, args, **kwargs):
+                started.set()
+                await gate.wait()
+                return ToolResult(output="gate-done")
+
+        return _GatedTool()
+
+    async def test_user_input_mid_wait_folds_before_tool_completes(self, make_agent):
+        gate = asyncio.Event()
+        started = asyncio.Event()
+        agent = make_agent(
+            script=["r1\n[/slowgate]\n[slowgate/]", "ack", "done"],
+        )
+        agent.add_tool(self._gated_tool(started, gate))
+        await agent.start()
+        try:
+            primary = asyncio.create_task(agent.inject_input("kick"))
+            await asyncio.wait_for(started.wait(), 5)
+            await agent.inject_input("urgent mid-wait message", source="web")
+
+            def _message_folded() -> bool:
+                return any(
+                    m.role == "user" and "urgent mid-wait message" in str(m.content)
+                    for m in agent.controller.conversation.get_messages()
+                )
+
+            folded_while_held = False
+            for _ in range(100):
+                if _message_folded():
+                    folded_while_held = not gate.is_set()
+                    break
+                await asyncio.sleep(0.05)
+            assert folded_while_held, (
+                "queued user input must fold at a forced round boundary "
+                "while the direct tool is still running — not after it"
+            )
+            gate.set()
+            await asyncio.wait_for(primary, 10)
+
+            # The promoted tool's REAL result is not lost — it folds back
+            # in through the background-completion path.
+            for _ in range(100):
+                if any(
+                    "gate-done" in str(m.content)
+                    for m in agent.controller.conversation.get_messages()
+                ):
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                raise AssertionError("promoted tool result never delivered")
+        finally:
+            gate.set()
+            await agent.stop()
+
+    async def test_bg_completion_alone_keeps_the_direct_wait(self, make_agent):
+        gate = asyncio.Event()
+        started = asyncio.Event()
+        bg_started = asyncio.Event()
+        bg_gate = asyncio.Event()
+
+        class _BgTool(BaseTool):
+            @property
+            def tool_name(self):
+                return "bgjob"
+
+            @property
+            def description(self):
+                return "bgjob"
+
+            @property
+            def execution_mode(self):
+                return ExecutionMode.BACKGROUND
+
+            async def _execute(self, args, **kwargs):
+                bg_started.set()
+                await bg_gate.wait()
+                return ToolResult(output="bg-payload")
+
+        agent = make_agent(
+            script=[
+                "r1\n[/bgjob]\n[bgjob/]\n[/slowgate]\n[slowgate/]",
+                "r2",
+                "done",
+            ],
+        )
+        agent.add_tool(self._gated_tool(started, gate))
+        agent.add_tool(_BgTool())
+        await agent.start()
+        try:
+            primary = asyncio.create_task(agent.inject_input("kick"))
+            await asyncio.wait_for(started.wait(), 5)
+            await asyncio.wait_for(bg_started.wait(), 5)
+            bg_gate.set()
+            # The completion reaches the inbox while slowgate is held.
+            for _ in range(60):
+                if len(agent._event_inbox) >= 1:
+                    break
+                await asyncio.sleep(0.05)
+            await asyncio.sleep(0.2)
+            # A background completion must NOT cut the direct wait short.
+            direct_handles = [h for h in agent._active_handles.values() if not h.done]
+            assert direct_handles, "slowgate handle should still be waiting"
+            assert not any(h.promoted for h in direct_handles)
+            gate.set()
+            await asyncio.wait_for(primary, 10)
+            assert any(
+                "bg-payload" in str(m.content)
+                for m in agent.controller.conversation.get_messages()
+            )
+        finally:
+            gate.set()
+            bg_gate.set()
+            await agent.stop()
+
+
 class TestOpportunisticInputInjection:
     """Mid-turn ``user_input`` / ``trigger`` events that arrive while
     the agent's ``_processing_lock`` is held by another turn must be
@@ -4118,6 +4294,46 @@ class TestOpportunisticInputInjection:
             # which (turn, branch) the injection landed on.
             assert "turn_index" in injected[0][1]
             assert "branch_id" in injected[0][1]
+        finally:
+            await agent.stop()
+
+    async def test_drain_claims_awaited_background_and_fifo_tail(self, make_agent):
+        agent = make_agent()
+        await agent.start()
+        try:
+            first = EventEnvelope(create_user_input_event("first"))
+            capture = TurnCapture()
+            awaited = EventEnvelope(
+                create_user_input_event("queued user"),
+                future=asyncio.get_running_loop().create_future(),
+                capture=capture,
+            )
+            background = EventEnvelope(
+                create_tool_complete_event("bg-1", "background done")
+            )
+            tail = EventEnvelope(create_user_input_event("tail user"))
+            agent._active_event_run = [first]
+            agent._active_event_captures = []
+            agent._event_inbox.put(awaited)
+            agent._event_inbox.put(background)
+            agent._event_inbox.put(tail)
+
+            drained = await agent._drain_mid_turn_pending_inputs(agent.controller)
+
+            assert drained == 3
+            assert agent._active_event_run == [first, awaited, background, tail]
+            assert agent._active_event_captures == [capture]
+            assert len(agent._event_inbox) == 0
+            content = "\n".join(
+                getattr(message, "content", "")
+                for message in agent.controller.conversation.get_messages()
+            )
+            assert (
+                content.index("queued user")
+                < content.index("background done")
+                < content.index("tail user")
+            )
+            assert not awaited.future.done()
         finally:
             await agent.stop()
 

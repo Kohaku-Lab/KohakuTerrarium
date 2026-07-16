@@ -24,6 +24,10 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _is_user_input(event: Any) -> bool:
+    return getattr(event, "type", "") == "user_input"
+
+
 class AgentToolsMixin(AgentRuntimeToolsMixin):
     """Provide tool execution, result handling, and background job management."""
 
@@ -69,7 +73,15 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         tool_call_ids: dict[str, str],
         native_mode: bool,
     ) -> tuple[dict[str, Any], bool]:
-        """Collect direct results while processing background promotions."""
+        """Collect direct results while processing background promotions.
+
+        Queued user input must not wait out a long direct job: the only
+        mid-turn drain runs AFTER this wait, so its arrival promotes the
+        remaining handles — the round boundary (and the drain behind it)
+        runs now, and each promoted job's real result returns through the
+        background-completion fold in a later round. Background
+        completions alone keep the natural boundary.
+        """
         if not handles:
             return {}, False
 
@@ -81,9 +93,23 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         }
 
         while waiters:
-            done, _ = await asyncio.wait(
-                waiters.values(), return_when=asyncio.FIRST_COMPLETED
-            )
+            if self._event_inbox.has_event(_is_user_input):
+                for handle in pending.values():
+                    if not handle.promoted:
+                        handle.promote()
+            arrival = asyncio.create_task(self._event_inbox.wait_put())
+            try:
+                done, _ = await asyncio.wait(
+                    set(waiters.values()) | {arrival},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                if not arrival.done():
+                    arrival.cancel()
+                    try:
+                        await arrival
+                    except asyncio.CancelledError:
+                        pass
 
             finished_job_ids = [jid for jid, task in waiters.items() if task in done]
             for jid in finished_job_ids:

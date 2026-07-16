@@ -90,6 +90,27 @@ class TestWakeup:
         await asyncio.wait_for(inbox.wait_nonempty(), timeout=1.0)
         assert not inbox.empty()
 
+    async def test_wait_put_observes_arrival_not_residency(self):
+        # Residents queued behind the active turn must NOT satisfy it —
+        # only the NEXT enqueue does (the _wait_handles arrival waiter
+        # would otherwise spin on already-queued background events).
+        inbox = EventInbox()
+        inbox.put(_env("resident"))
+        waiter = asyncio.create_task(inbox.wait_put())
+        await asyncio.sleep(0)
+        assert not waiter.done()
+        inbox.put(_env("fresh"))
+        await asyncio.wait_for(waiter, timeout=1.0)
+
+    def test_has_event_matches_by_predicate(self):
+        inbox = EventInbox()
+        inbox.put(EventEnvelope(TriggerEvent(type="tool_complete", content="x")))
+        assert not inbox.has_event(lambda ev: ev.type == "user_input")
+        inbox.put(_env("hello"))
+        assert inbox.has_event(lambda ev: ev.type == "user_input")
+        inbox.drain_all()
+        assert not inbox.has_event(lambda ev: ev.type == "user_input")
+
 
 class TestEditCancelRemove:
     def test_edit_wins_before_claim_and_noops_after(self):

@@ -38,6 +38,7 @@ class EventInbox:
     def __init__(self) -> None:
         self._dq: deque[EventEnvelope] = deque()
         self._waiter: asyncio.Future | None = None
+        self._put_waiter: asyncio.Future | None = None
 
     def __bool__(self) -> bool:
         return bool(self._dq)
@@ -61,9 +62,9 @@ class EventInbox:
 
     def wake(self) -> None:
         """Resolve the consumer's wake latch if it is parked."""
-        waiter = self._waiter
-        if waiter is not None and not waiter.done():
-            waiter.set_result(None)
+        for waiter in (self._waiter, self._put_waiter):
+            if waiter is not None and not waiter.done():
+                waiter.set_result(None)
 
     def drain_all(self) -> list[EventEnvelope]:
         """Atomically claim every queued envelope on the event-loop thread."""
@@ -99,6 +100,24 @@ class EventInbox:
             await self._waiter
         finally:
             self._waiter = None
+
+    def has_event(self, pred: Callable[[TriggerEvent], bool]) -> bool:
+        """Return whether any queued event matches ``pred``."""
+        return any(pred(env.event) for env in self._dq)
+
+    async def wait_put(self) -> None:
+        """Park until the NEXT enqueue; queued residents do not satisfy it.
+
+        ``wait_nonempty`` observes residency (the consumer's idle park);
+        this observes arrival — a mid-turn waiter can react to new events
+        without spinning on ones already queued behind the active turn.
+        """
+        loop = asyncio.get_running_loop()
+        self._put_waiter = loop.create_future()
+        try:
+            await self._put_waiter
+        finally:
+            self._put_waiter = None
 
     def edit(self, pending_id: str, content: Any) -> bool:
         """Rewrite a still-unclaimed event's content by pending id."""
