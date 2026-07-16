@@ -231,7 +231,15 @@ async def test_drive_screen_reload_does_not_duplicate_action_buttons():
         screen = app.screen
         await screen._reload()
         await screen._reload()
-        await pilot.pause()
-        names = [b.name for b in screen.query("#drive-actions Button").results(Button)]
+        # Bounded settle: slow runners need several message-pump passes
+        # before all three buttons finish mounting.
+        names: list[str] = []
+        for _ in range(40):
+            await pilot.pause()
+            names = [
+                b.name for b in screen.query("#drive-actions Button").results(Button)
+            ]
+            if len(names) >= 3:
+                break
         assert names.count("pause") == 1
         assert set(names) == {"pause", "cancel", "progress"}
