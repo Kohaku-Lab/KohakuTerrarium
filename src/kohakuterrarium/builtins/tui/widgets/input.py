@@ -33,7 +33,6 @@ class ChatInput(TextArea):
     class EditQueued(Message):
         """Request editing of the latest queued message."""
 
-        pass
 
     class CommandHint(Message):
         """Carry slash-command completion hints."""

@@ -17,7 +17,6 @@ T = TypeVar("T")
 class ModuleLoadError(Exception):
     """Raised when a configured module or object cannot be loaded."""
 
-    pass
 
 
 class ModuleLoader:

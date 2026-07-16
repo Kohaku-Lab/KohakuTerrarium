@@ -130,11 +130,9 @@ class BaseInputModule(ABC):
 
     async def _on_start(self) -> None:
         """Handle subclass-specific startup."""
-        pass
 
     async def _on_stop(self) -> None:
         """Handle subclass-specific shutdown."""
-        pass
 
     @abstractmethod
     async def get_input(self) -> TriggerEvent | None:

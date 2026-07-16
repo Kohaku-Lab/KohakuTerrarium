@@ -6,11 +6,8 @@ Resolve, persist, and list LLM presets against configured provider backends.
 from copy import deepcopy
 from typing import Any
 
-from kohakuterrarium.llm.api_keys import KEYS_PATH as KEYS_PATH
-from kohakuterrarium.llm.api_keys import KT_DIR as KT_DIR
 from kohakuterrarium.llm.api_keys import PROVIDER_KEY_MAP as PROVIDER_KEY_MAP
 from kohakuterrarium.llm.api_keys import get_api_key
-from kohakuterrarium.llm.api_keys import list_api_keys as list_api_keys
 from kohakuterrarium.llm.api_keys import save_api_key
 from kohakuterrarium.llm.backends import (
     _BUILTIN_PROVIDER_NAMES,
@@ -18,8 +15,6 @@ from kohakuterrarium.llm.backends import (
 from kohakuterrarium.llm.backends import (
     _LEGACY_BACKEND_TYPE_VALUES as _LEGACY_BACKEND_TYPE_VALUES,
 )
-from kohakuterrarium.llm.backends import _SCHEMA_VERSION as _SCHEMA_VERSION
-from kohakuterrarium.llm.backends import PROFILES_PATH as PROFILES_PATH
 from kohakuterrarium.llm.backends import (
     _normalize_backend_type as _normalize_backend_type,
 )
@@ -38,14 +33,11 @@ from kohakuterrarium.llm.codex_auth import CodexTokens
 from kohakuterrarium.llm.preset_store import load_presets
 from kohakuterrarium.llm.preset_store import preset_from_data as _preset_from_data
 from kohakuterrarium.llm.preset_store import serialize_user_data as _serialize_user_data
-from kohakuterrarium.llm.presets import ALIASES as ALIASES
-from kohakuterrarium.llm.presets import PRESETS as PRESETS
 from kohakuterrarium.llm.presets import get_all_presets, resolve_alias
 from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset, LLMProfile
 from kohakuterrarium.llm.variations import (
     _SHORTHAND_SELECTION_KEY,
 )
-from kohakuterrarium.llm.variations import apply_patch_map as apply_patch_map
 from kohakuterrarium.llm.variations import (
     apply_variation_groups,
     deep_merge_dicts,

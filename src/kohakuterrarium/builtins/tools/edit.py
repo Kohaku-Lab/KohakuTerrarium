@@ -40,7 +40,6 @@ class DiffHunk:
 class DiffParseError(Exception):
     """Indicate malformed or inapplicable unified-diff input."""
 
-    pass
 
 
 def parse_unified_diff(diff_text: str) -> list[DiffHunk]:

@@ -91,11 +91,9 @@ class BaseTrigger(ABC):
 
     async def _on_start(self) -> None:
         """Handle subclass-specific startup."""
-        pass
 
     async def _on_stop(self) -> None:
         """Handle subclass-specific shutdown."""
-        pass
 
     def set_context(self, context: dict[str, Any]) -> None:
         """Update trigger context."""
@@ -104,7 +102,6 @@ class BaseTrigger(ABC):
 
     def _on_context_update(self, context: dict[str, Any]) -> None:
         """React to newly merged trigger context."""
-        pass
 
     @abstractmethod
     async def wait_for_trigger(self) -> TriggerEvent | None:
