@@ -92,7 +92,7 @@ class TestAutosessionViaSessionDir:
         c._ever_started = True
         t._running = True
 
-        async def _cancelled_stop():
+        async def _cancelled_stop(*_args, **_kwargs):
             raise asyncio.CancelledError()
 
         c.stop = _cancelled_stop
