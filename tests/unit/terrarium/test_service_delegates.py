@@ -265,7 +265,8 @@ class TestPerCreatureOps:
     async def test_regenerate(self):
         svc, c = _build_service()
         out = await svc.regenerate("cid", turn_index=1)
-        assert out["status"] == "regenerating"
+        assert out["status"] == "completed"
+        assert out["request_id"]
         c.agent.regenerate_last_response.assert_awaited()
 
     async def test_edit_message(self):
@@ -275,7 +276,8 @@ class TestPerCreatureOps:
         svc, c = _build_service()
         out = await svc.edit_message("cid", 2, "new content")
         assert isinstance(out, dict)
-        assert out["status"] == "edited"
+        assert out["status"] == "completed"
+        assert out["request_id"]
         c.agent.edit_and_rerun.assert_awaited()
 
     async def test_edit_message_rejected_target_returns_false(self):
@@ -284,8 +286,8 @@ class TestPerCreatureOps:
         # dict shape here would mask the failure.
         svc, c = _build_service()
         c.agent.edit_and_rerun.return_value = False
-        out = await svc.edit_message("cid", 2, "new content")
-        assert out is False
+        with pytest.raises(ValueError, match="cannot be edited"):
+            await svc.edit_message("cid", 2, "new content")
 
     async def test_rewind(self):
         svc, c = _build_service()

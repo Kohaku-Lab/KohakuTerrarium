@@ -1,7 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.studio.sessions.creature_chat`."""
 
 from types import SimpleNamespace
-
+from unittest.mock import AsyncMock
 
 from kohakuterrarium.studio.sessions import creature_chat as chat_mod
 
@@ -132,20 +132,34 @@ class _ServiceWithMutators:
     forwarded args land on the service Protocol, not on a host engine
     ``find_creature``."""
 
-    def __init__(self, *, edit_result: bool = True) -> None:
+    def __init__(
+        self,
+        *,
+        regenerate_result: dict | None = None,
+        edit_result: dict | None = None,
+        history_result: dict | None = None,
+        branches_result: dict | None = None,
+    ) -> None:
         self.regenerate_calls: list[dict] = []
         self.edit_calls: list[dict] = []
         self.rewind_calls: list[tuple[str, int]] = []
-        self._edit_result = edit_result
+        self._regenerate_result = regenerate_result or {"ok": True}
+        self._edit_result = edit_result or {"ok": True}
+        self._history_result = history_result or {"events": []}
+        self._branches_result = branches_result or []
 
-    async def regenerate(self, creature_id, *, turn_index=None, branch_view=None):
+    async def regenerate(
+        self, creature_id, *, turn_index=None, branch_view=None, request_id=None
+    ):
         self.regenerate_calls.append(
             {
                 "creature_id": creature_id,
                 "turn_index": turn_index,
                 "branch_view": branch_view,
+                "request_id": request_id,
             }
         )
+        return self._regenerate_result
 
     async def edit_message(
         self,
@@ -156,6 +170,7 @@ class _ServiceWithMutators:
         turn_index=None,
         user_position=None,
         branch_view=None,
+        request_id=None,
     ):
         self.edit_calls.append(
             {
@@ -165,12 +180,19 @@ class _ServiceWithMutators:
                 "turn_index": turn_index,
                 "user_position": user_position,
                 "branch_view": branch_view,
+                "request_id": request_id,
             }
         )
         return self._edit_result
 
     async def rewind(self, creature_id, msg_idx):
         self.rewind_calls.append((creature_id, msg_idx))
+
+    async def chat_history(self, creature_id):
+        return self._history_result
+
+    async def chat_branches(self, creature_id):
+        return self._branches_result
 
 
 class TestRegenerate:
@@ -180,9 +202,22 @@ class TestRegenerate:
         verbatim — host-engine ``find_creature`` would 404 on a
         worker-hosted creature."""
         service = _ServiceWithMutators()
-        await chat_mod.regenerate(service, "g", "c", turn_index=2, branch_view={1: 1})
+        out = await chat_mod.regenerate(
+            service,
+            "g",
+            "c",
+            turn_index=2,
+            branch_view={1: 1},
+            request_id="regen-1",
+        )
+        assert out == {"ok": True}
         assert service.regenerate_calls == [
-            {"creature_id": "c", "turn_index": 2, "branch_view": {1: 1}}
+            {
+                "creature_id": "c",
+                "turn_index": 2,
+                "branch_view": {1: 1},
+                "request_id": "regen-1",
+            }
         ]
 
 
@@ -193,7 +228,7 @@ class TestEditMessage:
     async def test_returns_edit_result_and_forwards_args_via_service(self):
         """CF-11: edit_message must reach the worker via the service
         Protocol with every kwarg preserved."""
-        service = _ServiceWithMutators(edit_result=True)
+        service = _ServiceWithMutators(edit_result={"ok": True, "event_id": 7})
         out = await chat_mod.edit_message(
             service,
             "g",
@@ -203,8 +238,9 @@ class TestEditMessage:
             turn_index=1,
             user_position=2,
             branch_view={0: 1},
+            request_id="edit-1",
         )
-        assert out is True
+        assert out == {"ok": True, "event_id": 7}
         assert service.edit_calls == [
             {
                 "creature_id": "c",
@@ -213,6 +249,7 @@ class TestEditMessage:
                 "turn_index": 1,
                 "user_position": 2,
                 "branch_view": {0: 1},
+                "request_id": "edit-1",
             }
         ]
 
@@ -233,134 +270,43 @@ class TestRewind:
 
 
 class TestHistoryCreature:
-    def test_basic_via_session_store(self, monkeypatch):
-        store = _FakeStore(events=[{"type": "user_message"}])
-        agent = _FakeAgent(session_store=store, conversation=[{"role": "user"}])
-        creature = _FakeCreature(agent=agent)
-        monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        out = chat_mod.history(SimpleNamespace(), "g", "alice")
-        assert out["creature_id"] == "alice"
-        assert out["events"] == [{"type": "user_message"}]
-        assert out["messages"] == [{"role": "user"}]
+    async def test_returns_service_dto_unchanged(self):
+        payload = {
+            "creature_id": "alice",
+            "events": [{"type": "user_message", "agent_id": "alice"}],
+            "messages": [{"role": "user", "content": "hi"}],
+            "is_processing": True,
+        }
+        service = _ServiceWithMutators(history_result=payload)
 
-    def test_no_session_store_falls_back_to_lifecycle_store(self, monkeypatch):
-        agent = _FakeAgent(session_store=None)
-        creature = _FakeCreature(agent=agent)
-        monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        fallback = _FakeStore(events=[{"type": "fallback"}])
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: fallback)
-        # The creature's graph is resolved by a direct local engine walk
-        # now (no ``find_session_for_creature`` indirection) — the fake
-        # engine exposes a graph whose creature_ids include "alice".
-        eng = SimpleNamespace(
-            list_graphs=lambda: [SimpleNamespace(graph_id="g1", creature_ids={"alice"})]
-        )
-        out = chat_mod.history(eng, "g", "alice")
-        assert out["events"] == [{"type": "fallback"}]
+        out = await chat_mod.history(service, "remote-session", "alice")
 
-    def test_session_store_failure_falls_back(self, monkeypatch):
-        store = _FakeStore(raise_on={"get_resumable_events": RuntimeError("dead")})
-        agent = _FakeAgent(session_store=store)
-        creature = _FakeCreature(agent=agent)
-        monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
-        # No graph matches → the local walk falls back to session_id "g".
-        eng = SimpleNamespace(list_graphs=lambda: [])
-        out = chat_mod.history(eng, "g", "alice")
-        # Initial fetch raised → events list became empty → no fallback found → still empty.
-        assert out["events"] == []
-
-    def test_is_processing(self, monkeypatch):
-        agent = _FakeAgent(processing=True)
-        creature = _FakeCreature(agent=agent)
-        monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
-        eng = SimpleNamespace(list_graphs=lambda: [])
-        out = chat_mod.history(eng, "g", "alice")
-        assert out["is_processing"] is True
-
-    def test_lifecycle_fallback_store_failure_yields_empty_events(self, monkeypatch):
-        # No agent store at all → lifecycle fallback store is consulted,
-        # but ITS get_resumable_events raises. The handler must swallow
-        # the failure and surface an empty event list, not propagate.
-        agent = _FakeAgent(session_store=None)
-        creature = _FakeCreature(agent=agent)
-        monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        broken = _FakeStore(
-            raise_on={"get_resumable_events": RuntimeError("fallback dead")}
-        )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: broken)
-        eng = SimpleNamespace(
-            list_graphs=lambda: [SimpleNamespace(graph_id="g1", creature_ids={"alice"})]
-        )
-        out = chat_mod.history(eng, "g", "alice")
-        assert out["events"] == []
-
-
-class TestChannelHistoryLastResortScan:
-    def test_wildcard_session_scans_active_stores(self, monkeypatch):
-        # The direct session store lookup misses (e.g. the "_" wildcard),
-        # so _channel_history walks every live store and picks the first
-        # one that actually holds the channel.
-        empty = _FakeStore(channel_messages=[])
-        holder = _FakeStore(
-            channel_messages=[{"sender": "bob", "content": "hey", "ts": 7.0}]
-        )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
-        monkeypatch.setattr(chat_mod, "list_session_stores", lambda rt: [empty, holder])
-        out = chat_mod.history(SimpleNamespace(), "_", "ch:chat")
-        # The message from the holder store surfaces in the payload.
-        assert len(out["events"]) == 1
-        assert out["events"][0]["sender"] == "bob"
-        assert out["events"][0]["content"] == "hey"
-
-    def test_last_resort_scan_skips_stores_that_raise(self, monkeypatch):
-        # A store in the registry whose get_channel_messages raises must
-        # be skipped, not abort the scan — the next good store wins.
-        broken = _FakeStore(raise_on={"get_channel_messages": RuntimeError("boom")})
-        good = _FakeStore(
-            channel_messages=[{"sender": "alice", "content": "ok", "ts": 1.0}]
-        )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
-        monkeypatch.setattr(chat_mod, "list_session_stores", lambda rt: [broken, good])
-        out = chat_mod.history(SimpleNamespace(), "_", "ch:chat")
-        assert len(out["events"]) == 1
-        assert out["events"][0]["sender"] == "alice"
-
-    def test_last_resort_scan_finds_nothing(self, monkeypatch):
-        # No live store holds the channel → empty events, no error.
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
-        monkeypatch.setattr(
-            chat_mod,
-            "list_session_stores",
-            lambda rt: [_FakeStore(channel_messages=[])],
-        )
-        out = chat_mod.history(SimpleNamespace(), "_", "ch:chat")
-        assert out["events"] == []
+        assert out is payload
 
 
 class TestHistoryChannel:
-    def test_no_store(self, monkeypatch):
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: None)
-        out = chat_mod.history(SimpleNamespace(), "g", "ch:chat")
-        assert out["creature_id"] == "ch:chat"
-        assert out["events"] == []
-
-    def test_with_messages(self, monkeypatch):
-        store = _FakeStore(
-            channel_messages=[{"sender": "alice", "content": "hi", "ts": 100.0}]
+    async def test_uses_service_boundary(self):
+        service = SimpleNamespace(
+            channel_history=AsyncMock(
+                return_value=[{"sender": "alice", "content": "hi", "timestamp": 100.0}]
+            )
         )
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: store)
-        out = chat_mod.history(SimpleNamespace(), "g", "ch:chat")
-        assert len(out["events"]) == 1
-        assert out["events"][0]["type"] == "channel_message"
-        assert out["events"][0]["sender"] == "alice"
+        out = await chat_mod.history(service, "g", "ch:chat")
+        assert out["creature_id"] == "ch:chat"
+        assert out["events"] == [
+            {
+                "type": "channel_message",
+                "channel": "chat",
+                "sender": "alice",
+                "content": "hi",
+                "ts": 100.0,
+            }
+        ]
+        service.channel_history.assert_awaited_once_with("g", "chat")
 
-    def test_channel_lookup_failure(self, monkeypatch):
-        store = _FakeStore(raise_on={"get_channel_messages": RuntimeError("boom")})
-        monkeypatch.setattr(chat_mod, "get_session_store", lambda rt, sid: store)
-        out = chat_mod.history(SimpleNamespace(), "g", "ch:chat")
-        # Empty events on failure.
+    async def test_missing_channel_is_empty(self):
+        service = SimpleNamespace(channel_history=AsyncMock(side_effect=KeyError("x")))
+        out = await chat_mod.history(service, "g", "ch:chat")
         assert out["events"] == []
 
 
@@ -368,28 +314,19 @@ class TestHistoryChannel:
 
 
 class TestBranches:
-    def test_basic(self, monkeypatch):
-        # Build an agent with branched events.
-        store = _FakeStore(
-            events=[
-                {
-                    "type": "user_message",
-                    "event_id": 1,
-                    "turn_index": 1,
-                    "branch_id": 1,
-                },
-                {
-                    "type": "user_message",
-                    "event_id": 2,
-                    "turn_index": 1,
-                    "branch_id": 2,
-                },
-            ]
-        )
-        agent = _FakeAgent(session_store=store)
-        creature = _FakeCreature(agent=agent)
-        monkeypatch.setattr(chat_mod, "find_creature", lambda eng, sid, cid: creature)
-        out = chat_mod.branches(SimpleNamespace(), "g", "alice")
-        assert out["creature_id"] == "alice"
-        # turn 1 has branches [1, 2].
-        assert out["turns"][0]["branches"] == [1, 2]
+    async def test_returns_service_dto_unchanged(self):
+        payload = [
+            {
+                "turn_index": 1,
+                "branches": [
+                    {"branch_id": 1},
+                    {"branch_id": 2},
+                ],
+                "latest_branch": 2,
+            }
+        ]
+        service = _ServiceWithMutators(branches_result=payload)
+
+        out = await chat_mod.branches(service, "remote-session", "alice")
+
+        assert out is payload

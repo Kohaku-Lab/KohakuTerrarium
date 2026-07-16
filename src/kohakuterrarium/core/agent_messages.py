@@ -6,9 +6,8 @@ Modify past messages, regenerate responses, and replay conversation branches.
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.llm.message import normalize_content_parts
 from kohakuterrarium.session.history import (
-    _index_parent_paths,
-    _resolve_selected_branches,
     replay_conversation,
+    resolve_branch_view_strict,
     select_live_event_ids,
 )
 from kohakuterrarium.utils.logging import get_logger
@@ -24,6 +23,7 @@ class AgentMessagesMixin:
         *,
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
+        request_id: str | None = None,
     ) -> None:
         """Regenerate an assistant response.
 
@@ -118,7 +118,11 @@ class AgentMessagesMixin:
                 branch_id=self._branch_id,
                 parent_branch_path=ppath,
             )
-        await self._rerun_from_last()
+        self._branch_request_id = request_id
+        try:
+            await self._rerun_from_last()
+        finally:
+            self._branch_request_id = None
 
     async def edit_and_rerun(
         self,
@@ -128,6 +132,7 @@ class AgentMessagesMixin:
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
+        request_id: str | None = None,
     ) -> bool:
         """Replace a user message and re-run from there.
 
@@ -240,7 +245,11 @@ class AgentMessagesMixin:
                 branch_id=self._branch_id,
                 parent_branch_path=ppath,
             )
-        await self._rerun_from_last(new_user_content=new_content)
+        self._branch_request_id = request_id
+        try:
+            await self._rerun_from_last(new_user_content=new_content)
+        finally:
+            self._branch_request_id = None
         return True
 
     async def rewind_to(self, message_idx: int) -> None:
@@ -275,7 +284,11 @@ class AgentMessagesMixin:
         event = TriggerEvent(
             type=EventType.USER_INPUT,
             content=normalised,
-            context={"rerun": True, "edited": edited},
+            context={
+                "rerun": True,
+                "edited": edited,
+                "request_id": getattr(self, "_branch_request_id", None),
+            },
             stackable=False,
         )
         await self._process_event(event)
@@ -438,8 +451,7 @@ class AgentMessagesMixin:
                 exc_info=True,
             )
             return None
-        parent_paths = _index_parent_paths(events)
-        selected = _resolve_selected_branches(events, parent_paths, branch_view)
+        selected = resolve_branch_view_strict(events, branch_view)
         target_branch = selected.get(turn_index)
         if target_branch is None:
             return None
@@ -476,8 +488,7 @@ class AgentMessagesMixin:
 
         # Compute the chosen subtree's leaf state up front so we can
         # set agent metadata after reseating the conversation.
-        parent_paths = _index_parent_paths(events)
-        selected = _resolve_selected_branches(events, parent_paths, branch_view)
+        selected = resolve_branch_view_strict(events, branch_view)
 
         messages = replay_conversation(events, branch_view=branch_view)
         conv = self.controller.conversation

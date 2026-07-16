@@ -75,6 +75,7 @@ from kohakuterrarium.terrarium.service import (
     CreatureInfo,
     TerrariumService,
 )
+from kohakuterrarium.terrarium.service_dto import BranchMutationResult
 from kohakuterrarium.terrarium.topology import (
     ChannelInfo,
     GraphTopology,
@@ -559,11 +560,15 @@ class MultiNodeTerrariumService(
         *,
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> dict[str, Any]:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         return await self._route_per_creature(
             creature_id,
             lambda svc: svc.regenerate(
-                creature_id, turn_index=turn_index, branch_view=branch_view
+                creature_id,
+                turn_index=turn_index,
+                branch_view=branch_view,
+                request_id=request_id,
             ),
         )
 
@@ -576,7 +581,8 @@ class MultiNodeTerrariumService(
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool | dict[str, Any]:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         return await self._route_per_creature(
             creature_id,
             lambda svc: svc.edit_message(
@@ -586,6 +592,7 @@ class MultiNodeTerrariumService(
                 turn_index=turn_index,
                 user_position=user_position,
                 branch_view=branch_view,
+                request_id=request_id,
             ),
         )
 

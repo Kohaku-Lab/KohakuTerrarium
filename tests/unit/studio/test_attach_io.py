@@ -8,6 +8,7 @@ import pytest
 
 from kohakuterrarium.studio.attach import input_ops as input_ops_mod
 from kohakuterrarium.studio.attach import io as io_mod
+from kohakuterrarium.studio.attach import io_cluster as io_cluster_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 
@@ -304,6 +305,40 @@ class TestHandlePendingOp:
             queue=q,
         )
         assert q.get_nowait()["type"] == "error"
+
+
+# ── clustered pending input routing ──────────────────────────
+
+
+class TestClusterPendingInputRouting:
+    @pytest.mark.parametrize("msg_type", ["input_edit", "input_cancel"])
+    async def test_pending_op_routes_to_target_worker(self, msg_type):
+        target = ("node-b", "sid-b", SimpleNamespace(stream_id="stream-b"))
+        default = ("node-a", "sid-a", SimpleNamespace(stream_id="stream-a"))
+        service = SimpleNamespace(host=SimpleNamespace(request=AsyncMock()))
+        data = {
+            "type": msg_type,
+            "target": "bob",
+            "event_id": "pending-1",
+        }
+        if msg_type == "input_edit":
+            data["content"] = "updated"
+
+        handled = await io_cluster_mod._forward_client_frame(
+            service,
+            data,
+            {"bob": target},
+            default,
+        )
+
+        assert handled is True
+        service.host.request.assert_awaited_once_with(
+            to_node="node-b",
+            namespace="terrarium.attach",
+            type="input",
+            body={"stream_id": "stream-b", "frame": data},
+            timeout=10.0,
+        )
 
 
 # ── _forward_queue ──────────────────────────────────────────

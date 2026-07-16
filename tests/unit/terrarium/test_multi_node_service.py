@@ -140,11 +140,30 @@ class _FakeService:
     async def chat_branches(self, cid):
         return [{"t": 1}]
 
-    async def regenerate(self, cid, *, turn_index=None, branch_view=None):
-        return {"ok": True}
+    async def regenerate(
+        self,
+        cid,
+        *,
+        turn_index=None,
+        branch_view=None,
+        request_id=None,
+    ):
+        return {
+            "status": "completed",
+            "request_id": request_id,
+            "turn_index": turn_index or 0,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        }
 
     async def edit_message(self, cid, idx, content, **kw):
-        return True
+        return {
+            "status": "completed",
+            "request_id": kw.get("request_id"),
+            "turn_index": kw.get("turn_index") or 0,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        }
 
     async def rewind(self, cid, idx):
         self.calls.append(("rewind", cid, idx))
@@ -510,8 +529,8 @@ class TestPerCreatureRoutes:
         assert await svc.promote_job("c1", "j1") is False
         assert (await svc.chat_history("c1"))["messages"] == []
         assert await svc.chat_branches("c1") == [{"t": 1}]
-        assert (await svc.regenerate("c1"))["ok"] is True
-        assert await svc.edit_message("c1", 0, "x") is True
+        assert (await svc.regenerate("c1"))["status"] == "completed"
+        assert (await svc.edit_message("c1", 0, "x"))["status"] == "completed"
         await svc.rewind("c1", 0)
         assert await svc.get_scratchpad("c1") == {"k": "v"}
         assert await svc.patch_scratchpad("c1", {"k": "v"}) == {"k": "v"}

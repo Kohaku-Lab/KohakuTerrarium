@@ -344,7 +344,7 @@ class TestStudioIntegration:
             assert out == "First reply."
             out2 = await _drain_chat(studio, session_id, creature_id, "ping two")
             assert out2 == "Second reply."
-            history = studio.sessions.chat.history(session_id, creature_id)
+            history = await studio.sessions.chat.history(session_id, creature_id)
             # The user message + assistant reply are both in the
             # conversation snapshot the chat history endpoint returns
             # (index 0 is the system prompt).
@@ -358,12 +358,11 @@ class TestStudioIntegration:
             assert "Second reply." in history["messages"][-1]["content"]
             assert any(e["type"] == "user_input" for e in history["events"])
             assert history["is_processing"] is False
-            # Per-turn branch metadata — two linear turns, no branching.
-            branches = studio.sessions.chat.branches(session_id, creature_id)
-            assert branches["creature_id"] == creature_id
-            assert [t["turn_index"] for t in branches["turns"]] == [1, 2]
-            assert all(t["branches"] == [1] for t in branches["turns"])
-            assert all(t["latest_branch"] == 1 for t in branches["turns"])
+            # Canonical user turns are branch 1 before any regenerate/edit fork.
+            branches = await studio.sessions.chat.branches(session_id, creature_id)
+            assert [row["turn_index"] for row in branches] == [1, 2]
+            assert [row["selected"] for row in branches] == [1, 1]
+            assert all(row["branches"][0]["branch_id"] == 1 for row in branches)
 
             # --- sessions.state: read-only runtime surface --------------
             # The system prompt carries the workspace creature's seeded
@@ -550,7 +549,7 @@ class TestStudioIntegration:
             resumed = await studio.persistence.resume(saved_path)
             assert len(resumed.creatures) == 1
             resumed_cid = resumed.creatures[0]["creature_id"]
-            resumed_history = studio.sessions.chat.history(
+            resumed_history = await studio.sessions.chat.history(
                 resumed.session_id, resumed_cid
             )
             # The resumed conversation carries the original turn forward.
@@ -786,12 +785,12 @@ class TestStudioIntegration:
 
             # --- chat history mutation: rewind drops the tail -----------
             # Conversation before rewind: [system, user, assistant].
-            pre_rewind = studio.sessions.chat.history(session_id, creature_id)
+            pre_rewind = await studio.sessions.chat.history(session_id, creature_id)
             assert pre_rewind["messages"][-1]["role"] == "assistant"
             # Rewind to msg index 1 (the user message) — drops the
             # assistant reply without re-running.
             await studio.sessions.chat.rewind(session_id, creature_id, 1)
-            post_rewind = studio.sessions.chat.history(session_id, creature_id)
+            post_rewind = await studio.sessions.chat.history(session_id, creature_id)
             assert all(m["role"] != "assistant" for m in post_rewind["messages"])
 
             # --- channels: declare + introspect + broadcast -------------

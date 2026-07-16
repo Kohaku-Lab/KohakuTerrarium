@@ -196,10 +196,11 @@ class SessionOutput(OutputModule):
     async def flush(self) -> None:
         pass
 
-    async def on_processing_start(self) -> None:
+    async def on_processing_start(self, *, request_id: str | None = None) -> None:
         # Sequence numbers are local to one assistant response.
         self._chunk_seq = 0
-        self._record("processing_start", {})
+        payload = {"request_id": request_id} if request_id is not None else {}
+        self._record("processing_start", payload)
 
     async def on_processing_end(self) -> None:
         self._record("processing_end", {})
@@ -311,7 +312,9 @@ class SessionOutput(OutputModule):
                 if isinstance(content, str) and content:
                     self._ingest_text(content)
             case "processing_start":
-                await self.on_processing_start()
+                await self.on_processing_start(
+                    request_id=event.payload.get("request_id")
+                )
             case "processing_end":
                 await self.on_processing_end()
             case "user_input":

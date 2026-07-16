@@ -30,6 +30,7 @@ explicit admin tooling, not the standard service surface.
 from collections.abc import AsyncIterator
 from typing import Any
 
+from kohakuterrarium.errors import ConflictError, InvalidRequestError
 from kohakuterrarium.laboratory.protocols import LabSender
 from kohakuterrarium.laboratory._internal.client import (
     RequestAbortedError,
@@ -48,6 +49,7 @@ from kohakuterrarium.terrarium.events import (
     EventFilter,
 )
 from kohakuterrarium.terrarium.service import CreatureInfo
+from kohakuterrarium.terrarium.service_dto import BranchMutationResult
 from kohakuterrarium.terrarium.topology import (
     ChannelInfo,
     GraphTopology,
@@ -109,10 +111,49 @@ def _maybe_raise(body: Any) -> dict[str, Any]:
             raise CreatureNotHostedHere(message)
         if kind == "not_found":
             raise KeyError(message)
+        if kind == "conflict":
+            raise ConflictError(message)
         if kind == "invalid":
-            raise ValueError(message)
+            raise InvalidRequestError(message)
         raise RemoteEngineError(kind, message)
     return body
+
+
+def _branch_mutation_result(body: dict[str, Any]) -> BranchMutationResult:
+    """Validate the worker response against the public mutation DTO."""
+    required = {"status", "turn_index", "branch_id", "parent_branch_path"}
+    missing = required.difference(body)
+    if missing:
+        names = ", ".join(sorted(missing))
+        raise RemoteEngineError(
+            "invalid_response", f"branch mutation response is missing: {names}"
+        )
+    if body["status"] != "completed":
+        raise RemoteEngineError(
+            "invalid_response",
+            f"unexpected branch mutation status: {body['status']!r}",
+        )
+    parent_path = body["parent_branch_path"]
+    if not isinstance(parent_path, (list, tuple)):
+        raise RemoteEngineError(
+            "invalid_response", "parent_branch_path must be a sequence"
+        )
+    try:
+        return {
+            "status": "completed",
+            "request_id": (
+                str(body["request_id"]) if body.get("request_id") is not None else None
+            ),
+            "turn_index": int(body["turn_index"]),
+            "branch_id": int(body["branch_id"]),
+            "parent_branch_path": [
+                [int(pair[0]), int(pair[1])] for pair in parent_path
+            ],
+        }
+    except (IndexError, TypeError, ValueError) as exc:
+        raise RemoteEngineError(
+            "invalid_response", "invalid branch mutation response"
+        ) from exc
 
 
 class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMixin):
@@ -317,7 +358,8 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         *,
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> dict[str, Any]:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         body = _maybe_raise(
             await self._req_turn_mutation(
                 "regenerate",
@@ -325,10 +367,11 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
                     "creature_id": creature_id,
                     "turn_index": turn_index,
                     "branch_view": branch_view,
+                    "request_id": request_id,
                 },
             )
         )
-        return body
+        return _branch_mutation_result(body)
 
     async def edit_message(
         self,
@@ -339,7 +382,8 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         turn_index: int | None = None,
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
-    ) -> bool | dict[str, Any]:
+        request_id: str | None = None,
+    ) -> BranchMutationResult:
         body = _maybe_raise(
             await self._req_turn_mutation(
                 "edit_message",
@@ -350,22 +394,11 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
                     "turn_index": turn_index,
                     "user_position": user_position,
                     "branch_view": branch_view,
+                    "request_id": request_id,
                 },
             )
         )
-        # Newer workers return the freshly-opened branch_id in the
-        # body so callers can promote their navigator immediately.
-        # Legacy workers only set ``edited`` — fall back to that.
-        if not bool(body.get("edited", False)):
-            return False
-        result_keys = ("status", "turn_index", "branch_id", "user_position")
-        out: dict[str, Any] = {
-            k: body[k] for k in result_keys if body.get(k) is not None
-        }
-        if not out:
-            return True
-        out.setdefault("status", "edited")
-        return out
+        return _branch_mutation_result(body)
 
     async def rewind(self, creature_id: str, msg_idx: int) -> None:
         _maybe_raise(

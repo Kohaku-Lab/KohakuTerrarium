@@ -202,7 +202,10 @@ class StreamOutput(OutputModule):
                 if isinstance(content, str) and content:
                     self._put({"type": "text", "content": content})
             case "processing_start":
-                self._put({"type": "processing_start"})
+                frame = {"type": "processing_start"}
+                if event.payload.get("request_id") is not None:
+                    frame["request_id"] = event.payload["request_id"]
+                self._put(frame)
             case "processing_end":
                 self._put({"type": "processing_end"})
             case "user_input":

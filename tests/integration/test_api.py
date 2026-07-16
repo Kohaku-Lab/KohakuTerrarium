@@ -802,11 +802,11 @@ class TestApiIntegration:
         # ``(turn_index, branch_id)`` so the frontend's branch
         # navigator can promote without waiting for the post-turn
         # resync. The exact ids come from the agent's state, but the
-        # status is always "regenerating".
+        # The blocking endpoint reports truthful completion.
         resp = client.post(f"{base}/regenerate", json={})
         assert resp.status_code == 200
         body = resp.json()
-        assert body["status"] == "regenerating"
+        assert body["status"] == "completed"
         assert isinstance(body["turn_index"], int) and body["turn_index"] >= 1
         assert isinstance(body["branch_id"], int) and body["branch_id"] >= 1
         # Edit the first user message in place and re-run from there.
@@ -815,13 +815,14 @@ class TestApiIntegration:
             json={"content": "edited first turn", "user_position": 0},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "edited"
-        # Editing a target that isn't a user message → documented 400.
+        assert resp.json()["status"] == "completed"
+        # Editing a target that isn't a user message conflicts with the
+        # selected conversation branch.
         resp = client.post(
             f"{base}/messages/999/edit",
             json={"content": "x", "user_position": 999},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 409
         # Rewind the conversation to message index 1 (keeps the system
         # message at index 0 intact).
         resp = client.post(f"{base}/messages/1/rewind")

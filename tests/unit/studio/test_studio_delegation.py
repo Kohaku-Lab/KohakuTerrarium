@@ -168,13 +168,19 @@ def _attach_chat_agent(engine, creature_id="alice"):
     agent.conversation_history = [{"role": "user", "content": "hi"}]
     agent.session_store = None
 
-    async def _regen(*, turn_index=None, branch_view=None):
-        recorder.regenerate_args = (turn_index, branch_view)
+    async def _regen(*, turn_index=None, branch_view=None, request_id=None):
+        recorder.regenerate_args = (turn_index, branch_view, request_id)
 
     async def _edit(
-        idx, content, *, turn_index=None, user_position=None, branch_view=None
+        idx,
+        content,
+        *,
+        turn_index=None,
+        user_position=None,
+        branch_view=None,
+        request_id=None,
     ):
-        recorder.edit_args = (idx, content)
+        recorder.edit_args = (idx, content, request_id)
         return True
 
     async def _rewind(idx):
@@ -191,9 +197,10 @@ class TestSessionsChatControlForward:
         s, engine = studio_engine
         agent = _attach_chat_agent(engine)
         gid = engine.get_creature("alice").graph_id
-        await s.sessions.chat.regenerate(gid, "alice")
-        # The forward invoked the agent's regeneration entry point.
-        assert agent.regenerate_args == (None, None)
+        result = await s.sessions.chat.regenerate(gid, "alice")
+        # The facade preserves the authoritative service metadata.
+        assert result["status"] == "completed"
+        assert agent.regenerate_args == (None, None, None)
 
     async def test_edit_message_forwards_idx_and_content_and_returns_result(
         self, studio_engine
@@ -206,8 +213,8 @@ class TestSessionsChatControlForward:
         gid = engine.get_creature("alice").graph_id
         out = await s.sessions.chat.edit_message(gid, "alice", 0, "edited text")
         assert isinstance(out, dict)
-        assert out["status"] == "edited"
-        assert agent.edit_args == (0, "edited text")
+        assert out["status"] == "completed"
+        assert agent.edit_args == (0, "edited text", None)
 
     async def test_rewind_reaches_the_agent(self, studio_engine):
         s, engine = studio_engine
@@ -220,7 +227,7 @@ class TestSessionsChatControlForward:
         s, engine = studio_engine
         _attach_chat_agent(engine)
         gid = engine.get_creature("alice").graph_id
-        payload = s.sessions.chat.history(gid, "alice")
+        payload = await s.sessions.chat.history(gid, "alice")
         # The forward returns the live conversation snapshot.
         assert payload["messages"] == [{"role": "user", "content": "hi"}]
         assert payload["creature_id"] == "alice"
@@ -229,10 +236,9 @@ class TestSessionsChatControlForward:
         s, engine = studio_engine
         _attach_chat_agent(engine)
         gid = engine.get_creature("alice").graph_id
-        payload = s.sessions.chat.branches(gid, "alice")
-        # No branched events → an empty turns list, but the shape holds.
-        assert payload["creature_id"] == "alice"
-        assert payload["turns"] == []
+        payload = await s.sessions.chat.branches(gid, "alice")
+        # No branched events yield the service's canonical empty list.
+        assert payload == []
 
 
 # ── sessions.ctl interrupt / cancel_job ────────────────────────
