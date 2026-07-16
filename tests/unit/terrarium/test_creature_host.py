@@ -187,6 +187,44 @@ class TestStartStop:
         await c.start()
         await c.stop()
         assert c._running is False
+        assert c.stop_requested
+
+    async def test_only_explicit_start_clears_stop_intent(self):
+        c = _creature()
+        await c.start()
+        await c.stop()
+        assert c.stop_requested
+
+        await c.start(requested=False)
+        assert c.stop_requested
+        await c.stop(requested=False)
+        assert c.stop_requested
+
+        await c.start()
+        assert not c.stop_requested
+        await c.stop()
+
+    async def test_natural_idle_requires_no_turn_or_background_work(self):
+        c = _creature()
+        await c.start()
+        c._running = False
+        c.agent._running = False
+        assert c.is_naturally_idle()
+
+        c.agent._active_handles = {"direct": object()}
+        assert not c.is_naturally_idle()
+        c.agent._active_handles.clear()
+
+        c.agent._event_inbox = asyncio.Queue()
+        c.agent._event_inbox.put_nowait(object())
+        assert not c.is_naturally_idle()
+        c.agent._event_inbox.get_nowait()
+
+        c.agent._processing_task = asyncio.create_task(asyncio.sleep(1))
+        assert not c.is_naturally_idle()
+        c.agent._processing_task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await c.agent._processing_task
 
     async def test_is_running_property(self):
         c = _creature()

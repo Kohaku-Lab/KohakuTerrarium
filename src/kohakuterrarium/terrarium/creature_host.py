@@ -96,6 +96,8 @@ class Creature:
     # the dataclass stays trivially constructible.
     _output_queue: "asyncio.Queue[str | None] | None" = None
     _running: bool = False
+    _stop_requested: bool = True
+    _lifecycle_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     _chat_handler_installed: bool = False
     # Background task driving the agent's configured input module.
     # Spawned in ``start`` and reaped in ``stop`` — see ``start`` for
@@ -123,7 +125,7 @@ class Creature:
     # lifecycle
     # ------------------------------------------------------------------
 
-    async def start(self) -> None:
+    async def start(self, *, requested: bool = True) -> None:
         """Start the underlying agent.  Idempotent.
 
         Also spawns ``Agent._drive_input`` as a background task so the
@@ -139,27 +141,34 @@ class Creature:
         tests or specialized hosts that don't expose this hook simply
         skip the spawn (they're presumed to drive their own loop).
         """
-        if self._running:
-            return
-        self._ensure_chat_pipe()
-        self._restoration_state = RESTORATION_RESTORING
-        await self.agent.start()
-        self._running = True
-        self._ever_started = True
-        self._input_loop_error = None
-        self._killed = False
-        self._restoration_state = RESTORATION_STARTED
-        drive_input = getattr(self.agent, "_drive_input", None)
-        if callable(drive_input):
-            self._input_task = asyncio.create_task(
-                drive_input(),
-                name=f"creature-input-{self.creature_id}",
+        async with self._lifecycle_lock:
+            if self._running:
+                return
+            if requested:
+                self._stop_requested = False
+            elif self._stop_requested:
+                return
+            self._ensure_chat_pipe()
+            self._restoration_state = RESTORATION_RESTORING
+            await self.agent.start()
+            self._running = True
+            self._ever_started = True
+            self._input_loop_error = None
+            self._killed = False
+            self._restoration_state = RESTORATION_STARTED
+            drive_input = getattr(self.agent, "_drive_input", None)
+            if callable(drive_input):
+                self._input_task = asyncio.create_task(
+                    drive_input(),
+                    name=f"creature-input-{self.creature_id}",
+                )
+                self._input_task.add_done_callback(self._on_input_task_done)
+            self._arm_restoration_barrier()
+            logger.info(
+                "Creature started",
+                creature_id=self.creature_id,
+                creature_name=self.name,
             )
-            self._input_task.add_done_callback(self._on_input_task_done)
-        self._arm_restoration_barrier()
-        logger.info(
-            "Creature started", creature_id=self.creature_id, creature_name=self.name
-        )
 
     def _ensure_restoration_event(self) -> "asyncio.Event":
         if self._restoration_ready_event is None:
@@ -203,8 +212,8 @@ class Creature:
         return self._restoration_state == RESTORATION_READY
 
     async def wait_restoration_ready(self) -> None:
-        """Await the restoration barrier. Returns immediately once ready."""
-        if self.restoration_ready:
+        """Await restoration unless lifecycle stop intent supersedes it."""
+        if self.restoration_ready or self._stop_requested:
             return
         await self._ensure_restoration_event().wait()
 
@@ -231,32 +240,37 @@ class Creature:
             self._input_loop_error = exc
         self._running = False
 
-    async def stop(self) -> None:
+    async def stop(self, *, requested: bool = True) -> None:
         """Stop the underlying agent and close the chat pipe."""
-        if not self._running and self._input_task is None:
-            return
-        self._running = False
-        self._restoration_state = RESTORATION_ADDED
-        self._teardown_restoration_barrier()
-        if self._output_queue is not None:
-            self._output_queue.put_nowait(None)
-        # Stopping the agent flips ``Agent._running`` and stops the
-        # input module, which unblocks ``get_input`` and lets the
-        # background loop exit on its own.
-        await self.agent.stop()
-        await self._reap_input_task()
-        logger.info(
-            "Creature stopped", creature_id=self.creature_id, creature_name=self.name
-        )
+        if requested:
+            self._stop_requested = True
+        async with self._lifecycle_lock:
+            if not self._running and self._input_task is None:
+                return
+            self._running = False
+            self._restoration_state = RESTORATION_ADDED
+            self._teardown_restoration_barrier()
+            if self._output_queue is not None:
+                self._output_queue.put_nowait(None)
+            # Stopping the agent flips ``Agent._running`` and stops the
+            # input module, which unblocks ``get_input`` and lets the
+            # background loop exit on its own.
+            await self.agent.stop()
+            await self._reap_input_task()
+            logger.info(
+                "Creature stopped",
+                creature_id=self.creature_id,
+                creature_name=self.name,
+            )
 
     def _teardown_restoration_barrier(self) -> None:
-        """Cancel the barrier task and clear the ready signal on stop."""
+        """Cancel restoration and release waiters superseded by stop."""
         task = self._restoration_task
         self._restoration_task = None
         if task is not None and not task.done():
             task.cancel()
         if self._restoration_ready_event is not None:
-            self._restoration_ready_event.clear()
+            self._restoration_ready_event.set()
 
     async def _reap_input_task(self) -> None:
         """Wait for the input-driver task to exit, cancelling on timeout."""
@@ -272,7 +286,9 @@ class Creature:
             task.cancel()
             try:
                 await task
-            except (asyncio.CancelledError, Exception) as e:
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
                 logger.warning(
                     "input task cancel ended with exception",
                     creature_id=self.creature_id,
@@ -295,6 +311,39 @@ class Creature:
         creature is alive and message-eligible (``status`` is ``"idle"`` or
         ``"busy"``).  ``status`` is authoritative; this is derived from it."""
         return self.status in ("idle", "busy")
+
+    @property
+    def stop_requested(self) -> bool:
+        return self._stop_requested
+
+    def is_naturally_idle(self) -> bool:
+        if self._stop_requested or self.agent.is_running:
+            return False
+        if self._turn_work_pending():
+            return False
+        return not self._background_work_pending()
+
+    def _turn_work_pending(self) -> bool:
+        turn_lock = getattr(self.agent, "_turn_lock", None)
+        if turn_lock is not None and turn_lock.locked():
+            return True
+        processing = getattr(self.agent, "_processing_task", None)
+        if processing is not None and not processing.done():
+            return True
+        active_turn = getattr(self.agent, "_active_turn_task", None)
+        if active_turn is not None and not active_turn.done():
+            return True
+        inbox = getattr(self.agent, "_event_inbox", None)
+        return inbox is not None and not inbox.empty()
+
+    def _background_work_pending(self) -> bool:
+        if getattr(self.agent, "_active_handles", None):
+            return True
+        executor = getattr(self.agent, "executor", None)
+        if executor is not None and executor.get_running_jobs():
+            return True
+        manager = getattr(self.agent, "subagent_manager", None)
+        return manager is not None and bool(manager.get_running_jobs())
 
     @property
     def status(self) -> str:
