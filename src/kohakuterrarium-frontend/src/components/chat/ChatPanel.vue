@@ -112,7 +112,7 @@
               <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ resolvedEmptySubtitle }}</p>
             </div>
           </template>
-          <ChatMessage v-for="(msg, idx) in viewMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? viewMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === viewMessages.length - 1" />
+          <ChatMessage v-for="(msg, idx) in viewMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? viewMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
           <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
             <span class="text-sm text-amber/80 kohaku-pulse">{{ kohakuwuingLabel }}</span>

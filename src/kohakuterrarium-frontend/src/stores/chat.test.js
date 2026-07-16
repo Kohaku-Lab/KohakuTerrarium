@@ -549,7 +549,7 @@ describe("chat store — edit/regen live branch resync", () => {
 
     const ok = await chat.editMessage(0, "edited")
 
-    expect(ok).toBe(false)
+    expect(ok.ok).toBe(false)
     expect(chat.messagesByTab.main).toHaveLength(1)
     expect(chat.messagesByTab.main[0].role).toBe("assistant")
     expect(chat._branchResyncPendingByTab.main).toBeUndefined()
@@ -1806,7 +1806,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
     // re-opens the edit panel with the user's text, which is the
     // SECOND symptom (edit panel reopens). Either return true and
     // schedule a retry quietly, OR keep the optimistic UI visible.
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
 
     editSpy.mockRestore()
     getHistorySpy.mockRestore()
@@ -1853,7 +1853,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
       latestBranch: 1,
     })
 
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     const allText = JSON.stringify(chat.messagesByTab.main)
     expect(allText).not.toContain("old-to-A")
     expect(allText).toContain("A-edit")
@@ -1901,7 +1901,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
     const userIdx = chat.messagesByTab.main.findIndex((m) => m.role === "user")
     // Legacy row: NO turnIndex / userPosition / latestBranch metadata.
     const ok = await chat.editMessage(userIdx, "A-edit", {})
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     expect(chat._branchResyncPendingByTab.main?.baselineMaxEventId).toBe(5)
 
     // First resync races ahead of persistence and returns the OLD log.
@@ -1965,7 +1965,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
       latestBranch: 1,
     })
 
-    expect(ok).toBe(false)
+    expect(ok.ok).toBe(false)
     const allText = JSON.stringify(chat.messagesByTab.main)
     expect(allText).toContain("old-to-A")
     expect(chat.branchViewByTab.main?.[1]).toBeUndefined()
@@ -2066,7 +2066,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
       latestBranch: 1,
     })
 
-    expect(ok).toBe(false)
+    expect(ok.ok).toBe(false)
     expect(JSON.stringify(chat.messagesByTab.main)).toContain("old-to-A")
     expect(chat._branchResyncPendingByTab.main).toBeUndefined()
 
@@ -2110,7 +2110,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
       latestBranch: 1,
     })
 
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     expect(chat.branchViewByTab.main[1]).toBe(2)
     expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
 
@@ -2202,7 +2202,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
     // No latestBranch passed.
     const ok = await chat.editMessage(userIdx, "A-edit", { turnIndex: 1, userPosition: 0 })
 
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     expect(chat.branchViewByTab.main[1]).toBe(2)
     expect(chat._branchResyncPendingByTab.main.expectedBranchByTurn[1]).toBe(2)
     expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
@@ -2249,7 +2249,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
       latestBranch: 1,
     })
 
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     expect(chat.branchViewByTab.main[1]).toBe(2)
     expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
 
@@ -2295,7 +2295,7 @@ describe("chat store — user_input_injected (Feat 3 mid-turn)", () => {
       latestBranch: 1,
     })
 
-    expect(ok).toBe(true)
+    expect(ok.ok).toBe(true)
     expect(chat.branchViewByTab.main[1]).toBe(2)
     expect(JSON.stringify(chat.messagesByTab.main)).not.toContain("old-to-A")
 
@@ -3338,7 +3338,7 @@ describe("chat store — optimistic branch promotion", () => {
       latestBranch: 1,
     })
 
-    expect(ok).toBe(false)
+    expect(ok.ok).toBe(false)
     // Events restored to pre-optimistic state.
     expect(chat.eventsByTab.main).toEqual(originalEvents)
     expect(chat._streamingBranchByTab.main).toBeUndefined()
@@ -3567,7 +3567,7 @@ describe("chat store — queued-message UI freeze regressions", () => {
   //      log — the user_input_injected event from session_store
   //      renders B's bubble belatedly (after final agent message).
   // -------------------------------------------------------------------------
-  it.todo("user_input_injected should survive predicted/real branch mismatch", () => {
+  it("user_input_injected survives predicted/real branch mismatch", () => {
     const chat = useChatStore()
     chat._instanceId = "agent_1"
     chat._instanceGraphId = "agent_1"
@@ -3575,9 +3575,17 @@ describe("chat store — queued-message UI freeze regressions", () => {
     chat.tabs = ["main"]
     chat.messagesByTab = { main: [] }
     chat.processingByTab = { main: true }
-    // Optimistic state from editMessage: branchView predicted=2.
     chat.branchViewByTab = { main: { 1: 2 } }
     chat._streamingBranchByTab = { main: { turnIndex: 1, branchId: 2 } }
+    chat.branchOperationByTab = {
+      main: {
+        type: "edit",
+        phase: "running",
+        turnIndex: 1,
+        predictedBranch: 2,
+        requestId: "edit-1",
+      },
+    }
     chat.queuedMessagesByTab = {
       main: [
         {
@@ -3591,22 +3599,25 @@ describe("chat store — queued-message UI freeze regressions", () => {
       ],
     }
 
-    // Backend drained B against the REAL branch (3, not the predicted 2).
+    chat._onMessage({
+      type: "processing_start",
+      source: "main",
+      turn_index: 1,
+      branch_id: 3,
+    })
     chat._onMessage({
       type: "activity",
       activity_type: "user_input_injected",
       source: "main",
       content: [{ type: "text", text: "B" }],
       turn_index: 1,
-      branch_id: 3, // ← real branch differs from predicted
+      branch_id: 3,
     })
 
-    // TODO: _frameMatchesViewedBranch currently rejects this frame because
-    // branchView[1] = 2 while frame.branch_id = 3. Handler never runs and the
-    // queue stays stuck until a later history resync.
-    expect(chat.queuedMessagesByTab.main).toHaveLength(1)
-    // messagesByTab has NO new bubble because handler short-circuited.
-    expect(chat.messagesByTab.main.filter((m) => m.role === "user")).toHaveLength(0)
+    expect(chat.branchViewByTab.main[1]).toBe(3)
+    expect(chat.queuedMessagesByTab.main).toHaveLength(0)
+    const userMessages = chat.messagesByTab.main.filter((m) => m.role === "user")
+    expect(userMessages.some((m) => m.content === "B")).toBe(true)
   })
 
   // -------------------------------------------------------------------------
@@ -4038,6 +4049,92 @@ describe("chat store — interrupt targets the given tab", () => {
 })
 
 describe("chat store — concurrent history resyncs apply in order", () => {
+  it("requires physical expected-branch events on a compatible parent path", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.messagesByTab = { main: [{ id: "local", role: "assistant", content: "local" }] }
+    chat.branchViewByTab = { main: { 1: 2 } }
+    chat._branchResyncPendingByTab.main = {
+      active: true,
+      retries: 0,
+      expectedBranchByTurn: { 1: 2, 2: 1 },
+    }
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi.spyOn(importActual.terrariumAPI, "getHistory").mockResolvedValue({
+      events: [
+        { type: "user_input", event_id: 1, turn_index: 1, branch_id: 1, content: "old" },
+        {
+          type: "user_input",
+          event_id: 2,
+          turn_index: 2,
+          branch_id: 1,
+          parent_branch_path: [[1, 1]],
+          content: "child",
+        },
+      ],
+    })
+
+    expect(await chat._resyncHistory("main")).toBe(true)
+    expect(chat.messagesByTab.main[0].content).toBe("local")
+    expect(chat._branchResyncPendingByTab.main.active).toBe(true)
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+
+  it("an in-flight load cannot clobber a newer live optimistic message", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.messagesByTab = { main: [] }
+    let resolveHistory
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockImplementation(() => new Promise((resolve) => (resolveHistory = resolve)))
+
+    const load = chat._loadHistory("main")
+    await vi.waitFor(() => expect(resolveHistory).toBeTypeOf("function"))
+    chat._addMsg("main", { id: "live", role: "assistant", content: "live" })
+    resolveHistory({ events: [{ type: "user_input", event_id: 1, content: "stale" }] })
+
+    expect(await load).toBe(false)
+    expect(chat.messagesByTab.main.map((message) => message.content)).toEqual(["live"])
+    getHistorySpy.mockRestore()
+  })
+
+  it("a transient load failure preserves current history", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.messagesByTab = { main: [{ id: "kept", role: "assistant", content: "kept" }] }
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockRejectedValue(new Error("offline"))
+
+    expect(await chat._loadHistory("main")).toBe(false)
+    expect(chat.messagesByTab.main[0].content).toBe("kept")
+    getHistorySpy.mockRestore()
+  })
+
+  it("metadata-poor branch reconciliation captures a no-id physical baseline", () => {
+    const chat = useChatStore()
+    chat.activeTab = "main"
+    chat.eventsByTab = { main: [{ type: "user_input", content: "old" }] }
+
+    chat._markBranchResyncPending("main", { baselineFromCache: true })
+
+    expect(chat._branchResyncPendingByTab.main).toMatchObject({
+      active: true,
+      baselineMaxEventId: null,
+    })
+    expect(chat._branchResyncPendingByTab.main.baselinePhysicalFingerprint).toContain("old")
+    chat._clearBranchResyncTimers()
+  })
+
   it("a superseded (older) resync must not clobber the newer one's result", async () => {
     // Two resyncs for the same tab overlap. B starts after A, so B is
     // authoritative. B resolves first with newer events; A resolves
@@ -4094,6 +4191,34 @@ describe("chat store — concurrent history resyncs apply in order", () => {
 
     chat._clearBranchResyncTimers()
     getHistorySpy.mockRestore()
+  })
+
+  it("processing_start with another request id does not acknowledge the operation", () => {
+    const chat = useChatStore()
+    chat._instanceGeneration = 3
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchOperationByTab = {
+      main: {
+        type: "edit",
+        phase: "starting",
+        turnIndex: 1,
+        predictedBranch: 2,
+        requestId: "edit-1",
+        instanceGeneration: 3,
+      },
+    }
+
+    chat._onMessage({
+      type: "processing_start",
+      source: "main",
+      turn_index: 1,
+      branch_id: 2,
+      request_id: "other-request",
+    })
+
+    expect(chat.branchOperationByTab.main?.phase).toBe("starting")
   })
 
   it("a stale duplicate fetch (max event_id below the watermark) is rejected", async () => {

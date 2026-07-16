@@ -121,8 +121,8 @@
         <div class="flex flex-wrap items-center gap-2 text-xs">
           <span class="text-warm-400 dark:text-warm-500 mr-auto">Ctrl/Cmd+Enter to rerun · Esc to cancel</span>
           <button class="px-2.5 py-1 rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="editSaving" @click="cancelEdit">Cancel</button>
-          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-dark disabled:opacity-60" :disabled="editSaving || (!editText.trim() && editAttachments.length === 0)" @click="confirmEdit">
-            {{ editSaving ? "Saving..." : "Save & Rerun" }}
+          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-dark disabled:opacity-60" aria-label="Save and rerun" :disabled="editSaving || branchOperationBusy || (!editText.trim() && editAttachments.length === 0)" @click="confirmEdit">
+            {{ editSaving ? "Starting..." : "Save & Rerun" }}
           </button>
         </div>
       </div>
@@ -143,6 +143,7 @@
           <div class="whitespace-pre-wrap">{{ message.content }}</div>
         </template>
       </div>
+      <p v-if="editError || branchOperationError" class="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{{ editError || branchOperationError }}</p>
     </div>
     <!-- Hover actions for user messages -->
     <div v-if="!editing && !message.queued && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--right">
@@ -150,18 +151,18 @@
            has multiple distinct user contents (i.e. an edit produced
            a sibling branch at this divergence point). -->
       <div v-if="hasUserGroups" class="flex items-center gap-0.5 mr-1 select-none">
-        <button class="msg-action-btn" title="Previous edit" aria-label="Previous user edit" :disabled="!hasPrevUserGroup" @click="goToPrevUserGroup">
+        <button class="msg-action-btn" title="Previous edit" aria-label="Previous user edit" :disabled="branchOperationBusy || !hasPrevUserGroup" :aria-busy="branchOperationBusy" @click="goToPrevUserGroup">
           <span class="i-carbon-chevron-left text-xs" />
         </button>
         <span class="text-[10px] tabular-nums text-warm-500 px-1">{{ message.currentUserGroupIdx + 1 }}/{{ message.userGroupCount }}</span>
-        <button class="msg-action-btn" title="Next edit" aria-label="Next user edit" :disabled="!hasNextUserGroup" @click="goToNextUserGroup">
+        <button class="msg-action-btn" title="Next edit" aria-label="Next user edit" :disabled="branchOperationBusy || !hasNextUserGroup" :aria-busy="branchOperationBusy" @click="goToNextUserGroup">
           <span class="i-carbon-chevron-right text-xs" />
         </button>
       </div>
       <button class="msg-action-btn" title="Copy" aria-label="Copy message" @click="copyMessage">
         <span class="i-carbon-copy text-xs" />
       </button>
-      <button class="msg-action-btn" title="Edit & rerun" aria-label="Edit and rerun message" @click="startEdit">
+      <button class="msg-action-btn" title="Edit & rerun" aria-label="Edit and rerun message" :disabled="branchOperationBusy" :aria-busy="branchOperationBusy" @click="startEdit">
         <span class="i-carbon-edit text-xs" />
       </button>
     </div>
@@ -201,11 +202,11 @@
            alternative. Edit-only branching does NOT light this up —
            that's the user-side navigator's job. -->
       <div v-if="hasAssistantBranches" class="flex items-center gap-0.5 mr-1 select-none">
-        <button class="msg-action-btn" title="Previous regen" aria-label="Previous regen" :disabled="!hasPrevAssistantBranch" @click="goToPrevAssistantBranch">
+        <button class="msg-action-btn" title="Previous regen" aria-label="Previous regen" :disabled="branchOperationBusy || !hasPrevAssistantBranch" :aria-busy="branchOperationBusy" @click="goToPrevAssistantBranch">
           <span class="i-carbon-chevron-left text-xs" />
         </button>
         <span class="text-[10px] tabular-nums text-warm-500 px-1">{{ message.currentAssistantIdx + 1 }}/{{ message.assistantBranchCount }}</span>
-        <button class="msg-action-btn" title="Next regen" aria-label="Next regen" :disabled="!hasNextAssistantBranch" @click="goToNextAssistantBranch">
+        <button class="msg-action-btn" title="Next regen" aria-label="Next regen" :disabled="branchOperationBusy || !hasNextAssistantBranch" :aria-busy="branchOperationBusy" @click="goToNextAssistantBranch">
           <span class="i-carbon-chevron-right text-xs" />
         </button>
       </div>
@@ -216,7 +217,7 @@
            on assistant messages — the previous duplicate "Retry"
            button was identical and only hid the affordance when an
            interrupt left the turn in a non-"last" state. -->
-      <button class="msg-action-btn" title="Regenerate" aria-label="Regenerate response" @click="regenerate">
+      <button class="msg-action-btn" title="Regenerate" aria-label="Regenerate response" :disabled="branchOperationBusy" :aria-busy="branchOperationBusy" @click="regenerate">
         <span class="i-carbon-renew text-xs" />
       </button>
     </div>
@@ -314,6 +315,7 @@ const props = defineProps({
   isFirst: { type: Boolean, default: false },
   messageIdx: { type: Number, default: null },
   isLastAssistant: { type: Boolean, default: false },
+  tabId: { type: String, default: "" },
 })
 
 const expandedTools = reactive({})
@@ -331,6 +333,7 @@ const editTextareaEl = ref(null)
 const editImageInputEl = ref(null)
 const editFileInputEl = ref(null)
 const editSaving = ref(false)
+const editError = ref("")
 const errorExpanded = ref(false)
 
 const errorFirstLine = computed(() => {
@@ -372,6 +375,10 @@ const senderHomeNode = computed(() => {
 // ── Message actions (copy / edit / regenerate) ──
 
 const chat = useChatStore()
+const messageTab = computed(() => props.tabId || chat.activeTab)
+const branchOperation = computed(() => chat.branchOperationByTab[messageTab.value] || null)
+const branchOperationBusy = computed(() => branchOperation.value != null)
+const branchOperationError = computed(() => chat.branchOperationErrorByTab[messageTab.value] || "")
 
 function copyMessage() {
   const text = contentToText(props.message.contentParts || props.message.content)
@@ -439,46 +446,38 @@ function removeEditAttachment(index) {
 async function confirmEdit() {
   if (editSaving.value || (!editText.value.trim() && editAttachments.value.length === 0)) return
   editSaving.value = true
+  editError.value = ""
   let newContent
   try {
     newContent = await buildMessageParts(editText.value, editAttachments.value)
   } catch (err) {
-    console.error("Failed to prepare edited message:", err)
+    editError.value = err instanceof Error ? err.message : String(err)
     editSaving.value = false
     return
   }
-  // Close the editor IMMEDIATELY — the new branch is locked in the
-  // moment the user clicks Save & Rerun. Leaving the textarea on
-  // screen until the API + resync round-trip lands made it look
-  // like the rerun hadn't started yet; worse, the streaming reply
-  // appears underneath while the editor still covers the original
-  // bubble, hiding the user message that prompted it.
-  editing.value = false
-  const submittedText = editText.value
-  const submittedAttachments = editAttachments.value
-  editText.value = ""
-  editAttachments.value = []
-  try {
-    const ok = await chat.editMessage(props.messageIdx, newContent, {
-      turnIndex: props.message.turnIndex,
-      userPosition: props.message.userPosition,
-      latestBranch: props.message.latestBranch,
-    })
-    if (!ok) {
-      // Restore the draft so the user can retry — the rerun didn't
-      // land, so don't leave them with an empty edit buffer.
-      editText.value = submittedText
-      editAttachments.value = submittedAttachments
-      editing.value = true
-    }
-  } catch (err) {
-    console.error("Failed to prepare edited message:", err)
-    editText.value = submittedText
-    editAttachments.value = submittedAttachments
-    editing.value = true
-  } finally {
+  const operation = chat.editMessage(props.messageIdx, newContent, {
+    turnIndex: props.message.turnIndex,
+    userPosition: props.message.userPosition,
+    latestBranch: props.message.latestBranch,
+    attachments: editAttachments.value,
+  })
+  await nextTick()
+  if (branchOperation.value) {
     editSaving.value = false
+    editing.value = false
   }
+  const result = await operation
+  editSaving.value = false
+  if (result?.ok) {
+    editing.value = false
+    editText.value = ""
+    editAttachments.value = []
+    return
+  }
+  editing.value = true
+  editError.value = result?.error || branchOperationError.value || "Failed to start edit"
+  await nextTick()
+  editTextareaEl.value?.focus()
 }
 
 function regenerate() {
@@ -506,11 +505,12 @@ const hasPrevUserGroup = computed(() => hasUserGroups.value && (props.message.cu
 const hasNextUserGroup = computed(() => hasUserGroups.value && (props.message.currentUserGroupIdx ?? 0) < props.message.userGroupCount - 1)
 
 function _switchUserGroup(delta) {
+  if (branchOperationBusy.value) return
   const idx = props.message.currentUserGroupIdx ?? 0
   const target = idx + delta
   const groups = props.message.userGroupBranches || []
   if (target < 0 || target >= groups.length) return
-  chat.selectBranch(props.message.turnIndex, groups[target])
+  chat.selectBranch(props.message.turnIndex, groups[target], messageTab.value)
 }
 function goToPrevUserGroup() {
   if (hasPrevUserGroup.value) _switchUserGroup(-1)
@@ -524,11 +524,12 @@ const hasPrevAssistantBranch = computed(() => hasAssistantBranches.value && (pro
 const hasNextAssistantBranch = computed(() => hasAssistantBranches.value && (props.message.currentAssistantIdx ?? 0) < props.message.assistantBranchCount - 1)
 
 function _switchAssistantBranch(delta) {
+  if (branchOperationBusy.value) return
   const idx = props.message.currentAssistantIdx ?? 0
   const target = idx + delta
   const branches = props.message.assistantBranches || []
   if (target < 0 || target >= branches.length) return
-  chat.selectBranch(props.message.turnIndex, branches[target])
+  chat.selectBranch(props.message.turnIndex, branches[target], messageTab.value)
 }
 function goToPrevAssistantBranch() {
   if (hasPrevAssistantBranch.value) _switchAssistantBranch(-1)
