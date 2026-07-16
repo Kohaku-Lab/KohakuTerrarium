@@ -453,7 +453,7 @@ class Terrarium:
             raise KeyError(f"creature {cid!r} not in engine")
         old_gid = c.graph_id
         if c.is_running:
-            await c.stop()
+            await c.stop(requested=False)
         # A creature-scoped Drive orphans-and-blocks on removal,
         # a graph-scoped one unassigns / auto-assigns among the remaining
         # graph members — never a silent semantic reassignment.
@@ -802,10 +802,9 @@ class Terrarium:
     async def stop(self, creature: CreatureRef) -> None:
         """Stop a running creature without removing it from the graph."""
         c = self._creature(creature)
-        if c.is_running:
-            await c.stop()
-            if self._drive_runtime is not None:
-                await self._drive_runtime.on_creature_stopped(c.creature_id)
+        await c.stop()
+        if self._drive_runtime is not None:
+            await self._drive_runtime.on_creature_stopped(c.creature_id)
 
     async def stop_graph(self, graph: GraphRef) -> None:
         """Stop every creature in a graph (without removing them)."""
@@ -815,7 +814,7 @@ class Terrarium:
             return
         for cid in list(g.creature_ids):
             c = self._creatures.get(cid)
-            if c is not None and c.is_running:
+            if c is not None:
                 await c.stop()
                 if self._drive_runtime is not None:
                     await self._drive_runtime.on_creature_stopped(cid)
@@ -841,7 +840,7 @@ class Terrarium:
             for c in list(self._creatures.values()):
                 if c.is_running:
                     try:
-                        await c.stop()
+                        await c.stop(requested=False)
                     except Exception as e:  # pragma: no cover - defensive
                         _shutdown_log_warning(c.creature_id, str(e))
         finally:

@@ -34,7 +34,7 @@ from kohakuterrarium.terrarium.drive.runtime import (
     _result_to_settlement,
     build_drive_runtime,
 )
-from kohakuterrarium.terrarium.drive.sink import SettlementStatus
+from kohakuterrarium.terrarium.drive.sink import Settlement, SettlementStatus
 from kohakuterrarium.terrarium.events import EventKind
 
 WORKER = ActorRef("creature", "worker")
@@ -63,10 +63,22 @@ class _FakeAgentState:
 
 
 class _FakeCreature:
-    def __init__(self, cid, *, running=True, result=None, paused=False):
+    def __init__(
+        self,
+        cid,
+        *,
+        running=True,
+        result=None,
+        paused=False,
+        stop_requested=False,
+        naturally_idle=False,
+    ):
         self.creature_id = cid
         self._running = running
         self.paused = paused
+        self.stop_requested = stop_requested
+        self.naturally_idle = naturally_idle
+        self.start_count = 0
         self.agent = _FakeAgentState()
         self.result = result if result is not None else TurnResult(status="ok")
         self.injected: list = []
@@ -74,6 +86,18 @@ class _FakeCreature:
     @property
     def is_running(self):
         return self._running
+
+    def is_naturally_idle(self):
+        return self.naturally_idle
+
+    async def start(self, *, requested=True):
+        self.start_count += 1
+        self._running = True
+        if requested:
+            self.stop_requested = False
+
+    async def wait_restoration_ready(self):
+        return None
 
     async def inject_event(self, event, *, correlation_id=None):
         self.injected.append((event, correlation_id))
@@ -162,10 +186,31 @@ class TestEngineSink:
 
     async def test_rejected_when_creature_stopped(self):
         engine = _FakeEngine()
-        engine._creatures["worker"] = _FakeCreature("worker", running=False)
+        creature = _FakeCreature(
+            "worker", running=False, stop_requested=True, naturally_idle=True
+        )
+        engine._creatures["worker"] = creature
         sink = _EngineDriveSink(engine)
         out = await sink.deliver("worker", object(), delivery_id="d1")
         assert out.admitted is False
+        assert creature.start_count == 0
+
+    async def test_restarts_only_a_naturally_idle_creature(self):
+        engine = _FakeEngine()
+        creature = _FakeCreature("worker", running=False, naturally_idle=True)
+        engine._creatures["worker"] = creature
+        sink = _EngineDriveSink(engine)
+        out = await sink.deliver("worker", object(), delivery_id="d1")
+        assert out.admitted is True
+        assert await out.settlement() == Settlement(SettlementStatus.OK)
+        assert creature.start_count == 1
+        assert len(creature.injected) == 1
+
+        creature._running = False
+        creature.naturally_idle = False
+        out = await sink.deliver("worker", object(), delivery_id="d2")
+        assert out.admitted is False
+        assert creature.start_count == 1
 
     async def test_rejected_when_creature_paused(self):
         # UXI-11: a warm-paused creature stays is_running but admits no turns.
