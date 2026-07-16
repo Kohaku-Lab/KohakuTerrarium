@@ -3303,7 +3303,8 @@ const _chatStoreOptions = {
       if (
         operation?.instanceGeneration != null &&
         operation.instanceGeneration !== this._instanceGeneration
-      ) return false
+      )
+        return false
       if (requestId && requestId !== operation?.requestId) return false
       const predictedTurn = operation?.turnIndex
       const predictedBranch = operation?.predictedBranch
