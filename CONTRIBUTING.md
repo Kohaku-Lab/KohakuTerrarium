@@ -12,7 +12,7 @@ Open a thread before you write code. The fastest channels:
 
 - **QQ group**: 1097666427
 - **Discord**: https://discord.gg/xWYrkyvJ2s
-- **GitHub Issues**: https://github.com/KohakuBlueleaf/KohakuTerrarium/issues
+- **GitHub Issues**: https://github.com/Kohaku-Lab/KohakuTerrarium/issues
 
 Issue templates live in [`.github/ISSUE_TEMPLATE/`](.github/ISSUE_TEMPLATE/).
 
