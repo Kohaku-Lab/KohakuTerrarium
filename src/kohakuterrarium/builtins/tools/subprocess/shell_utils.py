@@ -3,7 +3,30 @@
 import asyncio
 import os
 import signal
+import subprocess
 import sys
+from typing import Any
+
+
+def windows_process_kwargs() -> dict[str, Any]:
+    """Return spawn options that keep Windows children from opening console windows.
+
+    ``CREATE_NO_WINDOW`` detaches the child from the parent console, so console
+    control events no longer reach it; callers must terminate children
+    explicitly (``terminate_process_tree`` uses ``taskkill``).
+    """
+    if sys.platform != "win32":
+        return {}
+
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.CREATE_NO_WINDOW
+        ),
+    }
 
 
 async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
@@ -20,6 +43,7 @@ async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
                 "/F",
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
+                **windows_process_kwargs(),
             )
             await killer.wait()
         else:

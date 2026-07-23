@@ -19,6 +19,9 @@ from kohakuterrarium.builtins.tools.bash import (
     _wait_timeout,
 )
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
+    windows_process_kwargs,
+)
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import is_mobile_profile
@@ -109,6 +112,7 @@ class PythonTool(BaseTool):
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.STDOUT,
                     cwd=cwd,
+                    **windows_process_kwargs(),
                 )
 
                 try:
@@ -127,6 +131,13 @@ class PythonTool(BaseTool):
                         exit_code=-1,
                         metadata={"timeout": timeout},
                     )
+                except asyncio.CancelledError:
+                    # The hidden-window child no longer shares the parent
+                    # console, so console signals cannot end it for us.
+                    with contextlib.suppress(ProcessLookupError):
+                        process.kill()
+                    await process.wait()
+                    raise
 
                 output = stdout.decode("utf-8", errors="replace") if stdout else ""
                 exit_code = process.returncode or 0

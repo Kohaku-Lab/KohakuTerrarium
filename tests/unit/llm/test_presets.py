@@ -20,7 +20,10 @@ from kohakuterrarium.llm.presets import (
 )
 from kohakuterrarium.llm.presets import _canonical_entry
 from kohakuterrarium.llm.preset_aliases import _CANONICAL_NAMES, ALIASES
-from kohakuterrarium.llm.variations import _ALLOWED_VARIATION_ROOTS
+from kohakuterrarium.llm.variations import (
+    _ALLOWED_VARIATION_ROOTS,
+    apply_variation_groups,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -198,6 +201,42 @@ class TestPresetsDataIntegrity:
             group = PRESETS[name]["variation_groups"]["reasoning"]
             assert "ultra" not in group, name
             assert "max" in group, name
+
+    def test_gpt56_mode_group_on_api_and_or_routes_only(self):
+        # ``reasoning.mode`` (standard | pro) is a Responses-API knob; the
+        # Codex OAuth backend rejects ``pro`` on every 5.6 model, so only
+        # the -api / -or routes expose the group.
+        for name in (
+            "gpt-5.6-sol-api",
+            "gpt-5.6-terra-api",
+            "gpt-5.6-luna-api",
+            "gpt-5.6-sol-or",
+            "gpt-5.6-terra-or",
+            "gpt-5.6-luna-or",
+        ):
+            group = PRESETS[name]["variation_groups"]["mode"]
+            assert set(group) == {"standard", "pro"}, name
+            assert group["standard"] == {}, name
+            assert group["pro"] == {"extra_body.reasoning.mode": "pro"}, name
+        for name in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            assert "mode" not in PRESETS[name]["variation_groups"], name
+
+    def test_gpt56_mode_composes_with_reasoning_selection(self):
+        # mode and effort patch sibling paths under extra_body.reasoning, so
+        # a combined selector must merge instead of colliding.
+        preset = PRESETS["gpt-5.6-sol-api"]
+        patched = apply_variation_groups(
+            preset,
+            preset["variation_groups"],
+            {"reasoning": "max", "mode": "pro"},
+        )
+        assert patched["extra_body"]["reasoning"]["mode"] == "pro"
+        assert patched["extra_body"]["reasoning"]["effort"] == "max"
+        # The default-mode option leaves the base preset byte-identical.
+        untouched = apply_variation_groups(
+            preset, preset["variation_groups"], {"mode": "standard"}
+        )
+        assert untouched == preset
 
     def test_anthropic_direct_presets_use_anthropic_provider(self):
         assert PRESETS["claude-opus-4.7"]["provider"] == "anthropic"
