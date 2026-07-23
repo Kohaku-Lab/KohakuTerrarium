@@ -456,7 +456,9 @@ src/kohakuterrarium/
 ├── llm/                      # LLM abstraction
 │   ├── base.py               # LLMProvider protocol
 │   ├── openai.py             # OpenAI-compatible provider (also OpenRouter)
-│   │                         #   (+ openai_helpers.py, openai_sanitize.py)
+│   │                         #   (+ openai_helpers.py, openai_sanitize.py, openai_ws.py)
+│   ├── responses_ws.py       # Responses-API WebSocket session (incremental
+│   │                         #   previous_response_id continuation; openai + codex)
 │   ├── anthropic_provider.py # Native Anthropic Messages API provider (official SDK)
 │   │                         #   (+ anthropic_format.py, anthropic_pairing.py, anthropic_cache.py)
 │   ├── codex_provider.py     # Codex OAuth provider (ChatGPT-subscription)

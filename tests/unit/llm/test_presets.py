@@ -202,11 +202,13 @@ class TestPresetsDataIntegrity:
             assert "ultra" not in group, name
             assert "max" in group, name
 
-    def test_gpt56_mode_group_on_api_and_or_routes_only(self):
-        # ``reasoning.mode`` (standard | pro) is a Responses-API knob; the
-        # Codex OAuth backend rejects ``pro`` on every 5.6 model, so only
-        # the -api / -or routes expose the group.
+    def test_gpt56_mode_group_on_every_route(self):
+        # ``reasoning.mode`` (standard | pro) is exposed uniformly on the
+        # codex / -api / -or routes for the whole 5.6 family.
         for name in (
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
             "gpt-5.6-sol-api",
             "gpt-5.6-terra-api",
             "gpt-5.6-luna-api",
@@ -218,8 +220,43 @@ class TestPresetsDataIntegrity:
             assert set(group) == {"standard", "pro"}, name
             assert group["standard"] == {}, name
             assert group["pro"] == {"extra_body.reasoning.mode": "pro"}, name
-        for name in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
-            assert "mode" not in PRESETS[name]["variation_groups"], name
+
+    def test_openai_direct_speed_group_mirrors_codex_fast_mode(self):
+        # -api GPT presets expose fast mode via the priority service tier;
+        # the mini/nano tiers do not support it (same rule as codex).
+        for name in (
+            "gpt-5.4-api",
+            "gpt-5.5-api",
+            "gpt-5.6-sol-api",
+            "gpt-5.6-terra-api",
+            "gpt-5.6-luna-api",
+        ):
+            group = PRESETS[name]["variation_groups"]["speed"]
+            assert group["normal"] == {}, name
+            assert group["fast"] == {"extra_body.service_tier": "priority"}, name
+        for name in ("gpt-5.4-mini-api", "gpt-5.4-nano-api"):
+            assert "speed" not in PRESETS[name]["variation_groups"], name
+
+    def test_websocket_mode_default_on_codex_and_openai_direct(self):
+        # Responses WebSocket mode is on for the routes that speak the
+        # Responses API natively; OpenRouter has no such transport.
+        ws_on = (
+            "gpt-5.6-sol",
+            "gpt-5.6-terra",
+            "gpt-5.6-luna",
+            "gpt-5.5",
+            "gpt-5.4",
+            "gpt-5.4-mini",
+            "gpt-5.6-sol-api",
+            "gpt-5.6-terra-api",
+            "gpt-5.6-luna-api",
+            "gpt-5.5-api",
+            "gpt-5.4-api",
+        )
+        for name in ws_on:
+            assert PRESETS[name]["extra_body"]["websocket_mode"] is True, name
+        for name in ("gpt-5.6-sol-or", "gpt-5.5-or", "gpt-5.4-or"):
+            assert "websocket_mode" not in PRESETS[name].get("extra_body", {}), name
 
     def test_gpt56_mode_composes_with_reasoning_selection(self):
         # mode and effort patch sibling paths under extra_body.reasoning, so

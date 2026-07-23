@@ -37,13 +37,20 @@ _CODEX_SPEED_GROUP: dict[str, dict[str, Any]] = {
 }
 
 # GPT-5.6 execution mode: ``reasoning.mode = standard | pro`` on the Responses
-# API, independent of ``reasoning.effort``. Direct-API + OpenRouter routes
-# only — the Codex OAuth backend rejects ``pro`` on every 5.6 model
-# ("`reasoning.mode` is not supported with this model", probed 2026-07), so
-# the codex presets deliberately omit this group.
+# API, independent of ``reasoning.effort``. Exposed on every 5.6 route; note
+# the Codex OAuth backend currently rejects ``pro`` ("`reasoning.mode` is not
+# supported with this model", probed 2026-07), which surfaces as a request
+# error until OpenAI enables it there.
 _GPT56_MODE_GROUP: dict[str, dict[str, Any]] = {
     "standard": {},
     "pro": {"extra_body.reasoning.mode": "pro"},
+}
+
+# OpenAI direct fast mode: same priority tier the codex speed group maps to.
+# GPT-5.4/5.5/5.6 support it; the mini/nano tiers do not expose it.
+_OPENAI_SPEED_GROUP: dict[str, dict[str, Any]] = {
+    "normal": {},
+    "fast": {"extra_body.service_tier": "priority"},
 }
 
 # OpenAI direct API reasoning: extra_body.reasoning.effort. Full scale per

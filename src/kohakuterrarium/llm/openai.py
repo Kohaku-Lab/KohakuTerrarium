@@ -36,12 +36,14 @@ from kohakuterrarium.llm.openai_sanitize import (
     strip_kt_extras,
     strip_surrogates,
 )
+from kohakuterrarium.llm.openai_ws import stream_ws_turn
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
     RetryPolicy,
     backoff_delay,
     classify_openai_error,
 )
+from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -71,6 +73,7 @@ class OpenAIProvider(BaseLLMProvider):
         max_retries: int = 3,
         echo_reasoning: bool = True,
         retry_policy: RetryPolicy | dict[str, Any] | None = None,
+        websocket_mode: bool = False,
     ):
         """Configure an OpenAI-compatible client and optional stateful reasoning echo."""
         super().__init__(
@@ -83,6 +86,10 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
         self.extra_body = extra_body or {}
+        self._websocket_mode = bool(
+            websocket_mode or self.extra_body.get("websocket_mode")
+        )
+        self._ws_session: ResponsesWSSession | None = None
         self.echo_reasoning = bool(echo_reasoning)
         self._retry_policy = RetryPolicy.from_value(retry_policy)
         self._api_key = api_key
@@ -128,7 +135,10 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
     async def close(self) -> None:
-        """Close the underlying HTTP client."""
+        """Close the WebSocket session and the underlying HTTP client."""
+        if self._ws_session is not None:
+            await self._ws_session.close()
+            self._ws_session = None
         await self._client.close()
 
     def with_model(self, name: str) -> "OpenAIProvider":
@@ -146,6 +156,8 @@ class OpenAIProvider(BaseLLMProvider):
             ),
         )
         clone.extra_body = dict(self.extra_body)
+        clone._websocket_mode = self._websocket_mode
+        clone._ws_session = None
         clone.echo_reasoning = self.echo_reasoning
         clone._retry_policy = self._retry_policy
         clone._api_key = self._api_key
@@ -181,6 +193,8 @@ class OpenAIProvider(BaseLLMProvider):
         if not new_key or new_key == self._api_key:
             return False
         old = self._client
+        old_session = self._ws_session
+        self._ws_session = None
         self._api_key = new_key
         self._client = AsyncOpenAI(
             api_key=new_key,
@@ -191,6 +205,8 @@ class OpenAIProvider(BaseLLMProvider):
         )
         try:
             loop = asyncio.get_running_loop()
+            if old_session is not None:
+                loop.create_task(old_session.close())
             loop.create_task(old.close())
         except RuntimeError:
             # A temporary loop can corrupt anyio state, so defer cleanup to GC.
@@ -200,6 +216,19 @@ class OpenAIProvider(BaseLLMProvider):
             provider=lookup_key,
         )
         return True
+
+    def _ws_session_for_turn(self) -> ResponsesWSSession | None:
+        """Return the WS session, or ``None`` when a turn is already in flight."""
+        if self._ws_session is None:
+
+            def _factory() -> Any:
+                # Late-bound so credential reloads pick up the rebuilt client.
+                return self._client.responses.connect(max_retries=0)
+
+            self._ws_session = ResponsesWSSession(_factory)
+        if self._ws_session.busy:
+            return None
+        return self._ws_session
 
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Resolve local images, strip internal fields, and add eligible cache markers."""
@@ -214,10 +243,10 @@ class OpenAIProvider(BaseLLMProvider):
 
     def _sanitize_extra_body(self, extra: dict[str, Any]) -> dict[str, Any]:
         """Remove framework-only request knobs before provider submission."""
-        if "disable_prompt_caching" not in extra:
+        knobs = ("disable_prompt_caching", "websocket_mode")
+        if not any(k in extra for k in knobs):
             return extra
-        cleaned = {k: v for k, v in extra.items() if k != "disable_prompt_caching"}
-        return cleaned
+        return {k: v for k, v in extra.items() if k not in knobs}
 
     async def _stream_chat(
         self,
@@ -273,6 +302,26 @@ class OpenAIProvider(BaseLLMProvider):
         """Stream chat completion via the OpenAI SDK."""
         self._last_tool_calls = []
         self._last_assistant_extra_fields = {}
+
+        if self._websocket_mode:
+            session = self._ws_session_for_turn()
+            if session is not None:
+                try:
+                    async for piece in stream_ws_turn(
+                        self, session, messages, tools, kwargs
+                    ):
+                        yield piece
+                    return
+                except ResponsesWSError as exc:
+                    if exc.mid_stream:
+                        raise
+                    logger.warning(
+                        "Responses WebSocket turn unavailable, using HTTP",
+                        error=str(exc),
+                    )
+        # An HTTP turn advances the conversation past the WS-side cache.
+        if self._ws_session is not None:
+            self._ws_session.invalidate()
 
         api_tools = [t.to_api_format() for t in tools] if tools else None
 
@@ -454,6 +503,9 @@ class OpenAIProvider(BaseLLMProvider):
         """Non-streaming chat completion via the OpenAI SDK."""
         self._last_tool_calls = []
         self._last_assistant_extra_fields = {}
+        # A Chat Completions turn advances past the WS-side cache.
+        if self._ws_session is not None:
+            self._ws_session.invalidate()
 
         create_kwargs: dict[str, Any] = {
             "model": kwargs.get("model", self.config.model),

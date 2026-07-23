@@ -48,6 +48,7 @@ from kohakuterrarium.llm.recovery import (
     backoff_delay,
     classify_openai_error,
 )
+from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -87,6 +88,8 @@ class CodexOAuthProvider(BaseLLMProvider):
         retry_policy: RetryPolicy | dict[str, Any] | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        extra_body: dict[str, Any] | None = None,
+        websocket_mode: bool | None = None,
     ):
         super().__init__(LLMConfig(model=model, retry_policy=retry_policy))
         self.model = model
@@ -98,6 +101,11 @@ class CodexOAuthProvider(BaseLLMProvider):
         # An explicit key bypasses OAuth and targets the configured Responses endpoint.
         self._api_key = api_key
         self._base_url = base_url
+        self.extra_body = dict(extra_body or {})
+        if websocket_mode is None:
+            websocket_mode = bool(self.extra_body.get("websocket_mode"))
+        self._websocket_mode = bool(websocket_mode)
+        self._ws_session: ResponsesWSSession | None = None
         self._tokens: CodexTokens | None = None
         self._client: Any = None  # AsyncOpenAI
         self._last_tool_calls: list[NativeToolCall] = []
@@ -186,6 +194,8 @@ class CodexOAuthProvider(BaseLLMProvider):
             retry_policy=self._retry_policy,
             api_key=self._api_key,
             base_url=self._base_url,
+            extra_body=dict(self.extra_body),
+            websocket_mode=self._websocket_mode,
         )
         clone._tokens = self._tokens
         clone._client = self._client
@@ -298,9 +308,6 @@ class CodexOAuthProvider(BaseLLMProvider):
                 if spec.get("type") == "image_generation":
                     self._image_gen_output_format = spec.get("output_format", "png")
 
-        # Codex requires each function call to be adjacent to its matching output.
-        api_input = fix_tool_call_pairing(api_input)
-
         logger.debug(
             "Codex API request",
             model=self.model,
@@ -309,10 +316,12 @@ class CodexOAuthProvider(BaseLLMProvider):
         )
 
         extra_params: dict[str, Any] = {}
-        if self.reasoning_effort and self.reasoning_effort != "none":
-            extra_params["reasoning"] = {"effort": self.reasoning_effort}
+        reasoning = self._merged_reasoning()
+        if reasoning:
+            extra_params["reasoning"] = reasoning
         if self.service_tier:
             extra_params["service_tier"] = self.service_tier
+        wire_extra = self._wire_extra_body()
 
         instr_text = instructions or "You are a helpful assistant."
         # Stable routing improves prompt-cache reuse; the prompt hash is the fallback.
@@ -321,14 +330,54 @@ class CodexOAuthProvider(BaseLLMProvider):
             or hashlib.sha256(instr_text.encode()).hexdigest()[:32]
         )
         # Third-party Responses endpoints may reject Codex's internal session header.
-        if not self._api_key:
-            extra_params["extra_headers"] = {"session_id": cache_key}
+        session_headers = {} if self._api_key else {"session_id": cache_key}
+
+        collected_tool_calls: list[NativeToolCall] = []
+
+        if self._websocket_mode:
+            session = self._ws_session_for_turn(session_headers)
+            if session is not None:
+                base_event: dict[str, Any] = {
+                    "model": self.model,
+                    "instructions": instr_text,
+                    "store": False,
+                    "prompt_cache_key": cache_key,
+                    **extra_params,
+                    **wire_extra,
+                }
+                if api_tools:
+                    base_event["tools"] = api_tools
+                try:
+                    async for event in session.stream_turn(
+                        base_event, api_input, fix_tool_call_pairing
+                    ):
+                        piece = self._process_stream_event(event, collected_tool_calls)
+                        if piece is not None:
+                            yield piece
+                    self._last_tool_calls = collected_tool_calls
+                    return
+                except ResponsesWSError as exc:
+                    if exc.mid_stream:
+                        raise
+                    logger.warning(
+                        "Codex WebSocket turn unavailable, using HTTP",
+                        error=str(exc),
+                    )
+        # An HTTP turn advances the conversation past the WS-side cache.
+        if self._ws_session is not None:
+            self._ws_session.invalidate()
+
+        if session_headers:
+            extra_params["extra_headers"] = session_headers
+        if wire_extra:
+            extra_params["extra_body"] = wire_extra
 
         try:
             stream = await self._client.responses.create(
                 model=self.model,
                 instructions=instr_text,
-                input=api_input,
+                # Codex requires each function call adjacent to its matching output.
+                input=fix_tool_call_pairing(api_input),
                 tools=api_tools,
                 store=False,
                 stream=True,
@@ -339,46 +388,10 @@ class CodexOAuthProvider(BaseLLMProvider):
             logger.error("Codex API request failed", error=str(e))
             raise
 
-        collected_tool_calls: list[NativeToolCall] = []
-
         async for event in stream:
-            # Generic SDK events may carry fresher inline rate-limit payloads.
-            maybe_capture_stream_rate_limit(
-                event, parse_rate_limit_event, UsageSnapshot, set_cached
-            )
-
-            match event.type:
-                case "response.output_text.delta":
-                    yield strip_surrogates(event.delta)
-                case "response.output_item.done":
-                    item = event.item
-                    itype = getattr(item, "type", "")
-                    if itype == "function_call":
-                        collected_tool_calls.append(
-                            NativeToolCall(
-                                id=getattr(item, "call_id", ""),
-                                name=getattr(item, "name", "") or "",
-                                arguments=getattr(item, "arguments", ""),
-                            )
-                        )
-                    elif itype == "image_generation_call":
-                        # Image bytes are available before the item status becomes completed.
-                        self._handle_image_generation_call(item)
-                case "response.completed":
-                    resp = getattr(event, "response", None)
-                    if resp:
-                        u = getattr(resp, "usage", None)
-                        if u:
-                            cached = 0
-                            details = getattr(u, "input_tokens_details", None)
-                            if details:
-                                cached = getattr(details, "cached_tokens", 0) or 0
-                            self._last_usage = {
-                                "prompt_tokens": getattr(u, "input_tokens", 0),
-                                "completion_tokens": getattr(u, "output_tokens", 0),
-                                "total_tokens": getattr(u, "total_tokens", 0),
-                                "cached_tokens": cached,
-                            }
+            piece = self._process_stream_event(event, collected_tool_calls)
+            if piece is not None:
+                yield piece
 
         self._last_tool_calls = collected_tool_calls
 
@@ -396,6 +409,85 @@ class CodexOAuthProvider(BaseLLMProvider):
             model=self.model,
         )
 
+    def _merged_reasoning(self) -> dict[str, Any]:
+        """Combine the effort field with reasoning overrides from extra_body."""
+        reasoning: dict[str, Any] = {}
+        if self.reasoning_effort and self.reasoning_effort != "none":
+            reasoning["effort"] = self.reasoning_effort
+        override = self.extra_body.get("reasoning")
+        if isinstance(override, dict):
+            reasoning.update(override)
+        return reasoning
+
+    def _wire_extra_body(self) -> dict[str, Any]:
+        """Return extra_body wire fields (framework knobs and reasoning removed)."""
+        return {
+            k: v
+            for k, v in self.extra_body.items()
+            if k not in ("reasoning", "websocket_mode", "disable_prompt_caching")
+        }
+
+    def _ws_session_for_turn(
+        self, session_headers: dict[str, str]
+    ) -> ResponsesWSSession | None:
+        """Return the WS session, or ``None`` when a turn is already in flight."""
+        self._ws_headers = dict(session_headers)
+        if self._ws_session is None:
+
+            def _factory() -> Any:
+                # Late-bound so credential reloads and header updates apply.
+                return self._client.responses.connect(
+                    max_retries=0, extra_headers=dict(self._ws_headers)
+                )
+
+            self._ws_session = ResponsesWSSession(_factory)
+        if self._ws_session.busy:
+            return None
+        return self._ws_session
+
+    def _process_stream_event(
+        self, event: Any, collected_tool_calls: list[NativeToolCall]
+    ) -> str | None:
+        """Fold one Responses stream event into provider state; return text."""
+        # Generic SDK events may carry fresher inline rate-limit payloads.
+        maybe_capture_stream_rate_limit(
+            event, parse_rate_limit_event, UsageSnapshot, set_cached
+        )
+
+        match getattr(event, "type", ""):
+            case "response.output_text.delta":
+                return strip_surrogates(event.delta)
+            case "response.output_item.done":
+                item = event.item
+                itype = getattr(item, "type", "")
+                if itype == "function_call":
+                    collected_tool_calls.append(
+                        NativeToolCall(
+                            id=getattr(item, "call_id", ""),
+                            name=getattr(item, "name", "") or "",
+                            arguments=getattr(item, "arguments", ""),
+                        )
+                    )
+                elif itype == "image_generation_call":
+                    # Image bytes are available before the item status completes.
+                    self._handle_image_generation_call(item)
+            case "response.completed":
+                resp = getattr(event, "response", None)
+                if resp:
+                    u = getattr(resp, "usage", None)
+                    if u:
+                        cached = 0
+                        details = getattr(u, "input_tokens_details", None)
+                        if details:
+                            cached = getattr(details, "cached_tokens", 0) or 0
+                        self._last_usage = {
+                            "prompt_tokens": getattr(u, "input_tokens", 0),
+                            "completion_tokens": getattr(u, "output_tokens", 0),
+                            "total_tokens": getattr(u, "total_tokens", 0),
+                            "cached_tokens": cached,
+                        }
+        return None
+
     def _handle_image_generation_call(self, item: Any) -> None:
         """Append an ImagePart for an ``image_generation_call`` item."""
         part = build_image_part(item, self._image_gen_output_format)
@@ -403,7 +495,10 @@ class CodexOAuthProvider(BaseLLMProvider):
             self._last_assistant_parts.append(part)
 
     async def close(self) -> None:
-        """Close the underlying SDK client."""
+        """Close the WebSocket session and the underlying SDK client."""
+        if self._ws_session is not None:
+            await self._ws_session.close()
+            self._ws_session = None
         if self._client:
             await self._client.close()
         self._client = None
