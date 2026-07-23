@@ -189,6 +189,7 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             retry_policy=getattr(profile, "retry_policy", None),
             api_key=codex_key,
             base_url=codex_base_url,
+            extra_body=getattr(profile, "extra_body", None) or None,
         )
         provider._profile_max_context = profile.max_context
         _apply_backend_native_identity(provider, profile)
@@ -303,6 +304,7 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
             reasoning_effort=config.reasoning_effort,
             service_tier=config.service_tier,
             retry_policy=config.retry_policy,
+            extra_body=config.extra_body or None,
         )
         logger.info(
             "Using Codex OAuth provider (ChatGPT subscription)",

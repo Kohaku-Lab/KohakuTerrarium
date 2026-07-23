@@ -27,6 +27,7 @@ from kohakuterrarium.llm.preset_groups import (
     _MISTRAL_REASONING_GROUP,
     _OPENAI_56_REASONING_GROUP,
     _OPENAI_REASONING_GROUP,
+    _OPENAI_SPEED_GROUP,
     _OR_REASONING_GROUP,
     _OR_REASONING_GROUP_56,
     _OR_REASONING_GROUP_WITH_XHIGH,
@@ -59,9 +60,11 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 372000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "extra_body": {"websocket_mode": True},
         "variation_groups": {
             "reasoning": _GPT56_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
+            "mode": _GPT56_MODE_GROUP,
         },
     },
     "gpt-5.6-terra": {
@@ -70,9 +73,11 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 372000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "extra_body": {"websocket_mode": True},
         "variation_groups": {
             "reasoning": _GPT56_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
+            "mode": _GPT56_MODE_GROUP,
         },
     },
     "gpt-5.6-luna": {
@@ -81,10 +86,12 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 372000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "extra_body": {"websocket_mode": True},
         "variation_groups": {
             # Luna exposes max but not the CLI-only ultra mode.
             "reasoning": _GPT56_LUNA_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
+            "mode": _GPT56_MODE_GROUP,
         },
     },
     "gpt-5.5": {
@@ -94,6 +101,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 272000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "extra_body": {"websocket_mode": True},
         "variation_groups": {
             "reasoning": _CODEX_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
@@ -106,6 +114,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 400000,
         "max_output": 128000,
         "reasoning_effort": "xhigh",
+        "extra_body": {"websocket_mode": True},
         "variation_groups": {
             "reasoning": _CODEX_REASONING_GROUP,
             "speed": _CODEX_SPEED_GROUP,
@@ -117,6 +126,7 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 400000,
         "max_output": 128000,
         "reasoning_effort": "high",
+        "extra_body": {"websocket_mode": True},
         # Mini does not expose the priority-backed fast-mode variation.
         "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
     },
@@ -134,10 +144,14 @@ PRESETS: dict[str, dict[str, Any]] = {
         "model": "gpt-5.6-sol",
         "max_context": 1050000,
         "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "websocket_mode": True,
+        },
         "variation_groups": {
             "reasoning": _OPENAI_56_REASONING_GROUP,
             "mode": _GPT56_MODE_GROUP,
+            "speed": _OPENAI_SPEED_GROUP,
         },
     },
     "gpt-5.6-terra-api": {
@@ -145,10 +159,14 @@ PRESETS: dict[str, dict[str, Any]] = {
         "model": "gpt-5.6-terra",
         "max_context": 1050000,
         "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "websocket_mode": True,
+        },
         "variation_groups": {
             "reasoning": _OPENAI_56_REASONING_GROUP,
             "mode": _GPT56_MODE_GROUP,
+            "speed": _OPENAI_SPEED_GROUP,
         },
     },
     "gpt-5.6-luna-api": {
@@ -156,10 +174,14 @@ PRESETS: dict[str, dict[str, Any]] = {
         "model": "gpt-5.6-luna",
         "max_context": 1050000,
         "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "websocket_mode": True,
+        },
         "variation_groups": {
             "reasoning": _OPENAI_56_REASONING_GROUP,
             "mode": _GPT56_MODE_GROUP,
+            "speed": _OPENAI_SPEED_GROUP,
         },
     },
     "gpt-5.5-api": {
@@ -167,16 +189,28 @@ PRESETS: dict[str, dict[str, Any]] = {
         "model": "gpt-5.5",
         "max_context": 272000,
         "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "websocket_mode": True,
+        },
+        "variation_groups": {
+            "reasoning": _OPENAI_REASONING_GROUP,
+            "speed": _OPENAI_SPEED_GROUP,
+        },
     },
     "gpt-5.4-api": {
         "provider": "openai",
         "model": "gpt-5.4",
         "max_context": 400000,
         "max_output": 128000,
-        "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OPENAI_REASONING_GROUP},
+        "extra_body": {
+            "reasoning": {"enabled": True, "effort": "high"},
+            "websocket_mode": True,
+        },
+        "variation_groups": {
+            "reasoning": _OPENAI_REASONING_GROUP,
+            "speed": _OPENAI_SPEED_GROUP,
+        },
     },
     "gpt-5.4-mini-api": {
         "provider": "openai",
