@@ -11,7 +11,10 @@ from typing import Any
 
 from kohakuterrarium.builtins.tools.bash_windows import windows_git_bash_candidates
 from kohakuterrarium.builtins.tools.registry import register_builtin
-from kohakuterrarium.builtins.tools.subprocess.shell_utils import terminate_process_tree
+from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
+    terminate_process_tree,
+    windows_process_kwargs,
+)
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -384,7 +387,7 @@ class ShellTool(BaseTool):
                     "env": env,
                 }
                 if sys.platform == "win32":
-                    popen_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+                    popen_kwargs.update(windows_process_kwargs())
                 else:
                     popen_kwargs["start_new_session"] = True
 

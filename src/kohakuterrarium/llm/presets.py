@@ -20,6 +20,7 @@ from kohakuterrarium.llm.preset_groups import (
     _GEMINI_THINKING_LITE_GROUP,
     _GLM_EFFORT_GROUP,
     _GPT56_LUNA_REASONING_GROUP,
+    _GPT56_MODE_GROUP,
     _GPT56_REASONING_GROUP,
     _GROK_EFFORT_GROUP,
     _MIMO_THINKING_GROUP,
@@ -134,7 +135,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1050000,
         "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OPENAI_56_REASONING_GROUP},
+        "variation_groups": {
+            "reasoning": _OPENAI_56_REASONING_GROUP,
+            "mode": _GPT56_MODE_GROUP,
+        },
     },
     "gpt-5.6-terra-api": {
         "provider": "openai",
@@ -142,7 +146,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1050000,
         "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OPENAI_56_REASONING_GROUP},
+        "variation_groups": {
+            "reasoning": _OPENAI_56_REASONING_GROUP,
+            "mode": _GPT56_MODE_GROUP,
+        },
     },
     "gpt-5.6-luna-api": {
         "provider": "openai",
@@ -150,7 +157,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1050000,
         "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OPENAI_56_REASONING_GROUP},
+        "variation_groups": {
+            "reasoning": _OPENAI_56_REASONING_GROUP,
+            "mode": _GPT56_MODE_GROUP,
+        },
     },
     "gpt-5.5-api": {
         "provider": "openai",
@@ -194,7 +204,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1050000,
         "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_56},
+        "variation_groups": {
+            "reasoning": _OR_REASONING_GROUP_56,
+            "mode": _GPT56_MODE_GROUP,
+        },
     },
     "gpt-5.6-terra-or": {
         "provider": "openrouter",
@@ -202,7 +215,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1050000,
         "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_56},
+        "variation_groups": {
+            "reasoning": _OR_REASONING_GROUP_56,
+            "mode": _GPT56_MODE_GROUP,
+        },
     },
     "gpt-5.6-luna-or": {
         "provider": "openrouter",
@@ -210,7 +226,10 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 1050000,
         "max_output": 128000,
         "extra_body": {"reasoning": {"enabled": True, "effort": "high"}},
-        "variation_groups": {"reasoning": _OR_REASONING_GROUP_56},
+        "variation_groups": {
+            "reasoning": _OR_REASONING_GROUP_56,
+            "mode": _GPT56_MODE_GROUP,
+        },
     },
     "gpt-5.5-or": {
         "provider": "openrouter",
