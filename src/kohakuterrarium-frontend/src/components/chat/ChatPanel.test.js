@@ -77,4 +77,54 @@ describe("ChatPanel command results", () => {
     command.mockRestore()
     confirm.mockRestore()
   })
+
+  it("does not send a slash target to a tab selected during inventory lookup", async () => {
+    let resolveTarget
+    const chat = useChatStore("graph_1")
+    chat._instanceId = "graph_1"
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku", "reviewer"]
+    chat.messagesByTab = { kohaku: [], reviewer: [] }
+    localStorage.setItem("kt.chat.draft.graph_1.reviewer", "/review")
+    vi.spyOn(chat, "prepareSlashSend").mockReturnValue(
+      new Promise((resolve) => {
+        resolveTarget = resolve
+      }),
+    )
+    const invoke = vi
+      .spyOn(terrariumAPI, "invokeCreatureSkill")
+      .mockResolvedValue({ accepted: true })
+    const wrapper = mount(ChatPanel, {
+      props: {
+        instance: {
+          id: "graph_1",
+          graph_id: "graph_1",
+          creatures: [
+            { name: "kohaku", status: "idle" },
+            { name: "reviewer", status: "idle" },
+          ],
+        },
+      },
+      global: {
+        provide: { chatStore: chat },
+        stubs: {
+          ChatMessage: true,
+          ModelSwitcher: true,
+          SiteChip: true,
+          StatusDot: true,
+        },
+      },
+    })
+    await wrapper.find("textarea").setValue("/review")
+    await wrapper.find('button[aria-label="Send message"]').trigger("click")
+    chat.activeTab = "reviewer"
+    await flushPromises()
+
+    resolveTarget({ type: "skill", name: "review" })
+    await flushPromises()
+
+    expect(invoke).not.toHaveBeenCalled()
+    invoke.mockRestore()
+  })
 })

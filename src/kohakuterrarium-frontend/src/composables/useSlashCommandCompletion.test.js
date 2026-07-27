@@ -28,4 +28,31 @@ describe("useSlashCommandCompletion", () => {
     expect(completion.entries.value).toEqual([])
     expect(completion.open.value).toBe(true)
   })
+
+  it("hides skills shadowed by command names or aliases", async () => {
+    const chat = reactive({
+      commandInventoryByTab: {
+        kohaku: {
+          commands: [{ name: "review", aliases: ["r"], description: "Review command" }],
+          skills: [
+            { name: "review", enabled: true },
+            { name: "R", enabled: true },
+            { name: "standalone", enabled: true },
+          ],
+        },
+      },
+      loadCommandInventory: vi.fn().mockResolvedValue(undefined),
+      markSlashTarget: vi.fn(),
+    })
+    const inputText = ref("/")
+    const activeTabKey = ref("kohaku")
+    const completion = useSlashCommandCompletion({ chat, inputText, activeTabKey })
+
+    await nextTick()
+
+    expect(completion.entries.value.map((entry) => `${entry.type}:${entry.name}`)).toEqual([
+      "command:review",
+      "skill:standalone",
+    ])
+  })
 })

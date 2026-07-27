@@ -133,19 +133,50 @@ def build_command_inventory(agent: Any) -> RuntimeCommandInventory:
 
 def resolve_explicit_invocation(agent: Any, name: str) -> ExplicitInvocation:
     """Resolve a user-selected slash target, with commands and aliases first."""
-    normalized = name.strip().lower().lstrip("/")
+    requested = name.strip().lstrip("/")
+    normalized = requested.casefold()
     commands = agent.list_user_commands()
-    command = commands.get(normalized)
-    if command is not None:
-        return ExplicitInvocation("command", normalized, normalized, command)
+    for canonical_name in (requested, normalized):
+        command = commands.get(canonical_name)
+        if command is not None:
+            return ExplicitInvocation("command", canonical_name, normalized, command)
+
+    command_matches = [
+        (canonical_name, candidate)
+        for canonical_name, candidate in commands.items()
+        if canonical_name.casefold() == normalized
+    ]
+    if len(command_matches) == 1:
+        canonical_name, command = command_matches[0]
+        return ExplicitInvocation("command", canonical_name, normalized, command)
+    if len(command_matches) > 1:
+        raise UnknownInvocationError(
+            normalized,
+            f"Ambiguous command name: /{normalized}",
+        )
 
     for canonical_name, candidate in commands.items():
-        aliases = {str(alias).lower() for alias in getattr(candidate, "aliases", ())}
+        aliases = {str(alias).casefold() for alias in getattr(candidate, "aliases", ())}
         if normalized in aliases:
             return ExplicitInvocation("command", canonical_name, normalized, candidate)
 
     registry = getattr(agent, "skills", None)
-    skill = registry.get(normalized) if registry is not None else None
+    skill = registry.get(requested) if registry is not None else None
+    if skill is None and registry is not None:
+        skill = registry.get(normalized)
+    if skill is None and registry is not None:
+        matches = [
+            candidate
+            for candidate in registry.all()
+            if candidate.name.casefold() == normalized
+        ]
+        if len(matches) == 1:
+            skill = matches[0]
+        elif len(matches) > 1:
+            raise UnknownInvocationError(
+                normalized,
+                f"Ambiguous skill name: /{normalized}",
+            )
     if skill is None:
         raise UnknownInvocationError(
             normalized,

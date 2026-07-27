@@ -2055,13 +2055,15 @@ const _chatStoreOptions = {
       const parsed = _parseSlashCommand(content)
       if (!parsed || !tab || tab.type === "channel") return null
       const marked = this._slashTargetByTab[tab.key]
-      if (marked && marked.name === parsed.command) return marked
+      if (marked && marked.name.toLowerCase() === parsed.command) return marked
       const inventory = await this.loadCommandInventory(tab)
       const command = inventory.commands?.find(
-        (entry) => entry.name === parsed.command || entry.aliases?.includes(parsed.command),
+        (entry) =>
+          entry.name.toLowerCase() === parsed.command ||
+          entry.aliases?.some((alias) => alias.toLowerCase() === parsed.command),
       )
       if (command) return { type: "command", name: command.name }
-      const skill = inventory.skills?.find((entry) => entry.name === parsed.command)
+      const skill = inventory.skills?.find((entry) => entry.name.toLowerCase() === parsed.command)
       return skill ? { type: "skill", name: skill.name } : null
     },
 
@@ -2075,7 +2077,7 @@ const _chatStoreOptions = {
         const tabInfo = this.tabs[tab]
         const target = this._slashTargetByTab[tab]
         delete this._slashTargetByTab[tab]
-        if (target?.type === "skill" && target.name === slashCommand.command) {
+        if (target?.type === "skill" && target.name.toLowerCase() === slashCommand.command) {
           const result = await terrariumAPI.invokeCreatureSkill(
             this._instanceGraphId || this._instanceId,
             tabInfo?.creature || tab,

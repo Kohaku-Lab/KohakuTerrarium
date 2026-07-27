@@ -24,8 +24,14 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
       ...entry,
       type: "command",
     }))
+    const commandNamespace = new Set(
+      commands.flatMap((entry) => [
+        entry.name.toLowerCase(),
+        ...(entry.aliases || []).map((alias) => alias.toLowerCase()),
+      ]),
+    )
     const skills = (inventory.value.skills || [])
-      .filter((entry) => entry.enabled)
+      .filter((entry) => entry.enabled && !commandNamespace.has(entry.name.toLowerCase()))
       .map((entry) => ({ ...entry, type: "skill" }))
     return [...commands, ...skills]
       .filter(

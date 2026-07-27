@@ -706,24 +706,38 @@ function removeAttachment(index) {
 
 async function send() {
   if (props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
+  const sendTab = viewActiveTab.value
+  const sendText = inputText.value
+  const sendAttachments = [...attachments.value]
+  const contextChanged = () => viewActiveTab.value !== sendTab || inputText.value !== sendText || attachments.value.length !== sendAttachments.length || attachments.value.some((attachment, index) => attachment !== sendAttachments[index])
   if (slashMenuOpen.value && slashMatches.value.length) {
     chooseSlashEntry(slashMatches.value[slashSelectedIndex.value] || slashMatches.value[0])
     return
   }
   if (props.groupId) onGroupFocus()
-  const slashTarget = await chat.prepareSlashSend(
-    {
-      key: viewActiveTab.value,
-      creature: viewActiveTab.value,
-      type: viewActiveTab.value?.startsWith("ch:") ? "channel" : "creature",
-    },
-    inputText.value,
-  )
-  chat.markSlashTarget(viewActiveTab.value, slashTarget)
-  const parts = await buildMessageParts(inputText.value, attachments.value)
+  let slashTarget = null
+  try {
+    slashTarget = await chat.prepareSlashSend(
+      {
+        key: sendTab,
+        creature: sendTab,
+        type: sendTab?.startsWith("ch:") ? "channel" : "creature",
+      },
+      sendText,
+    )
+  } catch (err) {
+    console.warn("Slash inventory lookup failed; using command fallback:", err)
+  }
+  if (contextChanged()) return
+  chat.markSlashTarget(sendTab, slashTarget)
+  const parts = await buildMessageParts(sendText, sendAttachments)
+  if (contextChanged()) {
+    chat.markSlashTarget(sendTab, null)
+    return
+  }
   const commandTarget = {
     sessionId: chat._instanceGraphId || chat._instanceId,
-    creatureId: viewActiveTab.value || "root",
+    creatureId: sendTab || "root",
   }
   const outcomePromise = chat.send(parts)
   inputText.value = ""

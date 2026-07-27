@@ -8,6 +8,38 @@ beforeEach(() => {
 })
 
 describe("chat store — slash commands", () => {
+  it("resolves a mixed-case inventory skill from normalized slash input", async () => {
+    const chat = useChatStore()
+    chat.commandInventoryByTab.kohaku = {
+      commands: [],
+      skills: [{ name: "CodeReview", enabled: true }],
+    }
+    chat._commandInventoryFetchedAtByTab.kohaku = Date.now()
+
+    const target = await chat.prepareSlashSend(
+      { key: "kohaku", creature: "kohaku", type: "creature" },
+      "/codereview focus",
+    )
+
+    expect(target).toEqual({ type: "skill", name: "CodeReview" })
+  })
+
+  it("keeps a selected mixed-case skill without refreshing inventory", async () => {
+    const chat = useChatStore()
+    chat.markSlashTarget("kohaku", { type: "skill", name: "CodeReview" })
+    const load = vi
+      .spyOn(chat, "loadCommandInventory")
+      .mockRejectedValue(new Error("inventory unavailable"))
+
+    const target = await chat.prepareSlashSend(
+      { key: "kohaku", creature: "kohaku", type: "creature" },
+      "/CodeReview focus",
+    )
+
+    expect(target).toEqual({ type: "skill", name: "CodeReview" })
+    expect(load).not.toHaveBeenCalled()
+  })
+
   it("executes a pure-text /goal command without sending websocket input", async () => {
     const chat = useChatStore()
     chat._instanceId = "session_1"

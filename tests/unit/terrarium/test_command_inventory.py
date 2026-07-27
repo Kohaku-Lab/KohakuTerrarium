@@ -125,3 +125,24 @@ def test_unknown_name_raises_typed_error():
         resolve_explicit_invocation(_FakeAgent(), "missing")
 
     assert error.value.name == "missing"
+
+
+def test_mixed_case_skill_name_resolves_from_slash_normalization():
+    skill = _FakeSkill("CodeReview")
+    agent = _FakeAgent(skills=_FakeSkillRegistry(skill))
+
+    invocation = resolve_explicit_invocation(agent, "codereview")
+
+    assert invocation.kind == "skill"
+    assert invocation.name == "CodeReview"
+    assert invocation.value is skill
+
+
+def test_exact_skill_case_wins_when_registry_has_casefold_variants():
+    mixed = _FakeSkill("CodeReview")
+    lower = _FakeSkill("codereview")
+    agent = _FakeAgent(skills=_FakeSkillRegistry(mixed, lower))
+
+    invocation = resolve_explicit_invocation(agent, "CodeReview")
+
+    assert invocation.value is mixed
