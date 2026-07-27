@@ -17,6 +17,11 @@ from kohakuterrarium.laboratory.adapters.terrarium_session import (
     TerrariumSessionAdapter,
 )
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium.graph_manifest import (
+    GraphManifest,
+    ManifestCreature,
+    save_manifest,
+)
 
 
 class _FakeNode:
@@ -40,15 +45,35 @@ class _FakeEngine:
         self._adopt_result: str | None = None
         self._adopt_calls: list[dict] = []
         self._creatures: dict[str, object] = {}
+        self.creatures = self._creatures
+        self._removed: list[str] = []
 
-    async def adopt_session(self, path, *, pwd=None, llm=None):
-        self._adopt_calls.append({"path": path, "pwd": pwd, "llm": llm})
+    async def adopt_session(
+        self,
+        path,
+        *,
+        pwd=None,
+        workspace_overrides=None,
+        llm=None,
+    ):
+        self._adopt_calls.append(
+            {
+                "path": path,
+                "pwd": pwd,
+                "workspace_overrides": workspace_overrides,
+                "llm": llm,
+            }
+        )
         if self._adopt_result is None:
             raise RuntimeError("adopt not configured")
         return self._adopt_result
 
     def list_creatures(self):
         return list(self._creatures.values())
+
+    async def remove_creature(self, creature_id):
+        self._removed.append(creature_id)
+        self.creatures.pop(creature_id, None)
 
 
 def _msg(type_, body, sender="ctrl"):
@@ -99,6 +124,99 @@ class TestConstruction:
 
 
 class TestResumeOp:
+    def test_workspace_preflight_is_worker_local_and_runtime_free(
+        self, _adapter, _engine, tmp_path
+    ):
+        missing = tmp_path / "missing"
+        session_path = tmp_path / "preflight.kohakutr"
+        store = SessionStore(session_path)
+        save_manifest(
+            store,
+            GraphManifest(
+                graph_id="graph",
+                creatures=(
+                    ManifestCreature(
+                        creature_id="c1",
+                        name="worker",
+                        config_snapshot={"name": "worker"},
+                        source_ref=None,
+                        pwd=str(missing),
+                        is_privileged=False,
+                        parent_creature_id=None,
+                    ),
+                ),
+                channels=(),
+                listen=(),
+                send=(),
+                revision=3,
+            ),
+        )
+        store.close(update_status=False)
+
+        out = _adapter._op_workspace_preflight({"path": str(session_path)})
+
+        assert out["ready"] is False
+        assert out["revision"] == 3
+        assert out["gaps"][0]["creature_ids"] == ["c1"]
+        assert _engine._adopt_calls == []
+        assert _engine._session_stores == {}
+
+    @pytest.mark.parametrize("legacy_pwd", [None, ""])
+    def test_workspace_preflight_reports_missing_legacy_pwd_as_gap(
+        self, _adapter, legacy_pwd
+    ):
+        out = _adapter._op_workspace_preflight({"legacy_pwd": legacy_pwd})
+
+        assert out == {
+            "legacy": True,
+            "ready": False,
+            "members": [],
+            "gaps": [
+                {
+                    "gap_id": "legacy",
+                    "saved_pwd": "",
+                    "status": "invalid",
+                    "creature_ids": [],
+                }
+            ],
+        }
+
+    def test_workspace_preflight_applies_replacement_before_adoption(
+        self, _adapter, _engine, tmp_path
+    ):
+        replacement = tmp_path / "replacement"
+        replacement.mkdir()
+        manifest = {
+            "kind": "kohakuterrarium.live_graph",
+            "version": 1,
+            "graph_id": "graph",
+            "revision": 1,
+            "creatures": [
+                {
+                    "creature_id": "c1",
+                    "name": "worker",
+                    "config_snapshot": {"name": "worker"},
+                    "source_ref": None,
+                    "pwd": str(tmp_path / "missing"),
+                    "is_privileged": False,
+                    "parent_creature_id": None,
+                }
+            ],
+            "channels": [],
+            "listen": [],
+            "send": [],
+        }
+
+        out = _adapter._op_workspace_preflight(
+            {
+                "manifest": manifest,
+                "workspace_overrides": {"c1": str(replacement)},
+            }
+        )
+
+        assert out["ready"] is True
+        assert _engine._adopt_calls == []
+
     async def test_resume_reports_worker_side_pwd_exists(
         self, _adapter, _engine, tmp_path
     ):
@@ -122,7 +240,11 @@ class TestResumeOp:
             is_privileged=False,
         )
         out = await _adapter._op_resume(
-            {"path": str(kohakutr), "pwd_override": str(tmp_path)}
+            {
+                "path": str(kohakutr),
+                "pwd_override": str(tmp_path),
+                "workspace_overrides": None,
+            }
         )
         assert out["session_id"] == "sid1"
         assert out["session_path"] == str(kohakutr)
@@ -138,6 +260,7 @@ class TestResumeOp:
                 "is_privileged": False,
             }
         ]
+        assert _engine._adopt_calls[-1]["workspace_overrides"] is None
 
     async def test_resume_pwd_exists_true_when_dir_present(
         self, _adapter, _engine, tmp_path
@@ -324,6 +447,31 @@ class TestResumeOp:
 
         assert outside.read_bytes() == b"keep"
 
+    async def test_resume_resolves_transferred_path_on_worker(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        worker_config = tmp_path / "worker-config"
+        kohakutr = worker_config / "resume" / "scoped.kohakutr"
+        kohakutr.parent.mkdir(parents=True)
+        store = SessionStore(kohakutr)
+        store.init_meta(
+            session_id="scoped",
+            config_type="agent",
+            config_path="x",
+            pwd=str(tmp_path),
+            agents=["a"],
+        )
+        _engine._adopt_result = "scoped"
+        _engine._session_stores["scoped"] = store
+        monkeypatch.setenv("KT_CONFIG_DIR", str(worker_config))
+
+        out = await _adapter._op_resume(
+            {"scope": "config://", "rel": "resume/scoped.kohakutr"}
+        )
+
+        assert out["session_id"] == "scoped"
+        assert _engine._adopt_calls[-1]["path"] == kohakutr.resolve()
+
 
 # ── error mapping ───────────────────────────────────────────────
 
@@ -453,6 +601,9 @@ class TestStores:
     async def test_stores_empty_when_no_live_stores(self, _adapter):
         out = await _adapter._dispatch(_msg("stores", {}))
         assert out == {"session_ids": []}
+
+
+# ── remove ──────────────────────────────────────────────────────
 
 
 # ── resume ──────────────────────────────────────────────────────

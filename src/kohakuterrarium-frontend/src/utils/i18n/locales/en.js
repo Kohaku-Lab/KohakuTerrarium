@@ -6,6 +6,15 @@ export default {
   "common.available": "Available",
   "common.cached": "Cached",
   "common.cancel": "Cancel",
+  "workspaceResume.title": "Workspace unavailable",
+  "workspaceResume.body":
+    "The saved workspace is unavailable. Choose an existing folder to replace only this missing workspace group, view the saved history, or cancel without resuming.",
+  "workspaceResume.viewHistory": "View history",
+  "workspaceResume.cancel": "Cancel",
+  "workspaceResume.chooseFolder": "Choose folder",
+  "workspaceResume.remotePathHint": ({ node }) =>
+    `Enter an existing directory on worker ${node}. It will be validated before resume.`,
+  "workspaceResume.remotePathPlaceholder": "Absolute directory path on the worker",
   "common.clear": "Clear",
   "common.confirm": "Confirm",
   "common.discard": "Discard",
@@ -160,7 +169,9 @@ export default {
   "sessions.resumeFailed": "Failed to resume: {message}",
   "sessions.workdirMissingTitle": "Working directory missing",
   "sessions.workdirMissingPrompt":
-    "The saved working directory no longer exists: {pwd}. Enter a new working directory (leave empty to keep the server default):",
+    "The saved working directory no longer exists: {pwd}. Choose a new directory, view history only, or close this dialog to cancel.",
+  "sessions.workdirChoose": "Choose new directory",
+  "sessions.workdirHistory": "View history only",
   "sessions.workdirSet": "Working directory set: {path}",
   "sessions.workdirSetFailed": "Failed to set working directory: {message}",
   "sessions.deleteConfirm": 'Delete session "{name}"?',

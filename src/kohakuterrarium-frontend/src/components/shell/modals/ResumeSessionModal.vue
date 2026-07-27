@@ -64,6 +64,7 @@ import ModalShell from "@/components/common/ModalShell.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useTabsStore } from "@/stores/tabs"
 import { sessionAPI } from "@/utils/api"
+import { consumeWorkspaceResumeAction } from "@/utils/workdirPrompt"
 import { useI18n } from "@/utils/i18n"
 import { extractTextPreview } from "@/utils/multimodal"
 
@@ -121,13 +122,14 @@ async function onSubmit() {
   resuming.value = true
   errorMsg.value = ""
   try {
-    await tabs.createSession({
+    const id = await tabs.createSession({
       kind: "resume",
       sessionName: selected.value,
       attachMode: alsoOpenInspector.value ? "both" : "chat",
       onNode: onNode.value,
     })
-    emit("close")
+    const workspaceAction = consumeWorkspaceResumeAction()
+    if (id || workspaceAction === "history") emit("close")
   } catch (err) {
     errorMsg.value = err?.response?.data?.detail || err?.message || String(err)
   } finally {

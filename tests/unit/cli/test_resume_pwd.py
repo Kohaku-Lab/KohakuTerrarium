@@ -1,7 +1,8 @@
 """Unit tests for :func:`kohakuterrarium.cli.resume._resolve_missing_pwd`."""
 
-import os
 import types
+
+import pytest
 
 from kohakuterrarium.cli import resume as resume_mod
 from kohakuterrarium.cli.resume import _resolve_missing_pwd
@@ -37,11 +38,13 @@ class TestResolveMissingPwd:
         path = _make_store(tmp_path, str(tmp_path))
         assert _resolve_missing_pwd(path, None) is None
 
-    def test_missing_dir_non_tty_falls_back(self, tmp_path, monkeypatch, capsys):
+    def test_missing_dir_non_tty_cancels(self, tmp_path, monkeypatch, capsys):
         path = _make_store(tmp_path, str(tmp_path / "gone"))
         _fake_stdin(monkeypatch, tty=False)
-        assert _resolve_missing_pwd(path, None) is None
-        assert "saved working dir missing" in capsys.readouterr().out.lower()
+        assert _resolve_missing_pwd(path, None) is False
+        assert (
+            "cannot resume without an explicit --pwd" in capsys.readouterr().out.lower()
+        )
 
     def test_missing_dir_prompts_until_valid(self, tmp_path, monkeypatch):
         path = _make_store(tmp_path, str(tmp_path / "gone"))
@@ -50,8 +53,28 @@ class TestResolveMissingPwd:
         monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
         assert _resolve_missing_pwd(path, None) == str(tmp_path)
 
-    def test_missing_dir_empty_answer_uses_cwd(self, tmp_path, monkeypatch):
+    def test_missing_dir_empty_answer_cancels(self, tmp_path, monkeypatch):
         path = _make_store(tmp_path, str(tmp_path / "gone"))
         _fake_stdin(monkeypatch, tty=True)
         monkeypatch.setattr("builtins.input", lambda _prompt: "")
-        assert _resolve_missing_pwd(path, None) == os.getcwd()
+        assert _resolve_missing_pwd(path, None) is False
+
+    def test_resume_cli_cancel_never_enters_runtime(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        path = _make_store(tmp_path, str(tmp_path / "gone"))
+        monkeypatch.setattr(resume_mod, "configure_utf8_stdio", lambda **_k: None)
+        monkeypatch.setattr(resume_mod, "set_level", lambda *_a, **_k: None)
+        monkeypatch.setattr(resume_mod, "_resolve_session", lambda *_a, **_k: path)
+        monkeypatch.setattr(
+            resume_mod, "announce_migration_if_needed", lambda *_a, **_k: None
+        )
+        monkeypatch.setattr(resume_mod, "_resolve_missing_pwd", lambda *_a: False)
+
+        async def forbidden_run(*_args, **_kwargs):
+            pytest.fail("cancel must not construct or run an engine")
+
+        monkeypatch.setattr(resume_mod, "_run", forbidden_run)
+
+        assert resume_mod.resume_cli("saved", None, "INFO") == 0
+        assert "Resume cancelled." in capsys.readouterr().out

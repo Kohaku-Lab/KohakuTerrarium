@@ -88,9 +88,9 @@ class TestDetectFormatVersion:
         finally:
             meta.close()
 
-        import kohakuterrarium.session.version as version_mod
+        import kohakuterrarium.session.readonly as readonly_mod
 
-        real_kvault = version_mod.KVault
+        real_kvault = readonly_mod.KVault
 
         class _CloseRaisesKVault:
             def __init__(self, *a, **kw):
@@ -102,12 +102,15 @@ class TestDetectFormatVersion:
             def __getitem__(self, key):
                 return self._inner[key]
 
+            def keys(self):
+                return self._inner.keys()
+
             def close(self):
                 # Close the real handle, then raise to exercise the
                 # defensive ``except`` around ``meta.close()``.
                 self._inner.close()
                 raise RuntimeError("close exploded")
 
-        monkeypatch.setattr(version_mod, "KVault", _CloseRaisesKVault)
+        monkeypatch.setattr(readonly_mod, "KVault", _CloseRaisesKVault)
         # The version is still detected; the close failure is swallowed.
         assert detect_format_version(path) == 2

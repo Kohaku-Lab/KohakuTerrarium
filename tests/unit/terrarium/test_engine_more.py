@@ -48,15 +48,54 @@ class TestConstructionClassmethods:
         finally:
             await t.shutdown()
 
+    async def test_resume_preflights_before_constructing_runtime(self, monkeypatch):
+        events = []
+
+        def fake_prepare(store, **kwargs):
+            events.append(("preflight", store, kwargs))
+            return object()
+
+        class ProbeTerrarium(Terrarium):
+            def __init__(self, **kwargs):
+                events.append(("construct", kwargs))
+                super().__init__(**kwargs)
+
+        async def fake_resume(engine, store, **kwargs):
+            events.append(("adopt", store, kwargs))
+
+        monkeypatch.setattr(
+            engine_mod._resume, "prepare_resume_workspace", fake_prepare
+        )
+        monkeypatch.setattr(engine_mod._resume, "resume_into_engine", fake_resume)
+        engine = await ProbeTerrarium.resume(
+            "saved", workspace_overrides={"gap": "/new"}
+        )
+        assert [event[0] for event in events] == ["preflight", "construct", "adopt"]
+        assert events[-1][2]["prepared_workspace"] is not None
+        await engine.shutdown()
+
     async def test_resume_delegates(self, monkeypatch):
         captured = {}
 
-        async def fake_resume(engine, store, *, pwd=None, llm=None):
+        prepared = object()
+
+        def fake_prepare(store, **kwargs):
+            assert store == "s.kohakutr"
+            assert kwargs == {"pwd": "/wd", "workspace_overrides": None}
+            return prepared
+
+        async def fake_resume(
+            engine, store, *, pwd=None, llm=None, prepared_workspace=None
+        ):
             captured["store"] = store
             captured["pwd"] = pwd
             captured["llm"] = llm
+            captured["prepared_workspace"] = prepared_workspace
             return "graph-1"
 
+        monkeypatch.setattr(
+            engine_mod._resume, "prepare_resume_workspace", fake_prepare
+        )
         monkeypatch.setattr(engine_mod._resume, "resume_into_engine", fake_resume)
         t = await Terrarium.resume("s.kohakutr", pwd="/wd", llm="gpt")
         try:
@@ -66,6 +105,7 @@ class TestConstructionClassmethods:
                 "store": "s.kohakutr",
                 "pwd": "/wd",
                 "llm": "gpt",
+                "prepared_workspace": prepared,
             }
         finally:
             await t.shutdown()

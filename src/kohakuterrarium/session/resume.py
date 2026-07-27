@@ -10,6 +10,7 @@ from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_serde import unpack_agent_config
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.conversation_elide import estimate_tokens, maybe_elide
+from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.packages.resolve import resolve_any_path
@@ -19,7 +20,11 @@ from kohakuterrarium.session.history import (
     normalize_resumable_events,
     replay_conversation,
 )
-from kohakuterrarium.session.migrations import ensure_latest_version
+from kohakuterrarium.session.migrations import (
+    ensure_latest_version,
+    latest_readable_version,
+)
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -337,6 +342,29 @@ def _open_store_with_migration(
     return SessionStore(resolved, writer_lock=writer_lock)
 
 
+def preflight_legacy_workspace(
+    session_path: str | Path,
+    pwd_override: str | None = None,
+) -> str:
+    """Resolve a legacy workspace without migration or writer acquisition."""
+    path = latest_readable_version(session_path)
+    meta = read_session_meta(path)
+    dirty_state = meta.get("workspace_resume_state")
+    if isinstance(dirty_state, dict) and dirty_state.get("status") == "partial_dirty":
+        raise SessionNotResumableError(
+            "Session has an incomplete workspace rollback and must be repaired"
+        )
+    saved_pwd = meta.get("pwd")
+    pwd = pwd_override or saved_pwd
+    if not (pwd and os.path.isdir(pwd)):
+        source = "override" if pwd_override else "saved"
+        raise SessionNotResumableError(
+            f"The {source} working directory is missing or invalid: {pwd!r}. "
+            "Choose a replacement directory or open the session history."
+        )
+    return str(Path(pwd).resolve())
+
+
 def resume_agent(
     session_path: str | Path,
     pwd_override: str | None = None,
@@ -352,6 +380,7 @@ def resume_agent(
     Explicit input or output modules override ``io_mode``. The caller owns the
     resumed agent loop and must close the returned store.
     """
+    pwd_override = preflight_legacy_workspace(session_path, pwd_override)
     store = _open_store_with_migration(session_path, writer_lock=True)
     try:
         return _resume_agent_from_open_store(
@@ -408,14 +437,14 @@ def _resume_agent_from_open_store(
         raise ValueError("Session has no config_path or config_snapshot in metadata")
 
     # Pass workspace explicitly; process-wide directory changes race other sessions.
-    pwd = pwd_override or meta.get("pwd", ".")
+    saved_pwd = meta.get("pwd")
+    pwd = pwd_override or saved_pwd
     if not (pwd and os.path.isdir(pwd)):
-        if pwd and not pwd_override:
-            logger.warning(
-                "Saved working dir no longer exists; falling back to cwd",
-                saved_pwd=pwd,
-            )
-        pwd = None
+        source = "override" if pwd_override else "saved"
+        raise SessionNotResumableError(
+            f"The {source} working directory is missing or invalid: {pwd!r}. "
+            "Choose a replacement directory or open the session history."
+        )
 
     # Explicit module instances take precedence over the mode shortcut.
     io_kwargs: dict[str, Any] = {}

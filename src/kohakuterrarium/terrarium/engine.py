@@ -155,39 +155,39 @@ class Terrarium:
         store: "SessionStore | str",
         *,
         pwd: str | None = None,
+        workspace_overrides: dict[str, str] | None = None,
         llm: Any = None,
         drive_config: Any = None,
         drive_registrations: "tuple[Any, ...] | list[Any] | None" = None,
         drive_store: Any = None,
     ) -> "Terrarium":
-        """Build a fresh engine and adopt a saved session into it. Drive args go
-        to the constructor; the resumed graph opens and reconciles its persisted
-        Drive state without reapplying recipe seeds, because none exist."""
-        engine = cls(
+        """Preflight and adopt a saved session into a fresh engine.
+
+        A failed preflight cannot create Drive/runtime side effects."""
+        return await _resume.resume_new_engine(
+            cls,
+            store,
             pwd=pwd,
+            workspace_overrides=workspace_overrides,
+            llm=llm,
             drive_config=drive_config,
             drive_registrations=drive_registrations,
             drive_store=drive_store,
         )
-        engine._running = True
-        await _resume.resume_into_engine(engine, store, pwd=pwd, llm=llm)
-        return engine
 
     async def adopt_session(
         self,
         store: "SessionStore | str",
         *,
         pwd: str | None = None,
+        workspace_overrides: dict[str, str] | None = None,
         llm: Any = None,
     ) -> str:
-        """Adopt a saved session into this running engine.  Returns ``graph_id``.
-
-        Same body as :meth:`resume` but on an existing engine instance —
-        the HTTP / programmatic hot-resume entry point.  The adopted graph
-        inherits this engine's already-configured Drive runtime;
-        no Drive args are read from the saved recipe.
-        """
-        return await _resume.resume_into_engine(self, store, pwd=pwd, llm=llm)
+        """Adopt a saved session into this engine and return its graph ID."""
+        kwargs = {"pwd": pwd, "llm": llm}
+        if workspace_overrides is not None:
+            kwargs["workspace_overrides"] = workspace_overrides
+        return await _resume.resume_into_engine(self, store, **kwargs)
 
     @classmethod
     async def with_creature(

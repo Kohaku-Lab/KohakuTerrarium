@@ -18,6 +18,7 @@ async def push_and_resume_member(
     path: Path,
     on_node: str,
     pwd_override: str | None = None,
+    workspace_overrides: dict[str, str] | None = None,
 ) -> tuple[str, dict, bool | None, str, list[dict[str, Any]]]:
     """Transfer one saved store and return its adopted worker identity."""
     mirror = getattr(request.app.state, "session_mirror", None)
@@ -74,8 +75,13 @@ async def push_and_resume_member(
             namespace="terrarium.session",
             type="resume",
             body={
+                "scope": "config://",
+                "rel": rel,
+                # Older workers consume the absolute path while updated workers
+                # resolve scope+rel against their own config root.
                 "path": worker_path,
                 "pwd_override": pwd_override,
+                "workspace_overrides": workspace_overrides,
                 "resume_token": resume_token,
             },
             timeout=60.0,

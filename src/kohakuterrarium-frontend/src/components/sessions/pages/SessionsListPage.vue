@@ -152,6 +152,7 @@
 
 <script setup>
 import { ElMessage, ElMessageBox } from "element-plus"
+import { openSavedSessionHistory, prepareWorkspaceResume } from "@/utils/workdirPrompt"
 
 import BuildEmbeddingsModal from "@/components/sessions/modals/BuildEmbeddingsModal.vue"
 import GemBadge from "@/components/common/GemBadge.vue"
@@ -252,21 +253,22 @@ function viewSession(session) {
 async function resumeSession(session) {
   resuming.value = session.name
   try {
-    // Local sessions carry pwd_exists on the list row — resolve the
-    // replacement dir BEFORE resume so every creature starts in it
-    // (no trigger/input ever runs in the fallback dir).
-    let pwdOverride
-    if (session.pwd_exists === false) {
-      pwdOverride = await promptForWorkdir(session.pwd || "")
+    const onNode = session.on_node || session.home_node || session.node_id
+    const prepared = await prepareWorkspaceResume(session.name, { onNode })
+    if (prepared.action !== "resume") {
+      if (prepared.action === "history") openSavedSessionHistory(session.name)
+      return
     }
-    const result = await sessionAPI.resume(session.name, pwdOverride ? { pwd: pwdOverride } : {})
+    const result = await sessionAPI.resume(session.name, {
+      onNode,
+      members: prepared.members,
+      workspaceOverrides: prepared.workspaceOverrides,
+      memberWorkspaceOverrides: prepared.memberWorkspaceOverrides,
+      memberPwdOverrides: prepared.memberPwdOverrides,
+      pwd: prepared.pwd,
+    })
     await instances.fetchAll()
     ElMessage.success(t("sessions.resumed", { name: session.name }))
-    if (!pwdOverride) {
-      // Remote sessions can't be pre-checked from the host — the
-      // worker reports the missing dir in the resume response.
-      await promptForMissingWorkdirAfterResume(result)
-    }
     if (typeof props.onResume === "function") {
       props.onResume({ session, result })
       return
@@ -276,15 +278,6 @@ async function resumeSession(session) {
     ElMessage.error(t("sessions.resumeFailed", { message: err.response?.data?.detail || err.message }))
   } finally {
     resuming.value = null
-  }
-}
-
-async function promptForWorkdir(savedPwd) {
-  try {
-    const { value } = await ElMessageBox.prompt(t("sessions.workdirMissingPrompt", { pwd: savedPwd }), t("sessions.workdirMissingTitle"), { inputValue: "" })
-    return (value || "").trim() || undefined
-  } catch {
-    return undefined // keep the server-side fallback dir
   }
 }
 

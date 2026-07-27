@@ -11,23 +11,23 @@ HTTP / CLI orchestration.
 
 import os
 from pathlib import Path
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-import kohakuterrarium.terrarium.channels as _channels
 import kohakuterrarium.terrarium.graph_checkpoint as _checkpoint
 import kohakuterrarium.terrarium.graph_manifest as _manifest
-import kohakuterrarium.terrarium.topology as _topology
 import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
-from kohakuterrarium.errors import (
-    GraphManifestCollisionError,
-    SessionNotResumableError,
-)
+import kohakuterrarium.terrarium.workspace_resume as _workspace
+from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.core.config_serde import pack_agent_config
+from kohakuterrarium.session.migrations import latest_readable_version
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.resume import (
     _open_store_with_migration,
     detect_session_type,
     inject_saved_state,
+    preflight_legacy_workspace,
     resume_agent,
 )
 from kohakuterrarium.session.store import SessionStore
@@ -35,7 +35,10 @@ from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
     _safe_creature_id,
-    apply_creature_name,
+)
+from kohakuterrarium.terrarium.resume_manifest import (
+    resume_manifest_into_engine as _resume_manifest_into_engine,
+    schedule_drive_reconcile as _schedule_drive_reconcile,
 )
 from kohakuterrarium.utils.logging import get_logger
 
@@ -61,15 +64,75 @@ def _finish_conversation_resume(store: SessionStore) -> None:
         checkpoint()
 
 
-def _schedule_drive_reconcile(engine: "Terrarium", creature: "Creature") -> None:
-    """Arm Drive reconciliation for a resumed creature.
+def prepare_resume_workspace(
+    store: SessionStore | str | Path,
+    *,
+    pwd: str | None = None,
+    workspace_overrides: dict[str, str] | None = None,
+) -> "_workspace.WorkspaceResumePlan | None":
+    """Read and validate workspace state without opening a writer/runtime."""
+    if pwd is not None and workspace_overrides:
+        raise ValueError("pwd and workspace_overrides are mutually exclusive")
+    path = latest_readable_version(_resolve_store_path(store))
+    meta = read_session_meta(path)
+    resume_state = meta.get("workspace_resume_state")
+    if (
+        isinstance(resume_state, Mapping)
+        and resume_state.get("status") == "partial_dirty"
+    ):
+        raise SessionNotResumableError(
+            "Session has an incomplete workspace rollback and must be repaired"
+        )
+    raw_manifest = meta.get(_manifest.MANIFEST_KEY)
+    if raw_manifest is None:
+        preflight_legacy_workspace(path, pwd)
+        return None
+    manifest = _manifest.parse_manifest(raw_manifest)
+    replacements = workspace_overrides
+    if pwd is not None:
+        replacements = {item.creature_id: pwd for item in manifest.creatures}
+    return _workspace.plan_workspace_resume(
+        manifest,
+        replacements,
+        allow_valid_targets=pwd is not None,
+    )
 
-    Resume starts creatures directly (not via ``engine.add_creature``), so it
-    must wire the restoration-barrier-gated reconcile itself. A no-op on a
-    Drive-disabled engine."""
-    runtime = getattr(engine, "_drive_runtime", None)
-    if runtime is not None:
-        runtime.schedule_reconcile(creature)
+
+async def resume_new_engine(
+    engine_cls: type["Terrarium"],
+    store: SessionStore | str | Path,
+    *,
+    pwd: str | None = None,
+    workspace_overrides: dict[str, str] | None = None,
+    llm: Any = None,
+    drive_config: Any = None,
+    drive_registrations: tuple[Any, ...] | list[Any] | None = None,
+    drive_store: Any = None,
+) -> "Terrarium":
+    """Preflight, construct, and adopt into a fresh engine."""
+    prepared = prepare_resume_workspace(
+        store,
+        pwd=pwd,
+        workspace_overrides=workspace_overrides,
+    )
+    engine = engine_cls(
+        pwd=pwd,
+        drive_config=drive_config,
+        drive_registrations=drive_registrations,
+        drive_store=drive_store,
+    )
+    engine._running = True
+    try:
+        resume_kwargs = {"pwd": pwd, "llm": llm}
+        if workspace_overrides is not None:
+            resume_kwargs["workspace_overrides"] = workspace_overrides
+        if prepared is not None:
+            resume_kwargs["prepared_workspace"] = prepared
+        await resume_into_engine(engine, store, **resume_kwargs)
+    except BaseException:
+        await engine.shutdown()
+        raise
+    return engine
 
 
 async def resume_into_engine(
@@ -77,49 +140,52 @@ async def resume_into_engine(
     store: SessionStore | str | Path,
     *,
     pwd: str | None = None,
+    workspace_overrides: dict[str, str] | None = None,
     llm: Any = None,
+    prepared_workspace: "_workspace.WorkspaceResumePlan | None" = None,
 ) -> str:
-    """Adopt a saved session into ``engine``.  Returns the graph_id.
-
-    Reads the saved store's metadata to dispatch between the agent
-    and terrarium rebuild paths, wraps the rebuilt agent(s) in
-    :class:`Creature` objects, adopts them via ``engine.add_creature``,
-    and attaches the ``SessionStore`` at the graph level.
-
-    ``store`` may be a path-like to a ``.kohakutr`` file or an
-    already-open :class:`SessionStore` instance.  An instance is CLOSED
-    here first — the rebuild paths open the file themselves, and two
-    live handles on one session file keep independent event counters.
-    """
+    """Adopt a saved session into ``engine`` and return its graph ID."""
+    if pwd is not None and workspace_overrides:
+        raise ValueError("pwd and workspace_overrides are mutually exclusive")
     path = _resolve_store_path(store)
     if isinstance(store, SessionStore):
         store.close(update_status=False)
-    probe = _open_store_with_migration(path)
-    meta = probe.load_meta()
+    path = latest_readable_version(path)
+    meta = read_session_meta(path)
     # None is the checkpoint tombstone — legacy resume, not a manifest.
+    dirty_state = meta.get("workspace_resume_state")
+    if isinstance(dirty_state, dict) and dirty_state.get("status") == "partial_dirty":
+        raise SessionNotResumableError(
+            "Session has an incomplete workspace rollback and must be repaired before resume"
+        )
     raw_manifest = meta.get(_manifest.MANIFEST_KEY)
-    close = getattr(probe, "close", None)
-    if close is not None:
-        close(update_status=False)
     if raw_manifest is not None:
-        _manifest.parse_manifest(raw_manifest)
-        locked = _open_store_with_migration(path, writer_lock=True)
-        try:
-            locked_manifest = _manifest.load_manifest(locked)
-        except BaseException:
-            locked.close(update_status=False)
-            raise
-        if locked_manifest is not None:
-            return await _resume_manifest_into_engine(
-                engine,
-                path,
-                locked_manifest,
-                pwd=pwd,
-                llm=llm,
-                store=locked,
-            )
-        # Tombstoned between the probe and the writer lock.
-        locked.close(update_status=False)
+        manifest = _manifest.parse_manifest(raw_manifest)
+        replacements = workspace_overrides
+        if pwd is not None:
+            if workspace_overrides:
+                raise ValueError(
+                    "pwd and workspace_overrides are mutually exclusive; "
+                    "pwd is the explicit whole-team compatibility override"
+                )
+            replacements = {item.creature_id: pwd for item in manifest.creatures}
+        workspace_plan = prepared_workspace or _workspace.plan_workspace_resume(
+            manifest,
+            replacements,
+            allow_valid_targets=pwd is not None,
+        )
+        resumed = await _resume_manifest_into_engine(
+            engine,
+            path,
+            workspace_plan,
+            replacements=replacements,
+            allow_valid_targets=pwd is not None,
+            llm=llm,
+        )
+        if resumed is not None:
+            return resumed
+        # Tombstoned between the read-only probe and writer-lock revalidation.
+    preflight_legacy_workspace(path, pwd)
     session_type = detect_session_type(path)
 
     if session_type == "agent":
@@ -136,152 +202,6 @@ def _resolve_store_path(store: SessionStore | str | Path) -> Path:
         # store implementation.
         return Path(getattr(store, "path", str(store)))
     return Path(str(store))
-
-
-async def _resume_manifest_into_engine(
-    engine: "Terrarium",
-    path: Path,
-    manifest: _manifest.GraphManifest,
-    *,
-    pwd: str | None,
-    llm: Any = None,
-    store: SessionStore | None = None,
-) -> str:
-    """Restore a graph exactly from an authoritative manifest."""
-    runtime_ids = [entry.creature_id for entry in manifest.creatures]
-    async with engine._recipe_identities.reserve_exact(engine, runtime_ids):
-        return await _resume_reserved_manifest(
-            engine, path, manifest, pwd=pwd, llm=llm, store=store
-        )
-
-
-async def _resume_reserved_manifest(
-    engine: "Terrarium",
-    path: Path,
-    manifest: _manifest.GraphManifest,
-    *,
-    pwd: str | None,
-    llm: Any,
-    store: SessionStore | None,
-) -> str:
-    store = store or _open_store_with_migration(path, writer_lock=True)
-    if manifest.graph_id in engine._topology.graphs:
-        store.close(update_status=False)
-        raise GraphManifestCollisionError("graph_id", manifest.graph_id)
-    for item in manifest.creatures:
-        if (
-            item.creature_id in engine._creatures
-            or item.creature_id in engine._topology.creature_to_graph
-        ):
-            store.close(update_status=False)
-            raise GraphManifestCollisionError("creature_id", item.creature_id)
-
-    created: list[Creature] = []
-    attached = False
-    engine._create_restore_graph(manifest.graph_id)
-    try:
-        for item in manifest.creatures:
-            creature = await engine.add_creature(
-                _manifest.unpack_creature_config(item),
-                llm=llm,
-                pwd=pwd or item.pwd,
-                io="none",
-                strict=False,
-                session=False,
-                start=False,
-                graph=manifest.graph_id,
-                creature_id=item.creature_id,
-                name=item.name,
-                is_privileged=item.is_privileged,
-                parent_creature_id=item.parent_creature_id,
-                _identity_reserved=True,
-            )
-            creature.injected_runtime = ()
-            created.append(creature)
-
-        graph = engine._topology.graphs[manifest.graph_id]
-        environment = engine._environments[manifest.graph_id]
-        for channel in manifest.channels:
-            info = _topology.add_channel(
-                engine._topology,
-                manifest.graph_id,
-                channel.name,
-                description=channel.description,
-            )
-            _channels.register_channel_in_environment(
-                environment.shared_channels,
-                info,
-                engine=engine,
-                graph_id=manifest.graph_id,
-            )
-        for creature_id, channel_name in manifest.listen:
-            _topology.set_listen(
-                engine._topology, creature_id, channel_name, listening=True
-            )
-        for creature_id, channel_name in manifest.send:
-            _topology.set_send(
-                engine._topology, creature_id, channel_name, sending=True
-            )
-
-        for creature in created:
-            creature.listen_channels = sorted(
-                graph.listen_edges.get(creature.creature_id, set())
-            )
-            creature.send_channels = sorted(
-                graph.send_edges.get(creature.creature_id, set())
-            )
-            _channels.bind_creature_to_environment(creature, environment)
-            for channel_name in creature.listen_channels:
-                _channels.inject_channel_trigger(
-                    creature.agent,
-                    subscriber_id=creature.name,
-                    channel_name=channel_name,
-                    registry=environment.shared_channels,
-                    ignore_sender_id=creature.creature_id,
-                )
-
-        await engine.attach_session(manifest.graph_id, store)
-        attached = True
-        engine._owned_sessions.add(manifest.graph_id)
-        for creature in created:
-            inject_saved_state(creature.agent, store, creature.name)
-            apply_creature_name(creature, creature.name)
-            await creature.start()
-            _schedule_drive_reconcile(engine, creature)
-        await _checkpoint.checkpoint(engine, manifest.graph_id)
-        _finish_conversation_resume(store)
-        return manifest.graph_id
-    except BaseException:
-        environment = engine._environments.get(manifest.graph_id)
-        for creature in reversed(created):
-            try:
-                if creature.is_running:
-                    await creature.stop()
-                registry = getattr(environment, "shared_channels", None)
-                for channel_name in creature.listen_channels:
-                    channel = (
-                        registry.get(channel_name) if registry is not None else None
-                    )
-                    if channel is not None:
-                        channel.unsubscribe(creature.name)
-            except BaseException:
-                pass
-            engine._creatures.pop(creature.creature_id, None)
-            getattr(engine, "_runtime_contexts", {}).pop(creature.creature_id, None)
-            engine._topology.creature_to_graph.pop(creature.creature_id, None)
-        if attached:
-            engine._session_stores.pop(manifest.graph_id, None)
-            engine._owned_sessions.discard(manifest.graph_id)
-        runtime = getattr(engine, "_drive_runtime", None)
-        if runtime is not None:
-            try:
-                await runtime.detach_graph(manifest.graph_id)
-            except BaseException:
-                pass
-        engine._environments.pop(manifest.graph_id, None)
-        engine._topology.graphs.pop(manifest.graph_id, None)
-        store.close(update_status=False)
-        raise
 
 
 async def _resume_agent_into_engine(
@@ -416,15 +336,14 @@ async def _resume_terrarium_body(
 
     # ``pwd`` flows into ``apply_recipe`` for per-creature workspaces;
     # resume must not change the process-wide working directory.
-    saved_pwd = meta.get("pwd", ".")
+    saved_pwd = meta.get("pwd")
     pwd = pwd or saved_pwd
     if not (pwd and os.path.isdir(pwd)):
-        if pwd and pwd == saved_pwd:
-            logger.warning(
-                "Saved working dir no longer exists; falling back to cwd",
-                saved_pwd=pwd,
-            )
-        pwd = None
+        source = "override" if pwd != saved_pwd else "saved"
+        raise SessionNotResumableError(
+            f"The {source} working directory is missing or invalid: {pwd!r}. "
+            "Choose a replacement directory or open the session history."
+        )
 
     config = load_terrarium_config(config_path)
 

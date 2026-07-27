@@ -177,7 +177,16 @@ await engine.apply_recipe("@kt-biome/terrariums/swe_team", session="runs/team.ko
 
 恢復從 session metadata 記錄的 config path (含 `@pkg` 參照)
 重建拓樸，並以各 agent 自己的工作目錄執行，不會對你的行程
-做 `os.chdir`。
+做 `os.chdir`。恢復會在建立 writer store、runtime、lifecycle 或
+adoption 前執行唯讀工作目錄預檢。目錄失效時必須選擇新目錄、只看歷史或
+取消，不會靜默退回 KohakuTerrarium 行程目錄。使用
+`workspace_overrides={"creature-id": "/new/path"}` 只替換確認的成員；
+共享失效路徑也可使用預檢回傳的 `gap_id` 成組替換。純量 `pwd=` 僅保留為
+明確的全隊相容覆寫，不能和 `workspace_overrides` 同時使用。成功替換會永久
+寫回 manifest；遠端與叢集會在實際 worker 上驗證路徑，並在第一次 adoption
+前完成全成員預檢。叢集 API 還可依成員 session ID 限定替換，讓不同 worker
+上相同的 creature 或路徑群組目標選擇不同目錄。若回滾無法持久化，session
+會標記為 `partial_dirty`；後續預檢與恢復會失敗關閉，直到 session 修復。
 
 ### 讀取：`SessionReader`
 

@@ -6,8 +6,7 @@ versioned suffixes so original sources remain intact.
 
 from pathlib import Path
 
-from kohakuvault import KVault
-
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -26,28 +25,13 @@ def detect_format_version(path: str | Path) -> int:
     if not p.exists():
         raise FileNotFoundError(p)
     try:
-        meta = KVault(str(p), table="meta")
+        val = read_session_meta(p).get("format_version", 1)
+        if isinstance(val, int):
+            return val
         try:
-            meta.enable_auto_pack()
-            try:
-                val = meta["format_version"]
-            except KeyError:
-                return 1
-            if isinstance(val, int):
-                return val
-            try:
-                return int(val)
-            except (TypeError, ValueError):
-                return 1
-        finally:
-            try:
-                meta.close()
-            except Exception as e:
-                logger.warning(
-                    "Failed to close meta while probing format_version",
-                    error=str(e),
-                    exc_info=True,
-                )
+            return int(val)
+        except (TypeError, ValueError):
+            return 1
     except Exception as e:
         logger.warning(
             "detect_format_version fell back to 1",

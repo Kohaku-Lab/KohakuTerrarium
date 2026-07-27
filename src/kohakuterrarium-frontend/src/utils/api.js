@@ -746,11 +746,40 @@ export const sessionAPI = {
     return data
   },
 
+  /** Inspect saved workspaces without creating a runtime. */
+  async preflightResume(sessionName, opts = {}) {
+    const body = {}
+    if (opts.onNode && opts.onNode !== "_host") body.on_node = opts.onNode
+    if (opts.members) body.members = opts.members
+    if (opts.pwd) body.pwd = opts.pwd
+    if (opts.workspaceOverrides) {
+      body.workspace_overrides = opts.workspaceOverrides
+    }
+    if (opts.memberWorkspaceOverrides) {
+      body.member_workspace_overrides = opts.memberWorkspaceOverrides
+    }
+    if (opts.memberPwdOverrides) {
+      body.member_pwd_overrides = opts.memberPwdOverrides
+    }
+    const { data } = await api.post(`/sessions/${sessionName}/resume/preflight`, body)
+    return data
+  },
+
   /** @returns {Promise<{instance_id: string, type: string, session_name: string}>} */
   async resume(sessionName, opts = {}) {
     const body = {}
     if (opts.onNode && opts.onNode !== "_host") body.on_node = opts.onNode
+    if (opts.members) body.members = opts.members
     if (opts.pwd) body.pwd = opts.pwd
+    if (opts.workspaceOverrides) {
+      body.workspace_overrides = opts.workspaceOverrides
+    }
+    if (opts.memberWorkspaceOverrides) {
+      body.member_workspace_overrides = opts.memberWorkspaceOverrides
+    }
+    if (opts.memberPwdOverrides) {
+      body.member_pwd_overrides = opts.memberPwdOverrides
+    }
     const { data } = await api.post(`/sessions/${sessionName}/resume`, body)
     return data
   },
