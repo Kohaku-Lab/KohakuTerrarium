@@ -35,7 +35,7 @@ const runtimeTarget = computed(() => (props.instance.is_live ? props.instance.ru
 const surfaces = computed(() => (runtimeTarget.value ? tabs.surfaceTabsForTarget(runtimeTarget.value) : {}))
 const chatOpen = computed(() => Boolean(surfaces.value.chat))
 const inspectorOpen = computed(() => Boolean(surfaces.value.inspector))
-const resuming = computed(() => conversations.isResuming(props.instance.id))
+const resuming = computed(() => conversations.isResuming(props.instance.conversation_id || props.instance.id))
 
 const statusColor = computed(() => {
   if (!props.instance.is_live) return "bg-warm-400"

@@ -6,7 +6,9 @@ import pytest
 
 from kohakuterrarium.api.routes.persistence.resume_coordinator import (
     ResumeCoordinator,
+    session_coordination_key,
 )
+from kohakuterrarium.session.store import SessionStore
 
 
 @pytest.mark.asyncio
@@ -121,3 +123,29 @@ async def test_failure_is_removed_and_next_call_retries():
 
     assert await coordinator.run("session-a", resume) == "resumed"
     assert attempts == 2
+
+
+def test_saved_cluster_members_with_one_identity_share_coordination_key(tmp_path):
+    first_path = tmp_path / "first.kohakutr"
+    second_path = tmp_path / "second.kohakutr"
+    first = SessionStore(first_path)
+    first.init_meta("first", "agent", "/cfg", str(tmp_path), ["first"])
+    conversation_id = first.meta["conversation_id"]
+    first.close(update_status=False)
+    second = SessionStore(second_path)
+    second.init_meta("second", "agent", "/cfg", str(tmp_path), ["second"])
+    second.meta["conversation_id"] = conversation_id
+    second.close(update_status=False)
+
+    assert session_coordination_key(first_path, tmp_path) == session_coordination_key(
+        second_path, tmp_path
+    )
+
+
+def test_missing_path_key_has_no_filesystem_side_effect(tmp_path):
+    missing = tmp_path / "missing.kohakutr"
+
+    key = session_coordination_key(missing, tmp_path)
+
+    assert ":path:" in key
+    assert missing.exists() is False

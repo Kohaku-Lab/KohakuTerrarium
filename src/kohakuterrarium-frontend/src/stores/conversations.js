@@ -27,7 +27,7 @@ export const useConversationsStore = defineStore("conversations", {
   }),
 
   getters: {
-    isResuming: (state) => (id) => Boolean(state._resumePromises[id]),
+    isResuming: (state) => (id) => Boolean(state._resumePromises[`${state._hostScope}:${id}`]),
   },
 
   actions: {

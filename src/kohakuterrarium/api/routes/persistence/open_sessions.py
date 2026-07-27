@@ -13,6 +13,7 @@ from kohakuterrarium.api.routes.persistence._executor import (
 )
 from kohakuterrarium.api.routes.persistence.resume_coordinator import (
     resume_coordinator,
+    session_coordination_key,
 )
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
@@ -21,6 +22,7 @@ from kohakuterrarium.studio.persistence.session_index.reconcile import reconcile
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.sessions import lifecycle
+from kohakuterrarium.studio.sessions.cluster_fold import cluster_groups
 from kohakuterrarium.studio.sessions.registry import stores_for
 from kohakuterrarium.terrarium.service import TerrariumService
 
@@ -52,6 +54,8 @@ def _live_rows(
     live_paths: set[str] = set()
     live_conversation_ids: set[str] = set()
     used_ids: set[str] = set()
+    groups = cluster_groups(service)
+    meta_registry = lifecycle.meta_for(service)
 
     for listing in lifecycle.list_sessions(service):
         try:
@@ -70,11 +74,22 @@ def _live_rows(
             live_paths.add(_path_key(path))
             saved_name = normalize_session_stem(path)
         else:
-            registry_meta = lifecycle.meta_for(service).get(listing.session_id) or {}
+            registry_meta = meta_registry.get(listing.session_id) or {}
             meta = dict(registry_meta)
             remote_path = str(meta.get("remote_session_path") or "")
             if remote_path:
                 saved_name = normalize_session_stem(Path(remote_path))
+
+        # A folded live cluster has one listing but several persisted member
+        # files. Suppress every member mirror from the dormant half of the rail.
+        for member_id in groups.get(listing.session_id, {listing.session_id}):
+            member_meta = meta_registry.get(member_id) or {}
+            member_path = str(member_meta.get("remote_session_path") or "")
+            if member_path:
+                live_paths.add(_path_key(member_path))
+            member_conversation_id = str(member_meta.get("conversation_id") or "")
+            if member_conversation_id:
+                live_conversation_ids.add(member_conversation_id)
 
         conversation_id = str(meta.get("conversation_id") or "") or None
         if conversation_id is not None:
@@ -130,6 +145,65 @@ def _dormant_row(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _saved_conversation_paths(path: Path, session_dir: Path) -> list[Path]:
+    """Resolve cluster members that share the selected saved conversation."""
+    selected = SessionStore.open_readonly(path)
+    try:
+        conversation_id = str(selected.meta.get("conversation_id") or "")
+        raw_members = selected.meta.get("cluster_members")
+    finally:
+        selected.close(update_status=False)
+
+    paths = [path]
+    if isinstance(raw_members, list):
+        for member in raw_members:
+            sid = member.get("sid") if isinstance(member, dict) else None
+            if not isinstance(sid, str) or not sid:
+                continue
+            candidate = resolve_session_path_in(sid, session_dir=session_dir)
+            if candidate is None:
+                continue
+            candidate_store = SessionStore.open_readonly(candidate)
+            try:
+                candidate_id = str(candidate_store.meta.get("conversation_id") or "")
+            finally:
+                candidate_store.close(update_status=False)
+            if conversation_id and candidate_id == conversation_id:
+                paths.append(candidate)
+
+    unique: dict[str, Path] = {}
+    for candidate in paths:
+        unique.setdefault(_path_key(candidate), candidate)
+    return list(unique.values())
+
+
+def _end_saved_conversation(path: Path, session_dir: Path) -> None:
+    """End every host-side member copy, rolling back partial marker writes."""
+    updated: list[tuple[Path, bool, str]] = []
+    try:
+        for member_path in _saved_conversation_paths(path, session_dir):
+            store = SessionStore(member_path)
+            try:
+                original_open = bool(store.meta.get("conversation_open"))
+                original_status = str(store.meta.get("status") or "running")
+                updated.append((member_path, original_open, original_status))
+                store.set_conversation_open(False)
+                store.update_status("completed")
+                store.checkpoint()
+            finally:
+                store.close(update_status=False)
+    except Exception:
+        for member_path, original_open, original_status in reversed(updated):
+            store = SessionStore(member_path)
+            try:
+                store.set_conversation_open(original_open)
+                store.update_status(original_status)
+                store.checkpoint()
+            finally:
+                store.close(update_status=False)
+        raise
+
+
 def build_open_session_rows(
     service: TerrariumService, session_dir: Path
 ) -> list[dict[str, Any]]:
@@ -137,6 +211,15 @@ def build_open_session_rows(
     session_dir = Path(session_dir)
     live_rows, live_paths, live_conversation_ids = _live_rows(service)
     used_ids = {str(row["id"]) for row in live_rows}
+    groups = cluster_groups(service)
+    live_saved_names: set[str] = set()
+    for row in live_rows:
+        runtime_id = str(row.get("runtime_id") or "")
+        if runtime_id:
+            live_saved_names.update(groups.get(runtime_id, {runtime_id}))
+        saved_name = str(row.get("saved_name") or "")
+        if saved_name:
+            live_saved_names.add(saved_name)
 
     index = get_session_index_default(session_dir)
     reconcile(index, session_dir, full=False)
@@ -149,6 +232,8 @@ def build_open_session_rows(
         saved_name = str(indexed.get("name", "") or "")
         conversation_id = str(indexed.get("conversation_id") or "")
         if not saved_name or not conversation_id:
+            continue
+        if saved_name in live_saved_names:
             continue
         if conversation_id in live_conversation_ids:
             continue
@@ -192,7 +277,9 @@ async def end_open_conversation(
         else None
     )
     coordination_key = (
-        _path_key(path) if path is not None else f"conversation:{conversation_id}"
+        await asyncio.to_thread(session_coordination_key, path, session_dir)
+        if path is not None
+        else f"{_path_key(session_dir)}:conversation:{conversation_id}"
     )
 
     async def _end() -> dict[str, str]:
@@ -205,15 +292,9 @@ async def end_open_conversation(
         path = resolve_session_path_in(saved_name, session_dir=session_dir)
         if path is None:
             raise HTTPException(status_code=404, detail="saved conversation not found")
-        store = SessionStore(path)
-        try:
-            store.set_conversation_open(False)
-            store.update_status("completed")
-            store.checkpoint()
-        finally:
-            store.close(update_status=False)
+        await asyncio.to_thread(_end_saved_conversation, path, session_dir)
         index = get_session_index_default(session_dir=session_dir)
-        reconcile(index, session_dir=session_dir)
+        await asyncio.to_thread(reconcile, index, session_dir=session_dir)
         return {"status": "ended", "conversation_id": conversation_id}
 
     try:

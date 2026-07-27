@@ -3,6 +3,7 @@
 import asyncio
 import base64
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -221,6 +222,8 @@ class TestStatReadWriteDelete:
         )
         assert out["stat"]["size"] == 2
         assert out["stat"]["is_dir"] is False
+        assert Path(out["stat"]["path"]).is_absolute()
+        assert Path(out["stat"]["path"]).name == "x.txt"
         assert "sha256" in out["stat"]
 
     async def test_stat_missing(self, adapter):

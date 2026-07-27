@@ -39,7 +39,17 @@ async def rollback_cluster_resume(
             errors.append(f"rollback {new_sid} on {node}: {exc}")
 
     links = getattr(service, "_cluster_links", None)
-    if isinstance(links, dict):
+    resumed_ids = {new_sid for new_sid, _new_meta, _node in resumed.values()}
+    if isinstance(links, set):
+        for link in list(links):
+            if any(
+                isinstance(endpoint, tuple)
+                and len(endpoint) == 2
+                and endpoint[1] in resumed_ids
+                for endpoint in link
+            ):
+                links.discard(link)
+    elif isinstance(links, dict):
         for new_sid, _new_meta, _node in resumed.values():
             links.pop(new_sid, None)
     return errors

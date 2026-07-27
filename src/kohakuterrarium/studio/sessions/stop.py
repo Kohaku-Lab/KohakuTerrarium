@@ -1,5 +1,6 @@
 """Stop sessions while keeping persisted conversation lifecycle consistent."""
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -69,6 +70,38 @@ def _update_mirror_lifecycle(path: str, *, end_conversation: bool) -> None:
         store.close(update_status=False)
 
 
+def _path_key(path: str | Path) -> str:
+    return os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
+
+
+def _host_mirror_paths(
+    session_ids: list[str],
+    meta: dict[str, dict[str, Any]],
+    mirror_dir: Path,
+    *,
+    live_store: SessionStore | None,
+) -> list[str]:
+    """Return each distinct host-side saved copy that needs lifecycle updates."""
+    live_key = _path_key(live_store.path) if live_store is not None else None
+    paths: list[str] = []
+    seen: set[str] = set()
+    for member_id in session_ids:
+        entry = meta.get(member_id) or {}
+        candidates = [
+            str(entry.get("resumed_from") or ""),
+            str(mirror_dir / f"{member_id}.kohakutr"),
+        ]
+        for candidate in candidates:
+            if not candidate or not Path(candidate).is_file():
+                continue
+            key = _path_key(candidate)
+            if key == live_key or key in seen:
+                continue
+            seen.add(key)
+            paths.append(candidate)
+    return paths
+
+
 async def _update_remote_lifecycle(
     service,
     session_id: str,
@@ -116,6 +149,7 @@ async def _update_remote_cluster_lifecycle(
     meta: dict[str, dict[str, Any]],
     *,
     end_conversation: bool,
+    status_override: str | None = None,
 ) -> None:
     updated: list[tuple[str, dict[str, Any]]] = []
     try:
@@ -128,6 +162,7 @@ async def _update_remote_cluster_lifecycle(
                 member_id,
                 entry,
                 end_conversation=end_conversation,
+                status_override=status_override,
             )
             updated.append((member_id, entry))
     except Exception:
@@ -201,31 +236,44 @@ async def stop_session(
             end_conversation=end_conversation,
         )
 
-    mirror_path = str(entry.get("resumed_from") or "") if entry else ""
-    original_mirror_lifecycle = (
-        _read_mirror_lifecycle(mirror_path) if mirror_path else None
-    )
-    if mirror_path:
-        try:
+    mirror_lifecycles: list[tuple[str, tuple[bool, str]]] = []
+    try:
+        for mirror_path in _host_mirror_paths(
+            cluster_session_ids,
+            meta,
+            mirror_dir,
+            live_store=store,
+        ):
+            original = _read_mirror_lifecycle(mirror_path)
+            if original is None:
+                continue
             _update_mirror_lifecycle(
                 mirror_path,
                 end_conversation=end_conversation,
             )
-        except Exception:
-            if store is not None and original_store_lifecycle is not None:
-                _set_store_lifecycle(
-                    store,
-                    is_open=original_store_lifecycle[0],
-                    status=original_store_lifecycle[1],
-                )
-            elif graph is None:
-                await _update_remote_cluster_lifecycle(
-                    service,
-                    cluster_session_ids,
-                    meta,
-                    end_conversation=False,
-                )
-            raise
+            mirror_lifecycles.append((mirror_path, original))
+    except Exception:
+        for updated_path, original in reversed(mirror_lifecycles):
+            _set_mirror_lifecycle(
+                updated_path,
+                is_open=original[0],
+                status=original[1],
+            )
+        if store is not None and original_store_lifecycle is not None:
+            _set_store_lifecycle(
+                store,
+                is_open=original_store_lifecycle[0],
+                status=original_store_lifecycle[1],
+            )
+        elif graph is None:
+            await _update_remote_cluster_lifecycle(
+                service,
+                cluster_session_ids,
+                meta,
+                end_conversation=False,
+                status_override="running",
+            )
+        raise
 
     try:
         if graph is not None:
@@ -258,8 +306,9 @@ async def stop_session(
                 cluster_session_ids,
                 meta,
                 end_conversation=False,
+                status_override="running",
             )
-        if mirror_path and original_mirror_lifecycle is not None:
+        for mirror_path, original_mirror_lifecycle in reversed(mirror_lifecycles):
             _set_mirror_lifecycle(
                 mirror_path,
                 is_open=original_mirror_lifecycle[0],

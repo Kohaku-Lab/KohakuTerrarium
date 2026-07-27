@@ -90,7 +90,10 @@ async def resume_session(
     }
     if store is not None:
         stores_for(service)[sid] = store
-        _index_hooks.attach(sid, store, Path(store.path).parent)
+        index_dir = Path(store.path).parent
+        if index_dir.name == "mirror":
+            index_dir = index_dir.parent
+        _index_hooks.attach(sid, store, index_dir)
 
     logger.info(
         "Resumed session registered with studio",

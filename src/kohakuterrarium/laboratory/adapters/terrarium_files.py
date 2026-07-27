@@ -157,6 +157,7 @@ class TerrariumFilesAdapter:
             raise FileNotFoundError(f"no such path: {scope}/{rel}")
         st = await asyncio.to_thread(target.stat)
         result = {
+            "path": str(target),
             "size": st.st_size,
             "mtime": st.st_mtime,
             "is_dir": target.is_dir(),

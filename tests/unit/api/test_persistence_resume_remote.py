@@ -123,7 +123,9 @@ class TestRemoteWritePath:
         )
         host = _FakeHost(
             responses={
-                "terrarium.files:stat": {"ok": True},
+                "terrarium.files:stat": {
+                    "stat": {"path": "D:/worker-config/resume/x.kohakutr"}
+                },
                 "terrarium.session:resume": {
                     "session_id": "remote-sid",
                     "meta": {
@@ -148,6 +150,15 @@ class TestRemoteWritePath:
         assert lifecycle.meta_for(svc)["remote-sid"]["conversation_id"] == (
             "conversation-remote"
         )
+        assert lifecycle.meta_for(svc)["remote-sid"]["remote_session_path"] == (
+            "D:/worker-config/resume/x.kohakutr"
+        )
+        resume_call = next(
+            call
+            for call in host.calls
+            if call["namespace"] == "terrarium.session" and call["type"] == "resume"
+        )
+        assert resume_call["body"]["path"] == "D:/worker-config/resume/x.kohakutr"
         # The push went through the chunked write_stream handshake, not
         # a one-shot ``write`` — that is the whole point of the pack
         # system: no single APP message can overflow the transport.
@@ -436,6 +447,33 @@ class TestClusterResume:
         pushed = [c for c in host.calls if c["namespace"] == "terrarium.files"]
         assert pushed == []
 
+    def test_cluster_resume_rejects_duplicate_member_ids_before_transfer(
+        self, monkeypatch, tmp_path
+    ):
+        path = tmp_path / "sid-a.kohakutr"
+        path.write_bytes(b"saved")
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_session_path_in",
+            lambda name, session_dir: path,
+        )
+        host = _FakeHost()
+        svc = _ClusterSvc(host)
+
+        response = TestClient(_app(service=svc)).post(
+            "/sessions/sid-a/resume",
+            json={
+                "on_node": "w1",
+                "members": [
+                    {"sid": "sid-a", "on_node": "w1"},
+                    {"sid": "sid-a", "on_node": "w2"},
+                ],
+            },
+        )
+
+        assert response.status_code == 400
+        assert host.calls == []
+
     def test_cluster_resume_rolls_back_primary_when_second_member_fails(
         self, monkeypatch, tmp_path
     ):
@@ -556,6 +594,9 @@ class TestClusterResume:
             _ci("cid-alpha", "alpha", "new-a"),
             _ci("cid-bravo", "bravo", "new-b"),
         ]
+        svc._cluster_links = {
+            frozenset({("w1", "new-a"), ("w2", "new-b")}),
+        }
 
         async def fail_connect(*args, **kwargs):
             raise RuntimeError("relink failed")
@@ -582,3 +623,4 @@ class TestClusterResume:
         ]
         assert rollback_calls == [("w2", "new-b"), ("w1", "new-a")]
         assert meta_for(svc) == {}
+        assert svc._cluster_links == set()

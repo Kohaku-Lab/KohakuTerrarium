@@ -85,6 +85,7 @@ describe("conversations store", () => {
     const inspector = store.openSurface(row, "inspector")
 
     expect(createSession).toHaveBeenCalledTimes(1)
+    expect(store.isResuming("saved-one")).toBe(true)
     expect(createSession).toHaveBeenCalledWith({
       kind: "resume",
       sessionName: "saved-one",
@@ -95,6 +96,7 @@ describe("conversations store", () => {
     deferred.resolve("runtime-one")
     await Promise.all([chat, inspector])
 
+    expect(store.isResuming("saved-one")).toBe(false)
     expect(tabs.surfaceTabsForTarget("runtime-one").chat).toBeDefined()
     expect(tabs.surfaceTabsForTarget("runtime-one").inspector).toBeDefined()
     expect(tabs.surfaceTabsForTarget("saved-one").chat).toBeUndefined()

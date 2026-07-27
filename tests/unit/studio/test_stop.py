@@ -30,7 +30,10 @@ async def _local_stop(tmp_path: Path, *, end_conversation: bool) -> dict:
     store.init_meta(session_id, "agent", "/cfg", str(tmp_path), ["alice"])
     engine._session_stores[session_id] = store
     lifecycle.stores_for(service)[session_id] = store
-    lifecycle.meta_for(service)[session_id] = {"name": "alice"}
+    lifecycle.meta_for(service)[session_id] = {
+        "name": "alice",
+        "resumed_from": str(path),
+    }
     hook = _CapturingHook(store)
 
     try:
@@ -191,6 +194,106 @@ async def test_remote_lifecycle_failure_keeps_runtime_registered(tmp_path):
 
     assert service.removed == []
     assert session_id in meta
+
+
+async def test_remote_teardown_failure_restores_running_lifecycle(tmp_path):
+    class _Host:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"ok": True}
+
+    class _Service:
+        def __init__(self):
+            self._host = _Host()
+
+        def list_graphs(self):
+            return []
+
+        async def remove_creature(self, _creature_id: str):
+            raise RuntimeError("teardown failed")
+
+    service = _Service()
+    session_id = "remote-session"
+    meta = {
+        session_id: {
+            "on_node": "worker-1",
+            "creature_id": "creature-1",
+            "remote_session_path": "C:/sessions/remote.kohakutr",
+        }
+    }
+
+    with pytest.raises(RuntimeError, match="teardown failed"):
+        await stop.stop_session(
+            service,
+            session_id,
+            meta=meta,
+            session_stores={},
+            mirror_dir=tmp_path,
+            end_conversation=True,
+        )
+
+    assert session_id in meta
+    assert [
+        (call["body"]["conversation_open"], call["body"]["status"])
+        for call in service._host.calls
+    ] == [
+        (False, "completed"),
+        (True, "running"),
+    ]
+
+
+async def test_remote_end_updates_host_mirror_before_runtime_removal(tmp_path):
+    class _Host:
+        async def request(self, **_kwargs):
+            return {"ok": True}
+
+    class _Service:
+        def __init__(self):
+            self._host = _Host()
+            self.removed: list[str] = []
+
+        def list_graphs(self):
+            return []
+
+        async def remove_creature(self, creature_id: str):
+            self.removed.append(creature_id)
+
+    service = _Service()
+    session_id = "remote-session"
+    mirror_dir = tmp_path / "mirror"
+    mirror_dir.mkdir()
+    mirror_path = mirror_dir / f"{session_id}.kohakutr"
+    mirror = SessionStore(mirror_path)
+    mirror.init_meta(session_id, "agent", "/cfg", str(tmp_path), ["alice"])
+    mirror.close(update_status=False)
+    meta = {
+        session_id: {
+            "on_node": "worker-1",
+            "creature_id": "creature-1",
+            "remote_session_path": "C:/sessions/remote.kohakutr",
+        }
+    }
+
+    await stop.stop_session(
+        service,
+        session_id,
+        meta=meta,
+        session_stores={},
+        mirror_dir=mirror_dir,
+        end_conversation=True,
+    )
+
+    reopened = SessionStore.open_readonly(mirror_path)
+    try:
+        assert bool(reopened.meta["conversation_open"]) is False
+        assert reopened.meta["status"] == "completed"
+    finally:
+        reopened.close(update_status=False)
+    assert service.removed == ["creature-1"]
+    assert meta == {}
 
 
 async def test_cluster_marker_failure_rolls_back_updated_members(tmp_path, monkeypatch):

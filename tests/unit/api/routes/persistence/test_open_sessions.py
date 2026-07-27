@@ -100,6 +100,65 @@ class TestOpenSessions:
         monkeypatch.setattr(open_sessions.lifecycle, "get_session", _stopped)
         assert open_sessions._live_rows(SimpleNamespace()) == ([], set(), set())
 
+    def test_folded_live_cluster_suppresses_every_member_mirror(
+        self, tmp_path, monkeypatch
+    ):
+        class _Service:
+            pass
+
+        service = _Service()
+        primary_path = tmp_path / "primary.kohakutr"
+        peer_path = tmp_path / "peer.kohakutr"
+        listing = SimpleNamespace(session_id="primary", node_id="worker-1")
+        session = SimpleNamespace(
+            has_root=False,
+            creatures=[{"name": "alpha"}, {"name": "bravo"}],
+            name="cluster",
+            pwd="",
+            created_at="now",
+        )
+        registry = {
+            "primary": {
+                "remote_session_path": str(primary_path),
+                "conversation_id": "conversation-primary",
+            },
+            "peer": {
+                "remote_session_path": str(peer_path),
+                "conversation_id": "conversation-peer",
+            },
+        }
+        monkeypatch.setattr(
+            open_sessions.lifecycle, "list_sessions", lambda _service: [listing]
+        )
+        monkeypatch.setattr(
+            open_sessions.lifecycle,
+            "get_session",
+            lambda _service, _session_id: session,
+        )
+        monkeypatch.setattr(
+            open_sessions.lifecycle, "meta_for", lambda _service: registry
+        )
+        monkeypatch.setattr(
+            open_sessions, "_store_for_runtime", lambda _service, _runtime_id: None
+        )
+        monkeypatch.setattr(
+            open_sessions,
+            "cluster_groups",
+            lambda _service: {"primary": {"primary", "peer"}},
+        )
+
+        rows, live_paths, conversation_ids = open_sessions._live_rows(service)
+
+        assert len(rows) == 1
+        assert live_paths == {
+            open_sessions._path_key(primary_path),
+            open_sessions._path_key(peer_path),
+        }
+        assert conversation_ids == {
+            "conversation-primary",
+            "conversation-peer",
+        }
+
     async def test_live_store_wins_over_its_saved_index_row(self, tmp_path):
         engine = await (
             TestTerrariumBuilder()
@@ -200,6 +259,45 @@ class TestOpenSessions:
         finally:
             close_session_index()
 
+    def test_end_route_closes_every_saved_cluster_member(self, tmp_path):
+        conversation_id = "conversation-cluster"
+        members = [
+            {"sid": "alpha", "on_node": "worker-1"},
+            {"sid": "bravo", "on_node": "worker-2"},
+        ]
+        paths = [tmp_path / "alpha.kohakutr", tmp_path / "bravo.kohakutr"]
+        for sid, path in zip(("alpha", "bravo"), paths, strict=True):
+            _saved_store(
+                path,
+                session_id=sid,
+                conversation_open=True,
+                conversation_id=conversation_id,
+            )
+            store = SessionStore(path)
+            store.meta["cluster_members"] = members
+            store.close(update_status=False)
+
+        service = LocalTerrariumService(Terrarium())
+        app = FastAPI()
+        app.dependency_overrides[get_service] = lambda: service
+        app.dependency_overrides[resolve_request_session_dir] = lambda: tmp_path
+        app.include_router(open_sessions.router, prefix="/sessions")
+
+        try:
+            client = TestClient(app)
+            response = client.post(f"/sessions/open/{conversation_id}/end")
+            assert response.status_code == 200
+            for path in paths:
+                store = SessionStore.open_readonly(path)
+                try:
+                    assert bool(store.meta["conversation_open"]) is False
+                    assert store.meta["status"] == "completed"
+                finally:
+                    store.close(update_status=False)
+            assert client.get("/sessions/open").json() == []
+        finally:
+            close_session_index()
+
     async def test_end_route_accepts_unsaved_live_row_id(self, tmp_path, monkeypatch):
         service = LocalTerrariumService(Terrarium())
         row = {
@@ -261,7 +359,7 @@ class TestOpenSessions:
 
         task = asyncio.create_task(
             open_sessions.resume_coordinator.run(
-                open_sessions._path_key(path),
+                open_sessions.session_coordination_key(path, tmp_path),
                 _resume,
                 intent="resume:_host",
             )

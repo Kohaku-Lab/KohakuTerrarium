@@ -1,22 +1,12 @@
-"""Persistence resume — adopt a saved session into the live engine.
+"""Adopt a saved session locally or on a selected Laboratory worker.
 
-The ``/{session_name}/resume`` path allows this router to mount under
-``/api/sessions`` while preserving the frontend session API URL.
-
-Responses retain ``{instance_id, type, session_name}`` and include the full
-:class:`Session` handle under ``session``.
-
-In standalone mode, ``on_node="_host"`` resumes into the local engine. In
-lab-host mode, a worker target receives the ``.kohakutr`` file and adopts it
-through ``terrarium.session.resume``; the host itself does not run agents.
+The route returns the legacy instance fields plus a full ``Session`` handle.
 """
 
 import asyncio
-import os
 from dataclasses import asdict
 from pathlib import Path
 
-import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -24,9 +14,16 @@ from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
 from kohakuterrarium.api.routes.persistence.cluster_resume_compensation import (
     rollback_cluster_resume,
 )
-from kohakuterrarium.api.routes.persistence.resume_coordinator import resume_coordinator
-from kohakuterrarium.laboratory.adapters.file_scopes import kt_config_home
-from kohakuterrarium.laboratory.file_transfer import stream_write_file
+from kohakuterrarium.api.routes.persistence.resume_coordinator import (
+    resume_coordinator,
+    session_coordination_key,
+)
+from kohakuterrarium.api.routes.persistence.remote_resume_transfer import (
+    push_and_resume_member as _push_and_resume_member,
+)
+from kohakuterrarium.api.routes.persistence.remote_resume_transfer import (
+    worker_absolute_fallback,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.resume import resume_session as studio_resume
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
@@ -36,6 +33,11 @@ from kohakuterrarium.studio.sessions.lifecycle import now_iso, register_session_
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
+
+
+def _worker_absolute_for(rel: str) -> str:
+    """Compatibility alias retained for route-level callers and tests."""
+    return worker_absolute_fallback(rel)
 
 
 class ClusterMember(BaseModel):
@@ -75,7 +77,7 @@ async def resume_session(
             status_code=404, detail=f"Session {session_name!r} not found"
         )
     body = req or ResumeRequest()
-    key = os.path.normcase(str(path.expanduser().resolve(strict=False)))
+    key = await asyncio.to_thread(session_coordination_key, path, session_dir)
     members = tuple(
         sorted((member.sid, member.on_node) for member in (body.members or []))
     )
@@ -184,7 +186,7 @@ async def _resume_session(
             pwd_override=req.pwd if req is not None else None,
         )
 
-    sid, meta, worker_pwd_exists = await _push_and_resume_member(
+    sid, meta, worker_pwd_exists, remote_session_path = await _push_and_resume_member(
         host=host,
         request=request,
         path=path,
@@ -231,7 +233,7 @@ async def _resume_session(
             "pwd": meta.get("pwd", ""),
             "on_node": on_node,
             "resumed_from": str(path),
-            "remote_session_path": _worker_absolute_for(f"resume/{path.name}"),
+            "remote_session_path": remote_session_path,
             "conversation_id": str(meta.get("conversation_id") or ""),
             "creature_id": primary_cid,
         },
@@ -268,15 +270,6 @@ async def _resume_session(
     }
 
 
-def _worker_absolute_for(rel: str) -> str:
-    """Reconstruct the worker absolute path for a ``config://`` relative path.
-
-    Mirroring ``kt_config_home`` avoids an extra transport round trip. This
-    requires host and worker nodes to use the same ``KT_CONFIG_DIR`` policy.
-    """
-    return str(kt_config_home() / rel)
-
-
 def _read_saved_cluster_members(path: Path) -> list[ClusterMember] | None:
     """Read valid persisted cluster membership from a saved store.
 
@@ -310,111 +303,6 @@ def _read_saved_cluster_members(path: Path) -> list[ClusterMember] | None:
     return members
 
 
-async def _push_and_resume_member(
-    *,
-    host,
-    request: Request,
-    path: Path,
-    on_node: str,
-    pwd_override: str | None = None,
-) -> tuple[str, dict, bool | None]:
-    """Transfer one session store to a worker and invoke its resume RPC.
-
-    ``pwd_exists`` reflects the worker filesystem and is ``None`` when an older
-    worker does not report it. Transfer and adoption failures are translated to
-    :class:`HTTPException`.
-    """
-    # A live mirror may still hold metadata and events in SQLite's WAL. A
-    # checkpoint makes the transferred main file self-contained.
-    mirror = getattr(request.app.state, "session_mirror", None)
-    if mirror is not None and hasattr(mirror, "checkpoint"):
-        try:
-            mirror.checkpoint(normalize_session_stem(path))
-        except Exception:  # pragma: no cover - defensive
-            pass
-
-    try:
-        async with aiofiles.open(path, "rb") as f:
-            data = await f.read()
-    except OSError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    rel = f"resume/{path.name}"
-    worker_path = _worker_absolute_for(rel)
-    transferred = False
-    try:
-        await stream_write_file(host, on_node, "config://", rel, data)
-        transferred = True
-        target_path_resp = await host.request(
-            to_node=on_node,
-            namespace="terrarium.files",
-            type="stat",
-            body={"scope": "config://", "path": rel},
-            timeout=10.0,
-        )
-        if isinstance(target_path_resp, dict) and "error" in target_path_resp:
-            raise HTTPException(
-                status_code=502,
-                detail=(
-                    f"worker {on_node!r} failed to receive .kohakutr: "
-                    f"{target_path_resp['error'].get('message', '')}"
-                ),
-            )
-        worker_path_resp = await host.request(
-            to_node=on_node,
-            namespace="terrarium.session",
-            type="resume",
-            body={
-                "path": worker_path,
-                "pwd_override": pwd_override,
-            },
-            timeout=60.0,
-        )
-        if isinstance(worker_path_resp, dict) and "error" in worker_path_resp:
-            err = worker_path_resp["error"]
-            # Worker ``invalid`` and ``not_found`` failures describe request or
-            # saved-session problems; other kinds represent transport-side or
-            # worker failures.
-            kind = err.get("kind") if isinstance(err, dict) else None
-            status = 400 if kind in ("invalid", "not_found") else 502
-            raise HTTPException(
-                status_code=status,
-                detail=(
-                    f"worker {on_node!r} resume failed: "
-                    f"{err.get('message', '') if isinstance(err, dict) else ''}"
-                ),
-            )
-        sid = worker_path_resp.get("session_id", "")
-        if not isinstance(sid, str) or not sid:
-            raise HTTPException(
-                status_code=502,
-                detail=f"worker {on_node!r} returned no session_id",
-            )
-    except Exception as exc:
-        if transferred:
-            try:
-                await host.request(
-                    to_node=on_node,
-                    namespace="terrarium.session",
-                    type="delete_transfer",
-                    body={"session_path": worker_path},
-                    timeout=30.0,
-                )
-            except Exception:
-                pass
-        if isinstance(exc, HTTPException):
-            raise
-        raise HTTPException(
-            status_code=502, detail=f"lab transport error: {exc}"
-        ) from exc
-
-    meta = worker_path_resp.get("meta", {}) or {}
-    worker_pwd_exists = worker_path_resp.get("pwd_exists")
-    if not isinstance(worker_pwd_exists, bool):
-        worker_pwd_exists = None
-    return sid, meta, worker_pwd_exists
-
-
 async def _resume_cluster(
     service: TerrariumService,
     request: Request,
@@ -433,6 +321,25 @@ async def _resume_cluster(
     refreshed roster supplies authoritative creature IDs for routing and
     relinking, while the response represents the primary member.
     """
+    member_ids = [member.sid for member in members]
+    if len(set(member_ids)) != len(member_ids):
+        raise HTTPException(
+            status_code=400,
+            detail="cluster resume members must use unique session ids",
+        )
+    primary_matches = [member for member in members if member.sid == primary_sid]
+    if len(primary_matches) != 1:
+        raise HTTPException(
+            status_code=400,
+            detail="cluster resume members must contain the requested primary session",
+        )
+    primary_member = primary_matches[0]
+    if primary_member.on_node != primary_on_node:
+        raise HTTPException(
+            status_code=400,
+            detail="cluster primary worker does not match on_node",
+        )
+
     # Resolve every store before mutating workers so a missing mirror cannot
     # leave a partially resumed cluster.
     paths: dict[str, Path] = {}
@@ -446,19 +353,21 @@ async def _resume_cluster(
         paths[m.sid] = resolved
 
     # Primary-first ordering makes its metadata the canonical response source.
-    primary_member = next(
-        (m for m in members if m.sid == primary_sid),
-        members[0],
-    )
     ordered: list[ClusterMember] = [primary_member] + [
         m for m in members if m.sid != primary_member.sid
     ]
     resumed: dict[str, tuple[str, dict, str]] = {}
+    remote_paths: dict[str, str] = {}
     registered_session_ids: list[str] = []
     connected_pairs: list[tuple[str, str]] = []
     try:
         for m in ordered:
-            new_sid, new_meta, _member_pwd_exists = await _push_and_resume_member(
+            (
+                new_sid,
+                new_meta,
+                _member_pwd_exists,
+                remote_session_path,
+            ) = await _push_and_resume_member(
                 host=host,
                 request=request,
                 path=paths[m.sid],
@@ -466,6 +375,10 @@ async def _resume_cluster(
                 pwd_override=pwd_override,
             )
             resumed[m.sid] = (new_sid, new_meta, m.on_node)
+            remote_paths[m.sid] = remote_session_path
+        new_session_ids = [new_sid for new_sid, _meta, _node in resumed.values()]
+        if len(set(new_session_ids)) != len(new_session_ids):
+            raise RuntimeError("workers returned duplicate resumed session ids")
     except Exception as exc:
         rollback_errors = await rollback_cluster_resume(
             service,
@@ -495,29 +408,39 @@ async def _resume_cluster(
 
     # Register every adopted member before relinking so metadata-backed
     # lookups observe a complete cluster.
-    for original_sid, (new_sid, new_meta, node) in resumed.items():
-        creature_id = new_creature_by_member.get(original_sid) or (
-            (new_meta.get("agents") or [""])[0]
-        )
-        register_session_meta(
+    try:
+        for original_sid, (new_sid, new_meta, node) in resumed.items():
+            creature_id = new_creature_by_member.get(original_sid) or (
+                (new_meta.get("agents") or [""])[0]
+            )
+            register_session_meta(
+                service,
+                new_sid,
+                {
+                    "name": new_meta.get("terrarium_name")
+                    or new_meta.get("session_id")
+                    or new_sid,
+                    "config_path": new_meta.get("config_path", ""),
+                    "pwd": new_meta.get("pwd", ""),
+                    "on_node": node,
+                    "resumed_from": str(paths[original_sid]),
+                    "remote_session_path": remote_paths[original_sid],
+                    "conversation_id": str(new_meta.get("conversation_id") or ""),
+                    "creature_id": creature_id,
+                },
+            )
+            registered_session_ids.append(new_sid)
+    except Exception as exc:
+        rollback_errors = await rollback_cluster_resume(
             service,
-            new_sid,
-            {
-                "name": new_meta.get("terrarium_name")
-                or new_meta.get("session_id")
-                or new_sid,
-                "config_path": new_meta.get("config_path", ""),
-                "pwd": new_meta.get("pwd", ""),
-                "on_node": node,
-                "resumed_from": str(paths[original_sid]),
-                "remote_session_path": _worker_absolute_for(
-                    f"resume/{paths[original_sid].name}"
-                ),
-                "conversation_id": str(new_meta.get("conversation_id") or ""),
-                "creature_id": creature_id,
-            },
+            resumed,
+            registered_session_ids,
+            connected_pairs,
         )
-        registered_session_ids.append(new_sid)
+        detail = f"cluster registration failed: {exc}"
+        if rollback_errors:
+            detail += "; rollback errors: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=502, detail=detail) from exc
 
     # Default-channel connections rebuild cluster links from the primary.
     primary_cid = new_creature_by_member.get(primary_member.sid)

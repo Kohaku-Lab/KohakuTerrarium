@@ -1,10 +1,37 @@
 """Per-session coordination for idempotent resume requests."""
 
 import asyncio
+import os
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import TypeVar
 
+from kohakuterrarium.session.store import SessionStore
+
 T = TypeVar("T")
+
+
+def session_coordination_key(path: str | Path, session_dir: str | Path) -> str:
+    """Return one request-scope key for every file in a persisted conversation."""
+    namespace = os.path.normcase(
+        str(Path(session_dir).expanduser().resolve(strict=False))
+    )
+    resolved = os.path.normcase(str(Path(path).expanduser().resolve(strict=False)))
+    candidate = Path(path)
+    try:
+        if not candidate.is_file():
+            raise FileNotFoundError(candidate)
+        store = SessionStore.open_readonly(candidate)
+        try:
+            conversation_id = str(store.meta.get("conversation_id") or "")
+        finally:
+            store.close(update_status=False)
+    except Exception:  # noqa: BLE001 - corrupt stores fall back to path identity
+        conversation_id = ""
+    identity = (
+        f"conversation:{conversation_id}" if conversation_id else f"path:{resolved}"
+    )
+    return f"{namespace}:{identity}"
 
 
 class ResumeCoordinator:

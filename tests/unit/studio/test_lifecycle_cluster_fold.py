@@ -238,8 +238,8 @@ class TestPersistClusterMembersToMirror:
         # succeeds without surprise side effects.
         for sid in ("ga", "gb"):
             store = SessionStore(mirror_dir / f"{sid}.kohakutr")
-            store.meta["session_id"] = sid
-            store.close()
+            store.init_meta(sid, "agent", "/cfg", str(tmp_path), [sid])
+            store.close(update_status=False)
 
         svc = _FakeMultiNodeService({frozenset({("w1", "ga"), ("w2", "gb")})})
         lifecycle._persist_cluster_members_to_mirror(svc, "ga")
@@ -248,15 +248,18 @@ class TestPersistClusterMembersToMirror:
         # not just the one we called the helper on. The resume route
         # reads it off whichever member the user opens — both must be
         # populated symmetrically.
+        conversation_ids = set()
         for sid in ("ga", "gb"):
             store = SessionStore(mirror_dir / f"{sid}.kohakutr")
             try:
                 members = store.meta.get("cluster_members")
+                conversation_ids.add(store.meta["conversation_id"])
             finally:
-                store.close()
+                store.close(update_status=False)
             assert isinstance(members, list)
             recorded = {(m["sid"], m["on_node"]) for m in members}
             assert recorded == {("ga", "w1"), ("gb", "w2")}
+        assert len(conversation_ids) == 1
 
     def test_no_persistence_when_session_not_clustered(self, monkeypatch, tmp_path):
         monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path))

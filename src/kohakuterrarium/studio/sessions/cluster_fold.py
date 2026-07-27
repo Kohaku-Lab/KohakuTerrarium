@@ -252,18 +252,42 @@ def persist_cluster_members_to_mirror(
     payload = [{"sid": sid, "on_node": node} for sid, node in sorted(members.items())]
     if not mirror_dir.is_dir():
         return
-    for sid in members:
-        path = mirror_dir / f"{sid}.kohakutr"
-        if not path.exists():
-            continue
+    member_paths = [
+        (sid, mirror_dir / f"{sid}.kohakutr")
+        for sid in sorted(members)
+        if (mirror_dir / f"{sid}.kohakutr").exists()
+    ]
+    canonical_conversation_id = ""
+    for _sid, path in member_paths:
+        try:
+            primary_store = SessionStore(path)
+            try:
+                canonical_conversation_id = str(
+                    primary_store.ensure_conversation_id() or ""
+                )
+            finally:
+                primary_store.close(update_status=False)
+        except Exception as exc:  # pragma: no cover - defensive
+            logger.warning(
+                "CF-6: failed to read cluster conversation identity",
+                path=str(path),
+                error=str(exc),
+                exc_info=True,
+            )
+        if canonical_conversation_id:
+            break
+
+    for sid, path in member_paths:
         try:
             tmp_store = SessionStore(path)
             try:
                 tmp_store.meta["cluster_members"] = payload
+                if canonical_conversation_id:
+                    tmp_store.meta["conversation_id"] = canonical_conversation_id
                 if hasattr(tmp_store, "checkpoint"):
                     tmp_store.checkpoint()
             finally:
-                tmp_store.close()
+                tmp_store.close(update_status=False)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning(
                 "CF-6: failed to persist cluster_members",
