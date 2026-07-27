@@ -296,6 +296,153 @@ async def test_remote_end_updates_host_mirror_before_runtime_removal(tmp_path):
     assert meta == {}
 
 
+async def test_remote_stop_removes_every_creature_in_the_member_graph(tmp_path):
+    class _Host:
+        async def request(self, **_kwargs):
+            return {"ok": True}
+
+    class _Service:
+        def __init__(self):
+            self._host = _Host()
+            self.removed: list[str] = []
+
+        def list_graphs(self):
+            return []
+
+        async def list_creatures(self):
+            return [
+                type(
+                    "Info", (), {"graph_id": "remote-session", "creature_id": "one"}
+                )(),
+                type(
+                    "Info", (), {"graph_id": "remote-session", "creature_id": "two"}
+                )(),
+            ]
+
+        async def remove_creature(self, creature_id: str):
+            self.removed.append(creature_id)
+
+    service = _Service()
+    meta = {
+        "remote-session": {
+            "on_node": "worker-1",
+            "creature_id": "one",
+            "remote_session_path": "C:/sessions/remote.kohakutr",
+        }
+    }
+
+    await stop.stop_session(
+        service,
+        "remote-session",
+        meta=meta,
+        session_stores={},
+        mirror_dir=tmp_path,
+    )
+
+    assert service.removed == ["one", "two"]
+    assert meta == {}
+
+
+async def test_remote_stop_uses_saved_roster_when_live_enumeration_fails(tmp_path):
+    class _Host:
+        async def request(self, **_kwargs):
+            return {"ok": True}
+
+    class _Service:
+        def __init__(self):
+            self._host = _Host()
+            self.removed: list[str] = []
+
+        def list_graphs(self):
+            return []
+
+        async def list_creatures(self):
+            raise RuntimeError("worker roster unavailable")
+
+        async def remove_creature(self, creature_id: str):
+            self.removed.append(creature_id)
+
+    service = _Service()
+    meta = {
+        "remote-session": {
+            "on_node": "worker-1",
+            "creature_id": "one",
+            "creature_ids": ["one", "two"],
+            "remote_session_path": "C:/sessions/remote.kohakutr",
+        }
+    }
+
+    await stop.stop_session(
+        service,
+        "remote-session",
+        meta=meta,
+        session_stores={},
+        mirror_dir=tmp_path,
+    )
+
+    assert service.removed == ["one", "two"]
+    assert meta == {}
+
+
+async def test_remote_cluster_stop_rejects_a_member_without_teardown_target(tmp_path):
+    class _Host:
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"ok": True}
+
+    class _Service:
+        def __init__(self):
+            self._host = _Host()
+            self._cluster_links = {
+                frozenset({("worker-1", "primary"), ("worker-2", "peer")})
+            }
+            self.removed: list[str] = []
+
+        def list_graphs(self):
+            return []
+
+        async def list_creatures(self):
+            return [
+                type(
+                    "Info",
+                    (),
+                    {"graph_id": "primary", "creature_id": "one"},
+                )()
+            ]
+
+        async def remove_creature(self, creature_id: str):
+            self.removed.append(creature_id)
+
+    service = _Service()
+    meta = {
+        "primary": {
+            "on_node": "worker-1",
+            "creature_id": "one",
+            "remote_session_path": "C:/sessions/primary.kohakutr",
+        },
+        "peer": {
+            "on_node": "worker-2",
+            "remote_session_path": "C:/sessions/peer.kohakutr",
+        },
+    }
+
+    with pytest.raises(RuntimeError, match="peer"):
+        await stop.stop_session(
+            service,
+            "primary",
+            meta=meta,
+            session_stores={},
+            mirror_dir=tmp_path,
+        )
+
+    assert service._host.calls == []
+    assert service.removed == []
+    assert set(meta) == {"primary", "peer"}
+
+
 async def test_cluster_marker_failure_rolls_back_updated_members(tmp_path, monkeypatch):
     class _Host:
         def __init__(self):

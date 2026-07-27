@@ -203,6 +203,7 @@ class TestResumeOp:
         _engine.creatures = lambda: tuple(_engine._creatures.values())
 
         async def remove_creature(creature_id):
+            assert "target" not in _engine._session_stores
             removed.append(creature_id)
             _engine._creatures.pop(creature_id)
 
@@ -214,6 +215,95 @@ class TestResumeOp:
         assert removed == ["two", "one"]
         assert list(_engine._creatures) == ["other"]
         assert session_path.exists() is False
+
+    async def test_rollback_resume_resolves_graph_from_session_path(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        session_path = tmp_path / "resume" / "rollback-by-path.kohakutr"
+        session_path.parent.mkdir()
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one"])
+        _engine._session_stores = {"target": store}
+        _engine._adopt_result = "target"
+        _engine._creatures = {
+            "one": SimpleNamespace(creature_id="one", graph_id="target"),
+        }
+        _engine.creatures = lambda: tuple(_engine._creatures.values())
+        removed = []
+
+        async def remove_creature(creature_id):
+            removed.append(creature_id)
+            _engine._creatures.pop(creature_id)
+
+        _engine.remove_creature = remove_creature
+
+        await _adapter._op_resume(
+            {"path": str(session_path), "resume_token": "resume-token"}
+        )
+        result = await _adapter._op_rollback_resume(
+            {
+                "session_path": str(session_path),
+                "resume_token": "resume-token",
+            }
+        )
+
+        assert result == {"ok": True, "removed": ["one"]}
+        assert removed == ["one"]
+        assert session_path.exists() is False
+
+    async def test_path_rollback_does_not_remove_a_preexisting_active_store(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        session_path = tmp_path / "resume" / "already-active.kohakutr"
+        session_path.parent.mkdir()
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one"])
+        _engine._session_stores = {"target": store}
+        _engine._creatures = {
+            "one": SimpleNamespace(creature_id="one", graph_id="target"),
+        }
+        _engine.creatures = lambda: tuple(_engine._creatures.values())
+
+        with pytest.raises(ValueError, match="active session store"):
+            await _adapter._op_rollback_resume(
+                {
+                    "session_path": str(session_path),
+                    "resume_token": "unrecognized-attempt",
+                }
+            )
+
+        assert list(_engine._creatures) == ["one"]
+        assert _engine._session_stores == {"target": store}
+        assert session_path.exists() is True
+
+    def test_delete_transfer_refuses_an_active_store(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        session_path = tmp_path / "resume" / "active.kohakutr"
+        session_path.parent.mkdir()
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one"])
+        _engine._session_stores = {"target": store}
+
+        with pytest.raises(ValueError, match="active session store"):
+            _adapter._op_delete_transfer({"session_path": str(session_path)})
+
+        assert session_path.exists() is True
+
+    def test_delete_transfer_rejects_a_path_outside_transfer_directory(
+        self, _adapter, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "config"))
+        outside = tmp_path / "unrelated.kohakutr"
+        outside.write_bytes(b"keep")
+
+        with pytest.raises(ValueError, match="transfer directory"):
+            _adapter._op_delete_transfer({"session_path": str(outside)})
+
+        assert outside.read_bytes() == b"keep"
 
 
 # ── error mapping ───────────────────────────────────────────────

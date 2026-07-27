@@ -21,9 +21,6 @@ from kohakuterrarium.api.routes.persistence.resume_coordinator import (
 from kohakuterrarium.api.routes.persistence.remote_resume_transfer import (
     push_and_resume_member as _push_and_resume_member,
 )
-from kohakuterrarium.api.routes.persistence.remote_resume_transfer import (
-    worker_absolute_fallback,
-)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.resume import resume_session as studio_resume
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
@@ -33,11 +30,6 @@ from kohakuterrarium.studio.sessions.lifecycle import now_iso, register_session_
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
-
-
-def _worker_absolute_for(rel: str) -> str:
-    """Compatibility alias retained for route-level callers and tests."""
-    return worker_absolute_fallback(rel)
 
 
 class ClusterMember(BaseModel):
@@ -151,6 +143,17 @@ async def _resume_session(
     # resumed as an isolated singleton when the caller omits ``members``.
     requested_members = req.members if (req is not None and req.members) else None
     saved_members = await asyncio.to_thread(_read_saved_cluster_members, path)
+    if requested_members is not None and saved_members is not None:
+        requested_ids = [member.sid for member in requested_members]
+        saved_ids = [member.sid for member in saved_members]
+        if len(requested_ids) != len(saved_ids) or set(requested_ids) != set(saved_ids):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "cluster resume members must include every persisted "
+                    "cluster member exactly once"
+                ),
+            )
     cluster_members = requested_members or saved_members
     if cluster_members and len(cluster_members) > 1:
         # Validate all targets before mutating workers to avoid a partially
@@ -173,7 +176,10 @@ async def _resume_session(
             cluster_members,
             on_node,
             session_name,
-            primary_sid=normalize_session_stem(path),
+            primary_sid=(
+                await asyncio.to_thread(_read_saved_session_id, path)
+                or normalize_session_stem(path)
+            ),
             session_dir=session_dir,
             pwd_override=req.pwd if req is not None else None,
         )
@@ -228,6 +234,10 @@ async def _resume_session(
             "remote_session_path": remote_session_path,
             "conversation_id": str(meta.get("conversation_id") or ""),
             "creature_id": primary_cid,
+            "creature_ids": [
+                str(creature["creature_id"]) for creature in resumed_creatures
+            ]
+            or ([str(primary_cid)] if primary_cid else []),
         },
     )
 
@@ -306,6 +316,20 @@ def _read_saved_cluster_members(path: Path) -> list[ClusterMember] | None:
     if len(members) < 2:
         return None
     return members
+
+
+def _read_saved_session_id(path: Path) -> str:
+    """Return the persisted graph identity even when its file was renamed."""
+    if not path.exists():
+        return ""
+    try:
+        store = SessionStore.open_readonly(path)
+    except Exception:
+        return ""
+    try:
+        return str(store.meta.get("session_id") or "")
+    finally:
+        store.close(update_status=False)
 
 
 async def _resume_cluster(
@@ -397,7 +421,7 @@ async def _resume_cluster(
         raise HTTPException(status_code=502, detail=detail) from exc
 
     # Roster refresh replaces stale pre-stop routing identities before relink.
-    new_creature_by_member: dict[str, str] = {}
+    new_creature_ids_by_member: dict[str, list[str]] = {}
     list_creatures = getattr(service, "list_creatures", None)
     roster: tuple = ()
     if callable(list_creatures):
@@ -406,17 +430,20 @@ async def _resume_cluster(
         except Exception:  # pragma: no cover - defensive
             roster = ()
     for original_sid, (new_sid, _meta, _node) in resumed.items():
+        creature_ids: list[str] = []
         for c in roster:
             if getattr(c, "graph_id", None) == new_sid:
-                new_creature_by_member[original_sid] = c.creature_id
-                break
+                creature_ids.append(str(c.creature_id))
+        if creature_ids:
+            new_creature_ids_by_member[original_sid] = creature_ids
 
     # Register every adopted member before relinking so metadata-backed
     # lookups observe a complete cluster.
     try:
         for original_sid, (new_sid, new_meta, node) in resumed.items():
-            creature_id = new_creature_by_member.get(original_sid) or (
-                (new_meta.get("agents") or [""])[0]
+            creature_ids = new_creature_ids_by_member.get(original_sid, [])
+            creature_id = (
+                creature_ids[0] if creature_ids else (new_meta.get("agents") or [""])[0]
             )
             register_session_meta(
                 service,
@@ -432,6 +459,8 @@ async def _resume_cluster(
                     "remote_session_path": remote_paths[original_sid],
                     "conversation_id": str(new_meta.get("conversation_id") or ""),
                     "creature_id": creature_id,
+                    "creature_ids": creature_ids
+                    or ([str(creature_id)] if creature_id else []),
                 },
             )
             registered_session_ids.append(new_sid)
@@ -448,18 +477,20 @@ async def _resume_cluster(
         raise HTTPException(status_code=502, detail=detail) from exc
 
     # Default-channel connections rebuild cluster links from the primary.
-    primary_cid = new_creature_by_member.get(primary_member.sid)
+    primary_creature_ids = new_creature_ids_by_member.get(primary_member.sid, [])
+    primary_cid = primary_creature_ids[0] if primary_creature_ids else None
     try:
         if not primary_cid:
             raise RuntimeError("resumed primary creature is missing from the roster")
         for m in ordered[1:]:
-            peer_cid = new_creature_by_member.get(m.sid)
+            peer_creature_ids = new_creature_ids_by_member.get(m.sid, [])
+            peer_cid = peer_creature_ids[0] if peer_creature_ids else None
             if not peer_cid:
                 raise RuntimeError(
                     f"resumed member {m.sid!r} is missing from the roster"
                 )
-            await service.connect(primary_cid, peer_cid)
             connected_pairs.append((primary_cid, peer_cid))
+            await service.connect(primary_cid, peer_cid, channel="default")
     except Exception as exc:
         rollback_errors = await rollback_cluster_resume(
             service,

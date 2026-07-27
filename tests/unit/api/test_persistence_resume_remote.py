@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.persistence import resume as resume_mod
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions.registry import meta_for
 
@@ -92,7 +93,9 @@ class TestRemoteWritePath:
         )
         host = _FakeHost(
             responses={
-                "terrarium.files:stat": {"ok": True},
+                "terrarium.files:stat": {
+                    "stat": {"path": "C:/worker-config/resume/x.kohakutr"}
+                },
                 "terrarium.session:resume": {"error": {"message": "bad resume"}},
             }
         )
@@ -139,7 +142,15 @@ class TestRemoteWritePath:
                 },
             }
         )
-        svc = _Svc(host)
+
+        class _RosterSvc(_Svc):
+            async def list_creatures(self):
+                return (
+                    _ci("cid-alice", "alice", "remote-sid"),
+                    _ci("cid-bob", "bob", "remote-sid"),
+                )
+
+        svc = _RosterSvc(host)
         client = TestClient(_app(service=svc))
         resp = client.post("/sessions/x/resume", json={"on_node": "w1"})
         assert resp.status_code == 200
@@ -153,6 +164,10 @@ class TestRemoteWritePath:
         assert lifecycle.meta_for(svc)["remote-sid"]["remote_session_path"] == (
             "D:/worker-config/resume/x.kohakutr"
         )
+        assert lifecycle.meta_for(svc)["remote-sid"]["creature_ids"] == [
+            "cid-alice",
+            "cid-bob",
+        ]
         resume_call = next(
             call
             for call in host.calls
@@ -175,7 +190,9 @@ class TestRemoteWritePath:
         )
         host = _FakeHost(
             responses={
-                "terrarium.files:stat": {"ok": True},
+                "terrarium.files:stat": {
+                    "stat": {"path": "C:/worker-config/resume/x.kohakutr"}
+                },
                 "terrarium.session:resume": {
                     "session_id": "sid",
                     "meta": {"agents": ["a"], "pwd": "/p"},
@@ -201,7 +218,9 @@ class TestRemoteWritePath:
         )
         host = _FakeHost(
             responses={
-                "terrarium.files:stat": {"ok": True},
+                "terrarium.files:stat": {
+                    "stat": {"path": "C:/worker-config/resume/x.kohakutr"}
+                },
                 "terrarium.session:resume": {
                     "session_id": "sid",
                     "meta": {"agents": ["a"], "pwd": ""},
@@ -214,7 +233,7 @@ class TestRemoteWritePath:
         assert resp.status_code == 200
         assert resp.json()["session"]["pwd_exists"] is False
 
-    def test_failed_worker_resume_deletes_transferred_session(
+    def test_failed_worker_resume_rolls_back_by_transferred_path(
         self, monkeypatch, tmp_path
     ):
         p = tmp_path / "x.kohakutr"
@@ -235,10 +254,10 @@ class TestRemoteWritePath:
                 )
                 if namespace == "terrarium.session" and type == "resume":
                     raise RuntimeError("worker resume failed")
-                if namespace == "terrarium.session" and type == "delete_transfer":
+                if namespace == "terrarium.session" and type == "rollback_resume":
                     return {"ok": True}
                 if namespace == "terrarium.files" and type == "stat":
-                    return {"ok": True}
+                    return {"stat": {"path": f"C:/worker-config/{body['path']}"}}
                 return self._responses.get(f"{namespace}:{type}", {})
 
         host = _FailingHost()
@@ -251,15 +270,21 @@ class TestRemoteWritePath:
             call
             for call in host.calls
             if call["namespace"] == "terrarium.session"
-            and call["type"] == "delete_transfer"
+            and call["type"] == "rollback_resume"
         ]
+        resume_token = next(
+            call["body"]["resume_token"]
+            for call in host.calls
+            if call["namespace"] == "terrarium.session" and call["type"] == "resume"
+        )
         assert cleanup == [
             {
                 "to": "w1",
                 "namespace": "terrarium.session",
-                "type": "delete_transfer",
+                "type": "rollback_resume",
                 "body": {
-                    "session_path": resume_mod._worker_absolute_for("resume/x.kohakutr")
+                    "session_path": "C:/worker-config/resume/x.kohakutr",
+                    "resume_token": resume_token,
                 },
             }
         ]
@@ -272,7 +297,9 @@ class TestRemoteWritePath:
         )
         host = _FakeHost(
             responses={
-                "terrarium.files:stat": {"ok": True},
+                "terrarium.files:stat": {
+                    "stat": {"path": "C:/worker-config/resume/x.kohakutr"}
+                },
                 "terrarium.session:resume": {"meta": {}},
             }
         )
@@ -283,9 +310,58 @@ class TestRemoteWritePath:
             call
             for call in host.calls
             if call["namespace"] == "terrarium.session"
-            and call["type"] == "delete_transfer"
+            and call["type"] == "rollback_resume"
         ]
-        assert len(cleanup) == 1
+        resume_token = next(
+            call["body"]["resume_token"]
+            for call in host.calls
+            if call["namespace"] == "terrarium.session" and call["type"] == "resume"
+        )
+        assert cleanup == [
+            {
+                "namespace": "terrarium.session",
+                "type": "rollback_resume",
+                "to": "w1",
+                "body": {
+                    "session_path": "C:/worker-config/resume/x.kohakutr",
+                    "resume_token": resume_token,
+                },
+            }
+        ]
+
+    def test_remote_resume_requires_worker_reported_absolute_path(
+        self, monkeypatch, tmp_path
+    ):
+        p = tmp_path / "x.kohakutr"
+        p.write_bytes(b"data")
+        monkeypatch.setattr(
+            resume_mod, "resolve_session_path_in", lambda name, session_dir: p
+        )
+        host = _FakeHost(
+            responses={
+                "terrarium.files:stat": {"ok": True},
+                "terrarium.session:resume": {
+                    "session_id": "must-not-run",
+                    "meta": {"agents": ["alice"]},
+                },
+            }
+        )
+
+        response = TestClient(_app(service=_Svc(host))).post(
+            "/sessions/x/resume", json={"on_node": "w1"}
+        )
+
+        assert response.status_code == 502
+        assert not any(
+            call["namespace"] == "terrarium.session" and call["type"] == "resume"
+            for call in host.calls
+        )
+        assert any(
+            call["namespace"] == "terrarium.files"
+            and call["type"] == "delete"
+            and call["body"] == {"scope": "config://", "path": "resume/x.kohakutr"}
+            for call in host.calls
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +451,7 @@ class TestClusterResume:
                 if namespace == "terrarium.session" and type == "resume":
                     return per_node_resume[to_node]
                 if namespace == "terrarium.files" and type == "stat":
-                    return {"ok": True}
+                    return {"stat": {"path": f"C:/worker-config/{body['path']}"}}
                 return self._responses.get(f"{namespace}:{type}", {})
 
         host = _RoutedHost()
@@ -413,6 +489,64 @@ class TestClusterResume:
         # list (so the frontend knows the cluster is intact).
         assert body["instance_id"] == "new-a"
         assert {m["on_node"] for m in body["cluster_members"]} == {"w1", "w2"}
+        assert meta_for(svc)["new-a"]["creature_ids"] == ["cid-alpha"]
+        assert meta_for(svc)["new-b"]["creature_ids"] == ["cid-bravo"]
+
+    def test_cluster_resume_uses_persisted_primary_id_after_file_rename(
+        self, monkeypatch, tmp_path
+    ):
+        selected = tmp_path / "renamed.kohakutr"
+        peer = tmp_path / "sid-b.kohakutr"
+        members = [
+            {"sid": "sid-a", "on_node": "w1"},
+            {"sid": "sid-b", "on_node": "w2"},
+        ]
+        for sid, path in (("sid-a", selected), ("sid-b", peer)):
+            store = SessionStore(path)
+            store.init_meta(sid, "agent", "/cfg", str(tmp_path), [sid])
+            store.meta["cluster_members"] = members
+            store.close(update_status=False)
+        paths = {"renamed": selected, "sid-a": selected, "sid-b": peer}
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_session_path_in",
+            lambda name, session_dir: paths.get(name),
+        )
+
+        class _RoutedHost(_FakeHost):
+            async def request(self, *, to_node, namespace, type, body, timeout):
+                self.calls.append(
+                    {
+                        "namespace": namespace,
+                        "type": type,
+                        "to": to_node,
+                        "body": body,
+                    }
+                )
+                if namespace == "terrarium.files" and type == "stat":
+                    return {"stat": {"path": f"C:/worker-config/{body['path']}"}}
+                if namespace == "terrarium.session" and type == "resume":
+                    suffix = "a" if to_node == "w1" else "b"
+                    return {
+                        "session_id": f"new-{suffix}",
+                        "meta": {"agents": [f"agent-{suffix}"], "config_type": "agent"},
+                    }
+                return self._responses.get(f"{namespace}:{type}", {})
+
+        host = _RoutedHost()
+        service = _ClusterSvc(host)
+        service._roster = [
+            _ci("cid-a", "agent-a", "new-a"),
+            _ci("cid-b", "agent-b", "new-b"),
+        ]
+
+        response = TestClient(_app(service=service)).post(
+            "/sessions/renamed/resume",
+            json={"on_node": "w1"},
+        )
+
+        assert response.status_code == 200, response.text
+        assert response.json()["instance_id"] == "new-a"
 
     def test_cluster_resume_rejects_when_member_worker_disconnected(
         self, monkeypatch, tmp_path
@@ -474,6 +608,37 @@ class TestClusterResume:
         assert response.status_code == 400
         assert host.calls == []
 
+    def test_cluster_resume_rejects_an_incomplete_saved_members_override(
+        self, monkeypatch, tmp_path
+    ):
+        path = tmp_path / "sid-a.kohakutr"
+        path.write_bytes(b"saved")
+        monkeypatch.setattr(
+            resume_mod, "resolve_session_path_in", lambda name, session_dir: path
+        )
+        monkeypatch.setattr(
+            resume_mod,
+            "_read_saved_cluster_members",
+            lambda _path: [
+                resume_mod.ClusterMember(sid="sid-a", on_node="w1"),
+                resume_mod.ClusterMember(sid="sid-b", on_node="w2"),
+            ],
+        )
+        host = _FakeHost()
+        service = _ClusterSvc(host)
+
+        response = TestClient(_app(service=service)).post(
+            "/sessions/sid-a/resume",
+            json={
+                "on_node": "w1",
+                "members": [{"sid": "sid-a", "on_node": "w1"}],
+            },
+        )
+
+        assert response.status_code == 400
+        assert "every persisted cluster member" in response.json()["detail"]
+        assert host.calls == []
+
     def test_cluster_resume_rolls_back_primary_when_second_member_fails(
         self, monkeypatch, tmp_path
     ):
@@ -510,7 +675,7 @@ class TestClusterResume:
                 if namespace == "terrarium.session" and type == "rollback_resume":
                     return {"ok": True, "removed": ["cid-alpha"]}
                 if namespace == "terrarium.files" and type == "stat":
-                    return {"ok": True}
+                    return {"stat": {"path": f"C:/worker-config/{body['path']}"}}
                 return self._responses.get(f"{namespace}:{type}", {})
 
         host = _FailingHost()
@@ -534,13 +699,29 @@ class TestClusterResume:
             if call["namespace"] == "terrarium.session"
             and call["type"] == "rollback_resume"
         ]
+        failed_resume_token = next(
+            call["body"]["resume_token"]
+            for call in host.calls
+            if call["namespace"] == "terrarium.session"
+            and call["type"] == "resume"
+            and call["to"] == "w2"
+        )
         assert rollback_calls == [
+            {
+                "namespace": "terrarium.session",
+                "type": "rollback_resume",
+                "to": "w2",
+                "body": {
+                    "session_path": "C:/worker-config/resume/sid-b.kohakutr",
+                    "resume_token": failed_resume_token,
+                },
+            },
             {
                 "namespace": "terrarium.session",
                 "type": "rollback_resume",
                 "to": "w1",
                 "body": {"graph_id": "new-a"},
-            }
+            },
         ]
         assert meta_for(svc) == {}
 
@@ -585,7 +766,7 @@ class TestClusterResume:
                 if namespace == "terrarium.session" and type == "rollback_resume":
                     return {"ok": True, "removed": []}
                 if namespace == "terrarium.files" and type == "stat":
-                    return {"ok": True}
+                    return {"stat": {"path": f"C:/worker-config/{body['path']}"}}
                 return self._responses.get(f"{namespace}:{type}", {})
 
         host = _RoutedHost()
@@ -598,10 +779,18 @@ class TestClusterResume:
             frozenset({("w1", "new-a"), ("w2", "new-b")}),
         }
 
-        async def fail_connect(*args, **kwargs):
+        disconnect_calls: list[tuple[str, str, str | None]] = []
+
+        async def fail_connect(sender_id, receiver_id, *, channel=None):
+            svc._cluster_links.add(frozenset({("w1", "new-a"), ("w2", "new-b")}))
             raise RuntimeError("relink failed")
 
+        async def disconnect(sender_id, receiver_id, *, channel=None):
+            disconnect_calls.append((sender_id, receiver_id, channel))
+            svc._cluster_links.clear()
+
         svc.connect = fail_connect
+        svc.disconnect = disconnect
         client = TestClient(_app(service=svc))
         resp = client.post(
             f"/sessions/{sid_a}/resume",
@@ -622,5 +811,6 @@ class TestClusterResume:
             and call["type"] == "rollback_resume"
         ]
         assert rollback_calls == [("w2", "new-b"), ("w1", "new-a")]
+        assert disconnect_calls == [("cid-alpha", "cid-bravo", "default")]
         assert meta_for(svc) == {}
         assert svc._cluster_links == set()

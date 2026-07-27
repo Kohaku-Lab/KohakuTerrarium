@@ -185,6 +185,66 @@ async def _update_remote_cluster_lifecycle(
         raise
 
 
+async def _remote_creature_ids(
+    service,
+    session_ids: list[str],
+    meta: dict[str, dict[str, Any]],
+) -> list[str]:
+    """Resolve every creature in the remote member graphs before teardown."""
+    by_session: dict[str, list[str]] = {session_id: [] for session_id in session_ids}
+    list_creatures = getattr(service, "list_creatures", None)
+    if callable(list_creatures):
+        try:
+            roster = await list_creatures()
+        except Exception as exc:  # noqa: BLE001 - metadata remains a safe fallback
+            logger.warning(
+                "Failed to enumerate remote session creatures",
+                error=str(exc),
+                exc_info=True,
+            )
+            roster = ()
+        for info in roster or ():
+            graph_id = getattr(info, "graph_id", None) or (
+                info.get("graph_id") if isinstance(info, dict) else None
+            )
+            creature_id = getattr(info, "creature_id", None) or (
+                info.get("creature_id") if isinstance(info, dict) else None
+            )
+            if graph_id in by_session and creature_id:
+                by_session[graph_id].append(str(creature_id))
+
+    resolved: list[str] = []
+    seen: set[str] = set()
+    missing: list[str] = []
+    for session_id in session_ids:
+        candidates = by_session[session_id]
+        entry = meta.get(session_id) or {}
+        fallback_ids = entry.get("creature_ids")
+        if isinstance(fallback_ids, list):
+            candidates.extend(
+                str(creature_id)
+                for creature_id in fallback_ids
+                if isinstance(creature_id, str) and creature_id
+            )
+        fallback = str(entry.get("creature_id") or "")
+        if fallback and fallback not in candidates:
+            candidates.append(fallback)
+        if not candidates:
+            missing.append(session_id)
+            continue
+        for creature_id in candidates:
+            if creature_id in seen:
+                continue
+            seen.add(creature_id)
+            resolved.append(creature_id)
+    if missing:
+        raise RuntimeError(
+            "remote session members have no creature teardown target: "
+            + ", ".join(sorted(missing))
+        )
+    return resolved
+
+
 async def stop_session(
     service,
     session_id: str,
@@ -218,6 +278,13 @@ async def stop_session(
     if isinstance(engine_stores, dict):
         store = engine_stores.get(session_id) or store
     entry = meta.get(session_id)
+    remote_creature_ids: list[str] = []
+    if graph is None and entry is not None:
+        remote_creature_ids = await _remote_creature_ids(
+            service,
+            cluster_session_ids,
+            meta,
+        )
 
     original_store_lifecycle = None
     if store is not None:
@@ -285,14 +352,11 @@ async def stop_session(
         else:
             if entry is None or not entry.get("on_node"):
                 raise KeyError(f"session {session_id!r} not found")
-            for member_id in cluster_session_ids:
-                member_entry = meta.get(member_id) or {}
-                creature_id = member_entry.get("creature_id")
-                if creature_id and hasattr(service, "remove_creature"):
-                    try:
-                        await service.remove_creature(creature_id)
-                    except KeyError:
-                        pass
+            for creature_id in remote_creature_ids:
+                try:
+                    await service.remove_creature(creature_id)
+                except KeyError:
+                    pass
     except Exception:
         if store is not None and original_store_lifecycle is not None:
             _set_store_lifecycle(

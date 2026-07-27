@@ -41,19 +41,6 @@ def _session(*, sid="sess-1", name="alice", creatures=None):
     )
 
 
-# ── _worker_absolute_for ───────────────────────────────────────
-
-
-class TestWorkerAbsoluteFor:
-    def test_expands_under_kohakuterrarium(self, monkeypatch):
-        # Verify the HOME-derived fallback, not the autouse env override.
-        monkeypatch.delenv("KT_CONFIG_DIR", raising=False)
-        out = resume_mod._worker_absolute_for("resume/alice.kohakutr")
-        # Path-style ends with the relative.
-        assert "alice.kohakutr" in out
-        assert ".kohakuterrarium" in out
-
-
 # ── host-mode resume ───────────────────────────────────────────
 
 

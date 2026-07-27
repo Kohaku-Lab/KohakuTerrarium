@@ -4,6 +4,7 @@ import asyncio
 import base64
 import hashlib
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -51,7 +52,8 @@ class _FakeNode:
 
 
 class _FakeEngine:
-    pass
+    def __init__(self):
+        self._session_stores = {}
 
 
 @pytest.fixture
@@ -331,6 +333,35 @@ class TestStatReadWriteDelete:
             _msg("delete", {"scope": "recipe://dir-del", "path": "sub"})
         )
         assert out == {}
+
+    async def test_active_session_file_cannot_be_overwritten_or_deleted(
+        self, adapter, monkeypatch, tmp_path
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        target = tmp_path / "resume" / "active.kohakutr"
+        target.parent.mkdir()
+        target.write_bytes(b"active")
+        adapter._engine._session_stores["sid"] = SimpleNamespace(path=target)
+        body = {
+            "scope": "config://",
+            "path": "resume/active.kohakutr",
+            "total_size": 3,
+            "sha256": _sha(b"new"),
+        }
+
+        begin = await adapter._dispatch(_msg("write_begin", body))
+        deleted = await adapter._dispatch(
+            _msg(
+                "delete",
+                {"scope": "config://", "path": "resume/active.kohakutr"},
+            )
+        )
+
+        assert begin["error"]["kind"] == "invalid"
+        assert "active session store" in begin["error"]["message"]
+        assert deleted["error"]["kind"] == "invalid"
+        assert "active session store" in deleted["error"]["message"]
+        assert target.read_bytes() == b"active"
 
 
 # ── list ─────────────────────────────────────────────────────────
