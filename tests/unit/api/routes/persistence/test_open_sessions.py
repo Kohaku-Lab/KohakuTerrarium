@@ -1,8 +1,10 @@
 """Unit tests for the open-conversation aggregation endpoint."""
 
+import asyncio
 from types import SimpleNamespace
 
-from fastapi import FastAPI
+import pytest
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
@@ -196,4 +198,84 @@ class TestOpenSessions:
                 store.close(update_status=False)
             assert client.get("/sessions/open").json() == []
         finally:
+            close_session_index()
+
+    async def test_end_route_accepts_unsaved_live_row_id(self, tmp_path, monkeypatch):
+        service = LocalTerrariumService(Terrarium())
+        row = {
+            "id": "runtime-only",
+            "conversation_id": None,
+            "runtime_id": "runtime-only",
+            "saved_name": None,
+        }
+        monkeypatch.setattr(
+            open_sessions,
+            "build_open_session_rows",
+            lambda _service, _session_dir: [row],
+        )
+        ended: list[str] = []
+
+        async def _end_session(_service, runtime_id):
+            ended.append(runtime_id)
+
+        monkeypatch.setattr(open_sessions.lifecycle, "end_session", _end_session)
+
+        response = await open_sessions.end_open_conversation(
+            "runtime-only",
+            service=service,
+            session_dir=tmp_path,
+        )
+
+        assert response == {
+            "status": "ended",
+            "conversation_id": "runtime-only",
+        }
+        assert ended == ["runtime-only"]
+
+    async def test_end_rejects_conflicting_inflight_resume(self, tmp_path, monkeypatch):
+        path = tmp_path / "dormant.kohakutr"
+        _saved_store(
+            path,
+            session_id="dormant",
+            conversation_open=True,
+            conversation_id="conversation-dormant",
+        )
+        service = LocalTerrariumService(Terrarium())
+        row = {
+            "conversation_id": "conversation-dormant",
+            "runtime_id": None,
+            "saved_name": "dormant",
+        }
+        monkeypatch.setattr(
+            open_sessions,
+            "build_open_session_rows",
+            lambda _service, _session_dir: [row],
+        )
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def _resume():
+            started.set()
+            await release.wait()
+            return "resumed"
+
+        task = asyncio.create_task(
+            open_sessions.resume_coordinator.run(
+                open_sessions._path_key(path),
+                _resume,
+                intent="resume:_host",
+            )
+        )
+        await started.wait()
+        try:
+            with pytest.raises(HTTPException) as exc:
+                await open_sessions.end_open_conversation(
+                    "conversation-dormant",
+                    service=service,
+                    session_dir=tmp_path,
+                )
+            assert exc.value.status_code == 409
+        finally:
+            release.set()
+            assert await task == "resumed"
             close_session_index()

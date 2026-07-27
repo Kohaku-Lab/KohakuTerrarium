@@ -11,6 +11,9 @@ from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
 from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
 )
+from kohakuterrarium.api.routes.persistence.resume_coordinator import (
+    resume_coordinator,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence.session_index import get_session_index_default
@@ -172,15 +175,32 @@ async def end_open_conversation(
     """End a live or dormant conversation without implicitly resuming it."""
     rows = await asyncio.to_thread(build_open_session_rows, service, session_dir)
     row = next(
-        (item for item in rows if item.get("conversation_id") == conversation_id),
+        (
+            item
+            for item in rows
+            if (item.get("conversation_id") or item.get("id")) == conversation_id
+        ),
         None,
     )
     if row is None:
         raise HTTPException(status_code=404, detail="open conversation not found")
-    runtime_id = row.get("runtime_id")
-    if runtime_id:
-        await lifecycle.end_session(service, str(runtime_id))
-    else:
+
+    saved_name = str(row.get("saved_name") or "")
+    path = (
+        resolve_session_path_in(saved_name, session_dir=session_dir)
+        if saved_name
+        else None
+    )
+    coordination_key = (
+        _path_key(path) if path is not None else f"conversation:{conversation_id}"
+    )
+
+    async def _end() -> dict[str, str]:
+        runtime_id = row.get("runtime_id")
+        if runtime_id:
+            await lifecycle.end_session(service, str(runtime_id))
+            return {"status": "ended", "conversation_id": conversation_id}
+
         saved_name = str(row.get("saved_name") or "")
         path = resolve_session_path_in(saved_name, session_dir=session_dir)
         if path is None:
@@ -194,7 +214,18 @@ async def end_open_conversation(
             store.close(update_status=False)
         index = get_session_index_default(session_dir=session_dir)
         reconcile(index, session_dir=session_dir)
-    return {"status": "ended", "conversation_id": conversation_id}
+        return {"status": "ended", "conversation_id": conversation_id}
+
+    try:
+        return await resume_coordinator.run(
+            coordination_key,
+            _end,
+            intent=f"end:{conversation_id}",
+        )
+    except RuntimeError as exc:
+        if "conflicting resume request" in str(exc):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise
 
 
 @router.get("/open")
