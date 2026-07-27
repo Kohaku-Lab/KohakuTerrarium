@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.terrarium import recipe as recipe_mod
+from kohakuterrarium.terrarium import graph_checkpoint as checkpoint_mod
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
@@ -413,6 +414,32 @@ class TestApplyRecipe:
         finally:
             await engine.shutdown()
 
+    async def test_existing_persisted_graph_attaches_store_to_new_members(
+        self, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        try:
+            added = await engine.add_creature(
+                existing,
+                start=False,
+                session=tmp_path / "existing.kohakutr",
+            )
+            store = engine._session_stores[added.graph_id]
+
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("new")]),
+                graph=added.graph_id,
+                start=False,
+                creature_builder=_fake_builder,
+            )
+
+            assert engine.get_creature("new").agent.session_store is store
+            assert store.meta["agents"] == ["existing", "new"]
+            assert store.meta["config_type"] == "terrarium"
+        finally:
+            await engine.shutdown()
+
 
 class TestRecipeRollback:
     async def test_builder_cannot_return_preexisting_creature_id(self):
@@ -439,11 +466,13 @@ class TestRecipeRollback:
     async def test_start_failure_rolls_back_only_new_members(self):
         engine = Terrarium()
         existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        built = {}
 
         def failing_builder(config, **kwargs):
             creature = _fake_builder(config, **kwargs)
             if config.name == "bad":
                 creature.agent = _StartFailAgent("bad")
+            built[config.name] = creature
             return creature
 
         try:
@@ -464,6 +493,8 @@ class TestRecipeRollback:
             assert graph.channels == {}
             assert existing.send_channels == []
             assert graph.send_edges.get("existing", set()) == set()
+            assert built["good"].agent.trigger_manager._triggers == {}
+            assert built["bad"].agent.trigger_manager._triggers == {}
         finally:
             await engine.shutdown()
 
@@ -511,6 +542,114 @@ class TestRecipeRollback:
         assert engine.list_graphs() == []
         assert engine._session_stores == {}
         assert engine._owned_sessions == set()
+        await engine.shutdown()
+
+    async def test_existing_graph_checkpoint_failure_removes_stale_membership(
+        self, monkeypatch, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        added = await engine.add_creature(existing, start=False, session=False)
+        await engine.add_channel(added.graph_id, "worker")
+
+        real_checkpoint = checkpoint_mod.checkpoint
+
+        async def fail_checkpoint(engine_arg, graph_id):
+            if checkpoint_mod._suppression.get(engine_arg, 0):
+                return await real_checkpoint(engine_arg, graph_id)
+            raise RuntimeError("checkpoint failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            fail_checkpoint,
+        )
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("worker")]),
+                graph=added.graph_id,
+                start=False,
+                session=tmp_path / "run.kohakutr",
+                creature_builder=_fake_builder,
+            )
+
+        graph = engine.get_graph(added.graph_id)
+        assert graph.creature_ids == {"existing"}
+        assert set(engine._creatures) == {"existing"}
+        assert set(graph.channels) == {"worker"}
+        assert engine._session_stores == {}
+        assert engine._owned_sessions == set()
+        assert existing.agent.session_store is None
+        await engine.shutdown()
+
+    async def test_failed_store_replacement_restores_open_previous_store(
+        self, monkeypatch, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        added = await engine.add_creature(
+            existing,
+            start=False,
+            session=tmp_path / "previous.kohakutr",
+        )
+        previous = engine._session_stores[added.graph_id]
+        real_checkpoint = checkpoint_mod.checkpoint
+
+        async def fail_checkpoint(engine_arg, graph_id):
+            if checkpoint_mod._suppression.get(engine_arg, 0):
+                return await real_checkpoint(engine_arg, graph_id)
+            raise RuntimeError("checkpoint failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            fail_checkpoint,
+        )
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("new")]),
+                graph=added.graph_id,
+                start=False,
+                session=tmp_path / "replacement.kohakutr",
+                creature_builder=_fake_builder,
+            )
+
+        assert engine._session_stores[added.graph_id] is previous
+        assert getattr(previous, "_closed", False) is False
+        assert existing.agent.session_store is previous
+        assert set(engine._creatures) == {"existing"}
+        await engine.shutdown()
+
+    async def test_failed_existing_store_reuse_restores_session_meta(
+        self, monkeypatch, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        added = await engine.add_creature(
+            existing,
+            start=False,
+            session=tmp_path / "existing.kohakutr",
+        )
+        store = engine._session_stores[added.graph_id]
+
+        async def fail_checkpoint(*args, **kwargs):
+            raise RuntimeError("checkpoint failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            fail_checkpoint,
+        )
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("new")]),
+                graph=added.graph_id,
+                start=False,
+                creature_builder=_fake_builder,
+            )
+
+        assert engine._session_stores[added.graph_id] is store
+        assert store.meta["agents"] == ["existing"]
+        assert store.meta["config_type"] == "agent"
+        assert existing.agent.session_store is store
+        assert set(engine._creatures) == {"existing"}
         await engine.shutdown()
 
     async def test_cancelled_start_finishes_rollback_and_releases_identity(self):

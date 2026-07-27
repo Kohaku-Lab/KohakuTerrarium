@@ -85,7 +85,7 @@ class TestManifestResume:
                 creature,
                 start=False,
                 graph=kwargs["graph"],
-                identity_reserved=kwargs.get("identity_reserved", False),
+                _identity_reserved=kwargs.get("_identity_reserved", False),
             )
 
         engine.add_creature = _wrapped_add

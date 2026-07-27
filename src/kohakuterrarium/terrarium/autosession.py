@@ -225,13 +225,26 @@ async def attach_for_recipe(
     session: SessionArg = None,
 ) -> SessionStore | None:
     """Autosession for ``apply_recipe`` — one terrarium-typed store."""
+    existing = engine._session_stores.get(graph_id)
     if session is False:
-        return engine._session_stores.get(graph_id)
+        return existing
+
+    names = [
+        engine.get_creature(cid).name
+        for cid in sorted(engine.get_graph(graph_id).creature_ids)
+        if cid in engine._creatures
+    ]
     if isinstance(session, SessionStore):
+        register_agents_in_meta(session, names)
         await engine.attach_session(graph_id, session)
         return session
-    if session is None and engine._session_stores.get(graph_id) is not None:
-        return engine._session_stores[graph_id]
+    if existing is not None and recipe_session_reuses_store(existing, session):
+        register_agents_in_meta(existing, names)
+        # The recipe may have just added graph members. Reattaching the same
+        # store wires persistence into every member without replacing the
+        # existing writer.
+        await engine.attach_session(graph_id, existing)
+        return existing
 
     if isinstance(session, (str, Path)):
         path: "str | Path | None" = session
@@ -242,11 +255,6 @@ async def attach_for_recipe(
             return None
         path = None
 
-    names = [
-        engine.get_creature(cid).name
-        for cid in sorted(engine.get_graph(graph_id).creature_ids)
-        if cid in engine._creatures
-    ]
     store = mint_store(
         engine,
         graph_id,
@@ -258,6 +266,27 @@ async def attach_for_recipe(
     engine._owned_sessions.add(graph_id)
     await engine.attach_session(graph_id, store)
     return store
+
+
+def recipe_session_reuses_store(
+    existing: SessionStore,
+    session: SessionArg,
+) -> bool:
+    """Return whether recipe persistence should retain ``existing``.
+
+    ``None`` and ``True`` mean "use persistence for this graph", so an
+    already-attached store satisfies both. An explicit path naming that same
+    file must also reuse the live writer rather than acquire a second writer
+    lock for it.
+    """
+    if session is None or session is True or session is existing:
+        return True
+    if not isinstance(session, (str, Path)):
+        return False
+    try:
+        return Path(existing.path).resolve() == Path(session).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
 
 
 def close_owned_stores(engine: "Terrarium") -> None:

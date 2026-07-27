@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -85,3 +86,58 @@ async def test_recipe_transaction_rollback_survives_caller_cancellation() -> Non
 
     assert engine.removed == ["new-a"]
     assert engine._creatures == {}
+
+
+@pytest.mark.asyncio
+async def test_existing_graph_rollback_cleans_drive_assignments() -> None:
+    class _Creature:
+        def __init__(self, creature_id: str) -> None:
+            self.creature_id = creature_id
+            self.graph_id = "g"
+            self.name = creature_id
+            self.listen_channels = []
+            self.send_channels = []
+            self.agent = SimpleNamespace(
+                trigger_manager=SimpleNamespace(_triggers={}, _created_at={})
+            )
+
+        async def stop(self) -> None:
+            return None
+
+    class _DriveRuntime:
+        def __init__(self) -> None:
+            self.removed = []
+
+        async def on_creature_removed(
+            self, creature_id, *, graph_id, graph_member_ids
+        ) -> None:
+            self.removed.append((creature_id, graph_id, graph_member_ids))
+
+    graph = SimpleNamespace(
+        creature_ids={"existing", "new"},
+        listen_edges={},
+        send_edges={},
+        channels={},
+    )
+    drive = _DriveRuntime()
+    engine = SimpleNamespace(
+        _creatures={
+            "existing": _Creature("existing"),
+            "new": _Creature("new"),
+        },
+        _topology=SimpleNamespace(
+            graphs={"g": graph},
+            creature_to_graph={"existing": "g", "new": "g"},
+        ),
+        _drive_runtime=drive,
+        _environments={},
+        _session_stores={},
+        _owned_sessions=set(),
+    )
+    transaction = RecipeApplyTransaction(engine)
+    transaction.snapshot_existing_members("g")
+    transaction.record_creature("new")
+
+    await transaction.rollback()
+
+    assert drive.removed == [("new", "g", frozenset({"existing"}))]

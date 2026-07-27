@@ -255,16 +255,43 @@ class Terrarium:
     async def add_creature(
         self,
         config: CreatureBuildInput | Creature,
-        **kwargs: Any,
+        *,
+        graph: GraphRef | None = None,
+        creature_id: str | None = None,
+        llm: Any = None,
+        pwd: str | None = None,
+        start: bool = True,
+        is_privileged: bool = False,
+        parent_creature_id: str | None = None,
+        io: str = "config",
+        strict: bool = True,
+        session: bool | str | Path | SessionStore | None = None,
+        name: str | None = None,
+        tools: list[Any] | None = None,
+        plugins: list[Any] | None = None,
+        _identity_reserved: bool = False,
     ) -> Creature:
         """Build and insert one creature into the engine."""
         return await _engine_creature_add.add_creature(
             self,
             config,
+            graph=graph,
+            creature_id=creature_id,
+            llm=llm,
+            pwd=pwd,
+            start=start,
+            is_privileged=is_privileged,
+            parent_creature_id=parent_creature_id,
+            io=io,
+            strict=strict,
+            session=session,
+            name=name,
+            tools=tools,
+            plugins=plugins,
+            identity_reserved=_identity_reserved,
             builder=build_creature,
             register_basic=force_register_basic_tools,
             register_privileged=force_register_privileged_tools,
-            **kwargs,
         )
 
     async def remove_creature(self, creature: CreatureRef) -> None:
@@ -601,6 +628,15 @@ class Terrarium:
             with _checkpoint.suppress(self):
                 topo = await _recipe.apply_recipe(self, recipe, **kwargs)
                 if topo is not None:
+                    previous_store = self._session_stores.get(topo.graph_id)
+                    if (
+                        previous_store is not None
+                        and session is not False
+                        and not _autosession.recipe_session_reuses_store(
+                            previous_store, session
+                        )
+                    ):
+                        transaction.stage_session_replacement(topo.graph_id)
                     await _autosession.attach_for_recipe(
                         self, topo.graph_id, recipe=recipe, session=session
                     )
@@ -609,6 +645,7 @@ class Terrarium:
         except BaseException:
             await _recipe_transaction.rollback_shielded(transaction)
             raise
+        await transaction.commit()
         return topo
 
     # ------------------------------------------------------------------

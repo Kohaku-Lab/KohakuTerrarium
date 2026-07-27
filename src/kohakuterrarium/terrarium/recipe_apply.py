@@ -207,7 +207,7 @@ async def _add_members(
             graph=graph_id,
             start=False,
             session=False,
-            identity_reserved=True,
+            _identity_reserved=True,
         )
 
     if config.root is None:
@@ -242,7 +242,7 @@ async def _add_members(
         graph=graph_id,
         start=False,
         session=False,
-        identity_reserved=True,
+        _identity_reserved=True,
     )
 
 
