@@ -3,13 +3,22 @@
 Modify past messages, regenerate responses, and replay conversation branches.
 """
 
+from kohakuterrarium.core.agent_raw_history import (
+    raw_target_content,
+    reload_raw_prefix_for_target,
+)
 from kohakuterrarium.core.events import EventType, TriggerEvent
+from kohakuterrarium.core.message_locator import (
+    user_message_indices_for_content,
+    user_message_indices_for_turn,
+)
 from kohakuterrarium.llm.message import normalize_content_parts
 from kohakuterrarium.session.history import (
     replay_conversation,
     resolve_branch_view_strict,
     select_live_event_ids,
 )
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -24,6 +33,7 @@ class AgentMessagesMixin:
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> None:
         """Regenerate an assistant response.
 
@@ -46,6 +56,17 @@ class AgentMessagesMixin:
         the resolved ``turn_index`` so the original branch is preserved
         and addressable via the ``<x/N>`` navigator.
         """
+        if target is not None:
+            await self.edit_and_rerun(
+                message_idx=-1,
+                new_content=raw_target_content(self, target, branch_view=branch_view),
+                turn_index=target.turn_index,
+                branch_view=branch_view,
+                request_id=request_id,
+                target=target,
+            )
+            return
+
         if turn_index is not None:
             # Reusing the selected branch's content gives regeneration the same
             # branching semantics as an edit without changing the message.
@@ -133,6 +154,7 @@ class AgentMessagesMixin:
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> bool:
         """Replace a user message and re-run from there.
 
@@ -147,11 +169,13 @@ class AgentMessagesMixin:
         truncation target resolves correctly even when the user has
         switched to an older subtree in the UI.
         """
-        # Reload conversation under the chosen subtree FIRST so the
-        # in-memory message list reflects what the user sees in the UI.
-        # Without this, edits on a non-latest branch silently fail
-        # because the agent's in-memory state is on a different branch.
-        if branch_view:
+        # Canonical persisted targets reconstruct original context before
+        # mutating in-memory state, deliberately bypassing compact snapshots.
+        if target is not None:
+            reload_raw_prefix_for_target(self, target, branch_view=branch_view)
+            turn_index = target.turn_index
+            user_position = None
+        elif branch_view:
             self._reload_conversation_under_branch_view(branch_view)
 
         conv = self.controller.conversation
@@ -260,7 +284,7 @@ class AgentMessagesMixin:
         if self.session_store:
             try:
                 self.session_store.save_conversation(
-                    self.config.name, conv.to_messages()
+                    self.config.name, conv.to_messages(include_metadata=True)
                 )
             except Exception as e:
                 logger.warning(
@@ -302,14 +326,36 @@ class AgentMessagesMixin:
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
     ) -> int | None:
-        """Resolve an edit target to an in-memory user-message index."""
+        """Resolve by turn metadata or exact unique legacy-content matching."""
         if turn_index is not None:
-            pos = self._user_position_for_turn_index(
+            metadata_matches = user_message_indices_for_turn(msgs, turn_index)
+            if len(metadata_matches) == 1:
+                return metadata_matches[0]
+            if len(metadata_matches) > 1:
+                logger.warning(
+                    "Ambiguous edit target metadata",
+                    turn_index=turn_index,
+                    matches=len(metadata_matches),
+                )
+                return None
+
+            target_content = self._user_message_content_for_turn(
                 turn_index, branch_view=branch_view
             )
-            if pos is not None:
-                user_position = pos
-            elif user_position is None:
+            if target_content is not None:
+                content_matches = user_message_indices_for_content(msgs, target_content)
+                if len(content_matches) == 1:
+                    return content_matches[0]
+                logger.warning(
+                    "Cannot uniquely match edit target content",
+                    turn_index=turn_index,
+                    matches=len(content_matches),
+                )
+                return None
+
+            # A caller may still supply the legacy visible position when no
+            # event metadata exists (for example, a narrow in-memory client).
+            if user_position is None:
                 return None
         if user_position is not None:
             if user_position < 0:
@@ -491,6 +537,30 @@ class AgentMessagesMixin:
         selected = resolve_branch_view_strict(events, branch_view)
 
         messages = replay_conversation(events, branch_view=branch_view)
+        metadata_by_turn = {
+            int(event["turn_index"]): {
+                "event_id": event.get("event_id"),
+                "turn_index": event.get("turn_index"),
+                "branch_id": event.get("branch_id"),
+            }
+            for event in events
+            if event.get("type") == "user_message"
+            and isinstance(event.get("turn_index"), int)
+        }
+        for message in messages:
+            if message.get("role") != "user":
+                continue
+            for metadata in metadata_by_turn.values():
+                if message.get("content") == next(
+                    (
+                        event.get("content")
+                        for event in events
+                        if event.get("event_id") == metadata.get("event_id")
+                    ),
+                    None,
+                ):
+                    message["metadata"] = metadata
+                    break
         conv = self.controller.conversation
         # Keep the system prompt (it carries tool docs and agent
         # personality). ``replay_conversation`` does not emit system
@@ -511,6 +581,8 @@ class AgentMessagesMixin:
                 extra["tool_call_id"] = msg["tool_call_id"]
             if msg.get("name"):
                 extra["name"] = msg["name"]
+            if msg.get("metadata"):
+                extra["metadata"] = msg["metadata"]
             conv.append(role, content, **extra)
 
         # Reseat agent state to the chosen subtree's leaf so the next

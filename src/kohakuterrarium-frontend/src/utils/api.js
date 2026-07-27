@@ -524,13 +524,20 @@ export const agentAPI = {
    * name. Old call sites that pass only an agent id can still call
    * ``regenerate(agentId)`` — the second arg defaults to the first.
    */
-  async regenerate(sessionId, creatureId, { turnIndex, branchView, requestId } = {}) {
+  async regenerate(sessionId, creatureId, { turnIndex, branchView, requestId, locator } = {}) {
     const sid = sessionId || "_"
     const cid = creatureId || sessionId
     const body = {}
     if (turnIndex != null) body.turn_index = turnIndex
     if (branchView && Object.keys(branchView).length) body.branch_view = branchView
     if (requestId) body.request_id = requestId
+    if (locator) {
+      body.target = {
+        event_id: locator.eventId,
+        turn_index: locator.turnIndex,
+        branch_id: locator.branchId,
+      }
+    }
     // This POST blocks through the whole rerun turn — no client timeout.
     const { data } = await api.post(
       `/sessions/${encodeTarget(sid)}/creatures/${encodeTarget(cid)}/regenerate`,
@@ -549,6 +556,13 @@ export const agentAPI = {
       body.branch_view = target.branchView
     }
     if (target.requestId) body.request_id = target.requestId
+    if (target.locator) {
+      body.target = {
+        event_id: target.locator.eventId,
+        turn_index: target.locator.turnIndex,
+        branch_id: target.locator.branchId,
+      }
+    }
     const sid = sessionId || "_"
     const cid = creatureId || sessionId
     // This POST blocks through the whole rerun turn — no client timeout.

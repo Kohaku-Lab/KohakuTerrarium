@@ -178,6 +178,9 @@ ALLOWLIST_600 = {
     # is already delegated to ``bootstrap/*`` factory modules — what
     # remains is the wiring sequence the Agent depends on in order.
     "bootstrap/agent_init.py",
+    # AgentMessagesMixin: branch-aware edit/regenerate resolution plus
+    # persisted raw-history reseating. Extraction follows if it grows further.
+    "core/agent_messages.py",
     # AgentToolsMixin: tool dispatch + handle waiting + promotion +
     # interruption + completion-activity emission + native/text result
     # formatting. One cohesive lifecycle around in-flight tool jobs;

@@ -439,6 +439,7 @@ def replay_conversation(
     events: Iterable[dict[str, Any]],
     *,
     branch_view: dict[int, int] | None = None,
+    include_metadata: bool = False,
 ) -> list[dict[str, Any]]:
     """Rebuild an OpenAI-shape message list from the event log.
 
@@ -509,7 +510,14 @@ def replay_conversation(
         _flush_text()
 
         if etype == "user_message":
-            messages.append({"role": "user", "content": evt.get("content", "")})
+            message = {"role": "user", "content": evt.get("content", "")}
+            if include_metadata:
+                message["metadata"] = {
+                    "event_id": evt.get("event_id"),
+                    "turn_index": evt.get("turn_index"),
+                    "branch_id": evt.get("branch_id"),
+                }
+            messages.append(message)
         elif etype == "assistant_tool_calls":
             tool_calls = evt.get("tool_calls") or []
             if (

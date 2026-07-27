@@ -34,6 +34,7 @@ from collections.abc import AsyncIterator
 from typing import Any, Protocol, runtime_checkable
 
 from kohakuterrarium.core.channel import ChannelMessage as _ChannelMessage
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.drive.service import DriveServiceMixin
 from kohakuterrarium.terrarium.drive.service_protocol import DriveServiceProtocol
 from kohakuterrarium.terrarium.service_dto import (
@@ -85,7 +86,7 @@ from kohakuterrarium.terrarium.topology import (
 def _completed_branch_result(
     agent: Any, request_id: str | None
 ) -> BranchMutationResult:
-    parent_path = getattr(agent, "_branch_parent_path", ()) or ()
+    parent_path = getattr(agent, "_parent_branch_path", ()) or ()
     return {
         "status": "completed",
         "request_id": request_id or uuid.uuid4().hex,
@@ -292,6 +293,7 @@ class TerrariumService(DriveServiceProtocol, Protocol):
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         """Regenerate an assistant response (whole tail by default).
 
@@ -312,6 +314,7 @@ class TerrariumService(DriveServiceProtocol, Protocol):
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         """Edit the user message at ``msg_idx`` and re-run from there."""
         ...
@@ -719,12 +722,14 @@ class LocalTerrariumService(DriveServiceMixin):
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         agent = self._agent(creature_id)
         await agent.regenerate_last_response(
             turn_index=turn_index,
             branch_view=branch_view,
             request_id=request_id,
+            target=target,
         )
         return _completed_branch_result(agent, request_id)
 
@@ -738,6 +743,7 @@ class LocalTerrariumService(DriveServiceMixin):
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         agent = self._agent(creature_id)
         ok = await agent.edit_and_rerun(
@@ -747,6 +753,7 @@ class LocalTerrariumService(DriveServiceMixin):
             user_position=user_position,
             branch_view=branch_view,
             request_id=request_id,
+            target=target,
         )
         if not ok:
             raise ValueError(f"message {msg_idx} cannot be edited")

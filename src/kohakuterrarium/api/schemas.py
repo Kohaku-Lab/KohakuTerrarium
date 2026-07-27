@@ -125,6 +125,14 @@ class AgentChat(BaseModel):
     content: list[ContentPartPayload] | None = None
 
 
+class PersistedMessageLocator(BaseModel):
+    """Canonical identity of one persisted turn-root user message."""
+
+    event_id: int
+    turn_index: int
+    branch_id: int
+
+
 class RegenerateRequest(BaseModel):
     """Select the turn and branch view used to regenerate a response.
 
@@ -136,6 +144,7 @@ class RegenerateRequest(BaseModel):
     turn_index: int | None = None
     branch_view: dict[int, int] | None = None
     request_id: str | None = None
+    target: PersistedMessageLocator | None = None
 
 
 class BranchMutationResponse(BaseModel):
@@ -160,6 +169,7 @@ class MessageEdit(BaseModel):
     # Restore the selected subtree before resolving edits on a non-latest branch.
     branch_view: dict[int, int] | None = None
     request_id: str | None = None
+    target: PersistedMessageLocator | None = None
 
 
 class SlashCommand(BaseModel):

@@ -18,6 +18,10 @@ tags:
 概念入门：[记忆与压缩](../concepts/modules/memory-and-compaction.md)、
 [会话与环境](../concepts/modules/session-and-environment.md)。
 
+### 压缩后的编辑与重新生成
+
+压缩会改变实时提示并写入快速恢复快照，但不会删除追加式事件日志。Studio 使用持久化的 `event_id`、`turn_index` 和 `branch_id` 定位可编辑用户消息。保存并重新运行或重新生成时，新分支从所选消息之前的原始事件前缀重建，并忽略压缩摘要和快照；旧分支及其后续事件仍可切换和恢复。定位缺失、歧义、指向回合中注入输入或与所选分支冲突时，操作会在不修改历史的情况下失败。
+
 ## `.kohakutr` 文件
 
 `.kohakutr` 是一个 SQLite 数据库（经 KohakuVault），有九张表：

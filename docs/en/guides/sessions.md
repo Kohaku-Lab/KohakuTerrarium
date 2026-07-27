@@ -33,6 +33,10 @@ Concept primer: [memory and compaction](../concepts/modules/memory-and-compactio
 
 The format is append-only for event data and versioned through KohakuVault's auto-pack. Binary artifacts can also live in a sibling `<session>.artifacts/` directory, so when a run generated images or other binary outputs, archive the `.kohakutr` file and its artifacts directory together.
 
+### Edit and regenerate after compaction
+
+Compaction changes the live prompt and writes a fast-resume snapshot, but it does not erase the append-only event log. Studio identifies editable user messages with the persisted `event_id`, `turn_index`, and `branch_id`. Save & Rerun and Regenerate rebuild the new branch from the selected message's original event prefix, ignoring compact summaries and snapshots. The previous branch and every later event remain available for branch navigation and resume. If the locator is missing, ambiguous, points to injected mid-turn input, or conflicts with the selected branch, the operation fails without changing history.
+
 ## Where sessions live
 
 ```
