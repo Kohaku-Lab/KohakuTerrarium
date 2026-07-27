@@ -7,7 +7,7 @@ shape, which our fake satisfies.
 
 from pathlib import Path
 
-
+import pytest
 from kohakuterrarium.terrarium import recipe as recipe_mod
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
@@ -60,6 +60,42 @@ class TestResolveRecipe:
 
 
 class TestApplyRecipe:
+    async def test_duplicate_names_fail_before_creating_a_partial_graph(self):
+        engine = Terrarium()
+        try:
+            recipe = _recipe(
+                creatures=[_creature_cfg("worker"), _creature_cfg("worker")]
+            )
+            with pytest.raises(ValueError, match="duplicate"):
+                await recipe_mod.apply_recipe(
+                    engine, recipe, creature_builder=_fake_builder
+                )
+            assert engine.list_graphs() == []
+            assert engine.list_creatures() == []
+        finally:
+            await engine.shutdown()
+
+    async def test_existing_name_conflict_does_not_declare_recipe_channels(self):
+        engine = Terrarium()
+        try:
+            existing = _fake_builder(_creature_cfg("worker"), creature_id="existing")
+            await engine.add_creature(existing, start=False, session=False)
+            graph = engine.get_graph(existing.graph_id)
+            with pytest.raises(ValueError, match="already contains creature name"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(
+                        creatures=[_creature_cfg("worker")],
+                        channels=[ChannelConfig(name="should-not-exist")],
+                    ),
+                    graph=graph.graph_id,
+                    creature_builder=_fake_builder,
+                )
+            assert graph.creature_ids == {"existing"}
+            assert graph.channels == {}
+        finally:
+            await engine.shutdown()
+
     async def test_empty_recipe(self):
         engine = Terrarium()
         try:

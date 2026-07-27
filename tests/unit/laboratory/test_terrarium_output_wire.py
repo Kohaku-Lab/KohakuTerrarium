@@ -1,5 +1,6 @@
 """Graph-bound Laboratory output-wire routing tests."""
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -25,6 +26,7 @@ class _Messenger:
 
 class _Agent:
     def __init__(self):
+        self._running = True
         self._process_event = AsyncMock()
 
 
@@ -220,7 +222,62 @@ class TestHostRelay:
 
 
 class TestWorkerDelivery:
-    async def test_exact_id_same_graph_is_awaited_before_success(self):
+    async def test_delivery_acknowledges_enqueue_without_waiting_for_full_turn(self):
+        messenger = _Messenger("worker-b")
+        target = _Creature("target-id", "worker", "graph-a")
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def blocking_process(event):
+            entered.set()
+            await release.wait()
+
+        target.agent._process_event = blocking_process
+        adapter = TerrariumOutputWireAdapter(
+            SimpleNamespace(_creatures={target.creature_id: target}), messenger
+        )
+
+        result = await asyncio.wait_for(
+            adapter._dispatch(
+                _msg(
+                    "_host",
+                    _body(
+                        peer="_host",
+                        hop=1,
+                        target_graph_id="graph-a",
+                        target_creature_id="target-id",
+                    ),
+                )
+            ),
+            timeout=0.2,
+        )
+        assert result == {"delivered": True}
+        await asyncio.wait_for(entered.wait(), timeout=0.2)
+        release.set()
+        await asyncio.sleep(0)
+
+    async def test_stopped_target_is_not_reported_as_delivered(self):
+        messenger = _Messenger("worker-b")
+        target = _Creature("target-id", "worker", "graph-a")
+        target.agent._running = False
+        adapter = TerrariumOutputWireAdapter(
+            SimpleNamespace(_creatures={target.creature_id: target}), messenger
+        )
+        result = await adapter._dispatch(
+            _msg(
+                "_host",
+                _body(
+                    peer="_host",
+                    hop=1,
+                    target_graph_id="graph-a",
+                    target_creature_id="target-id",
+                ),
+            )
+        )
+        assert result == {"delivered": False, "error": "target not running"}
+        target.agent._process_event.assert_not_awaited()
+
+    async def test_exact_id_same_graph_is_queued_before_success(self):
         messenger = _Messenger("worker-b")
         target = _Creature("target-id", "worker", "graph-a")
         foreign = _Creature("foreign-id", "worker", "graph-b")
@@ -243,6 +300,7 @@ class TestWorkerDelivery:
             )
         )
         assert result == {"delivered": True}
+        await asyncio.sleep(0)
         target.agent._process_event.assert_awaited_once()
         foreign.agent._process_event.assert_not_awaited()
 

@@ -7,6 +7,7 @@ give the host's coordination engine a fake ``_broadcast_adapter``, and
 drive the cross-node branches.
 """
 
+import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -63,6 +64,31 @@ class _FakeBroadcast:
 
 
 class TestCrossNodeConnect:
+    async def test_concurrent_connects_cannot_merge_duplicate_names_transitively(self):
+        svc = _make_service(
+            remote_specs={
+                "w1": [_info("alice", name="duplicate", graph_id="g-w1")],
+                "w2": [_info("bridge", name="bridge", graph_id="g-w2")],
+                "w3": [_info("carol", name="duplicate", graph_id="g-w3")],
+            }
+        )
+        svc._home.update({"alice": "w1", "bridge": "w2", "carol": "w3"})
+
+        async def noop_wire(*args, **kwargs):
+            return None
+
+        for remote in svc._remotes.values():
+            remote.wire_creature = noop_wire
+
+        results = await asyncio.gather(
+            svc.connect("alice", "bridge", channel="left"),
+            svc.connect("bridge", "carol", channel="right"),
+            return_exceptions=True,
+        )
+
+        assert sum(isinstance(item, GraphNameConflictError) for item in results) == 1
+        assert len(svc._cluster_links) == 1
+
     async def test_connect_rejects_non_endpoint_duplicate_alias(self, cross_svc):
         cross_svc._remotes["w1"]._creatures.append(
             _info("left-worker", name="worker", graph_id="g-w1")
@@ -178,6 +204,22 @@ class TestCrossNodeConnect:
 
 
 class TestCrossNodeDisconnect:
+    async def test_disconnect_keeps_cluster_link_until_last_channel_is_removed(
+        self, cross_svc
+    ):
+        cross_svc._coordination_engine = SimpleNamespace(
+            _broadcast_adapter=_FakeBroadcast()
+        )
+        await cross_svc.connect("alice", "bob", channel="chat")
+        await cross_svc.connect("alice", "bob", channel="review")
+        link = frozenset({("w1", "g-w1"), ("w2", "g-w2")})
+
+        await cross_svc.disconnect("alice", "bob", channel="chat")
+        assert link in cross_svc._cluster_links
+
+        await cross_svc.disconnect("alice", "bob", channel="review")
+        assert link not in cross_svc._cluster_links
+
     async def test_disconnect_explicit_channel(self, cross_svc):
         cross_svc._coordination_engine = SimpleNamespace(
             _broadcast_adapter=_FakeBroadcast()

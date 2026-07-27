@@ -1815,7 +1815,7 @@ terrarium:
             f"/api/sessions/topology/{session_id}/disconnect",
             json={"sender": alice_id, "receiver": "ghost-creature"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
         # Channel-info read on an unknown session → 404; channel list
         # on an unknown session → 404.
         resp = client.get(f"/api/sessions/topology/no-such-session/channels/team")

@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.terrarium.graph_identity import (
     GraphNameConflictError,
+    creature_name_aliases,
     ensure_graph_name_available,
 )
 
@@ -25,12 +26,13 @@ def guard_add_name(
     """Reject a duplicate role name when adding into an existing graph."""
     if graph_id is None:
         return
-    ensure_graph_name_available(
-        engine._topology,
-        engine._creatures,
-        graph_id=graph_id,
-        name=creature.name,
-    )
+    for name in sorted(creature_name_aliases(creature)):
+        ensure_graph_name_available(
+            engine._topology,
+            engine._creatures,
+            graph_id=graph_id,
+            name=name,
+        )
 
 
 def _graph_aliases(engine: "Terrarium", graph_id: str) -> dict[str, set[str]]:
@@ -42,10 +44,8 @@ def _graph_aliases(engine: "Terrarium", graph_id: str) -> dict[str, set[str]]:
         creature = engine._creatures.get(creature_id)
         if creature is None:
             continue
-        config = getattr(getattr(creature, "agent", None), "config", None)
-        for alias in {creature.name, getattr(config, "name", None)}:
-            if alias:
-                aliases.setdefault(alias, set()).add(creature_id)
+        for alias in creature_name_aliases(creature):
+            aliases.setdefault(alias, set()).add(creature_id)
     return aliases
 
 

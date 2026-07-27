@@ -147,14 +147,36 @@ class TerrariumOutputWiringResolver:
 
     def _resolve_graph_root_agent(self, source: str | None) -> "Agent | None":
         source_handle = self._creatures.get(source or "")
-        if source_handle is None and self._engine is None:
-            source_handle = self._resolve_handle(source or "", source=source or "")
-        source_graph = getattr(source_handle, "graph_id", None)
+        if self._engine is not None:
+            if (
+                source_handle is None
+                or source_handle.creature_id != source
+                or (
+                    source_graph := self._engine._topology.creature_to_graph.get(source)
+                )
+                is None
+            ):
+                return None
+            graph = self._engine._topology.graphs.get(source_graph)
+            if graph is None or source not in graph.creature_ids:
+                return None
+            candidate_ids = graph.creature_ids
+        else:
+            if source_handle is None:
+                source_handle = self._resolve_handle(source or "", source=source or "")
+            source_graph = getattr(source_handle, "graph_id", None)
+            candidate_ids = self._creatures
         candidates = [
             c
-            for c in self._creatures.values()
+            for creature_id in candidate_ids
+            if (c := self._creatures.get(creature_id)) is not None
+            if c.creature_id == creature_id
             if getattr(c, "is_privileged", False)
-            and (source_graph is None or getattr(c, "graph_id", None) == source_graph)
+            and (
+                self._engine is not None
+                or source_graph is None
+                or getattr(c, "graph_id", None) == source_graph
+            )
         ]
         if not candidates and self._root_agent is not None:
             return self._root_agent
@@ -226,7 +248,7 @@ class TerrariumOutputWiringResolver:
                             turn_index=turn_index,
                             source_event_type=source_event_type,
                         )
-                        asyncio.create_task(
+                        task = asyncio.create_task(
                             forwarder.forward_event(
                                 target_name=entry.to,
                                 event={
@@ -234,6 +256,7 @@ class TerrariumOutputWiringResolver:
                                     "content": delivered_content,
                                     "context": {
                                         "source": source,
+                                        "target": entry.to,
                                         "with_content": bool(entry.with_content),
                                         "source_event_type": source_event_type,
                                         "turn_index": turn_index,
@@ -244,6 +267,9 @@ class TerrariumOutputWiringResolver:
                                 source_graph_id=source_graph_id,
                             ),
                             name=f"wiring_remote_{source}_to_{entry.to}_{turn_index}",
+                        )
+                        task.add_done_callback(
+                            lambda t, tgt=entry.to: _log_task_error(t, source, tgt)
                         )
                         continue
                 continue

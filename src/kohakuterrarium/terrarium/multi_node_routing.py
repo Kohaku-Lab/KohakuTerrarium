@@ -71,6 +71,7 @@ def purge_node_caches(service: "MultiNodeTerrariumService", node_id: str) -> Non
         if any(endpoint[0] == node_id for endpoint in link)
     ]:
         service._cluster_links.discard(link)
+        getattr(service, "_cluster_link_refs", {}).pop(link, None)
     # Drop cross-sub bookkeeping referencing the dead node as either
     # ``my_node`` or ``peer_node``.
     for key in [k for k in service._cross_subs if k[0] == node_id or k[1] == node_id]:

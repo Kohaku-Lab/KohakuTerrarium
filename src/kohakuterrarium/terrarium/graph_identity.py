@@ -154,7 +154,7 @@ def ensure_graph_name_available(
         for creature_id in member_ids
         if creature_id != exclude_id
         and (creature := _registered_creature(creatures, creature_id)) is not None
-        and name in _name_aliases(creature)
+        and name in creature_name_aliases(creature)
     )
     if conflicts:
         raise GraphNameConflictError(
@@ -204,7 +204,7 @@ def resolve_local_graph_target(
         creature_id
         for creature_id in sorted(graph.creature_ids)
         if (creature := _registered_creature(creatures, creature_id)) is not None
-        and target in _name_aliases(creature)
+        and target in creature_name_aliases(creature)
     )
     if not candidate_ids:
         raise TargetNotFoundError(caller_id, target, graph_id)
@@ -227,7 +227,8 @@ def _registered_creature(
     return creature
 
 
-def _name_aliases(creature: CreatureIdentity) -> set[str]:
+def creature_name_aliases(creature: CreatureIdentity) -> set[str]:
+    """Return every display/config name accepted by graph-local resolution."""
     aliases = {creature.name} if creature.name else set()
     config = getattr(creature, "config", None)
     _add_name(aliases, config)
@@ -255,6 +256,7 @@ __all__ = [
     "ResolvedGraphTarget",
     "TargetNotFoundError",
     "UnknownCallerError",
+    "creature_name_aliases",
     "ensure_graph_name_available",
     "resolve_local_graph_target",
 ]

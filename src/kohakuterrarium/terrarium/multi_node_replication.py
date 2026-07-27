@@ -71,6 +71,41 @@ def drop_cross_sub(
         service._cross_subs[key] -= 1
 
 
+def record_cluster_link(
+    service: "MultiNodeTerrariumService",
+    link: frozenset[tuple[str, str]],
+) -> None:
+    """Record one independently removable bridge between two engine graphs."""
+    refs = getattr(service, "_cluster_link_refs", None)
+    if refs is None:
+        refs = {}
+        service._cluster_link_refs = refs
+    current = refs.get(link)
+    if current is None:
+        current = 1 if link in service._cluster_links else 0
+    refs[link] = current + 1
+    service._cluster_links.add(link)
+
+
+def drop_cluster_link(
+    service: "MultiNodeTerrariumService",
+    link: frozenset[tuple[str, str]],
+) -> None:
+    """Remove one bridge while retaining the logical link for remaining channels."""
+    refs = getattr(service, "_cluster_link_refs", None)
+    if refs is None:
+        refs = {}
+        service._cluster_link_refs = refs
+    current = refs.get(link)
+    if current is None:
+        current = 1 if link in service._cluster_links else 0
+    if current <= 1:
+        refs.pop(link, None)
+        service._cluster_links.discard(link)
+        return
+    refs[link] = current - 1
+
+
 async def _graph_aliases(remote: Any, graph_id: str) -> dict[str, set[str]]:
     aliases: dict[str, set[str]] = {}
     for info in await remote.list_creatures():
@@ -214,13 +249,14 @@ async def cross_node_connect(
     # Cluster-graph linkage: connect() over a cross-site bridge also
     # makes sender's graph and receiver's graph one logical cluster.
     # Record it for ``runtime_graph_snapshot``.
-    service._cluster_links.add(
+    record_cluster_link(
+        service,
         frozenset(
             {
                 (sender_home, info_send.graph_id),
                 (receiver_home, info_recv.graph_id),
             }
-        )
+        ),
     )
     return ConnectionResult(
         channel=chan_name,
@@ -282,7 +318,7 @@ async def cross_node_disconnect(
             (receiver_home, info_recv.graph_id),
         }
     )
-    service._cluster_links.discard(link_key)
+    drop_cluster_link(service, link_key)
     return DisconnectionResult(
         channels=[chan_name],
         delta_kind="cross_node",
@@ -353,8 +389,9 @@ async def ensure_channel_replicated(
     # for cross-node connection" UX invariant.  Stored as a frozenset
     # so direction doesn't matter and the same pair doesn't appear
     # twice.
-    service._cluster_links.add(
-        frozenset({(target_node, target_graph), (source_node, source_graph)})
+    record_cluster_link(
+        service,
+        frozenset({(target_node, target_graph), (source_node, source_graph)}),
     )
     bcast = await local_broadcast_adapter(service)
     if bcast is None:
@@ -424,9 +461,11 @@ async def find_channel_elsewhere(
 __all__ = [
     "cross_node_connect",
     "cross_node_disconnect",
+    "drop_cluster_link",
     "drop_cross_sub",
     "ensure_channel_replicated",
     "find_channel_elsewhere",
     "local_broadcast_adapter",
+    "record_cluster_link",
     "record_cross_sub",
 ]

@@ -62,7 +62,15 @@ async def resolve_creature_id(
         if info.creature_id == name_or_id:
             return info.creature_id
     # Name lookup remains within the requested session or cluster and must be unique.
-    matches = [info.creature_id for info in creatures if info.name == name_or_id]
+    matches = [
+        info.creature_id
+        for info in creatures
+        if info.name == name_or_id
+        or (
+            bool(config_name := getattr(info, "config_name", ""))
+            and config_name == name_or_id
+        )
+    ]
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
@@ -73,4 +81,4 @@ async def resolve_creature_id(
     raise HTTPException(404, f"creature {name_or_id!r} not found")
 
 
-__all__ = ["resolve_creature_id"]
+__all__ = ["resolve_connect_target_id", "resolve_creature_id"]

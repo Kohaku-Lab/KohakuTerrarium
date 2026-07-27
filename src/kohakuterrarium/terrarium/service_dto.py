@@ -64,6 +64,7 @@ class CreatureInfo:
     # Empty values preserve deferred model resolution.
     model: str = ""
     llm_name: str = ""
+    config_name: str = ""
 
 
 def _channel_message_to_dict(m: Any) -> dict[str, Any]:
@@ -105,6 +106,8 @@ def creature_to_info(creature: CreatureLike) -> CreatureInfo:
         except Exception:
             pass
     llm_name = llm_name or str(model or "")
+    config = getattr(creature, "config", None) or getattr(agent, "config", None)
+    config_name = getattr(config, "name", "") if config is not None else ""
     return CreatureInfo(
         creature_id=creature.creature_id,
         name=creature.name,
@@ -116,6 +119,7 @@ def creature_to_info(creature: CreatureLike) -> CreatureInfo:
         send_channels=tuple(creature.send_channels),
         model=str(model or ""),
         llm_name=str(llm_name or ""),
+        config_name=str(config_name or ""),
     )
 
 

@@ -6,6 +6,7 @@ session store is involved.
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -78,6 +79,20 @@ class TestAddRemoveCreature:
             assert t.get_graph(graph_id).creature_ids == {"alice"}
         finally:
             t._session_stores.clear()
+            await t.shutdown()
+            await other.shutdown()
+
+    async def test_add_rejects_duplicate_config_alias_before_mutation(self):
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        other = await TestTerrariumBuilder().with_creature("other").build()
+        candidate = other.get_creature("other")
+        candidate.config = SimpleNamespace(name="alice")
+        graph_id = t.get_creature("alice").graph_id
+        try:
+            with pytest.raises(ValueError, match="already contains"):
+                await t.add_creature(candidate, graph=graph_id, start=False)
+            assert t.get_graph(graph_id).creature_ids == {"alice"}
+        finally:
             await t.shutdown()
             await other.shutdown()
 
@@ -245,6 +260,23 @@ class TestConnectDisconnect:
             with pytest.raises(GraphNameConflictError):
                 await t.connect("worker", other.creature_id)
             assert t.get_creature("worker").graph_id != other.graph_id
+        finally:
+            await t.shutdown()
+
+    async def test_connect_rejects_duplicate_creature_config_alias(self):
+        t = await (
+            TestTerrariumBuilder()
+            .with_creature("left")
+            .with_creature("right")
+            .with_separate_graphs()
+            .build()
+        )
+        right = t.get_creature("right")
+        right.config = SimpleNamespace(name="left")
+        try:
+            with pytest.raises(ValueError, match="already contains"):
+                await t.connect("left", "right")
+            assert t.get_creature("left").graph_id != right.graph_id
         finally:
             await t.shutdown()
 

@@ -7,6 +7,7 @@ tests don't reach.
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 
@@ -319,6 +320,25 @@ class TestConnectMerge:
             assert {c.creature_id: c.graph_id for c in t.list_creatures()} == before
         finally:
             t._session_stores.clear()
+            await t.shutdown()
+
+    async def test_config_alias_conflict_fails_before_merge(self):
+        t = await (
+            TestTerrariumBuilder()
+            .with_creature("alice")
+            .with_creature("bob")
+            .with_separate_graphs()
+            .build()
+        )
+        try:
+            t.get_creature("bob").config = SimpleNamespace(name="alice")
+            before = {c.creature_id: c.graph_id for c in t.list_creatures()}
+
+            with pytest.raises(ValueError, match="already contains"):
+                await channels_mod.ensure_same_graph(t, "alice", "bob")
+
+            assert {c.creature_id: c.graph_id for c in t.list_creatures()} == before
+        finally:
             await t.shutdown()
 
     async def test_ensure_same_graph_noop_when_same(self):

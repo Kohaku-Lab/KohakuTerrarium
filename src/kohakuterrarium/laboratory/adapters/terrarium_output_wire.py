@@ -5,6 +5,7 @@ to the host, whose cluster-wide resolver forwards the event to the target's
 home node. Relayed messages are marked to prevent another forwarding hop.
 """
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
@@ -206,8 +207,14 @@ class TerrariumOutputWireAdapter:
             return {"delivered": False, "error": "target not found locally"}
         if local_graph_id != target_graph_id:
             return {"delivered": False, "error": "target graph mismatch"}
+        if not getattr(target_agent, "_running", False):
+            return {"delivered": False, "error": "target not running"}
         event = _event_from_dict(dict(body.get("event", {})))
-        await target_agent._process_event(event)
+        task = asyncio.create_task(
+            target_agent._process_event(event),
+            name=f"output-wire-{source_id}-to-{target_creature_id}",
+        )
+        task.add_done_callback(_log_delivery_error)
         return {"delivered": True}
 
     def _resolve_local_target(
@@ -227,3 +234,13 @@ def _event_from_dict(data: dict[str, Any]) -> TriggerEvent:
         context=dict(data.get("context", data.get("metadata", {}))),
         prompt_override=data.get("prompt_override"),
     )
+
+
+def _log_delivery_error(task: "asyncio.Task[Any]") -> None:
+    """Consume background receiver errors without leaking task warnings."""
+    if task.cancelled():
+        return
+    try:
+        task.result()
+    except Exception:
+        logger.exception("output-wire receiver event failed")

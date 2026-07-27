@@ -489,6 +489,12 @@ async def ensure_same_graph(
     the surviving graph id (unchanged if both creatures were already
     in the same graph).
     """
+    # Keep this lower-level merge path under the same identity invariant as
+    # Terrarium.connect(). It is used without creating a channel.
+    from kohakuterrarium.terrarium.graph_identity_engine import (
+        resolve_and_guard_connect,
+    )
+
     sid = engine._resolve_creature_id(a)
     rid = engine._resolve_creature_id(b)
     a_gid = engine._topology.creature_to_graph[sid]
@@ -509,6 +515,7 @@ async def ensure_same_graph(
                 "Cannot merge persisted graphs with duplicate creature names: "
                 + ", ".join(duplicates)
             )
+    resolve_and_guard_connect(engine, a, b)
     delta = _topo._merge_graphs(engine._topology, a_gid, b_gid)
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]

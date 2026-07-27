@@ -137,6 +137,10 @@ class MultiNodeTerrariumService(
         # ordinary single-host graph has no entries here and renders
         # as itself.
         self._cluster_links: set[frozenset[tuple[str, str]]] = set()
+        # Multiple channels can bridge the same pair of worker graphs. Keep the
+        # cluster folded until the final bridge is removed.
+        self._cluster_link_refs: dict[frozenset[tuple[str, str]], int] = {}
+        self._cluster_mutation_lock = asyncio.Lock()
         # Studio-tier session metadata lookup, injected at boot — used
         # to enrich ``runtime_graph_snapshot`` graphs with name / kind.
         self._runtime_graph_meta_lookup = None
@@ -452,24 +456,25 @@ class MultiNodeTerrariumService(
         *,
         channel: str | None = None,
     ) -> ConnectionResult:
-        sender_home = await self._resolve_home(sender_id)
-        receiver_home = await self._resolve_home(receiver_id)
-        if sender_home is None:
-            raise KeyError(sender_id)
-        if receiver_home is None:
-            raise KeyError(receiver_id)
-        if sender_home == receiver_home:
-            return await self.service_for(sender_home).connect(
-                sender_id, receiver_id, channel=channel
+        async with self._cluster_lock():
+            sender_home = await self._resolve_home(sender_id)
+            receiver_home = await self._resolve_home(receiver_id)
+            if sender_home is None:
+                raise KeyError(sender_id)
+            if receiver_home is None:
+                raise KeyError(receiver_id)
+            if sender_home == receiver_home:
+                return await self.service_for(sender_home).connect(
+                    sender_id, receiver_id, channel=channel
+                )
+            return await cross_node_connect(
+                self,
+                sender_id,
+                receiver_id,
+                sender_home,
+                receiver_home,
+                channel,
             )
-        return await cross_node_connect(
-            self,
-            sender_id,
-            receiver_id,
-            sender_home,
-            receiver_home,
-            channel,
-        )
 
     async def disconnect(
         self,
@@ -478,24 +483,33 @@ class MultiNodeTerrariumService(
         *,
         channel: str | None = None,
     ) -> DisconnectionResult:
-        sender_home = await self._resolve_home(sender_id)
-        receiver_home = await self._resolve_home(receiver_id)
-        if sender_home is None:
-            raise KeyError(sender_id)
-        if receiver_home is None:
-            raise KeyError(receiver_id)
-        if sender_home == receiver_home:
-            return await self.service_for(sender_home).disconnect(
-                sender_id, receiver_id, channel=channel
+        async with self._cluster_lock():
+            sender_home = await self._resolve_home(sender_id)
+            receiver_home = await self._resolve_home(receiver_id)
+            if sender_home is None:
+                raise KeyError(sender_id)
+            if receiver_home is None:
+                raise KeyError(receiver_id)
+            if sender_home == receiver_home:
+                return await self.service_for(sender_home).disconnect(
+                    sender_id, receiver_id, channel=channel
+                )
+            return await cross_node_disconnect(
+                self,
+                sender_id,
+                receiver_id,
+                sender_home,
+                receiver_home,
+                channel,
             )
-        return await cross_node_disconnect(
-            self,
-            sender_id,
-            receiver_id,
-            sender_home,
-            receiver_home,
-            channel,
-        )
+
+    def _cluster_lock(self) -> asyncio.Lock:
+        """Return the lock, including for lightweight test/service doubles."""
+        lock = getattr(self, "_cluster_mutation_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._cluster_mutation_lock = lock
+        return lock
 
     async def _local_broadcast_adapter(self):
         """Thin delegator to :func:`multi_node_replication.local_broadcast_adapter`."""

@@ -174,6 +174,12 @@ class TestToolResultInspection:
 
 
 class TestToolContextPathResolution:
+    def test_positional_memory_path_remains_backward_compatible(self, tmp_path):
+        memory_path = tmp_path / "memory.md"
+        ctx = ToolContext("a", None, tmp_path, memory_path)
+        assert ctx.memory_path == memory_path
+        assert ctx.creature_id == ""
+
     def test_relative_path_anchored_to_working_dir(self, tmp_path):
         ctx = ToolContext(agent_name="a", session=None, working_dir=tmp_path)
         resolved = ctx.resolve_path("sub/file.txt")

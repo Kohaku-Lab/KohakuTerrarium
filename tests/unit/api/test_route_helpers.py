@@ -22,7 +22,9 @@ class _FakeService:
         return self._creatures
 
 
-def _info(creature_id="cid", name="alice", graph_id="g") -> CreatureInfo:
+def _info(
+    creature_id="cid", name="alice", graph_id="g", config_name=""
+) -> CreatureInfo:
     return CreatureInfo(
         creature_id=creature_id,
         name=name,
@@ -32,6 +34,7 @@ def _info(creature_id="cid", name="alice", graph_id="g") -> CreatureInfo:
         parent_creature_id=None,
         listen_channels=(),
         send_channels=(),
+        config_name=config_name,
     )
 
 
@@ -62,6 +65,11 @@ class TestResolveCreatureId:
     async def test_name_fallback(self):
         svc = _FakeService([_info("cid-1", "alice")])
         out = await resolve_creature_id(svc, "alice")
+        assert out == "cid-1"
+
+    async def test_config_name_fallback(self):
+        svc = _FakeService([_info("cid-1", "display", config_name="configured")])
+        out = await resolve_creature_id(svc, "configured")
         assert out == "cid-1"
 
     async def test_id_wins_over_name(self):
