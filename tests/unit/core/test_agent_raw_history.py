@@ -3,7 +3,7 @@
 from types import SimpleNamespace
 
 from kohakuterrarium.core.agent_raw_history import reload_raw_prefix_for_target
-from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation import Conversation, ConversationConfig
 from kohakuterrarium.core.message_locator import user_message_indices_for_turn
 from kohakuterrarium.session.raw_history import UserMessageSelector
 
@@ -32,8 +32,8 @@ def _event(event_id, event_type, *, turn=None, content="", path=None):
     return event
 
 
-def _agent(events):
-    conversation = Conversation()
+def _agent(events, *, conversation_config=None):
+    conversation = Conversation(conversation_config)
     conversation.append("system", "current runtime prompt")
     conversation.append("user", "compacted context that must be discarded")
     return SimpleNamespace(
@@ -101,3 +101,22 @@ def test_reload_does_not_duplicate_a_persisted_system_prompt():
         ("system", "persisted prompt"),
         ("user", "target"),
     ]
+
+
+def test_reload_preserves_the_runtime_conversation_config():
+    events = [
+        _event(1, "user_message", turn=1, content="target"),
+    ]
+    config = ConversationConfig(
+        max_messages=17,
+        keep_system=False,
+        sanitize_orphan_tool_calls=False,
+    )
+    agent = _agent(events, conversation_config=config)
+
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=1, turn_index=1, branch_id=1),
+    )
+
+    assert agent.controller.conversation.config is config

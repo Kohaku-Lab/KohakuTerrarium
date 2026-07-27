@@ -1,10 +1,14 @@
 """Unit tests for :mod:`kohakuterrarium.core.agent_messages`."""
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.session.history import InvalidBranchViewError
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.session.store import SessionStore
 
 # ── fake agent harness (mirrors production surface) ──────────────
@@ -373,6 +377,90 @@ class TestEditAndRerun:
             user_position=0,  # first user message
         )
         assert ok is True
+
+    async def test_concurrent_canonical_edits_are_serialized(self, agent):
+        agent._apply_user_input("u1")
+        agent._emit_assistant("a1")
+        target_event = next(
+            event
+            for event in agent.session_store.get_events(agent.config.name)
+            if event.get("type") == "user_message"
+        )
+        target = UserMessageSelector(
+            event_id=target_event["event_id"],
+            turn_index=target_event["turn_index"],
+            branch_id=target_event["branch_id"],
+        )
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        entered: list[str] = []
+
+        async def blocking_process(event):
+            entered.append(event.content)
+            if len(entered) == 1:
+                first_started.set()
+                await release_first.wait()
+
+        agent._process_event = blocking_process
+        first = asyncio.create_task(
+            agent.edit_and_rerun(-1, "first edit", target=target)
+        )
+        await first_started.wait()
+        second = asyncio.create_task(
+            agent.edit_and_rerun(-1, "second edit", target=target)
+        )
+        await asyncio.sleep(0)
+        try:
+            assert entered == ["first edit"]
+        finally:
+            release_first.set()
+            results = await asyncio.gather(first, second)
+
+        assert results == [True, True]
+        assert entered == ["first edit", "second edit"]
+
+    async def test_edit_rejects_an_active_turn_before_mutating_history(self, agent):
+        agent._apply_user_input("u1")
+        agent._emit_assistant("a1")
+        agent._processing_lock = asyncio.Lock()
+        await agent._processing_lock.acquire()
+        messages_before = agent.controller.conversation.to_messages()
+        events_before = agent.session_store.get_events(agent.config.name)
+
+        try:
+            with pytest.raises(ConflictError, match="turn is active"):
+                await agent.edit_and_rerun(0, "must not land")
+        finally:
+            agent._processing_lock.release()
+
+        assert agent.controller.conversation.to_messages() == messages_before
+        assert agent.session_store.get_events(agent.config.name) == events_before
+
+    @pytest.mark.parametrize(
+        ("runtime_state", "message"),
+        [
+            ({"_paused": True}, "paused"),
+            ({"_running": False}, "not running"),
+        ],
+    )
+    async def test_edit_rejects_when_rerun_cannot_start_before_mutating_history(
+        self,
+        agent,
+        runtime_state,
+        message,
+    ):
+        agent._apply_user_input("u1")
+        agent._emit_assistant("a1")
+        for name, value in runtime_state.items():
+            setattr(agent, name, value)
+        messages_before = agent.controller.conversation.to_messages()
+        events_before = agent.session_store.get_events(agent.config.name)
+
+        with pytest.raises(ConflictError, match=message):
+            await agent.edit_and_rerun(0, "must not land")
+
+        assert agent.controller.conversation.to_messages() == messages_before
+        assert agent.session_store.get_events(agent.config.name) == events_before
 
 
 class TestRegenerateNonTailTurn:

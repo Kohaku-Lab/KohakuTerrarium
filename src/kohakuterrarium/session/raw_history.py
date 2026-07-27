@@ -5,8 +5,6 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any, TypeAlias
 
-from kohakuterrarium.session.history import _coerce_path
-
 BranchView: TypeAlias = Mapping[int | str, int | str]
 
 
@@ -99,9 +97,31 @@ def _validate_events(events: list[dict[str, Any]]) -> dict[int, int]:
     return positions
 
 
-def _target_lineage(target: Mapping[str, Any]) -> dict[int, int]:
+def _target_lineage(
+    target: Mapping[str, Any],
+    *,
+    target_turn: int,
+) -> dict[int, int]:
+    raw_path = target.get("parent_branch_path")
+    if raw_path is None:
+        return {}
+    if not isinstance(raw_path, (list, tuple)):
+        raise TargetUserMessageLineageError(
+            "target parent_branch_path must be a sequence of positive integer pairs"
+        )
+
     lineage: dict[int, int] = {}
-    for turn, branch in _coerce_path(target.get("parent_branch_path")):
+    for item in raw_path:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            raise TargetUserMessageLineageError(
+                "target parent_branch_path must contain positive integer pairs"
+            )
+        turn = _positive_int(item[0])
+        branch = _positive_int(item[1])
+        if turn is None or branch is None or turn >= target_turn:
+            raise TargetUserMessageLineageError(
+                "target parent_branch_path must contain positive earlier-turn pairs"
+            )
         prior = lineage.get(turn)
         if prior is not None and prior != branch:
             raise TargetUserMessageLineageError(
@@ -139,7 +159,7 @@ def select_raw_history_prefix(
             f"event_id {selector.event_id} belongs to turn/branch {actual}, not {expected}"
         )
 
-    lineage = _target_lineage(target)
+    lineage = _target_lineage(target, target_turn=selector.turn_index)
     selected = _normalize_view(branch_view)
     required = {**lineage, selector.turn_index: selector.branch_id}
     for turn, branch in selected.items():

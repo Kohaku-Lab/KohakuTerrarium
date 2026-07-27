@@ -157,3 +157,11 @@ def test_incomplete_raw_turn_metadata_is_rejected():
 
     with pytest.raises(MissingRawHistoryError, match="incomplete turn/branch"):
         _select(events)
+
+
+def test_malformed_explicit_target_ancestry_is_rejected():
+    events = _branched_events()
+    events[2]["parent_branch_path"] = [[1, 1], ["not-a-turn", 2]]
+
+    with pytest.raises(TargetUserMessageLineageError, match="parent_branch_path"):
+        _select(events)

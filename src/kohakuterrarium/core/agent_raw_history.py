@@ -46,6 +46,7 @@ def reload_raw_prefix_for_target(
     """Reseat one agent on the uncompacted prefix ending at target."""
     if agent.session_store is None:
         raise ValueError("raw persisted history is unavailable")
+    current_conversation = agent.controller.conversation
     prefix = select_raw_history_prefix(
         agent.session_store.get_events(agent.config.name),
         selector=target,
@@ -75,7 +76,7 @@ def reload_raw_prefix_for_target(
             ),
             *persisted_messages,
         ]
-    conversation = Conversation()
+    conversation = Conversation(current_conversation.config)
     for message in persisted_messages:
         conversation.append_message(message)
     agent.controller.conversation = conversation
