@@ -3530,7 +3530,8 @@ const _chatStoreOptions = {
             this._rebuildMessages(tab)
           }
           this._scheduleBranchResync(tab)
-          return
+          const error = this._failBranchOperation(tab, e)
+          return this._branchOperationResult(false, tab, null, error)
         }
         if (regenResponse?.branch_id != null && regenResponse?.turn_index != null) {
           // Trust the backend's exact branch_id over our prediction —
