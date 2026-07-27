@@ -49,7 +49,7 @@ export const useConversationsStore = defineStore("conversations", {
         try {
           const conversations = await sessionAPI.listOpen()
           if (!this._ownsFetch(task, generation, hostScope)) return
-          this.rows = conversations.map(mapConversation)
+          this.rows = conversations.map((row) => mapConversation(row, hostScope))
         } catch (err) {
           if (this._ownsFetch(task, generation, hostScope)) {
             console.error("Failed to fetch conversations:", err)
@@ -115,11 +115,13 @@ export const useConversationsStore = defineStore("conversations", {
     },
 
     async resume(row) {
+      const resumeScope = this._syncHostScope()
+      if (row._hostScope && row._hostScope !== resumeScope) {
+        throw new Error("Conversation belongs to a different host")
+      }
       if (row.is_live && row.runtime_id) return row.runtime_id
       if (!row.saved_name) throw new Error("Conversation has no saved session to resume")
 
-      this._syncHostScope()
-      const resumeScope = this._hostScope
       const generation = this._fetchGeneration
       const key = `${resumeScope}:${row.conversation_id || row.id}`
       if (this._endPromises[key]) throw new Error("Conversation is still ending")
@@ -153,8 +155,11 @@ export const useConversationsStore = defineStore("conversations", {
     },
 
     async endConversation(row) {
-      this._syncHostScope()
-      const key = `${this._hostScope}:${row.conversation_id || row.id}`
+      const endScope = this._syncHostScope()
+      if (row._hostScope && row._hostScope !== endScope) {
+        throw new Error("Conversation belongs to a different host")
+      }
+      const key = `${endScope}:${row.conversation_id || row.id}`
       if (this._resumePromises[key]) throw new Error("Conversation is still resuming")
       if (this._endPromises[key]) return this._endPromises[key]
       let task
@@ -234,7 +239,7 @@ function getHostScope() {
   return `${hosts.activeHostId || SAME_ORIGIN_SCOPE}:${userScope}`
 }
 
-function mapConversation(data) {
+function mapConversation(data, hostScope) {
   return {
     id: data.id,
     conversation_id: data.conversation_id || data.id,
@@ -248,5 +253,6 @@ function mapConversation(data) {
     node_id: data.node_id || "_host",
     creatures: data.creatures || [],
     last_active: data.last_active || null,
+    _hostScope: hostScope,
   }
 }

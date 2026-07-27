@@ -284,6 +284,32 @@ describe("conversations store", () => {
     expect(tabs.surfaceTabsForTarget("runtime-old-host").chat).toBeUndefined()
   })
 
+  it("rejects a row from the previous host before issuing an action", async () => {
+    const store = useConversationsStore()
+    const tabs = useTabsStore()
+    const hosts = useHostsStore()
+    hosts.activeHostId = "host-one"
+    sessionAPI.listOpen.mockResolvedValueOnce([
+      {
+        id: "conversation-one",
+        conversation_id: "conversation-one",
+        saved_name: "saved-one",
+        is_live: false,
+        node_id: "_host",
+      },
+    ])
+    const createSession = vi.spyOn(tabs, "createSession").mockResolvedValue("runtime-one")
+
+    await store.fetchAll()
+    const staleRow = store.rows[0]
+    hosts.activeHostId = "host-two"
+
+    await expect(store.openSurface(staleRow, "chat")).rejects.toThrow("different host")
+    await expect(store.endConversation(staleRow)).rejects.toThrow("different host")
+    expect(createSession).not.toHaveBeenCalled()
+    expect(sessionAPI.endConversation).not.toHaveBeenCalled()
+  })
+
   it("keeps a row retryable when ending fails", async () => {
     const store = useConversationsStore()
     const row = { id: "conversation-one", runtime_id: null }
