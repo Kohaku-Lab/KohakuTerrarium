@@ -129,9 +129,6 @@ class TestBuildConversation:
         # metadata is carried through onto the rebuilt message object.
         rebuilt = conv.get_messages()
         assert rebuilt[0].metadata == {"source": "test"}
-        assert conv.to_messages(include_metadata=True)[0]["metadata"] == {
-            "source": "test"
-        }
 
     def test_tool_calls_preserved(self):
         msgs = [

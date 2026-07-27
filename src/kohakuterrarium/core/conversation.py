@@ -147,19 +147,14 @@ class Conversation:
         )
 
     def to_messages(
-        self, *, preserve_pending_tail: bool = False, include_metadata: bool = False
+        self, *, preserve_pending_tail: bool = False
     ) -> list[dict[str, Any]]:
         """Return provider message dictionaries with valid native tool pairs.
 
         ``preserve_pending_tail`` retains an in-flight tool announcement only for
         persistence; provider generation rejects unanswered trailing calls.
-        ``include_metadata`` is reserved for persistence and diagnostic readers.
         """
         messages = messages_to_dicts(self._messages)
-        if include_metadata:
-            for message, raw in zip(messages, self._messages, strict=True):
-                if raw.metadata:
-                    message["metadata"] = dict(raw.metadata)
         if self.config.sanitize_orphan_tool_calls:
             messages = self.sanitize_orphan_tool_pairs(
                 messages, preserve_pending_tail=preserve_pending_tail

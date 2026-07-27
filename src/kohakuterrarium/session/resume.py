@@ -123,10 +123,7 @@ def _load_conversation_with_replay_fallback(
             for evt in tail
         )
         if not tail_has_forks:
-            appended = replay_conversation(
-                normalize_resumable_events(tail),
-                include_metadata=True,
-            )
+            appended = replay_conversation(normalize_resumable_events(tail))
             logger.info(
                 "Resume appended post-snapshot tail",
                 agent=agent_name,
@@ -142,10 +139,7 @@ def _load_conversation_with_replay_fallback(
         )
     if snapshot is not None and cached_up_to is None:
         return snapshot
-    replayed = replay_conversation(
-        normalize_resumable_events(events),
-        include_metadata=True,
-    )
+    replayed = replay_conversation(normalize_resumable_events(events))
     if replayed:
         logger.info(
             "Resume rebuilt conversation via replay",

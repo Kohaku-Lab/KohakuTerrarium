@@ -619,14 +619,32 @@ class TestApiStudioJourney:
         assert len(open_rows) == 1
         assert open_rows[0]["is_live"] is False
         conversation_id = open_rows[0]["conversation_id"]
+        saved_name = open_rows[0]["saved_name"]
 
         # Dormant history stays readable without implicitly resuming it.
         assert client.get("/api/sessions/active").json() == []
 
-        # Explicit End removes it from the rail while preserving saved history.
+        # Opening a dormant surface uses the saved-session resume path. The
+        # frontend covers the click-to-resume handoff; this journey proves the
+        # backend retains the stable conversation identity across that handoff.
+        resp = client.post(f"/api/sessions/{saved_name}/resume")
+        assert resp.status_code == 200
+        resumed_id = resp.json()["instance_id"]
+        assert [
+            row["session_id"] for row in client.get("/api/sessions/active").json()
+        ] == [resumed_id]
+        resumed_rows = client.get("/api/sessions/open").json()
+        assert len(resumed_rows) == 1
+        assert resumed_rows[0]["conversation_id"] == conversation_id
+        assert resumed_rows[0]["runtime_id"] == resumed_id
+        assert resumed_rows[0]["is_live"] is True
+
+        # Explicit End removes the live runtime and Rail row while preserving
+        # the saved History entry.
         resp = client.post(f"/api/sessions/open/{conversation_id}/end")
         assert resp.status_code == 200
         assert client.get("/api/sessions/open").json() == []
+        assert client.get("/api/sessions/active").json() == []
 
         # 13. The stopped session is now a saved session on disk — the
         #     saved-session list + history routes read it back. (No
@@ -636,7 +654,7 @@ class TestApiStudioJourney:
         assert resp.status_code == 200
         listing = resp.json()
         assert listing["total"] == 1
-        saved_name = listing["sessions"][0]["name"]
+        assert listing["sessions"][0]["name"] == saved_name
         assert listing["sessions"][0]["agents"] == ["scout"]
         # History index lists the agent target; the per-target read
         # returns its saved metadata.
