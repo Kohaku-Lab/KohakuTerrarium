@@ -51,6 +51,7 @@ def _ctx(engine, creature) -> ToolContext:
     env = engine._environments[creature.graph_id]
     return ToolContext(
         agent_name=creature.name,
+        creature_id=creature.creature_id,
         session=None,
         working_dir=Path("."),
         environment=env,

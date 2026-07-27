@@ -626,6 +626,7 @@ class TestCrossNodeChannelReplication:
         svc = _make_service()
         svc._remotes = {"w1": w1, "w2": w2}
         svc._home = {"a": "w1", "b": "w2"}
+        svc._cluster_links.add(frozenset({("w1", "g_a"), ("w2", "g_b")}))
 
         # Fake broadcast adapter to capture the cross-subscribe call.
         proxy_calls: list[dict] = []
@@ -731,6 +732,7 @@ class TestCrossNodeChannelReplication:
         svc = _make_service()
         svc._remotes = {"w1": w1, "w2": w2}
         svc._home = {"a": "w1", "b": "w2"}
+        svc._cluster_links.add(frozenset({("w1", "g_a"), ("w2", "g_b")}))
 
         proxy_calls: list[dict] = []
 
@@ -763,9 +765,12 @@ class TestCrossNodeChannelReplication:
         )
         svc = _make_service()
         svc._remotes = {"w1": w1}
-        out = await svc._find_channel_elsewhere("X", exclude="w1")
+        svc._cluster_links.add(frozenset({("w1", "g_a"), ("w2", "g_target")}))
+        out = await svc._find_channel_elsewhere("X", exclude="w1", graph_id="g_target")
         assert out is None
-        out2 = await svc._find_channel_elsewhere("X", exclude="other")
+        out2 = await svc._find_channel_elsewhere(
+            "X", exclude="other", graph_id="g_target"
+        )
         assert out2 == ("w1", "g_a")
 
     async def test_find_channel_elsewhere_swallows_worker_failure(self):
@@ -785,7 +790,10 @@ class TestCrossNodeChannelReplication:
         )
         svc = _make_service()
         svc._remotes = {"bad": broken, "w1": good}
-        out = await svc._find_channel_elsewhere("X", exclude="other")
+        svc._cluster_links.add(frozenset({("w1", "g_a"), ("w2", "g_target")}))
+        out = await svc._find_channel_elsewhere(
+            "X", exclude="other", graph_id="g_target"
+        )
         assert out == ("w1", "g_a")
 
 
@@ -958,6 +966,7 @@ class TestClusterGraphSnapshot:
         svc = _make_service()
         svc._remotes = {"w1": w1, "w2": w2}
         svc._home = {"a": "w1", "b": "w2"}
+        svc._cluster_links.add(frozenset({("w1", "g_a"), ("w2", "g_b")}))
 
         class _FakeBcast:
             async def proxy_subscribe(self, **kw):
@@ -1007,8 +1016,8 @@ class TestListCreaturesResilience:
         # Pre-populate the cache as if a prior list_creatures had
         # succeeded for both workers.
         svc._creature_name_cache = {
-            "alpha": ("w1", "c_alpha"),
-            "c_alpha": ("w1", "c_alpha"),
+            "alpha": {("g-alpha", "w1", "c_alpha")},
+            "c_alpha": {("g-alpha", "w1", "c_alpha")},
         }
         svc._home = {"c_alpha": "w1"}
 
@@ -1022,13 +1031,13 @@ class TestListCreaturesResilience:
         # wiped, cross-node output wiring couldn't resolve it, the UI
         # treated w1 creatures as offline.
         cache = svc._creature_name_cache
-        assert cache.get("alpha") == ("w1", "c_alpha"), (
-            "failed worker's prior name-cache entry was wiped — this "
+        expected_alpha = {("g-alpha", "w1", "c_alpha")}
+        assert cache.get("alpha") == expected_alpha, (
+            "failed worker's prior name-cache entry was wiped ? this "
             "is the offline cascade.  Cache: " + repr(cache)
         )
-        assert cache.get("c_alpha") == ("w1", "c_alpha")
-        # And the new worker's entry was merged in.
-        assert cache.get("bravo") == ("w2", "c_good")
+        assert cache.get("c_alpha") == expected_alpha
+        assert cache.get("bravo") == {("g_w2", "w2", "c_good")}
 
     async def test_fan_out_runs_in_parallel(self):
         # If listed sequentially, a slow worker holds up every fast one.

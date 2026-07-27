@@ -131,7 +131,10 @@ class GroupChannelTool(BaseTool):
             )
 
         ident = (args.get("creature_id") or "").strip()
-        target = resolve_group_target(gctx, ident)
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
         if target is None:
             return err(cross_cluster_target_error(gctx.engine, ident))
         direction = (args.get("direction") or "").strip()

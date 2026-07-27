@@ -321,8 +321,9 @@ class TestListCreatures:
     async def test_populates_name_cache(self):
         svc = _make_service(remote_specs={"w1": [_info("c1", name="alice")]})
         await svc.list_creatures()
-        assert svc._creature_name_cache["alice"] == ("w1", "c1")
-        assert svc._creature_name_cache["c1"] == ("w1", "c1")
+        expected = {("g", "w1", "c1")}
+        assert svc._creature_name_cache["alice"] == expected
+        assert svc._creature_name_cache["c1"] == expected
 
     async def test_remote_failure_swallowed(self):
         svc = _make_service(remote_specs={"w1": []})
@@ -402,8 +403,11 @@ class TestLifecycle:
         svc = _make_service(remote_specs={"w1": []})
         info = await svc.add_creature(None, on_node="w1")
         assert info.creature_id == "new-cid"
-        # Home is recorded.
+        # Home and exact graph-scoped aliases are recorded immediately.
         assert svc._home["new-cid"] == "w1"
+        expected = {("g", "w1", "new-cid")}
+        assert svc._creature_name_cache["new-cid"] == expected
+        assert svc._creature_name_cache["new"] == expected
 
     async def test_add_creature_default_host_rejected(self):
         # The default ``on_node="_host"`` is rejected — the host runs

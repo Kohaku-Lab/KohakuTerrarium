@@ -4,6 +4,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.routes.sessions_v2._helpers import (
+    resolve_connect_target_id,
+    resolve_creature_id,
+)
 from kohakuterrarium.api.schemas import ChannelAdd, ChannelSend, WireChannel
 from kohakuterrarium.studio.sessions import topology as topology_lib
 from kohakuterrarium.terrarium.service import TerrariumService
@@ -151,13 +155,15 @@ async def connect_creatures(
     Cross-node connections replicate the channel and establish a broadcast
     subscription between sites.
     """
-    # The topology layer emits the change event; a second event here would
-    # duplicate prompt refreshes and session-log entries.
+    # The URL session is authoritative: resolve both endpoints in that exact
+    # session or logical cluster before allowing the topology mutation.
     try:
+        sender_id = await resolve_creature_id(service, req.sender, session_id)
+        receiver_id = await resolve_connect_target_id(service, req.receiver, session_id)
         return await topology_lib.connect(
             service,
-            req.sender,
-            req.receiver,
+            sender_id,
+            receiver_id,
             channel=req.channel,
             channel_type=req.channel_type,
         )

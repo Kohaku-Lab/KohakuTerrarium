@@ -1,452 +1,299 @@
-"""Unit tests for :class:`TerrariumOutputWireAdapter`."""
+"""Graph-bound Laboratory output-wire routing tests."""
 
-import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
-
+from unittest.mock import AsyncMock
 
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.adapters.terrarium_output_wire import (
     TerrariumOutputWireAdapter,
 )
-from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 
-class _FakeNotifier:
-    def __init__(self, fail=False):
-        self.app_extensions = {}
-        self.notifications = []
-        self._fail = fail
+class _Messenger:
+    def __init__(self, node_id: str, *, response=None):
+        self.node_id = node_id
+        self.response = response or {"delivered": True}
+        self.request = AsyncMock(return_value=self.response)
+        self.handlers = {}
 
-    def register_app_extension(self, ns, handler):
-        self.app_extensions[ns] = handler
+    def register_handler(self, namespace, handler):
+        self.handlers[namespace] = handler
 
-    def unregister_app_extension(self, ns):
-        return self.app_extensions.pop(ns, None) is not None
-
-    async def notify(self, *, to_node, namespace, type, body):
-        if self._fail:
-            raise RuntimeError("delivery failed")
-        self.notifications.append(
-            {"to": to_node, "namespace": namespace, "type": type, "body": body}
-        )
+    def unregister_handler(self, namespace):
+        self.handlers.pop(namespace, None)
 
 
-def _app_msg(type_, body, sender="ctrl"):
+class _Agent:
+    def __init__(self):
+        self._process_event = AsyncMock()
+
+
+class _Creature:
+    def __init__(self, cid: str, name: str, graph_id: str):
+        self.creature_id = cid
+        self.name = name
+        self.graph_id = graph_id
+        self.agent = _Agent()
+
+
+def _msg(sender: str, body: dict) -> AppMessage:
     return AppMessage(
         sender_node=sender,
         namespace="terrarium.output_wire",
-        type=type_,
+        type="inject",
         body=body,
-        request_id="r1",
+        request_id="req-1",
         in_reply_to=None,
     )
 
 
-# ── construction / detach ────────────────────────────────────
+def _body(**overrides):
+    body = {
+        "target_name": "target-id",
+        "event": {
+            "source": "source-id",
+            "content": "hello",
+            "metadata": {},
+        },
+        "source_creature_id": "source-id",
+        "source_graph_id": "graph-a",
+        "hop": 0,
+        "peer": "worker-a",
+    }
+    body.update(overrides)
+    return body
 
 
 class TestLifecycle:
-    async def test_init_stashes_on_engine(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            assert "terrarium.output_wire" in notifier.app_extensions
-            assert t._output_wire_adapter is adapter
-            adapter.detach()
-            assert t._output_wire_adapter is None
-        finally:
-            await t.shutdown()
-
-    async def test_detach_idempotent(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            adapter.detach()
-            # Second detach is a no-op.
-            adapter.detach()
-        finally:
-            await t.shutdown()
+    def test_attach_and_detach(self):
+        messenger = _Messenger("worker-a")
+        engine = SimpleNamespace(_output_wire_adapter=None, _creatures={})
+        adapter = TerrariumOutputWireAdapter(engine, messenger)
+        assert engine._output_wire_adapter is adapter
+        assert "terrarium.output_wire" in messenger.handlers
+        adapter.detach()
+        assert engine._output_wire_adapter is None
+        assert "terrarium.output_wire" not in messenger.handlers
 
 
-# ── peer_for_target ──────────────────────────────────────────
+class TestGraphScopedCache:
+    def test_live_cache_reference_survives_refresh(self):
+        messenger = _Messenger("_host")
+        cache = {}
+        adapter = TerrariumOutputWireAdapter(
+            SimpleNamespace(_creatures={}), messenger, name_cache=cache
+        )
+        cache["worker"] = {("graph-a", "node-a", "id-a")}
+        assert adapter.peer_for_target("worker", graph_id="graph-a") == "node-a"
+
+    def test_duplicate_name_is_not_last_writer(self):
+        messenger = _Messenger("_host")
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        adapter.set_name_cache(
+            {
+                "worker": {
+                    ("graph-a", "node-a", "id-a"),
+                    ("graph-b", "node-b", "id-b"),
+                }
+            }
+        )
+        assert adapter.peer_for_target("worker") is None
+        assert adapter.peer_for_target("worker", graph_id="graph-a") == "node-a"
 
 
-class TestPeerForTarget:
-    async def test_no_resolver_means_worker_delegates_to_host(self):
-        # On a worker (which never installs a resolver), an unresolved
-        # local target forwards to the host — the cluster relay routes
-        # it from there.  "Lab host = transparent relay" UX invariant.
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            assert adapter.peer_for_target("anyone") == "_host"
-        finally:
-            adapter.detach()
-            await t.shutdown()
+class TestForwardEnvelope:
+    async def test_requires_source_graph_and_runtime_id(self):
+        messenger = _Messenger("worker-a")
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        assert await adapter.forward_event(target_name="target-id", event={}) is False
+        messenger.request.assert_not_awaited()
 
-    async def test_resolver_returns_none(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            adapter.set_target_resolver(lambda name: None)
-            assert adapter.peer_for_target("anyone") is None
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_resolver_returns_host_treated_as_local(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            adapter.set_target_resolver(lambda n: ("_host", "cid-x"))
-            assert adapter.peer_for_target("a") is None
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_resolver_returns_empty_node_id(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            adapter.set_target_resolver(lambda n: ("", "cid-x"))
-            assert adapter.peer_for_target("a") is None
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_resolver_returns_worker(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            adapter.set_target_resolver(lambda n: ("worker-1", "cid-x"))
-            assert adapter.peer_for_target("a") == "worker-1"
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_resolver_exception_returns_none(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-
-            def _boom(n):
-                raise RuntimeError("bad")
-
-            adapter.set_target_resolver(_boom)
-            assert adapter.peer_for_target("a") is None
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-
-# ── forward_event ────────────────────────────────────────────
-
-
-class TestForwardEvent:
-    async def test_successful_forward(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            ok = await adapter.forward_event("worker-1", {"target_name": "x"})
-            assert ok is True
-            assert notifier.notifications
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_failed_forward_returns_false(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier(fail=True)
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            ok = await adapter.forward_event("worker-1", {"target_name": "x"})
-            assert ok is False
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-
-# ── _dispatch / _handle ──────────────────────────────────────
-
-
-class TestDispatch:
-    async def test_unknown_type(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            resp = await adapter._dispatch(_app_msg("garbage", {}))
-            assert resp["error"]["kind"] == "unknown_type"
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_inject_missing_target_name(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            resp = await adapter._dispatch(_app_msg("inject", {}))
-            assert resp["error"]["kind"] == "invalid"
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_inject_unknown_creature(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            resp = await adapter._dispatch(_app_msg("inject", {"target_name": "ghost"}))
-            assert resp["error"]["kind"] == "not_found"
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_inject_target_not_running(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            # Make alice not running.
-            t.get_creature("alice").agent._running = False
-            resp = await adapter._dispatch(_app_msg("inject", {"target_name": "alice"}))
-            assert resp["delivered"] is False
-            assert "not_running" in resp["reason"]
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_inject_success(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            agent = t.get_creature("alice").agent
-            agent._running = True
-            agent._process_event = AsyncMock()
-            resp = await adapter._dispatch(
-                _app_msg(
-                    "inject",
-                    {
-                        "target_name": "alice",
-                        "source": "bob",
-                        "content": "hello",
-                        "with_content": True,
-                        "source_event_type": "tool_result",
-                        "turn_index": 3,
-                        "prompt_override": "[wire]",
-                    },
-                )
-            )
-            assert resp["delivered"] is True
-            # Give the asyncio task a moment to run.
-            await asyncio.sleep(0.05)
-            agent._process_event.assert_called_once()
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_inject_with_router_activity_notification(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            agent = t.get_creature("alice").agent
-            agent._running = True
-            agent._process_event = AsyncMock()
-            agent.output_router = SimpleNamespace(notify_activity=MagicMock())
-            resp = await adapter._dispatch(
-                _app_msg(
-                    "inject",
-                    {
-                        "target_name": "alice",
-                        "source": "bob",
-                        "content": "x" * 300,  # exercise the truncation path
-                    },
-                )
-            )
-            assert resp["delivered"] is True
-            agent.output_router.notify_activity.assert_called_once()
-            # Verify truncation suffix landed.
-            args, kw = agent.output_router.notify_activity.call_args
-            preview = kw["metadata"]["content_preview"]
-            assert preview.endswith("…")
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_inject_router_notify_failure_swallowed(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            agent = t.get_creature("alice").agent
-            agent._running = True
-            agent._process_event = AsyncMock()
-
-            def _boom(*a, **kw):
-                raise RuntimeError("bad router")
-
-            agent.output_router = SimpleNamespace(notify_activity=_boom)
-            resp = await adapter._dispatch(_app_msg("inject", {"target_name": "alice"}))
-            assert resp["delivered"] is True
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-
-# ── _resolve_local_agent ─────────────────────────────────────
-
-
-class TestResolveLocalAgent:
-    async def test_by_creature_id(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            agent = adapter._resolve_local_agent("alice")
-            assert agent is t.get_creature("alice").agent
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_by_config_name(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            creature = t.get_creature("alice")
-            # Rename so creature_id != name; mark config.name as the
-            # canonical lookup key.
-            creature.name = "other"
-            creature.agent.config = SimpleNamespace(name="alpha")
-            agent = adapter._resolve_local_agent("alpha")
-            assert agent is creature.agent
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_by_display_name(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            creature = t.get_creature("alice")
-            # creature_id stays "alice" but the display name differs;
-            # lookup by the display name must still resolve the agent.
-            creature.name = "display-name"
-            agent = adapter._resolve_local_agent("display-name")
-            assert agent is creature.agent
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-    async def test_unknown(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            assert adapter._resolve_local_agent("ghost") is None
-        finally:
-            adapter.detach()
-            await t.shutdown()
-
-
-# ── host-side cluster relay on local-miss ────────────────────────
+    async def test_request_ack_controls_delivered_result(self):
+        messenger = _Messenger("worker-a", response={"delivered": False})
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        delivered = await adapter.forward_event(
+            target_name="target-id",
+            event={"content": "hello"},
+            source_creature_id="source-id",
+            source_graph_id="graph-a",
+        )
+        assert delivered is False
+        destination, msg_type, body = messenger.request.await_args.args
+        assert (destination, msg_type) == ("_host", "inject")
+        assert body["source_creature_id"] == "source-id"
+        assert body["source_graph_id"] == "graph-a"
+        assert body["hop"] == 0
+        assert body["peer"] == "worker-a"
 
 
 class TestHostRelay:
-    """The host's _op_inject must re-route to the peer that owns the
-    target when the local engine doesn't have it.  This is what makes
-    a worker→host→worker output-wiring path actually deliver: workers
-    forward unresolved emissions to the host, and the host re-forwards
-    to the right peer based on its cluster name resolver.
-    """
+    async def test_relay_propagates_receiver_failure(self):
+        messenger = _Messenger("_host", response={"delivered": False})
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        adapter.set_name_cache(
+            {
+                "source-id": {("graph-a", "worker-a", "source-id")},
+                "target-id": {("graph-a", "worker-b", "target-id")},
+            }
+        )
+        result = await adapter._dispatch(_msg("worker-a", _body()))
+        assert result == {"delivered": False}
+        destination, msg_type, body = messenger.request.await_args.args
+        assert (destination, msg_type) == ("worker-b", "inject")
+        assert body["target_graph_id"] == "graph-a"
+        assert body["target_creature_id"] == "target-id"
+        assert body["hop"] == 1
+        assert body["peer"] == "_host"
 
-    async def test_local_miss_relays_to_peer(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            # Host-side: install a resolver that knows the target lives
-            # on worker-2.  No matching local creature.
-            adapter.set_target_resolver(lambda name: ("worker-2", "cid-x"))
-            msg = _app_msg(
-                "inject",
-                {
-                    "target_name": "alpha",
-                    "source": "bravo",
-                    "content": "hello",
-                    "with_content": True,
-                    "source_event_type": "user_message",
-                    "turn_index": 0,
+    async def test_forged_source_identity_fails_closed(self):
+        messenger = _Messenger("_host")
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        adapter.set_name_cache(
+            {
+                "source-id": {("graph-a", "worker-a", "source-id")},
+                "target-id": {("graph-a", "worker-b", "target-id")},
+            }
+        )
+        result = await adapter._dispatch(
+            _msg("worker-forged", _body(peer="worker-forged"))
+        )
+        assert result == {"delivered": False, "error": "forged source identity"}
+        messenger.request.assert_not_awaited()
+
+    async def test_forged_event_context_source_fails_closed(self):
+        messenger = _Messenger("_host")
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        adapter.set_name_cache(
+            {
+                "source-id": {("graph-a", "worker-a", "source-id")},
+                "target-id": {("graph-a", "worker-b", "target-id")},
+            }
+        )
+        result = await adapter._dispatch(
+            _msg(
+                "worker-a",
+                _body(event={"context": {"source": "forged-id"}}),
+            )
+        )
+        assert result == {"delivered": False, "error": "forged event source"}
+        messenger.request.assert_not_awaited()
+
+    async def test_cross_worker_local_graph_ids_share_one_cluster(self):
+        messenger = _Messenger("_host")
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        adapter.set_name_cache(
+            {
+                "source-id": {("graph-a", "worker-a", "source-id")},
+                "target-id": {("graph-b", "worker-b", "target-id")},
+            }
+        )
+        adapter.set_cluster_members(lambda graph_id: {"graph-a", "graph-b"})
+        result = await adapter._dispatch(_msg("worker-a", _body()))
+        assert result == {"delivered": True}
+        assert messenger.request.await_args.args[0] == "worker-b"
+
+    async def test_ambiguous_same_graph_target_fails_closed(self):
+        messenger = _Messenger("_host")
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        adapter.set_name_cache(
+            {
+                "source-id": {("graph-a", "worker-a", "source-id")},
+                "worker": {
+                    ("graph-a", "node-a", "id-a"),
+                    ("graph-a", "node-b", "id-b"),
                 },
-            )
-            out = await adapter._dispatch(msg)
-            assert out == {"delivered": True, "relayed": "worker-2"}
-            # The host forwarded an APP ``inject`` to worker-2 with the
-            # ``relayed`` flag so the worker won't double-bounce on a
-            # second miss.
-            assert len(notifier.notifications) == 1
-            n = notifier.notifications[0]
-            assert n["to"] == "worker-2"
-            assert n["type"] == "inject"
-            assert n["body"]["relayed"] is True
-            assert n["body"]["target_name"] == "alpha"
-        finally:
-            adapter.detach()
-            await t.shutdown()
+            }
+        )
+        result = await adapter._dispatch(_msg("worker-a", _body(target_name="worker")))
+        assert result["delivered"] is False
+        messenger.request.assert_not_awaited()
 
-    async def test_already_relayed_does_not_re_relay(self):
-        # Loop guard: a worker that receives a host-relayed inject and
-        # STILL can't resolve locally must raise rather than forwarding
-        # again — otherwise an inject for a vanished creature ping-pongs.
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            adapter.set_target_resolver(lambda name: ("worker-2", "cid-x"))
-            msg = _app_msg(
-                "inject",
-                {
-                    "target_name": "alpha",
-                    "source": "bravo",
-                    "content": "hello",
-                    "relayed": True,  # already a relayed payload
-                },
-            )
-            out = await adapter._dispatch(msg)
-            assert out.get("error", {}).get("kind") == "not_found"
-            # No further forwarding.
-            assert notifier.notifications == []
-        finally:
-            adapter.detach()
-            await t.shutdown()
+    async def test_forged_peer_and_excess_hop_fail_closed(self):
+        messenger = _Messenger("_host")
+        adapter = TerrariumOutputWireAdapter(SimpleNamespace(_creatures={}), messenger)
+        adapter.set_name_cache({"source-id": {("graph-a", "worker-a", "source-id")}})
+        forged = await adapter._dispatch(_msg("worker-a", _body(peer="worker-forged")))
+        excess = await adapter._dispatch(_msg("worker-a", _body(hop=2)))
+        assert forged["delivered"] is False
+        assert excess["delivered"] is False
+        messenger.request.assert_not_awaited()
 
-    async def test_resolver_returns_none_raises_not_found(self):
-        t = await TestTerrariumBuilder().build()
-        notifier = _FakeNotifier()
-        try:
-            adapter = TerrariumOutputWireAdapter(t, notifier)
-            adapter.set_target_resolver(lambda name: None)
-            msg = _app_msg(
-                "inject",
-                {"target_name": "ghost", "source": "bravo", "content": ""},
+
+class TestWorkerDelivery:
+    async def test_exact_id_same_graph_is_awaited_before_success(self):
+        messenger = _Messenger("worker-b")
+        target = _Creature("target-id", "worker", "graph-a")
+        foreign = _Creature("foreign-id", "worker", "graph-b")
+        engine = SimpleNamespace(
+            _creatures={
+                target.creature_id: target,
+                foreign.creature_id: foreign,
+            }
+        )
+        adapter = TerrariumOutputWireAdapter(engine, messenger)
+        result = await adapter._dispatch(
+            _msg(
+                "_host",
+                _body(
+                    peer="_host",
+                    hop=1,
+                    target_graph_id="graph-a",
+                    target_creature_id="target-id",
+                ),
             )
-            out = await adapter._dispatch(msg)
-            assert out.get("error", {}).get("kind") == "not_found"
-            assert notifier.notifications == []
-        finally:
-            adapter.detach()
-            await t.shutdown()
+        )
+        assert result == {"delivered": True}
+        target.agent._process_event.assert_awaited_once()
+        foreign.agent._process_event.assert_not_awaited()
+
+    async def test_worker_rejects_non_host_relay(self):
+        messenger = _Messenger("worker-b")
+        target = _Creature("target-id", "worker", "graph-a")
+        adapter = TerrariumOutputWireAdapter(
+            SimpleNamespace(_creatures={target.creature_id: target}), messenger
+        )
+        result = await adapter._dispatch(
+            _msg(
+                "worker-forged",
+                _body(
+                    peer="worker-forged",
+                    hop=1,
+                    target_graph_id="graph-a",
+                    target_creature_id="target-id",
+                ),
+            )
+        )
+        assert result == {"delivered": False, "error": "invalid relay peer"}
+        target.agent._process_event.assert_not_awaited()
+
+    async def test_graph_mismatch_and_unknown_target_fail_closed(self):
+        messenger = _Messenger("worker-b")
+        target = _Creature("target-id", "worker", "graph-b")
+        engine = SimpleNamespace(_creatures={target.creature_id: target})
+        adapter = TerrariumOutputWireAdapter(engine, messenger)
+        mismatch = await adapter._dispatch(
+            _msg(
+                "_host",
+                _body(
+                    peer="_host",
+                    hop=1,
+                    target_graph_id="graph-a",
+                    target_creature_id="target-id",
+                ),
+            )
+        )
+        unknown = await adapter._dispatch(
+            _msg(
+                "_host",
+                _body(
+                    target_name="missing",
+                    peer="_host",
+                    hop=1,
+                    target_graph_id="graph-a",
+                    target_creature_id="missing",
+                ),
+            )
+        )
+        assert mismatch["delivered"] is False
+        assert unknown["delivered"] is False
+        target.agent._process_event.assert_not_awaited()

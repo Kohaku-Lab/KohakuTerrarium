@@ -179,7 +179,10 @@ def build_runtime_graph_section(engine: "Terrarium", creature: "Creature") -> st
     output_in: list[str] = []
     output_out: list[str] = []
     self_id = getattr(creature.agent, "_creature_id", creature.creature_id)
-    for other_cid, other_creature in engine._creatures.items():
+    for other_cid in sorted(graph.creature_ids):
+        other_creature = engine._creatures.get(other_cid)
+        if other_creature is None:
+            continue
         agent_cfg = getattr(other_creature.agent, "config", None)
         wiring_entries = (
             getattr(agent_cfg, "output_wiring", None) if agent_cfg else None
@@ -193,7 +196,7 @@ def build_runtime_graph_section(engine: "Terrarium", creature: "Creature") -> st
     own_entries = (getattr(own_cfg, "output_wiring", None) if own_cfg else None) or []
     for entry in own_entries:
         target = getattr(entry, "to", "")
-        if target:
+        if target == "root" or target in graph.creature_ids:
             output_out.append(target)
 
     spawned: list[tuple[str, str]] = []

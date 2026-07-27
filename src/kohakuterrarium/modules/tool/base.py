@@ -43,6 +43,7 @@ class ToolContext:
     agent_name: str
     session: Any
     working_dir: Path
+    creature_id: str = ""
     memory_path: Path | None = None
     environment: Any = None
     tool_format: str = "native"

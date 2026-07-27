@@ -8,8 +8,7 @@ generic :class:`ToolContext` into a :class:`GroupContext` carrying:
 - the calling :class:`Creature`,
 - its current graph topology,
 
-and computes the caller's *group* (caller's graph members ∪ caller's
-spawned children regardless of which graph they are currently in).
+and computes the caller's local group (the live members of its graph).
 """
 
 import weakref
@@ -18,6 +17,12 @@ from typing import TYPE_CHECKING
 
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.terrarium.channels import TERRARIUM_ENGINE_KEY
+from kohakuterrarium.terrarium.graph_identity import (
+    CallerGraphNotFoundError,
+    GraphIdentityError,
+    UnknownCallerError,
+    resolve_local_graph_target,
+)
 
 if TYPE_CHECKING:
     from kohakuterrarium.terrarium.creature_host import Creature
@@ -63,69 +68,53 @@ def resolve_group_context(
         engine = engine_ref
     if engine is None:
         raise GroupToolError("group tools require a live terrarium engine")
-    caller = find_creature(engine, ctx.agent_name)
-    if caller is None:
+    caller_id = getattr(ctx, "creature_id", None)
+    if not isinstance(caller_id, str) or not caller_id:
         raise GroupToolError(
-            f"caller {ctx.agent_name!r} is not a creature in the engine"
+            "group tools require ToolContext.creature_id; legacy name-only "
+            "contexts are not safe to route"
         )
+    caller = engine._creatures.get(caller_id)
+    if caller is None or caller.creature_id != caller_id:
+        error = UnknownCallerError(caller_id)
+        raise GroupToolError(str(error)) from error
     if require_privileged and not getattr(caller, "is_privileged", False):
         raise GroupToolError("this tool is only callable by privileged creatures")
-    graph = engine._topology.graphs.get(caller.graph_id)
-    if graph is None:
-        raise GroupToolError(
-            f"caller's graph {caller.graph_id!r} is not present in topology"
-        )
+    graph_id = engine._topology.creature_to_graph.get(caller_id)
+    graph = engine._topology.graphs.get(graph_id or "")
+    if graph is None or caller_id not in graph.creature_ids:
+        error = CallerGraphNotFoundError(caller_id, graph_id)
+        raise GroupToolError(str(error)) from error
     return GroupContext(engine=engine, caller=caller, graph=graph)
 
 
-def find_creature(engine: "Terrarium", identifier: str) -> "Creature | None":
-    """Look up a creature by ``creature_id``, ``name``, or
-    ``agent.config.name``. Returns ``None`` if not found."""
-    by_id = engine._creatures.get(identifier)
-    if by_id is not None:
-        return by_id
-    for c in engine._creatures.values():
-        if c.name == identifier:
-            return c
-        cfg = getattr(c.agent, "config", None)
-        if cfg is not None and getattr(cfg, "name", None) == identifier:
-            return c
-    return None
-
-
 def compute_group(ctx: GroupContext) -> dict[str, "Creature"]:
-    """Return all creatures in the caller's group keyed by creature_id.
-
-    Group = (caller's graph members) ∪ (caller's spawned children,
-    regardless of which graph they currently live in).
-    """
+    """Return live creatures in the caller's graph, keyed by runtime ID."""
     out: dict[str, "Creature"] = {}
-    for cid in ctx.graph.creature_ids:
-        c = ctx.engine._creatures.get(cid)
-        if c is not None:
-            out[cid] = c
-    for c in ctx.engine._creatures.values():
-        if getattr(c, "parent_creature_id", None) == ctx.caller.creature_id:
-            out[c.creature_id] = c
+    for creature_id in ctx.graph.creature_ids:
+        creature = ctx.engine._creatures.get(creature_id)
+        if creature is not None and creature.creature_id == creature_id:
+            out[creature_id] = creature
     return out
 
 
-def resolve_group_target(gctx: GroupContext, identifier: str) -> "Creature | None":
-    """Resolve a target identifier (id or name) to a creature in the
-    caller's group. Returns ``None`` when the target is not in-group or
-    does not exist.
+def resolve_group_target(gctx: GroupContext, identifier: str) -> "Creature":
+    """Resolve a unique target inside the exact runtime caller's graph.
+
+    Resolution errors are preserved as :class:`GroupToolError` so ambiguous,
+    cross-graph, and unknown targets all fail closed rather than silently
+    selecting a similarly named creature.
     """
-    group = compute_group(gctx)
-    target = group.get(identifier)
-    if target is not None:
-        return target
-    for c in group.values():
-        if c.name == identifier:
-            return c
-        cfg = getattr(c.agent, "config", None)
-        if cfg is not None and getattr(cfg, "name", None) == identifier:
-            return c
-    return None
+    try:
+        resolved = resolve_local_graph_target(
+            gctx.engine._topology,
+            gctx.engine._creatures,
+            caller_id=gctx.caller.creature_id,
+            target=identifier,
+        )
+    except GraphIdentityError as exc:
+        raise GroupToolError(str(exc)) from exc
+    return gctx.engine._creatures[resolved.target_id]
 
 
 def engine_is_in_cluster(engine: "Terrarium") -> bool:

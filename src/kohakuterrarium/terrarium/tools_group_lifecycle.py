@@ -37,7 +37,10 @@ def _resolve_worker_target(
     gctx: GroupContext, ident: str, verb: str
 ) -> tuple[Any, ToolResult | None]:
     """Resolve a worker while reserving privileged lifecycle control for Studio."""
-    target = resolve_group_target(gctx, ident)
+    try:
+        target = resolve_group_target(gctx, ident)
+    except Exception as exc:
+        return None, err(str(exc))
     if target is None:
         return None, err(cross_cluster_target_error(gctx.engine, ident))
     if target.is_privileged:
@@ -164,7 +167,10 @@ class GroupRemoveNodeTool(BaseTool):
         if err_result is not None:
             return err_result
         ident = (args.get("creature_id") or "").strip()
-        target = resolve_group_target(gctx, ident)
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
         if target is None:
             return err(cross_cluster_target_error(gctx.engine, ident))
         if target.is_privileged:
@@ -224,7 +230,10 @@ class GroupStartNodeTool(BaseTool):
         if err_result is not None:
             return err_result
         ident = (args.get("creature_id") or "").strip()
-        target = resolve_group_target(gctx, ident)
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
         if target is None:
             return err(cross_cluster_target_error(gctx.engine, ident))
         if target.is_privileged:
@@ -275,7 +284,10 @@ class GroupStopNodeTool(BaseTool):
         if err_result is not None:
             return err_result
         ident = (args.get("creature_id") or "").strip()
-        target = resolve_group_target(gctx, ident)
+        try:
+            target = resolve_group_target(gctx, ident)
+        except Exception as exc:
+            return err(str(exc))
         if target is None:
             return err(cross_cluster_target_error(gctx.engine, ident))
         if target.is_privileged:

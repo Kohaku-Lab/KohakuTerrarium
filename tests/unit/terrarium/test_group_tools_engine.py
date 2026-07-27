@@ -48,6 +48,7 @@ def _ctx_for(engine, creature):
     env = engine._environments[creature.graph_id]
     return ToolContext(
         agent_name=creature.name,
+        creature_id=creature.creature_id,
         session=None,
         working_dir=Path("."),
         environment=env,
@@ -391,10 +392,8 @@ class TestGroupChannelWire:
         finally:
             await t.shutdown()
 
-    async def test_cross_graph_wire_merges_graphs(self):
-        """When the target is a spawned child still in its own
-        singleton graph, ``wire`` routes through ``engine.connect`` and
-        the two graphs merge — graph stays a connected component."""
+    async def test_cross_graph_wire_fails_closed(self):
+        """A spawned child in another graph cannot be implicitly merged."""
         t = await (
             TestTerrariumBuilder()
             .with_creature("root")
@@ -403,15 +402,11 @@ class TestGroupChannelWire:
             .build()
         )
         t.get_creature("root").is_privileged = True
-        # ``bob`` is a child of root → in root's *group* even though it
-        # lives in its own graph (the freshly-spawned-worker case).
         t.get_creature("bob").parent_creature_id = "root"
         try:
             root = t.get_creature("root")
             bob = t.get_creature("bob")
-            assert root.graph_id != bob.graph_id
-            tool = channel_mod.GroupChannelTool()
-            result = await tool._execute(
+            result = await channel_mod.GroupChannelTool()._execute(
                 {
                     "action": "wire",
                     "channel": "bridge",
@@ -420,16 +415,13 @@ class TestGroupChannelWire:
                 },
                 context=_ctx_for(t, root),
             )
-            body = _parse(result)
-            assert body["merged"] is True
-            # Invariant: graph = connected component → now one graph.
-            assert root.graph_id == bob.graph_id
-            assert len(t.list_graphs()) == 1
+            assert result.error is not None
+            assert "not a creature in caller" in result.error
+            assert root.graph_id != bob.graph_id
+            assert len(t.list_graphs()) == 2
         finally:
             await t.shutdown()
 
-
-class TestGroupChannelUnwire:
     async def test_unwire_listen_removes_edge(self):
         t = await (
             TestTerrariumBuilder()

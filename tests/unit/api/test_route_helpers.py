@@ -35,6 +35,24 @@ def _info(creature_id="cid", name="alice", graph_id="g") -> CreatureInfo:
     )
 
 
+class TestResolveConnectTargetId:
+    async def test_exact_runtime_id_may_cross_graph_but_name_may_not(self):
+        from kohakuterrarium.api.routes.sessions_v2._helpers import (
+            resolve_connect_target_id,
+        )
+
+        svc = _FakeService(
+            creatures=[
+                _info("source-id", "source", graph_id="g1"),
+                _info("target-id", "worker", graph_id="g2"),
+            ]
+        )
+        assert await resolve_connect_target_id(svc, "target-id", "g1") == "target-id"
+        with pytest.raises(HTTPException) as exc:
+            await resolve_connect_target_id(svc, "worker", "g1")
+        assert exc.value.status_code == 404
+
+
 class TestResolveCreatureId:
     async def test_exact_id_match(self):
         svc = _FakeService([_info("cid-1", "alice")])
@@ -108,19 +126,18 @@ class TestResolveCreatureId:
         # Same id WITH the right session resolves fine.
         assert await resolve_creature_id(svc, "cid-a", "graph_aaa") == "cid-a"
 
-    async def test_global_search_when_session_id_omitted(self):
-        # Back-compat: callers that pre-date the v2 session-scoped
-        # routes (tests + a few internal callers) pass ``session_id=None``
-        # and get the historical global-name-fallback behaviour.
+    async def test_global_duplicate_name_without_session_is_ambiguous(self):
+        # Legacy callers without a session may still use exact IDs, but duplicate
+        # names fail closed instead of selecting the first graph globally.
         svc = _FakeService(
             [
                 _info("cid-a", "alice", graph_id="graph_aaa"),
                 _info("cid-b", "alice", graph_id="graph_bbb"),
             ]
         )
-        out = await resolve_creature_id(svc, "alice")
-        # First match wins under global search (historical semantics).
-        assert out == "cid-a"
+        with pytest.raises(HTTPException) as exc:
+            await resolve_creature_id(svc, "alice")
+        assert exc.value.status_code == 409
 
 
 class TestResolveCreatureIdClusterScope:

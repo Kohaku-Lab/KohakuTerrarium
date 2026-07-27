@@ -124,7 +124,7 @@ class MultiNodeTerrariumService(
         # ``list_creatures``.  Read by the controller's
         # :class:`TerrariumOutputWireAdapter` target resolver to route
         # cross-node output-wiring emits without an async hop.
-        self._creature_name_cache: dict[str, tuple[str, str]] = {}
+        self._creature_name_cache: dict[str, set[tuple[str, str, str]]] = {}
         # Cross-node subscription bookkeeping — keyed by
         # ``(my_node, peer_node, graph_id, channel)`` to a refcount.
         self._cross_subs: dict[tuple[str, str, str, str], int] = {}
@@ -359,6 +359,12 @@ class MultiNodeTerrariumService(
             name=name,
         )
         self._home[info.creature_id] = on_node
+        identity = (info.graph_id, on_node, info.creature_id)
+        self._creature_name_cache.setdefault(info.creature_id, set()).add(identity)
+        self._creature_name_cache.setdefault(info.name, set()).add(identity)
+        config_name = getattr(info, "config_name", None)
+        if config_name:
+            self._creature_name_cache.setdefault(config_name, set()).add(identity)
         return info
 
     async def remove_creature(self, creature_id: str) -> None:
@@ -371,10 +377,12 @@ class MultiNodeTerrariumService(
         # reads this cache without an async hop, so a stale entry would
         # keep routing emits to the dead address until the next
         # ``list_creatures`` fan-out.
-        for key in [
-            k for k, v in self._creature_name_cache.items() if v[1] == creature_id
-        ]:
-            self._creature_name_cache.pop(key, None)
+        for key, entries in list(self._creature_name_cache.items()):
+            retained = {entry for entry in entries if entry[2] != creature_id}
+            if retained:
+                self._creature_name_cache[key] = retained
+            else:
+                self._creature_name_cache.pop(key, None)
 
     async def start_creature(self, creature_id: str) -> None:
         await self._route_per_creature(
@@ -714,10 +722,15 @@ class MultiNodeTerrariumService(
         )
 
     async def _find_channel_elsewhere(
-        self, channel: str, *, exclude: str
+        self, channel: str, *, exclude: str, graph_id: str
     ) -> tuple[str, str] | None:
-        """Thin delegator to :func:`multi_node_replication.find_channel_elsewhere`."""
-        return await find_channel_elsewhere(self, channel, exclude=exclude)
+        """Thin delegator to graph-scoped channel lookup."""
+        return await find_channel_elsewhere(
+            self,
+            channel,
+            exclude=exclude,
+            graph_id=graph_id,
+        )
 
     async def attach_policies(self, creature_id: str) -> list[str]:
         return await self._route_per_creature(

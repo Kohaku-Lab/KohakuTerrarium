@@ -125,14 +125,14 @@ async def _setup_cross_node_a_to_b(host, w1_name, w2_name, cfg_a, cfg_b, channel
         sb["creatures"][0].get("name"),
     )
     assert graph_a != graph_b
-    r_ch = await asyncio.wait_for(
+    r_connect = await asyncio.wait_for(
         host.http.post(
-            f"/api/sessions/topology/{graph_a}/channels",
-            json={"name": channel},
+            f"/api/sessions/topology/{graph_a}/connect",
+            json={"sender": a_id, "receiver": b_id, "channel": channel},
         ),
         timeout=OP_TIMEOUT,
     )
-    assert r_ch.status_code == 200, r_ch.text
+    assert r_connect.status_code == 200, r_connect.text
     r_send = await asyncio.wait_for(
         host.http.post(
             f"/api/sessions/topology/{graph_a}/creatures/{a_id}/wire",
@@ -413,6 +413,18 @@ async def test_cross_node_output_wire_fires_on_target_worker(tmp_path, monkeypat
             ).json()
             graph_a, a_id = sa["session_id"], sa["creatures"][0]["creature_id"]
             _graph_b, b_id = sb["session_id"], sb["creatures"][0]["creature_id"]
+            r_connect = await asyncio.wait_for(
+                host.http.post(
+                    f"/api/sessions/topology/{graph_a}/connect",
+                    json={
+                        "sender": a_id,
+                        "receiver": b_id,
+                        "channel": "output-bridge",
+                    },
+                ),
+                timeout=OP_TIMEOUT * 2,
+            )
+            assert r_connect.status_code == 200, r_connect.text
 
             # Cross-worker direct output wire alpha → bravo.
             r_wire = await asyncio.wait_for(

@@ -41,6 +41,7 @@ from kohakuterrarium.terrarium.events import (
     EventKind,
     RootAssignment,
 )
+import kohakuterrarium.terrarium.graph_identity_engine as _identity
 from kohakuterrarium.terrarium.runtime_prompt import RuntimeGraphPrompt
 from kohakuterrarium.terrarium.tools_group import (
     force_register_basic_tools,
@@ -75,9 +76,7 @@ class Terrarium:
     the three common construction shapes.
     """
 
-    # ------------------------------------------------------------------
-    # construction
-    # ------------------------------------------------------------------
+    # Construction
 
     def __init__(
         self,
@@ -358,6 +357,7 @@ class Terrarium:
             )
         if creature_id and creature.creature_id != creature_id:
             creature.creature_id = creature_id
+        _identity.bind_runtime_creature_id(creature)
         if name and name.strip():
             apply_creature_name(creature, name.strip())
         if creature.creature_id in self._creatures:
@@ -365,6 +365,7 @@ class Terrarium:
 
         graph_id = self._resolve_graph_id(graph) if graph is not None else None
         if graph_id is not None:
+            _identity.guard_add_name(self, creature, graph_id)
             await _checkpoint.preflight_add(
                 self,
                 graph_id,
@@ -605,9 +606,8 @@ class Terrarium:
 
         Body lives in ``terrarium.channels.connect_creatures``.
         """
-        result = await _channels.connect_creatures(
-            self, sender, receiver, channel=channel
-        )
+        endpoints = _identity.resolve_and_guard_connect(self, sender, receiver)
+        result = await _channels.connect_creatures(self, *endpoints, channel=channel)
         await _checkpoint.checkpoint(self, result.graph_id)
         await self._drain_drive_topology()
         return result

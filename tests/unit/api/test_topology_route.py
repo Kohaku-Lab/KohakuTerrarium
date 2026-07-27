@@ -32,6 +32,14 @@ class _FakeService:
         self.connect_calls.append((sender_id, receiver_id))
         return self._connect_result
 
+    async def list_creatures(self):
+        from kohakuterrarium.terrarium.service_dto import CreatureInfo
+
+        return (
+            CreatureInfo("a", "a", "g1", False, False, None, [], []),
+            CreatureInfo("b", "b", "g1", False, False, None, [], []),
+        )
+
 
 class _FakeGraph:
     def __init__(self, gid, creatures=()):

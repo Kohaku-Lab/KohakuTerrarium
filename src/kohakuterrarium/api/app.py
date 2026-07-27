@@ -48,6 +48,7 @@ from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
 from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+from kohakuterrarium.terrarium.multi_node_channels import cluster_members_for
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -207,8 +208,14 @@ async def lifespan(app: FastAPI):
         output_wire_adapter = TerrariumOutputWireAdapter(
             coordination_engine, host_engine
         )
-        output_wire_adapter.set_target_resolver(
-            _make_output_wire_target_resolver(multi_node_service)
+        output_wire_adapter.set_name_cache(multi_node_service._creature_name_cache)
+        output_wire_adapter.set_cluster_members(
+            lambda graph_id: {
+                member_graph_id
+                for _node_id, member_graph_id in cluster_members_for(
+                    multi_node_service, graph_id
+                )
+            }
         )
         # Mirror worker events under the host session directory so Studio reads
         # do not require a remote round trip.
@@ -382,25 +389,6 @@ def _parse_bind(bind: str) -> tuple[str, int]:
         raise ValueError(f"invalid lab bind {bind!r}; expected host:port")
     host, _, port_str = bind.rpartition(":")
     return host, int(port_str)
-
-
-def _make_output_wire_target_resolver(service: MultiNodeTerrariumService):
-    """Build a non-blocking target lookup from cached creature locations.
-
-    Cache misses return ``None`` because this synchronous resolver cannot perform
-    the asynchronous discovery needed to refresh the service cache.
-    """
-
-    def resolve(target_name: str) -> tuple[str, str] | None:
-        cache = getattr(service, "_creature_name_cache", None) or {}
-        entry = cache.get(target_name)
-        if entry is not None:
-            return entry
-        # ``list_creatures`` refreshes this cache; synchronous wire resolution
-        # cannot initiate that asynchronous discovery on a miss.
-        return None
-
-    return resolve
 
 
 async def _watch_membership(

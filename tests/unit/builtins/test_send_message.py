@@ -1,4 +1,4 @@
-"""Unit tests for the legacy ``send_message`` builtin tool.
+﻿"""Unit tests for the legacy ``send_message`` builtin tool.
 
 Pins behaviour of the engine-context send-edge gate: when a creature
 inside a Terrarium graph carries a private session-channel that
@@ -30,6 +30,7 @@ def _ctx_with_private_channel(
     session.channels.get_or_create(private_channel_name, channel_type="broadcast")
     return ToolContext(
         agent_name=creature.name,
+        creature_id=creature.creature_id,
         session=session,
         working_dir=Path("."),
         environment=env,

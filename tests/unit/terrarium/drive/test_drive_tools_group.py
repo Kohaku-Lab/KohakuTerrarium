@@ -47,6 +47,7 @@ async def _add(engine, cid, *, privileged=False, graph=None):
 def _ctx(engine, creature) -> ToolContext:
     return ToolContext(
         agent_name=creature.name,
+        creature_id=creature.creature_id,
         session=None,
         working_dir=Path("."),
         environment=engine._environments[creature.graph_id],
@@ -257,17 +258,16 @@ class TestGraphScopeGuard:
             await _add(engine, "outsider", privileged=True)  # other graph
             tool = GroupDriveTool()
             created = await _create(tool, engine, root)
-            res = await tool._execute(
-                {
-                    "action": "assign",
-                    "drive_id": created["drive_id"],
-                    "assignee": "outsider",
-                    "expected_revision": created["revision"],
-                },
-                context=_ctx(engine, root),
-            )
-            assert res.error is not None
-            assert "not in your graph" in res.error
+            with pytest.raises(Exception, match="not a creature in caller"):
+                await tool._execute(
+                    {
+                        "action": "assign",
+                        "drive_id": created["drive_id"],
+                        "assignee": "outsider",
+                        "expected_revision": created["revision"],
+                    },
+                    context=_ctx(engine, root),
+                )
         finally:
             await engine.shutdown()
 
@@ -316,20 +316,14 @@ class TestGroupPerRecordDurability:
             await engine.shutdown()
 
 
-# ── cross-graph group_wire merge drains Drive rows immediately (R1-12) ──
+# cross-graph group_wire remains fail-closed
 
 
-class TestGroupWireDriveMerge:
-    async def test_group_wire_merge_unions_rows_and_drops_manager(self):
-        # Two Drive-bearing graphs merged specifically through the privileged
-        # group_wire tool must IMMEDIATELY (no unrelated topology op) union their
-        # Drive rows into the survivor and drop the absorbed graph's manager
-        # (R1-12: ensure_same_graph drains the stashed Drive movement).
+class TestGroupWireDriveIsolation:
+    async def test_group_wire_does_not_merge_drive_graphs(self):
         engine = await _engine()
         try:
             root_a = await _add(engine, "root_a", privileged=True)
-            # root_b is root_a's spawned child, but lives in its OWN graph — so it
-            # is in root_a's group (wireable) yet disconnected from root_a's graph.
             root_b = Creature(
                 creature_id="root_b",
                 name="root_b",
@@ -338,21 +332,28 @@ class TestGroupWireDriveMerge:
             )
             await engine.add_creature(root_b, parent_creature_id="root_a")
             a_old, b_old = root_a.graph_id, root_b.graph_id
-            assert a_old != b_old
-
             da = await _create(GroupDriveTool(), engine, root_a)
             db = await _create(GroupDriveTool(), engine, root_b)
-
             res = await GroupWireTool()._execute(
                 {"action": "add", "to": "root_b"}, context=_ctx(engine, root_a)
             )
-            assert res.error is None, res.error
-
-            keep = engine._creatures["root_a"].graph_id
-            dropped = b_old if keep == a_old else a_old
-            survivor = engine.drives.manager_for(keep)
-            ids = {d.drive_id for d in await survivor.list_drives(DriveQuery())}
-            assert da["drive_id"] in ids and db["drive_id"] in ids  # row union
-            assert engine.drives.peek_manager(dropped) is None  # obsolete manager gone
+            assert res.error is not None
+            assert "not a creature in caller" in res.error
+            assert root_a.graph_id == a_old
+            assert root_b.graph_id == b_old
+            ids_a = {
+                drive.drive_id
+                for drive in await engine.drives.manager_for(a_old).list_drives(
+                    DriveQuery()
+                )
+            }
+            ids_b = {
+                drive.drive_id
+                for drive in await engine.drives.manager_for(b_old).list_drives(
+                    DriveQuery()
+                )
+            }
+            assert ids_a == {da["drive_id"]}
+            assert ids_b == {db["drive_id"]}
         finally:
             await engine.shutdown()

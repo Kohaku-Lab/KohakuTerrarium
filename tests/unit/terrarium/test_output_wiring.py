@@ -289,6 +289,42 @@ class TestSafeDeliver:
 # ── _log_task_error ──────────────────────────────────────────────
 
 
+class TestGraphLocalOutputResolution:
+    def test_same_name_in_other_graph_does_not_win(self):
+        from types import SimpleNamespace
+
+        from kohakuterrarium.terrarium.topology import GraphTopology, TopologyState
+
+        source = _FakeCreature("source", creature_id="source")
+        local = _FakeCreature("worker", creature_id="local")
+        foreign = _FakeCreature("worker", creature_id="foreign")
+        creatures = {
+            source.creature_id: source,
+            local.creature_id: local,
+            foreign.creature_id: foreign,
+        }
+        topology = TopologyState(
+            graphs={
+                "g-local": GraphTopology(
+                    graph_id="g-local", creature_ids={"source", "local"}
+                ),
+                "g-foreign": GraphTopology(
+                    graph_id="g-foreign", creature_ids={"foreign"}
+                ),
+            },
+            creature_to_graph={
+                "source": "g-local",
+                "local": "g-local",
+                "foreign": "g-foreign",
+            },
+        )
+        engine = SimpleNamespace(_creatures=creatures, _topology=topology)
+        resolver = TerrariumOutputWiringResolver(creatures, engine=engine)
+
+        assert resolver._resolve_target("worker", source="source") is local.agent
+        assert resolver._resolve_target("foreign", source="source") is None
+
+
 class TestLogTaskError:
     async def test_cancelled_task_no_log(self):
         async def coro():

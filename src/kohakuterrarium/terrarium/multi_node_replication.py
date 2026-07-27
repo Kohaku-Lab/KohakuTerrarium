@@ -5,7 +5,7 @@ graph isolated; cross-node ``connect`` / ``disconnect`` and lazy
 ``wire_creature`` replication need a small body of shared logic to:
 
 - Replicate a named channel onto a peer node's graph (idempotently).
-- Find a channel by name across all connected workers.
+- Find a channel only inside the same logical cluster component.
 - Cross-subscribe the broadcast adapter so messages flow.
 - Track cluster-link bookkeeping for the runtime-graph fold.
 - Track per-subscription refcounts for clean teardown.
@@ -14,12 +14,15 @@ Each helper receives the service explicitly because replication mutates its
 cluster-link and cross-subscription caches and uses its coordination adapter.
 """
 
-from typing import TYPE_CHECKING
+import asyncio
+from typing import TYPE_CHECKING, Any
 
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
     DisconnectionResult,
 )
+from kohakuterrarium.terrarium.graph_identity import GraphNameConflictError
+from kohakuterrarium.terrarium.multi_node_channels import cluster_members_for
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -68,6 +71,39 @@ def drop_cross_sub(
         service._cross_subs[key] -= 1
 
 
+async def _graph_aliases(remote: Any, graph_id: str) -> dict[str, set[str]]:
+    aliases: dict[str, set[str]] = {}
+    for info in await remote.list_creatures():
+        if info.graph_id != graph_id:
+            continue
+        for alias in {info.name, getattr(info, "config_name", None)}:
+            if alias:
+                aliases.setdefault(alias, set()).add(info.creature_id)
+    return aliases
+
+
+async def _guard_cross_node_name_conflicts(
+    service: "MultiNodeTerrariumService",
+    sender_home: str,
+    sender_graph: str,
+    receiver_home: str,
+    receiver_graph: str,
+) -> None:
+    sender_aliases, receiver_aliases = await asyncio.gather(
+        _graph_aliases(service._remotes[sender_home], sender_graph),
+        _graph_aliases(service._remotes[receiver_home], receiver_graph),
+    )
+    conflicts = sorted(set(sender_aliases) & set(receiver_aliases))
+    if not conflicts:
+        return
+    alias = conflicts[0]
+    raise GraphNameConflictError(
+        graph_id=f"{sender_graph}+{receiver_graph}",
+        name=alias,
+        creature_ids=tuple(sorted(sender_aliases[alias] | receiver_aliases[alias])),
+    )
+
+
 async def cross_node_connect(
     service: "MultiNodeTerrariumService",
     sender_id: str,
@@ -95,6 +131,13 @@ async def cross_node_connect(
         raise KeyError(sender_id)
     if info_recv is None:
         raise KeyError(receiver_id)
+    await _guard_cross_node_name_conflicts(
+        service,
+        sender_home,
+        info_send.graph_id,
+        receiver_home,
+        info_recv.graph_id,
+    )
     chan_name = channel or f"{info_send.name}_to_{info_recv.name}"
     # Both nodes need the channel object — add_channel is idempotent
     # at the engine layer when the channel already exists, but we
@@ -252,7 +295,12 @@ async def ensure_channel_replicated(
         return
     if any(getattr(c, "name", None) == channel for c in existing):
         return
-    source = await find_channel_elsewhere(service, channel, exclude=target_node)
+    source = await find_channel_elsewhere(
+        service,
+        channel,
+        exclude=target_node,
+        graph_id=target_graph,
+    )
     if source is None:
         # Channel doesn't exist anywhere — let the wire call below
         # raise the canonical "channel not found" error so the user
@@ -312,18 +360,14 @@ async def find_channel_elsewhere(
     channel: str,
     *,
     exclude: str,
+    graph_id: str,
 ) -> tuple[str, str] | None:
-    """Fan out across worker nodes to locate a graph hosting ``channel``.
-
-    Returns ``(node_id, graph_id)`` of the first match (or ``None`` if
-    no node hosts it).  ``exclude`` skips the target node — the caller
-    has already verified the channel is absent there.
-
-    Errors from individual nodes are swallowed so a single misbehaving
-    worker can't make the search fail; the worst case is "we didn't
-    find a peer that had it" and the wire call downstream raises the
-    canonical not-found error.
-    """
+    """Locate one same-component graph hosting ``channel``."""
+    members = {
+        member_graph_id
+        for _node_id, member_graph_id in cluster_members_for(service, graph_id)
+    }
+    candidates: list[tuple[str, str]] = []
     for node_id, svc in list(service._remotes.items()):
         if node_id == exclude:
             continue
@@ -332,17 +376,17 @@ async def find_channel_elsewhere(
         except Exception:
             logger.debug("list_graphs failed on %s during channel lookup", node_id)
             continue
-        for g in graphs:
-            gid = getattr(g, "graph_id", None) or ""
-            if not gid:
+        for graph in graphs:
+            candidate_graph_id = getattr(graph, "graph_id", None) or ""
+            if candidate_graph_id not in members:
                 continue
             try:
-                chans = await svc.list_channels(gid)
+                channels = await svc.list_channels(candidate_graph_id)
             except Exception:
                 continue
-            if any(getattr(c, "name", None) == channel for c in chans):
-                return node_id, gid
-    return None
+            if any(getattr(item, "name", None) == channel for item in channels):
+                candidates.append((node_id, candidate_graph_id))
+    return candidates[0] if len(candidates) == 1 else None
 
 
 __all__ = [

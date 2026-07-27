@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
 from kohakuterrarium.studio.sessions import cluster_fold, remote_meta, stop as _stop
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions.find import (
@@ -598,6 +599,20 @@ def rename_creature(service: "TerrariumService", creature_id: str, name: str) ->
     meta_registry = meta_for(service)
     if engine is not None:
         creature = engine.get_creature(creature_id)
+        topology = getattr(engine, "_topology", None)
+        graph_id = (
+            topology.creature_to_graph.get(creature.creature_id)
+            if topology is not None
+            else None
+        )
+        if graph_id is not None:
+            ensure_graph_name_available(
+                engine._topology,
+                engine._creatures,
+                graph_id=graph_id,
+                name=name,
+                exclude_id=creature.creature_id,
+            )
         apply_creature_name(creature, name)
         sid = creature.graph_id
         graph = next(

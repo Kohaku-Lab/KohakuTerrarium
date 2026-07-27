@@ -23,7 +23,21 @@ class TestExtractTargetName:
         assert wiring_mod._extract_target_name(42) is None
 
 
-# ── _resolve_creature_by_name ────────────────────────────────
+# ?? graph-local fixtures ????????????????????????????????????????
+
+
+class _Graph:
+    def __init__(self, gid, creature_ids):
+        self.graph_id = gid
+        self.creature_ids = set(creature_ids)
+
+
+class _Topology:
+    def __init__(self, graphs):
+        self.graphs = {graph.graph_id: graph for graph in graphs}
+        self.creature_to_graph = {
+            cid: graph.graph_id for graph in graphs for cid in graph.creature_ids
+        }
 
 
 class _Creature:
@@ -31,19 +45,22 @@ class _Creature:
         self.creature_id = cid
         self.name = name or cid
         self.graph_id = graph_id
+        config = type("Cfg", (), {"name": self.name})()
+        self.agent = type("Agent", (), {"config": config})()
 
 
 class _Engine:
     def __init__(self, creatures=None):
         self._creatures = creatures or {}
+        groups = {}
+        for creature in self._creatures.values():
+            groups.setdefault(creature.graph_id, set()).add(creature.creature_id)
+        self._topology = _Topology(
+            [_Graph(graph_id, ids) for graph_id, ids in groups.items()]
+        )
         self.wire_output_calls = []
         self.unwire_output_calls = []
         self.list_output_wiring_calls = []
-
-    def get_creature(self, cid):
-        if cid not in self._creatures:
-            raise KeyError(cid)
-        return self._creatures[cid]
 
     async def wire_output(self, cid, target):
         self.wire_output_calls.append((cid, target))
@@ -64,117 +81,63 @@ class _Engine:
         return True
 
 
-class TestResolveCreatureByName:
-    def test_by_id(self):
-        c = _Creature("cid-1")
-        eng = _Engine({"cid-1": c})
-        out = wiring_mod._resolve_creature_by_name(eng, "cid-1")
-        assert out is c
-
-    def test_by_name(self):
-        c = _Creature("cid-1", name="alice")
-        eng = _Engine({"cid-1": c})
-        out = wiring_mod._resolve_creature_by_name(eng, "alice")
-        assert out is c
-
-    def test_unknown(self):
-        eng = _Engine()
-        assert wiring_mod._resolve_creature_by_name(eng, "ghost") is None
-
-
-# ── _ensure_target_in_same_graph ─────────────────────────────
-
-
-class TestEnsureSameGraph:
-    async def test_unknown_source_noop(self):
-        # Unknown source returns without raising.
-        eng = _Engine()
-        await wiring_mod._ensure_target_in_same_graph(eng, "ghost", "bob")
-
-    async def test_unknown_target_noop(self):
-        c = _Creature("c1")
-        eng = _Engine({"c1": c})
-        await wiring_mod._ensure_target_in_same_graph(eng, "c1", "ghost")
-
-    async def test_same_graph_noop(self):
-        # Source and target in same graph → no ensure_same_graph call.
-        c1 = _Creature("c1", graph_id="g")
-        c2 = _Creature("c2", graph_id="g", name="bob")
-        eng = _Engine({"c1": c1, "c2": c2})
-        called = []
-
-        async def fake_merge(e, a, b):
-            called.append((a, b))
-
-        # Replace ensure_same_graph via the module's _channels import.
-        import kohakuterrarium.terrarium.channels as _channels_mod
-
-        orig = _channels_mod.ensure_same_graph
-        _channels_mod.ensure_same_graph = fake_merge
-        try:
-            await wiring_mod._ensure_target_in_same_graph(eng, "c1", "bob")
-        finally:
-            _channels_mod.ensure_same_graph = orig
-        assert called == []  # same graph → skipped
-
-    async def test_different_graph_merges(self):
-        c1 = _Creature("c1", graph_id="g1")
-        c2 = _Creature("c2", graph_id="g2", name="bob")
-        eng = _Engine({"c1": c1, "c2": c2})
-        called = []
-
-        async def fake_merge(e, a, b):
-            called.append((a, b))
-
-        import kohakuterrarium.terrarium.channels as _channels_mod
-
-        orig = _channels_mod.ensure_same_graph
-        _channels_mod.ensure_same_graph = fake_merge
-        try:
-            await wiring_mod._ensure_target_in_same_graph(eng, "c1", "bob")
-        finally:
-            _channels_mod.ensure_same_graph = orig
-        assert called == [("c1", "c2")]
-
-
 # ── wire_output / unwire_output / list_output_wiring ─────────
 
 
 class TestWireOutput:
-    async def test_root_target_skips_merge(self, monkeypatch):
+    async def test_root_target_is_preserved(self):
         eng = _Engine()
-        # Even with ``"root"`` we should NOT call ``_ensure_*``.
-        called = []
-
-        async def fake_ensure(e, src, tgt):
-            called.append((src, tgt))
-
-        monkeypatch.setattr(wiring_mod, "_ensure_target_in_same_graph", fake_ensure)
         await wiring_mod.wire_output(eng, "c1", "root")
-        assert called == []
+        assert eng.wire_output_calls == [("c1", "root")]
 
-    async def test_str_target_triggers_ensure(self, monkeypatch):
+    async def test_unique_local_name_is_canonical_runtime_id(self):
+        source = _Creature("source-id", "source")
+        target = _Creature("target-id", "worker")
+        eng = _Engine({"source-id": source, "target-id": target})
+
+        await wiring_mod.wire_output(eng, "source-id", "worker")
+
+        assert eng.wire_output_calls == [("source-id", {"to": "target-id"})]
+
+    async def test_cross_graph_target_is_rejected_without_merge(self):
+        import pytest
+        from kohakuterrarium.terrarium.graph_identity import TargetNotFoundError
+
+        source = _Creature("source-id", "source", graph_id="g1")
+        target = _Creature("target-id", "worker", graph_id="g2")
+        eng = _Engine({"source-id": source, "target-id": target})
+
+        with pytest.raises(TargetNotFoundError):
+            await wiring_mod.wire_output(eng, "source-id", "worker")
+        assert eng.wire_output_calls == []
+        assert eng._topology.creature_to_graph == {
+            "source-id": "g1",
+            "target-id": "g2",
+        }
+
+    async def test_duplicate_local_name_is_ambiguous(self):
+        import pytest
+        from kohakuterrarium.terrarium.graph_identity import AmbiguousTargetError
+
+        source = _Creature("source-id", "source")
+        first = _Creature("first-id", "worker")
+        second = _Creature("second-id", "worker")
+        eng = _Engine(
+            {
+                "source-id": source,
+                "first-id": first,
+                "second-id": second,
+            }
+        )
+
+        with pytest.raises(AmbiguousTargetError):
+            await wiring_mod.wire_output(eng, "source-id", "worker")
+        assert eng.wire_output_calls == []
+
+    async def test_invalid_mapping_without_target_stays_backward_compatible(self):
         eng = _Engine()
-        called = []
-
-        async def fake_ensure(e, src, tgt):
-            called.append((src, tgt))
-
-        monkeypatch.setattr(wiring_mod, "_ensure_target_in_same_graph", fake_ensure)
-        await wiring_mod.wire_output(eng, "c1", "bob")
-        assert called == [("c1", "bob")]
-
-    async def test_no_target_name_skips_ensure(self, monkeypatch):
-        eng = _Engine()
-        called = []
-
-        async def fake_ensure(e, src, tgt):
-            called.append((src, tgt))
-
-        monkeypatch.setattr(wiring_mod, "_ensure_target_in_same_graph", fake_ensure)
-        # No ``to`` key → no target name → no ensure.
         await wiring_mod.wire_output(eng, "c1", {"x": 1})
-        assert called == []
+        assert eng.wire_output_calls == [("c1", {"x": 1})]
 
 
 class TestUnwireOutput:

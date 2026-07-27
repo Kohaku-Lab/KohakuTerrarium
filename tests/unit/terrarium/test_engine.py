@@ -71,7 +71,9 @@ class TestAddRemoveCreature:
         duplicate.creature_id = "alice_copy"
         t._session_stores[graph_id] = object()
         try:
-            with pytest.raises(SessionNotResumableError, match="already contains"):
+            with pytest.raises(
+                (SessionNotResumableError, ValueError), match="already contains"
+            ):
                 await t.add_creature(duplicate, graph=graph_id, start=False)
             assert t.get_graph(graph_id).creature_ids == {"alice"}
         finally:
@@ -192,6 +194,57 @@ class TestConnectDisconnect:
             graph = t.get_graph(t.get_creature("alice").graph_id)
             assert "chat" in graph.send_edges["alice"]
             assert "chat" in graph.listen_edges["bob"]
+        finally:
+            await t.shutdown()
+
+    async def test_connect_rejects_non_endpoint_duplicate_names(self):
+        from kohakuterrarium.terrarium.graph_identity import GraphNameConflictError
+
+        t = await (
+            TestTerrariumBuilder()
+            .with_creature("left-endpoint")
+            .with_creature("left-worker")
+            .with_connection("left-endpoint", "left-worker")
+            .with_creature("right-endpoint")
+            .with_creature("right-worker")
+            .with_connection("right-endpoint", "right-worker")
+            .with_separate_graphs()
+            .build()
+        )
+        try:
+            left_worker = t.get_creature("left-worker")
+            right_worker = t.get_creature("right-worker")
+            left_worker.name = "worker"
+            left_worker.agent.config.name = "worker"
+            right_worker.name = "worker"
+            right_worker.agent.config.name = "worker"
+            with pytest.raises(GraphNameConflictError):
+                await t.connect("left-endpoint", "right-endpoint")
+            assert (
+                t.get_creature("left-endpoint").graph_id
+                != t.get_creature("right-endpoint").graph_id
+            )
+        finally:
+            await t.shutdown()
+
+    async def test_connect_rejects_duplicate_name_across_graphs(self):
+        from kohakuterrarium.terrarium.graph_identity import GraphNameConflictError
+
+        t = await (
+            TestTerrariumBuilder()
+            .with_creature("worker")
+            .with_creature("worker-other")
+            .with_separate_graphs()
+            .build()
+        )
+        other = t.get_creature("worker-other")
+        other.name = "worker"
+        other.agent.config.name = "worker"
+        try:
+            assert t.get_creature("worker").graph_id != other.graph_id
+            with pytest.raises(GraphNameConflictError):
+                await t.connect("worker", other.creature_id)
+            assert t.get_creature("worker").graph_id != other.graph_id
         finally:
             await t.shutdown()
 

@@ -29,6 +29,10 @@ from kohakuterrarium.core.output_wiring import (
     OutputWiringEntry,
     render_prompt,
 )
+from kohakuterrarium.terrarium.graph_identity import (
+    GraphIdentityError,
+    resolve_local_graph_target,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -79,10 +83,10 @@ class TerrariumOutputWiringResolver:
                 self._warn_once(target, "terrarium has no root agent configured")
             return root_agent
 
-        handle = self._resolve_handle(target)
+        handle = self._resolve_handle(target, source=source)
         if handle is None:
             if not self._has_cross_node_peer(target):
-                self._warn_once(target, "no such creature in this terrarium")
+                self._warn_once(target, "no such creature in the source graph")
             return None
         return handle.agent
 
@@ -110,21 +114,41 @@ class TerrariumOutputWiringResolver:
         )
         return True
 
-    def _resolve_handle(self, target: str):
-        handle = self._creatures.get(target)
-        if handle is not None:
-            return handle
-        for creature in self._creatures.values():
-            if getattr(creature, "name", None) == target:
-                return creature
-            agent = getattr(creature, "agent", None)
-            config = getattr(agent, "config", None)
-            if getattr(config, "name", None) == target:
-                return creature
-        return None
+    def _resolve_handle(self, target: str, *, source: str = ""):
+        if self._engine is None:
+            handle = self._creatures.get(target)
+            if handle is not None:
+                return handle
+            matches = [
+                creature
+                for creature in self._creatures.values()
+                if target
+                in {
+                    getattr(creature, "name", None),
+                    getattr(getattr(creature, "config", None), "name", None),
+                    getattr(
+                        getattr(getattr(creature, "agent", None), "config", None),
+                        "name",
+                        None,
+                    ),
+                }
+            ]
+            return matches[0] if len(matches) == 1 else None
+        try:
+            resolved = resolve_local_graph_target(
+                self._engine._topology,
+                self._creatures,
+                caller_id=source,
+                target=target,
+            )
+        except GraphIdentityError:
+            return None
+        return self._creatures.get(resolved.target_id)
 
     def _resolve_graph_root_agent(self, source: str | None) -> "Agent | None":
-        source_handle = self._resolve_handle(source or "")
+        source_handle = self._creatures.get(source or "")
+        if source_handle is None and self._engine is None:
+            source_handle = self._resolve_handle(source or "", source=source or "")
         source_graph = getattr(source_handle, "graph_id", None)
         candidates = [
             c
@@ -188,8 +212,11 @@ class TerrariumOutputWiringResolver:
                 # client mode); standalone runs miss and skip as before.
                 forwarder = getattr(self._engine, "_output_wire_adapter", None)
                 if forwarder is not None:
-                    peer = forwarder.peer_for_target(entry.to)
-                    if peer is not None:
+                    source_graph_id = self._engine._topology.creature_to_graph.get(
+                        source
+                    )
+                    peer = forwarder.peer_for_target(entry.to, graph_id=source_graph_id)
+                    if peer is not None and source_graph_id is not None:
                         delivered_content = content if entry.with_content else ""
                         prompt_text = render_prompt(
                             entry,
@@ -201,16 +228,20 @@ class TerrariumOutputWiringResolver:
                         )
                         asyncio.create_task(
                             forwarder.forward_event(
-                                peer,
-                                {
-                                    "target_name": entry.to,
-                                    "source": source,
+                                target_name=entry.to,
+                                event={
+                                    "type": "creature_output",
                                     "content": delivered_content,
-                                    "with_content": bool(entry.with_content),
-                                    "source_event_type": source_event_type,
-                                    "turn_index": turn_index,
+                                    "context": {
+                                        "source": source,
+                                        "with_content": bool(entry.with_content),
+                                        "source_event_type": source_event_type,
+                                        "turn_index": turn_index,
+                                    },
                                     "prompt_override": prompt_text,
                                 },
+                                source_creature_id=source,
+                                source_graph_id=source_graph_id,
                             ),
                             name=f"wiring_remote_{source}_to_{entry.to}_{turn_index}",
                         )
