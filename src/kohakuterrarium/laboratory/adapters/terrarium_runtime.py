@@ -309,18 +309,27 @@ class TerrariumRuntimeAdapter:
                 return {"status": self._engine.status()}
 
             case "apply_recipe":
-                await self._prewarm_llm_identity(msg.body.get("llm"))
+                llm = msg.body.get("llm")
+                if llm is not None and not isinstance(llm, str):
+                    raise ValueError("llm must be a selector string")
+                await self._prewarm_profile_by_selector(llm or "")
                 recipe_path = str(msg.body.get("recipe_path") or "")
                 if not recipe_path:
                     raise ValueError("recipe_path is required")
-                session_path = msg.body.get("session_path")
+                if "session_path" in msg.body:
+                    raise ValueError(
+                        "session_path is worker-owned and cannot be provided"
+                    )
+                persist = msg.body.get("persist", False)
+                if not isinstance(persist, bool):
+                    raise ValueError("persist must be a boolean")
                 graph = await self._engine.apply_recipe(
                     recipe_path,
                     pwd=msg.body.get("pwd"),
-                    llm=msg.body.get("llm"),
+                    llm=llm,
                     strict=bool(msg.body.get("strict", True)),
                     start=bool(msg.body.get("start", True)),
-                    session=session_path or False,
+                    session=True if persist else False,
                 )
                 creatures = [
                     pack_creature_info(creature_to_info(creature))

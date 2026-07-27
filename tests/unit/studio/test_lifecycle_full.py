@@ -12,7 +12,7 @@ import pytest
 
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
 from kohakuterrarium.testing.terrarium import (
     TestTerrariumBuilder,
     _FakeAgent,
@@ -84,7 +84,6 @@ class TestStartCreatureLocal:
         # When on_node != "_host", takes the remote path.
         engine = Terrarium()
         svc = LocalTerrariumService(engine)
-        from kohakuterrarium.terrarium.service import CreatureInfo
 
         info = CreatureInfo(
             creature_id="cid-r",

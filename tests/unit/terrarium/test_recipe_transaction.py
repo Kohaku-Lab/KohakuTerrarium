@@ -69,30 +69,6 @@ async def test_recipe_transaction_skips_owned_resource_removed_elsewhere() -> No
 
 
 @pytest.mark.asyncio
-async def test_recipe_transaction_external_compensation_is_best_effort(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    engine = _Engine([])
-    transaction = RecipeApplyTransaction(engine)  # type: ignore[arg-type]
-    calls: list[str] = []
-
-    async def succeeds() -> None:
-        calls.append("succeeds")
-
-    async def fails() -> None:
-        calls.append("fails")
-        raise RuntimeError("external cleanup failed")
-
-    transaction.record_external_compensation(succeeds)
-    transaction.record_external_compensation(fails)
-
-    await transaction.rollback()
-
-    assert calls == ["fails", "succeeds"]
-    assert "recipe external compensation failed" in caplog.text
-
-
-@pytest.mark.asyncio
 async def test_recipe_transaction_rollback_survives_caller_cancellation() -> None:
     engine = _Engine(["new-a"])
     engine.block_remove = True

@@ -243,7 +243,7 @@ class TestLifecycle:
         )
 
         out_graph, creatures = await svc.apply_recipe(
-            "recipe://team/config.yaml", start=False
+            "recipe://team/config.yaml", start=False, persist=True
         )
 
         assert out_graph.creature_ids == {"alice", "bob"}
@@ -256,7 +256,7 @@ class TestLifecycle:
                 "llm": None,
                 "strict": True,
                 "start": False,
-                "session_path": None,
+                "persist": True,
             },
         )
 

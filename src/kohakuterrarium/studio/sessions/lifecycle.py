@@ -406,7 +406,7 @@ async def _start_remote_terrarium(
         remote_recipe,
         pwd=pwd,
         llm=llm,
-        session_path=f"sessions/{name or source_path.stem}.kohakutr",
+        persist=True,
     )
     registered_ids: list[str] = []
     try:
@@ -421,7 +421,8 @@ async def _start_remote_terrarium(
         for creature in creatures:
             service._home[creature.creature_id] = on_node
             registered_ids.append(creature.creature_id)
-        base_name = name or load_terrarium_config(config_path).name
+        requested_name = name.strip() if name and name.strip() else None
+        base_name = requested_name or load_terrarium_config(config_path).name
         existing_names = {entry.get("name") for entry in meta_for(service).values()}
         session_name = base_name
         suffix = 2

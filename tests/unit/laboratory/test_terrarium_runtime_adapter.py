@@ -250,6 +250,36 @@ class TestTopologyReads:
 
 
 class TestLifecycleOps:
+    async def test_apply_recipe_persistence_is_worker_owned(self):
+        adapter = await _make_adapter()
+        calls = []
+
+        async def apply(recipe, **kwargs):
+            calls.append({"recipe": recipe, **kwargs})
+            return adapter._engine.list_graphs()[0]
+
+        adapter._engine.apply_recipe = apply
+        try:
+            out = await adapter._dispatch(
+                _msg("apply_recipe", {"recipe_path": "recipe.yaml", "persist": True})
+            )
+            assert out["graph"]["graph_id"]
+            assert calls[0]["session"] is True
+
+            rejected = await adapter._dispatch(
+                _msg(
+                    "apply_recipe",
+                    {
+                        "recipe_path": "recipe.yaml",
+                        "session_path": "../../escape.kohakutr",
+                    },
+                )
+            )
+            assert rejected["error"]["kind"] == "invalid"
+            assert len(calls) == 1
+        finally:
+            await adapter._engine.shutdown()
+
     async def test_remove_creature(self):
         adapter = await _make_adapter()
         try:

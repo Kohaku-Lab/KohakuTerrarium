@@ -250,9 +250,13 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         llm: Any = None,
         strict: bool = True,
         start: bool = True,
-        session_path: str | None = None,
+        persist: bool = False,
     ) -> tuple[GraphTopology, list[CreatureInfo]]:
-        """Apply one complete recipe on this worker without cross-node splitting."""
+        """Apply one complete recipe on this worker without cross-node splitting.
+
+        Persistence is worker-owned so display names and controller-provided
+        paths can never select the session file.
+        """
         body = _maybe_raise(
             await self._req(
                 "apply_recipe",
@@ -262,7 +266,7 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
                     "llm": llm,
                     "strict": strict,
                     "start": start,
-                    "session_path": session_path,
+                    "persist": persist,
                 },
             )
         )

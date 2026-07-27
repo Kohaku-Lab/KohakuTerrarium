@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import inspect
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from kohakuterrarium.terrarium.channels import remove_channel_trigger
 from kohakuterrarium.utils.logging import get_logger
@@ -19,7 +18,7 @@ logger = get_logger(__name__)
 
 @dataclass
 class RecipeApplyTransaction:
-    """Track resources owned by one recipe application and roll them back."""
+    """Track engine resources owned by one recipe application and roll them back."""
 
     engine: Terrarium
     created_creature_ids: list[str] = field(default_factory=list)
@@ -29,9 +28,6 @@ class RecipeApplyTransaction:
         default_factory=dict
     )
     existing_graph_id: str | None = None
-    external_compensations: list[Callable[[], Awaitable[Any]]] = field(
-        default_factory=list
-    )
     _rolled_back: bool = False
 
     def record_creature(self, creature_id: str) -> None:
@@ -90,12 +86,6 @@ class RecipeApplyTransaction:
             graph.listen_edges.pop(creature_id, None)
             graph.send_edges.pop(creature_id, None)
             self.engine._topology.creature_to_graph.pop(creature_id, None)
-
-    def record_external_compensation(
-        self, compensation: Callable[[], Awaitable[Any]]
-    ) -> None:
-        """Register a best-effort cleanup for an external side effect."""
-        self.external_compensations.append(compensation)
 
     async def rollback(self) -> None:
         """Remove only resources created by this application, exactly once."""
@@ -160,12 +150,6 @@ class RecipeApplyTransaction:
                         "recipe rollback failed to close session store",
                         extra={"graph_id": graph_id},
                     )
-
-        for compensation in reversed(self.external_compensations):
-            try:
-                await compensation()
-            except BaseException:
-                logger.exception("recipe external compensation failed")
 
 
 async def rollback_shielded(transaction: RecipeApplyTransaction) -> None:
