@@ -98,17 +98,11 @@ async def _spawn_alpha_bravo_cluster(host, w1, w2, cfg_alpha, cfg_bravo):
     b_id = sb["creatures"][0]["creature_id"]
     b_name = sb["creatures"][0]["name"]
 
-    await host.http.post(
-        f"/api/sessions/topology/{graph_a}/channels", json={"name": "ch1"}
+    connected = await host.http.post(
+        f"/api/sessions/topology/{graph_a}/connect",
+        json={"sender": a_id, "receiver": b_id, "channel": "ch1"},
     )
-    await host.http.post(
-        f"/api/sessions/topology/{graph_a}/creatures/{a_id}/wire",
-        json={"channel": "ch1", "direction": "send"},
-    )
-    await host.http.post(
-        f"/api/sessions/topology/{graph_b}/creatures/{b_id}/wire",
-        json={"channel": "ch1", "direction": "listen"},
-    )
+    assert connected.status_code == 200, connected.text
     return graph_a, graph_b, a_id, a_name, b_id, b_name
 
 
@@ -735,9 +729,17 @@ class TestMultinodeDeepProbes:
                         r.status_code == 200
                     ), f"create chan{i}: {r.status_code} {r.text}"
 
-                # Wire alpha as sender on odd, listener on even;
-                # bravo opposite. Forces cross-node replication for all 10.
-                for i in range(1, 11):
+                # Establish the logical cluster with exact endpoint identities.
+                linked = await host.http.post(
+                    f"/api/sessions/topology/{ga}/connect",
+                    json={"sender": a_id, "receiver": b_id, "channel": "chan1"},
+                )
+                assert linked.status_code == 200, linked.text
+
+                # Wire alpha as sender on later odd channels and listener on
+                # even channels; bravo is the opposite. Once the explicit
+                # link exists, same-component replication handles chan2..10.
+                for i in range(2, 11):
                     a_dir = "send" if i % 2 else "listen"
                     b_dir = "listen" if i % 2 else "send"
                     ra = await host.http.post(
