@@ -64,6 +64,45 @@ class TestAddRemoveCreature:
         finally:
             await t.shutdown()
 
+    async def test_start_failure_removes_inserted_creature(self):
+        t = Terrarium()
+        creature = Creature(
+            creature_id="alice", name="alice", agent=_FakeAgent("alice")
+        )
+
+        async def fail_start():
+            raise RuntimeError("start failed")
+
+        creature.agent.start = fail_start
+        try:
+            with pytest.raises(RuntimeError, match="start failed"):
+                await t.add_creature(creature)
+            assert t.list_creatures() == []
+            assert t.list_graphs() == []
+        finally:
+            await t.shutdown()
+
+    async def test_session_attach_failure_removes_inserted_creature(self, monkeypatch):
+        t = Terrarium()
+        creature = Creature(
+            creature_id="alice", name="alice", agent=_FakeAgent("alice")
+        )
+
+        async def fail_attach(*args, **kwargs):
+            raise RuntimeError("attach failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.autosession.attach_for_new_creature",
+            fail_attach,
+        )
+        try:
+            with pytest.raises(RuntimeError, match="attach failed"):
+                await t.add_creature(creature, start=False)
+            assert t.list_creatures() == []
+            assert t.list_graphs() == []
+        finally:
+            await t.shutdown()
+
     async def test_persisted_graph_rejects_duplicate_name_before_add(self):
         t = await TestTerrariumBuilder().with_creature("alice").build()
         graph_id = t.get_creature("alice").graph_id
@@ -604,6 +643,7 @@ class TestApplyRecipe:
             start=True,
             creature_builder=None,
             created_ids=None,
+            transaction=None,
         ):
             captured["recipe"] = recipe
             captured["pwd"] = pwd

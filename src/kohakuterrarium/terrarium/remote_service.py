@@ -242,6 +242,34 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
     # Lifecycle
     # ------------------------------------------------------------------
 
+    async def apply_recipe(
+        self,
+        recipe_path: str,
+        *,
+        pwd: str | None = None,
+        llm: Any = None,
+        strict: bool = True,
+        start: bool = True,
+        session_path: str | None = None,
+    ) -> tuple[GraphTopology, list[CreatureInfo]]:
+        """Apply one complete recipe on this worker without cross-node splitting."""
+        body = _maybe_raise(
+            await self._req(
+                "apply_recipe",
+                {
+                    "recipe_path": recipe_path,
+                    "pwd": pwd,
+                    "llm": llm,
+                    "strict": strict,
+                    "start": start,
+                    "session_path": session_path,
+                },
+            )
+        )
+        graph = unpack_graph_topology(body["graph"])
+        creatures = [unpack_creature_info(item) for item in body["creatures"]]
+        return graph, creatures
+
     async def add_creature(
         self,
         config: Any,

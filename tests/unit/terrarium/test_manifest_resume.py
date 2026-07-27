@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -80,7 +81,12 @@ class TestManifestResume:
             if not isinstance(config, AgentConfig):
                 return await original_add(config, **kwargs)
             creature = engine._creature_for_restore(config, kwargs)
-            return await original_add(creature, start=False, graph=kwargs["graph"])
+            return await original_add(
+                creature,
+                start=False,
+                graph=kwargs["graph"],
+                identity_reserved=kwargs.get("identity_reserved", False),
+            )
 
         engine.add_creature = _wrapped_add
         try:
@@ -93,3 +99,44 @@ class TestManifestResume:
             assert graph.send_edges["alice_id"] == {"tasks"}
         finally:
             await engine.shutdown()
+
+    async def test_manifest_ids_are_reserved_before_restore_io(
+        self, monkeypatch, tmp_path
+    ):
+        manifest_data = _manifest()
+        manifest = resume_mod._manifest.parse_manifest(manifest_data)
+        engine = await TestTerrariumBuilder().build()
+        first_started = asyncio.Event()
+        release_first = asyncio.Event()
+        calls = 0
+
+        async def blocked_restore(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            first_started.set()
+            await release_first.wait()
+            return "graph_saved"
+
+        monkeypatch.setattr(resume_mod, "_resume_reserved_manifest", blocked_restore)
+        first = asyncio.create_task(
+            resume_mod._resume_manifest_into_engine(
+                engine,
+                tmp_path / "run.kohakutr",
+                manifest,
+                pwd=None,
+                store=object(),
+            )
+        )
+        await first_started.wait()
+        with pytest.raises(ValueError, match="already exists"):
+            await resume_mod._resume_manifest_into_engine(
+                engine,
+                tmp_path / "run.kohakutr",
+                manifest,
+                pwd=None,
+                store=object(),
+            )
+        release_first.set()
+        assert await first == "graph_saved"
+        assert calls == 1
+        await engine.shutdown()

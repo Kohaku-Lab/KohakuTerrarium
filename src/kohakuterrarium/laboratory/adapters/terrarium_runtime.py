@@ -308,6 +308,29 @@ class TerrariumRuntimeAdapter:
             case "status_snapshot":
                 return {"status": self._engine.status()}
 
+            case "apply_recipe":
+                await self._prewarm_llm_identity(msg.body.get("llm"))
+                recipe_path = str(msg.body.get("recipe_path") or "")
+                if not recipe_path:
+                    raise ValueError("recipe_path is required")
+                session_path = msg.body.get("session_path")
+                graph = await self._engine.apply_recipe(
+                    recipe_path,
+                    pwd=msg.body.get("pwd"),
+                    llm=msg.body.get("llm"),
+                    strict=bool(msg.body.get("strict", True)),
+                    start=bool(msg.body.get("start", True)),
+                    session=session_path or False,
+                )
+                creatures = [
+                    pack_creature_info(creature_to_info(creature))
+                    for creature in self._engine.list_creatures()
+                    if creature.graph_id == graph.graph_id
+                ]
+                return {
+                    "graph": pack_graph_topology(graph),
+                    "creatures": creatures,
+                }
             case "add_creature":
                 config = unpack_creature_build_input(msg.body["config"])
                 # LLM construction needs remote profiles and credentials already cached.

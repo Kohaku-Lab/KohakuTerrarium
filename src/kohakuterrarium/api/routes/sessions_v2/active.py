@@ -102,17 +102,7 @@ async def create_creature_session(
 async def create_terrarium_session(
     req: TerrariumCreate, service: TerrariumService = Depends(get_service)
 ):
-    """Start a multi-creature session from a host-local recipe.
-
-    Remote recipe spawning is rejected rather than silently ignoring the selected
-    worker.
-    """
-    if req.on_node and req.on_node != "_host":
-        raise HTTPException(
-            501,
-            "Recipe spawn on a remote worker is not implemented yet — "
-            "spawn individual creatures via /agents with on_node instead.",
-        )
+    """Start the complete recipe on the explicitly selected runtime node."""
     try:
         session = await lifecycle.start_terrarium(
             service,
@@ -120,6 +110,7 @@ async def create_terrarium_session(
             pwd=req.pwd,
             name=req.name,
             llm=req.llm,
+            on_node=req.on_node or "_host",
         )
         return {**session.to_dict(), "status": "running"}
     except (ValueError, KeyError, FileNotFoundError) as e:
@@ -159,12 +150,6 @@ async def create_agent_compat(
 async def create_terrarium_compat(
     req: TerrariumCreate, service: TerrariumService = Depends(get_service)
 ):
-    if req.on_node and req.on_node != "_host":
-        raise HTTPException(
-            501,
-            "Recipe spawn on a remote worker is not implemented yet — "
-            "spawn individual creatures via /agents with on_node instead.",
-        )
     try:
         session = await lifecycle.start_terrarium(
             service,
@@ -172,6 +157,7 @@ async def create_terrarium_compat(
             pwd=req.pwd,
             name=req.name,
             llm=req.llm,
+            on_node=req.on_node or "_host",
         )
         return {"terrarium_id": session.session_id, "status": "running"}
     except (ValueError, KeyError, FileNotFoundError) as e:
