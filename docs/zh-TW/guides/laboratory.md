@@ -303,8 +303,11 @@ info = await service.add_creature(cfg, on_node="worker-gpu-1")
 ## 多節點生態瓶
 
 一個*生態瓶*（多生物圖）可以透過跨節點頻道橫跨多個 worker。
-Recipe 檔案（目前）不包含每隻生物的節點指定，所以用命令式
-方式建構拓樸：
+Recipe 檔案（目前）不包含每隻生物的節點指定。Studio 的
+**Run on** 選擇器（或 `apply_recipe(..., on_node="worker-1")`）
+會把整份 recipe 部署到一個已連線的 worker，並由該 worker 持有
+session 持久化。若要讓一個 terrarium 橫跨多個 worker，請用
+命令式方式建構拓樸：
 
 ```python
 # 在 worker-1 生 alpha、worker-2 生 bravo
@@ -427,7 +430,7 @@ worker 側以 WARNING 等級記錄，不會出現在主機的 log 裡。
 
 | 症狀 | 可能原因 |
 |---------|--------------|
-| spawn 時 `"on_node" is required` | 你在 lab-host 模式下試圖在主機上 spawn。挑一個 worker，或用 recipe（recipe 仍在協調引擎上執行）。 |
+| spawn 時 `"on_node" is required` | 你在 lab-host 模式下試圖在主機上 spawn。請選擇已連線的 worker；所選 recipe 會完整執行在該 worker 上，不會自動拆分到多個 worker。 |
 | Worker 連上後立刻斷線 | Token 不符。Hello/Welcome handshake 會以 INFO 等級記錄拒絕。 |
 | `worker 'X' resume failed: Session has no config_path or config_snapshot in metadata` | 鏡像檔案比 1.5.x 的 meta-sync 順序還舊。重新 spawn 生物並從新檔案 resume。 |
 | Codex `re-login due to process mismatch` 錯誤 | 你在 worker 行程裡用主機的 Codex token。在 **worker 上**透過 Settings → Providers（Manage on: 設為該 worker）登入 Codex。 |
