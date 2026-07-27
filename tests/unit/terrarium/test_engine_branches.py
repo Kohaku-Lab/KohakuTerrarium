@@ -108,6 +108,9 @@ class TestTerrariumResumeNameMatch:
         from unittest.mock import AsyncMock
 
         t.attach_session = AsyncMock()
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
         try:
             await resume_mod.resume_into_engine(t, tmp_path / "saved.kohakutr")
             # ``alice`` matched the saved set → injected under "alice".
@@ -170,6 +173,9 @@ class TestTerrariumResumeNameMatch:
         from unittest.mock import AsyncMock
 
         t.attach_session = AsyncMock()
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
         try:
             # Must not raise despite the phantom membership entry.
             gid = await resume_mod.resume_into_engine(t, tmp_path / "saved.kohakutr")
