@@ -435,6 +435,26 @@ class TestHostResume:
         assert response.json()["detail"]["code"] == "unresolved"
         assert calls == ["preflight"]
 
+    def test_lab_host_rejected_before_path_resolution(self, monkeypatch):
+        calls = []
+
+        def forbidden_resolve(*_args):
+            calls.append("resolve")
+            return None
+
+        def forbidden_factory():
+            calls.append("service")
+            return _LocalService()
+
+        monkeypatch.setattr(resume_mod, "resolve_session_path_in", forbidden_resolve)
+        app = _app(service_factory=forbidden_factory)
+        app.state.lab_mode = "lab-host"
+
+        response = TestClient(app).post("/sessions/ghost/resume")
+
+        assert response.status_code == 400
+        assert calls == []
+
     def test_session_missing(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod, "resolve_session_path_in", lambda n, _session_dir: None
