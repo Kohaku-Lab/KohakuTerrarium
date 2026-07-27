@@ -72,6 +72,8 @@ class TestMergeSessionStores:
                 assert "sid-b" in parents
                 assert merged.get_events("alice")
                 assert merged.get_events("bob")
+                assert bool(merged.meta["conversation_open"]) is True
+                assert merged.meta["conversation_id"] == s1.meta["conversation_id"]
             finally:
                 merged.close()
         finally:
@@ -96,9 +98,14 @@ class TestSplitSessionStore:
             new_stores = sc.split_session_store(src, new_paths)
             try:
                 assert len(new_stores) == 2
+                child_conversation_ids = set()
                 for s in new_stores:
                     assert "parent-sid" in s.meta["parent_session_ids"]
                     assert s.get_events("alice")
+                    assert bool(s.meta["conversation_open"]) is True
+                    child_conversation_ids.add(s.meta["conversation_id"])
+                assert len(child_conversation_ids) == 2
+                assert src.meta["conversation_id"] not in child_conversation_ids
             finally:
                 for s in new_stores:
                     s.close()
@@ -257,6 +264,12 @@ class TestApplyMerge:
             # Dropped store closed; survivor open + still mapped.
             assert getattr(s2, "_closed", False) is True
             assert getattr(s1, "_closed", False) is False
+            reopened_s2 = SessionStore.open_readonly(tmp_path / "g2.kohakutr")
+            try:
+                assert bool(reopened_s2.meta["conversation_open"]) is False
+                assert reopened_s2.meta["status"] == "completed"
+            finally:
+                reopened_s2.close(update_status=False)
             assert eng._session_stores == {"g1": s1}
             # Dropped graph's events landed on the survivor.
             assert s1.get_events("bob")
