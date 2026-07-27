@@ -10,6 +10,7 @@ HTTP / CLI orchestration.
 """
 
 import os
+from copy import deepcopy
 from pathlib import Path
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
@@ -46,6 +47,7 @@ if TYPE_CHECKING:
     from kohakuterrarium.terrarium.engine import Terrarium
 
 logger = get_logger(__name__)
+_MISSING = object()
 
 
 def _mark_conversation_open(store: SessionStore) -> None:
@@ -204,6 +206,48 @@ def _resolve_store_path(store: SessionStore | str | Path) -> Path:
     return Path(str(store))
 
 
+def _legacy_workspace_snapshot(store: SessionStore) -> dict[str, object] | None:
+    meta = getattr(store, "meta", None)
+    if not hasattr(meta, "get"):
+        return None
+    snapshot: dict[str, object] = {}
+    for key in (_manifest.MANIFEST_KEY, _topo_snap.META_KEY, "pwd"):
+        value = meta.get(key, _MISSING)
+        snapshot[key] = value if value is _MISSING else deepcopy(value)
+    return snapshot
+
+
+def _restore_legacy_workspace(
+    store: SessionStore,
+    original: dict[str, object],
+    error: BaseException,
+) -> None:
+    """Restore legacy workspace metadata or mark the store fail-closed."""
+    rollback_errors: list[str] = []
+    for key in (_manifest.MANIFEST_KEY, _topo_snap.META_KEY, "pwd"):
+        try:
+            value = original[key]
+            if value is _MISSING:
+                store.meta.pop(key, None)
+            else:
+                store.meta[key] = deepcopy(value)
+        except BaseException as rollback_error:
+            rollback_errors.append(f"{key}: {rollback_error}")
+            logger.exception(
+                "Legacy workspace metadata rollback failed",
+                field=key,
+            )
+    if rollback_errors:
+        try:
+            store.meta["workspace_resume_state"] = {
+                "status": "partial_dirty",
+                "error": str(error),
+                "rollback_error": "; ".join(rollback_errors),
+            }
+        except BaseException:
+            logger.exception("Unable to persist legacy workspace resume dirty marker")
+
+
 async def _resume_agent_into_engine(
     engine: "Terrarium",
     path: Path,
@@ -234,6 +278,8 @@ async def _resume_agent_into_engine(
         mark_conversation_open=False,
     )
     created: list[str] = []
+    original_workspace = _legacy_workspace_snapshot(store)
+    workspace_publish_started = False
     try:
         meta = getattr(store, "meta", {})
         snapshot = meta.get("config_snapshot") if hasattr(meta, "get") else None
@@ -242,18 +288,31 @@ async def _resume_agent_into_engine(
                 snapshot = pack_agent_config(agent.config)
             except (AttributeError, TypeError):
                 snapshot = {"name": agent.config.name}
+        saved_or_default_pwd = str(
+            pwd or (meta.get("pwd") if hasattr(meta, "get") else None) or os.getcwd()
+        )
+        effective_pwd = (
+            str(
+                Path(
+                    getattr(getattr(agent, "executor", None), "_working_dir", None)
+                    or saved_or_default_pwd
+                )
+                .expanduser()
+                .resolve()
+            )
+            if pwd is not None
+            else saved_or_default_pwd
+        )
         creature_obj = Creature(
             creature_id=_safe_creature_id(agent.config.name),
             name=agent.config.name,
             agent=agent,
             config=agent.config,
             config_snapshot=snapshot,
-            source_ref=meta.get("config_path") if hasattr(meta, "get") else None,
-            build_pwd=str(
-                pwd
-                or (meta.get("pwd") if hasattr(meta, "get") else None)
-                or os.getcwd()
+            source_ref=(
+                (meta.get("config_path") or None) if hasattr(meta, "get") else None
             ),
+            build_pwd=effective_pwd,
         )
         # ``session=False``: the SAVED store attaches below — autosession
         # minting a fresh sibling file here would orphan it on disk.
@@ -269,7 +328,8 @@ async def _resume_agent_into_engine(
         # without adding a duplicate SessionOutput sink. Resume OPENED this
         # store — register it as engine-owned so shutdown closes it (a
         # leaked writer lock blocks any later adopt of the same file).
-        await engine.attach_session(creature.graph_id, store)
+        with _checkpoint.suppress(engine):
+            await engine.attach_session(creature.graph_id, store)
         engine._owned_sessions.add(creature.graph_id)
 
         await creature.start()
@@ -277,7 +337,14 @@ async def _resume_agent_into_engine(
         # and Drive repository are already attached, so persisted Drives
         # redeliver only after startup settles.
         _schedule_drive_reconcile(engine, creature)
-        await _checkpoint.checkpoint(engine, creature.graph_id)
+        if pwd is not None and hasattr(store, "meta"):
+            workspace_publish_started = True
+            store.meta["pwd"] = effective_pwd
+        workspace_publish_started = True
+        if not await _checkpoint.checkpoint(engine, creature.graph_id):
+            raise SessionNotResumableError(
+                "Workspace resume checkpoint did not persist a valid graph manifest"
+            )
         _finish_conversation_resume(store)
 
         logger.info(
@@ -287,7 +354,9 @@ async def _resume_agent_into_engine(
             path=str(path),
         )
         return creature.graph_id
-    except BaseException:
+    except BaseException as exc:
+        if workspace_publish_started and original_workspace is not None:
+            _restore_legacy_workspace(store, original_workspace, exc)
         await _rollback_failed_adoption(engine, store, created)
         raise
 
@@ -330,6 +399,9 @@ async def _resume_terrarium_body(
     accumulates the ids of the creatures this adoption adds.
     """
     meta = store.load_meta()
+    original_workspace = _legacy_workspace_snapshot(store)
+    workspace_publish_started = False
+    requested_pwd = pwd
     config_path = meta.get("config_path", "")
     if not config_path:
         raise SessionNotResumableError("Saved terrarium has no config_path in metadata")
@@ -344,6 +416,8 @@ async def _resume_terrarium_body(
             f"The {source} working directory is missing or invalid: {pwd!r}. "
             "Choose a replacement directory or open the session history."
         )
+    if requested_pwd is not None:
+        pwd = str(Path(pwd).expanduser().resolve())
 
     config = load_terrarium_config(config_path)
 
@@ -414,7 +488,8 @@ async def _resume_terrarium_body(
     # Must precede the topology replay — the replay reads
     # ``runtime_topology`` off the engine-attached store. Resume OPENED
     # this store — register it as engine-owned so shutdown closes it.
-    await engine.attach_session(sid, store)
+    with _checkpoint.suppress(engine):
+        await engine.attach_session(sid, store)
     engine._owned_sessions.add(sid)
 
     # Replay runtime topology mutations on top of the recipe-rebuilt
@@ -439,9 +514,21 @@ async def _resume_terrarium_body(
         # only once each creature's startup settles.
         _schedule_drive_reconcile(engine, creature)
 
-    if sid in engine._topology.graphs:
-        await _checkpoint.checkpoint(engine, sid)
-    _finish_conversation_resume(store)
+    try:
+        if requested_pwd is not None:
+            workspace_publish_started = True
+            store.meta["pwd"] = pwd
+        if sid in engine._topology.graphs:
+            workspace_publish_started = True
+            if not await _checkpoint.checkpoint(engine, sid):
+                raise SessionNotResumableError(
+                    "Workspace resume checkpoint did not persist a valid graph manifest"
+                )
+        _finish_conversation_resume(store)
+    except BaseException as exc:
+        if workspace_publish_started and original_workspace is not None:
+            _restore_legacy_workspace(store, original_workspace, exc)
+        raise
     logger.info(
         "Terrarium session resumed into engine",
         session_id=sid,

@@ -8,6 +8,8 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from httpx import ASGITransport, AsyncClient
 
+from kohakuterrarium.bootstrap import agent_init as _agent_init
+from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.api.deps import (
     get_service_factory,
     resolve_request_session_dir,
@@ -17,8 +19,14 @@ from kohakuterrarium.api.routes.persistence.resume_remote import worker_absolute
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.studio.sessions.handles import Session
+from kohakuterrarium.testing.llm import ScriptedLLM
+from kohakuterrarium.terrarium import resume as terrarium_resume_mod
+from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
+from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.terrarium.workspace_resume import (
     WorkspaceResumeError,
     WorkspaceResumeFailure,
@@ -339,6 +347,67 @@ class TestHostResume:
 
         assert response.status_code == 409
         assert response.json()["detail"]["code"] == "stale_manifest"
+
+    def test_legacy_replacement_survives_resume_stop_preflight(
+        self, monkeypatch, tmp_path
+    ):
+        """Exercise the UI's preflight -> resume -> stop -> preflight lifecycle."""
+        old_pwd = tmp_path / "deleted-workspace"
+        replacement = tmp_path / "relocated"
+        replacement.mkdir()
+        path = tmp_path / "saved.kohakutr"
+        store = SessionStore(path)
+        store.init_meta(
+            "saved",
+            "agent",
+            "",
+            str(old_pwd),
+            ["alice"],
+            config_snapshot=pack_agent_config(AgentConfig(name="alice")),
+        )
+        store.close(update_status=False)
+
+        monkeypatch.setattr(resume_mod, "resolve_session_path_in", lambda *_args: path)
+        monkeypatch.setattr(
+            resume_mod,
+            "prepare_resume_workspace",
+            terrarium_resume_mod.prepare_resume_workspace,
+        )
+
+        def scripted_provider(*_args, **_kwargs):
+            return ScriptedLLM(["ok"])
+
+        monkeypatch.setattr(_bootstrap_llm, "create_llm_provider", scripted_provider)
+        monkeypatch.setattr(_agent_init, "create_llm_provider", scripted_provider)
+
+        engine = Terrarium(drive_config=DriveRuntimeConfig(enabled=False))
+        service = LocalTerrariumService(engine)
+        with TestClient(_app(service=service, session_dir=tmp_path)) as client:
+            initial = client.post("/sessions/saved/resume/preflight")
+            assert initial.status_code == 200
+            assert initial.json()["legacy"] is True
+            assert initial.json()["ready"] is False
+
+            resumed = client.post(
+                "/sessions/saved/resume",
+                json={"pwd": str(replacement)},
+            )
+            assert resumed.status_code == 200, resumed.text
+            sid = resumed.json()["instance_id"]
+
+            client.portal.call(lifecycle.stop_session, service, sid)
+
+            second = client.post("/sessions/saved/resume/preflight")
+            assert second.status_code == 200
+            assert second.json()["legacy"] is True
+            assert second.json()["ready"] is True
+            client.portal.call(engine.shutdown)
+
+        reopened = SessionStore(path)
+        try:
+            assert reopened.load_meta()["pwd"] == str(replacement.resolve())
+        finally:
+            reopened.close(update_status=False)
 
     def test_local_resume_orders_preflight_before_service_and_forwards_overrides(
         self, monkeypatch, tmp_path
