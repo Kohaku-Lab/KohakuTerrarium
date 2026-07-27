@@ -30,6 +30,9 @@ from kohakuterrarium.terrarium.events import (
     EngineEvent,
     EventKind,
 )
+from kohakuterrarium.terrarium.graph_identity_engine import (
+    resolve_and_guard_connect,
+)
 from kohakuterrarium.terrarium.topology import ChannelInfo
 from kohakuterrarium.utils.logging import get_logger
 
@@ -489,12 +492,6 @@ async def ensure_same_graph(
     the surviving graph id (unchanged if both creatures were already
     in the same graph).
     """
-    # Keep this lower-level merge path under the same identity invariant as
-    # Terrarium.connect(). It is used without creating a channel.
-    from kohakuterrarium.terrarium.graph_identity_engine import (
-        resolve_and_guard_connect,
-    )
-
     sid = engine._resolve_creature_id(a)
     rid = engine._resolve_creature_id(b)
     a_gid = engine._topology.creature_to_graph[sid]
