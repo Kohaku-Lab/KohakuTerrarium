@@ -3506,7 +3506,7 @@ const _chatStoreOptions = {
             turnIndex,
             branchView,
             requestId,
-            locator: target.locator ?? msgs?.[lastUserIdx]?.locator,
+            locator: targetUserMsg?.locator,
           })
         } catch (e) {
           // No HTTP response ≠ rejected (this POST blocks through the

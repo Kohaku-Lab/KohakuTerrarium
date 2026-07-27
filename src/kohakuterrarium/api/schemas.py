@@ -2,7 +2,7 @@
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class TerrariumCreate(BaseModel):
@@ -128,9 +128,9 @@ class AgentChat(BaseModel):
 class PersistedMessageLocator(BaseModel):
     """Canonical identity of one persisted turn-root user message."""
 
-    event_id: int
-    turn_index: int
-    branch_id: int
+    event_id: int = Field(gt=0)
+    turn_index: int = Field(gt=0)
+    branch_id: int = Field(gt=0)
 
 
 class RegenerateRequest(BaseModel):

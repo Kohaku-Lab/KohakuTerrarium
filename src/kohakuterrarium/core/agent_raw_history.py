@@ -61,9 +61,10 @@ def reload_raw_prefix_for_target(
         branch_view=prefix.branch_view,
         include_metadata=True,
     )
-    agent.controller.conversation = Conversation(
-        initial_messages=dicts_to_messages(messages)
-    )
+    conversation = Conversation()
+    for message in dicts_to_messages(messages):
+        conversation.append_message(message)
+    agent.controller.conversation = conversation
     agent._turn_index = target.turn_index
     agent._branch_id = target.branch_id
     agent._parent_branch_path = [
