@@ -1402,6 +1402,7 @@ const _chatStoreOptions = {
     commandInventoryByTab: {},
     commandInventoryRevisionByTab: {},
     _commandInventoryFetchedAtByTab: {},
+    _commandInventoryGenerationByTab: {},
     _commandInventoryRequestByTab: {},
     _slashTargetByTab: {},
 
@@ -1725,6 +1726,7 @@ const _chatStoreOptions = {
       this.commandInventoryByTab = {}
       this.commandInventoryRevisionByTab = {}
       this._commandInventoryFetchedAtByTab = {}
+      this._commandInventoryGenerationByTab = {}
       this._commandInventoryRequestByTab = {}
       this._slashTargetByTab = {}
       this._clearBranchResyncTimers()
@@ -1975,6 +1977,12 @@ const _chatStoreOptions = {
       if (!force && this._commandInventoryRequestByTab[tabKey]) {
         return this._commandInventoryRequestByTab[tabKey]
       }
+      if (force) {
+        this._commandInventoryGenerationByTab[tabKey] =
+          (this._commandInventoryGenerationByTab[tabKey] || 0) + 1
+      }
+      const generation = this._commandInventoryGenerationByTab[tabKey] || 0
+      const instanceGeneration = this._instanceGeneration
       const sessionId = this._instanceGraphId || this._instanceId
       const creature = tab.creature || tabKey
       const request = terrariumAPI
@@ -1983,7 +1991,16 @@ const _chatStoreOptions = {
           const tabStillOpen =
             this.tabs.includes(tabKey) ||
             Object.values(this.groups).some((group) => group.tabs.includes(tabKey))
-          if ((this._instanceGraphId || this._instanceId) !== sessionId || !tabStillOpen) {
+          const sessionStillOpen =
+            this._instanceGeneration === instanceGeneration &&
+            (this._instanceGraphId || this._instanceId) === sessionId
+          if ((this._commandInventoryGenerationByTab[tabKey] || 0) !== generation) {
+            const replacement = this._commandInventoryRequestByTab[tabKey]
+            if (replacement && replacement !== request) return replacement
+            if (sessionStillOpen && tabStillOpen) return this.loadCommandInventory(tab)
+            return inventory
+          }
+          if (!sessionStillOpen || !tabStillOpen) {
             return inventory
           }
           this.commandInventoryByTab[tabKey] = inventory
@@ -2002,11 +2019,25 @@ const _chatStoreOptions = {
     },
 
     invalidateCommandInventory(tab = null) {
+      const invalidate = (tabKey) => {
+        this._commandInventoryGenerationByTab[tabKey] =
+          (this._commandInventoryGenerationByTab[tabKey] || 0) + 1
+        delete this._commandInventoryFetchedAtByTab[tabKey]
+        delete this._commandInventoryRequestByTab[tabKey]
+      }
       if (tab) {
-        delete this._commandInventoryFetchedAtByTab[tab.key]
+        invalidate(typeof tab === "string" ? tab : tab.key)
         return
       }
+      const tabKeys = new Set([
+        ...Object.keys(this.commandInventoryByTab),
+        ...Object.keys(this._commandInventoryFetchedAtByTab),
+        ...Object.keys(this._commandInventoryGenerationByTab),
+        ...Object.keys(this._commandInventoryRequestByTab),
+      ])
+      for (const tabKey of tabKeys) invalidate(tabKey)
       this._commandInventoryFetchedAtByTab = {}
+      this._commandInventoryRequestByTab = {}
     },
 
     markSlashTarget(tab, entry) {
@@ -2059,6 +2090,7 @@ const _chatStoreOptions = {
           target?.type === "command" ? target.name : slashCommand.command,
           slashCommand.args,
         )
+        this.invalidateCommandInventory(tab)
         return { handled: "command", result }
       }
       if (!this._ws) return

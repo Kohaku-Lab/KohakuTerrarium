@@ -41,7 +41,7 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
       })
       .map((entry, flatIndex) => ({ ...entry, flatIndex }))
   })
-  const open = computed(() => query.value != null && (loading.value || entries.value.length > 0))
+  const open = computed(() => query.value != null)
   const activeDescendant = computed(() =>
     open.value && entries.value.length ? `slash-option-${selectedIndex.value}` : undefined,
   )

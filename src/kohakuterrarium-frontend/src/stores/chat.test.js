@@ -14,6 +14,7 @@ describe("chat store — slash commands", () => {
     chat._instanceGraphId = "graph_1"
     chat.activeTab = "kohaku"
     chat.messagesByTab = { kohaku: [] }
+    chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
     const wsSend = vi.fn()
     chat._ws = { readyState: WebSocket.OPEN, send: wsSend }
 
@@ -29,7 +30,100 @@ describe("chat store — slash commands", () => {
     expect(outcome).toEqual({ handled: "command", result })
     expect(wsSend).not.toHaveBeenCalled()
     expect(chat.messagesByTab.kohaku).toEqual([])
+    expect(chat._commandInventoryFetchedAtByTab.kohaku).toBeUndefined()
+    expect(chat._commandInventoryGenerationByTab.kohaku).toBe(1)
     commandSpy.mockRestore()
+  })
+
+  it("keeps the newest forced inventory when an older request resolves last", async () => {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.tabs = ["kohaku"]
+    const tab = { key: "kohaku", creature: "kohaku", type: "creature" }
+    let resolveOld
+    let resolveNew
+    const oldRequest = new Promise((resolve) => {
+      resolveOld = resolve
+    })
+    const newRequest = new Promise((resolve) => {
+      resolveNew = resolve
+    })
+    const importActual = await vi.importActual("@/utils/api")
+    const inventorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getCreatureCommandInventory")
+      .mockReturnValueOnce(oldRequest)
+      .mockReturnValueOnce(newRequest)
+
+    const first = chat.loadCommandInventory(tab, { force: true })
+    const second = chat.loadCommandInventory(tab, { force: true })
+    const newest = { commands: [{ name: "new" }], skills: [] }
+    resolveNew(newest)
+    await expect(second).resolves.toEqual(newest)
+    resolveOld({ commands: [{ name: "old" }], skills: [] })
+
+    await expect(first).resolves.toEqual(newest)
+    expect(chat.commandInventoryByTab.kohaku).toEqual(newest)
+    expect(chat.commandInventoryRevisionByTab.kohaku).toBe(1)
+    expect(inventorySpy).toHaveBeenCalledTimes(2)
+    inventorySpy.mockRestore()
+  })
+
+  it("refetches instead of caching a request invalidated while in flight", async () => {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.tabs = ["kohaku"]
+    const tab = { key: "kohaku", creature: "kohaku", type: "creature" }
+    let resolveStale
+    let resolveFresh
+    const staleRequest = new Promise((resolve) => {
+      resolveStale = resolve
+    })
+    const freshRequest = new Promise((resolve) => {
+      resolveFresh = resolve
+    })
+    const importActual = await vi.importActual("@/utils/api")
+    const inventorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getCreatureCommandInventory")
+      .mockReturnValueOnce(staleRequest)
+      .mockReturnValueOnce(freshRequest)
+
+    const pending = chat.loadCommandInventory(tab)
+    chat.invalidateCommandInventory(tab)
+    resolveStale({ commands: [{ name: "stale" }], skills: [] })
+    await vi.waitFor(() => expect(inventorySpy).toHaveBeenCalledTimes(2))
+    const fresh = { commands: [{ name: "fresh" }], skills: [] }
+    resolveFresh(fresh)
+
+    await expect(pending).resolves.toEqual(fresh)
+    expect(chat.commandInventoryByTab.kohaku).toEqual(fresh)
+    expect(chat.commandInventoryRevisionByTab.kohaku).toBe(1)
+    inventorySpy.mockRestore()
+  })
+
+  it("does not cache a request from an earlier instance generation", async () => {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.tabs = ["kohaku"]
+    const tab = { key: "kohaku", creature: "kohaku", type: "creature" }
+    let resolveInventory
+    const request = new Promise((resolve) => {
+      resolveInventory = resolve
+    })
+    const importActual = await vi.importActual("@/utils/api")
+    const inventorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getCreatureCommandInventory")
+      .mockReturnValueOnce(request)
+
+    const pending = chat.loadCommandInventory(tab)
+    chat._instanceGeneration += 1
+    chat._commandInventoryGenerationByTab = {}
+    const stale = { commands: [{ name: "stale" }], skills: [] }
+    resolveInventory(stale)
+
+    await expect(pending).resolves.toEqual(stale)
+    expect(chat.commandInventoryByTab.kohaku).toBeUndefined()
+    expect(chat.commandInventoryRevisionByTab.kohaku).toBeUndefined()
+    inventorySpy.mockRestore()
   })
 
   it("routes a menu-selected skill to the explicit skill endpoint", async () => {
