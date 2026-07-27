@@ -2,6 +2,7 @@
 
 from typing import Any, AsyncIterator
 
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
@@ -39,6 +40,7 @@ async def regenerate(
     turn_index: int | None = None,
     branch_view: dict[int, int] | None = None,
     request_id: str | None = None,
+    target: UserMessageSelector | None = None,
 ) -> dict[str, Any]:
     """Regenerate an assistant response.
 
@@ -59,12 +61,14 @@ async def regenerate(
     method on top of their host engine, so the path collapses to a
     direct call there.
     """
-    return await service.regenerate(
-        creature_id,
-        turn_index=turn_index,
-        branch_view=branch_view,
-        request_id=request_id,
-    )
+    kwargs = {
+        "turn_index": turn_index,
+        "branch_view": branch_view,
+        "request_id": request_id,
+    }
+    if target is not None:
+        kwargs["target"] = target
+    return await service.regenerate(creature_id, **kwargs)
 
 
 async def edit_message(
@@ -78,6 +82,7 @@ async def edit_message(
     user_position: int | None = None,
     branch_view: dict[int, int] | None = None,
     request_id: str | None = None,
+    target: UserMessageSelector | None = None,
 ) -> dict[str, Any]:
     """Edit a user message at ``msg_idx`` and re-run from there.
 
@@ -91,15 +96,15 @@ async def edit_message(
     about worker-hosted creatures, so the legacy ``as_engine`` path
     raised ``KeyError`` in lab-host mode.
     """
-    return await service.edit_message(
-        creature_id,
-        msg_idx,
-        content,
-        turn_index=turn_index,
-        user_position=user_position,
-        branch_view=branch_view,
-        request_id=request_id,
-    )
+    kwargs = {
+        "turn_index": turn_index,
+        "user_position": user_position,
+        "branch_view": branch_view,
+        "request_id": request_id,
+    }
+    if target is not None:
+        kwargs["target"] = target
+    return await service.edit_message(creature_id, msg_idx, content, **kwargs)
 
 
 async def rewind(

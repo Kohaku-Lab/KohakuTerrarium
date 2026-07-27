@@ -725,12 +725,14 @@ class LocalTerrariumService(DriveServiceMixin):
         target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         agent = self._agent(creature_id)
-        await agent.regenerate_last_response(
-            turn_index=turn_index,
-            branch_view=branch_view,
-            request_id=request_id,
-            target=target,
-        )
+        kwargs = {
+            "turn_index": turn_index,
+            "branch_view": branch_view,
+            "request_id": request_id,
+        }
+        if target is not None:
+            kwargs["target"] = target
+        await agent.regenerate_last_response(**kwargs)
         return _completed_branch_result(agent, request_id)
 
     async def edit_message(
@@ -746,15 +748,15 @@ class LocalTerrariumService(DriveServiceMixin):
         target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         agent = self._agent(creature_id)
-        ok = await agent.edit_and_rerun(
-            msg_idx,
-            content,
-            turn_index=turn_index,
-            user_position=user_position,
-            branch_view=branch_view,
-            request_id=request_id,
-            target=target,
-        )
+        kwargs = {
+            "turn_index": turn_index,
+            "user_position": user_position,
+            "branch_view": branch_view,
+            "request_id": request_id,
+        }
+        if target is not None:
+            kwargs["target"] = target
+        ok = await agent.edit_and_rerun(msg_idx, content, **kwargs)
         if not ok:
             raise ValueError(f"message {msg_idx} cannot be edited")
         return _completed_branch_result(agent, request_id)
