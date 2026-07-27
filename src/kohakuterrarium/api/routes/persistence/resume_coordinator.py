@@ -11,6 +11,17 @@ from kohakuterrarium.session.store import SessionStore
 T = TypeVar("T")
 
 
+def conversation_coordination_key(
+    conversation_id: str,
+    session_dir: str | Path,
+) -> str:
+    """Return a request-scope key for a known stable conversation identity."""
+    namespace = os.path.normcase(
+        str(Path(session_dir).expanduser().resolve(strict=False))
+    )
+    return f"{namespace}:conversation:{conversation_id}"
+
+
 def session_coordination_key(path: str | Path, session_dir: str | Path) -> str:
     """Return one request-scope key for every file in a persisted conversation."""
     namespace = os.path.normcase(
@@ -28,10 +39,9 @@ def session_coordination_key(path: str | Path, session_dir: str | Path) -> str:
             store.close(update_status=False)
     except Exception:  # noqa: BLE001 - corrupt stores fall back to path identity
         conversation_id = ""
-    identity = (
-        f"conversation:{conversation_id}" if conversation_id else f"path:{resolved}"
-    )
-    return f"{namespace}:{identity}"
+    if conversation_id:
+        return conversation_coordination_key(conversation_id, session_dir)
+    return f"{namespace}:path:{resolved}"
 
 
 class ResumeCoordinator:

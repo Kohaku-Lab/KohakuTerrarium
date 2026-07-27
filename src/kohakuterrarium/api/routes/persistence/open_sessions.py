@@ -12,6 +12,7 @@ from kohakuterrarium.api.routes.persistence._executor import (
     run_in_persistence_executor,
 )
 from kohakuterrarium.api.routes.persistence.resume_coordinator import (
+    conversation_coordination_key,
     resume_coordinator,
     session_coordination_key,
 )
@@ -277,9 +278,13 @@ async def end_open_conversation(
         else None
     )
     coordination_key = (
-        await asyncio.to_thread(session_coordination_key, path, session_dir)
-        if path is not None
-        else f"{_path_key(session_dir)}:conversation:{conversation_id}"
+        conversation_coordination_key(conversation_id, session_dir)
+        if row.get("conversation_id")
+        else (
+            await asyncio.to_thread(session_coordination_key, path, session_dir)
+            if path is not None
+            else conversation_coordination_key(conversation_id, session_dir)
+        )
     )
 
     async def _end() -> dict[str, str]:
