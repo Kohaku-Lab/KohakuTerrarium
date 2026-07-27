@@ -67,6 +67,12 @@ class TestTerrariumResumeNameMatch:
             update_status=lambda s: None,
         )
         monkeypatch.setattr(
+            resume_mod, "read_session_meta", lambda _path: fake_store.load_meta()
+        )
+        monkeypatch.setattr(
+            resume_mod, "preflight_legacy_workspace", lambda _path, _pwd: None
+        )
+        monkeypatch.setattr(
             resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
         from kohakuterrarium.terrarium.config import TerrariumConfig
@@ -122,6 +128,12 @@ class TestTerrariumResumeNameMatch:
                 "agents": ["alice"],
             },
             update_status=lambda s: None,
+        )
+        monkeypatch.setattr(
+            resume_mod, "read_session_meta", lambda _path: fake_store.load_meta()
+        )
+        monkeypatch.setattr(
+            resume_mod, "preflight_legacy_workspace", lambda _path, _pwd: None
         )
         monkeypatch.setattr(
             resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
