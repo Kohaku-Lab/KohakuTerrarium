@@ -23,11 +23,16 @@ from typing import Any
 
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
-from kohakuterrarium.session.history import project_branch_metadata
 from kohakuterrarium.modules.user_command.base import UserCommandContext
+from kohakuterrarium.session.history import project_branch_metadata
+from kohakuterrarium.skills.user_slash import build_user_skill_turn
 import kohakuterrarium.terrarium.channels as _terrarium_channels
 import kohakuterrarium.terrarium.topology as _terrarium_topology
 import kohakuterrarium.terrarium.topology_snapshot as _terrarium_topology_snap
+from kohakuterrarium.terrarium.command_inventory import (
+    build_command_inventory,
+    resolve_explicit_invocation,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import EngineEvent, EventKind
 from kohakuterrarium.terrarium.topology import GraphTopology
@@ -492,6 +497,34 @@ def wire_creature_on_engine(
     )
     # Resume needs the post-mutation snapshot to replay this wire.
     _terrarium_topology_snap.snapshot(engine, graph_id)
+
+
+def agent_command_inventory(agent: Any) -> dict[str, Any]:
+    """Return the live command and skill inventory for one agent."""
+    return build_command_inventory(agent).to_dict()
+
+
+async def agent_invoke_skill(
+    agent: Any,
+    name: str,
+    args: str | dict[str, Any] | None = None,
+    *,
+    source: str = "web:skill",
+) -> dict[str, Any]:
+    """Validate and inject one explicit user skill invocation."""
+    invocation = resolve_explicit_invocation(agent, name)
+    if invocation.kind != "skill":
+        raise ValueError(f"/{name} resolves to a command, not a skill")
+    arguments = normalize_command_args(args)
+    await agent.inject_input(
+        build_user_skill_turn(invocation.value, arguments),
+        source=source,
+    )
+    return {
+        "skill": invocation.name,
+        "accepted": True,
+        "source": source,
+    }
 
 
 async def agent_execute_command(

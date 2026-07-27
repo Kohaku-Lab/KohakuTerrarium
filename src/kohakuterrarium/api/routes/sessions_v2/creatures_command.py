@@ -1,4 +1,4 @@
-"""Per-creature slash command execution route."""
+"""Per-creature slash command, inventory, and explicit skill routes."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.requests import HTTPConnection
@@ -6,46 +6,85 @@ from starlette.requests import HTTPConnection
 from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_user
 from kohakuterrarium.api.auth.models import User
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
 from kohakuterrarium.api.schemas import SlashCommand
+from kohakuterrarium.terrarium.command_inventory import InvocationResolutionError
 from kohakuterrarium.terrarium.service import TerrariumService
+
+from ._helpers import resolve_creature_id
 
 router = APIRouter()
 
 
-def _command_principal(
-    conn_info: HTTPConnection, user: User | None
+def _command_authority(
+    connection: HTTPConnection,
+    user: User | None,
 ) -> tuple[str, bool]:
-    """Derive the slash-command principal and operator flag.
-
-    The single-tenant console is trusted, anonymous multi-user callers remain
-    unprivileged, and only authenticated administrators receive operator authority.
-    """
-    cfg = get_auth_config(conn_info)
-    if user is None:
-        if cfg.multi_user_enabled:
-            return "user:anonymous", False
+    """Derive command authority from authenticated request context."""
+    config = get_auth_config(connection)
+    if not config.multi_user_enabled:
         return "user:local", True
-    is_admin = user.role == "admin"
-    return f"user:{user.id}", is_admin
+    if user is None:
+        return "user:anonymous", False
+    return f"user:{user.id}", user.role == "admin"
+
+
+@router.get("/{session_id}/creatures/{creature_id}/command-inventory")
+async def get_creature_command_inventory(
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
+) -> dict:
+    """Return live commands and skills for one creature."""
+    resolved = await resolve_creature_id(service, creature_id, session_id)
+    try:
+        return await service.command_inventory(resolved)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Creature not found") from exc
+
+
+@router.post("/{session_id}/creatures/{creature_id}/skill-input")
+async def invoke_creature_skill(
+    session_id: str,
+    creature_id: str,
+    body: SlashCommand,
+    service: TerrariumService = Depends(get_service),
+) -> dict:
+    """Validate and inject a user-selected skill into the creature turn queue."""
+    resolved = await resolve_creature_id(service, creature_id, session_id)
+    try:
+        return await service.invoke_skill(
+            resolved,
+            body.command,
+            body.args,
+            source="web:skill",
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Creature not found") from exc
+    except (InvocationResolutionError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/{session_id}/creatures/{creature_id}/command")
 async def execute_creature_command(
     session_id: str,
     creature_id: str,
-    req: SlashCommand,
-    conn_info: HTTPConnection,
+    body: SlashCommand,
+    connection: HTTPConnection,
     service: TerrariumService = Depends(get_service),
     user: User | None = Depends(get_optional_user),
-):
-    cid = await resolve_creature_id(service, creature_id, session_id)
-    principal, is_operator = _command_principal(conn_info, user)
+) -> dict:
+    """Execute a user command against a creature."""
+    resolved = await resolve_creature_id(service, creature_id, session_id)
+    principal, is_operator = _command_authority(connection, user)
     try:
         return await service.execute_command(
-            cid, req.command, req.args, principal=principal, is_operator=is_operator
+            resolved,
+            body.command,
+            body.args,
+            principal=principal,
+            is_operator=is_operator,
         )
-    except KeyError:
-        raise HTTPException(404, f"creature {creature_id!r} not found")
-    except ValueError as e:
-        raise HTTPException(400, str(e))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Creature not found") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

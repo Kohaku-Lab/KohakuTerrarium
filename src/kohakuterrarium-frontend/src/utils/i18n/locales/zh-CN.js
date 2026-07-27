@@ -340,6 +340,12 @@ export default {
   "settings.account.inMinutes": "{minutes} 分后",
 
   "chat.noMessagesYet": "尚无消息",
+  "chat.slash.available": "可用命令和技能",
+  "chat.slash.loading": "正在加载命令和技能…",
+  "chat.slash.empty": "没有匹配的命令或技能",
+  "chat.slash.commands": "命令",
+  "chat.slash.skills": "技能",
+  "chat.slash.noDescription": "暂无说明",
   "chat.getStarted": "发送消息开始使用",
   "chat.processing": "KohakUwUing...",
   "chat.bgResultTool": "后台工具结果已送达：{label}",

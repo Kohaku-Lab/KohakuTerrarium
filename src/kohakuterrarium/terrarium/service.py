@@ -43,11 +43,13 @@ from kohakuterrarium.terrarium.service_dto import (
     creature_to_info,
 )
 from kohakuterrarium.terrarium.creature_ops import (
+    agent_command_inventory as _agent_command_inventory,
     agent_env as _agent_env,
     agent_execute_command as _agent_execute_command,
     agent_get_module_options as _agent_get_module_options,
     agent_get_native_tool_options as _agent_get_native_tool_options,
     agent_list_modules as _agent_list_modules,
+    agent_invoke_skill as _agent_invoke_skill,
     agent_list_plugins as _agent_list_plugins,
     agent_native_tool_inventory as _agent_native_tool_inventory,
     agent_patch_scratchpad as _agent_patch_scratchpad,
@@ -396,11 +398,22 @@ class TerrariumService(DriveServiceProtocol, Protocol):
         module_name: str,
     ) -> dict[str, Any]: ...
 
+    async def command_inventory(self, creature_id: str) -> dict[str, Any]: ...
+
+    async def invoke_skill(
+        self,
+        creature_id: str,
+        skill: str,
+        args: str | dict[str, Any] | None = None,
+        *,
+        source: str = "web:skill",
+    ) -> dict[str, Any]: ...
+
     async def execute_command(
         self,
         creature_id: str,
         command: str,
-        args: dict[str, Any] | None = None,
+        args: str | dict[str, Any] | None = None,
         *,
         principal: str = "user:local",
         is_operator: bool = False,
@@ -855,6 +868,24 @@ class LocalTerrariumService(DriveServiceMixin):
     ) -> dict[str, Any]:
         return await _agent_toggle_module(
             self._agent(creature_id), module_type, module_name
+        )
+
+    async def command_inventory(self, creature_id: str) -> dict[str, Any]:
+        return _agent_command_inventory(self._agent(creature_id))
+
+    async def invoke_skill(
+        self,
+        creature_id: str,
+        skill: str,
+        args: str | dict[str, Any] | None = None,
+        *,
+        source: str = "web:skill",
+    ) -> dict[str, Any]:
+        return await _agent_invoke_skill(
+            self._agent(creature_id),
+            skill,
+            args,
+            source=source,
         )
 
     async def execute_command(

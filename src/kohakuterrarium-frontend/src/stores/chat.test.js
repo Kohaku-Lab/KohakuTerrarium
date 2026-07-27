@@ -32,6 +32,29 @@ describe("chat store — slash commands", () => {
     commandSpy.mockRestore()
   })
 
+  it("routes a menu-selected skill to the explicit skill endpoint", async () => {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku"]
+    chat.messagesByTab = { kohaku: [] }
+    chat.markSlashTarget("kohaku", { type: "skill", name: "review" })
+    const importActual = await vi.importActual("@/utils/api")
+    const result = { accepted: true }
+    const skillSpy = vi
+      .spyOn(importActual.terrariumAPI, "invokeCreatureSkill")
+      .mockResolvedValue(result)
+    const commandSpy = vi.spyOn(importActual.terrariumAPI, "executeCreatureCommand")
+
+    const outcome = await chat.send([{ type: "text", text: "/review diff" }])
+
+    expect(skillSpy).toHaveBeenCalledWith("graph_1", "kohaku", "review", "diff")
+    expect(commandSpy).not.toHaveBeenCalled()
+    expect(outcome).toEqual({ handled: "skill", result })
+    skillSpy.mockRestore()
+    commandSpy.mockRestore()
+  })
+
   it("continues sending normal text over the websocket", async () => {
     const chat = useChatStore()
     chat._instanceGraphId = "graph_1"

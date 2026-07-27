@@ -44,6 +44,8 @@ describe("ChatPanel command results", () => {
     chat.activeTab = "kohaku"
     chat.tabs = ["kohaku"]
     chat.messagesByTab = { kohaku: [] }
+    chat.commandInventoryByTab = { kohaku: { commands: [], skills: [] } }
+    chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
     const wrapper = mount(ChatPanel, {
       props: {
         instance: {

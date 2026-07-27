@@ -396,6 +396,12 @@ export default {
   "settings.account.resetFailed": "Failed to redeem reset credit",
 
   "chat.noMessagesYet": "No messages yet",
+  "chat.slash.available": "Available commands and skills",
+  "chat.slash.loading": "Loading commands and skills…",
+  "chat.slash.empty": "No matching commands or skills",
+  "chat.slash.commands": "Commands",
+  "chat.slash.skills": "Skills",
+  "chat.slash.noDescription": "No description",
   "chat.getStarted": "Send a message to get started",
   "chat.subagent.conversation": "Conversation",
   "chat.subagent.empty": "(no messages)",

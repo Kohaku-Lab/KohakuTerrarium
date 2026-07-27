@@ -1,17 +1,5 @@
 <template>
-  <!--
-    Panel bg = recessed surface (warm-100 / warm-900)
-    Bubble bg = header-level surface (white / warm-800)
-    Tab bar sits on panel bg, active tab = bubble bg
-    Bubble has equal margin left/right/bottom
-  -->
   <div class="h-full flex flex-col bg-warm-100 dark:bg-[#211F1D]" :class="showFocusRing ? 'ring-1 ring-inset ring-iolite/40 dark:ring-iolite-light/30' : ''" @focusin="onGroupFocus" @mousedown="onGroupFocus">
-    <!-- Tab bar on panel bg.  The tabs themselves live in their own
-         ``overflow-x-auto`` scroller so on narrow viewports (and when
-         the user opens many channel tabs) the bar scrolls horizontally
-         within its own box instead of pushing the whole page sideways.
-         Model switcher + token-usage chips stay outside that scroller
-         so they remain visible. -->
     <div role="tablist" class="flex items-end gap-0 px-4 pt-2 shrink-0 min-w-0">
       <div class="flex items-end overflow-x-auto scrollbar-none min-w-0">
         <div v-for="tab in viewTabs" :key="tab" role="tab" tabindex="0" :draggable="!!props.groupId" :aria-selected="viewActiveTab === tab" class="relative flex items-center gap-1.5 px-3.5 py-2 text-xs font-medium cursor-pointer select-none rounded-t-lg -mb-px transition-colors shrink-0" :class="viewActiveTab === tab ? 'bg-white dark:bg-warm-900 text-warm-800 dark:text-warm-200 border border-warm-200 dark:border-warm-700 border-b-white dark:border-b-warm-900 z-10' : 'text-warm-400 dark:text-warm-500 hover:text-warm-600 dark:hover:text-warm-400 border border-transparent'" @click="onTabClick(tab)" @keydown.enter="onTabClick(tab)" @keydown.space.prevent="onTabClick(tab)" @dragstart="onTabDragStart($event, tab)" @dragend="onTabDragEnd" @dragover.prevent="onTabStripDragOver($event)" @drop.prevent.stop="onTabStripDrop($event, viewTabs.indexOf(tab))">
@@ -36,21 +24,10 @@
         </div>
       </div>
 
-      <!-- Model switcher — only mounted on compact density. The
-           regular shell shows the switcher in StatusBar at the
-           bottom of the workspace, so a duplicate in the chat
-           header would be redundant (and the variation summary
-           overflows badly in this narrow slot anyway). On compact
-           StatusBar isn't rendered, so this is the user's primary
-           access point for changing model. -->
       <div v-if="isCompact && props.instance?.id && !readOnly" class="flex items-center px-2 py-1 -mb-px chat-model-switcher">
         <ModelSwitcher :instance-id="props.instance.id" />
       </div>
 
-      <!-- Token usage + session info for active tab. The model name
-           text remains for non-compact contexts (where the
-           StatusBar handles model switching) and for read-only
-           viewers (no instance id). -->
       <div v-if="activeTokens > 0 || (!isCompact && viewModelDisplay) || (!props.instance?.id && viewModelDisplay) || readOnly" class="flex items-center gap-2 px-2 py-2 -mb-px text-[10px] text-warm-400 font-mono">
         <template v-if="(!isCompact || !props.instance?.id || readOnly) && viewModelDisplay">
           <span class="text-warm-500 dark:text-warm-400">{{ viewModelDisplay }}</span>
@@ -68,17 +45,10 @@
         </template>
       </div>
 
-      <!-- Tab bar bottom border (bubble top border) -->
       <div class="flex-1 border-b border-b-warm-200 dark:border-b-warm-700" />
     </div>
 
-    <!-- Chat bubble: surface-level bg, equal margin left/right/bottom -->
     <div ref="bubbleEl" class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm relative" :class="{ 'ring-2 ring-iolite/40 ring-inset': dragOver }" @dragenter.prevent="onDragEnter" @dragleave.prevent="onDragLeave" @dragover.prevent="onBubbleDragOver" @drop.prevent="onDrop">
-      <!-- Drop-zone edge overlays (Option E drag-to-split) — visible
-           only when a chat tab is being dragged over THIS group's
-           bubble. Each overlay shows when the cursor is in the
-           corresponding 25% edge zone; the center 50% surfaces a
-           full-bubble "move tab here" tint. -->
       <template v-if="props.groupId && tabDragHoverEdge">
         <div v-if="tabDragHoverEdge === 'left'" class="absolute inset-y-0 left-0 w-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-r-2 border-iolite/50 pointer-events-none z-20" />
         <div v-if="tabDragHoverEdge === 'right'" class="absolute inset-y-0 right-0 w-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-l-2 border-iolite/50 pointer-events-none z-20" />
@@ -86,21 +56,17 @@
         <div v-if="tabDragHoverEdge === 'bottom'" class="absolute inset-x-0 bottom-0 h-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-t-2 border-iolite/50 pointer-events-none z-20" />
         <div v-if="tabDragHoverEdge === 'center'" class="absolute inset-0 bg-iolite/8 dark:bg-iolite-light/8 border-2 border-iolite/40 rounded pointer-events-none z-20" />
       </template>
-      <!-- Decorative top accent: subtle gem gradient -->
       <div class="h-0.5 w-full bg-gradient-to-r from-iolite/30 via-taaffeite/20 to-aquamarine/30" />
 
-      <!-- Reconnect banner: surface when WS is attempting to reconnect -->
       <div v-if="chat.wsStatus === 'reconnecting'" class="flex items-center gap-2 px-4 py-1.5 text-xs bg-amber/10 dark:bg-amber/12 border-b border-amber/25 text-amber-shadow dark:text-amber-light">
         <span class="i-carbon-renew kohaku-pulse shrink-0" />
         <span>{{ t("chat.disconnected") }}</span>
       </div>
 
-      <!-- Drag-over hint -->
       <div v-if="dragOver && !readOnly" class="absolute inset-0 z-10 flex items-center justify-center bg-iolite/5 dark:bg-iolite/10 backdrop-blur-sm pointer-events-none">
         <div class="px-4 py-2 rounded-lg bg-white dark:bg-warm-900 border border-iolite/40 shadow-lg text-sm text-iolite dark:text-iolite-light font-medium"><span class="i-carbon-upload mr-1" /> {{ t("chat.dropToAttach") }}</div>
       </div>
 
-      <!-- Messages -->
       <div ref="messagesEl" class="chat-messages-viewport flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
         <div class="flex flex-col gap-3">
           <template v-if="viewMessages.length === 0">
@@ -120,9 +86,6 @@
         </div>
       </div>
 
-      <!-- Queued messages: shown above input, not in main chat.
-           Capped to QUEUE_VISIBLE items; overflow collapses into a "+N more"
-           toggle so the input doesn't get pushed off-screen. -->
       <div v-if="!readOnly && activeQueue.length" class="px-4 pt-2 flex flex-col gap-1.5">
         <div v-for="qm in visibleQueued" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm" :class="{ 'opacity-50': qm.cancelling }">
           <span class="i-carbon-time text-amber/60 text-xs flex-shrink-0" />
@@ -143,12 +106,7 @@
         </button>
       </div>
 
-      <!-- Input: sits inside bubble, with subtle top border -->
       <div v-if="!readOnly" class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
-        <!-- Pending UI events banner: shown when the user starts typing
-             with one or more interactive bus events still awaiting a
-             reply. Acts as a soft nudge — clicking scrolls to the most
-             recent unreplied event. -->
         <div v-if="showPendingBanner" class="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber/10 dark:bg-amber/15 border border-amber/30 text-xs">
           <span class="i-carbon-warning-alt text-amber" />
           <span class="text-amber-shadow dark:text-amber-light">
@@ -169,11 +127,6 @@
           <input ref="imageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onFileChange(e, 'image')" />
           <input ref="fileInputEl" type="file" class="hidden" @change="(e) => onFileChange(e, 'file')" />
 
-          <!-- LEFT cluster
-               desktop: always inline [+ file] [image]
-               mobile resting: inline [+ file] [image]
-               mobile active (focus or content): collapsed to a single
-               [+] that toggles an inline popover above the input. -->
           <button v-if="isCompact && inputActive" class="kt-input-pill-btn shrink-0 mb-0.5 text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.moreActions')" :aria-label="t('chat.moreActions')" @click="toggleSecondaryMenu">
             <span class="i-carbon-add" />
           </button>
@@ -186,12 +139,9 @@
             </button>
           </div>
 
-          <textarea ref="inputEl" v-model="inputText" rows="1" class="chat-input-textarea flex-1 bg-transparent border-none outline-none kt-text-body text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" @keydown="onInputKeydown" @input="autoResize" @paste="onPaste" @focus="onInputFocus" @blur="onInputBlur" />
+          <SlashCommandMenu :open="slashMenuOpen" :loading="slashInventoryLoading" :entries="slashMatches" :selected-index="slashSelectedIndex" @choose="chooseSlashEntry" @select-index="slashSelectedIndex = $event" />
+          <textarea ref="inputEl" v-model="inputText" rows="1" class="chat-input-textarea flex-1 bg-transparent border-none outline-none kt-text-body text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" aria-autocomplete="list" :aria-expanded="slashMenuOpen" aria-controls="slash-command-menu" :aria-activedescendant="slashActiveDescendant" role="combobox" @keydown="onInputKeydown" @input="onInputChanged" @paste="onPaste" @focus="onInputFocus" @blur="onInputBlur" />
 
-          <!-- RIGHT cluster
-               desktop / mobile resting: [compact] [clean] [send/stop]
-               mobile active: [send/stop] only — compact/clean are in
-               the popover triggered by [+]. -->
           <div class="flex items-center gap-1 shrink-0 mb-0.5">
             <button v-if="!(isCompact && inputActive)" class="kt-input-pill-btn text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
               <span class="i-carbon-collapse-all" />
@@ -207,8 +157,6 @@
             </button>
           </div>
 
-          <!-- Secondary actions popover (mobile-active only). Anchored
-               just above the input shell; backdrop closes on tap. -->
           <template v-if="isCompact && secondaryMenuOpen">
             <div class="fixed inset-0 z-40" @click="secondaryMenuOpen = false" />
             <div class="absolute left-0 right-0 bottom-full mb-2 z-50 flex items-center gap-1 px-2 py-2 rounded-xl bg-white dark:bg-warm-800 border border-warm-200 dark:border-warm-700 shadow-lg" @click.stop>
@@ -241,9 +189,11 @@ import { inject } from "vue"
 
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
+import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useDensity } from "@/composables/useDensity"
+import { useSlashCommandCompletion } from "@/composables/useSlashCommandCompletion"
 import { useChatStore } from "@/stores/chat"
 import { useChatTabDrag } from "@/composables/useChatTabDrag"
 import { useI18n } from "@/utils/i18n"
@@ -251,7 +201,6 @@ import { terrariumAPI, agentAPI } from "@/utils/api"
 import { buildMessageParts, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
 import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
 import { shouldSendOnEnter } from "@/utils/chatInput"
-// How many queued-while-processing messages to show before collapsing.
 const QUEUE_VISIBLE = 5
 
 const props = defineProps({
@@ -259,39 +208,14 @@ const props = defineProps({
   readOnly: { type: Boolean, default: false },
   emptyTitle: { type: String, default: "" },
   emptySubtitle: { type: String, default: "" },
-  // ── Multi-chat-panel additions (Option E) ──
-  // When ``groupId`` is set, this panel reads its ``tabs``/``activeTab``
-  // from ``chat.groups[groupId]`` instead of the scope-singleton
-  // legacy state. The container (``ChatPanelContainer``) passes this
-  // prop down to every leaf in the chat-internal split tree. When
-  // ``groupId`` is null (back-compat / SessionHistoryViewer), the
-  // panel behaves exactly as today.
   groupId: { type: String, default: null },
-  // When the parent has already resolved the scoped chat store
-  // (``ChatPanelContainer`` does this once via ``useChatStore`` +
-  // ``provide``), prefer reading via ``inject('chatStore')``. This
-  // closes the scope-mismatch hazard documented in the
-  // ``SessionHistoryViewer.vue`` precedent: descendants must NOT
-  // re-resolve ``useChatStore()`` with a potentially-different scope.
 })
 
 const emit = defineEmits(["focus-group"])
 
-// SCOPE INVARIANT — read order:
-//   1. Injected (preferred): ``ChatPanelContainer`` provided the
-//      scoped store. Use it verbatim; do NOT call ``useChatStore``
-//      with a fallback that might land on the "default" singleton.
-//   2. Fallback (back-compat): legacy callers (``SessionHistoryViewer``,
-//      direct mounts in tests) instantiate ``ChatPanel`` without a
-//      container, so we resolve our own scope here. Same call signature
-//      as before so v1 paths keep working.
 const injectedChat = inject("chatStore", null)
 const chat = injectedChat || useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
 const { t } = useI18n()
-// Compact density renders the chat header model pill (since the
-// StatusBar — which has its own ModelSwitcher — is hidden in the
-// compact shell). Regular/expansive density already shows the
-// switcher in StatusBar so this header-mounted copy is redundant.
 const { isCompact } = useDensity()
 const inputText = ref("")
 const messagesEl = ref(null)
@@ -304,15 +228,6 @@ const queueExpanded = ref(false)
 const dragOver = ref(false)
 let dragDepth = 0
 
-// ── Per-group view shims (Option E) ──
-//
-// When ``groupId`` is set we read tabs/activeTab/messages/queue from
-// the group bucket; otherwise we fall through to the legacy
-// scope-singleton fields exactly as today. ``isFocusedGroup`` drives
-// the iolite focus ring + which group "owns" the global ``chat.send``
-// dispatch (we focus the group on composer focus so ``chat.activeTab``
-// — kept synced by ``_syncLegacyFromGroups`` — matches what the
-// composer is visually pointing at).
 const viewGroup = computed(() => (props.groupId ? chat.groups?.[props.groupId] || null : null))
 const viewTabs = computed(() => (viewGroup.value ? viewGroup.value.tabs : chat.tabs))
 const viewActiveTab = computed(() => (viewGroup.value ? viewGroup.value.activeTab : chat.activeTab))
@@ -324,9 +239,6 @@ const viewProcessing = computed(() => {
   const t = viewActiveTab.value
   return t ? !!chat.processingByTab[t] : false
 })
-// Model info for THIS panel's active tab. In group mode the panel's
-// tab can differ from the store's global activeTab, so resolve the
-// per-tab entry locally instead of using ``chat.activeModelInfo``.
 const viewModelInfo = computed(() => {
   const t = viewActiveTab.value
   const info = (t && chat.modelByTab[t]) || {}
@@ -340,15 +252,8 @@ const viewModelInfo = computed(() => {
 const viewModelDisplay = computed(() => viewModelInfo.value.llmName || viewModelInfo.value.model || "")
 const isFocusedGroup = computed(() => !!(props.groupId && chat.focusedGroupId === props.groupId))
 
-// Whether the chat-internal tree has more than one leaf — drives
-// the focus ring (single-group layouts don't need disambiguation)
-// AND the close-tab button (closing the only tab in the only
-// group would leave the surface empty).
 const multipleGroupsExist = computed(() => Object.keys(chat.groups || {}).length > 1)
 
-// Show the iolite focus ring ONLY when there are multiple groups.
-// With a single group the ring is just visual noise — there's
-// nothing to disambiguate from.
 const showFocusRing = computed(() => isFocusedGroup.value && multipleGroupsExist.value)
 
 function onTabClick(tab) {
@@ -369,12 +274,8 @@ function onGroupFocus() {
   emit("focus-group", props.groupId)
 }
 
-// ── Drag-and-drop (Option E) ──
-//
-// Drag composable is wired only when this panel is rendered inside a
-// group (``groupId`` set). Legacy single-panel mode keeps the original
-// file-drop semantics on the bubble and does not participate in
-// tab-drag-to-split.
+const { activeDescendant: slashActiveDescendant, choose: chooseSlashEntry, clearTarget: clearSlashTarget, entries: slashMatches, loading: slashInventoryLoading, move: moveSlashSelection, open: slashMenuOpen, selectedIndex: slashSelectedIndex } = useSlashCommandCompletion({ chat, inputText, activeTabKey: viewActiveTab })
+
 const tabDrag = useChatTabDrag(chat)
 const tabDragHoverEdge = computed(() => (props.groupId ? tabDrag.isHoveringEdgeOf(props.groupId) : null))
 
@@ -394,19 +295,9 @@ function onTabStripDrop(ev, dstIndex) {
   tabDrag.onTabStripDrop(ev, props.groupId, dstIndex)
 }
 function onBubbleDragOver(ev) {
-  // The bubble already handles file drag-over for attachment intake;
-  // file drags carry ``Files`` in ``dataTransfer.types``, tab drags
-  // carry ``application/x-kt-tab``. The two paths are mutually
-  // exclusive — onDragEnter handles files, the composable handles
-  // tab drags. Falling through to the composable is safe because it
-  // ignores non-tab drags.
   if (props.groupId) tabDrag.onBubbleDragOver(ev, props.groupId)
 }
 
-// Active tab's queue — the chat store keeps queues per tab so the
-// "queued" banner only appears on the tab that owns the queued
-// message, never on a sibling tab the user happens to be looking at.
-// In group mode, route through the per-group activeTab.
 const activeQueue = computed(() => {
   const t = viewActiveTab.value
   return t ? chat.queuedMessagesByTab[t] || [] : []
@@ -418,8 +309,6 @@ const visibleQueued = computed(() => {
 })
 const hiddenQueuedCount = computed(() => Math.max(0, activeQueue.value.length - QUEUE_VISIBLE))
 
-// Inline edit of a still-queued message (UXI-08a). Text-only: editing a
-// queued multimodal message keeps just its text.
 const editingQueueId = ref(null)
 const editQueueText = ref("")
 function startEditQueue(qm) {
@@ -441,19 +330,10 @@ function draftKey() {
   const instanceId = props.instance?.id || chat._instanceId || ""
   const tab = viewActiveTab.value || ""
   if (!instanceId || !tab || props.readOnly) return ""
-  // Drafts are keyed by (instance, tab, groupId?). In legacy mode
-  // (no groupId) the key stays compatible with prior versions so
-  // existing localStorage drafts survive the upgrade. In group mode
-  // we suffix the groupId so two groups viewing the same tab can
-  // have independent drafts.
   const suffix = props.groupId ? `.${props.groupId}` : ""
   return `kt.chat.draft.${instanceId}.${tab}${suffix}`
 }
 
-// Drafts are keystroke-frequency state, so they live in localStorage
-// ONLY — never the backend ui-prefs store. The synchronous read also
-// removes the async restore/typing race the old hybrid path had to
-// generation-guard against.
 function restoreDraft() {
   const key = draftKey()
   if (!key) {
@@ -467,7 +347,6 @@ function restoreDraft() {
 function persistDraft() {
   const key = draftKey()
   if (!key) return
-  // writeLocalPref(key, null) removes the entry.
   writeLocalPref(key, inputText.value || null)
 }
 
@@ -503,9 +382,6 @@ const inputPlaceholder = computed(() => {
 const resolvedEmptyTitle = computed(() => props.emptyTitle || t("chat.noMessagesYet"))
 const resolvedEmptySubtitle = computed(() => props.emptySubtitle || t("chat.getStarted"))
 
-// Phase B: count interactive bus events that haven't been replied to
-// or superseded yet, scoped to the active tab. Banner appears when
-// the user starts typing while there are pending requests.
 const pendingCount = computed(() => {
   const tab = viewActiveTab.value
   if (!tab) return 0
@@ -515,17 +391,6 @@ const pendingCount = computed(() => {
 
 const showPendingBanner = computed(() => pendingCount.value > 0 && inputText.value.length > 0)
 
-// KohakUwUing label binds to the running branch, not to the tab — when
-// the user clicks <1/2> to peek at the previous branch while a regen
-// is still streaming branch 2, the label belongs to branch 2 and must
-// disappear from the branch-1 view. ``chat.viewingRunningBranch``
-// returns true only when the viewed branch IS the one generating; a
-// background tool with no associated stream still surfaces the
-// indicator (running job state is tab-scoped, not branch-scoped).
-// In group mode, ``viewingRunningBranch`` still tracks the global
-// chat.activeTab — which equals THIS group's activeTab only when this
-// group is focused. Unfocused groups fall back to the per-tab
-// processing flag alone (no branch-anchor narrowing).
 const viewRunningJobCount = computed(() => chat.runningJobCountForTab(viewActiveTab.value))
 
 const showKohakUwUingIndicator = computed(() => {
@@ -536,9 +401,6 @@ const showKohakUwUingIndicator = computed(() => {
   return viewProcessing.value
 })
 
-// State-aware label: distinguish an active main stream from "only
-// background tools/sub-agents are alive" so a paused stream doesn't
-// read as still generating.
 const kohakuwuingLabel = computed(() => {
   const streaming = !props.groupId || isFocusedGroup.value ? chat.processing && chat.viewingRunningBranch : viewProcessing.value
   const bgCount = viewRunningJobCount.value
@@ -556,10 +418,6 @@ function scrollToPending() {
   if (!target) return
   const el = messagesEl.value
   if (!el) return
-  // Find the rendered message by id; ChatMessage components don't
-  // expose an explicit id attribute, so we use querySelector by
-  // ``data-message-id`` if present, falling back to scrolling to the
-  // bottom of the list.
   const node = el.querySelector(`[data-message-id="${target.id}"]`)
   if (node && typeof node.scrollIntoView === "function") {
     node.scrollIntoView({ behavior: "smooth", block: "center" })
@@ -585,11 +443,26 @@ function closeTab(tab) {
 
 function onInputKeydown(e) {
   if (props.readOnly) return
-  // The send-vs-newline decision lives in ``shouldSendOnEnter`` (pure +
-  // unit-tested): it skips IME composition, never sends on the touch /
-  // compact shell (mobile soft keyboards have no Shift+Enter; the send
-  // button is used instead — fixes iOS Safari fire-on-Enter), and
-  // otherwise sends only on an unmodified Enter.
+  if (slashMenuOpen.value) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault()
+      moveSlashSelection(e.key === "ArrowDown" ? 1 : -1)
+      return
+    }
+    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+      const selected = slashMatches.value[slashSelectedIndex.value]
+      if (selected) {
+        e.preventDefault()
+        chooseSlashEntry(selected)
+        return
+      }
+    }
+    if (e.key === "Escape") {
+      e.preventDefault()
+      clearSlashTarget()
+      return
+    }
+  }
   if (shouldSendOnEnter(e, { isCompact: isCompact.value })) {
     e.preventDefault()
     send()
@@ -603,17 +476,14 @@ function autoResize() {
   el.style.height = Math.min(el.scrollHeight, 128) + "px"
 }
 
-// Mobile chat-input collapse pattern (Discord-style).  On the touch
-// shell (``isCompact``), once the textarea takes focus OR contains
-// any content, the secondary toolbar buttons (attach file, attach
-// image, compact, clean) collapse into a single ``[+]`` trigger so
-// the textarea + send button take the full bar width.  The collapsed
-// buttons re-appear behind a tap-to-open popover anchored above the
-// shell.  Desktop never engages the collapse — pointer:fine has no
-// real-estate problem.
 const inputFocused = ref(false)
 const secondaryMenuOpen = ref(false)
 const inputActive = computed(() => inputFocused.value || inputText.value.length > 0)
+
+function onInputChanged(event) {
+  autoResize(event)
+  clearSlashTarget()
+}
 
 function onInputFocus() {
   inputFocused.value = true
@@ -621,9 +491,6 @@ function onInputFocus() {
 
 function onInputBlur() {
   inputFocused.value = false
-  // If the user blurs by tapping the [+] popover, keep it open —
-  // the click on a popover button (which calls onSecondaryAction)
-  // will close it explicitly.
 }
 
 function toggleSecondaryMenu() {
@@ -635,15 +502,12 @@ function onSecondaryAction(fn) {
   if (typeof fn === "function") fn()
 }
 
-// Auto-scroll: only when new visible content arrives and the user is already near bottom.
 const isNearBottom = ref(true)
 const forceScrollOnNextMessageUpdate = ref(true)
 const scrollPositions = new Map()
 
 function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
   if (!instanceId || !tab) return ""
-  // Suffix the groupId in group mode so two groups viewing the same
-  // tab can each restore their own scrolltop on focus / re-render.
   const suffix = props.groupId ? `:${props.groupId}` : ""
   return `${instanceId}:${tab}${suffix}`
 }
@@ -766,7 +630,6 @@ async function onFileChange(e, kind = "file") {
   e.target.value = ""
 }
 
-// ── Drag-and-drop: routes dropped files through the same validation. ──
 function onDragEnter(e) {
   if (props.readOnly) return
   if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return
@@ -779,14 +642,6 @@ function onDragLeave() {
   if (dragDepth === 0) dragOver.value = false
 }
 function onDrop(e) {
-  // Dispatch by payload type: a chat tab drag carries
-  // ``application/x-kt-tab`` and is routed to the multi-group
-  // composable for move/split. Anything else (file drag for
-  // attachments) falls through to the existing file-intake path.
-  // Without this dispatch the tab payload would land in the
-  // attachment intake — which silently does nothing because the
-  // tab payload has no ``files`` entry — and the multi-group
-  // composable would never fire for bubble drops.
   if (props.groupId && e.dataTransfer?.types) {
     const types = Array.from(e.dataTransfer.types)
     if (types.includes("application/x-kt-tab")) {
@@ -804,25 +659,15 @@ function onDrop(e) {
   }
 }
 
-// ── Paste: clipboard image / file → attachment.  Lets users
-// Ctrl-V a screenshot (Win+Shift+S buffer, "copy image"
-// from a browser, etc.) or any file copied from the OS file
-// manager.  Text paste falls through untouched — we only
-// preventDefault when at least one file item was consumed.
 function onPaste(e) {
   if (props.readOnly) return
   const cd = e.clipboardData
   if (!cd) return
 
-  // 1. Some browsers (Chromium on file copy from Explorer) populate
-  //    ``clipboardData.files`` directly.
   const direct = Array.from(cd.files || [])
   const collected = []
   for (const file of direct) collected.push(file)
 
-  // 2. Screenshots / copied images surface via ``items`` with
-  //    ``kind === "file"`` but no ``files`` entry on some
-  //    browsers — fall through to that path too.
   if (collected.length === 0 && cd.items) {
     for (const item of cd.items) {
       if (item.kind !== "file") continue
@@ -830,11 +675,8 @@ function onPaste(e) {
       if (file) collected.push(file)
     }
   }
-  if (collected.length === 0) return // nothing pasted — let the textarea handle text
+  if (collected.length === 0) return // nothing pasted 閳?let the textarea handle text
 
-  // Synthesise a friendlier name for the clipboard's anonymous
-  // ``image.png`` blobs so the attachment chip + the backend log
-  // both carry a unique stem.  Existing files keep their name.
   let any = false
   for (const file of collected) {
     const kind = (file.type || "").startsWith("image/") ? "image" : "file"
@@ -846,11 +688,8 @@ function onPaste(e) {
 
 function _renameClipboardBlob(file, kind) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/T/, "_").replace(/Z$/, "")
-  const ext = (file.type.split("/")[1] || (kind === "image" ? "png" : "bin")).split("+")[0] // image/svg+xml → svg
+  const ext = (file.type.split("/")[1] || (kind === "image" ? "png" : "bin")).split("+")[0] // image/svg+xml 閳?svg
   const stem = kind === "image" ? `pasted-image-${ts}` : `pasted-file-${ts}`
-  // The File constructor accepts the underlying blob + a new name,
-  // preserving size / type / lastModified.  Falls back to the raw
-  // file when File isn't constructible (older Safari).
   try {
     return new File([file], `${stem}.${ext}`, {
       type: file.type,
@@ -867,12 +706,20 @@ function removeAttachment(index) {
 
 async function send() {
   if (props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
-  // Group mode: focus this group BEFORE ``chat.send`` so the
-  // legacy-synced ``chat.activeTab`` matches this group's activeTab.
-  // ``chat.send`` dispatches on ``chat.activeTab`` under the hood;
-  // without this focus the message would route to whichever group is
-  // currently focused instead of the one whose composer was used.
+  if (slashMenuOpen.value && slashMatches.value.length) {
+    chooseSlashEntry(slashMatches.value[slashSelectedIndex.value] || slashMatches.value[0])
+    return
+  }
   if (props.groupId) onGroupFocus()
+  const slashTarget = await chat.prepareSlashSend(
+    {
+      key: viewActiveTab.value,
+      creature: viewActiveTab.value,
+      type: viewActiveTab.value?.startsWith("ch:") ? "channel" : "creature",
+    },
+    inputText.value,
+  )
+  chat.markSlashTarget(viewActiveTab.value, slashTarget)
   const parts = await buildMessageParts(inputText.value, attachments.value)
   const commandTarget = {
     sessionId: chat._instanceGraphId || chat._instanceId,
@@ -903,10 +750,6 @@ async function triggerCompact() {
     const sid = chat._instanceGraphId || chat._instanceId
     const tab = viewActiveTab.value || "root"
     const response = await terrariumAPI.executeCreatureCommand(sid, tab, "compact")
-    // ``/compact`` returns a ``ui_notify`` payload describing one of
-    // four outcomes: triggered, no-controller, too-short, busy. Without
-    // surfacing it the user has no signal that the click did anything
-    // — the compact runs (or doesn't) silently in the background.
     await surfaceCommandResult(response)
   } catch (err) {
     console.error("Compact failed:", err)
@@ -914,16 +757,6 @@ async function triggerCompact() {
   }
 }
 
-/**
- * Render a ``UserCommandResult`` payload as a toast / inline message.
- *
- * Backend command results carry a ``data`` block built by ``ui_notify``
- * (and friends) in ``modules/user_command/base.py``. CLI/TUI commit
- * ``output`` to their own surfaces; the web frontend is responsible
- * for translating the typed payload into UI. Notifications surface as
- * toasts; confirmations execute the payload's follow-up command only after
- * the user accepts the dialog.
- */
 async function surfaceCommandResult(response, target = null) {
   if (!response) return
   if (response.error) {
@@ -953,8 +786,6 @@ async function surfaceCommandResult(response, target = null) {
     await surfaceCommandResult(confirmed, { sessionId: sid, creatureId: tab })
     return
   }
-  // Fall back to plain ``output`` text when no structured payload —
-  // mirrors how CLI / TUI render unspecified results.
   if (response.output) {
     ElMessage({ message: response.output, type: "info" })
   }
@@ -988,9 +819,6 @@ async function stopTask(jobId, jobName) {
     const tab = viewActiveTab.value
     const sid = chat._instanceGraphId || chat._instanceId
     await terrariumAPI.stopCreatureTask(sid, tab || "root", jobId)
-    // Don't eagerly remove from runningJobs — the backend will send a
-    // subagent_done/subagent_error or tool_done/tool_error event which
-    // handles the removal properly. Just mark as cancelling for visual feedback.
     const job = chat.runningJobs[jobId]
     if (job) job.cancelling = true
   } catch (err) {
@@ -998,9 +826,6 @@ async function stopTask(jobId, jobName) {
   }
 }
 
-// Escape key interrupt — only the FOCUSED group (or legacy single
-// panel) handles the global keystroke. Otherwise N panels would all
-// react to one Escape and call chat.interrupt() N times.
 function onGlobalKeydown(e) {
   if (props.readOnly) return
   if (props.groupId && !isFocusedGroup.value) return
@@ -1012,69 +837,4 @@ onMounted(() => window.addEventListener("keydown", onGlobalKeydown))
 onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown))
 </script>
 
-<style scoped>
-.chat-messages-viewport {
-  container-type: size;
-}
-
-/* ModelSwitcher's pill defaults to min-width: 12rem which is too
-   wide for the chat tab-bar header on compact viewports. Shrink
-   here without touching the global StatusBar usage. The variation
-   summary is hidden in this context — it overflows badly in the
-   narrow slot, and the user can still see/change variations from
-   the picker popover itself. */
-.chat-model-switcher :deep(.model-pill) {
-  min-width: 0;
-  max-width: 14rem;
-  padding: 0.15rem 0.45rem;
-  min-height: 24px;
-  gap: 0.35rem;
-}
-.chat-model-switcher :deep(.model-pill-variation) {
-  display: none;
-}
-.chat-model-switcher :deep(.target-select) {
-  width: 7rem;
-}
-
-/* Pill button sizing for the chat input row.  Single source of
- * truth so [+], [attach], [image], [compact], [clean] all match.
- * Coarse pointer bumps to 40×40 for tap-target compliance. */
-.kt-input-pill-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 0.375rem;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-  flex-shrink: 0;
-}
-@media (pointer: coarse) {
-  .kt-input-pill-btn {
-    width: 2.5rem;
-    height: 2.5rem;
-  }
-}
-
-/* Send / stop button — slightly bigger + rounded-lg to anchor the
- * right side of the input row.  Coarse pointer = 44×44 tap target. */
-.kt-input-send-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2rem;
-  height: 2rem;
-  border-radius: 0.5rem;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
-}
-@media (pointer: coarse) {
-  .kt-input-send-btn {
-    width: 2.75rem;
-    height: 2.75rem;
-  }
-}
-</style>
+<style scoped src="./chat-panel.css"></style>

@@ -15,6 +15,7 @@ import { readLocalJsonPref, writeLocalJsonPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
 
 const BRANCH_RESYNC_DELAY_MS = 350
+const COMMAND_INVENTORY_TTL_MS = 30_000
 // A pending branch op whose expected branch never lands (e.g. the edit
 // request was lost before dispatch) must not keep the stale-history
 // guard alive forever — after this many incomplete retries the guard is
@@ -1398,6 +1399,12 @@ const _chatStoreOptions = {
     branchOperationByTab: {},
     /** Last branch operation error, keyed by tab. */
     branchOperationErrorByTab: {},
+    commandInventoryByTab: {},
+    commandInventoryRevisionByTab: {},
+    _commandInventoryFetchedAtByTab: {},
+    _commandInventoryRequestByTab: {},
+    _slashTargetByTab: {},
+
     /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number, homeNode: string}} Session metadata */
     sessionInfo: {
       sessionId: "",
@@ -1715,6 +1722,11 @@ const _chatStoreOptions = {
       this._recentUserInputs = {}
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
+      this.commandInventoryByTab = {}
+      this.commandInventoryRevisionByTab = {}
+      this._commandInventoryFetchedAtByTab = {}
+      this._commandInventoryRequestByTab = {}
+      this._slashTargetByTab = {}
       this._clearBranchResyncTimers()
       // Reset multi-group state — group tree is per-scope, so a
       // different ``_instanceId`` means a different layout to load.
@@ -1954,6 +1966,74 @@ const _chatStoreOptions = {
       }
     },
 
+    async loadCommandInventory(tab, { force = false } = {}) {
+      if (!tab || tab.type === "channel") return { commands: [], skills: [] }
+      const tabKey = tab.key
+      const cached = this.commandInventoryByTab[tabKey]
+      const fetchedAt = this._commandInventoryFetchedAtByTab[tabKey] || 0
+      if (!force && cached && Date.now() - fetchedAt < COMMAND_INVENTORY_TTL_MS) return cached
+      if (!force && this._commandInventoryRequestByTab[tabKey]) {
+        return this._commandInventoryRequestByTab[tabKey]
+      }
+      const sessionId = this._instanceGraphId || this._instanceId
+      const creature = tab.creature || tabKey
+      const request = terrariumAPI
+        .getCreatureCommandInventory(sessionId, creature)
+        .then((inventory) => {
+          const tabStillOpen =
+            this.tabs.includes(tabKey) ||
+            Object.values(this.groups).some((group) => group.tabs.includes(tabKey))
+          if ((this._instanceGraphId || this._instanceId) !== sessionId || !tabStillOpen) {
+            return inventory
+          }
+          this.commandInventoryByTab[tabKey] = inventory
+          this._commandInventoryFetchedAtByTab[tabKey] = Date.now()
+          this.commandInventoryRevisionByTab[tabKey] =
+            (this.commandInventoryRevisionByTab[tabKey] || 0) + 1
+          return inventory
+        })
+        .finally(() => {
+          if (this._commandInventoryRequestByTab[tabKey] === request) {
+            delete this._commandInventoryRequestByTab[tabKey]
+          }
+        })
+      this._commandInventoryRequestByTab[tabKey] = request
+      return request
+    },
+
+    invalidateCommandInventory(tab = null) {
+      if (tab) {
+        delete this._commandInventoryFetchedAtByTab[tab.key]
+        return
+      }
+      this._commandInventoryFetchedAtByTab = {}
+    },
+
+    markSlashTarget(tab, entry) {
+      if (!tab) return
+      const tabKey = typeof tab === "string" ? tab : tab.key
+      if (entry) {
+        this._slashTargetByTab[tabKey] = {
+          type: entry.type || entry.kind,
+          name: entry.name,
+        }
+      } else delete this._slashTargetByTab[tabKey]
+    },
+
+    async prepareSlashSend(tab, content) {
+      const parsed = _parseSlashCommand(content)
+      if (!parsed || !tab || tab.type === "channel") return null
+      const marked = this._slashTargetByTab[tab.key]
+      if (marked && marked.name === parsed.command) return marked
+      const inventory = await this.loadCommandInventory(tab)
+      const command = inventory.commands?.find(
+        (entry) => entry.name === parsed.command || entry.aliases?.includes(parsed.command),
+      )
+      if (command) return { type: "command", name: command.name }
+      const skill = inventory.skills?.find((entry) => entry.name === parsed.command)
+      return skill ? { type: "skill", name: skill.name } : null
+    },
+
     async send(text) {
       if (!this.activeTab) return
       if (typeof text === "string" ? !text.trim() : !text.length) return
@@ -1961,10 +2041,22 @@ const _chatStoreOptions = {
       const tab = this.activeTab
       const slashCommand = _parseSlashCommand(text)
       if (slashCommand && !tab.startsWith("ch:")) {
+        const tabInfo = this.tabs[tab]
+        const target = this._slashTargetByTab[tab]
+        delete this._slashTargetByTab[tab]
+        if (target?.type === "skill" && target.name === slashCommand.command) {
+          const result = await terrariumAPI.invokeCreatureSkill(
+            this._instanceGraphId || this._instanceId,
+            tabInfo?.creature || tab,
+            target.name,
+            slashCommand.args,
+          )
+          return { handled: "skill", result }
+        }
         const result = await terrariumAPI.executeCreatureCommand(
           this._instanceGraphId || this._instanceId,
-          tab,
-          slashCommand.command,
+          tabInfo?.creature || tab,
+          target?.type === "command" ? target.name : slashCommand.command,
           slashCommand.args,
         )
         return { handled: "command", result }

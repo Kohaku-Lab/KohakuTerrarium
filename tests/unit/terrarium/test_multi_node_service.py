@@ -118,6 +118,14 @@ class _FakeService:
     async def inject_input(self, cid, msg, *, source="chat"):
         self.calls.append(("inject_input", cid, msg, source))
 
+    async def command_inventory(self, cid):
+        self.calls.append(("command_inventory", cid))
+        return {"commands": [], "skills": []}
+
+    async def invoke_skill(self, cid, skill, args=None, *, source="web:skill"):
+        self.calls.append(("invoke_skill", cid, skill, args, source))
+        return {"accepted": True}
+
     async def shutdown(self):
         self.calls.append(("shutdown",))
 
@@ -392,6 +400,24 @@ class TestPerCreatureReads:
     async def test_creature_status_missing_returns_none(self):
         svc = _make_service()
         assert await svc.creature_status("ghost") is None
+
+    async def test_command_inventory_and_skill_route_to_home_worker(self):
+        svc = _make_service(remote_specs={"w1": [_info("c1")]})
+        await svc.list_creatures()
+
+        inventory = await svc.command_inventory("c1")
+        result = await svc.invoke_skill("c1", "review", "diff")
+
+        assert inventory == {"commands": [], "skills": []}
+        assert result == {"accepted": True}
+        assert ("command_inventory", "c1") in svc._remotes["w1"].calls
+        assert (
+            "invoke_skill",
+            "c1",
+            "review",
+            "diff",
+            "web:skill",
+        ) in svc._remotes["w1"].calls
 
 
 # ── lifecycle ──────────────────────────────────────────────────
