@@ -61,8 +61,22 @@ def reload_raw_prefix_for_target(
         branch_view=prefix.branch_view,
         include_metadata=True,
     )
+    persisted_messages = dicts_to_messages(messages)
+    for raw_message, message in zip(messages, persisted_messages):
+        metadata = raw_message.get("metadata")
+        if isinstance(metadata, dict):
+            message.metadata = dict(metadata)
+    if not any(message.role == "system" for message in persisted_messages):
+        persisted_messages = [
+            *(
+                message
+                for message in agent.controller.conversation.get_messages()
+                if message.role == "system"
+            ),
+            *persisted_messages,
+        ]
     conversation = Conversation()
-    for message in dicts_to_messages(messages):
+    for message in persisted_messages:
         conversation.append_message(message)
     agent.controller.conversation = conversation
     agent._turn_index = target.turn_index
