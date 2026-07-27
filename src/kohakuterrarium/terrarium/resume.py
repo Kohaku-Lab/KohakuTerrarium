@@ -45,6 +45,22 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 
+def _mark_conversation_open(store: SessionStore) -> None:
+    """Persist the UI lifecycle marker when the store supports it."""
+    setter = getattr(store, "set_conversation_open", None)
+    if callable(setter):
+        setter(True)
+
+
+def _finish_conversation_resume(store: SessionStore) -> None:
+    """Persist UI lifecycle state only after runtime adoption succeeds."""
+    _mark_conversation_open(store)
+    store.update_status("running")
+    checkpoint = getattr(store, "checkpoint", None)
+    if callable(checkpoint):
+        checkpoint()
+
+
 def _schedule_drive_reconcile(engine: "Terrarium", creature: "Creature") -> None:
     """Arm Drive reconciliation for a resumed creature.
 
@@ -215,8 +231,8 @@ async def _resume_manifest_into_engine(
             apply_creature_name(creature, creature.name)
             await creature.start()
             _schedule_drive_reconcile(engine, creature)
-        store.update_status("running")
         await _checkpoint.checkpoint(engine, manifest.graph_id)
+        _finish_conversation_resume(store)
         return manifest.graph_id
     except BaseException:
         environment = engine._environments.get(manifest.graph_id)
@@ -278,6 +294,7 @@ async def _resume_agent_into_engine(
         io_mode=None,
         llm=llm,
         input_module=NoneInput(),
+        mark_conversation_open=False,
     )
     created: list[str] = []
     try:
@@ -324,6 +341,7 @@ async def _resume_agent_into_engine(
         # redeliver only after startup settles.
         _schedule_drive_reconcile(engine, creature)
         await _checkpoint.checkpoint(engine, creature.graph_id)
+        _finish_conversation_resume(store)
 
         logger.info(
             "Agent session resumed into engine",
@@ -462,7 +480,6 @@ async def _resume_terrarium_body(
     # this store — register it as engine-owned so shutdown closes it.
     await engine.attach_session(sid, store)
     engine._owned_sessions.add(sid)
-    store.update_status("running")
 
     # Replay runtime topology mutations on top of the recipe-rebuilt
     # graph BEFORE anything starts: any channel the user added via
@@ -488,6 +505,7 @@ async def _resume_terrarium_body(
 
     if sid in engine._topology.graphs:
         await _checkpoint.checkpoint(engine, sid)
+    _finish_conversation_resume(store)
     logger.info(
         "Terrarium session resumed into engine",
         session_id=sid,

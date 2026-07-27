@@ -15,12 +15,14 @@ import TabGroupContainer from "@/components/shell/TabGroupContainer.vue"
 import { useDensity } from "@/composables/useDensity"
 import { useTabsStore } from "@/stores/tabs"
 import { useInstancesStore } from "@/stores/instances"
+import { useConversationsStore } from "@/stores/conversations"
 import { useClusterStore } from "@/stores/cluster"
 import { useTabPersistence } from "@/composables/useTabPersistence"
 import { registerBuiltinTabKinds } from "@/components/shell/registerBuiltins"
 
 const tabs = useTabsStore()
 const instances = useInstancesStore()
+const conversations = useConversationsStore()
 const cluster = useClusterStore()
 const { isCompact } = useDensity()
 
@@ -40,12 +42,13 @@ onMounted(async () => {
   // finishes hydrating from localStorage (so we know whether storage
   // had tabs first).
 
-  // Kick off instance polling so the rail's Attached group has data.
+  // Live runtime state stays separate from the persisted conversation rail.
   if (typeof instances.startPolling === "function") {
     instances.startPolling()
   } else {
     instances.fetchAll()
   }
+  conversations.startPolling()
 
   // Cluster: hydrate mode + sites once, then poll only in lab-host
   // mode.  Standalone clients pay no polling cost.
@@ -54,6 +57,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  conversations.stopPolling()
   cluster.stopPolling()
 })
 </script>

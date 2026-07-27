@@ -14,12 +14,12 @@
       </div>
       <div class="mx-2 border-t border-warm-200 dark:border-warm-700" />
 
-      <!-- Group: Top — Dashboard above Attached -->
+      <!-- Group: Top — Dashboard above Conversations -->
       <RailGroupTop />
 
       <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />
 
-      <!-- Group: Attached -->
+      <!-- Group: Conversations -->
       <RailGroupAttached />
 
       <div class="mx-2 mt-1 border-t border-warm-200 dark:border-warm-700" />

@@ -163,6 +163,28 @@ async def start_creature(
         name=name.strip() if name and name.strip() else None,
     )
     sid = info.graph_id
+    remote_session_path = ""
+    conversation_id = ""
+    host = getattr(service, "_host", None)
+    if host is not None:
+        try:
+            response = await host.request(
+                to_node=on_node,
+                namespace="terrarium.session",
+                type="stores",
+                body={"session_id": sid},
+                timeout=30.0,
+            )
+            stores = response.get("stores") if isinstance(response, dict) else None
+            if isinstance(stores, list) and stores:
+                remote_session_path = str(stores[0].get("path") or "")
+                conversation_id = str(stores[0].get("conversation_id") or "")
+        except Exception as exc:
+            logger.warning(
+                "Failed to discover remote session store",
+                session_id=sid,
+                error=str(exc),
+            )
     meta_for(service)[sid] = {
         "name": info.name,
         "config_path": config_path or "",
@@ -171,6 +193,8 @@ async def start_creature(
         "on_node": on_node,
         # The host needs the worker identity to reconstruct remote Session handles.
         "creature_id": info.creature_id,
+        "remote_session_path": remote_session_path,
+        "conversation_id": conversation_id,
         # Cached model metadata keeps remote status readable during brief outages.
         "model": str(getattr(info, "model", "") or ""),
         "llm_name": str(getattr(info, "llm_name", "") or ""),
@@ -636,10 +660,7 @@ def _persist_cluster_members_to_mirror(service, session_id):
 
 
 async def stop_session(service: "TerrariumService", session_id: str) -> None:
-    """Thin delegator — see :func:`studio.sessions.stop.stop_session`.
-
-    Passes the lifecycle-owned registries by reference.
-    """
+    """Stop a runtime while keeping the conversation open and dormant."""
     await _stop.stop_session(
         service,
         session_id,
@@ -647,6 +668,19 @@ async def stop_session(service: "TerrariumService", session_id: str) -> None:
         session_stores=stores_for(service),
         mirror_dir=Path(_session_dir()) / "mirror",
         index_hooks=_index_hooks.registry(),
+    )
+
+
+async def end_session(service: "TerrariumService", session_id: str) -> None:
+    """Explicitly end a conversation and remove its runtime."""
+    await _stop.stop_session(
+        service,
+        session_id,
+        meta=meta_for(service),
+        session_stores=stores_for(service),
+        mirror_dir=Path(_session_dir()) / "mirror",
+        index_hooks=_index_hooks.registry(),
+        end_conversation=True,
     )
 
 

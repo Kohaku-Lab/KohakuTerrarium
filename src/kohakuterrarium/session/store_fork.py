@@ -13,6 +13,7 @@ from kohakuvault import KVault
 from kohakuterrarium.session.artifacts import artifacts_dir_for
 from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.store_protocol import SessionStoreLike
+from kohakuterrarium.session.identity import new_conversation_id
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -326,6 +327,7 @@ def perform_fork(
                 )
 
         dest.meta["session_id"] = child_session_id
+        dest.meta["conversation_id"] = new_conversation_id()
         dest.meta["created_at"] = created_at
         dest.meta["last_active"] = created_at
         dest.meta["status"] = "paused"

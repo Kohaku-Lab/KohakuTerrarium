@@ -8,6 +8,7 @@ data, not stubbed shapes.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -113,6 +114,7 @@ class TestResumeOp:
             {"path": str(kohakutr), "pwd_override": str(tmp_path)}
         )
         assert out["session_id"] == "sid1"
+        assert out["session_path"] == str(kohakutr)
         # Evaluated on the worker (this process) — the saved dir does
         # not exist here, whatever the controller might think.
         assert out["pwd_exists"] is False
@@ -134,6 +136,84 @@ class TestResumeOp:
         _engine._session_stores["sid2"] = store
         out = await _adapter._op_resume({"path": str(kohakutr)})
         assert out["pwd_exists"] is True
+
+    async def test_set_lifecycle_updates_worker_store(self, _adapter, tmp_path):
+        path = tmp_path / "lifecycle.kohakutr"
+        store = SessionStore(path)
+        store.init_meta("sid", "agent", "x", str(tmp_path), ["a"])
+        store.close(update_status=False)
+
+        result = _adapter._op_set_lifecycle(
+            {
+                "session_path": str(path),
+                "conversation_open": False,
+                "status": "completed",
+            }
+        )
+
+        assert result["ok"] is True
+        reopened = SessionStore.open_readonly(path)
+        try:
+            assert bool(reopened.meta["conversation_open"]) is False
+            assert reopened.meta["status"] == "completed"
+        finally:
+            reopened.close(update_status=False)
+
+    async def test_set_lifecycle_reuses_open_engine_store(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "live.kohakutr"
+        store = SessionStore(path)
+        store.init_meta("sid", "agent", "x", str(tmp_path), ["a"])
+        _engine._session_stores["sid"] = store
+
+        def fail_open(*args, **kwargs):
+            raise AssertionError("must reuse the live engine store")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.laboratory.adapters.terrarium_session.SessionStore",
+            fail_open,
+        )
+
+        result = _adapter._op_set_lifecycle(
+            {
+                "session_path": str(path),
+                "conversation_open": False,
+                "status": "completed",
+            }
+        )
+
+        assert result["ok"] is True
+        assert bool(store.meta["conversation_open"]) is False
+        assert store.meta["status"] == "completed"
+
+    async def test_rollback_resume_removes_graph_members(
+        self, _adapter, _engine, tmp_path
+    ):
+        _engine._creatures = {
+            "one": SimpleNamespace(creature_id="one", graph_id="target"),
+            "two": SimpleNamespace(creature_id="two", graph_id="target"),
+            "other": SimpleNamespace(creature_id="other", graph_id="other"),
+        }
+        removed = []
+        session_path = tmp_path / "rollback.kohakutr"
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one", "two"])
+        _engine._session_stores = {"target": store}
+        _engine.creatures = lambda: tuple(_engine._creatures.values())
+
+        async def remove_creature(creature_id):
+            removed.append(creature_id)
+            _engine._creatures.pop(creature_id)
+
+        _engine.remove_creature = remove_creature
+
+        result = await _adapter._op_rollback_resume({"graph_id": "target"})
+
+        assert result == {"ok": True, "removed": ["one", "two"]}
+        assert removed == ["two", "one"]
+        assert list(_engine._creatures) == ["other"]
+        assert session_path.exists() is False
 
 
 # ── error mapping ───────────────────────────────────────────────

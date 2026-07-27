@@ -12,6 +12,7 @@ through ``terrarium.session.resume``; the host itself does not run agents.
 """
 
 import asyncio
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -19,12 +20,16 @@ import aiofiles
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from kohakuterrarium.api.deps import get_engine, get_service
+from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
+from kohakuterrarium.api.routes.persistence.cluster_resume_compensation import (
+    rollback_cluster_resume,
+)
+from kohakuterrarium.api.routes.persistence.resume_coordinator import resume_coordinator
 from kohakuterrarium.laboratory.adapters.file_scopes import kt_config_home
 from kohakuterrarium.laboratory.file_transfer import stream_write_file
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.resume import resume_session as studio_resume
-from kohakuterrarium.studio.persistence.store import resolve_session_path_default
+from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.sessions.handles import Session
 from kohakuterrarium.studio.sessions.lifecycle import now_iso, register_session_meta
@@ -60,13 +65,44 @@ async def resume_session(
     session_name: str,
     request: Request,
     req: ResumeRequest | None = None,
+    session_dir: Path = Depends(resolve_request_session_dir),
     service: TerrariumService = Depends(get_service),
+):
+    """Share one canonical in-flight resume and reject conflicting intents."""
+    path = resolve_session_path_in(session_name, session_dir=session_dir)
+    if path is None:
+        raise HTTPException(
+            status_code=404, detail=f"Session {session_name!r} not found"
+        )
+    body = req or ResumeRequest()
+    key = os.path.normcase(str(path.expanduser().resolve(strict=False)))
+    members = tuple(
+        sorted((member.sid, member.on_node) for member in (body.members or []))
+    )
+    intent = repr((body.on_node or "_host", body.pwd, members))
+    try:
+        return await resume_coordinator.run(
+            key,
+            lambda: _resume_session(session_name, request, body, session_dir, service),
+            intent=intent,
+        )
+    except RuntimeError as exc:
+        if "conflicting resume request" in str(exc):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise
+
+
+async def _resume_session(
+    session_name: str,
+    request: Request,
+    req: ResumeRequest | None,
+    session_dir: Path,
+    service: TerrariumService,
 ):
     """Resume a saved session locally or on connected worker nodes.
 
-    ``get_engine`` is resolved lazily because only standalone host resumes need
-    a local engine. Lab-host requests reject that target, so eager dependency
-    resolution would initialize an engine the route cannot use.
+    Saved paths and the local service are both request-scoped so authenticated
+    users cannot resolve or adopt another user's session with the same name.
     """
     on_node = (req.on_node if req is not None else "_host") or "_host"
 
@@ -81,7 +117,7 @@ async def resume_session(
             ),
         )
 
-    path = await asyncio.to_thread(resolve_session_path_default, session_name)
+    path = await asyncio.to_thread(resolve_session_path_in, session_name, session_dir)
     if path is None:
         raise HTTPException(
             status_code=404, detail=f"Session not found: {session_name}"
@@ -89,10 +125,9 @@ async def resume_session(
 
     if on_node == "_host":
         # The host target is valid only for a standalone service.
-        engine = get_engine()
         try:
             session = await studio_resume(
-                engine, path, pwd_override=req.pwd if req is not None else None
+                service, path, pwd_override=req.pwd if req is not None else None
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -145,6 +180,7 @@ async def resume_session(
             on_node,
             session_name,
             primary_sid=normalize_session_stem(path),
+            session_dir=session_dir,
             pwd_override=req.pwd if req is not None else None,
         )
 
@@ -195,6 +231,8 @@ async def resume_session(
             "pwd": meta.get("pwd", ""),
             "on_node": on_node,
             "resumed_from": str(path),
+            "remote_session_path": _worker_absolute_for(f"resume/{path.name}"),
+            "conversation_id": str(meta.get("conversation_id") or ""),
             "creature_id": primary_cid,
         },
     )
@@ -250,13 +288,13 @@ def _read_saved_cluster_members(path: Path) -> list[ClusterMember] | None:
     if not path.exists():
         return None
     try:
-        store = SessionStore(path)
+        store = SessionStore.open_readonly(path)
     except Exception:
         return None
     try:
         raw = store.meta.get("cluster_members")
     finally:
-        store.close()
+        store.close(update_status=False)
     if not isinstance(raw, list) or len(raw) < 2:
         return None
     members: list[ClusterMember] = []
@@ -302,8 +340,11 @@ async def _push_and_resume_member(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     rel = f"resume/{path.name}"
+    worker_path = _worker_absolute_for(rel)
+    transferred = False
     try:
         await stream_write_file(host, on_node, "config://", rel, data)
+        transferred = True
         target_path_resp = await host.request(
             to_node=on_node,
             namespace="terrarium.files",
@@ -324,7 +365,7 @@ async def _push_and_resume_member(
             namespace="terrarium.session",
             type="resume",
             body={
-                "path": _worker_absolute_for(rel),
+                "path": worker_path,
                 "pwd_override": pwd_override,
             },
             timeout=60.0,
@@ -343,20 +384,31 @@ async def _push_and_resume_member(
                     f"{err.get('message', '') if isinstance(err, dict) else ''}"
                 ),
             )
-    except HTTPException:
-        raise
+        sid = worker_path_resp.get("session_id", "")
+        if not isinstance(sid, str) or not sid:
+            raise HTTPException(
+                status_code=502,
+                detail=f"worker {on_node!r} returned no session_id",
+            )
     except Exception as exc:
+        if transferred:
+            try:
+                await host.request(
+                    to_node=on_node,
+                    namespace="terrarium.session",
+                    type="delete_transfer",
+                    body={"session_path": worker_path},
+                    timeout=30.0,
+                )
+            except Exception:
+                pass
+        if isinstance(exc, HTTPException):
+            raise
         raise HTTPException(
             status_code=502, detail=f"lab transport error: {exc}"
         ) from exc
 
-    sid = worker_path_resp.get("session_id", "")
     meta = worker_path_resp.get("meta", {}) or {}
-    if not isinstance(sid, str) or not sid:
-        raise HTTPException(
-            status_code=502,
-            detail=f"worker {on_node!r} returned no session_id",
-        )
     worker_pwd_exists = worker_path_resp.get("pwd_exists")
     if not isinstance(worker_pwd_exists, bool):
         worker_pwd_exists = None
@@ -372,6 +424,7 @@ async def _resume_cluster(
     session_name: str,
     *,
     primary_sid: str,
+    session_dir: Path,
     pwd_override: str | None = None,
 ) -> dict:
     """Resume all cluster members on their workers and restore their links.
@@ -384,7 +437,7 @@ async def _resume_cluster(
     # leave a partially resumed cluster.
     paths: dict[str, Path] = {}
     for m in members:
-        resolved = await asyncio.to_thread(resolve_session_path_default, m.sid)
+        resolved = await asyncio.to_thread(resolve_session_path_in, m.sid, session_dir)
         if resolved is None:
             raise HTTPException(
                 status_code=404,
@@ -400,18 +453,30 @@ async def _resume_cluster(
     ordered: list[ClusterMember] = [primary_member] + [
         m for m in members if m.sid != primary_member.sid
     ]
-    resumed: dict[str, tuple[str, dict, str]] = (
-        {}
-    )  # Maps original IDs to the adopted ID, metadata, and worker node.
-    for m in ordered:
-        new_sid, new_meta, _member_pwd_exists = await _push_and_resume_member(
-            host=host,
-            request=request,
-            path=paths[m.sid],
-            on_node=m.on_node,
-            pwd_override=pwd_override,
+    resumed: dict[str, tuple[str, dict, str]] = {}
+    registered_session_ids: list[str] = []
+    connected_pairs: list[tuple[str, str]] = []
+    try:
+        for m in ordered:
+            new_sid, new_meta, _member_pwd_exists = await _push_and_resume_member(
+                host=host,
+                request=request,
+                path=paths[m.sid],
+                on_node=m.on_node,
+                pwd_override=pwd_override,
+            )
+            resumed[m.sid] = (new_sid, new_meta, m.on_node)
+    except Exception as exc:
+        rollback_errors = await rollback_cluster_resume(
+            service,
+            resumed,
+            registered_session_ids,
+            connected_pairs,
         )
-        resumed[m.sid] = (new_sid, new_meta, m.on_node)
+        detail = f"cluster member resume failed: {exc}"
+        if rollback_errors:
+            detail += "; rollback errors: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=502, detail=detail) from exc
 
     # Roster refresh replaces stale pre-stop routing identities before relink.
     new_creature_by_member: dict[str, str] = {}
@@ -445,25 +510,39 @@ async def _resume_cluster(
                 "pwd": new_meta.get("pwd", ""),
                 "on_node": node,
                 "resumed_from": str(paths[original_sid]),
+                "remote_session_path": _worker_absolute_for(
+                    f"resume/{paths[original_sid].name}"
+                ),
+                "conversation_id": str(new_meta.get("conversation_id") or ""),
                 "creature_id": creature_id,
             },
         )
+        registered_session_ids.append(new_sid)
 
     # Default-channel connections rebuild cluster links from the primary.
-    # Relink failures are returned without discarding successful adoptions;
-    # disconnected members remain recoverable through a manual connection.
     primary_cid = new_creature_by_member.get(primary_member.sid)
-    relink_errors: list[str] = []
-    if primary_cid and hasattr(service, "connect"):
+    try:
+        if not primary_cid:
+            raise RuntimeError("resumed primary creature is missing from the roster")
         for m in ordered[1:]:
             peer_cid = new_creature_by_member.get(m.sid)
             if not peer_cid:
-                relink_errors.append(f"no creature_id for sid={m.sid}")
-                continue
-            try:
-                await service.connect(primary_cid, peer_cid)
-            except Exception as exc:  # pragma: no cover - defensive
-                relink_errors.append(f"{m.sid}: {exc}")
+                raise RuntimeError(
+                    f"resumed member {m.sid!r} is missing from the roster"
+                )
+            await service.connect(primary_cid, peer_cid)
+            connected_pairs.append((primary_cid, peer_cid))
+    except Exception as exc:
+        rollback_errors = await rollback_cluster_resume(
+            service,
+            resumed,
+            registered_session_ids,
+            connected_pairs,
+        )
+        detail = f"cluster relink failed: {exc}"
+        if rollback_errors:
+            detail += "; rollback errors: " + "; ".join(rollback_errors)
+        raise HTTPException(status_code=502, detail=detail) from exc
 
     primary_new_sid, primary_meta, _ = resumed[primary_member.sid]
     name = primary_meta.get("terrarium_name") or session_name
@@ -509,5 +588,4 @@ async def _resume_cluster(
             {"sid": new_sid, "on_node": node}
             for (new_sid, _meta, node) in resumed.values()
         ],
-        "relink_errors": relink_errors,
     }

@@ -68,8 +68,10 @@ export function createVisibilityInterval(callback, intervalMs, opts = {}) {
   function start() {
     if (started) return
     started = true
-    if (immediate) tick()
-    if (document.visibilityState === "visible") armTimer()
+    if (document.visibilityState === "visible") {
+      if (immediate) tick()
+      armTimer()
+    }
     onVisibility = () => {
       if (!started) return
       if (document.visibilityState === "visible") {

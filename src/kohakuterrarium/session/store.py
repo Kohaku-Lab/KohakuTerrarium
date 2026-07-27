@@ -15,6 +15,7 @@ from kohakuterrarium.session.history import (
     dedupe_adjacent_duplicate_events,
     normalize_resumable_events,
 )
+from kohakuterrarium.session.identity import legacy_conversation_id, new_conversation_id
 from kohakuterrarium.session.rollup import (
     get_turn_rollup,
     list_turn_rollups,
@@ -597,6 +598,9 @@ class SessionStore:
         self.meta["created_at"] = now
         self.meta["last_active"] = now
         self.meta["status"] = "running"
+        self.meta["conversation_open"] = True
+        if not self.meta.get("conversation_id"):
+            self.meta["conversation_id"] = new_conversation_id()
         self.meta["agents"] = agents
         self.meta["hostname"] = platform.node()
         self.meta["python_version"] = platform.python_version()
@@ -613,6 +617,28 @@ class SessionStore:
 
         self.meta["status"] = status
         self.meta["last_active"] = datetime.now(timezone.utc).isoformat()
+
+    def set_conversation_open(self, is_open: bool) -> None:
+        """Persist whether the user still considers this conversation open."""
+
+        self.meta["conversation_open"] = bool(is_open)
+        if is_open:
+            self.ensure_conversation_id()
+
+    def ensure_conversation_id(self) -> str | None:
+        """Return the immutable persisted identity for a marked conversation.
+
+        Legacy files are backfilled only when they carry the explicit open
+        marker. Their path-derived UUID is deterministic across retries.
+        """
+        existing = self.meta.get("conversation_id")
+        if isinstance(existing, str) and existing:
+            return existing
+        if not self.meta.get("conversation_open"):
+            return None
+        conversation_id = legacy_conversation_id(self._path)
+        self.meta["conversation_id"] = conversation_id
+        return conversation_id
 
     def set_viewer_default_agent(self, namespace: str) -> None:
         """Record ``namespace`` as the session viewer's default agent.

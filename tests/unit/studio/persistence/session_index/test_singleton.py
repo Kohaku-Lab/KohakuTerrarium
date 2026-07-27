@@ -1,6 +1,8 @@
 """Unit tests for the ``session_index`` singleton + ``__init__`` glue."""
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -64,19 +66,69 @@ class TestSingleton:
         assert a is b
         close_session_index()
 
-    def test_rotates_when_session_dir_changes(self, tmp_path):
+    def test_relative_and_absolute_paths_share_normalized_bucket(
+        self, tmp_path, monkeypatch
+    ):
+        sdir = tmp_path / "sessions"
+        sdir.mkdir()
+        monkeypatch.chdir(tmp_path)
+
+        relative = get_session_index_default(Path("sessions"))
+        absolute = get_session_index_default(sdir)
+
+        assert relative is absolute
+        close_session_index()
+
+    def test_interleaved_directories_keep_independent_open_instances(self, tmp_path):
+        d1 = tmp_path / "d1"
+        d2 = tmp_path / "d2"
+        d1.mkdir()
+        d2.mkdir()
+
+        a1 = get_session_index_default(d1)
+        b1 = get_session_index_default(d2)
+        a2 = get_session_index_default(d1)
+
+        assert a2 is a1
+        assert a1._closed is False
+        assert b1._closed is False
+        close_session_index()
+
+    def test_concurrent_directories_share_one_open_instance_per_directory(
+        self, tmp_path
+    ):
+        directories = [tmp_path / "d1", tmp_path / "d2"]
+        for directory in directories:
+            directory.mkdir()
+        requested = directories * 4
+        barrier = threading.Barrier(len(requested))
+
+        def open_index(directory):
+            barrier.wait()
+            return directory, get_session_index_default(directory)
+
+        with ThreadPoolExecutor(max_workers=len(requested)) as executor:
+            opened = list(executor.map(open_index, requested))
+
+        for directory in directories:
+            instances = [index for key, index in opened if key == directory]
+            assert len({id(index) for index in instances}) == 1
+            assert instances[0]._closed is False
+        close_session_index()
+
+    def test_different_session_dirs_use_different_open_instances(self, tmp_path):
         d1 = tmp_path / "d1"
         d2 = tmp_path / "d2"
         d1.mkdir()
         d2.mkdir()
         a = get_session_index_default(d1)
         b = get_session_index_default(d2)
-        # New instance for the new directory.
         assert a is not b
-        # Old one was closed during the rotate; verify by accessing
-        # the ``_closed`` flag.
-        assert a._closed is True
+        assert a._closed is False
+        assert b._closed is False
         close_session_index()
+        assert a._closed is True
+        assert b._closed is True
 
     def test_close_is_idempotent(self):
         close_session_index()  # no singleton yet — must not raise
@@ -92,21 +144,25 @@ class TestSingleton:
         assert a is not b
         close_session_index()
 
-    def test_rotate_swallows_old_close_exception(self, tmp_path, monkeypatch):
+    def test_close_all_swallows_one_close_exception(self, tmp_path, monkeypatch):
         d1 = tmp_path / "d1"
         d2 = tmp_path / "d2"
         d1.mkdir()
         d2.mkdir()
         a = get_session_index_default(d1)
 
-        # Replace ``close`` on the existing singleton with a raise
-        # — the rotate path must swallow it and keep going.
+        # One broken close must not prevent later cached indexes from closing.
         def boom():
             raise RuntimeError("close blew up")
 
         monkeypatch.setattr(a, "close", boom)
         b = get_session_index_default(d2)
-        assert b is not a
+        close_session_index()
+        assert b._closed is True
+
+        # Both cache entries were cleared even though one close failed.
+        replacement = get_session_index_default(d1)
+        assert replacement is not a
         close_session_index()
 
     def test_close_session_index_swallows_close_exception(self, tmp_path, monkeypatch):

@@ -600,15 +600,33 @@ class TestApiStudioJourney:
             "ping again",
         ]
         assert regen_msgs[-1]["role"] == "assistant"
-        # The branches route is reachable and returns a list payload.
+        # Regeneration records the replaced tail as a child branch.
         resp = client.get(f"{base}/branches")
         assert resp.status_code == 200
-        assert resp.json() == []
+        branches = resp.json()
+        assert len(branches) == 2
+        assert [branch["turn_index"] for branch in branches] == [1, 2]
+        assert [branch["selected"] for branch in branches] == [1, 2]
+        assert branches[1]["branches"][1]["parent_branch_paths"] == [[[1, 1]]]
 
         # Stop the session — flushes + closes the .kohakutr file.
         resp = client.delete(f"/api/sessions/active/{session_id}")
         assert resp.status_code == 200
         assert client.get("/api/sessions/active").json() == []
+
+        # Stop detaches the runtime but keeps the conversation open and dormant.
+        open_rows = client.get("/api/sessions/open").json()
+        assert len(open_rows) == 1
+        assert open_rows[0]["is_live"] is False
+        conversation_id = open_rows[0]["conversation_id"]
+
+        # Dormant history stays readable without implicitly resuming it.
+        assert client.get("/api/sessions/active").json() == []
+
+        # Explicit End removes it from the rail while preserving saved history.
+        resp = client.post(f"/api/sessions/open/{conversation_id}/end")
+        assert resp.status_code == 200
+        assert client.get("/api/sessions/open").json() == []
 
         # 13. The stopped session is now a saved session on disk — the
         #     saved-session list + history routes read it back. (No

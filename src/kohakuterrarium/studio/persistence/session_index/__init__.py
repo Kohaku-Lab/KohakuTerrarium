@@ -4,10 +4,10 @@ The KohakuVault sidecar stores session listing entries, full-text search rows,
 and reconciliation metadata in one SQLite file. It avoids reopening every
 session database for cold listings.
 
-The singleton lock protects construction and bootstrap only. Per-request reads
-and writes rely on SQLite WAL and KohakuVault busy retries. The reconciliation
-function remains available from the ``reconcile`` submodule rather than this
-package namespace so the submodule attribute is not shadowed.
+The process cache lock protects construction and bootstrap only. Per-request
+reads and writes rely on SQLite WAL and KohakuVault busy retries. The
+reconciliation function remains available from the ``reconcile`` submodule
+rather than this package namespace so the submodule attribute is not shadowed.
 """
 
 import os
@@ -71,8 +71,7 @@ def sidecar_path_for(session_dir: Path) -> Path:
     return session_dir / _SIDECAR_NAME
 
 
-_singleton: SessionIndex | None = None
-_singleton_dir: Path | None = None
+_singletons: dict[str, SessionIndex] = {}
 _singleton_lock = threading.Lock()
 
 
@@ -95,24 +94,18 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
     A new sidecar receives a full reconciliation. Later process starts perform
     an incremental fingerprint reconciliation so sessions changed by sibling
     processes while the server was down are discovered. Push hooks and explicit
-    refreshes handle drift during the current process lifetime.
+    refreshes handle drift during the current process lifetime. Each normalized
+    session directory owns an independent cached index.
     """
-    global _singleton, _singleton_dir
     if session_dir is None:
         session_dir = _default_session_dir()
+    normalized_dir = Path(session_dir).expanduser().resolve(strict=False)
+    cache_key = os.path.normcase(str(normalized_dir))
     with _singleton_lock:
-        if _singleton is not None and _singleton_dir == session_dir:
-            return _singleton
-        # Directory rotation must close native handles before replacing the
-        # singleton.
-        if _singleton is not None:
-            try:
-                _singleton.close()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "singleton close-on-rotate failed", error=str(exc), exc_info=True
-                )
-        sidecar = sidecar_path_for(session_dir)
+        cached = _singletons.get(cache_key)
+        if cached is not None:
+            return cached
+        sidecar = sidecar_path_for(normalized_dir)
         instance = SessionIndex(sidecar)
         is_first_bootstrap = instance.meta_get(_BOOTSTRAP_FLAG) != "1"
         try:
@@ -121,14 +114,14 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
                     "Bootstrapping session index from disk (full)",
                     path=str(sidecar),
                 )
-                _run_reconcile(instance, session_dir, full=True)
+                _run_reconcile(instance, normalized_dir, full=True)
                 instance.meta_put(_BOOTSTRAP_FLAG, "1")
             else:
                 logger.debug(
                     "Reconciling session index on startup (incremental)",
                     path=str(sidecar),
                 )
-                _run_reconcile(instance, session_dir, full=False)
+                _run_reconcile(instance, normalized_dir, full=False)
         except Exception as exc:  # noqa: BLE001
             # Startup remains available with stale index data; the error is
             # logged because later refreshes may recover it.
@@ -138,31 +131,31 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
                 first_bootstrap=is_first_bootstrap,
                 exc_info=True,
             )
-        _singleton = instance
-        _singleton_dir = session_dir
+        _singletons[cache_key] = instance
         return instance
 
 
 def close_session_index() -> None:
-    """Idempotently release the singleton's SQLite handles."""
-    global _singleton, _singleton_dir
+    """Idempotently release every cached index's SQLite handles."""
     with _singleton_lock:
-        if _singleton is None:
-            return
-        try:
-            _singleton.close()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("close_session_index failed", error=str(exc), exc_info=True)
-        _singleton = None
-        _singleton_dir = None
+        cached = list(_singletons.items())
+        _singletons.clear()
+        for cache_key, instance in cached:
+            try:
+                instance.close()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "close_session_index failed",
+                    path=cache_key,
+                    error=str(exc),
+                    exc_info=True,
+                )
 
 
 def _reset_singleton_for_tests() -> None:
-    """Drop the singleton without closing files that tests may have removed.
+    """Drop cached indexes without closing files that tests may have removed.
 
     This intentionally may leak handles and is restricted to isolated tests.
     """
-    global _singleton, _singleton_dir
     with _singleton_lock:
-        _singleton = None
-        _singleton_dir = None
+        _singletons.clear()

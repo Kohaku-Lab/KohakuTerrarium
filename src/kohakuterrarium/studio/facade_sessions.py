@@ -90,6 +90,9 @@ class _SessionsNS:
     async def stop(self, session_id: str) -> None:
         await _session_lifecycle.stop_session(self._studio._service, session_id)
 
+    async def end(self, session_id: str) -> None:
+        await _session_lifecycle.end_session(self._studio._service, session_id)
+
     def find_creature(self, session_id: str, name_or_id: str) -> Any:
         return _session_lifecycle.find_creature(
             self._studio._service, session_id, name_or_id

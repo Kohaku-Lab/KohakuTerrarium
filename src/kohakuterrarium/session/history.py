@@ -439,6 +439,7 @@ def replay_conversation(
     events: Iterable[dict[str, Any]],
     *,
     branch_view: dict[int, int] | None = None,
+    include_metadata: bool = False,
 ) -> list[dict[str, Any]]:
     """Rebuild an OpenAI-shape message list from the event log.
 
@@ -463,14 +464,28 @@ def replay_conversation(
 
     messages: list[dict[str, Any]] = []
     text_buf: list[str] = []
+    text_metadata: dict[str, Any] | None = None
+
+    def _with_metadata(
+        message: dict[str, Any], event: dict[str, Any]
+    ) -> dict[str, Any]:
+        metadata = event.get("metadata")
+        if include_metadata and isinstance(metadata, dict):
+            message["metadata"] = dict(metadata)
+        return message
 
     def _flush_text() -> None:
+        nonlocal text_metadata
         if not text_buf:
             return
         content = "".join(text_buf)
         if content:
-            messages.append({"role": "assistant", "content": content})
+            message = {"role": "assistant", "content": content}
+            if include_metadata and text_metadata:
+                message["metadata"] = dict(text_metadata)
+            messages.append(message)
         text_buf.clear()
+        text_metadata = None
 
     for evt in events_list:
         etype = evt.get("type", "")
@@ -487,6 +502,8 @@ def replay_conversation(
             chunk = evt.get("content", "")
             if isinstance(chunk, str):
                 text_buf.append(chunk)
+                if include_metadata and isinstance(evt.get("metadata"), dict):
+                    text_metadata = dict(evt["metadata"])
             continue
 
         if etype in (
@@ -509,7 +526,9 @@ def replay_conversation(
         _flush_text()
 
         if etype == "user_message":
-            messages.append({"role": "user", "content": evt.get("content", "")})
+            messages.append(
+                _with_metadata({"role": "user", "content": evt.get("content", "")}, evt)
+            )
         elif etype == "assistant_tool_calls":
             tool_calls = evt.get("tool_calls") or []
             if (
@@ -520,29 +539,42 @@ def replay_conversation(
                 messages[-1]["tool_calls"] = tool_calls
             else:
                 messages.append(
-                    {
-                        "role": "assistant",
-                        "content": evt.get("content", ""),
-                        "tool_calls": tool_calls,
-                    }
+                    _with_metadata(
+                        {
+                            "role": "assistant",
+                            "content": evt.get("content", ""),
+                            "tool_calls": tool_calls,
+                        },
+                        evt,
+                    )
                 )
         elif etype == "tool_result":
             messages.append(
-                {
-                    "role": "tool",
-                    "content": evt.get("output", "") or "",
-                    "tool_call_id": evt.get("call_id", "") or evt.get("job_id", ""),
-                    "name": evt.get("name", ""),
-                }
+                _with_metadata(
+                    {
+                        "role": "tool",
+                        "content": evt.get("output", "") or "",
+                        "tool_call_id": evt.get("call_id", "") or evt.get("job_id", ""),
+                        "name": evt.get("name", ""),
+                    },
+                    evt,
+                )
             )
         elif etype == "system_prompt_set":
-            messages.append({"role": "system", "content": evt.get("content", "")})
+            messages.append(
+                _with_metadata(
+                    {"role": "system", "content": evt.get("content", "")}, evt
+                )
+            )
         elif etype == "compact_replace":
             messages.append(
-                {
-                    "role": "assistant",
-                    "content": evt.get("summary_text", ""),
-                }
+                _with_metadata(
+                    {
+                        "role": "assistant",
+                        "content": evt.get("summary_text", ""),
+                    },
+                    evt,
+                )
             )
 
     _flush_text()

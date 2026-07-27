@@ -304,6 +304,18 @@ async def get_active_session(
     return sess.to_dict()
 
 
+@router.post("/{session_id}/end")
+async def end_active_session(
+    session_id: str, service: TerrariumService = Depends(get_service)
+):
+    """Explicitly end a conversation and remove its runtime."""
+    try:
+        await lifecycle.end_session(service, session_id)
+        return {"status": "ended"}
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+
 @router.delete("/{session_id}")
 async def stop_active_session(
     session_id: str, service: TerrariumService = Depends(get_service)

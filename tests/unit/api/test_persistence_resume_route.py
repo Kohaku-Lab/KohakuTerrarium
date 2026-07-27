@@ -1,27 +1,32 @@
 """Unit tests for :mod:`kohakuterrarium.api.routes.persistence.resume`."""
 
+import asyncio
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
+import pytest
 
-from kohakuterrarium.api.deps import get_engine, get_service
+from kohakuterrarium.api.deps import (
+    get_service,
+    resolve_request_session_dir,
+)
 from kohakuterrarium.api.routes.persistence import resume as resume_mod
 from kohakuterrarium.studio.sessions.handles import Session
-
-
-class _LocalEngine:
-    pass
 
 
 class _LocalService:
     pass
 
 
-def _app(*, engine=None, service=None) -> FastAPI:
+def _app(*, service=None, session_dir=None) -> FastAPI:
     app = FastAPI()
-    app.dependency_overrides[get_engine] = lambda: engine or _LocalEngine()
-    app.dependency_overrides[get_service] = lambda: service or _LocalService()
+    app.dependency_overrides[get_service] = lambda: (
+        service if service is not None else _LocalService()
+    )
+    if session_dir is not None:
+        app.dependency_overrides[resolve_request_session_dir] = lambda: session_dir
     app.include_router(resume_mod.router, prefix="/sessions")
     return app
 
@@ -53,8 +58,124 @@ class TestWorkerAbsoluteFor:
 
 
 class TestHostResume:
+    @pytest.mark.asyncio
+    async def test_concurrent_requests_share_one_underlying_resume(
+        self, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "shared.kohakutr"
+        path.write_bytes(b"saved")
+        started = asyncio.Event()
+        release = asyncio.Event()
+        calls = 0
+
+        async def fake_resume(service, saved_path, pwd_override=None):
+            nonlocal calls
+            calls += 1
+            started.set()
+            await release.wait()
+            return _session()
+
+        monkeypatch.setattr(resume_mod, "studio_resume", fake_resume)
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_session_path_in",
+            lambda name, session_dir: path,
+        )
+        transport = ASGITransport(app=_app(session_dir=tmp_path))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            first = asyncio.create_task(client.post("/sessions/shared/resume"))
+            for _ in range(100):
+                if started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert started.is_set()
+            second = asyncio.create_task(client.post("/sessions/alias/resume"))
+            await asyncio.sleep(0)
+
+            assert calls == 1
+            release.set()
+            responses = await asyncio.gather(first, second)
+
+        assert [response.status_code for response in responses] == [200, 200]
+
+    @pytest.mark.asyncio
+    async def test_conflicting_target_returns_409(self, tmp_path, monkeypatch):
+        path = tmp_path / "shared.kohakutr"
+        path.write_bytes(b"session")
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def fake_impl(*args, **kwargs):
+            started.set()
+            await release.wait()
+            return {"instance_id": "sid-conflict"}
+
+        monkeypatch.setattr(resume_mod, "_resume_session", fake_impl)
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_session_path_in",
+            lambda name, session_dir: path,
+        )
+        transport = ASGITransport(app=_app(session_dir=tmp_path))
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            first = asyncio.create_task(client.post("/sessions/shared/resume"))
+            for _ in range(100):
+                if started.is_set():
+                    break
+                await asyncio.sleep(0.01)
+            assert started.is_set()
+            conflict = await client.post(
+                "/sessions/shared/resume",
+                json={
+                    "on_node": "_host",
+                    "members": [{"sid": "other", "on_node": "worker-b"}],
+                },
+            )
+            release.set()
+            successful = await first
+
+        assert conflict.status_code == 409
+        assert successful.status_code == 200
+
+    def test_same_saved_name_is_isolated_by_request_directory_and_service(
+        self, tmp_path, monkeypatch
+    ):
+        user_a_dir = tmp_path / "user-a"
+        user_b_dir = tmp_path / "user-b"
+        user_a_dir.mkdir()
+        user_b_dir.mkdir()
+        user_a_path = user_a_dir / "shared.kohakutr"
+        user_b_path = user_b_dir / "shared.kohakutr"
+        user_a_path.write_bytes(b"a")
+        user_b_path.write_bytes(b"b")
+        user_a_service = _LocalService()
+        user_b_service = _LocalService()
+        resumed: list[tuple[object, Path]] = []
+
+        async def fake_resume(service, path, pwd_override=None):
+            resumed.append((service, path))
+            return _session(sid=f"sess-{path.read_text()}")
+
+        monkeypatch.setattr(resume_mod, "studio_resume", fake_resume)
+
+        user_a = TestClient(_app(service=user_a_service, session_dir=user_a_dir)).post(
+            "/sessions/shared/resume"
+        )
+        user_b = TestClient(_app(service=user_b_service, session_dir=user_b_dir)).post(
+            "/sessions/shared/resume"
+        )
+
+        assert user_a.status_code == 200
+        assert user_b.status_code == 200
+        assert resumed == [
+            (user_a_service, user_a_path),
+            (user_b_service, user_b_path),
+        ]
+
     def test_session_missing(self, monkeypatch):
-        monkeypatch.setattr(resume_mod, "resolve_session_path_default", lambda n: None)
+        monkeypatch.setattr(
+            resume_mod, "resolve_session_path_in", lambda name, session_dir: None
+        )
         client = TestClient(_app())
         resp = client.post("/sessions/ghost/resume")
         assert resp.status_code == 404
@@ -62,8 +183,8 @@ class TestHostResume:
     def test_host_success_agent(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
         async def fake_resume(engine, path, pwd_override=None):
@@ -80,8 +201,8 @@ class TestHostResume:
     def test_host_success_terrarium(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
         async def fake_resume(engine, path, pwd_override=None):
@@ -101,8 +222,8 @@ class TestHostResume:
     def test_file_not_found_404(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
         async def boom(engine, path, pwd_override=None):
@@ -116,8 +237,8 @@ class TestHostResume:
     def test_value_error_400(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
         async def boom(engine, path, pwd_override=None):
@@ -131,8 +252,8 @@ class TestHostResume:
     def test_default_on_node_is_host(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
         called_with = {}
@@ -155,8 +276,8 @@ class TestHostResume:
         # start — not be patched on afterwards.
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
         called_with = {}
@@ -179,8 +300,8 @@ class TestRemoteResume:
     def test_no_lab_host(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
         # Service has no `.host` attribute → 404.
         client = TestClient(_app())
@@ -190,8 +311,8 @@ class TestRemoteResume:
     def test_unknown_node(self, monkeypatch):
         monkeypatch.setattr(
             resume_mod,
-            "resolve_session_path_default",
-            lambda n: Path("/x/s.kohakutr"),
+            "resolve_session_path_in",
+            lambda name, session_dir: Path("/x/s.kohakutr"),
         )
 
         class _Svc:

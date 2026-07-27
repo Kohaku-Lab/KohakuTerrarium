@@ -53,6 +53,12 @@ class TerrariumSessionAdapter:
                 return self._op_stores(msg.body)
             case "resume":
                 return await self._op_resume(msg.body)
+            case "set_lifecycle":
+                return self._op_set_lifecycle(msg.body)
+            case "rollback_resume":
+                return await self._op_rollback_resume(msg.body)
+            case "delete_transfer":
+                return self._op_delete_transfer(msg.body)
             case _:
                 return {
                     "error": {
@@ -93,7 +99,81 @@ class TerrariumSessionAdapter:
     def _op_stores(self, body: dict[str, Any]) -> dict[str, Any]:
         # Only attached stores are authoritative for sessions owned by this worker.
         stores = getattr(self._engine, "_session_stores", {}) or {}
-        return {"session_ids": sorted(stores.keys())}
+        session_id = str(body.get("session_id") or "")
+        details = []
+        for graph_id, store in stores.items():
+            if session_id and session_id not in {str(graph_id), str(store.session_id)}:
+                continue
+            details.append(
+                {
+                    "session_id": str(graph_id),
+                    "path": str(store.path),
+                    "conversation_id": str(store.meta.get("conversation_id") or ""),
+                }
+            )
+        result: dict[str, Any] = {"session_ids": sorted(stores.keys())}
+        if session_id:
+            result["stores"] = details
+        return result
+
+    def _op_set_lifecycle(self, body: dict[str, Any]) -> dict[str, Any]:
+        path = Path(str(body.get("session_path") or body.get("path") or ""))
+        if not path.is_file():
+            raise ValueError("set_lifecycle requires an existing session_path")
+        is_open = bool(body.get("conversation_open"))
+        status = str(body.get("status") or ("running" if is_open else "completed"))
+        stores = getattr(self._engine, "_session_stores", {}) or {}
+        store = next(
+            (item for item in stores.values() if Path(item.path) == path),
+            None,
+        )
+        owns_store = store is None
+        if store is None:
+            store = SessionStore(path)
+        try:
+            store.set_conversation_open(is_open)
+            store.update_status(status)
+            store.checkpoint()
+        finally:
+            if owns_store:
+                store.close(update_status=False)
+        return {"ok": True, "session_path": str(path)}
+
+    def _op_delete_transfer(self, body: dict[str, Any]) -> dict[str, Any]:
+        path = Path(str(body.get("session_path") or ""))
+        if not path.name:
+            raise ValueError("delete_transfer requires session_path")
+        for candidate in (path, Path(f"{path}-wal"), Path(f"{path}-shm")):
+            candidate.unlink(missing_ok=True)
+        return {"ok": True, "session_path": str(path)}
+
+    async def _op_rollback_resume(self, body: dict[str, Any]) -> dict[str, Any]:
+        graph_id = str(body.get("graph_id") or "")
+        if not graph_id:
+            raise ValueError("rollback_resume requires graph_id")
+        stores = getattr(self._engine, "_session_stores", {}) or {}
+        store = stores.get(graph_id)
+        session_path = Path(store.path) if store is not None else None
+        creature_ids = [
+            creature.creature_id
+            for creature in self._engine.creatures()
+            if creature.graph_id == graph_id
+        ]
+        for creature_id in reversed(creature_ids):
+            await self._engine.remove_creature(creature_id)
+        if store is not None:
+            try:
+                store.close(update_status=False)
+            except Exception:
+                pass
+        if session_path is not None:
+            for candidate in (
+                session_path,
+                Path(f"{session_path}-wal"),
+                Path(f"{session_path}-shm"),
+            ):
+                candidate.unlink(missing_ok=True)
+        return {"ok": True, "removed": creature_ids}
 
     async def _op_resume(self, body: dict[str, Any]) -> dict[str, Any]:
         """Adopt a session file already present on the worker."""
@@ -115,6 +195,7 @@ class TerrariumSessionAdapter:
         saved_pwd = str(meta.get("pwd", "") or "")
         return {
             "session_id": sid,
+            "session_path": str(path),
             "meta": dict(meta),
             "pwd_exists": (not saved_pwd) or os.path.isdir(saved_pwd),
         }
