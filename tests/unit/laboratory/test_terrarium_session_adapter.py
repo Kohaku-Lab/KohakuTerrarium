@@ -39,12 +39,16 @@ class _FakeEngine:
         self._session_stores: dict[str, SessionStore] = {}
         self._adopt_result: str | None = None
         self._adopt_calls: list[dict] = []
+        self._creatures: dict[str, object] = {}
 
     async def adopt_session(self, path, *, pwd=None, llm=None):
         self._adopt_calls.append({"path": path, "pwd": pwd, "llm": llm})
         if self._adopt_result is None:
             raise RuntimeError("adopt not configured")
         return self._adopt_result
+
+    def creatures(self):
+        return tuple(self._creatures.values())
 
 
 def _msg(type_, body, sender="ctrl"):
@@ -110,6 +114,13 @@ class TestResumeOp:
         )
         _engine._adopt_result = "sid1"
         _engine._session_stores["sid1"] = store
+        _engine._creatures["cid-a"] = SimpleNamespace(
+            creature_id="cid-a",
+            name="alice",
+            graph_id="sid1",
+            is_running=True,
+            is_privileged=False,
+        )
         out = await _adapter._op_resume(
             {"path": str(kohakutr), "pwd_override": str(tmp_path)}
         )
@@ -119,6 +130,14 @@ class TestResumeOp:
         # not exist here, whatever the controller might think.
         assert out["pwd_exists"] is False
         assert _engine._adopt_calls[-1]["pwd"] == str(tmp_path)
+        assert out["creatures"] == [
+            {
+                "creature_id": "cid-a",
+                "name": "alice",
+                "running": True,
+                "is_privileged": False,
+            }
+        ]
 
     async def test_resume_pwd_exists_true_when_dir_present(
         self, _adapter, _engine, tmp_path

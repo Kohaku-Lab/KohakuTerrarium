@@ -18,7 +18,7 @@ async def push_and_resume_member(
     path: Path,
     on_node: str,
     pwd_override: str | None = None,
-) -> tuple[str, dict, bool | None, str]:
+) -> tuple[str, dict, bool | None, str, list[dict[str, Any]]]:
     """Transfer one saved store and return its adopted worker identity."""
     mirror = getattr(request.app.state, "session_mirror", None)
     if mirror is not None and hasattr(mirror, "checkpoint"):
@@ -107,6 +107,33 @@ async def push_and_resume_member(
                 status_code=502,
                 detail=f"worker {on_node!r} returned invalid session metadata",
             )
+        raw_creatures = worker_response.get("creatures", [])
+        if not isinstance(raw_creatures, list):
+            raise HTTPException(
+                status_code=502,
+                detail=f"worker {on_node!r} returned an invalid creature roster",
+            )
+        worker_creatures: list[dict[str, Any]] = []
+        for item in raw_creatures:
+            if not isinstance(item, dict):
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"worker {on_node!r} returned an invalid creature roster",
+                )
+            creature_id = item.get("creature_id")
+            if not isinstance(creature_id, str) or not creature_id:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"worker {on_node!r} returned a creature without an id",
+                )
+            worker_creatures.append(
+                {
+                    "creature_id": creature_id,
+                    "name": str(item.get("name") or creature_id),
+                    "running": bool(item.get("running", True)),
+                    "is_privileged": bool(item.get("is_privileged", False)),
+                }
+            )
     except Exception as exc:
         if resumed_sid:
             try:
@@ -154,7 +181,7 @@ async def push_and_resume_member(
     if not isinstance(worker_pwd_exists, bool):
         worker_pwd_exists = None
     remote_session_path = str(worker_response.get("session_path") or worker_path)
-    return sid, meta, worker_pwd_exists, remote_session_path
+    return sid, meta, worker_pwd_exists, remote_session_path, worker_creatures
 
 
 __all__ = ["push_and_resume_member"]

@@ -6,6 +6,7 @@ The route returns the legacy instance fields plus a full ``Session`` handle.
 import asyncio
 from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -184,7 +185,13 @@ async def _resume_session(
             pwd_override=req.pwd if req is not None else None,
         )
 
-    sid, meta, worker_pwd_exists, remote_session_path = await _push_and_resume_member(
+    (
+        sid,
+        meta,
+        worker_pwd_exists,
+        remote_session_path,
+        worker_creatures,
+    ) = await _push_and_resume_member(
         host=host,
         request=request,
         path=path,
@@ -195,17 +202,20 @@ async def _resume_session(
     # Resumed creatures bypass spawn-time home and name cache population.
     # Refreshing the worker roster makes subsequent creature, history, and
     # chat lookups route to the correct node.
-    resumed_creatures: list[dict] = []
+    resumed_creatures: list[dict] = [
+        {**creature, "home_node": on_node} for creature in worker_creatures
+    ]
     list_creatures = getattr(service, "list_creatures", None)
     if callable(list_creatures):
         try:
             roster = await list_creatures()
         except Exception:  # pragma: no cover - defensive
             roster = ()
+        refreshed_creatures: list[dict] = []
         for c in roster:
             if getattr(c, "graph_id", None) != sid:
                 continue
-            resumed_creatures.append(
+            refreshed_creatures.append(
                 {
                     "creature_id": c.creature_id,
                     "name": c.name,
@@ -214,6 +224,8 @@ async def _resume_session(
                     "is_privileged": getattr(c, "is_privileged", False),
                 }
             )
+        if refreshed_creatures:
+            resumed_creatures = refreshed_creatures
 
     # Controller metadata is the source for remote session listings and
     # synthesized handles. Prefer the live roster identity when available.
@@ -387,6 +399,7 @@ async def _resume_cluster(
     ]
     resumed: dict[str, tuple[str, dict, str]] = {}
     remote_paths: dict[str, str] = {}
+    worker_creatures_by_member: dict[str, list[dict[str, Any]]] = {}
     registered_session_ids: list[str] = []
     connected_pairs: list[tuple[str, str]] = []
     try:
@@ -396,6 +409,7 @@ async def _resume_cluster(
                 new_meta,
                 _member_pwd_exists,
                 remote_session_path,
+                worker_creatures,
             ) = await _push_and_resume_member(
                 host=host,
                 request=request,
@@ -405,6 +419,7 @@ async def _resume_cluster(
             )
             resumed[m.sid] = (new_sid, new_meta, m.on_node)
             remote_paths[m.sid] = remote_session_path
+            worker_creatures_by_member[m.sid] = worker_creatures
         new_session_ids = [new_sid for new_sid, _meta, _node in resumed.values()]
         if len(set(new_session_ids)) != len(new_session_ids):
             raise RuntimeError("workers returned duplicate resumed session ids")
@@ -421,7 +436,14 @@ async def _resume_cluster(
         raise HTTPException(status_code=502, detail=detail) from exc
 
     # Roster refresh replaces stale pre-stop routing identities before relink.
-    new_creature_ids_by_member: dict[str, list[str]] = {}
+    new_creature_ids_by_member: dict[str, list[str]] = {
+        member_id: [
+            str(creature["creature_id"])
+            for creature in creatures
+            if creature.get("creature_id")
+        ]
+        for member_id, creatures in worker_creatures_by_member.items()
+    }
     list_creatures = getattr(service, "list_creatures", None)
     roster: tuple = ()
     if callable(list_creatures):
@@ -505,11 +527,15 @@ async def _resume_cluster(
 
     primary_new_sid, primary_meta, _ = resumed[primary_member.sid]
     name = primary_meta.get("terrarium_name") or session_name
-    creatures_payload: list[dict] = []
+    creatures_payload: list[dict] = [
+        {**creature, "home_node": primary_member.on_node}
+        for creature in worker_creatures_by_member.get(primary_member.sid, [])
+    ]
+    refreshed_primary_creatures: list[dict] = []
     for c in roster:
         if getattr(c, "graph_id", None) != primary_new_sid:
             continue
-        creatures_payload.append(
+        refreshed_primary_creatures.append(
             {
                 "creature_id": c.creature_id,
                 "name": c.name,
@@ -518,6 +544,8 @@ async def _resume_cluster(
                 "is_privileged": getattr(c, "is_privileged", False),
             }
         )
+    if refreshed_primary_creatures:
+        creatures_payload = refreshed_primary_creatures
     if not creatures_payload:
         creatures_payload = [
             {"creature_id": agent, "name": agent}

@@ -139,16 +139,27 @@ class TestRemoteWritePath:
                         "terrarium_creatures": [{"name": "x"}],
                         "conversation_id": "conversation-remote",
                     },
+                    "creatures": [
+                        {
+                            "creature_id": "cid-alice",
+                            "name": "alice",
+                            "running": True,
+                            "is_privileged": False,
+                        },
+                        {
+                            "creature_id": "cid-bob",
+                            "name": "bob",
+                            "running": True,
+                            "is_privileged": False,
+                        },
+                    ],
                 },
             }
         )
 
         class _RosterSvc(_Svc):
             async def list_creatures(self):
-                return (
-                    _ci("cid-alice", "alice", "remote-sid"),
-                    _ci("cid-bob", "bob", "remote-sid"),
-                )
+                raise RuntimeError("controller roster refresh unavailable")
 
         svc = _RosterSvc(host)
         client = TestClient(_app(service=svc))

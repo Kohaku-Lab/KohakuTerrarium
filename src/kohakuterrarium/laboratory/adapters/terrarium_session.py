@@ -278,6 +278,16 @@ class TerrariumSessionAdapter:
             self._remember_resume_token(resume_token, sid, local)
         store = getattr(self._engine, "_session_stores", {}).get(sid)
         meta = store.load_meta() if store is not None else {}
+        creatures = [
+            {
+                "creature_id": str(creature.creature_id),
+                "name": str(getattr(creature, "name", creature.creature_id)),
+                "running": bool(getattr(creature, "is_running", True)),
+                "is_privileged": bool(getattr(creature, "is_privileged", False)),
+            }
+            for creature in self._engine.creatures()
+            if getattr(creature, "graph_id", None) == sid
+        ]
         # Path validity must be evaluated here; the controller cannot stat the
         # worker's filesystem.
         saved_pwd = str(meta.get("pwd", "") or "")
@@ -285,6 +295,7 @@ class TerrariumSessionAdapter:
             "session_id": sid,
             "session_path": str(path),
             "meta": dict(meta),
+            "creatures": creatures,
             "pwd_exists": (not saved_pwd) or os.path.isdir(saved_pwd),
         }
 
