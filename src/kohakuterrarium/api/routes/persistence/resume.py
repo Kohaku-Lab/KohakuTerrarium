@@ -71,12 +71,13 @@ async def resume_session(
     service: TerrariumService = Depends(get_service),
 ):
     """Share one canonical in-flight resume and reject conflicting intents."""
+    body = req or ResumeRequest()
+    _reject_lab_host_target(body.on_node or "_host", service)
     path = resolve_session_path_in(session_name, session_dir=session_dir)
     if path is None:
         raise HTTPException(
             status_code=404, detail=f"Session {session_name!r} not found"
         )
-    body = req or ResumeRequest()
     key = await asyncio.to_thread(session_coordination_key, path, session_dir)
     members = tuple(
         sorted((member.sid, member.on_node) for member in (body.members or []))
@@ -108,16 +109,7 @@ async def _resume_session(
     """
     on_node = (req.on_node if req is not None else "_host") or "_host"
 
-    # Lab hosts run no agents. Adopting into the host engine would mix local
-    # and worker execution paths, so multi-node sessions must target a worker.
-    if on_node == "_host" and hasattr(service, "connected_nodes"):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "lab-host mode runs no agents on the host — resume on a "
-                "worker node (pass on_node=<worker name>)"
-            ),
-        )
+    _reject_lab_host_target(on_node, service)
 
     path = await asyncio.to_thread(resolve_session_path_in, session_name, session_dir)
     if path is None:
@@ -268,6 +260,19 @@ async def _resume_session(
         "session": asdict(synthetic),
         "on_node": on_node,
     }
+
+
+def _reject_lab_host_target(on_node: str, service: TerrariumService) -> None:
+    """Reject host-local adoption before resolving any saved-session path."""
+    if on_node != "_host" or not hasattr(service, "connected_nodes"):
+        return
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "lab-host mode runs no agents on the host — resume on a "
+            "worker node (pass on_node=<worker name>)"
+        ),
+    )
 
 
 def _read_saved_cluster_members(path: Path) -> list[ClusterMember] | None:

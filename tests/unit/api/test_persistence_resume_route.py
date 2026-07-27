@@ -58,6 +58,28 @@ class TestWorkerAbsoluteFor:
 
 
 class TestHostResume:
+    def test_lab_host_target_rejected_before_path_resolution(
+        self, tmp_path, monkeypatch
+    ):
+        class _LabService:
+            def connected_nodes(self):
+                return ()
+
+        def unexpected_resolution(*args, **kwargs):
+            raise AssertionError("host-target rejection must happen before path lookup")
+
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_session_path_in",
+            unexpected_resolution,
+        )
+        client = TestClient(_app(service=_LabService(), session_dir=tmp_path))
+
+        response = client.post("/sessions/missing/resume")
+
+        assert response.status_code == 400
+        assert "runs no agents on the host" in response.json()["detail"]
+
     @pytest.mark.asyncio
     async def test_concurrent_requests_share_one_underlying_resume(
         self, tmp_path, monkeypatch
