@@ -82,6 +82,34 @@ async def _graph_aliases(remote: Any, graph_id: str) -> dict[str, set[str]]:
     return aliases
 
 
+def _logical_graph_members(
+    service: "MultiNodeTerrariumService",
+    node_id: str,
+    graph_id: str,
+) -> set[tuple[str, str]]:
+    """Return the complete logical component containing one worker graph."""
+    members = set(cluster_members_for(service, graph_id))
+    return members or {(node_id, graph_id)}
+
+
+async def _logical_graph_aliases(
+    service: "MultiNodeTerrariumService",
+    members: set[tuple[str, str]],
+) -> dict[str, set[str]]:
+    """Collect aliases across every worker-local graph in one component."""
+    alias_sets = await asyncio.gather(
+        *(
+            _graph_aliases(service.service_for(node_id), graph_id)
+            for node_id, graph_id in sorted(members)
+        )
+    )
+    aliases: dict[str, set[str]] = {}
+    for member_aliases in alias_sets:
+        for alias, creature_ids in member_aliases.items():
+            aliases.setdefault(alias, set()).update(creature_ids)
+    return aliases
+
+
 async def _guard_cross_node_name_conflicts(
     service: "MultiNodeTerrariumService",
     sender_home: str,
@@ -89,9 +117,13 @@ async def _guard_cross_node_name_conflicts(
     receiver_home: str,
     receiver_graph: str,
 ) -> None:
+    sender_members = _logical_graph_members(service, sender_home, sender_graph)
+    receiver_members = _logical_graph_members(service, receiver_home, receiver_graph)
+    if sender_members & receiver_members:
+        return
     sender_aliases, receiver_aliases = await asyncio.gather(
-        _graph_aliases(service._remotes[sender_home], sender_graph),
-        _graph_aliases(service._remotes[receiver_home], receiver_graph),
+        _logical_graph_aliases(service, sender_members),
+        _logical_graph_aliases(service, receiver_members),
     )
     conflicts = sorted(set(sender_aliases) & set(receiver_aliases))
     if not conflicts:
