@@ -47,8 +47,8 @@ class _FakeEngine:
             raise RuntimeError("adopt not configured")
         return self._adopt_result
 
-    def creatures(self):
-        return tuple(self._creatures.values())
+    def list_creatures(self):
+        return list(self._creatures.values())
 
 
 def _msg(type_, body, sender="ctrl"):
@@ -219,7 +219,7 @@ class TestResumeOp:
         store = SessionStore(session_path)
         store.init_meta("target", "agent", "x", str(tmp_path), ["one", "two"])
         _engine._session_stores = {"target": store}
-        _engine.creatures = lambda: tuple(_engine._creatures.values())
+        _engine.list_creatures = lambda: list(_engine._creatures.values())
 
         async def remove_creature(creature_id):
             assert "target" not in _engine._session_stores
@@ -248,7 +248,7 @@ class TestResumeOp:
         _engine._creatures = {
             "one": SimpleNamespace(creature_id="one", graph_id="target"),
         }
-        _engine.creatures = lambda: tuple(_engine._creatures.values())
+        _engine.list_creatures = lambda: list(_engine._creatures.values())
         removed = []
 
         async def remove_creature(creature_id):
@@ -283,7 +283,7 @@ class TestResumeOp:
         _engine._creatures = {
             "one": SimpleNamespace(creature_id="one", graph_id="target"),
         }
-        _engine.creatures = lambda: tuple(_engine._creatures.values())
+        _engine.list_creatures = lambda: list(_engine._creatures.values())
 
         with pytest.raises(ValueError, match="active session store"):
             await _adapter._op_rollback_resume(

@@ -232,7 +232,7 @@ class TerrariumSessionAdapter:
                 owned_sessions.discard(graph_id)
         creature_ids = [
             creature.creature_id
-            for creature in self._engine.creatures()
+            for creature in self._engine.list_creatures()
             if creature.graph_id == graph_id
         ]
         for creature_id in reversed(creature_ids):
@@ -285,7 +285,7 @@ class TerrariumSessionAdapter:
                 "running": bool(getattr(creature, "is_running", True)),
                 "is_privileged": bool(getattr(creature, "is_privileged", False)),
             }
-            for creature in self._engine.creatures()
+            for creature in self._engine.list_creatures()
             if getattr(creature, "graph_id", None) == sid
         ]
         # Path validity must be evaluated here; the controller cannot stat the
