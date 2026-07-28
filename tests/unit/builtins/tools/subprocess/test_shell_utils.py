@@ -105,3 +105,49 @@ class TestTerminateProcessTree:
             return process.returncode
 
         assert asyncio.run(scenario()) is not None
+
+    def test_non_group_child_escalates_to_direct_kill(self, monkeypatch):
+        class FakeProcess:
+            pid = 1234
+            returncode = None
+            terminated = False
+            killed = False
+
+            async def wait(self):
+                return self.returncode
+
+            def terminate(self):
+                self.terminated = True
+
+            def kill(self):
+                self.killed = True
+                self.returncode = -9
+
+        process = FakeProcess()
+        group_signals = []
+        wait_timeouts = []
+
+        def missing_group(pid, sig):
+            assert pid == process.pid
+            group_signals.append(sig)
+            raise ProcessLookupError
+
+        async def controlled_wait(awaitable, timeout):
+            wait_timeouts.append(timeout)
+            if len(wait_timeouts) == 1:
+                awaitable.close()
+                raise asyncio.TimeoutError
+            return await awaitable
+
+        monkeypatch.setattr(shell_utils.sys, "platform", "linux")
+        monkeypatch.setattr(shell_utils.os, "killpg", missing_group, raising=False)
+        monkeypatch.setattr(shell_utils.signal, "SIGKILL", 9, raising=False)
+        monkeypatch.setattr(shell_utils.asyncio, "wait_for", controlled_wait)
+
+        asyncio.run(shell_utils.terminate_process_tree(process))
+
+        assert group_signals == [shell_utils.signal.SIGTERM, 9]
+        assert wait_timeouts == [3, 5]
+        assert process.terminated is True
+        assert process.killed is True
+        assert process.returncode == -9

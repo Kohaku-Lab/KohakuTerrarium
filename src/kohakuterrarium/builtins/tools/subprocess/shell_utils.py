@@ -1,6 +1,7 @@
 """Shared helpers for shell-like built-in tools."""
 
 import asyncio
+import contextlib
 import os
 import signal
 import subprocess
@@ -50,7 +51,8 @@ async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
             try:
                 os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError:
-                return
+                with contextlib.suppress(ProcessLookupError):
+                    process.terminate()
             except Exception:
                 process.terminate()
             try:
@@ -60,7 +62,8 @@ async def terminate_process_tree(process: asyncio.subprocess.Process) -> None:
                 try:
                     os.killpg(process.pid, signal.SIGKILL)
                 except ProcessLookupError:
-                    return
+                    with contextlib.suppress(ProcessLookupError):
+                        process.kill()
                 except Exception:
                     process.kill()
         await asyncio.wait_for(process.wait(), timeout=5)
