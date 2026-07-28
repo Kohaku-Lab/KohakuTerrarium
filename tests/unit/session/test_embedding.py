@@ -2,10 +2,11 @@
 
 Note: The provider-specific classes (Model2Vec / SentenceTransformer / API)
 depend on third-party libraries or the network. Those paths are exercised
-via mock injection; the real model loading is out of scope per the
-``CLAUDE.md`` policy on 3rd-party deterministic-test exceptions.
+through deterministic dependency seams; real model loading is out of scope
+per the ``CLAUDE.md`` policy on 3rd-party deterministic-test exceptions.
 """
 
+import model2vec
 import numpy as np
 import pytest
 
@@ -223,22 +224,53 @@ class TestCreateEmbedder:
         assert isinstance(emb, NullEmbedder)
 
 
-# ── Model2VecEmbedder (real, deterministic — model2vec is a dep) ──
+# ── Model2VecEmbedder ─────────────────────────────────────────────
+
+
+class _DeterministicStaticModel:
+    dim = 4
+
+    def __init__(self):
+        self.batches: list[list[str]] = []
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        batch = list(texts)
+        self.batches.append(batch)
+        rows = [
+            [float(len(text) + dimension) for dimension in range(self.dim)]
+            for text in batch
+        ]
+        return np.asarray(rows, dtype=np.float64).reshape(len(batch), self.dim)
 
 
 class TestModel2VecEmbedder:
-    def test_real_encode_round_trip(self):
-        # model2vec ships as a project dependency and is fully
-        # deterministic — load the small default model and verify the
-        # encode contract: (n, dims) float32, dims matches the property.
-        emb = Model2VecEmbedder()
-        assert emb.dimensions > 0
-        vecs = emb.encode(["hello world", "second text"])
+    def test_encode_round_trip_without_model_download(self, monkeypatch):
+        model_name = "example/deterministic-model"
+        static_model = _DeterministicStaticModel()
+        loaded_models: list[str] = []
+
+        def fake_from_pretrained(_cls, path, **_kwargs):
+            loaded_models.append(str(path))
+            return static_model
+
+        monkeypatch.setattr(
+            model2vec.StaticModel,
+            "from_pretrained",
+            classmethod(fake_from_pretrained),
+        )
+
+        emb = Model2VecEmbedder(model_name=model_name)
+        assert loaded_models == [model_name]
+        assert emb.dimensions == static_model.dim
+        batch = ["hello world", "second text"]
+        vecs = emb.encode(batch)
+        assert static_model.batches == [batch]
         assert vecs.shape == (2, emb.dimensions)
         assert vecs.dtype == np.float32
-        # encode_one unwraps the batch dim.
         one = emb.encode_one("solo")
+        assert static_model.batches == [batch, ["solo"]]
         assert one.shape == (emb.dimensions,)
+        assert one.dtype == np.float32
 
     def test_import_error_when_model2vec_absent(self, monkeypatch):
         # If model2vec can't be imported the constructor raises a clear

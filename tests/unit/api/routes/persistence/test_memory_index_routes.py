@@ -8,15 +8,45 @@ shape, error paths, and the WS frame contract using a real on-disk
 """
 
 import json
+import threading
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.persistence import memory_index as memory_index_mod
 from kohakuterrarium.api.ws import memory_build as ws_memory_build
+from kohakuterrarium.session.embedding import BaseEmbedder
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.persistence import store as store_mod
+from kohakuterrarium.studio.sessions import memory_build as memory_build_service
+
+
+class _FakeEmbedder(BaseEmbedder):
+    dimensions = 4
+
+    def __init__(
+        self,
+        encode_started: threading.Event,
+        encode_release: threading.Event,
+    ):
+        self._encode_started = encode_started
+        self._encode_release = encode_release
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        self._encode_started.set()
+        if not self._encode_release.wait(timeout=30.0):
+            raise TimeoutError("fake embedder was not released")
+        rows = [
+            [
+                float((sum(text.encode("utf-8")) + dimension) % 31 + 1)
+                for dimension in range(self.dimensions)
+            ]
+            for text in texts
+        ]
+        return np.asarray(rows, dtype=np.float32).reshape(len(texts), self.dimensions)
 
 
 def _real_session(tmp_path: Path, *, with_events: bool = True) -> Path:
@@ -48,14 +78,20 @@ def _real_session(tmp_path: Path, *, with_events: bool = True) -> Path:
 @pytest.fixture
 def app(monkeypatch, tmp_path):
     monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
-    # Resolve session names against ``tmp_path`` so the routes find the
-    # files this test writes.
-    from kohakuterrarium.studio.persistence import store as store_mod
-
+    encode_started = threading.Event()
+    encode_release = threading.Event()
+    encode_release.set()
+    monkeypatch.setattr(
+        memory_build_service,
+        "create_embedder",
+        lambda _config: _FakeEmbedder(encode_started, encode_release),
+    )
     monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path, raising=True)
 
     app = FastAPI()
     app.state.lab_mode = "standalone"
+    app.state.embedder_encode_started = encode_started
+    app.state.embedder_encode_release = encode_release
     app.include_router(memory_index_mod.router, prefix="/api/sessions")
     app.include_router(ws_memory_build.router)
     return app
@@ -188,14 +224,14 @@ class TestBuildWebSocket:
 
 
 class TestConcurrentBuildGuard:
-    def test_second_build_for_same_session_rejected(self, client, tmp_path):
+    def test_second_build_for_same_session_rejected(self, app, client, tmp_path):
         """The WS module owns a per-session in-flight set. A second
         build while the first is mid-stream gets a terminal ``failed``
         frame instead of racing through ``SessionMemory`` write paths.
         """
-        import threading
-
         _real_session(tmp_path)
+        app.state.embedder_encode_started.clear()
+        app.state.embedder_encode_release.clear()
         first_connected = threading.Event()
         first_terminal = threading.Event()
         first_frames: list = []
@@ -215,10 +251,8 @@ class TestConcurrentBuildGuard:
         t = threading.Thread(target=run_first)
         t.start()
         try:
-            first_connected.wait(timeout=5.0)
-            # First build is in flight. Open a second WS on the same
-            # session and assert it receives a "failed" terminal frame
-            # without waiting on the first.
+            assert first_connected.wait(timeout=5.0)
+            assert app.state.embedder_encode_started.wait(timeout=5.0)
             second_frames: list = []
             with client.websocket_connect(
                 "/ws/sessions/alice/memory/build?embedder=auto"
@@ -231,5 +265,8 @@ class TestConcurrentBuildGuard:
             assert second_frames[-1]["status"] == "failed"
             assert "already running" in (second_frames[-1]["error"] or "").lower()
         finally:
-            first_terminal.wait(timeout=30.0)
-            t.join(timeout=2.0)
+            app.state.embedder_encode_release.set()
+            assert first_terminal.wait(timeout=5.0)
+            t.join(timeout=5.0)
+        assert not t.is_alive()
+        assert first_frames[-1]["status"] == "ok"
