@@ -512,6 +512,7 @@ class TestRecipeRollback:
             await engine.apply_recipe(
                 _recipe(creatures=[_creature_cfg("worker")]),
                 start=False,
+                creature_builder=_fake_builder,
             )
 
         assert engine.list_creatures() == []
