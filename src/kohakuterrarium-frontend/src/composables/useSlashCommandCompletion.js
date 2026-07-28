@@ -5,6 +5,7 @@ const SLASH_QUERY_RE = /^\/([^\s]*)$/
 export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
   const loading = ref(false)
   const selectedIndex = ref(0)
+  const dismissed = ref(false)
   const tab = computed(() => {
     const key = activeTabKey.value
     return key ? { key, creature: key, type: key.startsWith("ch:") ? "channel" : "creature" } : null
@@ -47,7 +48,7 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
       })
       .map((entry, flatIndex) => ({ ...entry, flatIndex }))
   })
-  const open = computed(() => query.value != null)
+  const open = computed(() => query.value != null && !dismissed.value)
   const activeDescendant = computed(() =>
     open.value && entries.value.length ? `slash-option-${selectedIndex.value}` : undefined,
   )
@@ -80,7 +81,17 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
     chat.markSlashTarget(tab.value, null)
   }
 
+  function dismiss() {
+    dismissed.value = true
+    clearTarget()
+  }
+
+  function reopen() {
+    dismissed.value = false
+  }
+
   watch(query, (value) => {
+    dismissed.value = false
     selectedIndex.value = 0
     if (value != null && activeTabKey.value) void ensureLoaded()
   })
@@ -88,6 +99,7 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
     if (selectedIndex.value >= value.length) selectedIndex.value = 0
   })
   watch(activeTabKey, () => {
+    dismissed.value = false
     selectedIndex.value = 0
     if (query.value != null && activeTabKey.value) void ensureLoaded()
   })
@@ -96,11 +108,13 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
     activeDescendant,
     choose,
     clearTarget,
+    dismiss,
     ensureLoaded,
     entries,
     loading,
     move,
     open,
+    reopen,
     selectedIndex,
   }
 }

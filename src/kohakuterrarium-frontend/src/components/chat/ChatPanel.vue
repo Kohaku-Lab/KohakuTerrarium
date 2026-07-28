@@ -274,7 +274,7 @@ function onGroupFocus() {
   emit("focus-group", props.groupId)
 }
 
-const { activeDescendant: slashActiveDescendant, choose: chooseSlashEntry, clearTarget: clearSlashTarget, entries: slashMatches, loading: slashInventoryLoading, move: moveSlashSelection, open: slashMenuOpen, selectedIndex: slashSelectedIndex } = useSlashCommandCompletion({ chat, inputText, activeTabKey: viewActiveTab })
+const { activeDescendant: slashActiveDescendant, choose: chooseSlashEntry, dismiss: dismissSlashMenu, entries: slashMatches, loading: slashInventoryLoading, move: moveSlashSelection, open: slashMenuOpen, reopen: reopenSlashMenu, selectedIndex: slashSelectedIndex } = useSlashCommandCompletion({ chat, inputText, activeTabKey: viewActiveTab })
 
 const tabDrag = useChatTabDrag(chat)
 const tabDragHoverEdge = computed(() => (props.groupId ? tabDrag.isHoveringEdgeOf(props.groupId) : null))
@@ -459,7 +459,8 @@ function onInputKeydown(e) {
     }
     if (e.key === "Escape") {
       e.preventDefault()
-      clearSlashTarget()
+      e.stopPropagation()
+      dismissSlashMenu()
       return
     }
   }
@@ -482,11 +483,12 @@ const inputActive = computed(() => inputFocused.value || inputText.value.length 
 
 function onInputChanged(event) {
   autoResize(event)
-  clearSlashTarget()
+  chat.markSlashTarget(viewActiveTab.value, null)
 }
 
 function onInputFocus() {
   inputFocused.value = true
+  reopenSlashMenu()
 }
 
 function onInputBlur() {
@@ -709,7 +711,18 @@ async function send() {
   const sendTab = viewActiveTab.value
   const sendText = inputText.value
   const sendAttachments = [...attachments.value]
-  const contextChanged = () => viewActiveTab.value !== sendTab || inputText.value !== sendText || attachments.value.length !== sendAttachments.length || attachments.value.some((attachment, index) => attachment !== sendAttachments[index])
+  const sendInstanceGeneration = chat._instanceGeneration
+  const sendInstanceId = chat._instanceId
+  const sendGraphId = chat._instanceGraphId
+  const sendPropInstanceId = props.instance?.id
+  const sendPropGraphId = props.instance?.graph_id
+  let ownedSlashTarget = chat._slashTargetByTab?.[sendTab]
+  const contextChanged = () => chat._instanceGeneration !== sendInstanceGeneration || chat._instanceId !== sendInstanceId || chat._instanceGraphId !== sendGraphId || props.instance?.id !== sendPropInstanceId || props.instance?.graph_id !== sendPropGraphId || chat.activeTab !== sendTab || viewActiveTab.value !== sendTab || inputText.value !== sendText || attachments.value.length !== sendAttachments.length || attachments.value.some((attachment, index) => attachment !== sendAttachments[index])
+  const clearOwnedSlashTarget = () => {
+    if (chat._slashTargetByTab?.[sendTab] === ownedSlashTarget) {
+      chat.markSlashTarget(sendTab, null)
+    }
+  }
   if (slashMenuOpen.value && slashMatches.value.length) {
     chooseSlashEntry(slashMatches.value[slashSelectedIndex.value] || slashMatches.value[0])
     return
@@ -728,11 +741,21 @@ async function send() {
   } catch (err) {
     console.warn("Slash inventory lookup failed; using command fallback:", err)
   }
-  if (contextChanged()) return
-  chat.markSlashTarget(sendTab, slashTarget)
-  const parts = await buildMessageParts(sendText, sendAttachments)
   if (contextChanged()) {
-    chat.markSlashTarget(sendTab, null)
+    clearOwnedSlashTarget()
+    return
+  }
+  chat.markSlashTarget(sendTab, slashTarget)
+  ownedSlashTarget = chat._slashTargetByTab?.[sendTab]
+  let parts
+  try {
+    parts = await buildMessageParts(sendText, sendAttachments)
+  } catch (err) {
+    clearOwnedSlashTarget()
+    throw err
+  }
+  if (contextChanged()) {
+    clearOwnedSlashTarget()
     return
   }
   const commandTarget = {
@@ -842,6 +865,7 @@ async function stopTask(jobId, jobName) {
 
 function onGlobalKeydown(e) {
   if (props.readOnly) return
+  if (e.defaultPrevented) return
   if (props.groupId && !isFocusedGroup.value) return
   if (e.key === "Escape" && viewProcessing.value) {
     chat.interrupt(viewActiveTab.value)

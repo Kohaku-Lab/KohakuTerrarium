@@ -55,4 +55,40 @@ describe("useSlashCommandCompletion", () => {
       "skill:standalone",
     ])
   })
+
+  it("dismisses the current query until the input changes or the menu is reopened", async () => {
+    const chat = reactive({
+      commandInventoryByTab: {
+        kohaku: {
+          commands: [{ name: "help", aliases: [], description: "Show help" }],
+          skills: [],
+        },
+      },
+      loadCommandInventory: vi.fn().mockResolvedValue(undefined),
+      markSlashTarget: vi.fn(),
+    })
+    const inputText = ref("/")
+    const activeTabKey = ref("kohaku")
+    const completion = useSlashCommandCompletion({ chat, inputText, activeTabKey })
+
+    await nextTick()
+    expect(completion.open.value).toBe(true)
+
+    completion.dismiss()
+    await nextTick()
+    expect(completion.open.value).toBe(false)
+    expect(chat.markSlashTarget).toHaveBeenLastCalledWith(
+      { key: "kohaku", creature: "kohaku", type: "creature" },
+      null,
+    )
+
+    inputText.value = "/h"
+    await nextTick()
+    expect(completion.open.value).toBe(true)
+
+    completion.dismiss()
+    expect(completion.open.value).toBe(false)
+    completion.reopen()
+    expect(completion.open.value).toBe(true)
+  })
 })
