@@ -20,13 +20,14 @@ Each test method runs ONE complete lifecycle end-to-end:
   LLM profiles + keys + MCP registry + UI prefs CRUD, plus the
   read-only builtin catalog + introspection.
 
-The ONLY seam is the LLM: BOTH ``create_llm_provider`` import sites
-(``bootstrap.llm`` and ``bootstrap.agent_init``) are monkeypatched to a
-:class:`ScriptedLLM`. Every other collaborator is real — a real
-:class:`Studio` over a real :class:`Terrarium` engine wrapped in a real
-:class:`LocalTerrariumService`, real on-disk ``.kohakutr`` session
-files in a ``tmp_path`` dir, real workspace directories, the real
-identity YAML stores (redirected to ``tmp_path``).
+The only seams are genuine external I/O: BOTH ``create_llm_provider``
+import sites (``bootstrap.llm`` and ``bootstrap.agent_init``) use a
+:class:`ScriptedLLM`, and the auto memory-search workflow uses a
+deterministic :class:`BaseEmbedder`. Every other collaborator is real
+— a real :class:`Studio` over a real :class:`Terrarium` engine wrapped
+in a real :class:`LocalTerrariumService`, real on-disk ``.kohakutr``
+session files in a ``tmp_path`` dir, real workspace directories, the
+real identity YAML stores (redirected to ``tmp_path``).
 
 No shape asserts: every assertion pins an exact value or an observable
 side effect.
@@ -34,6 +35,7 @@ side effect.
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from kohakuterrarium.errors import (
@@ -43,8 +45,10 @@ from kohakuterrarium.errors import (
 )
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
+from kohakuterrarium.session.embedding import BaseEmbedder
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import store as _persistence_store_mod
+from kohakuterrarium.studio.sessions import memory_search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM
 
@@ -52,8 +56,24 @@ pytestmark = pytest.mark.timeout(30)
 
 
 # ---------------------------------------------------------------------------
-# Fixtures — isolate every module-global path + the LLM seam.
+# Fixtures — isolate module-global paths and genuine external I/O.
 # ---------------------------------------------------------------------------
+
+
+class _HashEmbedder(BaseEmbedder):
+    """Deterministic stand-in for the external embedding provider."""
+
+    dimensions = 64
+
+    def encode(self, texts: list[str]) -> np.ndarray:
+        vectors = np.zeros((len(texts), self.dimensions), dtype=np.float32)
+        for row, text in enumerate(texts):
+            for token in text.lower().split():
+                vectors[row, sum(token.encode("utf-8")) % self.dimensions] += 1.0
+            norm = float(np.linalg.norm(vectors[row]))
+            if norm > 0:
+                vectors[row] /= norm
+        return vectors
 
 
 @pytest.fixture
@@ -73,6 +93,16 @@ def scripted_llm(monkeypatch):
     monkeypatch.setattr(_bootstrap_llm_mod, "create_llm_provider", _fake_create)
     monkeypatch.setattr(_agent_init_mod, "create_llm_provider", _fake_create)
     return holder
+
+
+@pytest.fixture
+def deterministic_embedder(monkeypatch):
+    """Keep auto memory search on its real path without downloading a model."""
+    monkeypatch.setattr(
+        _session_memory_mod,
+        "create_embedder",
+        lambda _config: _HashEmbedder(),
+    )
 
 
 @pytest.fixture
@@ -163,7 +193,7 @@ class TestStudioIntegration:
     """Each method runs one complete studio-tier lifecycle."""
 
     async def test_workspace_to_session_to_persistence_lifecycle(
-        self, scripted_llm, isolated_paths
+        self, scripted_llm, deterministic_embedder, isolated_paths
     ):
         """The headline flow, end-to-end through the Studio façade:
 
@@ -634,8 +664,8 @@ class TestStudioIntegration:
             assert mem["mode"] == "fts"
             assert mem["session_name"] == saved_stem
             assert mem["count"] >= 1
-            # ``auto`` mode resolves the embedder + falls back to FTS when
-            # no vector index exists — still hits the recorded turn.
+            # ``auto`` resolves the deterministic embedder and exercises
+            # hybrid search; its FTS side still finds the recorded turn.
             mem_auto = await studio.sessions.search_memory(
                 saved_path,  # a direct .kohakutr path works too
                 "ping",
