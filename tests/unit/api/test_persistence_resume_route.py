@@ -13,6 +13,7 @@ from kohakuterrarium.api.deps import (
     resolve_request_session_dir,
 )
 from kohakuterrarium.api.routes.persistence import resume as resume_mod
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions.handles import Session
 
 
@@ -155,15 +156,28 @@ class TestHostResume:
         user_b_dir.mkdir()
         user_a_path = user_a_dir / "shared.kohakutr"
         user_b_path = user_b_dir / "shared.kohakutr"
-        user_a_path.write_bytes(b"a")
-        user_b_path.write_bytes(b"b")
+        conversation_id = "shared-conversation"
+        for path, session_id in (
+            (user_a_path, "saved-a"),
+            (user_b_path, "saved-b"),
+        ):
+            store = SessionStore(path)
+            store.init_meta(
+                session_id,
+                "agent",
+                "/cfg",
+                str(path.parent),
+                ["alice"],
+            )
+            store.meta["conversation_id"] = conversation_id
+            store.close(update_status=False)
         user_a_service = _LocalService()
         user_b_service = _LocalService()
         resumed: list[tuple[object, Path]] = []
 
         async def fake_resume(service, path, pwd_override=None):
             resumed.append((service, path))
-            return _session(sid=f"sess-{path.read_text()}")
+            return _session(sid=f"sess-{path.parent.name}")
 
         monkeypatch.setattr(resume_mod, "studio_resume", fake_resume)
 
