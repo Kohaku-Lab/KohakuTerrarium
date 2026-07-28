@@ -708,6 +708,7 @@ export function _replayEvents(messages, events, branchView = null) {
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
+        turnIndex: typeof evt?.turn_index === "number" ? evt.turn_index : null,
         injectedMidTurn: true,
         timestamp: "",
       })
@@ -1163,7 +1164,9 @@ export function _replayEvents(messages, events, branchView = null) {
   let assistantMsgIdx = 0
   for (const msg of result) {
     if (msg.role === "user") {
-      const ti = userTurnsForResult[userMsgIdx]
+      if (msg.injectedMidTurn) continue
+      const ti = typeof msg.turnIndex === "number" ? msg.turnIndex : userTurnsForResult[userMsgIdx]
+      msg.userPosition = userMsgIdx
       userMsgIdx += 1
       // Always stamp turnIndex on the message so the regen / edit
       // buttons can target THIS turn — even when there's no
@@ -3356,7 +3359,7 @@ const _chatStoreOptions = {
       if (msgs[messageIdx]?.role !== "user") return null
       let pos = 0
       for (let i = 0; i < messageIdx; i++) {
-        if (msgs[i]?.role === "user") pos += 1
+        if (msgs[i]?.role === "user" && !msgs[i]?.injectedMidTurn) pos += 1
       }
       return pos
     },
@@ -3573,7 +3576,7 @@ const _chatStoreOptions = {
      * server-side regardless of how many decorations sit in front of it.
      */
     async editMessage(messageIdx, newContent, target = {}) {
-      const tab = this.activeTab
+      const tab = target.tabId || this.activeTab
       if (!this._instanceId)
         return this._branchOperationResult(false, tab, null, "No active instance")
       if (messageIdx == null)

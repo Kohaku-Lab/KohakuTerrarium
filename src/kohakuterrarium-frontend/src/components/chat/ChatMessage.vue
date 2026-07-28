@@ -460,6 +460,7 @@ async function confirmEdit() {
     userPosition: props.message.userPosition,
     latestBranch: props.message.latestBranch,
     attachments: editAttachments.value,
+    tabId: messageTab.value,
   })
   await nextTick()
   if (branchOperation.value) {
