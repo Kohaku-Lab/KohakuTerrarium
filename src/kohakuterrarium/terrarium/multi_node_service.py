@@ -73,6 +73,7 @@ from kohakuterrarium.terrarium.multi_node_routing import (
     runtime_graph_snapshot_fanout,
     stream_subscribe,
 )
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.remote_service import RemoteTerrariumService
 from kohakuterrarium.terrarium.service import (
     CreatureInfo,
@@ -588,15 +589,18 @@ class MultiNodeTerrariumService(
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
+        kwargs = {
+            "turn_index": turn_index,
+            "branch_view": branch_view,
+            "request_id": request_id,
+        }
+        if target is not None:
+            kwargs["target"] = target
         return await self._route_per_creature(
             creature_id,
-            lambda svc: svc.regenerate(
-                creature_id,
-                turn_index=turn_index,
-                branch_view=branch_view,
-                request_id=request_id,
-            ),
+            lambda svc: svc.regenerate(creature_id, **kwargs),
         )
 
     async def edit_message(
@@ -609,18 +613,19 @@ class MultiNodeTerrariumService(
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
+        kwargs = {
+            "turn_index": turn_index,
+            "user_position": user_position,
+            "branch_view": branch_view,
+            "request_id": request_id,
+        }
+        if target is not None:
+            kwargs["target"] = target
         return await self._route_per_creature(
             creature_id,
-            lambda svc: svc.edit_message(
-                creature_id,
-                msg_idx,
-                content,
-                turn_index=turn_index,
-                user_position=user_position,
-                branch_view=branch_view,
-                request_id=request_id,
-            ),
+            lambda svc: svc.edit_message(creature_id, msg_idx, content, **kwargs),
         )
 
     async def rewind(self, creature_id: str, msg_idx: int) -> None:

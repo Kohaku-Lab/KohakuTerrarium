@@ -146,7 +146,7 @@
       <p v-if="editError || branchOperationError" class="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{{ editError || branchOperationError }}</p>
     </div>
     <!-- Hover actions for user messages -->
-    <div v-if="!editing && !message.queued && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--right">
+    <div v-if="!editing && !message.queued && !message.injectedMidTurn && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--right">
       <!-- Branch navigator on user message: shown only when this turn
            has multiple distinct user contents (i.e. an edit produced
            a sibling branch at this divergence point). -->
@@ -460,6 +460,7 @@ async function confirmEdit() {
     userPosition: props.message.userPosition,
     latestBranch: props.message.latestBranch,
     attachments: editAttachments.value,
+    tabId: messageTab.value,
   })
   await nextTick()
   if (branchOperation.value) {

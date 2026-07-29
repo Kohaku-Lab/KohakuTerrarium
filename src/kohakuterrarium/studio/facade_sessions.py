@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
 from kohakuterrarium.errors import SessionNotFoundError
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence import store as _persistence_store
 from kohakuterrarium.studio.sessions import (
@@ -231,6 +232,7 @@ class _SessionsChat:
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> dict[str, Any]:
         return await _session_chat.regenerate(
             self._studio._service,
@@ -239,6 +241,7 @@ class _SessionsChat:
             turn_index=turn_index,
             branch_view=branch_view,
             request_id=request_id,
+            target=target,
         )
 
     async def edit_message(
@@ -252,6 +255,7 @@ class _SessionsChat:
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> dict[str, Any]:
         return await _session_chat.edit_message(
             self._studio._service,
@@ -263,6 +267,7 @@ class _SessionsChat:
             user_position=user_position,
             branch_view=branch_view,
             request_id=request_id,
+            target=target,
         )
 
     async def rewind(self, session_id: str, creature_id: str, msg_idx: int) -> None:

@@ -395,7 +395,7 @@ export function _replayEvents(messages, events, branchView = null) {
   let _n = 0
   // Dedupe user-role renders across user_input + user_message duplicates
   // for the same (turn, branch).
-  const _seenUserRender = new Set()
+  const _seenUserRender = new Map()
   // Track job lifecycle: started jobs and completed jobs
   const startedJobs = {} // jobId -> tool part reference
   const completedJobs = new Set() // jobIds that received done/error
@@ -662,17 +662,28 @@ export function _replayEvents(messages, events, branchView = null) {
       const ti = evt?.turn_index
       const bi = evt?.branch_id
       const key = typeof ti === "number" && typeof bi === "number" ? `${ti}/${bi}` : null
-      if (key && _seenUserRender.has(key)) continue
-      if (key) _seenUserRender.add(key)
+      if (key && _seenUserRender.has(key)) {
+        const prior = _seenUserRender.get(key)
+        if (t === "user_message" && prior && typeof evt.event_id === "number") {
+          prior.locator = { eventId: evt.event_id, turnIndex: ti, branchId: bi }
+        }
+        continue
+      }
       cur = null
       const normalized = normalizeMessageContent(evt.content)
-      result.push({
+      const userMessage = {
         id: "h_" + result.length,
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
         timestamp: "",
-      })
+        locator:
+          t === "user_message" && typeof evt.event_id === "number"
+            ? { eventId: evt.event_id, turnIndex: ti, branchId: bi }
+            : null,
+      }
+      result.push(userMessage)
+      if (key) _seenUserRender.set(key, userMessage)
     } else if (t === "user_input_injected") {
       // Mid-turn injection (Feat 3) — the user typed during processing
       // and the backend folded it into the running turn. Distinct
@@ -697,6 +708,7 @@ export function _replayEvents(messages, events, branchView = null) {
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
+        turnIndex: typeof evt?.turn_index === "number" ? evt.turn_index : null,
         injectedMidTurn: true,
         timestamp: "",
       })
@@ -1152,7 +1164,9 @@ export function _replayEvents(messages, events, branchView = null) {
   let assistantMsgIdx = 0
   for (const msg of result) {
     if (msg.role === "user") {
-      const ti = userTurnsForResult[userMsgIdx]
+      if (msg.injectedMidTurn) continue
+      const ti = typeof msg.turnIndex === "number" ? msg.turnIndex : userTurnsForResult[userMsgIdx]
+      msg.userPosition = userMsgIdx
       userMsgIdx += 1
       // Always stamp turnIndex on the message so the regen / edit
       // buttons can target THIS turn — even when there's no
@@ -3345,7 +3359,7 @@ const _chatStoreOptions = {
       if (msgs[messageIdx]?.role !== "user") return null
       let pos = 0
       for (let i = 0; i < messageIdx; i++) {
-        if (msgs[i]?.role === "user") pos += 1
+        if (msgs[i]?.role === "user" && !msgs[i]?.injectedMidTurn) pos += 1
       }
       return pos
     },
@@ -3495,6 +3509,7 @@ const _chatStoreOptions = {
             turnIndex,
             branchView,
             requestId,
+            locator: targetUserMsg?.locator,
           })
         } catch (e) {
           // No HTTP response ≠ rejected (this POST blocks through the
@@ -3518,7 +3533,8 @@ const _chatStoreOptions = {
             this._rebuildMessages(tab)
           }
           this._scheduleBranchResync(tab)
-          return
+          const error = this._failBranchOperation(tab, e)
+          return this._branchOperationResult(false, tab, null, error)
         }
         if (regenResponse?.branch_id != null && regenResponse?.turn_index != null) {
           // Trust the backend's exact branch_id over our prediction —
@@ -3560,7 +3576,7 @@ const _chatStoreOptions = {
      * server-side regardless of how many decorations sit in front of it.
      */
     async editMessage(messageIdx, newContent, target = {}) {
-      const tab = this.activeTab
+      const tab = target.tabId || this.activeTab
       if (!this._instanceId)
         return this._branchOperationResult(false, tab, null, "No active instance")
       if (messageIdx == null)
@@ -3577,7 +3593,8 @@ const _chatStoreOptions = {
       }
       let backendIdx = messageIdx
       let userPosition = target.userPosition
-      const turnIndex = target.turnIndex
+      const locator = target.locator ?? this.messagesByTab[tab]?.[messageIdx]?.locator
+      const turnIndex = locator?.turnIndex ?? target.turnIndex
       // Never-branched messages carry no ``latestBranch`` metadata —
       // derive the current max from the cached event log so the
       // prediction (and the stale-history guard) still arm.
@@ -3691,6 +3708,7 @@ const _chatStoreOptions = {
             branchView,
             attachments: Array.isArray(target.attachments) ? target.attachments : [],
             requestId,
+            locator,
           })
         } catch (e) {
           // No HTTP response ≠ rejected: this POST blocks through the

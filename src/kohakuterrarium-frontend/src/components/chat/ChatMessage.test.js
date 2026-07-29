@@ -28,7 +28,7 @@ function mountMessage(store, pinia) {
   store.messagesByTab.main = [message]
   store.activeTab = "main"
   return mount(ChatMessage, {
-    props: { message, messageIdx: 0 },
+    props: { message, messageIdx: 0, tabId: "main" },
     global: {
       plugins: [pinia],
       stubs: {
@@ -56,6 +56,24 @@ describe("ChatMessage branch operations", () => {
     })
     pinia = createPinia()
     setActivePinia(pinia)
+  })
+
+  it("keeps Save & Rerun bound to the message tab after the active tab changes", async () => {
+    const store = useChatStore()
+    store._instanceId = "instance"
+    const editSpy = vi.spyOn(store, "editMessage").mockResolvedValue({ ok: true })
+    const wrapper = mountMessage(store, pinia)
+
+    await wrapper.get('[aria-label="Edit and rerun message"]').trigger("click")
+    store.activeTab = "other"
+    await wrapper.get("textarea").setValue("updated draft")
+    await wrapper.get('[aria-label="Save and rerun"]').trigger("click")
+
+    expect(editSpy).toHaveBeenCalledWith(
+      0,
+      "updated draft",
+      expect.objectContaining({ tabId: "main" }),
+    )
   })
 
   it("keeps the editor mounted and disabled until Save & Rerun is accepted", async () => {

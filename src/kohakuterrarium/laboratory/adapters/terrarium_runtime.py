@@ -40,6 +40,7 @@ from kohakuterrarium.terrarium.creature_ops import (
     session_attach_policies_for,
     wire_creature_on_engine,
 )
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import (
     LocalTerrariumService,
@@ -482,22 +483,34 @@ class TerrariumRuntimeAdapter:
 
             case "regenerate":
                 agent = self._require_hosted(msg.body["creature_id"]).agent
-                await agent.regenerate_last_response(
-                    turn_index=msg.body.get("turn_index"),
-                    branch_view=msg.body.get("branch_view"),
-                    request_id=msg.body.get("request_id"),
-                )
+                raw_target = msg.body.get("target")
+                target = UserMessageSelector(**raw_target) if raw_target else None
+                kwargs = {
+                    "turn_index": msg.body.get("turn_index"),
+                    "branch_view": msg.body.get("branch_view"),
+                    "request_id": msg.body.get("request_id"),
+                }
+                if target is not None:
+                    kwargs["target"] = target
+                await agent.regenerate_last_response(**kwargs)
                 return _completed_branch_result(agent, msg.body.get("request_id"))
 
             case "edit_message":
                 agent = self._require_hosted(msg.body["creature_id"]).agent
+                raw_target = msg.body.get("target")
+                target = UserMessageSelector(**raw_target) if raw_target else None
+                kwargs = {
+                    "turn_index": msg.body.get("turn_index"),
+                    "user_position": msg.body.get("user_position"),
+                    "branch_view": msg.body.get("branch_view"),
+                    "request_id": msg.body.get("request_id"),
+                }
+                if target is not None:
+                    kwargs["target"] = target
                 ok = await agent.edit_and_rerun(
                     msg.body["msg_idx"],
                     unpack_content(msg.body["content"]),
-                    turn_index=msg.body.get("turn_index"),
-                    user_position=msg.body.get("user_position"),
-                    branch_view=msg.body.get("branch_view"),
-                    request_id=msg.body.get("request_id"),
+                    **kwargs,
                 )
                 if not ok:
                     raise ValueError(f"message {msg.body['msg_idx']} cannot be edited")
