@@ -19,6 +19,7 @@ export const useConversationsStore = defineStore("conversations", {
     _inflightFetch: null,
     _queuedFetch: null,
     _fetchGeneration: 0,
+    _scopeGeneration: 0,
     _hostScope: null,
     _unsubscribeHosts: null,
     _unsubscribeAuth: null,
@@ -28,6 +29,7 @@ export const useConversationsStore = defineStore("conversations", {
 
   getters: {
     isResuming: (state) => (id) => Boolean(state._resumePromises[`${state._hostScope}:${id}`]),
+    liveRows: (state) => state.rows.filter((row) => row.is_live),
   },
 
   actions: {
@@ -104,14 +106,32 @@ export const useConversationsStore = defineStore("conversations", {
       return hostScope
     },
 
-    _invalidateFetches({ clearRows = false } = {}) {
+    _invalidateListFetches() {
       this._fetchGeneration++
       this._inflightFetch = null
       this._queuedFetch = null
       this.loading = false
+    },
+
+    _invalidateFetches({ clearRows = false } = {}) {
+      this._invalidateListFetches()
+      this._scopeGeneration++
       this._resumePromises = {}
       this._endPromises = {}
       if (clearRows) this.rows = []
+    },
+
+    markRuntimeStopped(runtimeId) {
+      if (!runtimeId) return
+      // Invalidate any request that started before the successful Stop.
+      // Its live snapshot must not resurrect the row after the local
+      // liveness transition.
+      this._invalidateListFetches()
+      this.rows = this.rows.map((row) => {
+        const matches = row.runtime_id === runtimeId || (row.is_live && row.id === runtimeId)
+        if (!matches) return row
+        return { ...row, runtime_id: null, is_live: false, status: "paused" }
+      })
     },
 
     async resume(row) {
@@ -122,7 +142,7 @@ export const useConversationsStore = defineStore("conversations", {
       if (row.is_live && row.runtime_id) return row.runtime_id
       if (!row.saved_name) throw new Error("Conversation has no saved session to resume")
 
-      const generation = this._fetchGeneration
+      const scopeGeneration = this._scopeGeneration
       const key = `${resumeScope}:${row.conversation_id || row.id}`
       if (this._endPromises[key]) throw new Error("Conversation is still ending")
       const existing = this._resumePromises[key]
@@ -138,18 +158,21 @@ export const useConversationsStore = defineStore("conversations", {
           onNode: row.node_id || "_host",
         })
         if (runtimeId === null) return null
+        this._syncHostScope()
+        if (scopeGeneration !== this._scopeGeneration || resumeScope !== this._hostScope) {
+          throw new Error("Conversation host changed while resuming")
+        }
         await Promise.all([instances.fetchAll(), this.fetchAll({ force: true })])
+        this._syncHostScope()
+        if (scopeGeneration !== this._scopeGeneration || resumeScope !== this._hostScope) {
+          throw new Error("Conversation host changed while resuming")
+        }
         return runtimeId
       })()
 
       this._resumePromises[key] = task
       try {
-        const runtimeId = await task
-        this._syncHostScope()
-        if (generation !== this._fetchGeneration || resumeScope !== this._hostScope) {
-          throw new Error("Conversation host changed while resuming")
-        }
-        return runtimeId
+        return await task
       } finally {
         if (this._resumePromises[key] === task) delete this._resumePromises[key]
       }
@@ -160,14 +183,23 @@ export const useConversationsStore = defineStore("conversations", {
       if (row._hostScope && row._hostScope !== endScope) {
         throw new Error("Conversation belongs to a different host")
       }
+      const scopeGeneration = this._scopeGeneration
       const key = `${endScope}:${row.conversation_id || row.id}`
       if (this._resumePromises[key]) throw new Error("Conversation is still resuming")
       if (this._endPromises[key]) return this._endPromises[key]
       let task
       task = (async () => {
         await sessionAPI.endConversation(row.conversation_id || row.id)
+        this._syncHostScope()
+        if (scopeGeneration !== this._scopeGeneration || endScope !== this._hostScope) {
+          throw new Error("Conversation host changed while ending")
+        }
         const instances = useInstancesStore()
         await Promise.all([instances.fetchAll(), this.fetchAll({ force: true })])
+        this._syncHostScope()
+        if (scopeGeneration !== this._scopeGeneration || endScope !== this._hostScope) {
+          throw new Error("Conversation host changed while ending")
+        }
       })().finally(() => {
         if (this._endPromises[key] === task) delete this._endPromises[key]
       })

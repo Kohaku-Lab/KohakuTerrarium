@@ -40,7 +40,8 @@ export const useInstancesStore = defineStore("instances", {
       if (this._inflightFetch) return this._inflightFetch
       this.loading = true
       const seq = ++this._fetchSeq
-      this._inflightFetch = (async () => {
+      let task
+      task = (async () => {
         try {
           const sessions = await sessionAPI.listActive()
           if (seq !== this._fetchSeq) return
@@ -48,32 +49,39 @@ export const useInstancesStore = defineStore("instances", {
         } catch (err) {
           console.error("Failed to fetch instances:", err)
         } finally {
-          this.loading = false
-          this._inflightFetch = null
+          if (this._inflightFetch === task) {
+            this.loading = false
+            this._inflightFetch = null
+          }
         }
       })()
-      return this._inflightFetch
+      this._inflightFetch = task
+      return task
     },
 
     async fetchOne(id) {
       this.loading = true
+      const seq = this._fetchSeq
       try {
         const data = await sessionAPI.getActive(id)
         const loaded = _mapSession(data)
-        this.current = loaded
-        const idx = this.list.findIndex((item) => item.id === loaded.id)
-        if (idx >= 0) {
-          this.list.splice(idx, 1, loaded)
-        } else {
-          this.list.unshift(loaded)
+        if (seq === this._fetchSeq) {
+          this.current = loaded
+          const idx = this.list.findIndex((item) => item.id === loaded.id)
+          if (idx >= 0) {
+            this.list.splice(idx, 1, loaded)
+          } else {
+            this.list.unshift(loaded)
+          }
         }
         return loaded
       } catch (err) {
-        if (err?.response?.status === 404) {
+        if (err?.response?.status === 404 && seq === this._fetchSeq) {
           this.list = this.list.filter((i) => i.id !== id)
           if (this.current?.id === id) this.current = null
           return null
         }
+        if (err?.response?.status === 404) return null
         console.error("Failed to fetch instance:", err)
         throw err
       } finally {
@@ -106,8 +114,15 @@ export const useInstancesStore = defineStore("instances", {
     async stop(id) {
       try {
         await sessionAPI.stopActive(id)
+        ++this._fetchSeq
+        this._inflightFetch = null
+        this.loading = false
         this.list = this.list.filter((i) => i.id !== id)
         if (this.current?.id === id) this.current = null
+        const { useConversationsStore } = await import("@/stores/conversations")
+        const conversations = useConversationsStore()
+        conversations.markRuntimeStopped(id)
+        void conversations.fetchAll({ force: true })
       } catch (err) {
         console.error("Failed to stop instance:", err)
         throw err

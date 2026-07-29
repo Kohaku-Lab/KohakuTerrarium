@@ -615,7 +615,8 @@ export const useRuntimeGraphStore = defineStore("runtimeGraph", () => {
       // Stopping the session is the engine-level equivalent of
       // dissolving the molecule — it tears down the graph and removes
       // every creature/channel inside it.
-      await terrariumAPI.stop(groupId)
+      const { useInstancesStore } = await import("@/stores/instances")
+      await useInstancesStore().stop(groupId)
       pushLog(`stopped session ${groupId}`)
     } catch (err) {
       pushLog(`stop failed · ${err?.message || err}`)
