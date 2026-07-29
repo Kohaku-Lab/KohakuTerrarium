@@ -49,6 +49,7 @@ from kohakuterrarium.terrarium.events import (
     EngineEvent,
     EventFilter,
 )
+from kohakuterrarium.terrarium.remote_recipe import RemoteRecipeServiceMixin
 from kohakuterrarium.terrarium.service import CreatureInfo
 from kohakuterrarium.terrarium.service_dto import BranchMutationResult
 from kohakuterrarium.terrarium.topology import (
@@ -157,7 +158,11 @@ def _branch_mutation_result(body: dict[str, Any]) -> BranchMutationResult:
         ) from exc
 
 
-class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMixin):
+class RemoteTerrariumService(
+    RemoteRecipeServiceMixin,
+    RemoteDriveServiceMixin,
+    DriveServiceUnsupportedMixin,
+):
     """Controller-side proxy for a worker node's Terrarium engine.
 
     Implements the :class:`TerrariumService` Protocol over Lab APP
@@ -241,38 +246,6 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
-
-    async def apply_recipe(
-        self,
-        recipe_path: str,
-        *,
-        pwd: str | None = None,
-        llm: Any = None,
-        strict: bool = True,
-        start: bool = True,
-        persist: bool = False,
-    ) -> tuple[GraphTopology, list[CreatureInfo]]:
-        """Apply one complete recipe on this worker without cross-node splitting.
-
-        Persistence is worker-owned so display names and controller-provided
-        paths can never select the session file.
-        """
-        body = _maybe_raise(
-            await self._req(
-                "apply_recipe",
-                {
-                    "recipe_path": recipe_path,
-                    "pwd": pwd,
-                    "llm": llm,
-                    "strict": strict,
-                    "start": start,
-                    "persist": persist,
-                },
-            )
-        )
-        graph = unpack_graph_topology(body["graph"])
-        creatures = [unpack_creature_info(item) for item in body["creatures"]]
-        return graph, creatures
 
     async def add_creature(
         self,
@@ -984,6 +957,9 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
             body=body,
             timeout=timeout if timeout is not None else self._timeout,
         )
+
+    async def _checked_req(self, type_: str, body: dict[str, Any]) -> dict[str, Any]:
+        return _maybe_raise(await self._req(type_, body))
 
     async def _req_turn_mutation(self, type_: str, body: dict[str, Any]) -> Any:
         """Turn-length branch mutation (regenerate / edit_message).
