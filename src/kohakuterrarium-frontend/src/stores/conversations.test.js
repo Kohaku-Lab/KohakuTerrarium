@@ -62,6 +62,84 @@ describe("conversations store", () => {
     expect(createSession).not.toHaveBeenCalled()
   })
 
+  it("removes a stopped or disconnected runtime from the visible rail", async () => {
+    const store = useConversationsStore()
+    sessionAPI.listOpen
+      .mockResolvedValueOnce([
+        {
+          id: "conversation-one",
+          runtime_id: "runtime-one",
+          is_live: true,
+          status: "running",
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: "conversation-one",
+          runtime_id: null,
+          is_live: false,
+          status: "paused",
+        },
+      ])
+
+    await store.fetchAll()
+    expect(store.liveRows.map((row) => row.id)).toEqual(["conversation-one"])
+
+    await store.fetchAll({ force: true })
+    expect(store.rows.map((row) => row.id)).toEqual(["conversation-one"])
+    expect(store.liveRows).toEqual([])
+  })
+
+  it("keeps a locally stopped runtime hidden from a request started before stop", async () => {
+    const store = useConversationsStore()
+    const deferred = promiseWithResolvers()
+    const live = {
+      id: "conversation-one",
+      runtime_id: "runtime-one",
+      is_live: true,
+      status: "running",
+    }
+    sessionAPI.listOpen.mockReturnValue(deferred.promise)
+    const staleFetch = store.fetchAll()
+
+    store.markRuntimeStopped("runtime-one")
+    expect(store.liveRows).toEqual([])
+
+    deferred.resolve([live])
+    await staleFetch
+    expect(store.liveRows).toEqual([])
+
+    sessionAPI.listOpen.mockResolvedValue([
+      {
+        ...live,
+        runtime_id: null,
+        is_live: false,
+        status: "paused",
+      },
+    ])
+    await store.fetchAll()
+    expect(store.liveRows).toEqual([])
+  })
+
+  it("shows the same runtime id again when a post-stop refresh reports it live", async () => {
+    const store = useConversationsStore()
+    const live = {
+      id: "conversation-one",
+      runtime_id: "runtime-one",
+      is_live: true,
+      status: "running",
+    }
+    sessionAPI.listOpen.mockResolvedValue([live])
+    await store.fetchAll()
+
+    store.markRuntimeStopped("runtime-one")
+    expect(store.liveRows).toEqual([])
+
+    await store.fetchAll()
+
+    expect(store.liveRows).toEqual([expect.objectContaining(live)])
+  })
+
   it("shares one resume while concurrent surface requests target the new runtime id", async () => {
     const store = useConversationsStore()
     const tabs = useTabsStore()
@@ -100,6 +178,73 @@ describe("conversations store", () => {
     expect(tabs.surfaceTabsForTarget("runtime-one").chat).toBeDefined()
     expect(tabs.surfaceTabsForTarget("runtime-one").inspector).toBeDefined()
     expect(tabs.surfaceTabsForTarget("saved-one").chat).toBeUndefined()
+  })
+
+  it("keeps another conversation resume single-flight while a runtime stops", async () => {
+    const store = useConversationsStore()
+    const tabs = useTabsStore()
+    const instances = useInstancesStore()
+    const deferred = promiseWithResolvers()
+    const createSession = vi.spyOn(tabs, "createSession").mockReturnValue(deferred.promise)
+    vi.spyOn(instances, "fetchAll").mockResolvedValue()
+    sessionAPI.listOpen.mockResolvedValue([])
+    const row = {
+      id: "saved-one",
+      runtime_id: null,
+      saved_name: "saved-one",
+      status: "paused",
+      is_live: false,
+      node_id: "_host",
+    }
+    store.rows = [
+      {
+        id: "conversation-two",
+        runtime_id: "runtime-two",
+        status: "running",
+        is_live: true,
+      },
+    ]
+
+    const chat = store.openSurface(row, "chat")
+    store.markRuntimeStopped("runtime-two")
+    const inspector = store.openSurface(row, "inspector")
+
+    expect(createSession).toHaveBeenCalledTimes(1)
+    deferred.resolve("runtime-one")
+    await Promise.all([chat, inspector])
+
+    expect(tabs.surfaceTabsForTarget("runtime-one").chat).toBeDefined()
+    expect(tabs.surfaceTabsForTarget("runtime-one").inspector).toBeDefined()
+  })
+
+  it("keeps another conversation end single-flight while a runtime stops", async () => {
+    const store = useConversationsStore()
+    const instances = useInstancesStore()
+    const deferred = promiseWithResolvers()
+    sessionAPI.endConversation.mockReturnValue(deferred.promise)
+    vi.spyOn(instances, "fetchAll").mockResolvedValue()
+    sessionAPI.listOpen.mockResolvedValue([])
+    const row = {
+      id: "saved-one",
+      conversation_id: "saved-one",
+      _hostScope: "_same_origin:__anonymous__",
+    }
+    store.rows = [
+      {
+        id: "conversation-two",
+        runtime_id: "runtime-two",
+        status: "running",
+        is_live: true,
+      },
+    ]
+
+    const first = store.endConversation(row)
+    store.markRuntimeStopped("runtime-two")
+    const second = store.endConversation(row)
+
+    expect(sessionAPI.endConversation).toHaveBeenCalledTimes(1)
+    deferred.resolve({ status: "ended" })
+    await Promise.all([first, second])
   })
 
   it("opens a live row directly without resuming it", async () => {
@@ -296,7 +441,7 @@ describe("conversations store", () => {
     store.stopPolling()
   })
 
-  it("rejects a completed resume after the host scope changes", async () => {
+  it("rejects every waiter for a shared resume after the host scope changes", async () => {
     const store = useConversationsStore()
     const tabs = useTabsStore()
     const hosts = useHostsStore()
@@ -309,12 +454,41 @@ describe("conversations store", () => {
       is_live: false,
     }
 
-    const opening = store.openSurface(row, "chat")
+    const chat = store.openSurface(row, "chat")
+    const inspector = store.openSurface(row, "inspector")
     hosts.activeHostId = "other-host"
     resume.resolve("runtime-old-host")
 
-    await expect(opening).rejects.toThrow("host changed")
+    const results = await Promise.allSettled([chat, inspector])
+    expect(results.map((result) => result.status)).toEqual(["rejected", "rejected"])
+    expect(results.map((result) => result.reason?.message)).toEqual([
+      expect.stringContaining("host changed"),
+      expect.stringContaining("host changed"),
+    ])
     expect(tabs.surfaceTabsForTarget("runtime-old-host").chat).toBeUndefined()
+    expect(tabs.surfaceTabsForTarget("runtime-old-host").inspector).toBeUndefined()
+  })
+
+  it("rejects a completed end after the host scope changes", async () => {
+    const store = useConversationsStore()
+    const hosts = useHostsStore()
+    const instances = useInstancesStore()
+    const end = promiseWithResolvers()
+    sessionAPI.endConversation.mockReturnValueOnce(end.promise)
+    const fetchInstances = vi.spyOn(instances, "fetchAll").mockResolvedValue()
+    const row = {
+      id: "conversation-one",
+      conversation_id: "conversation-one",
+      saved_name: "saved-one",
+      is_live: false,
+    }
+
+    const ending = store.endConversation(row)
+    hosts.activeHostId = "other-host"
+    end.resolve({ status: "ended" })
+
+    await expect(ending).rejects.toThrow("host changed")
+    expect(fetchInstances).not.toHaveBeenCalled()
   })
 
   it("rejects a row from the previous host before issuing an action", async () => {

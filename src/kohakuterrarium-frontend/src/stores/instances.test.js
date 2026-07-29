@@ -5,6 +5,7 @@ vi.mock("@/utils/api", () => {
   return {
     sessionAPI: {
       listActive: vi.fn(),
+      listOpen: vi.fn(),
       getActive: vi.fn(),
       stopActive: vi.fn(),
     },
@@ -18,11 +19,14 @@ vi.mock("@/utils/api", () => {
 })
 
 import { sessionAPI } from "@/utils/api"
+import { useConversationsStore } from "./conversations"
 import { useInstancesStore } from "./instances"
 
 beforeEach(() => {
   setActivePinia(createPinia())
   vi.clearAllMocks()
+  sessionAPI.listOpen.mockResolvedValue([])
+  sessionAPI.stopActive.mockResolvedValue({ status: "stopped" })
 })
 
 describe("instances.fetchAll — SessionListing payload shape", () => {
@@ -66,6 +70,64 @@ describe("instances.fetchAll — SessionListing payload shape", () => {
 })
 
 describe("instances store", () => {
+  it("invalidates a pre-stop list request and hides the stopped conversation immediately", async () => {
+    const store = useInstancesStore()
+    const conversations = useConversationsStore()
+    const deferred = promiseWithResolvers()
+    sessionAPI.listActive.mockReturnValue(deferred.promise)
+    sessionAPI.listOpen.mockReturnValue(new Promise(() => {}))
+    store.list = [{ id: "graph_dead", status: "running" }]
+    store.current = { id: "graph_dead", status: "running" }
+    conversations.rows = [
+      {
+        id: "conversation-one",
+        runtime_id: "graph_dead",
+        is_live: true,
+        status: "running",
+      },
+    ]
+
+    const staleFetch = store.fetchAll()
+    await store.stop("graph_dead")
+
+    expect(store.list).toEqual([])
+    expect(store.current).toBeNull()
+    expect(conversations.liveRows).toEqual([])
+
+    deferred.resolve([
+      {
+        session_id: "graph_dead",
+        name: "stale",
+        creatures: 1,
+      },
+    ])
+    await staleFetch
+
+    expect(store.list).toEqual([])
+    expect(store.current).toBeNull()
+  })
+
+  it("ignores a pre-stop detail response that resolves after stop", async () => {
+    const store = useInstancesStore()
+    const deferred = promiseWithResolvers()
+    sessionAPI.getActive.mockReturnValue(deferred.promise)
+    store.list = [{ id: "graph_dead", status: "running" }]
+    store.current = { id: "graph_dead", status: "running" }
+
+    const staleFetch = store.fetchOne("graph_dead")
+    await store.stop("graph_dead")
+    deferred.resolve({
+      session_id: "graph_dead",
+      name: "stale",
+      creatures: [],
+      channels: [],
+    })
+    await staleFetch
+
+    expect(store.list).toEqual([])
+    expect(store.current).toBeNull()
+  })
+
   it("clears stale current instance on fetchOne 404", async () => {
     const store = useInstancesStore()
     store.list = [{ id: "graph_dead", type: "creature" }]
@@ -151,3 +213,13 @@ describe("instances store", () => {
     expect(result.creatures[0].name).toBe("alice")
   })
 })
+
+function promiseWithResolvers() {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}

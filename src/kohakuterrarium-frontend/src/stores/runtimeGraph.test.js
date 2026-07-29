@@ -22,6 +22,10 @@ vi.mock("@/utils/wsUrl", () => ({
 
 vi.mock("@/utils/api", () => ({
   runtimeGraphAPI: { snapshot: vi.fn() },
+  sessionAPI: {
+    listActive: vi.fn(),
+    stopActive: vi.fn(),
+  },
   terrariumAPI: {
     connect: vi.fn(),
     wireCreature: vi.fn(),
@@ -40,6 +44,7 @@ vi.mock("@/utils/api", () => ({
 }))
 
 import { runtimeGraphAPI, terrariumAPI, wiringAPI } from "@/utils/api"
+import { useInstancesStore } from "./instances"
 import { useRuntimeGraphStore } from "./runtimeGraph"
 
 const snapshot = {
@@ -98,6 +103,17 @@ beforeEach(() => {
 })
 
 describe("runtime graph store", () => {
+  it("routes graph dissolution through the shared instance stop action", async () => {
+    const store = useRuntimeGraphStore()
+    const instances = useInstancesStore()
+    const stop = vi.spyOn(instances, "stop").mockResolvedValue()
+
+    await store.dissolveGroup("graph_1")
+
+    expect(stop).toHaveBeenCalledWith("graph_1")
+    expect(terrariumAPI.stop).not.toHaveBeenCalled()
+  })
+
   it("normalizes runtime snapshot into graph editor data", async () => {
     const store = useRuntimeGraphStore()
 

@@ -124,35 +124,34 @@ This means small config drift is fine (swapping an LLM, changing a prompt). Stru
 
 ## Open conversations in the web UI
 
-The Conversations rail tracks a user's intent to continue a conversation, not
-whether its runtime is currently running. These are separate lifecycle axes:
+The Conversations rail lists only conversations whose runtime is currently
+attached. The persisted conversation lifecycle remains a separate concern:
 
-- **Live and open:** a runtime is attached, and the conversation remains in the rail.
-- **Dormant and open:** no runtime is attached, but the saved conversation remains
-  in the rail after a tab closes, a runtime stops, or the app exits.
-- **Ended:** the user explicitly ended the conversation. It leaves the rail, while
-  its saved history remains available from Sessions.
+- **Live and open:** a runtime is attached, so the conversation appears in the rail.
+- **Dormant and open:** no runtime is attached. The saved conversation remains
+  available from Sessions but is not rendered in the rail.
+- **Ended:** the user explicitly ended the conversation. Its saved history remains
+  available from Sessions.
 
 Closing a Chat or Inspector tab only detaches that view. It never stops or ends
-the conversation. A dormant row resumes lazily when you click it; simply opening
-the app does not resume every saved runtime. Chat and Inspector then target the
-new runtime ID. The existing Sessions history page remains read-only and keeps
-its existing **View** and **Resume** actions; the rail does not add a second
-history-specific Continue action.
+the conversation, so a still-live runtime remains in the rail. After the backend
+reports a stopped or disconnected creature as inactive, the row disappears on
+the next refresh. The Sessions history page remains read-only and keeps its
+existing **View** and **Resume** actions.
 
 Every newly persisted conversation has a stable `conversation_id`. Runtime graph
 IDs may change after restart or resume, and filenames may be moved or renamed,
-but those changes do not create duplicate rail rows. `GET /api/sessions/open`
+but those changes do not create duplicate records. `GET /api/sessions/open`
 merges live runtimes with saved open markers using this identity and lets the
-live row win. Session indexes and lookups are scoped to the authenticated
-session directory, so one user's index cannot supply another user's rows.
+live row win; the rail renders only rows with `is_live: true`. Session indexes
+and lookups are scoped to the authenticated session directory, so one user's
+index cannot supply another user's rows.
 
 The saved lifecycle marker is explicit. Sessions created before this marker was
-introduced are still available in history but are hidden from the Conversations
-rail by default. A normal runtime stop preserves the open marker and records a
-paused/dormant state. Explicit **End** clears the marker and records a terminal
-state. Local, remote, and clustered operations synchronize this marker with the
-saved store before the rail refreshes.
+introduced are still available in history. A normal runtime stop preserves the
+open marker and records a paused/dormant state. Explicit **End** clears the
+marker and records a terminal state. Local, remote, and clustered operations
+synchronize this marker with the saved store before the rail refreshes.
 
 Resume is singleflight per saved conversation: concurrent browser requests share
 one server operation, while cancellation of one waiter does not cancel the

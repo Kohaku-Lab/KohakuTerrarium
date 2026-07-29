@@ -894,7 +894,7 @@ export default {
   "shell.rail.attached": "已附加",
   "shell.rail.attachedEmpty": "沒有正在執行的目標",
   "shell.rail.conversations": "對話",
-  "shell.rail.conversationsEmpty": "沒有未結束的對話",
+  "shell.rail.conversationsEmpty": "沒有活躍對話",
   "shell.rail.openChat": "開啟聊天",
   "shell.rail.closeChat": "關閉聊天",
   "shell.rail.openInspector": "開啟檢查器",
