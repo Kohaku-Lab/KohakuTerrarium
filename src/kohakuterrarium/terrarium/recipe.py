@@ -81,6 +81,7 @@ async def apply_recipe(
     """
     config = _resolve_recipe(recipe)
     logical_names = _validate_logical_names(config)
+    declared_aliases = _validate_declared_name_aliases(config)
     builder = creature_builder or build_creature
     use_default_builder = creature_builder is None
     graph_lock = None
@@ -92,7 +93,7 @@ async def apply_recipe(
     async with graph_cm:
         if graph is not None:
             graph_id = engine._resolve_graph_id(graph)
-            for name in logical_names:
+            for name in declared_aliases:
                 ensure_graph_name_available(
                     engine._topology,
                     engine._creatures,
@@ -136,6 +137,36 @@ def _validate_logical_names(config: TerrariumConfig) -> list[str]:
             )
         names.append("root")
     return names
+
+
+def _validate_declared_name_aliases(config: TerrariumConfig) -> list[str]:
+    """Return every declared graph alias, rejecting cross-member ambiguity."""
+    owners: dict[str, int] = {}
+    duplicates: set[str] = set()
+    for owner, creature in enumerate(config.creatures):
+        aliases = {creature.name}
+        configured_name = creature.config_data.get("name")
+        if isinstance(configured_name, str) and configured_name:
+            aliases.add(configured_name)
+        for alias in aliases:
+            previous_owner = owners.setdefault(alias, owner)
+            if previous_owner != owner:
+                duplicates.add(alias)
+
+    if config.root is not None:
+        root_owner = len(config.creatures)
+        previous_owner = owners.setdefault("root", root_owner)
+        if previous_owner != root_owner:
+            duplicates.add("root")
+
+    if duplicates:
+        formatted = ", ".join(repr(name) for name in sorted(duplicates))
+        raise ValueError(
+            "Terrarium recipe contains duplicate creature name alias(es): "
+            f"{formatted}. Display and configured names must be unique within "
+            "one graph."
+        )
+    return sorted(owners)
 
 
 def _build_recipe_creature(

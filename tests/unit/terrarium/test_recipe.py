@@ -393,6 +393,59 @@ class TestApplyRecipe:
         finally:
             await engine.shutdown()
 
+    async def test_existing_graph_rejects_declared_agent_alias_before_mutation(
+        self, monkeypatch
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        existing.agent.config.name = "shared"
+        candidate = _creature_cfg("new-member")
+        candidate.config_data["name"] = "shared"
+
+        async def unexpected_add_channel(*_args, **_kwargs):
+            raise AssertionError("recipe mutation began before alias preflight")
+
+        try:
+            added = await engine.add_creature(existing, start=False, session=False)
+            monkeypatch.setattr(engine, "add_channel", unexpected_add_channel)
+            with pytest.raises(ValueError, match="already contains creature name"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(creatures=[candidate]),
+                    graph=added.graph_id,
+                    creature_builder=_fake_builder,
+                )
+            graph = engine.get_graph(added.graph_id)
+            assert graph.creature_ids == {"existing"}
+            assert graph.channels == {}
+        finally:
+            await engine.shutdown()
+
+    async def test_duplicate_declared_agent_aliases_fail_before_mutation(
+        self, monkeypatch
+    ):
+        engine = Terrarium()
+        alice = _creature_cfg("alice")
+        bob = _creature_cfg("bob")
+        alice.config_data["name"] = "shared"
+        bob.config_data["name"] = "shared"
+
+        async def unexpected_add_channel(*_args, **_kwargs):
+            raise AssertionError("recipe mutation began before alias validation")
+
+        monkeypatch.setattr(engine, "add_channel", unexpected_add_channel)
+        try:
+            with pytest.raises(ValueError, match="duplicate creature name alias"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(creatures=[alice, bob]),
+                    creature_builder=_fake_builder,
+                )
+            assert engine.list_graphs() == []
+            assert engine.list_creatures() == []
+        finally:
+            await engine.shutdown()
+
     async def test_existing_graph_starts_only_new_members(self):
         engine = Terrarium()
         existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")

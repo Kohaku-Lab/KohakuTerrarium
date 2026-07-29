@@ -135,6 +135,26 @@ class TestAddRemoveCreature:
             await t.shutdown()
             await other.shutdown()
 
+    async def test_add_binds_final_runtime_id_to_executor(self):
+        t = Terrarium()
+        creature = Creature(
+            creature_id="configured-id",
+            name="worker",
+            agent=_FakeAgent(name="worker"),
+        )
+        creature.agent.executor = SimpleNamespace(_creature_id="configured-id")
+        try:
+            added = await t.add_creature(
+                creature,
+                creature_id="runtime-id",
+                start=False,
+                session=False,
+            )
+            assert added.creature_id == "runtime-id"
+            assert creature.agent.executor._creature_id == "runtime-id"
+        finally:
+            await t.shutdown()
+
     async def test_remove_unknown_raises(self):
         t = Terrarium()
         with pytest.raises(KeyError):
