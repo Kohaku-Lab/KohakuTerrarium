@@ -16,11 +16,13 @@ from kohakuterrarium.llm.backends import set_remote_backend
 from kohakuterrarium.llm.preset_store import preset_from_data, set_remote_preset
 from kohakuterrarium.llm.profile_types import LLMBackend
 from kohakuterrarium.terrarium.creature_ops import (
+    agent_command_inventory,
     agent_env,
     agent_execute_command,
     agent_get_module_options,
     agent_get_native_tool_options,
     agent_list_modules,
+    agent_invoke_skill,
     agent_list_plugins,
     agent_native_tool_inventory,
     agent_patch_scratchpad,
@@ -697,6 +699,41 @@ class TerrariumRuntimeAdapter:
                     creature.agent,
                     msg.body["module_type"],
                     msg.body["module_name"],
+                )
+
+            case "command_inventory":
+                if msg.sender_node != HOST_NODE_ID:
+                    return {
+                        "error": {
+                            "kind": "forbidden",
+                            "message": (
+                                "command_inventory refused from non-host origin "
+                                f"{msg.sender_node!r}"
+                            ),
+                        }
+                    }
+                cid = msg.body["creature_id"]
+                creature = self._require_hosted(cid)
+                return agent_command_inventory(creature.agent)
+
+            case "invoke_skill":
+                if msg.sender_node != HOST_NODE_ID:
+                    return {
+                        "error": {
+                            "kind": "forbidden",
+                            "message": (
+                                "invoke_skill refused from non-host origin "
+                                f"{msg.sender_node!r}"
+                            ),
+                        }
+                    }
+                cid = msg.body["creature_id"]
+                creature = self._require_hosted(cid)
+                return await agent_invoke_skill(
+                    creature.agent,
+                    msg.body["skill"],
+                    msg.body.get("args"),
+                    source=msg.body.get("source", "web:skill"),
                 )
 
             case "execute_command":

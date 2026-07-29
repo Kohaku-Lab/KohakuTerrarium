@@ -7,6 +7,7 @@ Pure-function helpers — exercised against minimal stand-ins for
 import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -473,6 +474,38 @@ class TestModuleCatalog:
 
 
 # ── execute_command ────────────────────────────────────────────
+
+
+class TestCommandInventoryAndSkillInput:
+    @pytest.mark.asyncio
+    async def test_agent_invoke_skill_injects_explicit_web_turn(self):
+        skill = SimpleNamespace(
+            name="review",
+            description="Review changes",
+            body="Inspect carefully",
+            origin="test",
+            enabled=True,
+            invocation_blocked=True,
+        )
+        agent = SimpleNamespace(
+            list_user_commands=lambda: {},
+            skills=SimpleNamespace(
+                get=lambda name: skill if name == "review" else None
+            ),
+            inject_input=AsyncMock(),
+        )
+
+        result = await co.agent_invoke_skill(agent, "review", "diff")
+
+        assert result == {
+            "skill": "review",
+            "accepted": True,
+            "source": "web:skill",
+        }
+        content = agent.inject_input.await_args.args[0]
+        assert "Inspect carefully" in content
+        assert "diff" in content
+        agent.inject_input.assert_awaited_once_with(content, source="web:skill")
 
 
 class TestExecuteCommand:

@@ -406,6 +406,23 @@ export const terrariumAPI = {
     return data
   },
 
+  /** Fetch live commands and skills for a terrarium creature */
+  async getCreatureCommandInventory(id, name) {
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(name)}/command-inventory`,
+    )
+    return data
+  },
+
+  /** Inject a user-selected skill into a terrarium creature */
+  async invokeCreatureSkill(id, name, skill, args = "") {
+    const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/skill-input`, {
+      command: skill,
+      args,
+    })
+    return data
+  },
+
   /** Execute a slash command on a terrarium creature */
   async executeCreatureCommand(id, name, command, args = "") {
     const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/command`, {
