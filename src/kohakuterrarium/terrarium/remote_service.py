@@ -610,6 +610,36 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         )
         return body
 
+    async def command_inventory(self, creature_id: str) -> dict[str, Any]:
+        body = _maybe_raise(
+            await self._req(
+                "command_inventory",
+                {"creature_id": creature_id},
+            )
+        )
+        return body
+
+    async def invoke_skill(
+        self,
+        creature_id: str,
+        skill: str,
+        args: str | dict[str, Any] | None = None,
+        *,
+        source: str = "web:skill",
+    ) -> dict[str, Any]:
+        body = _maybe_raise(
+            await self._req(
+                "invoke_skill",
+                {
+                    "creature_id": creature_id,
+                    "skill": skill,
+                    "args": args,
+                    "source": source,
+                },
+            )
+        )
+        return body
+
     async def execute_command(
         self,
         creature_id: str,
