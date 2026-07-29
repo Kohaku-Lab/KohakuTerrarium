@@ -381,6 +381,20 @@ class TestRename:
         finally:
             await t.shutdown()
 
+    async def test_rename_creature_rejects_duplicate_name_in_graph(self):
+        from kohakuterrarium.terrarium.graph_identity import GraphNameConflictError
+
+        t = await (
+            TestTerrariumBuilder().with_creature("alice").with_creature("bob").build()
+        )
+        svc = LocalTerrariumService(t)
+        try:
+            with pytest.raises(GraphNameConflictError):
+                lifecycle.rename_creature(svc, "bob", "alice")
+            assert t.get_creature("bob").name == "bob"
+        finally:
+            await t.shutdown()
+
     async def test_rename_creature_updates_meta_when_solo(self):
         t = await TestTerrariumBuilder().with_creature("alice").build()
         svc = LocalTerrariumService(t)

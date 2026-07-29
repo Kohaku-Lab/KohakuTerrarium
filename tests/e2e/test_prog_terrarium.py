@@ -187,6 +187,7 @@ def _ctx_for(service: LocalTerrariumService, creature_id: str) -> ToolContext:
     env = engine._environments[creature.graph_id]
     return ToolContext(
         agent_name=creature.name,
+        creature_id=creature.creature_id,
         session=None,
         working_dir=Path("."),
         environment=env,
@@ -395,7 +396,7 @@ class TestProgTerrariumJourney:
         assert gw_add.error is None, gw_add.error
         wire_edge_id = json.loads(gw_add.output)["edge_id"]
         assert wire_edge_id
-        assert any(e["to"] == "analyst" for e in engine.list_output_wiring("root"))
+        assert any(e["to"] == analyst_id for e in engine.list_output_wiring("root"))
         gw_rm = await GroupWireTool()._execute(
             {"action": "remove", "edge_id": wire_edge_id}, context=ctx
         )

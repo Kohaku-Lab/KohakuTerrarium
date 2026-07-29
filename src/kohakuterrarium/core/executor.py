@@ -43,6 +43,7 @@ class Executor:
         self._serial_lock: asyncio.Lock | None = None
 
         self._agent_name: str = ""
+        self._creature_id: str = ""
         self._tool_format: str = "native"
         self._agent: Any = None  # Agent instance, set during init
         self._session: Any = None  # Session, set by agent during init
@@ -362,6 +363,7 @@ class Executor:
             agent_name=self._agent_name,
             session=self._session,
             working_dir=self._working_dir,
+            creature_id=self._creature_id,
             memory_path=self._memory_path,
             environment=self._environment,
             tool_format=self._tool_format,

@@ -6,183 +6,241 @@ home node. Relayed messages are marked to prevent another forwarding hop.
 """
 
 import asyncio
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
-from kohakuterrarium.core.events import create_creature_output_event
+from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.laboratory._internal.app import AppMessage
-from kohakuterrarium.laboratory.protocols import LabNotifier
-from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.laboratory.protocols import LabNode
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+_NAMESPACE = "terrarium.output_wire"
+_MSG_INJECT = "inject"
+
 
 class TerrariumOutputWireAdapter:
-    """Per-node extension that forwards and receives output-wiring events.
+    """Route graph-bound output events with exact identities and acknowledgements."""
 
-    The engine reference lets its output resolver discover this adapter without
-    an import cycle. Only the host installs a cluster target resolver.
-    """
-
-    NAMESPACE = "terrarium.output_wire"
-
-    def __init__(self, engine: Terrarium, lab_node: LabNotifier) -> None:
+    def __init__(
+        self,
+        engine: Any,
+        messenger: LabNode,
+        *,
+        name_cache: dict[str, set[tuple[str, str, str]]] | None = None,
+        cluster_members: Callable[[str], set[str]] | None = None,
+    ) -> None:
         self._engine = engine
-        self._node = lab_node
-        self._target_resolver: Callable[[str], tuple[str, str] | None] | None = None
-        lab_node.register_app_extension(self.NAMESPACE, self._dispatch)
+        self._messenger = messenger
+        self._name_cache = name_cache if name_cache is not None else {}
+        self._cluster_members = cluster_members or (lambda graph_id: {graph_id})
+        register = getattr(messenger, "register_app_extension", None)
+        if register is None:
+            register = getattr(messenger, "register_handler", None)
+        if register is None:
+            raise TypeError("messenger does not support APP extensions")
+        register(_NAMESPACE, self._dispatch)
         engine._output_wire_adapter = self
-        logger.info("lab adapter registered", namespace=self.NAMESPACE)
 
     def detach(self) -> None:
         if getattr(self._engine, "_output_wire_adapter", None) is self:
             self._engine._output_wire_adapter = None
-        self._node.unregister_app_extension(self.NAMESPACE)
-        self._target_resolver = None
-        logger.info("lab adapter detached", namespace=self.NAMESPACE)
+        unregister = getattr(self._messenger, "unregister_app_extension", None)
+        if unregister is None:
+            unregister = getattr(self._messenger, "unregister_handler", None)
+        if unregister is not None:
+            unregister(_NAMESPACE)
 
-    def set_target_resolver(
-        self, resolver: Callable[[str], tuple[str, str] | None]
-    ) -> None:
-        """Install the host's target-name to home-node lookup."""
-        self._target_resolver = resolver
+    def _node_id(self) -> str:
+        value = getattr(self._messenger, "node_id", None)
+        if callable(value):
+            value = value()
+        if not value:
+            value = getattr(self._messenger, "client_id", None)
+        if not value:
+            value = "_host"
+        return str(value)
 
-    def peer_for_target(self, target_name: str) -> str | None:
-        """Return the remote route for a target, if one is required.
+    def set_name_cache(self, cache: dict[str, set[tuple[str, str, str]]]) -> None:
+        self._name_cache = cache
 
-        Workers return ``"_host"`` because only the host knows cluster-wide
-        placement. The host returns ``None`` for its own targets so they remain
-        on the local path.
-        """
-        if self._target_resolver is None:
-            # Workers lack cluster placement data, so the host is their relay.
+    def set_cluster_members(self, resolver: Callable[[str], set[str]]) -> None:
+        self._cluster_members = resolver
+
+    def peer_for_target(
+        self, target_name: str, *, graph_id: str | None = None
+    ) -> str | None:
+        if self._node_id() != "_host":
             return "_host"
-        try:
-            entry = self._target_resolver(target_name)
-        except Exception:
-            logger.exception("output_wire target resolver crashed")
-            return None
-        if entry is None:
-            return None
-        node_id, _ = entry
-        if not node_id or node_id == "_host":
-            return None
-        return node_id
+        entries = set(self._name_cache.get(target_name, set()))
+        if graph_id is not None:
+            graph_ids = self._cluster_members(graph_id)
+            entries = {entry for entry in entries if entry[0] in graph_ids}
+        return next(iter(entries))[1] if len(entries) == 1 else None
 
     async def forward_event(
         self,
-        peer_node: str,
-        body: dict[str, Any],
+        *,
+        target_name: str,
+        event: dict[str, Any],
+        source_creature_id: str | None = None,
+        source_graph_id: str | None = None,
+        hop: int = 0,
     ) -> bool:
-        """Fire ``inject`` at ``peer_node``.  Returns ``True`` on RPC ack."""
+        if not source_creature_id or not source_graph_id or hop != 0:
+            return False
+        peer = self.peer_for_target(target_name, graph_id=source_graph_id)
+        if peer is None or peer == self._node_id():
+            return False
+        result = await self._request(
+            peer,
+            _MSG_INJECT,
+            {
+                "target_name": target_name,
+                "event": dict(event),
+                "source_creature_id": source_creature_id,
+                "source_graph_id": source_graph_id,
+                "hop": hop,
+                "peer": self._node_id(),
+            },
+        )
+        return bool(result.get("delivered", False))
+
+    async def _request(
+        self, peer: str, msg_type: str, body: dict[str, Any]
+    ) -> dict[str, Any]:
+        request = self._messenger.request
         try:
-            await self._node.notify(
-                to_node=peer_node,
-                namespace=self.NAMESPACE,
-                type="inject",
+            return await request(peer, msg_type, body)
+        except TypeError:
+            return await request(
+                to_node=peer,
+                namespace=_NAMESPACE,
+                type=msg_type,
                 body=body,
             )
-            return True
-        except Exception:
-            logger.debug(
-                "output_wire forward failed",
-                peer=peer_node,
-                target=body.get("target_name"),
-            )
-            return False
 
     async def _dispatch(self, msg: AppMessage) -> dict[str, Any]:
         try:
-            return await self._handle(msg)
-        except KeyError as e:
-            return {"error": {"kind": "not_found", "message": str(e)}}
-        except ValueError as e:
-            return {"error": {"kind": "invalid", "message": str(e)}}
-        except Exception as e:  # pragma: no cover - defensive
-            logger.exception("terrarium.output_wire handler failed: %s", msg.type)
-            return {"error": {"kind": "output_wire", "message": str(e)}}
-
-    async def _handle(self, msg: AppMessage) -> dict[str, Any]:
-        match msg.type:
-            case "inject":
-                return await self._op_inject(msg.body)
-            case _:
-                return {
-                    "error": {
-                        "kind": "unknown_type",
-                        "message": f"unsupported terrarium.output_wire type: {msg.type!r}",
-                    }
-                }
+            if msg.type != _MSG_INJECT:
+                raise ValueError(f"unknown output-wire op: {msg.type}")
+            body = dict(msg.body)
+            body["_sender_node"] = msg.sender_node
+            return await self._op_inject(body)
+        except Exception as exc:
+            logger.warning("output-wire op failed", error=str(exc))
+            return {"delivered": False, "error": str(exc)}
 
     async def _op_inject(self, body: dict[str, Any]) -> dict[str, Any]:
-        """Deliver an injected event locally or relay it once from the host."""
-        target_name = body.get("target_name", "")
-        if not target_name:
-            raise ValueError("target_name required")
-        target_agent = self._resolve_local_agent(target_name)
+        target_name = body.get("target_name")
+        source_id = body.get("source_creature_id")
+        source_graph_id = body.get("source_graph_id")
+        hop = body.get("hop")
+        peer_claim = body.get("peer")
+        sender_node = body.get("_sender_node")
+        if (
+            not isinstance(target_name, str)
+            or not isinstance(source_id, str)
+            or not isinstance(source_graph_id, str)
+            or not isinstance(hop, int)
+            or hop < 0
+            or hop > 1
+            or peer_claim != sender_node
+        ):
+            return {"delivered": False, "error": "invalid routing identity"}
+
+        if self._node_id() == "_host":
+            source_identity = (
+                source_graph_id,
+                sender_node,
+                source_id,
+            )
+            if source_identity not in self._name_cache.get(source_id, set()):
+                return {"delivered": False, "error": "forged source identity"}
+            event = body.get("event", {})
+            event_source = event.get("source")
+            context_source = event.get("context", {}).get("source")
+            if event_source not in {None, source_id} or context_source not in {
+                None,
+                source_id,
+            }:
+                return {"delivered": False, "error": "forged event source"}
+            graph_ids = self._cluster_members(source_graph_id)
+            entries = {
+                entry
+                for entry in self._name_cache.get(target_name, set())
+                if entry[0] in graph_ids
+            }
+            if len(entries) != 1 or hop != 0:
+                return {
+                    "delivered": False,
+                    "error": "target not found or ambiguous",
+                }
+            target_graph_id, peer, target_creature_id = next(iter(entries))
+            result = await self._request(
+                peer,
+                _MSG_INJECT,
+                {
+                    "target_name": target_name,
+                    "event": dict(body.get("event", {})),
+                    "source_creature_id": source_id,
+                    "source_graph_id": source_graph_id,
+                    "target_graph_id": target_graph_id,
+                    "target_creature_id": target_creature_id,
+                    "hop": 1,
+                    "peer": self._node_id(),
+                },
+            )
+            return {"delivered": bool(result.get("delivered", False))}
+
+        if sender_node != "_host" or hop != 1:
+            return {"delivered": False, "error": "invalid relay peer"}
+        target_creature_id = body.get("target_creature_id")
+        target_graph_id = body.get("target_graph_id")
+        if not isinstance(target_creature_id, str) or not isinstance(
+            target_graph_id, str
+        ):
+            return {"delivered": False, "error": "missing exact target identity"}
+        target_agent, local_graph_id = self._resolve_local_target(target_creature_id)
         if target_agent is None:
-            # Only the host can resolve a miss to another peer. The marker
-            # prevents a misplaced target from being forwarded repeatedly.
-            if self._target_resolver is not None and not body.get("relayed"):
-                try:
-                    entry = self._target_resolver(target_name)
-                except Exception:
-                    entry = None
-                if entry is not None:
-                    peer_node, _ = entry
-                    if peer_node and peer_node != "_host":
-                        relayed_body = {**body, "relayed": True}
-                        await self.forward_event(peer_node, relayed_body)
-                        return {"delivered": True, "relayed": peer_node}
-            raise KeyError(f"no creature named {target_name!r} on this node")
+            return {"delivered": False, "error": "target not found locally"}
+        if local_graph_id != target_graph_id:
+            return {"delivered": False, "error": "target graph mismatch"}
         if not getattr(target_agent, "_running", False):
-            return {"delivered": False, "reason": "target_not_running"}
-        event = create_creature_output_event(
-            source=body.get("source", ""),
-            target=target_name,
-            content=body.get("content", ""),
-            with_content=bool(body.get("with_content", True)),
-            source_event_type=body.get("source_event_type", ""),
-            turn_index=int(body.get("turn_index", 0)),
-            prompt_override=body.get("prompt_override", ""),
+            return {"delivered": False, "error": "target not running"}
+        event = _event_from_dict(dict(body.get("event", {})))
+        task = asyncio.create_task(
+            target_agent._process_event(event),
+            name=f"output-wire-{source_id}-to-{target_creature_id}",
         )
-        # Activity reporting must not prevent event delivery.
-        try:
-            router = getattr(target_agent, "output_router", None)
-            if router is not None and hasattr(router, "notify_activity"):
-                preview = (body.get("content", "") or "").strip()
-                if len(preview) > 240:
-                    preview = preview[:239] + "…"
-                router.notify_activity(
-                    "wire_inbound",
-                    f"Inbound from {body.get('source', '?')}",
-                    metadata={
-                        "from": body.get("source", ""),
-                        "to": target_name,
-                        "with_content": bool(body.get("with_content", True)),
-                        "content_preview": preview,
-                        "source_event_type": body.get("source_event_type", ""),
-                        "source_turn_index": int(body.get("turn_index", 0)),
-                        "cross_node": True,
-                    },
-                )
-        except Exception:
-            logger.debug("wire_inbound notify failed on injected event")
-        # Do not hold the sender's emit task for the receiver's entire turn.
-        asyncio.create_task(target_agent._process_event(event))
+        task.add_done_callback(_log_delivery_error)
         return {"delivered": True}
 
-    def _resolve_local_agent(self, target_name: str):
-        """Find an Agent on this engine by creature_id, name, or config.name."""
-        for creature in self._engine.list_creatures():
-            if creature.creature_id == target_name:
-                return creature.agent
-            if getattr(creature, "name", None) == target_name:
-                return creature.agent
-            cfg = getattr(creature.agent, "config", None)
-            if getattr(cfg, "name", None) == target_name:
-                return creature.agent
-        return None
+    def _resolve_local_target(
+        self, target_creature_id: str
+    ) -> tuple[Any | None, str | None]:
+        creature = getattr(self._engine, "_creatures", {}).get(target_creature_id)
+        if creature is None:
+            return None, None
+        return getattr(creature, "agent", None), getattr(creature, "graph_id", None)
 
 
-__all__ = ["TerrariumOutputWireAdapter"]
+def _event_from_dict(data: dict[str, Any]) -> TriggerEvent:
+    """Rebuild the minimal TriggerEvent used for output-wire injection."""
+    return TriggerEvent(
+        type=str(data.get("type", "creature_output")),
+        content=str(data.get("content", "")),
+        context=dict(data.get("context", data.get("metadata", {}))),
+        prompt_override=data.get("prompt_override"),
+    )
+
+
+def _log_delivery_error(task: "asyncio.Task[Any]") -> None:
+    """Consume background receiver errors without leaking task warnings."""
+    if task.cancelled():
+        return
+    try:
+        task.result()
+    except Exception:
+        logger.exception("output-wire receiver event failed")

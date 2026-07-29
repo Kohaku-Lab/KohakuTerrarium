@@ -24,33 +24,6 @@ class TestParseBind:
             app_mod._parse_bind("no-colon")
 
 
-# ── _make_output_wire_target_resolver ─────────────────────────
-
-
-class TestMakeOutputWireTargetResolver:
-    def test_resolves_from_cache(self):
-        # service has _creature_name_cache attribute populated
-        class _Svc:
-            _creature_name_cache = {"alice": ("worker-1", "cid-1")}
-
-        resolver = app_mod._make_output_wire_target_resolver(_Svc())
-        assert resolver("alice") == ("worker-1", "cid-1")
-
-    def test_miss_returns_none(self):
-        class _Svc:
-            _creature_name_cache = {}
-
-        resolver = app_mod._make_output_wire_target_resolver(_Svc())
-        assert resolver("ghost") is None
-
-    def test_no_cache_attr_returns_none(self):
-        class _Svc:
-            pass
-
-        resolver = app_mod._make_output_wire_target_resolver(_Svc())
-        assert resolver("anyone") is None
-
-
 # ── create_app ─────────────────────────────────────────────────
 
 

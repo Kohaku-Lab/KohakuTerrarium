@@ -423,31 +423,19 @@ class TestGroupWireBranches:
         assert result.error
         assert "environment" in result.error
 
-    async def test_cross_graph_merge_failure(self, monkeypatch):
-        """A failed ``ensure_same_graph`` during a cross-graph wire
-        surfaces as 'cross-graph merge failed'."""
+    async def test_cross_graph_target_is_rejected_without_merge(self, monkeypatch):
         caller = SimpleNamespace(creature_id="root", name="root", graph_id="g1")
-        from_c = SimpleNamespace(creature_id="root", name="root", graph_id="g1")
-        to_c = SimpleNamespace(creature_id="bob", name="bob", graph_id="g2")
         gctx = SimpleNamespace(engine=SimpleNamespace(), caller=caller)
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        seq = iter([from_c, to_c])
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: next(seq))
-
-        async def _boom(engine, a, b):
-            raise RuntimeError("merge denied")
-
-        monkeypatch.setattr(wire_mod._channels, "ensure_same_graph", _boom)
+        target_error = wire_mod.err("target is outside caller graph")
+        monkeypatch.setattr(
+            wire_mod,
+            "resolve_target_or_error",
+            lambda *args: (None, target_error),
+        )
         result = await wire_mod.GroupWireTool()._execute({"action": "add", "to": "bob"})
-        assert "cross-graph merge failed" in result.error
+        assert "outside caller graph" in result.error
 
-
-# ---------------------------------------------------------------------------
-# group lifecycle tools — resolution-error propagation
-# ---------------------------------------------------------------------------
-
-
-class TestLifecycleResolutionErrors:
     async def test_remove_node_resolution_error(self):
         tool = lifecycle_mod.GroupRemoveNodeTool()
         result = await tool._execute(

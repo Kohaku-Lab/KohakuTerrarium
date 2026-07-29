@@ -1503,6 +1503,7 @@ class TestModulesIntegration:
             def _ctx(creature):
                 return ToolContext(
                     agent_name=creature.name,
+                    creature_id=creature.creature_id,
                     session=None,
                     working_dir=tmp_path,
                     environment=engine._environments[creature.graph_id],

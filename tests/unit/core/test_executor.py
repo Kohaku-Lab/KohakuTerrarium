@@ -612,15 +612,18 @@ class TestToolContextBuild:
             async def _execute(self, args, context=None, **kwargs):
                 captured["ctx"] = context
                 captured["agent_name"] = context.agent_name
+                captured["creature_id"] = context.creature_id
                 return ToolResult(output="ok")
 
         ex = Executor()
         ex.register_tool(_NeedsCtx())
         ex._agent_name = "alice"
+        ex._creature_id = "creature-alice"
         ex._working_dir = Path.cwd()
         jid = await ex.submit("needs", {})
         await ex.wait_for(jid)
         assert captured["agent_name"] == "alice"
+        assert captured["creature_id"] == "creature-alice"
 
     async def test_emit_tool_wait_through_router(self):
         ex = Executor()

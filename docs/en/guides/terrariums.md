@@ -184,6 +184,8 @@ async with Terrarium() as engine:
 
 Cross-graph `connect()` merges the two graphs: environments union, attached session stores merge into one (with `parent_session_ids` recording lineage), the new listener gets a `ChannelTrigger` injected. `disconnect()` may split a graph back apart and copy the parent session into each side. See [`examples/code/terrarium_hotplug.py`](../../examples/code/terrarium_hotplug.py).
 
+Routing operations such as channel wiring, group messaging, and output wiring resolve targets inside the caller's current logical graph. Prefer an exact runtime creature ID. A display or config name is accepted only when it is unique in that graph; ambiguous, stale, and foreign-graph targets are rejected. These operations never merge disconnected graphs implicitly: call `connect()` first with exact endpoints.
+
 The same mutations are available to a privileged node inside the graph through the group tools: `group_add_node`, `group_remove_node`, `group_start_node`, `group_stop_node`, `group_channel`, `group_wire`. Together they form the in-graph "graph editor" an LLM-driven privileged node uses to evolve the team mid-run.
 
 Hot-plug is useful for provisioning ad-hoc specialists without restarting. Existing channels pick up the new listener; the new creature receives its channel topology in its system prompt.

@@ -558,6 +558,14 @@ class HostEngine:
         sender: ConnectedClient,
         env: Envelope,
     ) -> None:
+        if env.from_node != sender.client_id:
+            _log.warning(
+                "Dropping envelope with forged source identity",
+                authenticated_peer=sender.client_id,
+                claimed_source=env.from_node,
+                target=env.to_node,
+            )
+            return
         match env.kind:
             case EnvelopeKind.HEARTBEAT:
                 self._membership.heartbeat(sender.client_id, now=time.monotonic())

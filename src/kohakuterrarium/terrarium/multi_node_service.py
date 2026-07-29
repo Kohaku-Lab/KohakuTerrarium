@@ -124,7 +124,7 @@ class MultiNodeTerrariumService(
         # ``list_creatures``.  Read by the controller's
         # :class:`TerrariumOutputWireAdapter` target resolver to route
         # cross-node output-wiring emits without an async hop.
-        self._creature_name_cache: dict[str, tuple[str, str]] = {}
+        self._creature_name_cache: dict[str, set[tuple[str, str, str]]] = {}
         # Cross-node subscription bookkeeping — keyed by
         # ``(my_node, peer_node, graph_id, channel)`` to a refcount.
         self._cross_subs: dict[tuple[str, str, str, str], int] = {}
@@ -137,6 +137,10 @@ class MultiNodeTerrariumService(
         # ordinary single-host graph has no entries here and renders
         # as itself.
         self._cluster_links: set[frozenset[tuple[str, str]]] = set()
+        # Multiple channels can bridge the same pair of worker graphs. Keep the
+        # cluster folded until the final bridge is removed.
+        self._cluster_link_refs: dict[frozenset[tuple[str, str]], int] = {}
+        self._cluster_mutation_lock = asyncio.Lock()
         # Studio-tier session metadata lookup, injected at boot — used
         # to enrich ``runtime_graph_snapshot`` graphs with name / kind.
         self._runtime_graph_meta_lookup = None
@@ -359,6 +363,12 @@ class MultiNodeTerrariumService(
             name=name,
         )
         self._home[info.creature_id] = on_node
+        identity = (info.graph_id, on_node, info.creature_id)
+        self._creature_name_cache.setdefault(info.creature_id, set()).add(identity)
+        self._creature_name_cache.setdefault(info.name, set()).add(identity)
+        config_name = getattr(info, "config_name", None)
+        if config_name:
+            self._creature_name_cache.setdefault(config_name, set()).add(identity)
         return info
 
     async def remove_creature(self, creature_id: str) -> None:
@@ -371,10 +381,12 @@ class MultiNodeTerrariumService(
         # reads this cache without an async hop, so a stale entry would
         # keep routing emits to the dead address until the next
         # ``list_creatures`` fan-out.
-        for key in [
-            k for k, v in self._creature_name_cache.items() if v[1] == creature_id
-        ]:
-            self._creature_name_cache.pop(key, None)
+        for key, entries in list(self._creature_name_cache.items()):
+            retained = {entry for entry in entries if entry[2] != creature_id}
+            if retained:
+                self._creature_name_cache[key] = retained
+            else:
+                self._creature_name_cache.pop(key, None)
 
     async def start_creature(self, creature_id: str) -> None:
         await self._route_per_creature(
@@ -444,24 +456,25 @@ class MultiNodeTerrariumService(
         *,
         channel: str | None = None,
     ) -> ConnectionResult:
-        sender_home = await self._resolve_home(sender_id)
-        receiver_home = await self._resolve_home(receiver_id)
-        if sender_home is None:
-            raise KeyError(sender_id)
-        if receiver_home is None:
-            raise KeyError(receiver_id)
-        if sender_home == receiver_home:
-            return await self.service_for(sender_home).connect(
-                sender_id, receiver_id, channel=channel
+        async with self._cluster_lock():
+            sender_home = await self._resolve_home(sender_id)
+            receiver_home = await self._resolve_home(receiver_id)
+            if sender_home is None:
+                raise KeyError(sender_id)
+            if receiver_home is None:
+                raise KeyError(receiver_id)
+            if sender_home == receiver_home:
+                return await self.service_for(sender_home).connect(
+                    sender_id, receiver_id, channel=channel
+                )
+            return await cross_node_connect(
+                self,
+                sender_id,
+                receiver_id,
+                sender_home,
+                receiver_home,
+                channel,
             )
-        return await cross_node_connect(
-            self,
-            sender_id,
-            receiver_id,
-            sender_home,
-            receiver_home,
-            channel,
-        )
 
     async def disconnect(
         self,
@@ -470,24 +483,33 @@ class MultiNodeTerrariumService(
         *,
         channel: str | None = None,
     ) -> DisconnectionResult:
-        sender_home = await self._resolve_home(sender_id)
-        receiver_home = await self._resolve_home(receiver_id)
-        if sender_home is None:
-            raise KeyError(sender_id)
-        if receiver_home is None:
-            raise KeyError(receiver_id)
-        if sender_home == receiver_home:
-            return await self.service_for(sender_home).disconnect(
-                sender_id, receiver_id, channel=channel
+        async with self._cluster_lock():
+            sender_home = await self._resolve_home(sender_id)
+            receiver_home = await self._resolve_home(receiver_id)
+            if sender_home is None:
+                raise KeyError(sender_id)
+            if receiver_home is None:
+                raise KeyError(receiver_id)
+            if sender_home == receiver_home:
+                return await self.service_for(sender_home).disconnect(
+                    sender_id, receiver_id, channel=channel
+                )
+            return await cross_node_disconnect(
+                self,
+                sender_id,
+                receiver_id,
+                sender_home,
+                receiver_home,
+                channel,
             )
-        return await cross_node_disconnect(
-            self,
-            sender_id,
-            receiver_id,
-            sender_home,
-            receiver_home,
-            channel,
-        )
+
+    def _cluster_lock(self) -> asyncio.Lock:
+        """Return the lock, including for lightweight test/service doubles."""
+        lock = getattr(self, "_cluster_mutation_lock", None)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._cluster_mutation_lock = lock
+        return lock
 
     async def _local_broadcast_adapter(self):
         """Thin delegator to :func:`multi_node_replication.local_broadcast_adapter`."""
@@ -714,10 +736,15 @@ class MultiNodeTerrariumService(
         )
 
     async def _find_channel_elsewhere(
-        self, channel: str, *, exclude: str
+        self, channel: str, *, exclude: str, graph_id: str
     ) -> tuple[str, str] | None:
-        """Thin delegator to :func:`multi_node_replication.find_channel_elsewhere`."""
-        return await find_channel_elsewhere(self, channel, exclude=exclude)
+        """Thin delegator to graph-scoped channel lookup."""
+        return await find_channel_elsewhere(
+            self,
+            channel,
+            exclude=exclude,
+            graph_id=graph_id,
+        )
 
     async def attach_policies(self, creature_id: str) -> list[str]:
         return await self._route_per_creature(

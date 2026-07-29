@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`kohakuterrarium.terrarium.group_tool_context`."""
+﻿"""Unit tests for :mod:`kohakuterrarium.terrarium.group_tool_context`."""
 
 import weakref
 from types import SimpleNamespace
@@ -33,7 +33,15 @@ class _Creature:
 class _Engine:
     def __init__(self, creatures=None, graphs=None):
         self._creatures = creatures or {}
-        self._topology = SimpleNamespace(graphs=graphs or {})
+        graph_map = graphs or {}
+        creature_to_graph = {
+            creature_id: graph_id
+            for graph_id, graph in graph_map.items()
+            for creature_id in graph.creature_ids
+        }
+        self._topology = SimpleNamespace(
+            graphs=graph_map, creature_to_graph=creature_to_graph
+        )
 
 
 class _Env:
@@ -44,51 +52,23 @@ class _Env:
         return self._lookup.get(key)
 
 
-def _ctx(env=None, agent_name="caller"):
+def _ctx(env=None, agent_name="caller", creature_id="caller"):
     from pathlib import Path
 
     return ToolContext(
         agent_name=agent_name,
         session=None,
         working_dir=Path("."),
+        creature_id=creature_id,
         environment=env,
     )
-
-
-# ── find_creature ──────────────────────────────────────────────
-
-
-class TestFindCreature:
-    def test_by_id(self):
-        c = _Creature("cid-1")
-        eng = _Engine({"cid-1": c})
-        out = gtc.find_creature(eng, "cid-1")
-        assert out is c
-
-    def test_by_name(self):
-        c = _Creature("cid-1", name="alice")
-        eng = _Engine({"cid-1": c})
-        out = gtc.find_creature(eng, "alice")
-        assert out is c
-
-    def test_by_config_name(self):
-        c = _Creature("cid-1", name="alice")
-        c.agent.config.name = "alpha"
-        c.name = "other"
-        eng = _Engine({"cid-1": c})
-        out = gtc.find_creature(eng, "alpha")
-        assert out is c
-
-    def test_unknown(self):
-        eng = _Engine()
-        assert gtc.find_creature(eng, "ghost") is None
 
 
 # ── resolve_group_context ──────────────────────────────────────
 
 
 def _engine_with_graph(privileged=True):
-    g = SimpleNamespace(creature_ids={"caller"}, channels=set())
+    g = SimpleNamespace(graph_id="g1", creature_ids={"caller"}, channels=set())
     c = _Creature("caller", is_privileged=privileged)
     return _Engine({"caller": c}, graphs={"g1": g})
 
@@ -122,8 +102,22 @@ class TestResolveGroupContext:
     def test_unknown_caller_raises(self):
         eng = _engine_with_graph()
         env = _Env({TERRARIUM_ENGINE_KEY: eng})
-        ctx = _ctx(env=env, agent_name="ghost")
-        with pytest.raises(gtc.GroupToolError, match="not a creature"):
+        ctx = _ctx(env=env, agent_name="caller", creature_id="ghost")
+        with pytest.raises(gtc.GroupToolError, match="known runtime creature"):
+            gtc.resolve_group_context(ctx)
+
+    def test_caller_name_never_overrides_runtime_id(self):
+        eng = _engine_with_graph()
+        env = _Env({TERRARIUM_ENGINE_KEY: eng})
+        ctx = _ctx(env=env, agent_name="caller", creature_id="ghost")
+        with pytest.raises(gtc.GroupToolError, match="ghost"):
+            gtc.resolve_group_context(ctx)
+
+    def test_legacy_context_without_creature_id_is_explicitly_rejected(self):
+        eng = _engine_with_graph()
+        env = _Env({TERRARIUM_ENGINE_KEY: eng})
+        ctx = SimpleNamespace(agent_name="caller", environment=env)
+        with pytest.raises(gtc.GroupToolError, match="ToolContext.creature_id"):
             gtc.resolve_group_context(ctx)
 
     def test_require_privileged_rejects_non_privileged(self):
@@ -142,9 +136,9 @@ class TestResolveGroupContext:
 
     def test_missing_graph_raises(self):
         c = _Creature("caller", graph_id="g-orphan")
-        eng = _Engine({"caller": c}, graphs={})  # no g-orphan
+        eng = _Engine({"caller": c}, graphs={})
         env = _Env({TERRARIUM_ENGINE_KEY: eng})
-        with pytest.raises(gtc.GroupToolError, match="not present in topology"):
+        with pytest.raises(gtc.GroupToolError, match="not assigned to a graph"):
             gtc.resolve_group_context(_ctx(env=env))
 
     def test_dead_weakref(self):
@@ -172,47 +166,70 @@ class TestComputeGroup:
         group = gtc.compute_group(gctx)
         assert set(group.keys()) == {"a", "b"}
 
-    def test_includes_spawned_children(self):
+    def test_excludes_spawned_children_outside_graph(self):
         a = _Creature("a", graph_id="g1")
         child = _Creature("child", graph_id="g-other", parent_creature_id="a")
-        graph = SimpleNamespace(creature_ids={"a"})
-        eng = _Engine({"a": a, "child": child})
+        graph = SimpleNamespace(graph_id="g1", creature_ids={"a"})
+        eng = _Engine({"a": a, "child": child}, graphs={"g1": graph})
         gctx = gtc.GroupContext(engine=eng, caller=a, graph=graph)
         group = gtc.compute_group(gctx)
-        assert "child" in group
+        assert "child" not in group
 
 
 class TestResolveGroupTarget:
-    def test_by_id(self):
-        a = _Creature("a", graph_id="g1")
-        b = _Creature("b", graph_id="g1")
-        graph = SimpleNamespace(creature_ids={"a", "b"})
-        eng = _Engine({"a": a, "b": b})
-        gctx = gtc.GroupContext(engine=eng, caller=a, graph=graph)
-        assert gtc.resolve_group_target(gctx, "b") is b
+    @staticmethod
+    def _context(*creatures):
+        graph = SimpleNamespace(
+            graph_id="g1", creature_ids={creature.creature_id for creature in creatures}
+        )
+        engine = _Engine(
+            {creature.creature_id: creature for creature in creatures},
+            graphs={"g1": graph},
+        )
+        return gtc.GroupContext(engine=engine, caller=creatures[0], graph=graph)
 
-    def test_by_name(self):
-        a = _Creature("cid-a", name="alice", graph_id="g1")
-        graph = SimpleNamespace(creature_ids={"cid-a"})
-        eng = _Engine({"cid-a": a})
-        gctx = gtc.GroupContext(engine=eng, caller=a, graph=graph)
-        assert gtc.resolve_group_target(gctx, "alice") is a
+    def test_by_id(self):
+        a = _Creature("a")
+        b = _Creature("b")
+        assert gtc.resolve_group_target(self._context(a, b), "b") is b
+
+    def test_exact_self_send_uses_runtime_id(self):
+        a = _Creature("caller", name="shared")
+        b = _Creature("other", name="shared")
+        assert gtc.resolve_group_target(self._context(a, b), "caller") is a
 
     def test_by_config_name(self):
-        a = _Creature("cid-a", name="alice", graph_id="g1")
+        a = _Creature("cid-a", name="alice")
         a.agent.config.name = "alpha"
         a.name = "other"
-        graph = SimpleNamespace(creature_ids={"cid-a"})
-        eng = _Engine({"cid-a": a})
-        gctx = gtc.GroupContext(engine=eng, caller=a, graph=graph)
-        assert gtc.resolve_group_target(gctx, "alpha") is a
+        assert gtc.resolve_group_target(self._context(a), "alpha") is a
 
-    def test_unknown_returns_none(self):
-        a = _Creature("a", graph_id="g1")
-        graph = SimpleNamespace(creature_ids={"a"})
-        eng = _Engine({"a": a})
-        gctx = gtc.GroupContext(engine=eng, caller=a, graph=graph)
-        assert gtc.resolve_group_target(gctx, "ghost") is None
+    def test_duplicate_display_name_is_ambiguous(self):
+        a = _Creature("a", name="same")
+        b = _Creature("b", name="same")
+        with pytest.raises(gtc.GroupToolError, match="ambiguous"):
+            gtc.resolve_group_target(self._context(a, b), "same")
+
+    def test_duplicate_config_name_is_ambiguous(self):
+        a = _Creature("a")
+        b = _Creature("b")
+        a.agent.config.name = b.agent.config.name = "same-config"
+        with pytest.raises(gtc.GroupToolError, match="ambiguous"):
+            gtc.resolve_group_target(self._context(a, b), "same-config")
+
+    def test_cross_graph_exact_id_is_rejected(self):
+        a = _Creature("a")
+        other = _Creature("other", graph_id="g2")
+        graph = SimpleNamespace(graph_id="g1", creature_ids={"a"})
+        engine = _Engine({"a": a, "other": other}, graphs={"g1": graph})
+        gctx = gtc.GroupContext(engine=engine, caller=a, graph=graph)
+        with pytest.raises(gtc.GroupToolError, match="not a creature"):
+            gtc.resolve_group_target(gctx, "other")
+
+    def test_unknown_fails_closed(self):
+        a = _Creature("a")
+        with pytest.raises(gtc.GroupToolError, match="not a creature"):
+            gtc.resolve_group_target(self._context(a), "ghost")
 
 
 # ── CF-7: cross-cluster awareness ──────────────────────────────

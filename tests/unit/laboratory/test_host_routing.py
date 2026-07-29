@@ -71,6 +71,25 @@ async def _start_pair(port=1, second_name=None):
 # ── CONTROL unsubscribe + unregister_creature ────────────────
 
 
+class TestAuthenticatedEnvelopeSource:
+    async def test_forged_from_node_is_dropped(self):
+        host, c1 = await _start_pair(port=9)
+        try:
+            await c1.send(
+                build_subscribe(
+                    from_node="forged-worker",
+                    to_node="_host",
+                    channel="chat",
+                )
+            )
+            await asyncio.sleep(0.05)
+            assert "forged-worker" not in host.addressing.listeners("chat")
+            assert "w1" not in host.addressing.listeners("chat")
+        finally:
+            await c1.stop()
+            await host.stop()
+
+
 class TestControlUnsubUnregister:
     async def test_unsubscribe_after_subscribe(self):
         host, c1 = await _start_pair(port=1)

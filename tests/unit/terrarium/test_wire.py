@@ -53,6 +53,7 @@ class TestCreatureInfoRoundTrip:
         c = CreatureInfo(
             creature_id="cid",
             name="n",
+            config_name="config-n",
             graph_id="g",
             is_running=True,
             is_privileged=False,

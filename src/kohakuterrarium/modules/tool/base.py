@@ -50,6 +50,7 @@ class ToolContext:
     file_read_state: Any = None
     path_guard: Any = None
     runtime_services: dict[str, Any] = field(default_factory=dict)
+    creature_id: str = ""
 
     @property
     def channels(self) -> Any:

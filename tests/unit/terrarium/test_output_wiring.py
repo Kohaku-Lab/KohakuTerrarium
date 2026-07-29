@@ -2,6 +2,7 @@
 
 import asyncio
 from dataclasses import dataclass
+from types import SimpleNamespace
 
 
 from kohakuterrarium.core.output_wiring import ROOT_TARGET, OutputWiringEntry
@@ -10,6 +11,7 @@ from kohakuterrarium.terrarium.output_wiring import (
     _log_task_error,
     _safe_deliver,
 )
+from kohakuterrarium.terrarium.topology import GraphTopology, TopologyState
 
 # ── fakes ─────────────────────────────────────────────────────────
 
@@ -87,6 +89,35 @@ class TestResolveTarget:
         out = r._resolve_target(ROOT_TARGET, source="src")
         assert out is rb.agent
 
+    def test_engine_backed_root_uses_topology_not_stale_handle_graph(self):
+        ra = _FakeCreature("ra", is_privileged=True, graph_id="stale")
+        rb = _FakeCreature("rb", is_privileged=True, graph_id="g2")
+        source = _FakeCreature("src", graph_id="g2")
+        creatures = {"ra": ra, "rb": rb, "src": source}
+        topology = TopologyState(
+            graphs={
+                "g1": GraphTopology(graph_id="g1", creature_ids={"ra", "src"}),
+                "g2": GraphTopology(graph_id="g2", creature_ids={"rb"}),
+            },
+            creature_to_graph={"ra": "g1", "rb": "g2", "src": "g1"},
+        )
+        engine = SimpleNamespace(_topology=topology)
+        r = TerrariumOutputWiringResolver(creatures, engine=engine)
+
+        assert r._resolve_target(ROOT_TARGET, source="src") is ra.agent
+
+    def test_engine_backed_root_rejects_unknown_source(self):
+        root = _FakeCreature("root", is_privileged=True, graph_id="g")
+        topology = TopologyState(
+            graphs={"g": GraphTopology(graph_id="g", creature_ids={"root"})},
+            creature_to_graph={"root": "g"},
+        )
+        r = TerrariumOutputWiringResolver(
+            {"root": root}, engine=SimpleNamespace(_topology=topology)
+        )
+
+        assert r._resolve_target(ROOT_TARGET, source="forged") is None
+
 
 # ── _warn_once ───────────────────────────────────────────────────
 
@@ -142,6 +173,44 @@ class TestTargetIdentity:
 
 
 class TestEmit:
+    async def test_remote_event_preserves_standard_target_context(self):
+        forwarded = asyncio.Event()
+
+        class _Forwarder:
+            payload = None
+
+            def peer_for_target(self, target, *, graph_id):
+                return "_host"
+
+            async def forward_event(self, **kwargs):
+                self.payload = kwargs
+                forwarded.set()
+                return True
+
+        source = _FakeCreature("source", creature_id="source", graph_id="g")
+        topology = TopologyState(
+            graphs={"g": GraphTopology(graph_id="g", creature_ids={"source"})},
+            creature_to_graph={"source": "g"},
+        )
+        forwarder = _Forwarder()
+        engine = SimpleNamespace(
+            _creatures={"source": source},
+            _topology=topology,
+            _output_wire_adapter=forwarder,
+        )
+        resolver = TerrariumOutputWiringResolver(engine._creatures, engine=engine)
+
+        await resolver.emit(
+            source="source",
+            content="hello",
+            source_event_type="turn_end",
+            turn_index=7,
+            entries=[OutputWiringEntry(to="remote-target")],
+        )
+        await asyncio.wait_for(forwarded.wait(), timeout=1)
+
+        assert forwarder.payload["event"]["context"]["target"] == "remote-target"
+
     async def test_unknown_target_skipped(self):
         r = TerrariumOutputWiringResolver({})
         await r.emit(
@@ -287,6 +356,42 @@ class TestSafeDeliver:
 
 
 # ── _log_task_error ──────────────────────────────────────────────
+
+
+class TestGraphLocalOutputResolution:
+    def test_same_name_in_other_graph_does_not_win(self):
+        from types import SimpleNamespace
+
+        from kohakuterrarium.terrarium.topology import GraphTopology, TopologyState
+
+        source = _FakeCreature("source", creature_id="source")
+        local = _FakeCreature("worker", creature_id="local")
+        foreign = _FakeCreature("worker", creature_id="foreign")
+        creatures = {
+            source.creature_id: source,
+            local.creature_id: local,
+            foreign.creature_id: foreign,
+        }
+        topology = TopologyState(
+            graphs={
+                "g-local": GraphTopology(
+                    graph_id="g-local", creature_ids={"source", "local"}
+                ),
+                "g-foreign": GraphTopology(
+                    graph_id="g-foreign", creature_ids={"foreign"}
+                ),
+            },
+            creature_to_graph={
+                "source": "g-local",
+                "local": "g-local",
+                "foreign": "g-foreign",
+            },
+        )
+        engine = SimpleNamespace(_creatures=creatures, _topology=topology)
+        resolver = TerrariumOutputWiringResolver(creatures, engine=engine)
+
+        assert resolver._resolve_target("worker", source="source") is local.agent
+        assert resolver._resolve_target("foreign", source="source") is None
 
 
 class TestLogTaskError:

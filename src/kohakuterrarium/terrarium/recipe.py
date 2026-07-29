@@ -22,6 +22,7 @@ and gives every other creature a send edge on ``report_to_root``.
 agent, so no recipe-side tool injection is needed.
 """
 
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -35,6 +36,7 @@ from kohakuterrarium.terrarium.config import (
     load_terrarium_config,
 )
 from kohakuterrarium.terrarium.creature_host import Creature, build_creature
+from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
 from kohakuterrarium.terrarium.topology import GraphTopology
 from kohakuterrarium.utils.logging import get_logger
 
@@ -81,6 +83,7 @@ async def apply_recipe(
     task added meanwhile.
     """
     config = _resolve_recipe(recipe)
+    _preflight_recipe_names(engine, config, graph)
     builder = creature_builder or build_creature
     use_default_builder = creature_builder is None
 
@@ -254,6 +257,33 @@ async def apply_recipe(
         root=has_root,
     )
     return engine.get_graph(graph_id)
+
+
+def _preflight_recipe_names(
+    engine: "Terrarium",
+    config: TerrariumConfig,
+    graph: GraphTopology | str | None,
+) -> None:
+    """Reject ambiguous names before recipe application mutates the engine."""
+    names = [creature.name for creature in config.creatures]
+    if config.root is not None:
+        names.append("root")
+    duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
+    if duplicates:
+        raise ValueError(
+            "Terrarium recipe contains duplicate logical creature name(s): "
+            + ", ".join(repr(name) for name in duplicates)
+        )
+    if graph is None:
+        return
+    graph_id = engine._resolve_graph_id(graph)
+    for name in names:
+        ensure_graph_name_available(
+            engine._topology,
+            engine._creatures,
+            graph_id=graph_id,
+            name=name,
+        )
 
 
 def _allocate_unique_creature_id(engine: "Terrarium", name: str) -> str:

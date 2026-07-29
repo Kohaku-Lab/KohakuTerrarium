@@ -99,6 +99,7 @@ def pack_creature_info(c: CreatureInfo) -> dict[str, Any]:
         "send_channels": list(c.send_channels),
         "model": c.model,
         "llm_name": c.llm_name,
+        "config_name": c.config_name,
     }
 
 
@@ -118,6 +119,8 @@ def unpack_creature_info(d: dict[str, Any]) -> CreatureInfo:
         # Older workers may also omit ``llm_name``; use the same
         # forward-compatibility treatment as ``model``.
         llm_name=str(d.get("llm_name", "") or ""),
+        # Graph-local name resolution accepts the original config alias too.
+        config_name=str(d.get("config_name", "") or ""),
     )
 
 

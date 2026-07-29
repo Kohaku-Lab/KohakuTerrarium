@@ -175,6 +175,7 @@ def _ctx_for(service: LocalTerrariumService, creature_id: str) -> ToolContext:
     env = engine._environments[creature.graph_id]
     return ToolContext(
         agent_name=creature.name,
+        creature_id=creature.creature_id,
         session=None,
         working_dir=Path("."),
         environment=env,
@@ -620,7 +621,7 @@ class TestTerrariumIntegration:
             context=ctx,
         )
         assert bad_target.error is not None
-        assert "not in your group" in bad_target.error
+        assert "not a creature in caller" in bad_target.error
         # unwire a channel not in the graph is rejected.
         bad_unwire = await GroupChannelTool()._execute(
             {
@@ -649,7 +650,7 @@ class TestTerrariumIntegration:
         assert gw_add.error is None, gw_add.error
         gw_edge_id = json.loads(gw_add.output)["edge_id"]
         assert gw_edge_id
-        assert any(e["to"] == "worker" for e in engine.list_output_wiring("lead"))
+        assert any(e["to"] == worker_id for e in engine.list_output_wiring("lead"))
         gw_rm = await GroupWireTool()._execute(
             {"action": "remove", "edge_id": gw_edge_id}, context=ctx
         )
@@ -744,9 +745,13 @@ class TestTerrariumIntegration:
         rm_res = await GroupRemoveNodeTool()._execute(
             {"creature_id": worker_id}, context=ctx
         )
-        assert rm_res.error is None, rm_res.error
-        assert worker_id not in service.engine
-        assert {c.creature_id for c in await service.list_creatures()} == {"lead"}
+        assert rm_res.error is not None
+        assert "not a creature in caller" in rm_res.error
+        assert worker_id in service.engine
+        assert {c.creature_id for c in await service.list_creatures()} == {
+            "lead",
+            worker_id,
+        }
         # The privileged node may NOT be removed via the tool.
         deny = await GroupRemoveNodeTool()._execute(
             {"creature_id": "lead"}, context=ctx
@@ -1444,15 +1449,13 @@ class TestTerrariumIntegration:
         assert len((await service.chat_history("writer"))["messages"]) == writer_pre
         assert await service.unwire_output("scout", stopped_wire["edge_id"]) is True
         await service.start_creature("writer")
-        # A wire to a creature that does NOT exist is silently dropped
-        # (the resolver warns once and skips) — the source turn still ok.
-        ghost_wire = await service.wire_output(
-            "scout", {"to": "no_such_target", "with_content": True}
-        )
-        async for _ in service.chat("scout", "to a ghost"):
-            pass
-        await asyncio.sleep(0.05)
-        assert await service.unwire_output("scout", ghost_wire["edge_id"]) is True
+        # Unknown targets fail closed at wiring time; no dead edge is stored.
+        from kohakuterrarium.terrarium.graph_identity import TargetNotFoundError
+
+        with pytest.raises(TargetNotFoundError):
+            await service.wire_output(
+                "scout", {"to": "no_such_target", "with_content": True}
+            )
 
         # --- OutputLogCapture — tee a creature's output into a ring buffer.
         # ``creature_host`` exposes ``output_log`` + ``get_log_entries`` /

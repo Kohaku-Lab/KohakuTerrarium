@@ -1805,18 +1805,17 @@ terrarium:
         resp = client.post(f"/api/sessions/topology/{session_id}/merge/no-such-session")
         assert resp.status_code == 404
 
-        # connect referencing a creature that does not exist →
-        # documented 400 (KeyError/ValueError in topology_lib).
+        # Connect resolves identities in the URL session before mutation.
         resp = client.post(
             f"/api/sessions/topology/{session_id}/connect",
             json={"sender": alice_id, "receiver": "ghost-creature"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
         resp = client.post(
             f"/api/sessions/topology/{session_id}/disconnect",
             json={"sender": alice_id, "receiver": "ghost-creature"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
         # Channel-info read on an unknown session → 404; channel list
         # on an unknown session → 404.
         resp = client.get(f"/api/sessions/topology/no-such-session/channels/team")
@@ -1848,7 +1847,7 @@ terrarium:
         resp = client.get(f"{wbase}/outputs")
         assert resp.status_code == 200
         outputs = resp.json()["outputs"]
-        assert any(e.get("to") == "bob" for e in outputs)
+        assert any(e.get("to") == bob_id for e in outputs)
         # sinks endpoint reports the empty secondary-sink list.
         resp = client.get(f"{wbase}/sinks")
         assert resp.status_code == 200
@@ -1886,7 +1885,7 @@ terrarium:
         wired_graph = next(
             g for g in resp.json()["graphs"] if g["graph_id"] == session_id
         )
-        edge = next(e for e in wired_graph["output_edges"] if e.get("to") == "bob")
+        edge = next(e for e in wired_graph["output_edges"] if e.get("to") == bob_id)
         assert edge["from"] == alice_id
         assert edge["to_creature_id"] == bob_id
         assert edge["graph_id"] == session_id

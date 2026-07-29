@@ -7,11 +7,14 @@ give the host's coordination engine a fake ``_broadcast_adapter``, and
 drive the cross-node branches.
 """
 
+import asyncio
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
 
 from kohakuterrarium.terrarium.events import ConnectionResult, DisconnectionResult
+from kohakuterrarium.terrarium.graph_identity import GraphNameConflictError
 
 from tests.unit.terrarium.test_multi_node_service import (
     _info,
@@ -24,8 +27,8 @@ def cross_svc():
     """Service with alice on worker-1, bob on worker-2."""
     svc = _make_service(
         remote_specs={
-            "w1": [_info("alice", graph_id="g-w1")],
-            "w2": [_info("bob", graph_id="g-w2")],
+            "w1": [_info("alice", name="alice", graph_id="g-w1")],
+            "w2": [_info("bob", name="bob", graph_id="g-w2")],
         }
     )
     # Prime the home registry.
@@ -39,6 +42,12 @@ def cross_svc():
 
     svc._remotes["w1"].wire_creature = _noop_wire
     svc._remotes["w2"].wire_creature = _noop_wire
+    svc._remotes["w1"].list_creatures = AsyncMock(
+        return_value=tuple(svc._remotes["w1"]._creatures)
+    )
+    svc._remotes["w2"].list_creatures = AsyncMock(
+        return_value=tuple(svc._remotes["w2"]._creatures)
+    )
     return svc
 
 
@@ -55,6 +64,88 @@ class _FakeBroadcast:
 
 
 class TestCrossNodeConnect:
+    async def test_concurrent_connects_cannot_merge_duplicate_names_transitively(self):
+        svc = _make_service(
+            remote_specs={
+                "w1": [_info("alice", name="duplicate", graph_id="g-w1")],
+                "w2": [_info("bridge", name="bridge", graph_id="g-w2")],
+                "w3": [_info("carol", name="duplicate", graph_id="g-w3")],
+            }
+        )
+        svc._home.update({"alice": "w1", "bridge": "w2", "carol": "w3"})
+
+        async def noop_wire(*args, **kwargs):
+            return None
+
+        for remote in svc._remotes.values():
+            remote.wire_creature = noop_wire
+
+        results = await asyncio.gather(
+            svc.connect("alice", "bridge", channel="left"),
+            svc.connect("bridge", "carol", channel="right"),
+            return_exceptions=True,
+        )
+
+        assert sum(isinstance(item, GraphNameConflictError) for item in results) == 1
+        assert len(svc._cluster_links) == 1
+
+    async def test_connect_rejects_non_endpoint_duplicate_alias(self, cross_svc):
+        cross_svc._remotes["w1"]._creatures.append(
+            _info("left-worker", name="worker", graph_id="g-w1")
+        )
+        cross_svc._remotes["w2"]._creatures.append(
+            _info("right-worker", name="worker", graph_id="g-w2")
+        )
+        cross_svc._remotes["w1"].list_creatures.return_value = tuple(
+            cross_svc._remotes["w1"]._creatures
+        )
+        cross_svc._remotes["w2"].list_creatures.return_value = tuple(
+            cross_svc._remotes["w2"]._creatures
+        )
+        with pytest.raises(GraphNameConflictError):
+            await cross_svc.connect("alice", "bob", channel="chat")
+        assert not cross_svc._cluster_links
+
+    async def test_connect_rejects_duplicate_alias_on_non_endpoint_cluster_members(
+        self,
+    ):
+        svc = _make_service(
+            remote_specs={
+                "w1": [_info("alice", name="alice", graph_id="g-w1")],
+                "w2": [_info("left-worker", name="worker", graph_id="g-w2")],
+                "w3": [_info("bob", name="bob", graph_id="g-w3")],
+                "w4": [_info("right-worker", name="worker", graph_id="g-w4")],
+            }
+        )
+        svc._home.update({"alice": "w1", "bob": "w3"})
+        svc._cluster_links.update(
+            {
+                frozenset({("w1", "g-w1"), ("w2", "g-w2")}),
+                frozenset({("w3", "g-w3"), ("w4", "g-w4")}),
+            }
+        )
+
+        async def noop_wire(*args, **kwargs):
+            return None
+
+        for remote in svc._remotes.values():
+            remote.wire_creature = noop_wire
+
+        with pytest.raises(GraphNameConflictError, match="worker"):
+            await svc.connect("alice", "bob", channel="chat")
+        assert len(svc._cluster_links) == 2
+
+    async def test_connect_allows_another_channel_inside_existing_cluster(
+        self, cross_svc
+    ):
+        cross_svc._cluster_links.add(frozenset({("w1", "g-w1"), ("w2", "g-w2")}))
+
+        result = await cross_svc.connect("alice", "bob", channel="review")
+
+        assert result.channel == "review"
+        assert result.delta_kind == "cross_node"
+        assert len(cross_svc._cluster_links) == 1
+
     async def test_connect_explicit_channel(self, cross_svc):
         cross_svc._coordination_engine = SimpleNamespace(
             _broadcast_adapter=_FakeBroadcast()
@@ -113,6 +204,22 @@ class TestCrossNodeConnect:
 
 
 class TestCrossNodeDisconnect:
+    async def test_disconnect_keeps_cluster_link_until_last_channel_is_removed(
+        self, cross_svc
+    ):
+        cross_svc._coordination_engine = SimpleNamespace(
+            _broadcast_adapter=_FakeBroadcast()
+        )
+        await cross_svc.connect("alice", "bob", channel="chat")
+        await cross_svc.connect("alice", "bob", channel="review")
+        link = frozenset({("w1", "g-w1"), ("w2", "g-w2")})
+
+        await cross_svc.disconnect("alice", "bob", channel="chat")
+        assert link in cross_svc._cluster_links
+
+        await cross_svc.disconnect("alice", "bob", channel="review")
+        assert link not in cross_svc._cluster_links
+
     async def test_disconnect_explicit_channel(self, cross_svc):
         cross_svc._coordination_engine = SimpleNamespace(
             _broadcast_adapter=_FakeBroadcast()

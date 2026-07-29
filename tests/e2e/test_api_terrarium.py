@@ -585,14 +585,14 @@ class TestApiTerrariumJourney:
         assert "ops" not in creatures["bob"]["send_channels"]
 
         # 7e. Topology error branches — every route's reject path.
-        #     connect with a missing creature is a 400 (engine raises
-        #     KeyError, route maps it); channel send on a missing channel
+        #     connect with a missing creature is rejected as 404 during
+        #     session-scoped identity resolution; channel send on a missing channel
         #     is a 404; a missing session's channel list is a 404.
         resp = client.post(
             f"/api/sessions/topology/{session_id}/connect",
             json={"sender": "alice", "receiver": "ghost", "channel": "ops"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 404
         resp = client.get(
             f"/api/sessions/topology/{session_id}/channels/no_such_channel"
         )

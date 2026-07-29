@@ -30,6 +30,9 @@ from kohakuterrarium.terrarium.events import (
     EngineEvent,
     EventKind,
 )
+from kohakuterrarium.terrarium.graph_identity_engine import (
+    resolve_and_guard_connect,
+)
 from kohakuterrarium.terrarium.topology import ChannelInfo
 from kohakuterrarium.utils.logging import get_logger
 
@@ -509,6 +512,7 @@ async def ensure_same_graph(
                 "Cannot merge persisted graphs with duplicate creature names: "
                 + ", ".join(duplicates)
             )
+    resolve_and_guard_connect(engine, a, b)
     delta = _topo._merge_graphs(engine._topology, a_gid, b_gid)
     keep_gid = delta.new_graph_ids[0]
     drop_gids = [g for g in delta.old_graph_ids if g != keep_gid]
