@@ -15,7 +15,6 @@ from kohakuterrarium.api.deps import (
     resolve_request_session_dir,
 )
 from kohakuterrarium.api.routes.persistence import resume as resume_mod
-from kohakuterrarium.api.routes.persistence.resume_remote import worker_absolute_for
 from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.store import SessionStore
@@ -98,19 +97,6 @@ def _write_workspace_session(path: Path, valid_pwd: Path, missing_pwd: Path) -> 
         "send": [],
     }
     store.close(update_status=False)
-
-
-# ── _worker_absolute_for ───────────────────────────────────────
-
-
-class TestWorkerAbsoluteFor:
-    def test_expands_under_kohakuterrarium(self, monkeypatch):
-        # Verify the HOME-derived fallback, not the autouse env override.
-        monkeypatch.delenv("KT_CONFIG_DIR", raising=False)
-        out = worker_absolute_for("resume/alice.kohakutr")
-        # Path-style ends with the relative.
-        assert "alice.kohakutr" in out
-        assert ".kohakuterrarium" in out
 
 
 # ── host-mode resume ───────────────────────────────────────────

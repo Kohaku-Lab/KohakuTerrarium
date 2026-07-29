@@ -137,6 +137,7 @@ export const useConversationsStore = defineStore("conversations", {
           attachMode: "none",
           onNode: row.node_id || "_host",
         })
+        if (runtimeId === null) return null
         await Promise.all([instances.fetchAll(), this.fetchAll({ force: true })])
         return runtimeId
       })()
@@ -176,6 +177,7 @@ export const useConversationsStore = defineStore("conversations", {
 
     async openSurface(row, surface) {
       const runtimeId = await this.resume(row)
+      if (runtimeId === null) return null
       const tabs = useTabsStore()
       await tabs.openSurface(runtimeId, surface, {
         config_name: row.config_name,

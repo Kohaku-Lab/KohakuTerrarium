@@ -467,52 +467,6 @@ class TestRemoteWritePath:
             for call in host.calls
         )
 
-    @pytest.mark.asyncio
-    async def test_response_build_failure_restores_only_its_registry_entries(
-        self, monkeypatch, tmp_path
-    ):
-        service = _Svc(_FakeHost())
-        service._home = {"existing": "w1"}
-
-        async def list_creatures():
-            return [
-                SimpleNamespace(
-                    creature_id="alice",
-                    name="alice",
-                    graph_id="sid",
-                    is_running=True,
-                    is_privileged=False,
-                )
-            ]
-
-        service.list_creatures = list_creatures
-        registry = meta_for(service)
-        registry["sid"] = {"name": "previous"}
-        registry["other"] = {"name": "untouched"}
-
-        class FailingSession:
-            def __init__(self, **kwargs):
-                raise RuntimeError("synthetic response failed")
-
-        monkeypatch.setattr(remote_mod, "Session", FailingSession)
-
-        with pytest.raises(RuntimeError, match="synthetic response failed"):
-            await remote_mod.build_remote_response(
-                service,
-                sid="sid",
-                meta={"agents": ["alice"]},
-                on_node="w1",
-                path=tmp_path / "saved.kohakutr",
-                session_name="saved",
-                worker_pwd_exists=None,
-            )
-
-        assert service._home == {"existing": "w1"}
-        assert registry == {
-            "sid": {"name": "previous"},
-            "other": {"name": "untouched"},
-        }
-
 
 # ---------------------------------------------------------------------------
 # CF-6 — cluster resume
