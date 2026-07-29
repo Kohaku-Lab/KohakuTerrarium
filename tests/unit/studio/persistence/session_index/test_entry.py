@@ -31,6 +31,8 @@ class TestFromMeta:
         assert e.fork_point is None
         assert e.migrated_from_version is None
         assert e.has_vector_index is False
+        assert e.conversation_open is False
+        assert e.conversation_id is None
         # File fingerprint pulled from stat()
         assert e.file_size == 100
         assert e.file_mtime > 0
@@ -48,6 +50,8 @@ class TestFromMeta:
             "format_version": 2,
             "on_node": "worker-1",
             "terrarium_name": "research_team",
+            "conversation_open": True,
+            "conversation_id": "conversation-123",
             "lineage": {
                 "fork": {"parent_session_id": "alice", "fork_point": 3},
                 "migration": {"source_version": 1},
@@ -68,6 +72,8 @@ class TestFromMeta:
         assert e.agents == ["bob", "carol"]
         assert e.node_id == "worker-1"
         assert e.terrarium_name == "research_team"
+        assert e.conversation_open is True
+        assert e.conversation_id == "conversation-123"
         assert e.preview == "hello world"
         assert e.has_vector_index is True
         assert e.parent_session_id == "alice"
@@ -227,6 +233,8 @@ class TestSerialization:
         }
         e = SessionIndexEntry.from_dict(bare)
         assert e.terrarium_name == ""
+        assert e.conversation_open is False
+        assert e.conversation_id is None
         assert e.has_vector_index is False
         assert e.forked_children == []
         assert e._search_rowid == 0
@@ -238,4 +246,4 @@ class TestSerialization:
 
 def test_schema_version_is_an_int():
     assert isinstance(SCHEMA_VERSION, int)
-    assert SCHEMA_VERSION >= 1
+    assert SCHEMA_VERSION >= 4

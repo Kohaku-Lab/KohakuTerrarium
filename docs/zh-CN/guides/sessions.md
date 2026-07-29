@@ -114,6 +114,22 @@ graph_id = await engine.adopt_session("runs/other.kohakutr")
 （重命名生物、删掉它正在用的工具）可能导致回放错误；需要完美保真
 时，把会话钉死在它原来的配置上。
 
+## Web UI 中的开放对话
+
+Conversations Rail 表示用户仍打算继续某段对话，而不是表示其 runtime 当前正在运行。两者是独立的生命周期维度：
+
+- **在线且开放：** runtime 已附加，对话保留在 Rail 中。
+- **休眠且开放：** 当前没有附加 runtime；关闭标签页、停止 runtime 或退出应用后，已保存对话仍保留在 Rail 中。
+- **已结束：** 用户显式结束对话。它会从 Rail 移除，但保存的历史仍可在 Sessions 中查看。
+
+关闭 Chat 或 Inspector 标签页只会 detach 该视图，不会停止或结束对话。休眠行只在用户点击时惰性恢复；打开应用不会自动恢复所有已保存 runtime。恢复后，Chat 和 Inspector 会使用新的 runtime ID。现有 Sessions 历史页继续保持只读，并沿用原有的 **View** 与 **Resume** 操作；Rail 不会再添加重复的历史 Continue 按钮。
+
+每个新持久化的对话都有稳定的 `conversation_id`。runtime graph ID 在重启或恢复后可以变化，文件也可以移动或重命名，但这些变化不会在 Rail 中产生重复行。`GET /api/sessions/open` 使用该 identity 聚合在线 runtime 与带开放 marker 的已保存 session，并让在线行优先。Session index 与查询按已认证用户的 session directory 隔离，因此一个用户的索引不会返回另一个用户的数据。
+
+保存的生命周期 marker 是显式的。引入 marker 之前创建的旧 session 仍可在历史中访问，但默认不显示于 Conversations Rail。普通 runtime Stop 保留开放 marker，并记录 paused/dormant 状态；显式 **End** 清除 marker 并记录 terminal 状态。本地、远程与 cluster 操作都会在 Rail 刷新前同步保存文件中的 marker。
+
+Resume 按保存对话执行 singleflight：两个浏览器同时请求时只执行一次服务端恢复；取消一个等待者不会取消共享恢复，失败后仍可重试。Cluster resume 采用 all-or-error 语义：任何成员恢复失败或保存的连接无法重建时，服务端会补偿已恢复成员、清理 partial runtime metadata、保留原始保存生命周期，并返回非成功响应，而不是留下 degraded partial cluster。
+
 ## 中断与恢复工作流
 
 ```bash

@@ -96,6 +96,7 @@ from kohakuterrarium.api.routes.persistence import history as persistence_histor
 from kohakuterrarium.api.routes.persistence import (
     memory_index as persistence_memory_index,
 )
+from kohakuterrarium.api.routes.persistence import open_sessions as persistence_open
 from kohakuterrarium.api.routes.persistence import resume as persistence_resume
 from kohakuterrarium.api.routes.persistence import saved as persistence_saved
 from kohakuterrarium.api.routes.persistence import viewer as persistence_viewer
@@ -521,6 +522,9 @@ def create_app(
 
     # Session-facing and concern-specific prefixes mount the same router objects,
     # preserving the frontend contract without a forwarding shim.
+    app.include_router(
+        persistence_open.router, prefix="/api/sessions", tags=["sessions"]
+    )
     app.include_router(
         persistence_saved.router, prefix="/api/sessions", tags=["sessions"]
     )

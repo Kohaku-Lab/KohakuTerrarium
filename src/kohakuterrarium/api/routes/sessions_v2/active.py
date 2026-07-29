@@ -11,7 +11,11 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from kohakuterrarium.api.deps import get_service
+from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
+from kohakuterrarium.api.routes.persistence.resume_coordinator import (
+    conversation_coordination_key,
+    resume_coordinator,
+)
 from kohakuterrarium.api.schemas import (
     AgentCreate,
     CreatureAdd,
@@ -33,6 +37,43 @@ class CreaturePayload(BaseModel):
     pwd: str | None = None
     name: str | None = None
     on_node: str | None = None  # Omission targets the lab host.
+
+
+def _runtime_conversation_id(service: TerrariumService, session_id: str) -> str:
+    """Return the stable conversation identity, falling back to the runtime ID."""
+    store = lifecycle.get_session_store(service, session_id)
+    if store is not None and not getattr(store, "_closed", False):
+        try:
+            conversation_id = str(store.meta.get("conversation_id") or "")
+        except Exception:  # noqa: BLE001 - metadata fallback remains available
+            conversation_id = ""
+        if conversation_id:
+            return conversation_id
+    meta = lifecycle.meta_for(service).get(session_id) or {}
+    return str(meta.get("conversation_id") or session_id)
+
+
+async def _run_lifecycle_action(
+    service: TerrariumService,
+    session_id: str,
+    session_dir: Path,
+    *,
+    verb: str,
+) -> None:
+    """Serialize active stop/end with saved-session resume and rail end."""
+    conversation_id = _runtime_conversation_id(service, session_id)
+    key = conversation_coordination_key(conversation_id, session_dir)
+    action = lifecycle.end_session if verb == "end" else lifecycle.stop_session
+    try:
+        await resume_coordinator.run(
+            key,
+            lambda: action(service, session_id),
+            intent=f"{verb}:{conversation_id}",
+        )
+    except RuntimeError as exc:
+        if "conflicting resume request" in str(exc):
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise
 
 
 @router.post("/creature")
@@ -205,13 +246,20 @@ async def _resolve_session(service: TerrariumService, identifier: str):
 
 @router.delete("/agents/{creature_id}")
 async def stop_creature_by_id(
-    creature_id: str, service: TerrariumService = Depends(get_service)
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
+    session_dir: Path = Depends(resolve_request_session_dir),
 ):
     sid = await lifecycle.find_session_for_creature(service, creature_id)
     if sid is None:
         raise HTTPException(404, f"Agent not found: {creature_id}")
     try:
-        await lifecycle.stop_session(service, sid)
+        await _run_lifecycle_action(
+            service,
+            sid,
+            session_dir,
+            verb="stop",
+        )
     except KeyError as e:
         raise HTTPException(404, str(e))
     return {"status": "stopped"}
@@ -219,10 +267,17 @@ async def stop_creature_by_id(
 
 @router.delete("/terrariums/{session_id}")
 async def stop_terrarium_session(
-    session_id: str, service: TerrariumService = Depends(get_service)
+    session_id: str,
+    service: TerrariumService = Depends(get_service),
+    session_dir: Path = Depends(resolve_request_session_dir),
 ):
     try:
-        await lifecycle.stop_session(service, session_id)
+        await _run_lifecycle_action(
+            service,
+            session_id,
+            session_dir,
+            verb="stop",
+        )
     except KeyError as e:
         raise HTTPException(404, str(e))
     return {"status": "stopped"}
@@ -304,12 +359,38 @@ async def get_active_session(
     return sess.to_dict()
 
 
+@router.post("/{session_id}/end")
+async def end_active_session(
+    session_id: str,
+    service: TerrariumService = Depends(get_service),
+    session_dir: Path = Depends(resolve_request_session_dir),
+):
+    """Explicitly end a conversation and remove its runtime."""
+    try:
+        await _run_lifecycle_action(
+            service,
+            session_id,
+            session_dir,
+            verb="end",
+        )
+        return {"status": "ended"}
+    except KeyError as e:
+        raise HTTPException(404, str(e))
+
+
 @router.delete("/{session_id}")
 async def stop_active_session(
-    session_id: str, service: TerrariumService = Depends(get_service)
+    session_id: str,
+    service: TerrariumService = Depends(get_service),
+    session_dir: Path = Depends(resolve_request_session_dir),
 ):
     try:
-        await lifecycle.stop_session(service, session_id)
+        await _run_lifecycle_action(
+            service,
+            session_id,
+            session_dir,
+            verb="stop",
+        )
         return {"status": "stopped"}
     except KeyError as e:
         raise HTTPException(404, str(e))

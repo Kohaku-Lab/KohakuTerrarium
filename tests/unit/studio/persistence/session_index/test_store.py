@@ -28,6 +28,7 @@ def _entry(
     created_at: str = "2026-01-01T00:00:00",
     node_id: str = "",
     agents: list[str] | None = None,
+    conversation_id: str | None = None,
 ) -> SessionIndexEntry:
     return SessionIndexEntry(
         filename=filename,
@@ -44,6 +45,7 @@ def _entry(
         created_at=created_at,
         format_version=2,
         node_id=node_id,
+        conversation_id=conversation_id,
     )
 
 
@@ -69,6 +71,32 @@ def idx(tmp_path):
 class TestSchema:
     def test_first_open_sets_version(self, idx):
         assert idx.meta_get("schema_version") == SCHEMA_VERSION
+
+    def test_entry_roundtrips_conversation_id(self, idx):
+        idx.upsert(
+            _entry(
+                filename="alice.kohakutr",
+                conversation_id="conversation-123",
+            )
+        )
+        assert idx.get("alice.kohakutr")["conversation_id"] == "conversation-123"
+        assert list(idx.iter_entries())[0]["conversation_id"] == "conversation-123"
+
+    def test_schema_version_mismatch_clears_sidecar_even_when_columns_match(
+        self, tmp_path
+    ):
+        side = tmp_path / ".kt-index.kvault"
+        i1 = SessionIndex(side)
+        i1.upsert(_entry(filename="alice.kohakutr"))
+        i1.meta_put("schema_version", SCHEMA_VERSION - 1)
+        i1.close()
+
+        i2 = SessionIndex(side)
+        try:
+            assert i2.list().total == 0
+            assert i2.meta_get("schema_version") == SCHEMA_VERSION
+        finally:
+            i2.close()
 
     def test_schema_bump_clears_sidecar(self, tmp_path):
         side = tmp_path / ".kt-index.kvault"

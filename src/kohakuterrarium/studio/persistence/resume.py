@@ -16,6 +16,7 @@ from kohakuterrarium.session.migrations import (
 )
 from kohakuterrarium.session.resume import _open_store_with_migration
 from kohakuterrarium.studio.sessions.handles import Session
+from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions.lifecycle import (
     _build_session_handle,
     now_iso as _now_iso,
@@ -89,6 +90,10 @@ async def resume_session(
     }
     if store is not None:
         stores_for(service)[sid] = store
+        index_dir = Path(store.path).parent
+        if index_dir.name == "mirror":
+            index_dir = index_dir.parent
+        _index_hooks.attach(sid, store, index_dir)
 
     logger.info(
         "Resumed session registered with studio",

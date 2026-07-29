@@ -92,6 +92,27 @@ class TerrariumFilesAdapter:
         self._transfers.clear()
         logger.info("lab adapter detached", namespace=self.NAMESPACE)
 
+    def _reject_active_session_path(
+        self,
+        target: Path,
+        *,
+        include_descendants: bool = False,
+    ) -> None:
+        """Prevent generic file operations from mutating attached stores."""
+        resolved = target.expanduser().resolve(strict=False)
+        stores = getattr(self._engine, "_session_stores", {}) or {}
+        for store in stores.values():
+            store_path = Path(store.path).expanduser().resolve(strict=False)
+            matches = store_path == resolved
+            if include_descendants and not matches:
+                try:
+                    store_path.relative_to(resolved)
+                    matches = True
+                except ValueError:
+                    pass
+            if matches:
+                raise ScopeError("operation refuses an active session store")
+
     async def _dispatch(self, msg: AppMessage) -> dict[str, Any]:
         try:
             return await self._handle(msg)
@@ -157,6 +178,7 @@ class TerrariumFilesAdapter:
             raise FileNotFoundError(f"no such path: {scope}/{rel}")
         st = await asyncio.to_thread(target.stat)
         result = {
+            "path": str(target),
             "size": st.st_size,
             "mtime": st.st_mtime,
             "is_dir": target.is_dir(),
@@ -194,6 +216,7 @@ class TerrariumFilesAdapter:
                 f"{MAX_ONESHOT_BYTES} bytes); chunked write_stream not yet supported"
             )
         target = resolve_in_scope(scope, rel, self._engine)
+        self._reject_active_session_path(target)
         await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
         expect_hash = body.get("expect_hash")
         if expect_hash is not None and target.exists():
@@ -213,6 +236,7 @@ class TerrariumFilesAdapter:
         if not isinstance(total_size, int) or total_size < 0:
             raise ScopeError("write_begin requires a non-negative int total_size")
         target = resolve_in_scope(scope, rel, self._engine)
+        self._reject_active_session_path(target)
         await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
         transfer_id = uuid.uuid4().hex
         staging = target.parent / f".staging-stream-{transfer_id}"
@@ -282,6 +306,11 @@ class TerrariumFilesAdapter:
                     f"expect_hash mismatch: file at "
                     f"{transfer.scope}/{transfer.rel} has sha256 {on_disk}"
                 )
+        try:
+            self._reject_active_session_path(transfer.target)
+        except ScopeError:
+            await self._discard_transfer(transfer_id)
+            raise
         if await self._commit_is_idempotent(transfer, actual_sha):
             await self._cleanup_after_commit(transfer_id, transfer.staging)
             return {"written": transfer.received, "sha256": actual_sha}
@@ -347,6 +376,7 @@ class TerrariumFilesAdapter:
                 "pass an explicit non-empty path"
             )
         target = resolve_in_scope(scope, rel, self._engine)
+        self._reject_active_session_path(target, include_descendants=True)
         if not target.exists():
             raise FileNotFoundError(f"no such path: {scope}/{rel}")
         if target.is_dir():

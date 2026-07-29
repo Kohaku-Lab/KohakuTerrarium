@@ -39,8 +39,9 @@ def _max_mtime_with_wal(path: Path) -> float:
 
 # Bump for any stored or FTS schema change; the derived sidecar is rebuilt on
 # mismatch. Version 2 added terrarium/config search fields and WAL-aware
-# fingerprints.
-SCHEMA_VERSION = 2
+# fingerprints. Version 3 added the persisted conversation-open marker;
+# version 4 added stable conversation identities.
+SCHEMA_VERSION = 4
 
 
 @dataclass
@@ -66,6 +67,8 @@ class SessionIndexEntry:
     node_id: str
 
     terrarium_name: str = ""
+    conversation_open: bool = False
+    conversation_id: str | None = None
     has_vector_index: bool = False
     parent_session_id: str | None = None
     fork_point: int | None = None
@@ -129,6 +132,10 @@ class SessionIndexEntry:
             format_version=int(meta.get("format_version", 1) or 1),
             node_id=str(meta.get("on_node", "") or ""),
             terrarium_name=str(meta.get("terrarium_name", "") or ""),
+            conversation_open=bool(meta.get("conversation_open", False)),
+            conversation_id=(
+                str(meta["conversation_id"]) if meta.get("conversation_id") else None
+            ),
             has_vector_index=bool(has_vector_index),
             parent_session_id=(fork or {}).get("parent_session_id") if fork else None,
             fork_point=(fork or {}).get("fork_point") if fork else None,
@@ -166,6 +173,8 @@ class SessionIndexEntry:
                 kwargs[f] = d[f]
         for f in (
             "terrarium_name",
+            "conversation_open",
+            "conversation_id",
             "has_vector_index",
             "parent_session_id",
             "fork_point",

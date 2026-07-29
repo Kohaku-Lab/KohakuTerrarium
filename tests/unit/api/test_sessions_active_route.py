@@ -1,7 +1,9 @@
 """Unit tests for :mod:`kohakuterrarium.api.routes.sessions_v2.active`."""
 
+import asyncio
+
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
@@ -398,6 +400,48 @@ class TestStopRoutes:
         client = TestClient(self._app())
         resp = client.delete("/active/ghost-id")
         assert resp.status_code == 404
+
+    async def test_stop_rejects_a_concurrent_resume_of_the_same_conversation(
+        self, monkeypatch, tmp_path
+    ):
+        service = _FakeService()
+        active_mod.lifecycle.meta_for(service)["g1"] = {
+            "conversation_id": "conversation-one"
+        }
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def resume():
+            started.set()
+            await release.wait()
+
+        task = asyncio.create_task(
+            active_mod.resume_coordinator.run(
+                active_mod.conversation_coordination_key(
+                    "conversation-one",
+                    tmp_path,
+                ),
+                resume,
+                intent="resume:_host",
+            )
+        )
+        await started.wait()
+        monkeypatch.setattr(
+            active_mod.lifecycle,
+            "stop_session",
+            lambda *_args, **_kwargs: pytest.fail("stop must not start"),
+        )
+        try:
+            with pytest.raises(HTTPException) as exc:
+                await active_mod.stop_active_session(
+                    "g1",
+                    service=service,
+                    session_dir=tmp_path,
+                )
+            assert exc.value.status_code == 409
+        finally:
+            release.set()
+            await task
 
 
 # ── list / get sessions ────────────────────────────────────────
