@@ -155,6 +155,40 @@ class TestBuildRuntimeGraphSection:
         finally:
             await t.shutdown()
 
+    async def test_foreign_graph_wiring_is_not_rendered(self):
+        t = await (
+            TestTerrariumBuilder()
+            .with_creature("alice")
+            .with_creature("local-worker")
+            .build()
+        )
+        try:
+            alice = t.get_creature("alice")
+            foreign = t.get_creature("local-worker")
+            foreign.creature_id = "foreign-id"
+            foreign.name = "worker"
+            foreign.graph_id = "foreign-graph"
+            t._creatures.pop("local-worker")
+            t._creatures[foreign.creature_id] = foreign
+            t._topology.graphs[alice.graph_id].creature_ids.discard("local-worker")
+            from kohakuterrarium.terrarium.topology import GraphTopology
+
+            t._topology.graphs[foreign.graph_id] = GraphTopology(
+                graph_id=foreign.graph_id,
+                creature_ids={foreign.creature_id},
+            )
+            t._topology.creature_to_graph.pop("local-worker", None)
+            t._topology.creature_to_graph[foreign.creature_id] = foreign.graph_id
+            foreign.agent.config.output_wiring = [{"to": alice.name}]
+            alice.agent.config.output_wiring = [{"to": foreign.creature_id}]
+
+            out = rp.build_runtime_graph_section(t, alice)
+
+            assert "foreign-id" not in out
+            assert "worker" not in out
+        finally:
+            await t.shutdown()
+
     async def test_privileged_with_spawned_child(self):
         t = await TestTerrariumBuilder().with_creature("alice").build()
         try:
@@ -280,16 +314,19 @@ class TestOutputWiringInSection:
             await t.shutdown()
 
     async def test_outbound_output_wires(self):
-        t = await TestTerrariumBuilder().with_creature("alice").build()
+        t = await (
+            TestTerrariumBuilder().with_creature("alice").with_creature("bob").build()
+        )
         try:
             alice = t.get_creature("alice")
+            bob = t.get_creature("bob")
             alice.agent.config = SimpleNamespace(
                 name="alice",
-                output_wiring=[SimpleNamespace(to="bob")],
+                output_wiring=[SimpleNamespace(to=bob.creature_id)],
             )
             out = rp.build_runtime_graph_section(t, alice)
             assert "outbound to" in out
-            assert "bob" in out
+            assert bob.creature_id in out
         finally:
             await t.shutdown()
 

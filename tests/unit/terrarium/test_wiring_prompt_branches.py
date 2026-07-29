@@ -79,11 +79,12 @@ class _Forwarder:
         self._peer = peer
         self.forwarded = []
 
-    def peer_for_target(self, name):
+    def peer_for_target(self, name, *, graph_id=None):
         return self._peer
 
-    async def forward_event(self, peer, payload):
-        self.forwarded.append((peer, payload))
+    async def forward_event(self, **payload):
+        self.forwarded.append(payload)
+        return True
 
 
 class TestEmitCrossNodeForward:
@@ -91,7 +92,10 @@ class TestEmitCrossNodeForward:
         """When a target isn't a local creature but a remote forwarder
         knows a peer for it, the emission is forwarded over the wire."""
         forwarder = _Forwarder(peer="node-2")
-        engine = SimpleNamespace(_output_wire_adapter=forwarder)
+        engine = SimpleNamespace(
+            _output_wire_adapter=forwarder,
+            _topology=SimpleNamespace(creature_to_graph={"alice": "g"}),
+        )
         r = TerrariumOutputWiringResolver({}, engine=engine)
         await r.emit(
             source="alice",
@@ -102,17 +106,21 @@ class TestEmitCrossNodeForward:
         )
         await asyncio.sleep(0.05)
         assert forwarder.forwarded
-        peer, payload = forwarder.forwarded[0]
-        assert peer == "node-2"
+        payload = forwarder.forwarded[0]
         assert payload["target_name"] == "remote_bob"
-        assert payload["content"] == "payload"
-        assert payload["turn_index"] == 3
+        assert payload["source_creature_id"] == "alice"
+        assert payload["source_graph_id"] == "g"
+        assert payload["event"]["content"] == "payload"
+        assert payload["event"]["context"]["turn_index"] == 3
 
     async def test_unknown_target_no_peer_is_skipped(self):
         """When the forwarder has no peer for the name, the emission is
         dropped — the target is recorded so it isn't re-warned."""
         forwarder = _Forwarder(peer=None)
-        engine = SimpleNamespace(_output_wire_adapter=forwarder)
+        engine = SimpleNamespace(
+            _output_wire_adapter=forwarder,
+            _topology=SimpleNamespace(creature_to_graph={"alice": "g"}),
+        )
         r = TerrariumOutputWiringResolver({}, engine=engine)
         await r.emit(
             source="alice",

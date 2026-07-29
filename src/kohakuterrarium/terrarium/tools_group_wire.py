@@ -2,7 +2,6 @@
 
 from typing import Any
 
-import kohakuterrarium.terrarium.channels as _channels
 from kohakuterrarium.builtins.tool_catalog import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
@@ -10,11 +9,12 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.terrarium.group_tool_context import (
-    cross_cluster_target_error,
-    resolve_group_target,
+from kohakuterrarium.terrarium.tools_group_common import (
+    err,
+    ok,
+    resolve_or_error,
+    resolve_target_or_error,
 )
-from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
 
 
 @register_builtin("group_wire")
@@ -60,26 +60,19 @@ class GroupWireTool(BaseTool):
             return err_result
         action = (args.get("action") or "").strip()
         from_id = (args.get("from") or "").strip() or gctx.caller.creature_id
-        from_creature = resolve_group_target(gctx, from_id)
-        if from_creature is None:
-            return err(cross_cluster_target_error(gctx.engine, from_id))
+        from_creature, target_error = resolve_target_or_error(gctx, from_id)
+        if target_error is not None:
+            return target_error
 
         if action == "add":
             to_id = (args.get("to") or "").strip()
             if not to_id:
                 return err("'to' is required for action='add'")
-            to_creature = resolve_group_target(gctx, to_id)
-            if to_creature is None:
-                return err(cross_cluster_target_error(gctx.engine, to_id))
-            if from_creature.graph_id != to_creature.graph_id:
-                try:
-                    await _channels.ensure_same_graph(
-                        gctx.engine, from_creature, to_creature
-                    )
-                except Exception as exc:
-                    return err(f"cross-graph merge failed: {exc}")
+            to_creature, target_error = resolve_target_or_error(gctx, to_id)
+            if target_error is not None:
+                return target_error
             target: dict[str, Any] = {
-                "to": to_creature.name,
+                "to": to_creature.creature_id,
                 "with_content": bool(args.get("with_content", True)),
             }
             if args.get("prompt"):
@@ -99,7 +92,7 @@ class GroupWireTool(BaseTool):
                     "edge_id": edge_id,
                     "from": from_creature.creature_id,
                     "to": to_creature.creature_id,
-                    "caller_graph_id": gctx.caller.graph_id,
+                    "caller_graph_id": gctx.graph.graph_id,
                 }
             )
 
@@ -118,7 +111,7 @@ class GroupWireTool(BaseTool):
                     "removed": removed,
                     "edge_id": edge_id,
                     "from": from_creature.creature_id,
-                    "caller_graph_id": gctx.caller.graph_id,
+                    "caller_graph_id": gctx.graph.graph_id,
                 }
             )
 

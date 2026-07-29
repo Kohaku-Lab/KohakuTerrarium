@@ -17,10 +17,13 @@ class _FakeService:
     ``connect`` returns ``connect_result`` for the merge path.
     """
 
-    def __init__(self, *, graph=object(), graphs=None, connect_result=None):
+    def __init__(
+        self, *, graph=object(), graphs=None, connect_result=None, creatures=None
+    ):
         self._graph = graph
         self._graphs = graphs
         self._connect_result = connect_result
+        self._creatures = creatures
         self.connect_calls: list[tuple[str, str]] = []
 
     async def get_graph(self, gid):
@@ -31,6 +34,16 @@ class _FakeService:
     async def connect(self, sender_id, receiver_id, *, channel=None):
         self.connect_calls.append((sender_id, receiver_id))
         return self._connect_result
+
+    async def list_creatures(self):
+        from kohakuterrarium.terrarium.service_dto import CreatureInfo
+
+        if self._creatures is not None:
+            return tuple(self._creatures)
+        return (
+            CreatureInfo("a", "a", "g1", False, False, None, [], []),
+            CreatureInfo("b", "b", "g1", False, False, None, [], []),
+        )
 
 
 class _FakeGraph:
@@ -309,7 +322,10 @@ class TestConnectDisconnect:
         assert resp.status_code == 400
 
     def test_disconnect_success(self, monkeypatch):
+        captured = {}
+
         async def fake(svc, s, r, **kw):
+            captured.update(sender=s, receiver=r)
             return {"channels": ["ch"]}
 
         monkeypatch.setattr(topology_mod.topology_lib, "disconnect", fake)
@@ -321,6 +337,29 @@ class TestConnectDisconnect:
         assert resp.status_code == 200
         # Route returns the disconnect lib result verbatim.
         assert resp.json() == {"channels": ["ch"]}
+        assert captured == {"sender": "a", "receiver": "b"}
+
+    def test_disconnect_rejects_creature_outside_url_session(self, monkeypatch):
+        from kohakuterrarium.terrarium.service_dto import CreatureInfo
+
+        called = False
+
+        async def fake(*args, **kwargs):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(topology_mod.topology_lib, "disconnect", fake)
+        creatures = [
+            CreatureInfo("a", "a", "g1", False, False, None, (), ()),
+            CreatureInfo("foreign", "foreign", "g2", False, False, None, (), ()),
+        ]
+        client = TestClient(_app(service=_FakeService(creatures=creatures)))
+        resp = client.post(
+            "/topology/g1/disconnect",
+            json={"sender": "a", "receiver": "foreign", "channel": "chat"},
+        )
+        assert resp.status_code == 404
+        assert called is False
 
     def test_disconnect_value_error(self, monkeypatch):
         async def boom(svc, s, r, **kw):
@@ -350,17 +389,42 @@ class TestConnectDisconnect:
 
 class TestWireRoutes:
     def test_wire_success(self, monkeypatch):
+        captured = {}
+
         async def fake_wire(svc, sid, cid, ch, direction, *, enabled):
+            captured["creature_id"] = cid
             return None
 
         monkeypatch.setattr(topology_mod.topology_lib, "wire_creature", fake_wire)
         client = TestClient(_app())
         resp = client.post(
-            "/topology/g1/creatures/c1/wire",
+            "/topology/g1/creatures/a/wire",
             json={"channel": "ch", "direction": "listen"},
         )
         assert resp.status_code == 200
         assert resp.json() == {"status": "wired"}
+        assert captured == {"creature_id": "a"}
+
+    def test_wire_rejects_creature_outside_url_session(self, monkeypatch):
+        from kohakuterrarium.terrarium.service_dto import CreatureInfo
+
+        called = False
+
+        async def fake_wire(*args, **kwargs):
+            nonlocal called
+            called = True
+
+        monkeypatch.setattr(topology_mod.topology_lib, "wire_creature", fake_wire)
+        creatures = [
+            CreatureInfo("foreign", "foreign", "g2", False, False, None, (), ())
+        ]
+        client = TestClient(_app(service=_FakeService(creatures=creatures)))
+        resp = client.post(
+            "/topology/g1/creatures/foreign/wire",
+            json={"channel": "ch", "direction": "listen"},
+        )
+        assert resp.status_code == 404
+        assert called is False
 
     def test_wire_value_error(self, monkeypatch):
         async def boom(*a, **kw):
@@ -369,7 +433,7 @@ class TestWireRoutes:
         monkeypatch.setattr(topology_mod.topology_lib, "wire_creature", boom)
         client = TestClient(_app())
         resp = client.post(
-            "/topology/g1/creatures/c1/wire",
+            "/topology/g1/creatures/a/wire",
             json={"channel": "ch", "direction": "listen"},
         )
         assert resp.status_code == 400
@@ -382,7 +446,7 @@ class TestWireRoutes:
         client = TestClient(_app())
         resp = client.request(
             "DELETE",
-            "/topology/g1/creatures/c1/wire",
+            "/topology/g1/creatures/a/wire",
             json={"channel": "ch", "direction": "send"},
         )
         assert resp.status_code == 200
@@ -396,7 +460,7 @@ class TestWireRoutes:
         client = TestClient(_app())
         resp = client.request(
             "DELETE",
-            "/topology/g1/creatures/c1/wire",
+            "/topology/g1/creatures/a/wire",
             json={"channel": "ch", "direction": "send"},
         )
         assert resp.status_code == 400
@@ -409,7 +473,7 @@ class TestWireRoutes:
         client = TestClient(_app())
         resp = client.request(
             "DELETE",
-            "/topology/g1/creatures/c1/wire",
+            "/topology/g1/creatures/a/wire",
             json={"channel": "ch", "direction": "send"},
         )
         assert resp.status_code == 400

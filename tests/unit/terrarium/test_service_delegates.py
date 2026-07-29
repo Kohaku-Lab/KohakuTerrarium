@@ -454,8 +454,9 @@ class TestWiring:
 
     async def test_wire_output(self):
         svc, _ = _build_service()
-        out = await svc.wire_output("cid", "to-name")
+        out = await svc.wire_output("cid", "root")
         assert out["edge_id"] == "edge-1"
+        svc._engine.wire_output.assert_awaited_once_with("cid", {"to": "root"})
 
     async def test_unwire_output(self):
         svc, _ = _build_service()

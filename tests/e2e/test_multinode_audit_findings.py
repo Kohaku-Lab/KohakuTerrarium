@@ -124,23 +124,10 @@ def _get_service(host):
 class TestMultiNodeAuditFindings:
     """One method per suspected bug — each fails on current impl."""
 
-    async def test_cross_node_disconnect_must_clear_cluster_link(
+    async def test_cross_graph_wire_does_not_create_cluster_link(
         self, tmp_path, monkeypatch
     ):
-        """``_cluster_links`` is added on ``connect`` (line 504) and on
-        ``_ensure_channel_replicated`` (line 990) but is NEVER cleaned —
-        not on ``disconnect``, not on ``remove_channel``, not on
-        ``remove_creature``, not on ``drop_remote``.
-
-        User-facing symptom: after a user wires a cross-node bridge and
-        then disconnects it, ``runtime_graph_snapshot`` STILL folds the
-        two engine graphs into a single cluster (``is_cluster=True``,
-        ``members`` carries both sides) — the UI continues to render
-        ONE merged graph forever.  The cluster is also "sticky": after
-        disconnect, both graphs are still ad-hoc joined, so even a
-        single-node user op against either graph_id may surface
-        creatures from the other side.
-        """
+        """Separate logical graphs remain separate after same-channel wiring."""
         monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "host-sessions"))
         install_scripted_llm(
             monkeypatch,
@@ -148,56 +135,21 @@ class TestMultiNodeAuditFindings:
         )
         cfg_a = _write_cfg(tmp_path, "alpha")
         cfg_b = _write_cfg(tmp_path, "bravo")
-
         async with RealLabHost(tmp_path) as host:
             async with (
-                RealLabWorker("w1", host.lab_ws_url, tmp_path / "w1") as _w1,
-                RealLabWorker("w2", host.lab_ws_url, tmp_path / "w2") as _w2,
+                RealLabWorker("w1", host.lab_ws_url, tmp_path / "w1"),
+                RealLabWorker("w2", host.lab_ws_url, tmp_path / "w2"),
             ):
                 await asyncio.sleep(0.3)
-                ga, gb, a_id, _a_name, b_id, _b_name = await _spawn_cross_cluster(
-                    host, cfg_a, cfg_b
-                )
-
-                # Sanity: after cross-wire, snapshot folds into a cluster.
-                snap_before = (await host.http.get("/api/runtime/graph")).json()
-                fused_before = [
-                    g for g in snap_before.get("graphs", []) if g.get("is_cluster")
-                ]
-                assert fused_before, (
-                    "precondition: cross-wire should produce a cluster fold; "
-                    f"got graphs={[g.get('graph_id') for g in snap_before.get('graphs', [])]}"
-                )
-
-                # Disconnect the cross-node bridge.
-                disc = await host.http.post(
-                    f"/api/sessions/topology/{ga}/disconnect",
-                    json={"sender": a_id, "receiver": b_id, "channel": "ch1"},
-                )
-                assert (
-                    disc.status_code == 200
-                ), f"disconnect call must succeed: {disc.status_code} {disc.text}"
-
-                # BEHAVIOR ASSERTION: after disconnect, the two engine
-                # graphs MUST surface as separate graphs again — no
-                # cluster fold, ``is_cluster`` absent or False on both.
-                snap_after = (await host.http.get("/api/runtime/graph")).json()
-                still_fused = [
-                    g for g in snap_after.get("graphs", []) if g.get("is_cluster")
-                ]
-                # Also assert the cross-node bookkeeping was cleaned.
+                ga, gb, *_ = await _spawn_cross_cluster(host, cfg_a, cfg_b)
+                snapshot = (await host.http.get("/api/runtime/graph")).json()
+                graph_ids = {graph.get("graph_id") for graph in snapshot["graphs"]}
                 service = _get_service(host)
-                cluster_links_after = set(service._cluster_links)
-
-                assert not still_fused and not cluster_links_after, (
-                    "BUG: cross-node disconnect leaves _cluster_links and "
-                    "the cluster fold intact.  After disconnect, the two "
-                    "engine graphs should render as separate graphs.\n"
-                    f"still_fused graphs: {[g.get('graph_id') for g in still_fused]}\n"
-                    f"cluster_links: {cluster_links_after}\n"
-                    f"file:line — multi_node_service.py:518-573 (disconnect) "
-                    f"never removes from self._cluster_links."
-                )
+                assert ga in graph_ids and gb in graph_ids
+                assert not [
+                    graph for graph in snapshot["graphs"] if graph.get("is_cluster")
+                ]
+                assert not service._cluster_links
 
     async def test_remove_creature_must_purge_name_cache(self, tmp_path, monkeypatch):
         """``remove_creature`` (line 380) clears ``_home`` but NOT
@@ -258,19 +210,8 @@ class TestMultiNodeAuditFindings:
                     f"name cache used by _make_output_wire_target_resolver."
                 )
 
-                # And the public resolver entry — built from the same
-                # cache — must miss for the dead name.
-                from kohakuterrarium.api.app import (
-                    _make_output_wire_target_resolver,
-                )
-
-                resolve = _make_output_wire_target_resolver(service)
-                assert resolve(a_name) is None and resolve(a_id) is None, (
-                    "BUG: output-wire resolver returns a hit for a "
-                    f"removed creature; resolve({a_name!r})="
-                    f"{resolve(a_name)!r} resolve({a_id!r})="
-                    f"{resolve(a_id)!r}"
-                )
+                # Exact graph-scoped routing cannot retain either alias.
+                assert a_name not in cache_after and a_id not in cache_after
 
     async def test_drop_remote_must_purge_name_cache_and_cluster_links(
         self, tmp_path, monkeypatch
@@ -312,8 +253,7 @@ class TestMultiNodeAuditFindings:
                 assert (
                     b_name in service._creature_name_cache
                 ), "precondition: bravo name cached"
-                links_before = set(service._cluster_links)
-                assert links_before, "precondition: cluster link recorded"
+                assert not service._cluster_links
 
                 # w2 disconnects (clean shutdown — host gets LEFT).
                 await w2.__aexit__(None, None, None)
@@ -338,7 +278,11 @@ class TestMultiNodeAuditFindings:
                 bravo_in_cache = (
                     b_name in cache_after
                     or b_id in cache_after
-                    or any(v[0] == "w2" for v in cache_after.values())
+                    or any(
+                        entry[1] == "w2"
+                        for entries in cache_after.values()
+                        for entry in entries
+                    )
                 )
                 links_pointing_at_w2 = {
                     link
@@ -356,16 +300,12 @@ class TestMultiNodeAuditFindings:
                 )
 
                 # And the resolver returns a dead address — the most
-                # user-visible consequence:
-                from kohakuterrarium.api.app import (
-                    _make_output_wire_target_resolver,
-                )
-
-                resolve = _make_output_wire_target_resolver(service)
-                entry = resolve(b_name)
-                assert entry is None or entry[0] != "w2", (
-                    "BUG: output-wire resolver still routes to the dead "
-                    f"node; resolve({b_name!r})={entry!r}"
+                # User-visible consequence: no graph-scoped identity can
+                # retain the disconnected peer.
+                entries = service._creature_name_cache.get(b_name, set())
+                assert all(entry[1] != "w2" for entry in entries), (
+                    "BUG: output-wire cache still routes to the dead "
+                    f"node; entries={entries!r}"
                 )
             finally:
                 if w2 is not None:

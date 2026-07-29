@@ -179,6 +179,8 @@ async with Terrarium() as engine:
 
 跨圖的 `connect()` 會合併兩個圖：environment 取聯集，掛著的 session store 合併成一份（`parent_session_ids` 記下血脈），新的 listener 會被注入 `ChannelTrigger`。`disconnect()` 可能把圖拆回兩邊、並把 parent session 複製到兩側。參考 [`examples/code/terrarium_hotplug.py`](../../examples/code/terrarium_hotplug.py)。
 
+頻道接線、群組訊息和 output wiring 等路由操作只會在呼叫者目前的邏輯圖內解析目標。請優先使用精確的執行期 Creature ID；顯示名稱或設定名稱只有在圖內唯一時才會被接受，歧義、過期或屬於其他圖的目標都會被拒絕。這些操作不會隱式合併彼此斷開的圖；請先用精確端點呼叫 `connect()`。
+
 同樣的 mutation 也開放給圖中的特權節點透過群組工具呼叫：`group_add_node`、`group_remove_node`、`group_start_node`、`group_stop_node`、`group_channel`、`group_wire`。它們合在一起就是圖內的「圖編輯器」，讓 LLM 驅動的 root 在執行中演化團隊。
 
 熱插拔很適合臨時補一個專員、又不用重啟。既有頻道會自動吸收新的 listener；新生物會在它的 system prompt 看到自己的頻道拓樸。

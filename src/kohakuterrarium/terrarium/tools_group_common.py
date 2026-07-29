@@ -12,6 +12,7 @@ from kohakuterrarium.terrarium.group_tool_context import (
     GroupContext,
     GroupToolError,
     resolve_group_context,
+    resolve_group_target,
 )
 
 
@@ -36,6 +37,16 @@ def resolve_or_error(
             resolve_group_context(ctx, require_privileged=require_privileged),
             None,
         )
+    except GroupToolError as exc:
+        return None, err(str(exc))
+
+
+def resolve_target_or_error(
+    gctx: GroupContext, identifier: str
+) -> tuple[Any | None, ToolResult | None]:
+    """Resolve one caller-graph target while preserving safe resolver errors."""
+    try:
+        return resolve_group_target(gctx, identifier), None
     except GroupToolError as exc:
         return None, err(str(exc))
 

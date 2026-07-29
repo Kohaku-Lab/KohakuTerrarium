@@ -75,6 +75,7 @@ from kohakuterrarium.terrarium.events import (
     EngineEvent,
     EventFilter,
 )
+from kohakuterrarium.terrarium.graph_identity import resolve_local_graph_target
 from kohakuterrarium.terrarium.topology import (
     ChannelInfo,
     GraphTopology,
@@ -908,7 +909,21 @@ class LocalTerrariumService(DriveServiceMixin):
         creature_id: str,
         target: str | dict[str, Any],
     ) -> dict[str, Any]:
-        edge_id = await self._engine.wire_output(creature_id, target)
+        if isinstance(target, dict):
+            target_name = str(target.get("to", ""))
+            canonical = dict(target)
+        else:
+            target_name = str(target)
+            canonical = {"to": target_name}
+        if target_name != "root":
+            resolved = resolve_local_graph_target(
+                self._engine._topology,
+                self._engine._creatures,
+                caller_id=creature_id,
+                target=target_name,
+            )
+            canonical["to"] = resolved.target_id
+        edge_id = await self._engine.wire_output(creature_id, canonical)
         return {"edge_id": str(edge_id)}
 
     async def unwire_output(self, creature_id: str, edge_id: str) -> bool:

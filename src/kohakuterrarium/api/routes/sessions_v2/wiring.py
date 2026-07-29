@@ -59,8 +59,11 @@ async def wire_creature_output(
 ):
     """Add a direct output-wiring edge for a creature."""
     cid = await resolve_creature_id(service, creature_id, session_id)
+    entry = req.as_entry()
+    if req.to != "root":
+        entry["to"] = await resolve_creature_id(service, req.to, session_id)
     try:
-        result = await service.wire_output(cid, req.as_entry())
+        result = await service.wire_output(cid, entry)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
     except ValueError as exc:

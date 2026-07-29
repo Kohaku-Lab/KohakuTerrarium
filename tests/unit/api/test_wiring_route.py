@@ -33,7 +33,7 @@ class _FakeService:
         raise_on=None,
         cluster_links=None,
     ):
-        self._creatures = creatures or [_info()]
+        self._creatures = creatures or [_info(), _info("c2", "bob")]
         self._list = list_returns or [{"edge_id": "e1"}]
         self._wire = wire_returns or {"edge_id": "e2"}
         self._unwire = unwire_returns

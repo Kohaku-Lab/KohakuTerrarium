@@ -7,10 +7,9 @@ and WebSocket observation.
 
 from typing import Any
 
-import kohakuterrarium.terrarium.channels as _channels
 from kohakuterrarium.modules.output.base import OutputModule
-from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
+from kohakuterrarium.terrarium.graph_identity import resolve_local_graph_target
 from kohakuterrarium.studio._runtime import as_engine
 
 
@@ -19,19 +18,20 @@ async def wire_output(
     creature_id: str,
     target: str | dict[str, Any],
 ) -> str:
-    """Add a runtime ``config.output_wiring`` edge from a creature.
-
-    If the target resolves to a creature in a different graph the two
-    graphs are merged first — output wiring is dispatched per-graph at
-    emit time, so without the merge the resolver would silently drop
-    every emission. The merge is the engine's "ensure same graph"
-    primitive, which does *not* introduce a channel side-effect.
-    """
+    """Add a runtime output edge resolved inside the source logical graph."""
     engine = as_engine(service)
     target_name = _extract_target_name(target)
-    if target_name and target_name != "root":
-        await _ensure_target_in_same_graph(engine, creature_id, target_name)
-    return await engine.wire_output(creature_id, target)
+    if not target_name or target_name == "root":
+        return await engine.wire_output(creature_id, target)
+    resolved = resolve_local_graph_target(
+        engine._topology,
+        engine._creatures,
+        caller_id=creature_id,
+        target=target_name,
+    )
+    canonical = dict(target) if isinstance(target, dict) else {}
+    canonical["to"] = resolved.target_id
+    return await engine.wire_output(creature_id, canonical)
 
 
 def _extract_target_name(target: str | dict[str, Any]) -> str | None:
@@ -41,41 +41,6 @@ def _extract_target_name(target: str | dict[str, Any]) -> str | None:
         value = target.get("to")
         if isinstance(value, str) and value:
             return value
-    return None
-
-
-async def _ensure_target_in_same_graph(
-    engine: Terrarium,
-    source_id: str,
-    target_name: str,
-) -> None:
-    try:
-        source = engine.get_creature(source_id)
-    except KeyError:
-        return
-    target = _resolve_creature_by_name(engine, target_name)
-    if target is None:
-        return
-    if target.graph_id == source.graph_id:
-        return
-    await _channels.ensure_same_graph(engine, source_id, target.creature_id)
-
-
-def _resolve_creature_by_name(engine: Terrarium, name: str):
-    """Look up a creature by id, then by display name as a fallback.
-
-    Output-wiring entries can target either a creature id or its
-    config-level name; the live resolver checks both at emit time so
-    the cross-graph merge has to mirror that lookup or we'd refuse to
-    merge for the very wirings the engine would happily honor.
-    """
-    try:
-        return engine.get_creature(name)
-    except KeyError:
-        pass
-    for handle in getattr(engine, "_creatures", {}).values():
-        if getattr(handle, "name", None) == name:
-            return handle
     return None
 
 

@@ -19,34 +19,43 @@ logger = get_logger(__name__)
 
 
 def _check_engine_send_edge(
-    context: ToolContext, channel_name: str
+    context: ToolContext | None, channel_name: str
 ) -> tuple[bool, str | None]:
-    """Return topology membership and any send-edge denial for a channel."""
+    """Authorize a topology channel using the exact runtime caller identity.
+
+    The boolean indicates that an engine context was present and therefore must
+    not fall through to a same-name private channel when identity or topology
+    validation fails.
+    """
     if context is None or context.environment is None:
         return False, None
     engine_ref = context.environment.get("terrarium_engine")
     engine = engine_ref() if isinstance(engine_ref, weakref.ref) else engine_ref
     if engine is None:
         return False, None
-    creature = None
-    by_id = engine._creatures.get(context.agent_name)
-    if by_id is not None:
-        creature = by_id
-    else:
-        for c in engine._creatures.values():
-            if c.name == context.agent_name:
-                creature = c
-                break
-            cfg = getattr(c.agent, "config", None)
-            if cfg is not None and getattr(cfg, "name", None) == context.agent_name:
-                creature = c
-                break
-    if creature is None:
+
+    caller_id = getattr(context, "creature_id", None)
+    if not isinstance(caller_id, str) or not caller_id:
+        return True, (
+            "Cannot verify channel permissions without ToolContext.creature_id; "
+            "legacy name-only contexts are denied."
+        )
+    creature = engine._creatures.get(caller_id)
+    if creature is None or creature.creature_id != caller_id:
+        return True, f"Unknown runtime caller {caller_id!r}; channel send denied."
+    graph_id = engine._topology.creature_to_graph.get(caller_id)
+    graph = engine._topology.graphs.get(graph_id or "")
+    if graph is None or caller_id not in graph.creature_ids:
+        return (
+            True,
+            f"Cannot verify graph for runtime caller {caller_id!r}; send denied.",
+        )
+    if channel_name not in graph.channels:
         return False, None
-    graph = engine._topology.graphs.get(creature.graph_id)
-    if graph is None or channel_name not in graph.channels:
-        return False, None
-    sends = graph.send_edges.get(creature.creature_id, set())
+    try:
+        sends = graph.send_edges[caller_id]
+    except (AttributeError, KeyError, TypeError):
+        return True, "Could not verify caller channel permissions; send denied."
     if channel_name in sends:
         return True, None
     return True, (
@@ -54,7 +63,7 @@ def _check_engine_send_edge(
         f"Your outgoing channels: {sorted(sends)}. "
         f"Ask the privileged creature to wire you via "
         f"group_channel(action='wire', direction='send', "
-        f"channel='{channel_name}', creature_id=you)."
+        f"channel='{channel_name}', creature_id={caller_id!r})."
     )
 
 
@@ -96,11 +105,9 @@ class SendMessageTool(BaseTool):
         sender_id: str | None = None
         if context:
             sender = context.agent_name
-            agent_obj = getattr(context, "agent", None)
-            if agent_obj is not None:
-                sender_id = getattr(agent_obj, "_creature_id", None) or getattr(
-                    agent_obj, "creature_id", None
-                )
+            candidate_id = getattr(context, "creature_id", None)
+            if isinstance(candidate_id, str) and candidate_id:
+                sender_id = candidate_id
 
         metadata: dict[str, Any] = {}
         raw_metadata = args.get("metadata", "")

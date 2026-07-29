@@ -4,7 +4,7 @@
 lock-step with worker membership:
 
 - ``_home``: ``creature_id → node_id``.
-- ``_creature_name_cache``: ``name → (node_id, creature_id)``.
+- ``_creature_name_cache``: ``name → {(graph_id, node_id, creature_id)}``.
 - ``_cluster_links``: ``frozenset[(node_id, graph_id)]`` pairs.
 - ``_cross_subs``: per-subscription refcount keyed by ``(my_node,
   peer_node, graph_id, channel)``.
@@ -57,9 +57,13 @@ def purge_node_caches(service: "MultiNodeTerrariumService", node_id: str) -> Non
     # Drop home_node entries pointing at this client.
     for cid in [c for c, n in service._home.items() if n == node_id]:
         service._home.pop(cid, None)
-    # Drop name-cache entries whose value targets the dead node.
-    for key in [k for k, v in service._creature_name_cache.items() if v[0] == node_id]:
-        service._creature_name_cache.pop(key, None)
+    # Drop only identities hosted by the dead node; preserve same-name peers.
+    for key, entries in list(service._creature_name_cache.items()):
+        retained = {entry for entry in entries if entry[1] != node_id}
+        if retained:
+            service._creature_name_cache[key] = retained
+        else:
+            service._creature_name_cache.pop(key, None)
     # Drop cluster links touching the dead node on either endpoint.
     for link in [
         link
@@ -67,6 +71,7 @@ def purge_node_caches(service: "MultiNodeTerrariumService", node_id: str) -> Non
         if any(endpoint[0] == node_id for endpoint in link)
     ]:
         service._cluster_links.discard(link)
+        getattr(service, "_cluster_link_refs", {}).pop(link, None)
     # Drop cross-sub bookkeeping referencing the dead node as either
     # ``my_node`` or ``peer_node``.
     for key in [k for k in service._cross_subs if k[0] == node_id or k[1] == node_id]:
@@ -104,7 +109,9 @@ async def list_creatures_fanout(
     )
 
     # Start from the prior cache so failing workers' entries survive.
-    merged_cache: dict[str, tuple[str, str]] = dict(service._creature_name_cache)
+    merged_cache: dict[str, set[tuple[str, str, str]]] = {
+        key: set(value) for key, value in service._creature_name_cache.items()
+    }
     # For workers that successfully reported, their list IS
     # authoritative — drop any stale entries we may have for them
     # before re-adding what they reported now.
@@ -115,18 +122,24 @@ async def list_creatures_fanout(
             continue
         # Authoritative refresh for this node: drop any cache rows that
         # point at this node so creature removals propagate.
-        for key, val in list(merged_cache.items()):
-            if val[0] == node_id:
+        for key, entries in list(merged_cache.items()):
+            retained = {entry for entry in entries if entry[1] != node_id}
+            if retained:
+                merged_cache[key] = retained
+            else:
                 merged_cache.pop(key, None)
         for c in resp:
             results.append(c)
             service._home[c.creature_id] = node_id
-            merged_cache[c.name] = (node_id, c.creature_id)
-            merged_cache[c.creature_id] = (node_id, c.creature_id)
-    # Atomic swap so concurrent reads of the cache never see a
-    # half-built dict.  The resolver is sync and reads this attribute
-    # without a lock.
-    service._creature_name_cache = merged_cache
+            identity = (c.graph_id, node_id, c.creature_id)
+            merged_cache.setdefault(c.name, set()).add(identity)
+            config_name = getattr(c, "config_name", None)
+            if config_name:
+                merged_cache.setdefault(config_name, set()).add(identity)
+            merged_cache.setdefault(c.creature_id, set()).add(identity)
+    # Preserve the live cache object held by adapters while replacing contents.
+    service._creature_name_cache.clear()
+    service._creature_name_cache.update(merged_cache)
     return tuple(results)
 
 

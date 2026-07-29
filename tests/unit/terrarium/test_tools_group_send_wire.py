@@ -110,16 +110,37 @@ class TestGroupSend:
         monkeypatch.setattr(
             send_mod, "resolve_or_error", lambda c, **_: (_gctx(), None)
         )
-        monkeypatch.setattr(send_mod, "resolve_group_target", lambda g, n: None)
+        monkeypatch.setattr(
+            send_mod,
+            "resolve_target_or_error",
+            lambda g, n: (None, send_mod.err("not in your group")),
+        )
         r = await send_mod.GroupSendTool()._execute({"to": "ghost", "message": "m"})
         assert "not in your group" in r.error
+
+    async def test_self_send_is_rejected(self, monkeypatch):
+        caller = _FakeCreature(cid="caller", name="caller")
+        gctx = _gctx(caller=caller)
+        monkeypatch.setattr(send_mod, "resolve_or_error", lambda c, **_: (gctx, None))
+        monkeypatch.setattr(
+            send_mod,
+            "resolve_target_or_error",
+            lambda g, n: (caller, None),
+        )
+        result = await send_mod.GroupSendTool()._execute(
+            {"to": "caller", "message": "loop"}
+        )
+        assert "cannot target the caller itself" in result.error
+        caller.agent._process_event.assert_not_called()
 
     async def test_target_not_running(self, monkeypatch):
         monkeypatch.setattr(
             send_mod, "resolve_or_error", lambda c, **_: (_gctx(), None)
         )
         target = _FakeCreature(is_running=False)
-        monkeypatch.setattr(send_mod, "resolve_group_target", lambda g, n: target)
+        monkeypatch.setattr(
+            send_mod, "resolve_target_or_error", lambda g, n: (target, None)
+        )
         r = await send_mod.GroupSendTool()._execute({"to": "t", "message": "m"})
         assert "is not running" in r.error
 
@@ -129,7 +150,9 @@ class TestGroupSend:
         )
         monkeypatch.setattr(send_mod, "resolve_or_error", lambda c, **_: (gctx, None))
         target = _FakeCreature(is_privileged=False)
-        monkeypatch.setattr(send_mod, "resolve_group_target", lambda g, n: target)
+        monkeypatch.setattr(
+            send_mod, "resolve_target_or_error", lambda g, n: (target, None)
+        )
         r = await send_mod.GroupSendTool()._execute({"to": "t", "message": "m"})
         assert "non-privileged" in r.error
 
@@ -137,7 +160,9 @@ class TestGroupSend:
         gctx = _gctx()
         monkeypatch.setattr(send_mod, "resolve_or_error", lambda c, **_: (gctx, None))
         target = _FakeCreature(name="bob")
-        monkeypatch.setattr(send_mod, "resolve_group_target", lambda g, n: target)
+        monkeypatch.setattr(
+            send_mod, "resolve_target_or_error", lambda g, n: (target, None)
+        )
         r = await send_mod.GroupSendTool()._execute({"to": "bob", "message": "hi"})
         body = _parse(r)
         assert body["delivered"] is True
@@ -156,7 +181,9 @@ class TestGroupSend:
                 (t, d, metadata)
             )
         )
-        monkeypatch.setattr(send_mod, "resolve_group_target", lambda g, n: target)
+        monkeypatch.setattr(
+            send_mod, "resolve_target_or_error", lambda g, n: (target, None)
+        )
         r = await send_mod.GroupSendTool()._execute({"to": "bob", "message": "hi"})
         assert _parse(r)["delivered"] is True
         assert [t for t, _, _ in activities] == ["wire_inbound"]
@@ -305,7 +332,11 @@ class TestGroupWire:
         monkeypatch.setattr(
             wire_mod, "resolve_or_error", lambda c, **_: (_gctx(), None)
         )
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: None)
+        monkeypatch.setattr(
+            wire_mod,
+            "resolve_target_or_error",
+            lambda g, n: (None, wire_mod.err("not in your group")),
+        )
         r = await wire_mod.GroupWireTool()._execute({"action": "add"})
         assert "not in your group" in r.error
 
@@ -314,8 +345,8 @@ class TestGroupWire:
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
         monkeypatch.setattr(
             wire_mod,
-            "resolve_group_target",
-            lambda g, n: gctx.caller,
+            "resolve_target_or_error",
+            lambda g, n: (gctx.caller, None),
         )
         r = await wire_mod.GroupWireTool()._execute({"action": "add"})
         assert "'to' is required" in r.error
@@ -323,9 +354,12 @@ class TestGroupWire:
     async def test_add_to_unknown(self, monkeypatch):
         gctx = _gctx()
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        # First call returns from_creature (caller), second call returns None
-        seq = iter([gctx.caller, None])
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: next(seq))
+        responses = iter(
+            [(gctx.caller, None), (None, wire_mod.err("not in your group"))]
+        )
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: next(responses)
+        )
         r = await wire_mod.GroupWireTool()._execute({"action": "add", "to": "ghost"})
         assert "not in your group" in r.error
 
@@ -334,7 +368,9 @@ class TestGroupWire:
         target = _FakeCreature(cid="t", name="bob", graph_id="g1")
         seq = iter([gctx.caller, target])
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: next(seq))
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: (next(seq), None)
+        )
         r = await wire_mod.GroupWireTool()._execute(
             {
                 "action": "add",
@@ -348,21 +384,26 @@ class TestGroupWire:
         body = _parse(r)
         assert body["edge_id"] == "edge-1"
         assert body["to"] == "t"
+        wire_target = gctx.engine.wire_output.await_args.args[1]
+        assert wire_target["to"] == "t"
 
-    async def test_add_cross_graph_merges(self, monkeypatch):
+    async def test_add_cross_graph_is_rejected(self, monkeypatch):
         gctx = _gctx()
-        target = _FakeCreature(cid="t", name="bob", graph_id="g-other")
-        seq = iter([gctx.caller, target])
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: next(seq))
-        ensure_called = {}
-
-        async def ensure_same_graph(e, f, t):
-            ensure_called["called"] = True
-
-        monkeypatch.setattr(wire_mod._channels, "ensure_same_graph", ensure_same_graph)
-        await wire_mod.GroupWireTool()._execute({"action": "add", "to": "bob"})
-        assert ensure_called["called"]
+        responses = iter(
+            [
+                (gctx.caller, None),
+                (None, wire_mod.err("target is not a creature in caller graph")),
+            ]
+        )
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: next(responses)
+        )
+        result = await wire_mod.GroupWireTool()._execute(
+            {"action": "add", "to": "cross-graph-id"}
+        )
+        assert "not a creature in caller graph" in result.error
+        gctx.engine.wire_output.assert_not_awaited()
 
     async def test_add_wire_output_failure(self, monkeypatch):
         gctx = _gctx()
@@ -370,14 +411,18 @@ class TestGroupWire:
         target = _FakeCreature(cid="t", graph_id="g1")
         seq = iter([gctx.caller, target])
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: next(seq))
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: (next(seq), None)
+        )
         r = await wire_mod.GroupWireTool()._execute({"action": "add", "to": "bob"})
         assert "wire_output failed" in r.error
 
     async def test_remove_missing_edge_id(self, monkeypatch):
         gctx = _gctx()
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: gctx.caller)
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: (gctx.caller, None)
+        )
         r = await wire_mod.GroupWireTool()._execute({"action": "remove"})
         assert "'edge_id' is required" in r.error
 
@@ -385,7 +430,9 @@ class TestGroupWire:
         gctx = _gctx()
         gctx.engine.unwire_output.side_effect = RuntimeError("nope")
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: gctx.caller)
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: (gctx.caller, None)
+        )
         r = await wire_mod.GroupWireTool()._execute(
             {"action": "remove", "edge_id": "e-1"}
         )
@@ -394,7 +441,9 @@ class TestGroupWire:
     async def test_remove_success(self, monkeypatch):
         gctx = _gctx()
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: gctx.caller)
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: (gctx.caller, None)
+        )
         r = await wire_mod.GroupWireTool()._execute(
             {"action": "remove", "edge_id": "e-1"}
         )
@@ -404,7 +453,9 @@ class TestGroupWire:
     async def test_unknown_action(self, monkeypatch):
         gctx = _gctx()
         monkeypatch.setattr(wire_mod, "resolve_or_error", lambda c, **_: (gctx, None))
-        monkeypatch.setattr(wire_mod, "resolve_group_target", lambda g, n: gctx.caller)
+        monkeypatch.setattr(
+            wire_mod, "resolve_target_or_error", lambda g, n: (gctx.caller, None)
+        )
         r = await wire_mod.GroupWireTool()._execute({"action": "garbage"})
         assert "unknown action" in r.error
 

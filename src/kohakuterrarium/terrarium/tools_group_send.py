@@ -26,12 +26,13 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
-from kohakuterrarium.terrarium.group_tool_context import (
-    cross_cluster_target_error,
-    resolve_group_target,
-)
 from kohakuterrarium.terrarium.output_wiring import notify_inbound_delivery
-from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
+from kohakuterrarium.terrarium.tools_group_common import (
+    err,
+    ok,
+    resolve_or_error,
+    resolve_target_or_error,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 _logger = get_logger(__name__)
@@ -98,9 +99,11 @@ class GroupSendTool(BaseTool):
         message = args.get("message")
         if not to_id or message is None:
             return err("'to' and 'message' are required")
-        target = resolve_group_target(gctx, to_id)
-        if target is None:
-            return err(cross_cluster_target_error(gctx.engine, to_id))
+        target, target_error = resolve_target_or_error(gctx, to_id)
+        if target_error is not None:
+            return target_error
+        if target.creature_id == gctx.caller.creature_id:
+            return err("group_send cannot target the caller itself")
         if not target.is_running:
             return err(f"target {target.name!r} is not running")
         if not gctx.caller.is_privileged and not target.is_privileged:
@@ -197,7 +200,10 @@ class SendChannelTool(BaseTool):
                 f"channel {channel_name!r} does not exist in your graph; "
                 f"available: {sorted(graph.channels)}"
             )
-        sends = graph.send_edges.get(gctx.caller.creature_id, set())
+        try:
+            sends = graph.send_edges[gctx.caller.creature_id]
+        except (AttributeError, KeyError, TypeError):
+            return err("could not verify caller channel permissions; send denied")
         if channel_name not in sends:
             # Privileged callers can self-wire; non-privileged need a
             # privileged creature to wire them.
@@ -237,6 +243,6 @@ class SendChannelTool(BaseTool):
             {
                 "channel": channel_name,
                 "message_id": msg.message_id,
-                "caller_graph_id": gctx.caller.graph_id,
+                "caller_graph_id": gctx.graph.graph_id,
             }
         )

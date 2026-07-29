@@ -68,6 +68,17 @@ class TestCreatureToInfo:
         finally:
             await svc.shutdown()
 
+    async def test_snapshot_preserves_distinct_config_name_alias(self):
+        svc = await _make_service()
+        try:
+            engine_creature = svc.engine.get_creature("alice")
+            engine_creature.name = "display-alice"
+            info = creature_to_info(engine_creature)
+            assert info.name == "display-alice"
+            assert info.config_name == "alice"
+        finally:
+            await svc.shutdown()
+
 
 # ── Protocol surface conformance ────────────────────────────────
 
