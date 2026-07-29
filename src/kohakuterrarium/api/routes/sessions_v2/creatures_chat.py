@@ -14,6 +14,7 @@ from kohakuterrarium.api.schemas import (
     RegenerateRequest,
 )
 from kohakuterrarium.errors import ConflictError, NotFoundError
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
@@ -53,13 +54,20 @@ async def regenerate_creature(
     turn_index = req.turn_index if req is not None else None
     branch_view = req.branch_view if req is not None else None
     request_id = request_id or (req.request_id if req is not None else None)
+    target = (
+        UserMessageSelector(**req.target.model_dump())
+        if req is not None and req.target is not None
+        else None
+    )
     try:
-        return await service.regenerate(
-            cid,
-            turn_index=turn_index,
-            branch_view=branch_view,
-            request_id=request_id,
-        )
+        kwargs = {
+            "turn_index": turn_index,
+            "branch_view": branch_view,
+            "request_id": request_id,
+        }
+        if target is not None:
+            kwargs["target"] = target
+        return await service.regenerate(cid, **kwargs)
     except (NotFoundError, KeyError) as exc:
         raise HTTPException(404, str(exc)) from exc
     except (ConflictError, ValueError) as exc:
@@ -88,15 +96,16 @@ async def edit_creature_message(
     cid = await resolve_creature_id(service, creature_id, session_id)
     request_id = request_id or req.request_id
     try:
-        edited = await service.edit_message(
-            cid,
-            msg_idx,
-            content,
-            turn_index=req.turn_index,
-            user_position=req.user_position,
-            branch_view=req.branch_view,
-            request_id=request_id,
-        )
+        target = UserMessageSelector(**req.target.model_dump()) if req.target else None
+        kwargs = {
+            "turn_index": req.turn_index,
+            "user_position": req.user_position,
+            "branch_view": req.branch_view,
+            "request_id": request_id,
+        }
+        if target is not None:
+            kwargs["target"] = target
+        edited = await service.edit_message(cid, msg_idx, content, **kwargs)
         return edited
     except (NotFoundError, KeyError) as exc:
         raise HTTPException(404, str(exc)) from exc

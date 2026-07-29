@@ -15,6 +15,10 @@ tags:
 
 概念入門：[記憶與壓縮](../concepts/modules/memory-and-compaction.md)、[工作階段與環境](../concepts/modules/session-and-environment.md)。
 
+### 壓縮後的編輯與重新產生
+
+壓縮會改變即時提示並寫入快速恢復快照，但不會刪除追加式事件日誌。Studio 使用持久化的 `event_id`、`turn_index` 和 `branch_id` 定位可編輯的使用者訊息。儲存並重新執行或重新產生時，新分支會從所選訊息之前的原始事件前綴重建，並忽略壓縮摘要與快照；舊分支及其後續事件仍可切換與恢復。定位缺失、歧義、指向回合中注入輸入或與所選分支衝突時，操作會在不修改歷程的情況下失敗。
+
 ## `.kohakutr` 檔案
 
 `.kohakutr` 是一個 SQLite 資料庫 (透過 KohakuVault)，有九張表：

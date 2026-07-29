@@ -37,6 +37,7 @@ from kohakuterrarium.laboratory._internal.client import (
     RequestTimeoutError,
 )
 from kohakuterrarium.laboratory.streams import RemoteStream, StreamDemux
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.drive.remote_ops import RemoteDriveServiceMixin
 from kohakuterrarium.terrarium.drive.service_protocol import (
@@ -359,6 +360,7 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         turn_index: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         body = _maybe_raise(
             await self._req_turn_mutation(
@@ -368,6 +370,15 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
                     "turn_index": turn_index,
                     "branch_view": branch_view,
                     "request_id": request_id,
+                    "target": (
+                        {
+                            "event_id": target.event_id,
+                            "turn_index": target.turn_index,
+                            "branch_id": target.branch_id,
+                        }
+                        if target is not None
+                        else None
+                    ),
                 },
             )
         )
@@ -383,6 +394,7 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
         user_position: int | None = None,
         branch_view: dict[int, int] | None = None,
         request_id: str | None = None,
+        target: UserMessageSelector | None = None,
     ) -> BranchMutationResult:
         body = _maybe_raise(
             await self._req_turn_mutation(
@@ -395,6 +407,15 @@ class RemoteTerrariumService(RemoteDriveServiceMixin, DriveServiceUnsupportedMix
                     "user_position": user_position,
                     "branch_view": branch_view,
                     "request_id": request_id,
+                    "target": (
+                        {
+                            "event_id": target.event_id,
+                            "turn_index": target.turn_index,
+                            "branch_id": target.branch_id,
+                        }
+                        if target is not None
+                        else None
+                    ),
                 },
             )
         )
