@@ -24,10 +24,11 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from kohakuterrarium.errors import SessionNotResumableError
-from kohakuterrarium.session.store import SessionStore
 import kohakuterrarium.terrarium.drive.topology as _drive_topology
 import kohakuterrarium.terrarium.topology_leftovers as _topo_leftovers
+from kohakuterrarium.errors import SessionNotResumableError
+from kohakuterrarium.session.identity import new_conversation_id
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -109,6 +110,27 @@ def _inherit_resumable_meta(src_meta: dict, dst_store: SessionStore) -> None:
             logger.warning("split/merge: meta key %r write failed", key, exc_info=True)
 
 
+def _inherit_conversation_lifecycle(
+    src_meta: dict,
+    dst_store: SessionStore,
+    *,
+    new_identity: bool,
+) -> None:
+    """Carry open/closed state while assigning the correct logical identity."""
+    is_open = bool(src_meta.get("conversation_open", False))
+    dst_store.meta["conversation_open"] = is_open
+    existing_id = str(src_meta.get("conversation_id") or "")
+    if new_identity and is_open:
+        dst_store.meta["conversation_id"] = new_conversation_id()
+    elif existing_id:
+        dst_store.meta["conversation_id"] = existing_id
+    elif is_open:
+        dst_store.meta["conversation_id"] = new_conversation_id()
+    dst_store.meta["status"] = str(src_meta.get("status") or "running")
+    if src_meta.get("last_active"):
+        dst_store.meta["last_active"] = src_meta["last_active"]
+
+
 def merge_session_stores(
     old_stores: list[SessionStore],
     new_path: str | Path,
@@ -140,6 +162,11 @@ def merge_session_stores(
         new_store.meta["parent_session_ids"] = parents
         new_store.meta["merged_at"] = time.time()
         _inherit_resumable_meta(inherited_meta, new_store)
+        _inherit_conversation_lifecycle(
+            inherited_meta,
+            new_store,
+            new_identity=False,
+        )
     except Exception:
         logger.warning("merge: meta write failed", exc_info=True)
     logger.info(
@@ -174,6 +201,11 @@ def split_session_store(
             new_store.meta["parent_session_ids"] = [str(parent_id)] if parent_id else []
             new_store.meta["split_at"] = time.time()
             _inherit_resumable_meta(full_old_meta, new_store)
+            _inherit_conversation_lifecycle(
+                full_old_meta,
+                new_store,
+                new_identity=True,
+            )
         except Exception:
             logger.warning("split: meta write failed", exc_info=True)
         new_stores.append(new_store)
@@ -233,6 +265,15 @@ def _close_superseded(store: SessionStore) -> None:
     superseded file must not flip to ``paused`` and reappear as a
     resumable ghost.
     """
+    try:
+        store.set_conversation_open(False)
+        store.update_status("completed")
+        store.checkpoint()
+    except Exception:
+        logger.warning(
+            "session merge/split: superseded lifecycle update failed",
+            exc_info=True,
+        )
     try:
         store.close(update_status=False)
     except Exception:

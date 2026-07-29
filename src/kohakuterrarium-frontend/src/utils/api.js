@@ -706,6 +706,12 @@ export const filesAPI = {
  *  are kept for the per-creature URL methods.
  */
 export const sessionAPI = {
+  /** Conversations that are still open, whether live or dormant. */
+  async listOpen() {
+    const { data } = await api.get("/sessions/open")
+    return data
+  },
+
   /** Active sessions — list every running session. */
   async listActive() {
     const { data } = await api.get("/sessions/active")
@@ -723,6 +729,11 @@ export const sessionAPI = {
 
   async stopActive(id) {
     await api.delete(`/sessions/active/${encodeTarget(id)}`)
+  },
+
+  async endConversation(conversationId) {
+    const { data } = await api.post(`/sessions/open/${encodeTarget(conversationId)}/end`)
+    return data
   },
 
   // ── saved-session lookups ────────────────────────────────────────

@@ -103,13 +103,33 @@ class TestStartCreatureLocal:
         # Replace the multi-node-like path: monkey-patch add_creature on
         # the service to bypass on_node check.
         svc.add_creature = _add
+        svc._host = SimpleNamespace(
+            request=AsyncMock(
+                return_value={
+                    "stores": [
+                        {
+                            "path": "C:/sessions/g-remote.kohakutr",
+                            "conversation_id": "conversation-remote",
+                        }
+                    ]
+                }
+            )
+        )
         try:
             sess = await lifecycle.start_creature(
                 svc, config=SimpleNamespace(name="bob"), on_node="worker-1"
             )
             assert sess.home_node == "worker-1"
-            # _meta entry retained.
-            assert sess.session_id in lifecycle.meta_for(svc)
+            meta = lifecycle.meta_for(svc)[sess.session_id]
+            assert meta["remote_session_path"] == "C:/sessions/g-remote.kohakutr"
+            assert meta["conversation_id"] == "conversation-remote"
+            svc._host.request.assert_awaited_once_with(
+                to_node="worker-1",
+                namespace="terrarium.session",
+                type="stores",
+                body={"session_id": "g-remote"},
+                timeout=30.0,
+            )
         finally:
             await engine.shutdown()
 

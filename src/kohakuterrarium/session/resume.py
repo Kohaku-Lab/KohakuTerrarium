@@ -27,6 +27,13 @@ logger = get_logger(__name__)
 IO_MODES = ("cli", "plain", "tui")
 
 
+def _mark_conversation_open(store: SessionStore) -> None:
+    """Persist the UI lifecycle marker when the store supports it."""
+    setter = getattr(store, "set_conversation_open", None)
+    if callable(setter):
+        setter(True)
+
+
 def _create_io_modules(
     mode: str,
 ) -> tuple[InputModule, OutputModule]:
@@ -325,6 +332,7 @@ def resume_agent(
     *,
     input_module: InputModule | None = None,
     output_module: OutputModule | None = None,
+    mark_conversation_open: bool = True,
 ) -> tuple[Agent, SessionStore]:
     """Resume a standalone agent and return it with its writable store.
 
@@ -341,6 +349,7 @@ def resume_agent(
             llm=llm,
             input_module=input_module,
             output_module=output_module,
+            mark_conversation_open=mark_conversation_open,
         )
     except BaseException:
         # Any post-open failure must release the writer lock before propagating.
@@ -363,6 +372,7 @@ def _resume_agent_from_open_store(
     llm: Any,
     input_module: InputModule | None,
     output_module: OutputModule | None,
+    mark_conversation_open: bool,
 ) -> tuple[Agent, SessionStore]:
     """Rebuild and rehydrate an agent from an already-open session store."""
     meta = store.load_meta()
@@ -429,7 +439,9 @@ def _resume_agent_from_open_store(
     inject_saved_state(agent, store, agent_name)
 
     # Continued turns append to the same session file.
-    store.update_status("running")
+    if mark_conversation_open:
+        _mark_conversation_open(store)
+        store.update_status("running")
     agent.attach_session_store(store)
 
     logger.info("Agent resumed", agent=agent_name, session=str(session_path))
@@ -451,4 +463,4 @@ def detect_session_type(session_path: str | Path) -> str:
         meta = store.load_meta()
         return meta.get("config_type", "agent")
     finally:
-        store.close()
+        store.close(update_status=False)

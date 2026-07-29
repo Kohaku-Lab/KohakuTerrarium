@@ -15,6 +15,7 @@ from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
+from kohakuterrarium.terrarium.config import TerrariumConfig
 from kohakuterrarium.terrarium.creature_host import Creature
 
 # ── _resolve_store_path ───────────────────────────────────────
@@ -62,8 +63,14 @@ class TestResumeIntoEngine:
 
         fake_agent = _FakeAgent(name="alice")
         fake_agent.config = SimpleNamespace(name="alice")
-        fake_store = SimpleNamespace()
         captured: dict = {}
+        fake_store = SimpleNamespace(
+            set_conversation_open=lambda value: captured.setdefault(
+                "final_open", value
+            ),
+            update_status=lambda value: captured.setdefault("final_status", value),
+            checkpoint=lambda: None,
+        )
 
         def _resume_agent(
             path,
@@ -73,8 +80,10 @@ class TestResumeIntoEngine:
             *,
             input_module=None,
             output_module=None,
+            mark_conversation_open=True,
         ):
             captured["input_module"] = input_module
+            captured["mark_conversation_open"] = mark_conversation_open
             return fake_agent, fake_store
 
         monkeypatch.setattr(resume_mod, "resume_agent", _resume_agent)
@@ -91,6 +100,9 @@ class TestResumeIntoEngine:
             # never a stdin reader. Without this a worker-side resume
             # boots ``input: cli`` with no TTY and wedges the worker.
             assert isinstance(captured["input_module"], NoneInput)
+            assert captured["mark_conversation_open"] is False
+            assert captured["final_open"] is True
+            assert captured["final_status"] == "running"
         finally:
             await t.shutdown()
 
@@ -109,8 +121,6 @@ class TestResumeIntoEngine:
         monkeypatch.setattr(
             resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
-
-        from kohakuterrarium.terrarium.config import TerrariumConfig
 
         fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
         monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
@@ -234,8 +244,6 @@ class TestResumeIntoEngine:
         monkeypatch.setattr(
             resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
-
-        from kohakuterrarium.terrarium.config import TerrariumConfig
 
         fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
         monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
@@ -395,8 +403,6 @@ class TestResumeIntoEngine:
         # already added — a half-resumed graph must not survive.
         path = self._write_terrarium_session(tmp_path)
 
-        from kohakuterrarium.terrarium.config import TerrariumConfig
-
         fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
         monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
 
@@ -457,8 +463,6 @@ class TestResumeIntoEngine:
         import kohakuterrarium.terrarium.topology as _topo
 
         path = self._write_terrarium_session(tmp_path)
-
-        from kohakuterrarium.terrarium.config import TerrariumConfig
 
         fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
         monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
@@ -553,7 +557,12 @@ class TestResumeIntoEngine:
         monkeypatch.setattr(resume_mod, "detect_session_type", lambda p: "agent")
         fake_agent = _FakeAgent(name="alice")
         fake_agent.config = SimpleNamespace(name="alice")
-        fake_store = SimpleNamespace(path=str(tmp_path / "a.kohakutr"))
+        fake_store = SimpleNamespace(
+            path=str(tmp_path / "a.kohakutr"),
+            set_conversation_open=lambda _value: None,
+            update_status=lambda _value: None,
+            checkpoint=lambda: None,
+        )
         monkeypatch.setattr(
             resume_mod, "resume_agent", lambda *a, **k: (fake_agent, fake_store)
         )
@@ -583,7 +592,11 @@ class TestResumeIntoEngine:
         # random suffix, which would make an ``"alice" in`` check vacuous.
         monkeypatch.setattr(resume_mod, "_safe_creature_id", lambda name: name)
 
-        store = SessionStore(str(tmp_path / "agent.kohakutr.v2"), writer_lock=True)
+        path = tmp_path / "agent.kohakutr.v2"
+        store = SessionStore(str(path), writer_lock=True)
+        store.init_meta("agent", "agent", "/cfg", str(tmp_path), ["alice"])
+        store.set_conversation_open(False)
+        store.update_status("completed")
 
         fake_agent = _FakeAgent(name="alice")
         fake_agent.config = SimpleNamespace(name="alice")
@@ -601,10 +614,16 @@ class TestResumeIntoEngine:
             *,
             input_module=None,
             output_module=None,
+            mark_conversation_open=True,
         ):
+            captured["mark_conversation_open"] = mark_conversation_open
+            if mark_conversation_open:
+                store.set_conversation_open(True)
+                store.update_status("running")
             return fake_agent, store
 
         monkeypatch.setattr(resume_mod, "resume_agent", _resume_agent)
+        captured = {}
 
         t = await TestTerrariumBuilder().with_creature("preexisting").build()
         try:
@@ -616,5 +635,48 @@ class TestResumeIntoEngine:
             assert set(t._creatures) == {"preexisting"}
             # The store's writer lock was released.
             assert getattr(store, "_closed", False) is True
+            assert captured["mark_conversation_open"] is False
+            reopened = SessionStore.open_readonly(path)
+            try:
+                meta = reopened.load_meta()
+                assert bool(meta["conversation_open"]) is False
+                assert meta["status"] == "completed"
+            finally:
+                reopened.close()
         finally:
             await t.shutdown()
+
+    async def test_terrarium_resume_failure_preserves_closed_lifecycle(
+        self, monkeypatch, tmp_path
+    ):
+        path = tmp_path / "team.kohakutr"
+        store = SessionStore(path)
+        store.init_meta("team", "terrarium", "/cfg/team.yaml", str(tmp_path), ["root"])
+        store.set_conversation_open(False)
+        store.update_status("completed")
+        store.close(update_status=False)
+
+        monkeypatch.setattr(
+            resume_mod,
+            "load_terrarium_config",
+            lambda _path: TerrariumConfig(name="team", creatures=[], channels=[]),
+        )
+
+        async def _fail_replay(engine, graph_id):  # noqa: ARG001
+            raise RuntimeError("topology replay failed")
+
+        monkeypatch.setattr(resume_mod._topo_snap, "replay", _fail_replay)
+
+        engine = await TestTerrariumBuilder().build()
+        try:
+            with pytest.raises(RuntimeError, match="topology replay failed"):
+                await resume_mod.resume_into_engine(engine, path)
+            reopened = SessionStore.open_readonly(path)
+            try:
+                meta = reopened.load_meta()
+                assert bool(meta["conversation_open"]) is False
+                assert meta["status"] == "completed"
+            finally:
+                reopened.close()
+        finally:
+            await engine.shutdown()

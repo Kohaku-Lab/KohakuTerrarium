@@ -8,6 +8,7 @@ data, not stubbed shapes.
 """
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,12 +39,16 @@ class _FakeEngine:
         self._session_stores: dict[str, SessionStore] = {}
         self._adopt_result: str | None = None
         self._adopt_calls: list[dict] = []
+        self._creatures: dict[str, object] = {}
 
     async def adopt_session(self, path, *, pwd=None, llm=None):
         self._adopt_calls.append({"path": path, "pwd": pwd, "llm": llm})
         if self._adopt_result is None:
             raise RuntimeError("adopt not configured")
         return self._adopt_result
+
+    def list_creatures(self):
+        return list(self._creatures.values())
 
 
 def _msg(type_, body, sender="ctrl"):
@@ -109,14 +114,30 @@ class TestResumeOp:
         )
         _engine._adopt_result = "sid1"
         _engine._session_stores["sid1"] = store
+        _engine._creatures["cid-a"] = SimpleNamespace(
+            creature_id="cid-a",
+            name="alice",
+            graph_id="sid1",
+            is_running=True,
+            is_privileged=False,
+        )
         out = await _adapter._op_resume(
             {"path": str(kohakutr), "pwd_override": str(tmp_path)}
         )
         assert out["session_id"] == "sid1"
+        assert out["session_path"] == str(kohakutr)
         # Evaluated on the worker (this process) — the saved dir does
         # not exist here, whatever the controller might think.
         assert out["pwd_exists"] is False
         assert _engine._adopt_calls[-1]["pwd"] == str(tmp_path)
+        assert out["creatures"] == [
+            {
+                "creature_id": "cid-a",
+                "name": "alice",
+                "running": True,
+                "is_privileged": False,
+            }
+        ]
 
     async def test_resume_pwd_exists_true_when_dir_present(
         self, _adapter, _engine, tmp_path
@@ -134,6 +155,174 @@ class TestResumeOp:
         _engine._session_stores["sid2"] = store
         out = await _adapter._op_resume({"path": str(kohakutr)})
         assert out["pwd_exists"] is True
+
+    async def test_set_lifecycle_updates_worker_store(self, _adapter, tmp_path):
+        path = tmp_path / "lifecycle.kohakutr"
+        store = SessionStore(path)
+        store.init_meta("sid", "agent", "x", str(tmp_path), ["a"])
+        store.close(update_status=False)
+
+        result = _adapter._op_set_lifecycle(
+            {
+                "session_path": str(path),
+                "conversation_open": False,
+                "status": "completed",
+            }
+        )
+
+        assert result["ok"] is True
+        reopened = SessionStore.open_readonly(path)
+        try:
+            assert bool(reopened.meta["conversation_open"]) is False
+            assert reopened.meta["status"] == "completed"
+        finally:
+            reopened.close(update_status=False)
+
+    async def test_set_lifecycle_reuses_open_engine_store(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        path = tmp_path / "live.kohakutr"
+        store = SessionStore(path)
+        store.init_meta("sid", "agent", "x", str(tmp_path), ["a"])
+        _engine._session_stores["sid"] = store
+
+        def fail_open(*args, **kwargs):
+            raise AssertionError("must reuse the live engine store")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.laboratory.adapters.terrarium_session.SessionStore",
+            fail_open,
+        )
+
+        result = _adapter._op_set_lifecycle(
+            {
+                "session_path": str(path),
+                "conversation_open": False,
+                "status": "completed",
+            }
+        )
+
+        assert result["ok"] is True
+        assert bool(store.meta["conversation_open"]) is False
+        assert store.meta["status"] == "completed"
+
+    async def test_rollback_resume_removes_graph_members(
+        self, _adapter, _engine, tmp_path
+    ):
+        _engine._creatures = {
+            "one": SimpleNamespace(creature_id="one", graph_id="target"),
+            "two": SimpleNamespace(creature_id="two", graph_id="target"),
+            "other": SimpleNamespace(creature_id="other", graph_id="other"),
+        }
+        removed = []
+        session_path = tmp_path / "rollback.kohakutr"
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one", "two"])
+        _engine._session_stores = {"target": store}
+        _engine.list_creatures = lambda: list(_engine._creatures.values())
+
+        async def remove_creature(creature_id):
+            assert "target" not in _engine._session_stores
+            removed.append(creature_id)
+            _engine._creatures.pop(creature_id)
+
+        _engine.remove_creature = remove_creature
+
+        result = await _adapter._op_rollback_resume({"graph_id": "target"})
+
+        assert result == {"ok": True, "removed": ["one", "two"]}
+        assert removed == ["two", "one"]
+        assert list(_engine._creatures) == ["other"]
+        assert session_path.exists() is False
+
+    async def test_rollback_resume_resolves_graph_from_session_path(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        session_path = tmp_path / "resume" / "rollback-by-path.kohakutr"
+        session_path.parent.mkdir()
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one"])
+        _engine._session_stores = {"target": store}
+        _engine._adopt_result = "target"
+        _engine._creatures = {
+            "one": SimpleNamespace(creature_id="one", graph_id="target"),
+        }
+        _engine.list_creatures = lambda: list(_engine._creatures.values())
+        removed = []
+
+        async def remove_creature(creature_id):
+            removed.append(creature_id)
+            _engine._creatures.pop(creature_id)
+
+        _engine.remove_creature = remove_creature
+
+        await _adapter._op_resume(
+            {"path": str(session_path), "resume_token": "resume-token"}
+        )
+        result = await _adapter._op_rollback_resume(
+            {
+                "session_path": str(session_path),
+                "resume_token": "resume-token",
+            }
+        )
+
+        assert result == {"ok": True, "removed": ["one"]}
+        assert removed == ["one"]
+        assert session_path.exists() is False
+
+    async def test_path_rollback_does_not_remove_a_preexisting_active_store(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        session_path = tmp_path / "resume" / "already-active.kohakutr"
+        session_path.parent.mkdir()
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one"])
+        _engine._session_stores = {"target": store}
+        _engine._creatures = {
+            "one": SimpleNamespace(creature_id="one", graph_id="target"),
+        }
+        _engine.list_creatures = lambda: list(_engine._creatures.values())
+
+        with pytest.raises(ValueError, match="active session store"):
+            await _adapter._op_rollback_resume(
+                {
+                    "session_path": str(session_path),
+                    "resume_token": "unrecognized-attempt",
+                }
+            )
+
+        assert list(_engine._creatures) == ["one"]
+        assert _engine._session_stores == {"target": store}
+        assert session_path.exists() is True
+
+    def test_delete_transfer_refuses_an_active_store(
+        self, _adapter, _engine, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        session_path = tmp_path / "resume" / "active.kohakutr"
+        session_path.parent.mkdir()
+        store = SessionStore(session_path)
+        store.init_meta("target", "agent", "x", str(tmp_path), ["one"])
+        _engine._session_stores = {"target": store}
+
+        with pytest.raises(ValueError, match="active session store"):
+            _adapter._op_delete_transfer({"session_path": str(session_path)})
+
+        assert session_path.exists() is True
+
+    def test_delete_transfer_rejects_a_path_outside_transfer_directory(
+        self, _adapter, tmp_path, monkeypatch
+    ):
+        monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "config"))
+        outside = tmp_path / "unrelated.kohakutr"
+        outside.write_bytes(b"keep")
+
+        with pytest.raises(ValueError, match="transfer directory"):
+            _adapter._op_delete_transfer({"session_path": str(outside)})
+
+        assert outside.read_bytes() == b"keep"
 
 
 # ── error mapping ───────────────────────────────────────────────

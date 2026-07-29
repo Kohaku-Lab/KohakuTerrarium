@@ -120,18 +120,20 @@ class SessionIndex:
         """Delete sidecars whose stored FTS column order is not current.
 
         A meta-only probe avoids opening the search table. Missing, unreadable,
-        reordered, or changed columns invalidate the database and its WAL/SHM
-        companions. The column list, rather than the version scalar, is the
-        ground truth for compatibility.
+        reordered, or changed columns, and any schema-version mismatch,
+        invalidate the database and its WAL/SHM companions.
         """
         if not sidecar_path.exists():
             return
         stored: Any = None
+        stored_version: Any = None
         meta = None
         try:
             meta = KVault(str(sidecar_path), table="meta")
             if "search_columns" in meta:
                 stored = meta.get("search_columns")
+            if "schema_version" in meta:
+                stored_version = meta.get("schema_version")
         except Exception as exc:  # noqa: BLE001
             logger.warning(
                 "Session index meta probe failed; rebuilding sidecar",
@@ -149,10 +151,16 @@ class SessionIndex:
                     logger.warning(
                         "meta probe close failed", error=str(exc), exc_info=True
                     )
-        if isinstance(stored, list) and stored == list(SEARCH_COLUMNS):
+        if (
+            stored_version == SCHEMA_VERSION
+            and isinstance(stored, list)
+            and stored == list(SEARCH_COLUMNS)
+        ):
             return
         logger.info(
             "Session index schema drift; purging sidecar",
+            stored_version=stored_version,
+            current_version=SCHEMA_VERSION,
             stored_columns=stored,
             current_columns=list(SEARCH_COLUMNS),
             path=str(sidecar_path),
