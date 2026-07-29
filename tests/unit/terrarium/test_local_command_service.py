@@ -83,27 +83,6 @@ async def test_command_inventory_resolves_the_local_agent():
     assert service.seen_creature_ids == ["creature-one"]
 
 
-async def test_invoke_skill_forwards_arguments_and_source():
-    service = _Service()
-
-    result = await service.invoke_skill(
-        "creature-one",
-        "review",
-        {"args": "diff"},
-        source="web:test",
-    )
-
-    assert result == {
-        "skill": "review",
-        "accepted": True,
-        "source": "web:test",
-    }
-    content, source = service.agent.injected[0]
-    assert "Inspect the proposed change carefully." in content
-    assert "diff" in content
-    assert source == "web:test"
-
-
 async def test_execute_command_normalizes_args_and_forwards_trusted_context():
     service = _Service()
 

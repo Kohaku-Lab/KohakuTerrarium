@@ -32,9 +32,15 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
       ]),
     )
     const skills = (inventory.value.skills || [])
-      .filter((entry) => entry.enabled && !commandNamespace.has(entry.name.toLowerCase()))
+      .filter(
+        (entry) =>
+          entry.enabled &&
+          !entry.invocation_blocked &&
+          !commandNamespace.has(entry.name.toLowerCase()),
+      )
       .map((entry) => ({ ...entry, type: "skill" }))
-    return [...commands, ...skills]
+    const visibleCommands = commands.filter((entry) => entry.name.toLowerCase() === "goal")
+    return [...visibleCommands, ...skills]
       .filter(
         (entry) =>
           entry.name.toLowerCase().includes(needle) ||

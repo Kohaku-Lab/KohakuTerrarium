@@ -413,6 +413,7 @@ export default {
   "chat.slash.commands": "Commands",
   "chat.slash.skills": "Skills",
   "chat.slash.noDescription": "No description",
+  "chat.command.completed": "Command completed.",
   "chat.getStarted": "Send a message to get started",
   "chat.subagent.conversation": "Conversation",
   "chat.subagent.empty": "(no messages)",

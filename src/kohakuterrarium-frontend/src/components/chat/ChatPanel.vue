@@ -758,10 +758,22 @@ async function send() {
     clearOwnedSlashTarget()
     return
   }
-  const commandTarget = {
-    sessionId: chat._instanceGraphId || chat._instanceId,
-    creatureId: sendTab || "root",
+  const inlineCommand = /^\/goal(?:\s|$)/i.test(sendText)
+  const resultContext = inlineCommand ? chat.registerCommandResultContext(sendTab) : chat.captureCommandResultContext(sendTab)
+  if (contextChanged()) {
+    if (inlineCommand) chat.releaseCommandResultContext(sendTab, resultContext)
+    clearOwnedSlashTarget()
+    return
   }
+  const commandTarget = {
+    sessionId: sendGraphId || sendInstanceId,
+    creatureId: sendTab || "root",
+    tabKey: sendTab,
+    commandText: sendText,
+    inline: inlineCommand,
+    resultContext,
+  }
+  const commandContextChanged = () => chat._instanceGeneration !== sendInstanceGeneration || chat._instanceId !== sendInstanceId || chat._instanceGraphId !== sendGraphId || props.instance?.id !== sendPropInstanceId || props.instance?.graph_id !== sendPropGraphId
   const outcomePromise = chat.send(parts)
   inputText.value = ""
   attachments.value = []
@@ -773,10 +785,34 @@ async function send() {
   })
   try {
     const outcome = await outcomePromise
-    if (outcome?.handled === "command") await surfaceCommandResult(outcome.result, commandTarget)
+    if (outcome?.handled === "command") {
+      if (commandContextChanged()) {
+        chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
+      } else {
+        await surfaceCommandResult(outcome.result, commandTarget)
+      }
+    } else if (commandTarget.inline) {
+      chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
+    }
   } catch (err) {
     console.error("Command failed:", err)
-    ElMessage.error(`Command failed: ${err?.message || err}`)
+    if (commandContextChanged()) {
+      chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
+      return
+    }
+    if (commandTarget.inline) {
+      chat.addCommandResult(
+        commandTarget.tabKey,
+        commandTarget.commandText,
+        {
+          error: err?.response?.data?.detail || err?.message || String(err),
+        },
+        commandTarget.resultContext,
+      )
+      if (viewActiveTab.value === commandTarget.tabKey) nextTick(scrollToBottom)
+    } else {
+      ElMessage.error(`Command failed: ${err?.message || err}`)
+    }
   }
 }
 
@@ -796,6 +832,11 @@ async function triggerCompact() {
 
 async function surfaceCommandResult(response, target = null) {
   if (!response) return
+  if (target?.inline) {
+    chat.addCommandResult(target.tabKey, target.commandText, response, target.resultContext)
+    if (viewActiveTab.value === target.tabKey) nextTick(scrollToBottom)
+    return
+  }
   if (response.error) {
     ElMessage.error(response.error)
     return

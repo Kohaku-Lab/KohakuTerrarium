@@ -22,7 +22,6 @@ from kohakuterrarium.terrarium.creature_ops import (
     agent_execute_command,
     agent_get_module_options,
     agent_get_native_tool_options,
-    agent_invoke_skill,
     agent_list_modules,
     agent_list_plugins,
     agent_native_tool_inventory,
@@ -764,26 +763,6 @@ class TerrariumRuntimeAdapter:
                 cid = msg.body["creature_id"]
                 creature = self._require_hosted(cid)
                 return agent_command_inventory(creature.agent)
-
-            case "invoke_skill":
-                if msg.sender_node != HOST_NODE_ID:
-                    return {
-                        "error": {
-                            "kind": "forbidden",
-                            "message": (
-                                "invoke_skill refused from non-host origin "
-                                f"{msg.sender_node!r}"
-                            ),
-                        }
-                    }
-                cid = msg.body["creature_id"]
-                creature = self._require_hosted(cid)
-                return await agent_invoke_skill(
-                    creature.agent,
-                    msg.body["skill"],
-                    msg.body.get("args"),
-                    source=msg.body.get("source", "web:skill"),
-                )
 
             case "execute_command":
                 # Principal and operator authority may only originate from the host.

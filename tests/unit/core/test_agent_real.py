@@ -2271,11 +2271,28 @@ class TestSessionStoreUserInputAppend:
         agent.attach_session_store(store)
         await agent.start()
         try:
-            await agent._process_event(create_user_input_event("hello"))
+            event = create_user_input_event("hello")
+            event.context["pending_id"] = "c_primary"
+            await agent._process_event(event)
             events = store.get_events("test_agent")
             types_ = [e["type"] for e in events]
             assert "user_input" in types_
             assert "user_message" in types_
+            user_events = [
+                event
+                for event in events
+                if event["type"] in {"user_input", "user_message"}
+            ]
+            assert all(event["pending_id"] == "c_primary" for event in user_events)
+            assert all(isinstance(event["event_id"], int) for event in user_events)
+            resumable_user_events = [
+                event
+                for event in store.get_resumable_events("test_agent")
+                if event["type"] in {"user_input", "user_message"}
+            ]
+            assert all(
+                event["pending_id"] == "c_primary" for event in resumable_user_events
+            )
         finally:
             await agent.stop()
 
@@ -4621,7 +4638,9 @@ class TestOpportunisticInputInjection:
                 # is held and inject_input WILL buffer.
                 await _asyncio.wait_for(injected_during_tool.wait(), timeout=5.0)
                 # Inject B from a sibling task (mirrors how io.py does it).
-                processed = await agent.inject_input("B", source="web")
+                processed = await agent.inject_input(
+                    "B", source="web", pending_id="c_midturn"
+                )
                 assert processed is False, (
                     "B must buffer mid-turn — _process_event returns False "
                     "when the lock is held by another turn"
@@ -4649,8 +4668,15 @@ class TestOpportunisticInputInjection:
                     f"event; got types: {[e.get('type') for e in events]}"
                 )
                 assert injected[0].get("content") == "B"
+                assert injected[0].get("pending_id") == "c_midturn"
                 assert injected[0].get("turn_index") == agent._turn_index
                 assert injected[0].get("branch_id") == agent._branch_id
+                resumable_injected = [
+                    e
+                    for e in store.get_resumable_events(agent.config.name)
+                    if e.get("type") == "user_input_injected"
+                ]
+                assert resumable_injected[0].get("pending_id") == "c_midturn"
 
                 # 3) StreamOutput queue has user_input_injected frame for B.
                 frames: list[dict] = []
@@ -4667,6 +4693,7 @@ class TestOpportunisticInputInjection:
                     f"got frame types: {[(f.get('type'), f.get('activity_type')) for f in frames]}"
                 )
                 assert inj_frames[0].get("content") == "B"
+                assert inj_frames[0].get("pending_id") == "c_midturn"
                 assert inj_frames[0].get("source") == "test_agent"
             finally:
                 release.set()

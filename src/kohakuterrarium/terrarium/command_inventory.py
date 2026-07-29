@@ -1,4 +1,4 @@
-"""Runtime command/skill inventory and explicit invocation resolution."""
+"""Runtime command and skill inventory for interactive clients."""
 
 from __future__ import annotations
 
@@ -62,32 +62,6 @@ class RuntimeCommandInventory:
         }
 
 
-@dataclass(frozen=True)
-class ExplicitInvocation:
-    """Resolved explicit slash invocation."""
-
-    kind: Literal["command", "skill"]
-    name: str
-    requested_name: str
-    value: Any
-
-
-class InvocationResolutionError(ValueError):
-    """Base error for explicit command/skill resolution."""
-
-    def __init__(self, name: str, message: str) -> None:
-        self.name = name
-        super().__init__(message)
-
-
-class DisabledSkillError(InvocationResolutionError):
-    """Raised when a user explicitly requests a disabled skill."""
-
-
-class UnknownInvocationError(InvocationResolutionError):
-    """Raised when no command, alias, or skill matches the requested name."""
-
-
 def _command_source(provenance: Any) -> str:
     if provenance is None:
         return "runtime"
@@ -129,63 +103,3 @@ def build_command_inventory(agent: Any) -> RuntimeCommandInventory:
         for skill in sorted(skills, key=lambda item: item.name)
     )
     return RuntimeCommandInventory(commands=command_entries, skills=skill_entries)
-
-
-def resolve_explicit_invocation(agent: Any, name: str) -> ExplicitInvocation:
-    """Resolve a user-selected slash target, with commands and aliases first."""
-    requested = name.strip().lstrip("/")
-    normalized = requested.casefold()
-    commands = agent.list_user_commands()
-    for canonical_name in (requested, normalized):
-        command = commands.get(canonical_name)
-        if command is not None:
-            return ExplicitInvocation("command", canonical_name, normalized, command)
-
-    command_matches = [
-        (canonical_name, candidate)
-        for canonical_name, candidate in commands.items()
-        if canonical_name.casefold() == normalized
-    ]
-    if len(command_matches) == 1:
-        canonical_name, command = command_matches[0]
-        return ExplicitInvocation("command", canonical_name, normalized, command)
-    if len(command_matches) > 1:
-        raise UnknownInvocationError(
-            normalized,
-            f"Ambiguous command name: /{normalized}",
-        )
-
-    for canonical_name, candidate in commands.items():
-        aliases = {str(alias).casefold() for alias in getattr(candidate, "aliases", ())}
-        if normalized in aliases:
-            return ExplicitInvocation("command", canonical_name, normalized, candidate)
-
-    registry = getattr(agent, "skills", None)
-    skill = registry.get(requested) if registry is not None else None
-    if skill is None and registry is not None:
-        skill = registry.get(normalized)
-    if skill is None and registry is not None:
-        matches = [
-            candidate
-            for candidate in registry.all()
-            if candidate.name.casefold() == normalized
-        ]
-        if len(matches) == 1:
-            skill = matches[0]
-        elif len(matches) > 1:
-            raise UnknownInvocationError(
-                normalized,
-                f"Ambiguous skill name: /{normalized}",
-            )
-    if skill is None:
-        raise UnknownInvocationError(
-            normalized,
-            f"Unknown command or skill: /{normalized}",
-        )
-    if not skill.enabled:
-        raise DisabledSkillError(
-            normalized,
-            f"Skill is disabled: /{normalized}",
-        )
-
-    return ExplicitInvocation("skill", skill.name, normalized, skill)

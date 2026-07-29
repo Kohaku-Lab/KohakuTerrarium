@@ -29,15 +29,22 @@ describe("useSlashCommandCompletion", () => {
     expect(completion.open.value).toBe(true)
   })
 
-  it("hides skills shadowed by command names or aliases", async () => {
+  it("shows only inventory /goal and enabled skills outside the full command namespace", async () => {
     const chat = reactive({
       commandInventoryByTab: {
         kohaku: {
-          commands: [{ name: "review", aliases: ["r"], description: "Review command" }],
+          commands: [
+            { name: "model", aliases: ["llm"], description: "Switch model" },
+            { name: "goal", aliases: [], description: "Manage goals" },
+            { name: "status", aliases: ["info"], description: "Show status" },
+            { name: "compact", aliases: [], description: "Compact context" },
+          ],
           skills: [
-            { name: "review", enabled: true },
-            { name: "R", enabled: true },
-            { name: "standalone", enabled: true },
+            { name: "MODEL", enabled: true },
+            { name: "Info", enabled: true },
+            { name: "disabled-review", enabled: false },
+            { name: "manual-only", enabled: true, invocation_blocked: true },
+            { name: "research", enabled: true },
           ],
         },
       },
@@ -51,16 +58,68 @@ describe("useSlashCommandCompletion", () => {
     await nextTick()
 
     expect(completion.entries.value.map((entry) => `${entry.type}:${entry.name}`)).toEqual([
-      "command:review",
-      "skill:standalone",
+      "command:goal",
+      "skill:research",
     ])
+  })
+
+  it("does not synthesize /goal when the live inventory does not contain it", async () => {
+    const chat = reactive({
+      commandInventoryByTab: {
+        kohaku: {
+          commands: [{ name: "status", aliases: ["info"], description: "Show status" }],
+          skills: [{ name: "research", enabled: true }],
+        },
+      },
+      loadCommandInventory: vi.fn().mockResolvedValue(undefined),
+      markSlashTarget: vi.fn(),
+    })
+    const inputText = ref("/")
+    const activeTabKey = ref("kohaku")
+    const completion = useSlashCommandCompletion({ chat, inputText, activeTabKey })
+
+    await nextTick()
+
+    expect(completion.entries.value.map((entry) => `${entry.type}:${entry.name}`)).toEqual([
+      "skill:research",
+    ])
+  })
+
+  it("filters the visible /goal and skills without revealing hidden commands", async () => {
+    const chat = reactive({
+      commandInventoryByTab: {
+        kohaku: {
+          commands: [
+            { name: "goal", aliases: [], description: "Manage goals" },
+            { name: "status", aliases: ["info"], description: "Show status" },
+          ],
+          skills: [{ name: "research", enabled: true }],
+        },
+      },
+      loadCommandInventory: vi.fn().mockResolvedValue(undefined),
+      markSlashTarget: vi.fn(),
+    })
+    const inputText = ref("/go")
+    const activeTabKey = ref("kohaku")
+    const completion = useSlashCommandCompletion({ chat, inputText, activeTabKey })
+
+    await nextTick()
+    expect(completion.entries.value.map((entry) => entry.name)).toEqual(["goal"])
+
+    inputText.value = "/stat"
+    await nextTick()
+    expect(completion.entries.value).toEqual([])
+
+    inputText.value = "/sea"
+    await nextTick()
+    expect(completion.entries.value.map((entry) => entry.name)).toEqual(["research"])
   })
 
   it("dismisses the current query until the input changes or the menu is reopened", async () => {
     const chat = reactive({
       commandInventoryByTab: {
         kohaku: {
-          commands: [{ name: "help", aliases: [], description: "Show help" }],
+          commands: [{ name: "goal", aliases: [], description: "Manage goals" }],
           skills: [],
         },
       },
@@ -82,7 +141,7 @@ describe("useSlashCommandCompletion", () => {
       null,
     )
 
-    inputText.value = "/h"
+    inputText.value = "/go"
     await nextTick()
     expect(completion.open.value).toBe(true)
 

@@ -158,11 +158,13 @@ class TestBatchingInvariants:
         await agent.start()
         try:
             before = agent._turn_index
+            folded_user = create_user_input_event("hi there")
+            folded_user.context["pending_id"] = "c_folded"
             # Initial batch: background completion (primary) + fresh user input.
             await agent._begin_batch(
                 [
                     create_tool_complete_event(job_id="bash_1", content="done"),
-                    create_user_input_event("hi there"),
+                    folded_user,
                 ]
             )
             assert agent._turn_index == before + 1, (
@@ -175,6 +177,7 @@ class TestBatchingInvariants:
                 if e["type"] == "user_input_injected"
             ]
             assert len(injected) == 1
+            assert injected[0]["pending_id"] == "c_folded"
             assert injected[0]["turn_index"] == before + 1, (
                 "the folded user_input's session record must carry the NEW "
                 "turn_index, not the previous turn's"

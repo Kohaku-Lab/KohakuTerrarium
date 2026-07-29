@@ -639,24 +639,6 @@ class MultiNodeTerrariumService(
             lambda svc: svc.command_inventory(creature_id),
         )
 
-    async def invoke_skill(
-        self,
-        creature_id: str,
-        skill: str,
-        args: str | dict[str, Any] | None = None,
-        *,
-        source: str = "web:skill",
-    ) -> dict[str, Any]:
-        return await self._route_per_creature(
-            creature_id,
-            lambda svc: svc.invoke_skill(
-                creature_id,
-                skill,
-                args,
-                source=source,
-            ),
-        )
-
     async def execute_command(
         self,
         creature_id: str,

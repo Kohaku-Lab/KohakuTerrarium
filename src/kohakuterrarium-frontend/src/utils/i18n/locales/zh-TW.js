@@ -357,6 +357,7 @@ export default {
   "chat.slash.commands": "命令",
   "chat.slash.skills": "技能",
   "chat.slash.noDescription": "暫無說明",
+  "chat.command.completed": "命令已完成。",
   "chat.getStarted": "傳送訊息開始使用",
   "chat.processing": "KohakUwUing...",
   "chat.bgResultTool": "背景工具結果已送達：{label}",

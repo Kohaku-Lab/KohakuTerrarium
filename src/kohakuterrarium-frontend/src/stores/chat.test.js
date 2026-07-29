@@ -40,6 +40,22 @@ describe("chat store — slash commands", () => {
     expect(load).not.toHaveBeenCalled()
   })
 
+  it("does not offer an invocation-blocked skill to the ordinary chat path", async () => {
+    const chat = useChatStore()
+    chat.commandInventoryByTab.kohaku = {
+      commands: [],
+      skills: [{ name: "manual-only", enabled: true, invocation_blocked: true }],
+    }
+    chat._commandInventoryFetchedAtByTab.kohaku = Date.now()
+
+    const target = await chat.prepareSlashSend(
+      { key: "kohaku", creature: "kohaku", type: "creature" },
+      "/manual-only",
+    )
+
+    expect(target).toBeNull()
+  })
+
   it("executes a pure-text /goal command without sending websocket input", async () => {
     const chat = useChatStore()
     chat._instanceId = "session_1"
@@ -158,27 +174,670 @@ describe("chat store — slash commands", () => {
     inventorySpy.mockRestore()
   })
 
-  it("routes a menu-selected skill to the explicit skill endpoint", async () => {
+  it("sends a menu-selected skill as ordinary chat for the agent to handle", async () => {
     const chat = useChatStore()
     chat._instanceGraphId = "graph_1"
     chat.activeTab = "kohaku"
     chat.tabs = ["kohaku"]
     chat.messagesByTab = { kohaku: [] }
     chat.markSlashTarget("kohaku", { type: "skill", name: "review" })
+    const wsSend = vi.fn()
+    chat._ws = { readyState: WebSocket.OPEN, send: wsSend }
     const importActual = await vi.importActual("@/utils/api")
-    const result = { accepted: true }
-    const skillSpy = vi
-      .spyOn(importActual.terrariumAPI, "invokeCreatureSkill")
-      .mockResolvedValue(result)
     const commandSpy = vi.spyOn(importActual.terrariumAPI, "executeCreatureCommand")
 
     const outcome = await chat.send([{ type: "text", text: "/review diff" }])
 
-    expect(skillSpy).toHaveBeenCalledWith("graph_1", "kohaku", "review", "diff")
     expect(commandSpy).not.toHaveBeenCalled()
-    expect(outcome).toEqual({ handled: "skill", result })
-    skillSpy.mockRestore()
+    expect(outcome).toBeUndefined()
+    expect(JSON.parse(wsSend.mock.calls[0][0])).toMatchObject({
+      type: "input",
+      target: "kohaku",
+      content: [{ type: "text", text: "/review diff" }],
+    })
+    expect(chat.messagesByTab.kohaku[0]).toMatchObject({
+      role: "user",
+      content: "/review diff",
+    })
     commandSpy.mockRestore()
+  })
+
+  it("sends hidden UI commands as ordinary chat instead of executing them", async () => {
+    const chat = useChatStore()
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku"]
+    chat.messagesByTab = { kohaku: [] }
+    chat.commandInventoryByTab.kohaku = {
+      commands: [{ name: "model", aliases: [] }],
+      skills: [],
+    }
+    chat._commandInventoryFetchedAtByTab.kohaku = Date.now()
+    const target = await chat.prepareSlashSend(
+      { key: "kohaku", creature: "kohaku", type: "creature" },
+      "/model",
+    )
+    chat.markSlashTarget("kohaku", target)
+    const wsSend = vi.fn()
+    chat._ws = { readyState: WebSocket.OPEN, send: wsSend }
+    const importActual = await vi.importActual("@/utils/api")
+    const commandSpy = vi.spyOn(importActual.terrariumAPI, "executeCreatureCommand")
+
+    await chat.send([{ type: "text", text: "/model" }])
+
+    expect(target).toBeNull()
+    expect(commandSpy).not.toHaveBeenCalled()
+    expect(wsSend).toHaveBeenCalledOnce()
+    expect(chat.messagesByTab.kohaku[0].content).toBe("/model")
+    commandSpy.mockRestore()
+  })
+
+  it("keeps inline command results across canonical history rebuilds", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { kohaku: [] }
+    chat.eventsByTab = {
+      kohaku: [{ type: "user_input", event_id: 1, content: "hello" }],
+    }
+    chat._rebuildMessages("kohaku")
+
+    chat.addCommandResult("kohaku", "/goal list", {
+      output: "Goals: drive_1",
+      data: { type: "list", title: "Goals", items: [] },
+    })
+    chat._rebuildMessages("kohaku")
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "user",
+      "command_result",
+    ])
+    expect(chat.messagesByTab.kohaku[1]).toMatchObject({
+      command: "/goal list",
+      content: "Goals: drive_1",
+    })
+  })
+
+  it("keeps inline command results anchored between later history events", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [{ type: "user_input", event_id: 1, content: "before" }],
+    }
+    chat._rebuildMessages("kohaku")
+
+    chat.addCommandResult("kohaku", "/goal list", {
+      output: "Goals: drive_1",
+    })
+    chat.eventsByTab.kohaku.push({
+      type: "user_input",
+      event_id: 2,
+      content: "after",
+    })
+    chat._rebuildMessages("kohaku")
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "user",
+      "command_result",
+      "user",
+    ])
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "before",
+      "Goals: drive_1",
+      "after",
+    ])
+  })
+
+  it("pins a command result to the nearest boundary after history shrinks", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [
+        { type: "user_input", event_id: 1, content: "one" },
+        { type: "user_input", event_id: 2, content: "two" },
+        { type: "user_input", event_id: 3, content: "three" },
+      ],
+    }
+    chat._rebuildMessages("kohaku")
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" })
+
+    chat.eventsByTab.kohaku = [{ type: "user_input", event_id: 1, content: "one" }]
+    chat._rebuildMessages("kohaku")
+    chat.eventsByTab.kohaku.push({
+      type: "user_input",
+      event_id: 4,
+      content: "after compact",
+    })
+    chat._rebuildMessages("kohaku")
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "user",
+      "command_result",
+      "user",
+    ])
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "one",
+      "Goals",
+      "after compact",
+    ])
+  })
+
+  it("shows a command result only on its dispatch branch and restores it on return", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [
+        {
+          type: "user_input",
+          event_id: 1,
+          turn_index: 1,
+          branch_id: 1,
+          content: "branch one",
+        },
+        {
+          type: "processing_start",
+          event_id: 2,
+          turn_index: 1,
+          branch_id: 1,
+        },
+        {
+          type: "text_chunk",
+          event_id: 3,
+          turn_index: 1,
+          branch_id: 1,
+          content: "reply",
+        },
+        {
+          type: "processing_end",
+          event_id: 4,
+          turn_index: 1,
+          branch_id: 1,
+        },
+        {
+          type: "user_input",
+          event_id: 5,
+          turn_index: 1,
+          branch_id: 2,
+          content: "branch two",
+        },
+      ],
+    }
+    chat.branchViewByTab = { kohaku: { 1: 1 } }
+    chat._rebuildMessages("kohaku")
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" })
+
+    chat.branchViewByTab.kohaku = { 1: 2 }
+    chat._rebuildMessages("kohaku")
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual(["user"])
+
+    chat.branchViewByTab.kohaku = { 1: 1 }
+    chat._rebuildMessages("kohaku")
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "command_result",
+    ])
+  })
+
+  it("keeps an in-flight command result on its dispatch branch boundary", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [
+        {
+          type: "user_input",
+          event_id: 1,
+          turn_index: 1,
+          branch_id: 1,
+          content: "branch one",
+        },
+        {
+          type: "processing_start",
+          event_id: 2,
+          turn_index: 1,
+          branch_id: 1,
+        },
+        {
+          type: "text_chunk",
+          event_id: 3,
+          turn_index: 1,
+          branch_id: 1,
+          content: "reply",
+        },
+        {
+          type: "processing_end",
+          event_id: 4,
+          turn_index: 1,
+          branch_id: 1,
+        },
+        {
+          type: "user_input",
+          event_id: 5,
+          turn_index: 1,
+          branch_id: 2,
+          content: "branch two",
+        },
+      ],
+    }
+    chat.branchViewByTab = { kohaku: { 1: 1 } }
+    chat._rebuildMessages("kohaku")
+    const resultContext = chat.captureCommandResultContext("kohaku")
+
+    chat.branchViewByTab.kohaku = { 1: 2 }
+    chat._rebuildMessages("kohaku")
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual(["user"])
+
+    chat.branchViewByTab.kohaku = { 1: 1 }
+    chat._rebuildMessages("kohaku")
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "user",
+      "assistant",
+      "command_result",
+    ])
+  })
+
+  it("locks an unknown dispatch context to the branch selected when history arrives", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { kohaku: [] }
+    const resultContext = chat.registerCommandResultContext("kohaku")
+
+    chat.eventsByTab = {
+      kohaku: [
+        {
+          type: "user_input",
+          event_id: 1,
+          turn_index: 1,
+          branch_id: 1,
+          content: "branch one",
+        },
+        {
+          type: "user_input",
+          event_id: 2,
+          turn_index: 1,
+          branch_id: 2,
+          content: "branch two",
+        },
+      ],
+    }
+    chat.branchViewByTab = { kohaku: {} }
+    chat._rebuildMessages("kohaku")
+
+    chat.branchViewByTab.kohaku = { 1: 1 }
+    chat._rebuildMessages("kohaku")
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual(["branch one"])
+
+    chat.branchViewByTab.kohaku = { 1: 2 }
+    chat._rebuildMessages("kohaku")
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "branch two",
+      "Goals",
+    ])
+  })
+
+  it("inserts an in-flight command result before later optimistic messages", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [{ type: "user_input", event_id: 1, content: "before" }],
+    }
+    chat._rebuildMessages("kohaku")
+    const resultContext = chat.captureCommandResultContext("kohaku")
+    chat.messagesByTab.kohaku.push({
+      id: "later",
+      role: "user",
+      content: "after",
+    })
+
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "user",
+      "command_result",
+      "user",
+    ])
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "before",
+      "Goals",
+      "after",
+    ])
+  })
+
+  it("does not let a command result cancel an in-flight initial history load", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session_1"
+    chat._instanceGraphId = "graph_1"
+    chat.messagesByTab = { kohaku: [] }
+    let resolveHistory
+    const history = new Promise((resolve) => {
+      resolveHistory = resolve
+    })
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi.spyOn(importActual.terrariumAPI, "getHistory").mockReturnValue(history)
+    const pending = chat._loadHistory("kohaku")
+
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" })
+    resolveHistory({
+      events: [{ type: "user_input", event_id: 1, content: "older history" }],
+      messages: [],
+      is_processing: false,
+    })
+
+    await expect(pending).resolves.toBe(true)
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "user",
+      "command_result",
+    ])
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "older history",
+      "Goals",
+    ])
+    getHistory.mockRestore()
+  })
+
+  it("anchors a command result before a later message while initial history is deferred", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session_1"
+    chat._instanceGraphId = "graph_1"
+    chat.messagesByTab = { kohaku: [] }
+    let resolveHistory
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi.spyOn(importActual.terrariumAPI, "getHistory").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve
+        }),
+    )
+    const pending = chat._resyncHistory("kohaku", {
+      generation: chat._instanceGeneration,
+      initialLoad: true,
+    })
+    await vi.waitFor(() => expect(resolveHistory).toBeTypeOf("function"))
+
+    const resultContext = chat.registerCommandResultContext("kohaku")
+    chat._addMsg("kohaku", {
+      id: "later",
+      eventId: "c_later",
+      role: "user",
+      content: "after",
+    })
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "command_result",
+      "user",
+    ])
+    resolveHistory({
+      events: [{ type: "user_input", event_id: 1, content: "stale history" }],
+      messages: [],
+      is_processing: false,
+    })
+    await expect(pending).resolves.toBe(false)
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual(["Goals", "after"])
+    getHistory.mockRestore()
+  })
+
+  it("keeps a command result before a later message when initial history fails", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session_1"
+    chat._instanceGraphId = "graph_1"
+    chat.messagesByTab = { kohaku: [] }
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockRejectedValue(new Error("offline"))
+    const pending = chat._loadHistory("kohaku")
+
+    const resultContext = chat.registerCommandResultContext("kohaku")
+    chat._addMsg("kohaku", {
+      id: "later",
+      eventId: "c_later",
+      role: "user",
+      content: "after",
+    })
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+
+    await expect(pending).resolves.toBe(false)
+    expect(chat.messagesByTab.kohaku.map((message) => message.role)).toEqual([
+      "command_result",
+      "user",
+    ])
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual(["Goals", "after"])
+    getHistory.mockRestore()
+  })
+
+  it("orders command results by dispatch when they share a later-message boundary", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { kohaku: [] }
+    const firstContext = chat.registerCommandResultContext("kohaku")
+    const secondContext = chat.registerCommandResultContext("kohaku")
+    chat._addMsg("kohaku", {
+      id: "later",
+      eventId: "c_later",
+      role: "user",
+      content: "after",
+    })
+
+    chat.addCommandResult("kohaku", "/goal second", { output: "second" }, secondContext)
+    chat.addCommandResult("kohaku", "/goal first", { output: "first" }, firstContext)
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "first",
+      "second",
+      "after",
+    ])
+  })
+
+  it("does not anchor a pending command result to a different branch view", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [
+        {
+          type: "user_input",
+          event_id: 1,
+          turn_index: 1,
+          branch_id: 1,
+          content: "branch one",
+        },
+        {
+          type: "user_input",
+          event_id: 2,
+          turn_index: 1,
+          branch_id: 2,
+          content: "branch two",
+        },
+      ],
+    }
+    chat.branchViewByTab = { kohaku: { 1: 1 } }
+    chat._rebuildMessages("kohaku")
+    const resultContext = chat.registerCommandResultContext("kohaku")
+
+    chat.branchViewByTab.kohaku = { 1: 2 }
+    chat._rebuildMessages("kohaku")
+    chat._addMsg("kohaku", {
+      id: "other-branch",
+      eventId: "c_other",
+      role: "user",
+      content: "other branch",
+    })
+    expect(resultContext.beforeEventId).toBeNull()
+
+    chat.branchViewByTab.kohaku = { 1: 1 }
+    chat._rebuildMessages("kohaku")
+    chat._addMsg("kohaku", {
+      id: "dispatch-branch",
+      eventId: "c_dispatch",
+      role: "user",
+      content: "dispatch branch",
+    })
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+
+    expect(chat._localCommandResultsByTab.kohaku[0]._beforeEventId).toBe("c_dispatch")
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "branch one",
+      "Goals",
+      "dispatch branch",
+    ])
+  })
+
+  it("treats an explicit latest branch as the same view as the default selection", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [
+        {
+          type: "user_input",
+          event_id: 1,
+          turn_index: 1,
+          branch_id: 1,
+          content: "branch one",
+        },
+        {
+          type: "user_input",
+          event_id: 2,
+          turn_index: 1,
+          branch_id: 2,
+          content: "branch two",
+        },
+      ],
+    }
+    chat.branchViewByTab = { kohaku: {} }
+    chat._rebuildMessages("kohaku")
+    const resultContext = chat.registerCommandResultContext("kohaku")
+
+    chat.branchViewByTab.kohaku = { 1: 2 }
+    chat._rebuildMessages("kohaku")
+    chat._addMsg("kohaku", {
+      id: "later",
+      eventId: "c_later",
+      role: "user",
+      content: "after",
+    })
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+
+    expect(chat._localCommandResultsByTab.kohaku[0]._beforeEventId).toBe("c_later")
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "branch two",
+      "Goals",
+      "after",
+    ])
+  })
+
+  it("uses the saved anchor when a command result boundary disappears", () => {
+    const chat = useChatStore()
+    chat.eventsByTab = {
+      kohaku: [{ type: "user_input", event_id: 1, content: "before" }],
+    }
+    chat._rebuildMessages("kohaku")
+    const resultContext = chat.registerCommandResultContext("kohaku")
+    chat._addMsg("kohaku", {
+      id: "later",
+      eventId: "c_later",
+      role: "user",
+      content: "old boundary",
+    })
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+
+    chat.eventsByTab.kohaku = [
+      { type: "user_input", event_id: 1, content: "before" },
+      { type: "user_input", event_id: 2, content: "after compact one" },
+      { type: "user_input", event_id: 3, content: "after compact two" },
+    ]
+    chat._rebuildMessages("kohaku")
+
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "before",
+      "Goals",
+      "after compact one",
+      "after compact two",
+    ])
+  })
+
+  it("keeps an early command result before its later canonical user event", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session_1"
+    chat._instanceGraphId = "graph_1"
+    chat.messagesByTab = { kohaku: [] }
+    const resultContext = chat.registerCommandResultContext("kohaku")
+    chat.addCommandResult("kohaku", "/goal list", { output: "Goals" }, resultContext)
+    chat._addMsg("kohaku", {
+      id: "later",
+      eventId: "c_later",
+      role: "user",
+      content: "after",
+    })
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi.spyOn(importActual.terrariumAPI, "getHistory").mockResolvedValue({
+      events: [
+        {
+          type: "user_input",
+          event_id: 1,
+          turn_index: 1,
+          branch_id: 1,
+          content: "older",
+        },
+        {
+          type: "user_message",
+          event_id: 2,
+          turn_index: 1,
+          branch_id: 1,
+          content: "older",
+        },
+        {
+          type: "user_input",
+          event_id: 3,
+          pending_id: "c_later",
+          turn_index: 2,
+          branch_id: 1,
+          content: "after",
+        },
+        {
+          type: "user_message",
+          event_id: 4,
+          pending_id: "c_later",
+          turn_index: 2,
+          branch_id: 1,
+          content: "after",
+        },
+      ],
+      messages: [],
+      is_processing: false,
+    })
+
+    await expect(chat._resyncHistory("kohaku")).resolves.toBe(true)
+    expect(chat.messagesByTab.kohaku.map((message) => message.content)).toEqual([
+      "older",
+      "Goals",
+      "after",
+    ])
+    expect(chat.messagesByTab.kohaku[2].eventId).toBe("c_later")
+    getHistory.mockRestore()
+  })
+
+  it("restores an inline command result when an empty-history tab is reopened", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session_1"
+    chat._instanceGraphId = "graph_1"
+    chat.messagesByTab = { kohaku: [] }
+    chat.addCommandResult("kohaku", "/goal list", {
+      output: "No goals found",
+    })
+    chat.messagesByTab.kohaku = []
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi.spyOn(importActual.terrariumAPI, "getHistory").mockResolvedValue({
+      events: [],
+      messages: [],
+      is_processing: false,
+    })
+
+    await expect(
+      chat._resyncHistory("kohaku", {
+        generation: chat._instanceGeneration,
+        initialLoad: true,
+      }),
+    ).resolves.toBe(true)
+
+    expect(chat.messagesByTab.kohaku).toHaveLength(1)
+    expect(chat.messagesByTab.kohaku[0]).toMatchObject({
+      role: "command_result",
+      command: "/goal list",
+      content: "No goals found",
+    })
+    getHistory.mockRestore()
   })
 
   it("continues sending normal text over the websocket", async () => {
