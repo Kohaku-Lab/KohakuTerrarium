@@ -73,8 +73,8 @@ dependencies = [
     "pymupdf>=1.24.0",
     # >=11 floor for Chaquopy (Android) compat; the Image API we use is stable.
     "Pillow>=11.0.0",
-    # MCP client
-    "mcp>=1.0.0",
+    # MCP 2.x removed APIs used by the current client integration.
+    "mcp>=1.0.0,<2",
     # Direct dep for the Android wheel URL ref (transitive via mcp).
     "rpds-py>=0.30.0",
     # Direct dep for the Android wheel URL ref (transitive via openai/anthropic).
