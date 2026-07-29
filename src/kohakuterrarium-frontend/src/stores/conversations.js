@@ -4,11 +4,11 @@ import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { useTabsStore } from "@/stores/tabs"
 import { sessionAPI } from "@/utils/api"
 
 const POLL_INTERVAL_MS = 5000
-const SAME_ORIGIN_SCOPE = "_same_origin"
 
 export const useConversationsStore = defineStore("conversations", {
   state: () => ({
@@ -96,7 +96,7 @@ export const useConversationsStore = defineStore("conversations", {
     },
 
     _syncHostScope() {
-      const hostScope = getHostScope()
+      const hostScope = getRuntimeScope()
       if (this._hostScope === null) {
         this._hostScope = hostScope
       } else if (this._hostScope !== hostScope) {
@@ -121,8 +121,10 @@ export const useConversationsStore = defineStore("conversations", {
       if (clearRows) this.rows = []
     },
 
-    markRuntimeStopped(runtimeId) {
-      if (!runtimeId) return
+    markRuntimeStopped(runtimeId, expectedScope = null) {
+      if (!runtimeId) return false
+      const hostScope = this._syncHostScope()
+      if (expectedScope !== null && expectedScope !== hostScope) return false
       // Invalidate any request that started before the successful Stop.
       // Its live snapshot must not resurrect the row after the local
       // liveness transition.
@@ -132,6 +134,7 @@ export const useConversationsStore = defineStore("conversations", {
         if (!matches) return row
         return { ...row, runtime_id: null, is_live: false, status: "paused" }
       })
+      return true
     },
 
     async resume(row) {
@@ -257,21 +260,6 @@ export const useConversationsStore = defineStore("conversations", {
     },
   },
 })
-
-function getHostScope() {
-  const hosts = useHostsStore()
-  const user = hosts.activeUser
-  const auth = useAuthStore()
-  const sameOriginUser = auth.sameOriginUser
-  const userScope =
-    user?.id ||
-    user?.username ||
-    hosts.activeUserToken ||
-    sameOriginUser?.id ||
-    sameOriginUser?.username ||
-    "__anonymous__"
-  return `${hosts.activeHostId || SAME_ORIGIN_SCOPE}:${userScope}`
-}
 
 function mapConversation(data, hostScope) {
   return {

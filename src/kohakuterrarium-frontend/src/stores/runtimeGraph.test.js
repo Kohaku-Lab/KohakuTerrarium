@@ -20,11 +20,14 @@ vi.mock("@/utils/wsUrl", () => ({
   wsUrl: vi.fn((path) => `ws://test${path}`),
 }))
 
+vi.mock("@/stores/runtimeLifecycle", () => ({
+  stopRuntime: vi.fn(),
+}))
+
 vi.mock("@/utils/api", () => ({
   runtimeGraphAPI: { snapshot: vi.fn() },
   sessionAPI: {
-    listActive: vi.fn(),
-    stopActive: vi.fn(),
+    listActive: vi.fn(() => Promise.resolve([])),
   },
   terrariumAPI: {
     connect: vi.fn(),
@@ -43,8 +46,8 @@ vi.mock("@/utils/api", () => ({
   },
 }))
 
+import { stopRuntime } from "./runtimeLifecycle"
 import { runtimeGraphAPI, terrariumAPI, wiringAPI } from "@/utils/api"
-import { useInstancesStore } from "./instances"
 import { useRuntimeGraphStore } from "./runtimeGraph"
 
 const snapshot = {
@@ -105,12 +108,11 @@ beforeEach(() => {
 describe("runtime graph store", () => {
   it("routes graph dissolution through the shared instance stop action", async () => {
     const store = useRuntimeGraphStore()
-    const instances = useInstancesStore()
-    const stop = vi.spyOn(instances, "stop").mockResolvedValue()
+    stopRuntime.mockResolvedValue()
 
     await store.dissolveGroup("graph_1")
 
-    expect(stop).toHaveBeenCalledWith("graph_1")
+    expect(stopRuntime).toHaveBeenCalledWith("graph_1")
     expect(terrariumAPI.stop).not.toHaveBeenCalled()
   })
 

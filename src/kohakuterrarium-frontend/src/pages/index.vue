@@ -67,6 +67,7 @@ import { ElMessage } from "element-plus"
 import StatusDot from "@/components/common/StatusDot.vue"
 import GraphCounts from "@/components/common/GraphCounts.vue"
 import { useInstancesStore } from "@/stores/instances"
+import { stopRuntime } from "@/stores/runtimeLifecycle"
 import { useI18n } from "@/utils/i18n"
 
 const instances = useInstancesStore()
@@ -115,7 +116,7 @@ async function confirmStop() {
   if (!stopTarget.value) return
   stopping.value = true
   try {
-    await instances.stop(stopTarget.value.id)
+    await stopRuntime(stopTarget.value.id)
     ElMessage({
       message: t("home.stoppedMessage", { name: stopTarget.value.config_name }),
       type: "success",
