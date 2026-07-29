@@ -2,10 +2,7 @@ import { defineStore } from "pinia"
 import { computed, reactive } from "vue"
 
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
-import { runtimeGraphAPI, terrariumAPI, wiringAPI } from "@/utils/api"
-import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
-import { wsUrl } from "@/utils/wsUrl"
-
+import { useInstancesStore } from "@/stores/instances"
 import {
   FREE_STACK,
   GROUP_PADDING_BOTTOM,
@@ -16,6 +13,10 @@ import {
   Z_BANDS,
   normalizeSnapshot,
 } from "@/stores/runtimeGraphModel"
+import { stopRuntime } from "@/stores/runtimeLifecycle"
+import { runtimeGraphAPI, terrariumAPI, wiringAPI } from "@/utils/api"
+import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+import { wsUrl } from "@/utils/wsUrl"
 
 export { FREE_STACK, NODE_HEIGHT, NODE_WIDTH, Z_BANDS }
 
@@ -427,16 +428,8 @@ export const useRuntimeGraphStore = defineStore("runtimeGraph", () => {
     }
   }
 
-  // Lazy-imported to avoid a Pinia init cycle (instances store imports
-  // pieces from `runtimeGraphModel`'s neighborhood at module load).
   function _refreshInstancesSoon() {
-    import("@/stores/instances")
-      .then(({ useInstancesStore }) => {
-        useInstancesStore().fetchAll()
-      })
-      .catch(() => {
-        /* instances store unavailable in tests — fine */
-      })
+    void useInstancesStore().fetchAll()
   }
 
   async function connectNodes(source, target) {
@@ -615,8 +608,7 @@ export const useRuntimeGraphStore = defineStore("runtimeGraph", () => {
       // Stopping the session is the engine-level equivalent of
       // dissolving the molecule — it tears down the graph and removes
       // every creature/channel inside it.
-      const { useInstancesStore } = await import("@/stores/instances")
-      await useInstancesStore().stop(groupId)
+      await stopRuntime(groupId)
       pushLog(`stopped session ${groupId}`)
     } catch (err) {
       pushLog(`stop failed · ${err?.message || err}`)

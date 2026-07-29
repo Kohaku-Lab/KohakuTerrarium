@@ -2,8 +2,12 @@ import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+vi.mock("@/stores/runtimeLifecycle", () => ({
+  stopRuntime: vi.fn(),
+}))
+
 import ConfirmStopDialog from "./ConfirmStopDialog.vue"
-import { useInstancesStore } from "@/stores/instances"
+import { stopRuntime } from "@/stores/runtimeLifecycle"
 import { useTabsStore } from "@/stores/tabs"
 
 beforeEach(() => {
@@ -12,9 +16,8 @@ beforeEach(() => {
 
 describe("ConfirmStopDialog", () => {
   it("stops and detaches the selected runtime", async () => {
-    const instances = useInstancesStore()
     const tabs = useTabsStore()
-    const stop = vi.spyOn(instances, "stop").mockResolvedValue()
+    stopRuntime.mockResolvedValue()
     const detach = vi.spyOn(tabs, "detach").mockResolvedValue()
     const wrapper = mount(ConfirmStopDialog, {
       props: {
@@ -29,9 +32,9 @@ describe("ConfirmStopDialog", () => {
     await wrapper.findAll("button").at(-1).trigger("click")
     await flushPromises()
 
-    expect(stop).toHaveBeenCalledWith("runtime-one")
+    expect(stopRuntime).toHaveBeenCalledWith("runtime-one")
     expect(detach).toHaveBeenCalledWith("runtime-one")
-    expect(stop.mock.invocationCallOrder[0]).toBeLessThan(detach.mock.invocationCallOrder[0])
+    expect(stopRuntime.mock.invocationCallOrder[0]).toBeLessThan(detach.mock.invocationCallOrder[0])
     expect(wrapper.emitted("stopped")).toHaveLength(1)
   })
 })
