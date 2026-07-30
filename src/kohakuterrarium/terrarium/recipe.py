@@ -28,12 +28,7 @@ from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
-from kohakuterrarium.core.environment import Environment
-from kohakuterrarium.terrarium.config import (
-    CreatureConfig,
-    TerrariumConfig,
-    load_terrarium_config,
-)
+from kohakuterrarium.terrarium.config import TerrariumConfig, load_terrarium_config
 from kohakuterrarium.terrarium.creature_host import Creature, build_creature
 from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
 from kohakuterrarium.terrarium.recipe_apply import apply_resolved_recipe
@@ -167,30 +162,3 @@ def _validate_declared_name_aliases(config: TerrariumConfig) -> list[str]:
             "one graph."
         )
     return sorted(owners)
-
-
-def _build_recipe_creature(
-    builder: CreatureBuilder,
-    cfg: CreatureConfig,
-    *,
-    creature_id: str,
-    pwd: str | None,
-    llm: Any,
-    env: Environment,
-    use_default_builder: bool,
-    strict: bool = True,
-) -> Creature:
-    if use_default_builder:
-        return builder(
-            cfg,
-            creature_id=creature_id,
-            pwd=pwd,
-            llm=llm,
-            environment=env,
-            strict=strict,
-        )
-    creature = builder(cfg, creature_id=creature_id, pwd=pwd)
-    creature.agent.environment = env
-    if getattr(creature.agent, "executor", None) is not None:
-        creature.agent.executor._environment = env
-    return creature

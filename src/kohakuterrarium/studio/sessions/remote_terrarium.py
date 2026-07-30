@@ -1,5 +1,6 @@
 """Start Studio terrarium sessions on a selected laboratory worker."""
 
+import asyncio
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -89,14 +90,13 @@ async def start_remote_terrarium(
         for creature_id in registered_ids:
             if service._home.get(creature_id) == on_node:
                 service._home.pop(creature_id, None)
-        for creature in reversed(creatures):
-            try:
-                await remote_service.remove_creature(creature.creature_id)
-            except BaseException:
-                logger.exception(
-                    "remote recipe compensation failed",
-                    extra={"creature_id": creature.creature_id},
-                )
+        try:
+            await _discard_remote_recipe(remote_service, graph.graph_id)
+        except BaseException:
+            logger.exception(
+                "remote recipe compensation failed",
+                extra={"graph_id": graph.graph_id},
+            )
         raise
     meta_for(service)[graph.graph_id] = {
         "session_id": graph.graph_id,
@@ -127,3 +127,13 @@ async def start_remote_terrarium(
         has_root=any(creature.is_privileged for creature in creatures),
         home_node=on_node,
     )
+
+
+async def _discard_remote_recipe(remote_service, graph_id: str) -> None:
+    """Finish the worker-side discard even when the caller is cancelled."""
+    cleanup = asyncio.create_task(remote_service.discard_recipe(graph_id))
+    try:
+        await asyncio.shield(cleanup)
+    except asyncio.CancelledError:
+        await cleanup
+        raise

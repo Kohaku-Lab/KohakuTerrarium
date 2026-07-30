@@ -10,6 +10,7 @@ from kohakuterrarium.laboratory.adapters.terrarium_runtime import (
     TerrariumRuntimeAdapter,
     _NotHostedHere,
 )
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder
 
 
@@ -289,6 +290,33 @@ class TestLifecycleOps:
             assert out == {}
         finally:
             await adapter._engine.shutdown()
+
+    async def test_discard_recipe_removes_worker_store_and_releases_lock(
+        self, tmp_path
+    ):
+        adapter = await _make_adapter()
+        engine = adapter._engine
+        graph_id = engine.list_graphs()[0].graph_id
+        session_path = tmp_path / "recipe.kohakutr"
+        await engine.attach_session(graph_id, session_path)
+        try:
+            out = await adapter._dispatch(
+                _msg("discard_recipe", {"graph_id": graph_id})
+            )
+
+            assert out == {}
+            assert engine.list_creatures() == []
+            assert engine.list_graphs() == []
+            assert engine._session_stores == {}
+            assert engine._owned_sessions == set()
+            assert not session_path.exists()
+            assert not session_path.with_name(session_path.name + "-wal").exists()
+            assert not session_path.with_name(session_path.name + "-shm").exists()
+            assert not session_path.with_name(session_path.name + ".drives").exists()
+            reopened = SessionStore(session_path, writer_lock=True)
+            reopened.close(update_status=False)
+        finally:
+            await engine.shutdown()
 
     async def test_start_stop_creature(self):
         adapter = await _make_adapter()

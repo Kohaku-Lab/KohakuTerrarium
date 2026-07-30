@@ -300,13 +300,18 @@ def _build_recipe_creature(
     use_default_builder: bool,
     environment: Environment,
 ) -> Creature:
-    kwargs: dict[str, Any] = {
-        "graph_id": graph_id,
-        "pwd": pwd,
-        "llm": llm,
-        "strict": strict,
-        "environment": environment,
-    }
-    kwargs["creature_id"] = creature_id
+    kwargs: dict[str, Any] = {"creature_id": creature_id, "pwd": pwd}
+    if use_default_builder:
+        kwargs.update(
+            graph_id=graph_id,
+            llm=llm,
+            strict=strict,
+            environment=environment,
+        )
     creature = builder(config, **kwargs)
+    if not use_default_builder:
+        creature.agent.environment = environment
+        executor = getattr(creature.agent, "executor", None)
+        if executor is not None:
+            executor._environment = environment
     return creature

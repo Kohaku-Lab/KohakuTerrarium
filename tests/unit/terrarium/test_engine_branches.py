@@ -19,6 +19,7 @@ from kohakuterrarium.terrarium import channel_lifecycle as cl
 from kohakuterrarium.terrarium import config as config_mod
 from kohakuterrarium.terrarium import creature_ops as co
 from kohakuterrarium.terrarium import recipe as recipe_mod
+from kohakuterrarium.terrarium import recipe_apply as recipe_apply_mod
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.terrarium import root as root_mod
 from kohakuterrarium.terrarium import wire as wire_mod
@@ -265,13 +266,15 @@ class TestRecipeBranches:
         cfg = CreatureConfig(
             name="alice", config_data={"name": "alice"}, base_dir=Path(".")
         )
-        out = recipe_mod._build_recipe_creature(
+        out = recipe_apply_mod._build_recipe_creature(
             _builder,
             cfg,
             creature_id="alice",
+            graph_id="graph",
             pwd=None,
             llm=None,
-            env=env,
+            strict=True,
+            environment=env,
             use_default_builder=False,
         )
         assert out is creature

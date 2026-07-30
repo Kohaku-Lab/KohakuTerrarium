@@ -260,6 +260,16 @@ class TestLifecycle:
             },
         )
 
+    async def test_discard_recipe_targets_worker_graph(self):
+        svc = _make_service({"discard_recipe": {}})
+
+        await svc.discard_recipe("g1")
+
+        assert svc._sender.calls[-1][1:] == (
+            "discard_recipe",
+            {"graph_id": "g1"},
+        )
+
     async def test_add_creature_with_agent_config(self):
         from pathlib import Path
 

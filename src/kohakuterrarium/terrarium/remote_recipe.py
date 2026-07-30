@@ -46,3 +46,7 @@ class RemoteRecipeServiceMixin:
         graph = unpack_graph_topology(body["graph"])
         creatures = [unpack_creature_info(item) for item in body["creatures"]]
         return graph, creatures
+
+    async def discard_recipe(self, graph_id: str) -> None:
+        """Discard a just-applied recipe and its worker-owned persistence."""
+        await self._checked_req("discard_recipe", {"graph_id": graph_id})

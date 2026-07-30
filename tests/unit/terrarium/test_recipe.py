@@ -12,6 +12,7 @@ import pytest
 
 from kohakuterrarium.terrarium import recipe as recipe_mod
 from kohakuterrarium.terrarium import graph_checkpoint as checkpoint_mod
+from kohakuterrarium.terrarium import recipe_apply as recipe_apply_mod
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
@@ -751,13 +752,24 @@ class TestBuildRecipeCreature:
     def test_use_default_builder_passes_kwargs(self):
         called = {}
 
-        def default(cfg, *, creature_id, pwd, llm, environment, strict=True):
+        def default(
+            cfg,
+            *,
+            creature_id,
+            graph_id,
+            pwd,
+            llm,
+            environment,
+            strict=True,
+        ):
             called.update(
                 {
                     "creature_id": creature_id,
+                    "graph_id": graph_id,
                     "pwd": pwd,
                     "llm": llm,
                     "environment": environment,
+                    "strict": strict,
                 }
             )
             return Creature(
@@ -768,32 +780,46 @@ class TestBuildRecipeCreature:
 
         cfg = _creature_cfg("x")
         env = object()
-        recipe_mod._build_recipe_creature(
+        recipe_apply_mod._build_recipe_creature(
             default,
             cfg,
             creature_id="cid",
+            graph_id="gid",
             pwd="/wd",
             llm="model",
-            env=env,
+            strict=False,
+            environment=env,
             use_default_builder=True,
         )
         assert called == {
             "creature_id": "cid",
+            "graph_id": "gid",
             "pwd": "/wd",
             "llm": "model",
             "environment": env,
+            "strict": False,
         }
 
-    def test_stub_builder_injects_env(self):
+    def test_custom_builder_keeps_public_contract_and_injects_env(self):
         cfg = _creature_cfg("x")
         env = object()
-        out = recipe_mod._build_recipe_creature(
-            _fake_builder,
+
+        def strict_custom_builder(config, *, creature_id, pwd=None):
+            return Creature(
+                creature_id=creature_id,
+                name=config.name,
+                agent=_FakeAgent(name=config.name),
+            )
+
+        out = recipe_apply_mod._build_recipe_creature(
+            strict_custom_builder,
             cfg,
             creature_id="cid",
-            pwd=None,
-            llm=None,
-            env=env,
+            graph_id="gid",
+            pwd="/wd",
+            llm="model",
+            strict=True,
+            environment=env,
             use_default_builder=False,
         )
         assert out.agent.environment is env
