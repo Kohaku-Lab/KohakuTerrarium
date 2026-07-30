@@ -72,28 +72,48 @@ def validate_cluster_member_selection(
 def read_saved_cluster_members(path: Path) -> list[ClusterMember] | None:
     """Read valid persisted cluster membership from a saved store.
 
-    Missing, malformed, or singleton membership returns ``None``. The blocking
-    store access must run through :func:`asyncio.to_thread`.
+    An absent field returns ``None`` for a single-session resume. Present but
+    unreadable or malformed membership fails closed before any runtime mutation.
+    The blocking store access must run through :func:`asyncio.to_thread`.
     """
     if not path.exists():
         return None
     try:
-        raw = read_session_meta(path).get("cluster_members")
-    except Exception:
+        meta = read_session_meta(path)
+    except Exception as exc:
+        raise _corrupt_cluster_members(
+            f"Unable to read persisted cluster membership: {exc}"
+        ) from exc
+    if not isinstance(meta, dict):
+        raise _corrupt_cluster_members("Persisted session metadata is not an object")
+    if "cluster_members" not in meta:
         return None
+    raw = meta["cluster_members"]
     if not isinstance(raw, list) or len(raw) < 2:
-        return None
+        raise _corrupt_cluster_members(
+            "Persisted cluster_members must contain at least two members"
+        )
     members: list[ClusterMember] = []
-    for entry in raw:
+    for index, entry in enumerate(raw):
         if not isinstance(entry, dict):
-            continue
+            raise _corrupt_cluster_members(
+                f"Persisted cluster member at index {index} is not an object"
+            )
         sid = entry.get("sid")
         node = entry.get("on_node")
-        if isinstance(sid, str) and sid and isinstance(node, str) and node:
-            members.append(ClusterMember(sid=sid, on_node=node))
-    if len(members) < 2:
-        return None
+        if not (isinstance(sid, str) and sid and isinstance(node, str) and node):
+            raise _corrupt_cluster_members(
+                f"Persisted cluster member at index {index} requires sid and on_node"
+            )
+        members.append(ClusterMember(sid=sid, on_node=node))
     return members
+
+
+def _corrupt_cluster_members(message: str) -> HTTPException:
+    return HTTPException(
+        status_code=422,
+        detail={"code": "corrupt_cluster_members", "message": message},
+    )
 
 
 def read_saved_session_id(path: Path) -> str:

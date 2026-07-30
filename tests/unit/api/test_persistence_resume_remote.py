@@ -15,6 +15,7 @@ from kohakuterrarium.api.routes.persistence import (
     cluster_resume_compensation as compensation_mod,
 )
 from kohakuterrarium.api.routes.persistence import resume as resume_mod
+from kohakuterrarium.api.routes.persistence import resume_cluster as cluster_mod
 from kohakuterrarium.api.routes.persistence import resume_remote as remote_mod
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.sessions import lifecycle
@@ -37,6 +38,7 @@ def _workspace_resume_boundaries(monkeypatch):
         "rollback_remote_workspace_meta",
         lambda snapshot: None,
     )
+    monkeypatch.setattr(resume_mod, "_read_saved_cluster_members", lambda path: None)
 
 
 def _app(*, service=None, session_dir: Path = Path("/")):
@@ -626,6 +628,11 @@ class TestClusterResume:
         paths = {"renamed": selected, "sid-a": selected, "sid-b": peer}
         monkeypatch.setattr(
             resume_mod,
+            "_read_saved_cluster_members",
+            cluster_mod.read_saved_cluster_members,
+        )
+        monkeypatch.setattr(
+            resume_mod,
             "resolve_session_path_in",
             lambda name, session_dir: paths.get(name),
         )
@@ -664,6 +671,32 @@ class TestClusterResume:
 
         assert response.status_code == 200, response.text
         assert response.json()["instance_id"] == "new-a"
+
+    def test_corrupt_saved_membership_stops_before_worker_mutation(
+        self, monkeypatch, tmp_path
+    ):
+        path = tmp_path / "sid-a.kohakutr"
+        path.write_bytes(b"not a session database")
+        monkeypatch.setattr(
+            resume_mod,
+            "resolve_session_path_in",
+            lambda name, session_dir: path,
+        )
+        monkeypatch.setattr(
+            resume_mod,
+            "_read_saved_cluster_members",
+            cluster_mod.read_saved_cluster_members,
+        )
+        host = _FakeHost()
+
+        response = TestClient(_app(service=_Svc(host))).post(
+            "/sessions/sid-a/resume",
+            json={"on_node": "w1"},
+        )
+
+        assert response.status_code == 422
+        assert response.json()["detail"]["code"] == "corrupt_cluster_members"
+        assert host.calls == []
 
     def test_cluster_resume_rejects_when_member_worker_disconnected(
         self, monkeypatch, tmp_path
