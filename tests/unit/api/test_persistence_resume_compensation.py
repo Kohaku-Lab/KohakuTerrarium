@@ -29,6 +29,7 @@ def _resume_boundaries(monkeypatch):
         "rollback_remote_workspace_meta",
         lambda _snapshot: None,
     )
+    monkeypatch.setattr(resume_mod, "_read_saved_cluster_members", lambda path: None)
 
 
 def _request():
