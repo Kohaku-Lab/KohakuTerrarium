@@ -12,10 +12,10 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kohakuterrarium.studio.sessions import lifecycle
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.service import LocalTerrariumService, CreatureInfo
-from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
+from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 
 # Session bookkeeping is instance-scoped (studio.sessions.registry) —
 # each test builds its own engine/service, so no module-state reset is

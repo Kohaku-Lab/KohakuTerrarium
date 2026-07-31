@@ -148,6 +148,22 @@ async def _resume_manifest_into_engine(
     store: SessionStore | None = None,
 ) -> str:
     """Restore a graph exactly from an authoritative manifest."""
+    runtime_ids = [entry.creature_id for entry in manifest.creatures]
+    async with engine._recipe_identities.reserve_exact(engine, runtime_ids):
+        return await _resume_reserved_manifest(
+            engine, path, manifest, pwd=pwd, llm=llm, store=store
+        )
+
+
+async def _resume_reserved_manifest(
+    engine: "Terrarium",
+    path: Path,
+    manifest: _manifest.GraphManifest,
+    *,
+    pwd: str | None,
+    llm: Any,
+    store: SessionStore | None,
+) -> str:
     store = store or _open_store_with_migration(path, writer_lock=True)
     if manifest.graph_id in engine._topology.graphs:
         store.close(update_status=False)
@@ -178,6 +194,7 @@ async def _resume_manifest_into_engine(
                 name=item.name,
                 is_privileged=item.is_privileged,
                 parent_creature_id=item.parent_creature_id,
+                _identity_reserved=True,
             )
             creature.injected_runtime = ()
             created.append(creature)

@@ -197,6 +197,13 @@ class WorkerSessionAttacher:
                     tee.detach()
             return
 
+    def discard_graph(self, graph_id: str) -> None:
+        """Detach all mirroring state before a recipe store is deleted."""
+        tee = self._graph_tees.pop(graph_id, None)
+        self._graph_refs.pop(graph_id, None)
+        if tee is not None:
+            tee.detach()
+
     def close_all(self) -> None:
         """Detach every tracked event tee."""
         for tee in list(self._graph_tees.values()):

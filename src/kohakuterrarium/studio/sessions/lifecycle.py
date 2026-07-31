@@ -11,7 +11,12 @@ from typing import Any
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
-from kohakuterrarium.studio.sessions import cluster_fold, remote_meta, stop as _stop
+from kohakuterrarium.studio.sessions import (
+    cluster_fold,
+    remote_meta,
+    remote_terrarium,
+    stop as _stop,
+)
 from kohakuterrarium.studio.sessions import index_hooks as _index_hooks
 from kohakuterrarium.studio.sessions.find import (
     apply_creature_name,
@@ -39,6 +44,7 @@ from kohakuterrarium.terrarium.config import (
 from kohakuterrarium.studio._runtime import as_engine, host_engine_or_none
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import default_workdir
 
@@ -266,6 +272,7 @@ async def start_terrarium(
     pwd: str | None = None,
     name: str | None = None,
     llm: str | None = None,
+    on_node: str = "_host",
 ) -> Session:
     """Apply a recipe into a fresh graph; start every creature.
 
@@ -282,6 +289,16 @@ async def start_terrarium(
     that engine, and it is gated on the lab-host's explicit
     presence of one.
     """
+    if isinstance(service, MultiNodeTerrariumService):
+        return await _start_remote_terrarium(
+            service,
+            config_path=config_path,
+            name=name,
+            pwd=pwd,
+            llm=llm,
+            on_node=on_node,
+        )
+
     engine = _resolve_engine_for_recipe(service)
     pwd = _normalize_pwd(pwd)
     if config_path:
@@ -343,6 +360,26 @@ async def start_terrarium(
     }
     logger.info("Terrarium session started", session_id=sid)
     return _build_session_handle(engine, sid, meta_for(service))
+
+
+async def _start_remote_terrarium(
+    service: MultiNodeTerrariumService,
+    *,
+    config_path: str | None,
+    name: str | None,
+    pwd: str | None,
+    llm: str | None,
+    on_node: str,
+) -> Session:
+    """Delegate remote recipe startup to its worker-specific lifecycle."""
+    return await remote_terrarium.start_remote_terrarium(
+        service,
+        config_path=config_path,
+        name=name,
+        pwd=pwd,
+        llm=llm,
+        on_node=on_node,
+    )
 
 
 def list_sessions(service: "TerrariumService") -> list[SessionListing]:

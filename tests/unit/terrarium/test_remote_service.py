@@ -228,6 +228,48 @@ class TestReadRPCs:
 
 
 class TestLifecycle:
+    async def test_apply_recipe_targets_one_worker(self):
+        graph = {
+            "graph_id": "g1",
+            "creature_ids": ["alice", "bob"],
+            "channels": {},
+            "listen_edges": {},
+            "send_edges": {},
+        }
+        info_a = _packed_creature_info()
+        info_b = {**info_a, "creature_id": "bob", "name": "bob"}
+        svc = _make_service(
+            {"apply_recipe": {"graph": graph, "creatures": [info_a, info_b]}}
+        )
+
+        out_graph, creatures = await svc.apply_recipe(
+            "recipe://team/config.yaml", start=False, persist=True
+        )
+
+        assert out_graph.creature_ids == {"alice", "bob"}
+        assert [creature.creature_id for creature in creatures] == ["cid", "bob"]
+        assert svc._sender.calls[-1][1:] == (
+            "apply_recipe",
+            {
+                "recipe_path": "recipe://team/config.yaml",
+                "pwd": None,
+                "llm": None,
+                "strict": True,
+                "start": False,
+                "persist": True,
+            },
+        )
+
+    async def test_discard_recipe_targets_worker_graph(self):
+        svc = _make_service({"discard_recipe": {}})
+
+        await svc.discard_recipe("g1")
+
+        assert svc._sender.calls[-1][1:] == (
+            "discard_recipe",
+            {"graph_id": "g1"},
+        )
+
     async def test_add_creature_with_agent_config(self):
         from pathlib import Path
 

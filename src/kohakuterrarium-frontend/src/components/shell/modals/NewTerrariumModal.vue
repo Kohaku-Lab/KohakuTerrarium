@@ -59,6 +59,7 @@ import { computed, onMounted, ref, watch } from "vue"
 
 import ModalShell from "@/components/common/ModalShell.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
+import { useClusterStore } from "@/stores/cluster"
 import { useConfigsStore } from "@/stores/configs"
 import { useTabsStore } from "@/stores/tabs"
 import { configAPI } from "@/utils/api"
@@ -72,6 +73,7 @@ const emit = defineEmits(["close"])
 
 const tabs = useTabsStore()
 const configs = useConfigsStore()
+const cluster = useClusterStore()
 const { t } = useI18n()
 
 const pwd = ref("")
@@ -81,7 +83,7 @@ const starting = ref(false)
 const errorMsg = ref("")
 const name = ref("")
 const namePlaceholder = ref(randomNameFor("terrarium"))
-const onNode = ref("_host")
+const onNode = ref(cluster.isCluster ? "" : "_host")
 
 // See NewCreatureModal.vue for the rationale: track whether the user has
 // manually edited the working-dir input so we can safely overwrite it
@@ -114,7 +116,7 @@ watch(
   },
 )
 
-const canSubmit = computed(() => Boolean(pwd.value.trim() && selectedConfig.value && !starting.value))
+const canSubmit = computed(() => Boolean(pwd.value.trim() && selectedConfig.value && !starting.value && (!cluster.isCluster || (onNode.value && onNode.value !== "_host"))))
 
 async function onSubmit() {
   if (!canSubmit.value) return

@@ -22,29 +22,20 @@ and gives every other creature a send edge on ``report_to_root``.
 agent, so no recipe-side tool injection is needed.
 """
 
+import asyncio
 from collections import Counter
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
-import kohakuterrarium.terrarium.channels as _channels
-import kohakuterrarium.terrarium.topology as _topo
-import kohakuterrarium.terrarium.wiring as _wiring
-from kohakuterrarium.core.environment import Environment
-from kohakuterrarium.terrarium.config import (
-    CreatureConfig,
-    TerrariumConfig,
-    load_terrarium_config,
-)
+from kohakuterrarium.terrarium.config import TerrariumConfig, load_terrarium_config
 from kohakuterrarium.terrarium.creature_host import Creature, build_creature
 from kohakuterrarium.terrarium.graph_identity import ensure_graph_name_available
+from kohakuterrarium.terrarium.recipe_apply import apply_resolved_recipe
 from kohakuterrarium.terrarium.topology import GraphTopology
-from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
     from kohakuterrarium.terrarium.engine import Terrarium
-
-logger = get_logger(__name__)
-
 
 CreatureBuilder = Callable[..., Creature]
 
@@ -68,6 +59,7 @@ async def apply_recipe(
     start: bool = True,
     creature_builder: CreatureBuilder | None = None,
     created_ids: list[str] | None = None,
+    transaction=None,
 ) -> GraphTopology:
     """Load a terrarium recipe into ``engine`` and return the resulting
     :class:`GraphTopology`.
@@ -83,256 +75,90 @@ async def apply_recipe(
     task added meanwhile.
     """
     config = _resolve_recipe(recipe)
-    _preflight_recipe_names(engine, config, graph)
+    logical_names = _validate_logical_names(config)
+    declared_aliases = _validate_declared_name_aliases(config)
     builder = creature_builder or build_creature
     use_default_builder = creature_builder is None
-
-    # 1. Mint or reuse the graph and its shared environment before building
-    # agents, so recipe-created agents receive the graph Environment in their
-    # ToolContext and can use shared channels.
+    graph_lock = None
     if graph is not None:
         graph_id = engine._resolve_graph_id(graph)
-    else:
-        graph_id = _topo.new_graph_id()
-        engine._topology.graphs[graph_id] = _topo.GraphTopology(graph_id=graph_id)
-        engine._environments[graph_id] = Environment(env_id=f"env_{graph_id}")
-    env = engine._environments[graph_id]
-    _channels.register_engine_handle(env, engine)
+        graph_lock = engine._recipe_graph_locks.setdefault(graph_id, asyncio.Lock())
+    graph_cm = graph_lock if graph_lock is not None else nullcontext()
 
-    # 2. Pre-declare every channel the recipe wants.
-    for ch_cfg in config.channels:
-        await engine.add_channel(
-            graph_id,
-            ch_cfg.name,
-            description=ch_cfg.description,
-        )
-        logger.debug("Recipe channel declared", channel=ch_cfg.name)
-
-    # 3. Auto-direct channels (one per creature) — added even for
-    #    creatures the recipe didn't list as having explicit inbound.
-    for cr_cfg in config.creatures:
-        if cr_cfg.name not in engine.get_graph(graph_id).channels:
-            await engine.add_channel(
-                graph_id,
-                cr_cfg.name,
-                description=f"Direct channel to {cr_cfg.name}",
+    async with graph_cm:
+        if graph is not None:
+            graph_id = engine._resolve_graph_id(graph)
+            for name in declared_aliases:
+                ensure_graph_name_available(
+                    engine._topology,
+                    engine._creatures,
+                    graph_id=graph_id,
+                    name=name,
+                )
+        async with engine._recipe_identities.reserve(
+            engine, logical_names
+        ) as runtime_ids:
+            return await apply_resolved_recipe(
+                engine,
+                config,
+                runtime_ids=runtime_ids,
+                graph=graph,
+                pwd=pwd,
+                llm=llm,
+                strict=strict,
+                start=start,
+                builder=builder,
+                use_default_builder=use_default_builder,
+                created_ids=created_ids,
+                transaction=transaction,
             )
 
-    # 4. report_to_root when a root is declared.
-    has_root = config.root is not None
-    if has_root and "report_to_root" not in engine.get_graph(graph_id).channels:
-        await engine.add_channel(
-            graph_id,
-            "report_to_root",
-            description="Any creature can report to the root agent",
-        )
 
-    # 5. Add every configured creature.
-    # Back-to-back spawns of the same recipe would collide on
-    # ``creature_id=cr_cfg.name``; suffix with a counter so a second
-    # ``apply_recipe`` against the same engine adds ``intake_2`` /
-    # ``intake_3`` / ... instead of 400ing on ``already exists``.
-    # We track the resolved id per cr_cfg.name so the wiring pass
-    # in step 6 can find the right Creature when names alias.
-    recipe_id_map: dict[str, str] = {}
-    for cr_cfg in config.creatures:
-        cid = _allocate_unique_creature_id(engine, cr_cfg.name)
-        recipe_id_map[cr_cfg.name] = cid
-        creature = _build_recipe_creature(
-            builder,
-            cr_cfg,
-            creature_id=cid,
-            pwd=pwd,
-            llm=llm,
-            env=env,
-            use_default_builder=use_default_builder,
-            strict=strict,
-        )
-        # ``session=False``: per-creature autosession is suppressed —
-        # ``engine.apply_recipe`` mints ONE terrarium-typed store for
-        # the whole graph (config_path = the recipe) after this loop.
-        added = await engine.add_creature(
-            creature, graph=graph_id, start=False, session=False
-        )
-        if created_ids is not None:
-            created_ids.append(added.creature_id)
-
-    root_creature: Creature | None = None
-    if config.root is not None:
-        root_data = dict(config.root.config_data)
-        root_data["name"] = "root"
-        root_cfg = CreatureConfig(
-            name="root",
-            config_data=root_data,
-            base_dir=config.root.base_dir,
-        )
-        root_creature = _build_recipe_creature(
-            builder,
-            root_cfg,
-            creature_id="root",
-            pwd=pwd,
-            llm=llm,
-            env=env,
-            use_default_builder=use_default_builder,
-            strict=strict,
-        )
-        added_root = await engine.add_creature(
-            root_creature, graph=graph_id, start=False, session=False
-        )
-        if created_ids is not None:
-            created_ids.append(added_root.creature_id)
-
-    # 6. Wire listen/send edges + inject triggers.
-    for cr_cfg in config.creatures:
-        creature = engine.get_creature(recipe_id_map[cr_cfg.name])
-        # Always listen to the creature's own direct channel.
-        all_listen = list(cr_cfg.listen_channels)
-        if cr_cfg.name not in all_listen:
-            all_listen.append(cr_cfg.name)
-        for ch in all_listen:
-            try:
-                _topo.set_listen(
-                    engine._topology,
-                    creature.creature_id,
-                    ch,
-                    listening=True,
-                )
-            except KeyError:
-                # Channel not declared — recipe-author error; skip
-                # silently (parity with legacy behaviour).
-                continue
-            _channels.inject_channel_trigger(
-                creature.agent,
-                subscriber_id=cr_cfg.name,
-                channel_name=ch,
-                registry=env.shared_channels,
-                ignore_sender=cr_cfg.name,
-                ignore_sender_id=creature.creature_id,
-            )
-            if ch not in creature.listen_channels:
-                creature.listen_channels.append(ch)
-        # send edges — no trigger needed; the agent emits to the channel
-        # via send_channel / send_message tool.
-        all_send = list(cr_cfg.send_channels)
-        if has_root and "report_to_root" not in all_send:
-            all_send.append("report_to_root")
-        for ch in all_send:
-            try:
-                _topo.set_send(
-                    engine._topology,
-                    creature.creature_id,
-                    ch,
-                    sending=True,
-                )
-            except KeyError:
-                continue
-            if ch not in creature.send_channels:
-                creature.send_channels.append(ch)
-
-    # 7. Designate the root creature: makes it privileged and wires it
-    # as the listener on every channel in the graph.
-    if root_creature is not None:
-        await engine.assign_root(root_creature)
-
-    _wiring.install_output_wiring_resolver(engine)
-
-    # 8. Start every creature now that wiring is complete. Resume
-    # passes ``start=False`` so saved state can be injected BEFORE any
-    # startup trigger or input runs against an empty conversation.
-    if start:
-        for cid in list(engine.get_graph(graph_id).creature_ids):
-            creature = engine.get_creature(cid)
-            await creature.start()
-            # Arm the barrier-gated Drive reconcile/dispatcher start, as every
-            # other creature-start site does (engine.add_creature / engine.start
-            # / resume). Recipe apply starts creatures directly, not via those.
-            if engine._drive_runtime is not None:
-                engine._drive_runtime.schedule_reconcile(creature)
-
-    logger.info(
-        "Recipe applied",
-        terrarium=config.name,
-        creatures=len(config.creatures),
-        channels=len(config.channels),
-        root=has_root,
-    )
-    return engine.get_graph(graph_id)
-
-
-def _preflight_recipe_names(
-    engine: "Terrarium",
-    config: TerrariumConfig,
-    graph: GraphTopology | str | None,
-) -> None:
-    """Reject ambiguous names before recipe application mutates the engine."""
+def _validate_logical_names(config: TerrariumConfig) -> list[str]:
+    """Return recipe logical names, rejecting names that make wiring ambiguous."""
     names = [creature.name for creature in config.creatures]
-    if config.root is not None:
-        names.append("root")
     duplicates = sorted(name for name, count in Counter(names).items() if count > 1)
     if duplicates:
+        formatted = ", ".join(repr(name) for name in duplicates)
         raise ValueError(
-            "Terrarium recipe contains duplicate logical creature name(s): "
-            + ", ".join(repr(name) for name in duplicates)
+            f"Terrarium recipe contains duplicate logical creature name(s): "
+            f"{formatted}. Logical creature names must be unique within one recipe."
         )
-    if graph is None:
-        return
-    graph_id = engine._resolve_graph_id(graph)
-    for name in names:
-        ensure_graph_name_available(
-            engine._topology,
-            engine._creatures,
-            graph_id=graph_id,
-            name=name,
+    if config.root is not None:
+        if "root" in names:
+            raise ValueError(
+                "Terrarium recipe cannot declare both a root section and a regular "
+                "creature named 'root'"
+            )
+        names.append("root")
+    return names
+
+
+def _validate_declared_name_aliases(config: TerrariumConfig) -> list[str]:
+    """Return every declared graph alias, rejecting cross-member ambiguity."""
+    owners: dict[str, int] = {}
+    duplicates: set[str] = set()
+    for owner, creature in enumerate(config.creatures):
+        aliases = {creature.name}
+        configured_name = creature.config_data.get("name")
+        if isinstance(configured_name, str) and configured_name:
+            aliases.add(configured_name)
+        for alias in aliases:
+            previous_owner = owners.setdefault(alias, owner)
+            if previous_owner != owner:
+                duplicates.add(alias)
+
+    if config.root is not None:
+        root_owner = len(config.creatures)
+        previous_owner = owners.setdefault("root", root_owner)
+        if previous_owner != root_owner:
+            duplicates.add("root")
+
+    if duplicates:
+        formatted = ", ".join(repr(name) for name in sorted(duplicates))
+        raise ValueError(
+            "Terrarium recipe contains duplicate creature name alias(es): "
+            f"{formatted}. Display and configured names must be unique within "
+            "one graph."
         )
-
-
-def _allocate_unique_creature_id(engine: "Terrarium", name: str) -> str:
-    """Return a creature_id starting with ``name`` that isn't taken on
-    ``engine``.
-
-    Recipe-spawned creatures historically use ``creature_id == name``;
-    when the same recipe is applied twice (or two recipes share a name
-    in the same engine) the second spawn collided with
-    ``ValueError: creature_id 'X' already exists``.  Suffix with a
-    counter (``X_2``, ``X_3``, ...) so back-to-back ``apply_recipe``
-    calls succeed deterministically.
-    """
-    try:
-        engine.get_creature(name)
-    except KeyError:
-        return name
-    n = 2
-    while True:
-        candidate = f"{name}_{n}"
-        try:
-            engine.get_creature(candidate)
-        except KeyError:
-            return candidate
-        n += 1
-
-
-def _build_recipe_creature(
-    builder: CreatureBuilder,
-    cfg: CreatureConfig,
-    *,
-    creature_id: str,
-    pwd: str | None,
-    llm: Any,
-    env: Environment,
-    use_default_builder: bool,
-    strict: bool = True,
-) -> Creature:
-    if use_default_builder:
-        return builder(
-            cfg,
-            creature_id=creature_id,
-            pwd=pwd,
-            llm=llm,
-            environment=env,
-            strict=strict,
-        )
-    creature = builder(cfg, creature_id=creature_id, pwd=pwd)
-    creature.agent.environment = env
-    if getattr(creature.agent, "executor", None) is not None:
-        creature.agent.executor._environment = env
-    return creature
+    return sorted(owners)

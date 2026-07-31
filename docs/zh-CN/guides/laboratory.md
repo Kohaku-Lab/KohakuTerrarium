@@ -303,8 +303,11 @@ info = await service.add_creature(cfg, on_node="worker-gpu-1")
 ## 多节点 terrarium
 
 一个 *terrarium*（多生物图）可以通过跨节点通道横跨多个工作节
-点。Recipe 文件目前还不支持每生物的节点指定，所以请用命令式
-的方式搭建拓扑：
+点。Recipe 文件目前还不支持每生物的节点指定。Studio 的
+**Run on** 选择器（或 `apply_recipe(..., on_node="worker-1")`）
+会把整份 recipe 部署到一个已连接的工作节点，并由该节点持有
+session 持久化。若要让一个 terrarium 横跨多个工作节点，请用
+命令式的方式搭建拓扑：
 
 ```python
 # 在 worker-1 上生成 alpha、在 worker-2 上生成 bravo
@@ -430,7 +433,7 @@ WARNING 级别记录在工作节点侧，不会出现在主机的 log 里。
 
 | 现象 | 可能原因 |
 |------|----------|
-| 生成时 `"on_node" is required` | 你处于 lab-host 模式但尝试在主机上生成。选一个工作节点，或者用 recipe（recipe 仍然在 coordination engine 上运行）。 |
+| 生成时 `"on_node" is required` | 你处于 lab-host 模式但尝试在主机上生成。请选择已连接的工作节点；所选 recipe 会完整运行在该节点上，不会自动拆分到多个节点。 |
 | 工作节点连上后立刻断开 | Token 不匹配。Hello/Welcome 握手会在 INFO 级别记录拒绝。 |
 | `worker 'X' resume failed: Session has no config_path or config_snapshot in metadata` | 镜像文件早于 1.5.x 的 meta-sync 顺序。请重新生成该生物，并从新文件 resume。 |
 | Codex `re-login due to process mismatch` 错误 | 你在工作节点进程里使用主机的 Codex token。请通过 Settings → Providers（把 Manage on: 设为该工作节点）**在工作节点上** 登录 Codex。 |
