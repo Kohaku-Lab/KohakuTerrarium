@@ -33,6 +33,19 @@ def _parse_detail(detail: str) -> tuple[str, str]:
     return "unknown", detail
 
 
+def _stream_metadata(metadata: dict) -> dict:
+    """Whitelist activity metadata for streaming; prefer the bounded preview."""
+    out = {}
+    for k in _STREAM_METADATA_KEYS:
+        if k in metadata:
+            out[k] = metadata[k]
+    # Full tool output lives in the session event log; stream frames only
+    # carry the bounded preview so WS payloads stay small.
+    if "output_preview" in metadata and "output" in out:
+        out["output"] = metadata["output_preview"]
+    return out
+
+
 class StreamOutput(OutputModule):
     """Queue source-tagged websocket frames as a secondary agent output.
 
@@ -150,9 +163,7 @@ class StreamOutput(OutputModule):
             "id": frame_id,
         }
         if metadata:
-            for k in _STREAM_METADATA_KEYS:
-                if k in metadata:
-                    msg[k] = metadata[k]
+            msg.update(_stream_metadata(metadata))
         self._put(msg)
         self._emit_typed_mirror(activity_type, name, info, frame_id, metadata)
         self._n += 1
@@ -184,9 +195,7 @@ class StreamOutput(OutputModule):
             "id": frame_id,
         }
         if metadata:
-            for k in _STREAM_METADATA_KEYS:
-                if k in metadata:
-                    mirror[k] = metadata[k]
+            mirror.update(_stream_metadata(metadata))
         self._put(mirror)
 
     async def emit(self, event: OutputEvent) -> None:

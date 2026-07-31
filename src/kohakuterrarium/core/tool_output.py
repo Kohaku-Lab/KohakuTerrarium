@@ -51,7 +51,13 @@ class NormalizedToolOutput:
         return self.stats.text
 
 
-def truncate_text_utf8(text: str, max_bytes: int) -> tuple[str, dict[str, Any]]:
+def truncate_text_utf8(
+    text: str,
+    max_bytes: int,
+    *,
+    tool_name: str = "",
+    saved_to: str | None = None,
+) -> tuple[str, dict[str, Any]]:
     """Truncate tool text at a valid UTF-8 boundary.
 
     The byte limit applies to retained source text; the explanatory truncation note
@@ -65,10 +71,7 @@ def truncate_text_utf8(text: str, max_bytes: int) -> tuple[str, dict[str, Any]]:
     prefix = raw[:max_bytes].decode("utf-8", errors="ignore")
     kept_bytes = len(prefix.encode("utf-8"))
     omitted = max(0, original_bytes - kept_bytes)
-    note = (
-        f"\n... [tool output truncated to {max_bytes} bytes; "
-        f"{omitted} bytes omitted]"
-    )
+    note = _truncation_note(max_bytes, omitted, tool_name=tool_name, saved_to=saved_to)
     return (
         prefix + note,
         {
@@ -77,6 +80,32 @@ def truncate_text_utf8(text: str, max_bytes: int) -> tuple[str, dict[str, Any]]:
             "max_output_bytes": max_bytes,
             "omitted_text_bytes": omitted,
         },
+    )
+
+
+def _truncation_note(
+    max_bytes: int,
+    omitted: int,
+    *,
+    tool_name: str = "",
+    saved_to: str | None = None,
+) -> str:
+    """Build the truncation hint appropriate to the tool and its fallback path."""
+    if saved_to:
+        return (
+            f"\n... [tool output truncated to {max_bytes} bytes; "
+            f"{omitted} bytes omitted. Full output saved to {saved_to}; "
+            f"use read to view it]"
+        )
+    if tool_name == "read":
+        return (
+            f"\n... [tool output truncated to {max_bytes} bytes; "
+            f"{omitted} bytes omitted. Re-run the tool with a smaller scope "
+            f"(e.g. offset/limit) to read the omitted sections]"
+        )
+    return (
+        f"\n... [tool output truncated to {max_bytes} bytes; "
+        f"{omitted} bytes omitted. Re-run the tool with a smaller scope]"
     )
 
 
@@ -123,6 +152,7 @@ def normalize_tool_output(
     tool_name: str = "",
     artifact_store: Any = None,
     preview_chars: int = TOOL_OUTPUT_PREVIEW_CHARS,
+    saved_to: str | None = None,
 ) -> NormalizedToolOutput:
     """Normalize and byte-limit a tool result before storage or injection.
 
@@ -135,7 +165,9 @@ def normalize_tool_output(
         normalized = ""
 
     if isinstance(normalized, str):
-        truncated, trunc_meta = truncate_text_utf8(normalized, max_output)
+        truncated, trunc_meta = truncate_text_utf8(
+            normalized, max_output, tool_name=tool_name, saved_to=saved_to
+        )
         metadata.update(trunc_meta)
         stats = output_stats(truncated, preview_chars=preview_chars)
         return NormalizedToolOutput(output=truncated, stats=stats, metadata=metadata)
@@ -162,7 +194,9 @@ def normalize_tool_output(
         else:
             parts.append(part)
 
-    parts, trunc_meta = _truncate_text_parts(parts, max_output)
+    parts, trunc_meta = _truncate_text_parts(
+        parts, max_output, tool_name=tool_name, saved_to=saved_to
+    )
     metadata.update(trunc_meta)
     if materialized:
         metadata["data_urls_materialized"] = materialized
@@ -237,7 +271,11 @@ def materialize_image_part(
 
 
 def _truncate_text_parts(
-    parts: list[ContentPart], max_output: int
+    parts: list[ContentPart],
+    max_output: int,
+    *,
+    tool_name: str = "",
+    saved_to: str | None = None,
 ) -> tuple[list[ContentPart], dict[str, Any]]:
     text_bytes = sum(
         len(part.text.encode("utf-8")) for part in parts if isinstance(part, TextPart)
@@ -270,9 +308,8 @@ def _truncate_text_parts(
     if not note_added:
         out.append(
             TextPart(
-                text=(
-                    f"... [tool output truncated to {max_output} bytes; "
-                    f"{omitted} bytes omitted]"
+                text=_truncation_note(
+                    max_output, omitted, tool_name=tool_name, saved_to=saved_to
                 )
             )
         )

@@ -5,6 +5,8 @@ from kohakuterrarium.core.conversation_elide import (
     ELISION_MARKER,
     TOOL_FEEDBACK_KIND,
     elide_stale_tool_results,
+    estimate_tokens,
+    maybe_elide,
 )
 
 BIG = "R" * 2000
@@ -86,3 +88,120 @@ class TestElideStaleToolResults:
         # Second pass finds nothing new and rewrites nothing.
         assert elide_stale_tool_results(conv) == 0
         assert big.content == stubbed
+
+    def test_stub_names_the_originating_tool_call(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        calls = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read", "arguments": '{"path": "big.py"}'},
+            }
+        ]
+        conv.append("assistant", "dispatch", tool_calls=calls)
+        old = conv.append("tool", "file content " + BIG, tool_call_id="call_1")
+        conv.append("assistant", "again", tool_calls=[{**calls[0], "id": "call_2"}])
+        latest = conv.append("tool", "new content " + BIG, tool_call_id="call_2")
+
+        assert elide_stale_tool_results(conv) == 1
+        assert 'read({"path": "big.py"})' in old.content
+        assert "from read" in old.content
+        assert latest.content.endswith(BIG)
+
+    def test_stub_without_call_id_falls_back_to_generic(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        first = _feedback(conv, "[tool result] round1 " + BIG)
+        conv.append("assistant", "more tools")
+        _feedback(conv, "[tool result] round2 " + BIG)
+
+        assert elide_stale_tool_results(conv) == 1
+        assert "from a tool" in first.content
+
+
+class TestMaybeElide:
+    def test_skips_when_below_threshold(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        _feedback(conv, "[tool result] small " + "x" * 100)
+        conv.append("assistant", "ok")
+
+        assert (
+            maybe_elide(conv, 10_000, threshold_ratio=0.6, elide_max_tokens=256_000)
+            == 0
+        )
+        assert "x" * 100 in conv.get_messages()[1].content
+
+    def test_elides_when_crowded(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        first = _feedback(conv, "[tool result] round1 " + BIG)
+        conv.append("assistant", "more tools")
+        _feedback(conv, "[tool result] round2 " + BIG)
+
+        assert (
+            maybe_elide(conv, 200_000, threshold_ratio=0.6, elide_max_tokens=256_000)
+            == 1
+        )
+        assert ELISION_MARKER in first.content
+
+    def test_skips_when_no_usage_yet(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        _feedback(conv, "[tool result] round1 " + BIG)
+
+        # Mirrors the resumed controller before the first real LLM call:
+        # an empty/zero usage must not elide anything by itself.
+        assert maybe_elide(conv, 0, threshold_ratio=0.6, elide_max_tokens=256_000) == 0
+
+    def test_idempotent_across_repeated_calls(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        first = _feedback(conv, "[tool result] round1 " + BIG)
+        conv.append("assistant", "more tools")
+        _feedback(conv, "[tool result] round2 " + BIG)
+
+        # Reload paths may run before the per-turn check; the second call
+        # must not re-stub already-elided messages.
+        assert (
+            maybe_elide(conv, 200_000, threshold_ratio=0.6, elide_max_tokens=256_000)
+            == 1
+        )
+        assert (
+            maybe_elide(conv, 200_000, threshold_ratio=0.6, elide_max_tokens=256_000)
+            == 0
+        )
+        assert ELISION_MARKER in first.content
+
+
+class TestEstimateTokens:
+    def test_scales_with_content_length(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        conv.append("user", "x" * 1000)
+        small = estimate_tokens(conv)
+        conv.append("user", "x" * 100_000)
+        large = estimate_tokens(conv)
+        assert small > 0
+        assert large > small
+        # Conservative: ~3.5 chars/token → 100KB content is at least ~20K tokens.
+        assert large >= 20_000
+
+    def test_counts_tool_call_arguments(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        conv.append(
+            "assistant",
+            "",
+            tool_calls=[
+                {
+                    "id": "c1",
+                    "function": {
+                        "name": "read",
+                        "arguments": '{"path": "' + "y" * 500 + '"}',
+                    },
+                }
+            ],
+        )
+        assert estimate_tokens(conv) >= 100

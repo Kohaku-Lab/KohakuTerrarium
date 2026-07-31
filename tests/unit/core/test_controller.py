@@ -149,9 +149,11 @@ class TestEphemeralMode:
 
 
 class TestStaleToolResultElision:
-    async def test_prior_round_results_elided_from_context(self):
+    async def test_prior_round_results_elided_from_context_when_window_is_full(self):
         env = TestAgentBuilder().with_llm_script(["r1", "r2"]).build()
         big = "X" * 2000
+        # Simulate a crowded context window (78% of the 256k budget).
+        env.controller._last_usage = {"prompt_tokens": 200_000}
         await env.controller.push_event(
             create_tool_complete_event("job1", "round1 output " + big)
         )
@@ -174,6 +176,57 @@ class TestStaleToolResultElision:
         assert ELISION_MARKER in feedback[0].content
         assert big not in feedback[0].content
         assert big in feedback[1].content
+
+    async def test_prior_round_results_kept_when_context_is_spacious(self):
+        env = TestAgentBuilder().with_llm_script(["r1", "r2"]).build()
+        big = "X" * 2000
+        # No usage recorded: the window is not crowded, so stale rounds
+        # stay verbatim and the controller can reference what it read
+        # without re-running tools.
+        await env.controller.push_event(
+            create_tool_complete_event("job1", "round1 output " + big)
+        )
+        async for _ in env.controller.run_once():
+            pass
+        await env.controller.push_event(
+            create_tool_complete_event("job2", "round2 output " + big)
+        )
+        async for _ in env.controller.run_once():
+            pass
+
+        feedback = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if (m.metadata or {}).get("kind") == TOOL_FEEDBACK_KIND
+        ]
+        assert len(feedback) == 2
+        assert big in feedback[0].content
+        assert ELISION_MARKER not in feedback[0].content
+        assert big in feedback[1].content
+
+    async def test_elide_disabled_by_config(self):
+        env = TestAgentBuilder().with_llm_script(["r1", "r2"]).build()
+        env.controller.config.elide_tool_results = False
+        env.controller._last_usage = {"prompt_tokens": 200_000}
+        big = "X" * 2000
+        await env.controller.push_event(
+            create_tool_complete_event("job1", "round1 output " + big)
+        )
+        async for _ in env.controller.run_once():
+            pass
+        await env.controller.push_event(
+            create_tool_complete_event("job2", "round2 output " + big)
+        )
+        async for _ in env.controller.run_once():
+            pass
+
+        feedback = [
+            m
+            for m in env.controller.conversation.get_messages()
+            if (m.metadata or {}).get("kind") == TOOL_FEEDBACK_KIND
+        ]
+        assert big in feedback[0].content
+        assert ELISION_MARKER not in feedback[0].content
 
     async def test_real_user_input_is_never_tagged_or_elided(self):
         env = TestAgentBuilder().with_llm_script(["r1", "r2"]).build()

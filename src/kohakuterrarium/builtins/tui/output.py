@@ -409,7 +409,7 @@ class TUIOutput(BaseOutputModule):
     def _handle_tool_done(
         self, name: str, rest: str, job_id: str, t: str, metadata: dict
     ) -> None:
-        output = metadata.get("output", rest)
+        output = metadata.get("output_preview") or metadata.get("output", rest)
         self._tui.update_tool_block(name, output=output, tool_id=job_id, target=t)
         self._tui.update_running(job_id or name, name, remove=True)
 

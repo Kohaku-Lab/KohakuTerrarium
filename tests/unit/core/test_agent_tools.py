@@ -164,6 +164,20 @@ class TestEmitDirectCompletion:
         kinds = [c[0] for c in agent.output_router.activity_calls]
         assert "tool_done" in kinds
 
+    def test_tool_done_carries_full_output_and_preview(self, agent):
+        # The event log must keep the full tool output (recoverable via
+        # search_memory) while UI rendering keeps using the bounded preview.
+        agent._register_direct_job("bash_x", kind="tool", name="bash")
+        big = "x" * 12000
+        result = JobResult(job_id="bash_x", output=big, exit_code=0)
+        agent._emit_direct_completion_activity("bash_x", result)
+        meta = next(
+            c[2] for c in agent.output_router.activity_calls if c[0] == "tool_done"
+        )
+        assert meta["output"] == big
+        assert meta["output_preview"] == big[:5000]
+        assert len(meta["output_preview"]) == 5000
+
     def test_tool_error(self, agent):
         agent._register_direct_job("bash_x", kind="tool", name="bash")
         result = JobResult(job_id="bash_x", error="boom", output="")

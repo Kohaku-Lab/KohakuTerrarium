@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import Any
 
+from kohakuterrarium.core.conversation_elide import estimate_tokens, maybe_elide
 from kohakuterrarium.core.message_locator import (
     user_message_indices_for_content,
     user_message_indices_for_turn,
@@ -250,6 +251,18 @@ def reload_conversation_under_branch_view(
             if message.get(key):
                 extra[key] = message[key]
         conversation.append(role, message.get("content", ""), **extra)
+
+    # Rebuilds restore tool outputs elided during live turns; re-apply
+    # elision when the estimated prompt is crowded so reloads stay bounded.
+    controller = agent.controller
+    config = getattr(controller, "config", None)
+    if config is not None and getattr(config, "elide_tool_results", False):
+        maybe_elide(
+            conversation,
+            estimate_tokens(conversation),
+            threshold_ratio=config.elide_threshold_ratio,
+            elide_max_tokens=config.elide_max_tokens,
+        )
 
     if selected:
         max_turn = max(selected)
