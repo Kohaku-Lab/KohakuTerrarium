@@ -449,6 +449,27 @@ class TestOutputNormalisation:
         assert "truncated" in result.output
         assert result.metadata.get("truncated") is True
 
+    async def test_truncation_note_points_at_bash_output_file(self):
+        # Bash materializes full output to a temp file and exposes the path
+        # as metadata["raw_output_path"]; the truncation hint must surface it.
+        class _BashLikeTool(_EchoTool):
+            @property
+            def tool_name(self):
+                return "bash"
+
+            async def _execute(self, args, **kwargs):
+                return ToolResult(
+                    output=str(args.get("msg", "")),
+                    metadata={"raw_output_path": "/tmp/kohakuterrarium-bash/bash_1.log"},
+                )
+
+        ex = Executor()
+        ex.register_tool(_BashLikeTool(max_output=10))
+        jid = await ex.submit("bash", {"msg": "x" * 1000})
+        result = await ex.wait_for(jid)
+        assert "Full output saved to /tmp/kohakuterrarium-bash/bash_1.log" in result.output
+        assert "use read to view it" in result.output
+
 
 # ── pending / running / task accessors ───────────────────────────
 

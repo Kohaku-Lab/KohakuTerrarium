@@ -267,7 +267,9 @@ class Executor:
                 job_id=job_id,
                 tool_name=tool.tool_name,
                 artifact_store=artifact_store,
-                saved_to=result_metadata.get("output_path"),
+                # Bash materializes the full output to a temp file and exposes
+                # its path via this metadata key (see builtins.tools.bash).
+                saved_to=result_metadata.get("raw_output_path"),
             )
             metadata = dict(result.metadata or {})
             metadata.update(normalized.metadata)
