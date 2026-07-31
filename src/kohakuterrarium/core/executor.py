@@ -258,12 +258,16 @@ class Executor:
 
             max_output = tool.config.max_output if isinstance(tool, BaseTool) else 0
             artifact_store = getattr(self._agent, "session_store", None)
+            result_metadata = (
+                result.metadata if isinstance(result.metadata, dict) else {}
+            )
             normalized = normalize_tool_output(
                 result.output,
                 max_output=max_output,
                 job_id=job_id,
                 tool_name=tool.tool_name,
                 artifact_store=artifact_store,
+                saved_to=result_metadata.get("output_path"),
             )
             metadata = dict(result.metadata or {})
             metadata.update(normalized.metadata)

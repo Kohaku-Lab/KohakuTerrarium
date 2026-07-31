@@ -83,7 +83,7 @@ class ReadTool(BaseTool):
         offset = int(args.get("offset", 0))
         limit = int(args.get("limit", 0))
 
-        max_output_bytes = int(self.config.extra.get("max_output_bytes", 200000))
+        max_output_bytes = int(self.config.extra.get("max_output_bytes", 256000))
         try:
             async with aiofiles.open(
                 file_path, encoding="utf-8", errors="replace"

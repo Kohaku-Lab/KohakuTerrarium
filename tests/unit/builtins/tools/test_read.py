@@ -66,3 +66,19 @@ class TestReadDefaultLineGuard:
             f"showing lines {MAX_DEFAULT_LINES + 1}-{MAX_DEFAULT_LINES + 100} of 3000"
             in result.output
         )
+
+    async def test_byte_cap_aligned_with_executor_max_output(self, tmp_path):
+        # A file under the default line guard but over the byte cap must
+        # truncate at 256000 bytes (aligned with the executor's max_output).
+        path = tmp_path / "wide.txt"
+        path.write_text(
+            "\n".join(f"row {i} " + "x" * 400 for i in range(1000)),
+            encoding="utf-8",
+        )
+        ctx = _ctx(tmp_path)
+
+        result = await ReadTool().execute({"path": str(path)}, context=ctx)
+
+        assert result.success is True
+        assert "truncated at 256000 bytes" in result.output
+        assert "Use offset/limit to read specific sections." in result.output
