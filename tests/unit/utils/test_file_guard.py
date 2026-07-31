@@ -209,8 +209,12 @@ class TestPathBoundaryGuard:
     def test_sibling_prefix_not_treated_as_child(self, tmp_path):
         # A sibling whose name shares a prefix ("ws2") must not be judged
         # inside "ws" — path containment is component-wise, not textual.
-        guard = PathBoundaryGuard(tmp_path / "ws", mode="warn")
-        sibling = tmp_path / "ws2" / "file.txt"
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        guard = PathBoundaryGuard(ws, mode="warn")
+        sibling_dir = tmp_path / "ws2"
+        sibling_dir.mkdir()
+        sibling = sibling_dir / "file.txt"
         err = guard.check(str(sibling))
         assert err is not None
         assert "Warning" in err
