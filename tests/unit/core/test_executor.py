@@ -460,14 +460,18 @@ class TestOutputNormalisation:
             async def _execute(self, args, **kwargs):
                 return ToolResult(
                     output=str(args.get("msg", "")),
-                    metadata={"raw_output_path": "/tmp/kohakuterrarium-bash/bash_1.log"},
+                    metadata={
+                        "raw_output_path": "/tmp/kohakuterrarium-bash/bash_1.log"
+                    },
                 )
 
         ex = Executor()
         ex.register_tool(_BashLikeTool(max_output=10))
         jid = await ex.submit("bash", {"msg": "x" * 1000})
         result = await ex.wait_for(jid)
-        assert "Full output saved to /tmp/kohakuterrarium-bash/bash_1.log" in result.output
+        assert (
+            "Full output saved to /tmp/kohakuterrarium-bash/bash_1.log" in result.output
+        )
         assert "use read to view it" in result.output
 
 
