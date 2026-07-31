@@ -197,6 +197,28 @@ class TestPathBoundaryGuard:
         # Retry of A allowed, B still warned/allowed independently.
         assert guard.check(str(out_a)) is None
 
+    def test_filesystem_root_cwd_allows_children(self):
+        # Regression: cwd at a filesystem root ("E:\\" or "/") previously
+        # produced a double-separator prefix ("E:\\\\" / "//") so every
+        # child path was misjudged as outside the working directory.
+        root = Path(Path.cwd().anchor)
+        guard = PathBoundaryGuard(root, mode="warn")
+        child = root / "kt-path-guard-regression-child"
+        assert guard.check(str(child)) is None
+
+    def test_sibling_prefix_not_treated_as_child(self, tmp_path):
+        # A sibling whose name shares a prefix ("ws2") must not be judged
+        # inside "ws" — path containment is component-wise, not textual.
+        ws = tmp_path / "ws"
+        ws.mkdir()
+        guard = PathBoundaryGuard(ws, mode="warn")
+        sibling_dir = tmp_path / "ws2"
+        sibling_dir.mkdir()
+        sibling = sibling_dir / "file.txt"
+        err = guard.check(str(sibling))
+        assert err is not None
+        assert "Warning" in err
+
 
 # ── is_binary_file ──────────────────────────────────────────────────
 
