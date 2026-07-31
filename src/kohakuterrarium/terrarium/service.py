@@ -37,6 +37,7 @@ from kohakuterrarium.core.channel import ChannelMessage as _ChannelMessage
 from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.drive.service import DriveServiceMixin
 from kohakuterrarium.terrarium.drive.service_protocol import DriveServiceProtocol
+from kohakuterrarium.terrarium.local_command_service import LocalCommandServiceMixin
 from kohakuterrarium.terrarium.service_dto import (
     BranchMutationResult,
     CreatureInfo,
@@ -44,13 +45,10 @@ from kohakuterrarium.terrarium.service_dto import (
     creature_to_info,
 )
 from kohakuterrarium.terrarium.creature_ops import (
-    agent_command_inventory as _agent_command_inventory,
     agent_env as _agent_env,
-    agent_execute_command as _agent_execute_command,
     agent_get_module_options as _agent_get_module_options,
     agent_get_native_tool_options as _agent_get_native_tool_options,
     agent_list_modules as _agent_list_modules,
-    agent_invoke_skill as _agent_invoke_skill,
     agent_list_plugins as _agent_list_plugins,
     agent_native_tool_inventory as _agent_native_tool_inventory,
     agent_patch_scratchpad as _agent_patch_scratchpad,
@@ -67,7 +65,7 @@ from kohakuterrarium.terrarium.creature_ops import (
     build_runtime_graph_snapshot_for as _build_runtime_graph_snapshot_for,
     chat_branches_for as _chat_branches_for,
     chat_history_for as _chat_history_for,
-    normalize_command_args as _normalize_command_args,
+    normalize_command_args,
     session_attach_policies_for as _session_attach_policies_for,
     wire_creature_on_engine as _wire_creature_on_engine,
 )
@@ -84,6 +82,8 @@ from kohakuterrarium.terrarium.topology import (
     GraphTopology,
     TopologyDelta,
 )
+
+_normalize_command_args = normalize_command_args
 
 
 def _completed_branch_result(
@@ -479,7 +479,7 @@ class TerrariumService(DriveServiceProtocol, Protocol):
     ) -> AsyncIterator[EngineEvent]: ...
 
 
-class LocalTerrariumService(DriveServiceMixin):
+class LocalTerrariumService(LocalCommandServiceMixin, DriveServiceMixin):
     """Direct in-process implementation backed by a :class:`Terrarium`.
 
     Every method delegates to the underlying engine with at most a
@@ -878,44 +878,6 @@ class LocalTerrariumService(DriveServiceMixin):
     ) -> dict[str, Any]:
         return await _agent_toggle_module(
             self._agent(creature_id), module_type, module_name
-        )
-
-    async def command_inventory(self, creature_id: str) -> dict[str, Any]:
-        return _agent_command_inventory(self._agent(creature_id))
-
-    async def invoke_skill(
-        self,
-        creature_id: str,
-        skill: str,
-        args: str | dict[str, Any] | None = None,
-        *,
-        source: str = "web:skill",
-    ) -> dict[str, Any]:
-        return await _agent_invoke_skill(
-            self._agent(creature_id),
-            skill,
-            args,
-            source=source,
-        )
-
-    async def execute_command(
-        self,
-        creature_id: str,
-        command: str,
-        args: str | dict[str, Any] | None = None,
-        *,
-        principal: str = "user:local",
-        is_operator: bool = False,
-    ) -> dict[str, Any]:
-        return await _agent_execute_command(
-            self._agent(creature_id),
-            command,
-            _normalize_command_args(args),
-            service=self,
-            engine=self._engine,
-            creature_id=creature_id,
-            principal=principal,
-            is_operator=is_operator,
         )
 
     async def wire_creature(
