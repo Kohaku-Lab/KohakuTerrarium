@@ -278,7 +278,12 @@ class RichCLIOutput(BaseOutputModule):
             return
 
         if activity_type == "tool_done":
-            output = metadata.get("output") or metadata.get("result") or ""
+            output = (
+                metadata.get("output_preview")
+                or metadata.get("output")
+                or metadata.get("result")
+                or ""
+            )
             self.app.on_tool_done(job_id=job_id, output=str(output))
             return
 

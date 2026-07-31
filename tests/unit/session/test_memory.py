@@ -261,6 +261,30 @@ class TestExtractBlocks:
         tool_blocks = [b for b in blocks if b.block_type == "tool"]
         assert tool_blocks == []
 
+    def test_large_tool_result_indexed_beyond_old_2000_cap(self):
+        # Elided tool results (≤256KB) must stay recoverable: the index cap
+        # covers far more than the historical 2000-char truncation.
+        from kohakuterrarium.session.memory import TOOL_RESULT_INDEX_CHARS
+
+        big = (
+            "needle-at-tail "
+            + "z" * (TOOL_RESULT_INDEX_CHARS - 50)
+            + " unique-tail-marker"
+        )
+        events = [
+            {"type": "user_input", "content": "q", "event_id": 1},
+            {
+                "type": "tool_result",
+                "name": "bash",
+                "output": big,
+                "event_id": 2,
+            },
+        ]
+        blocks = _extract_blocks("alice", events)
+        tool_blocks = [b for b in blocks if b.block_type == "tool"]
+        assert len(tool_blocks) == 1
+        assert "unique-tail-marker" in tool_blocks[0].content
+
     def test_processing_end_ends_round(self):
         events = [
             {"type": "user_input", "content": "q", "event_id": 1},

@@ -112,6 +112,28 @@ class TestStreamOutputSync:
         # Unknown keys are filtered.
         assert "unknown_key" not in msg
 
+    def test_tool_done_streams_preview_not_full_output(self, _stream):
+        so, q, _log = _stream
+        full = "x" * 200_000
+        so.on_activity_with_metadata(
+            "tool_done",
+            "[bash] big",
+            metadata={
+                "job_id": "j1",
+                "output": full,
+                "output_preview": full[:5000],
+            },
+        )
+        msg = q.get_nowait()
+        assert msg["type"] == "activity"
+        assert msg["output"] == full[:5000]
+        assert len(msg["output"]) == 5000
+        mirror = q.get_nowait()
+        assert mirror["type"] == "tool_done"
+        assert mirror["output"] == full[:5000]
+        # The raw full output never leaves the process over the stream.
+        assert full not in (msg["output"], mirror["output"])
+
     def test_on_assistant_image(self, _stream):
         so, q, _log = _stream
         so.on_assistant_image(

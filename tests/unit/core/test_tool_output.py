@@ -67,6 +67,27 @@ class TestTruncateUtf8:
         assert meta["omitted_text_bytes"] >= 990
         assert meta["max_output_bytes"] == 10
 
+    def test_truncation_note_suggests_narrower_scope_for_read(self):
+        text = "x" * 1000
+        out, _ = truncate_text_utf8(text, 10, tool_name="read")
+        assert "offset/limit" in out
+        assert "omitted sections" in out
+
+    def test_generic_truncation_note_has_no_read_specific_hint(self):
+        text = "x" * 1000
+        out, _ = truncate_text_utf8(text, 10)
+        assert "truncated" in out
+        assert "offset/limit" not in out
+
+    def test_truncation_note_points_at_saved_output_file(self):
+        text = "x" * 1000
+        out, _ = truncate_text_utf8(
+            text, 10, tool_name="bash", saved_to="/tmp/kohakuterrarium-bash/bash_1.log"
+        )
+        assert "Full output saved to /tmp/kohakuterrarium-bash/bash_1.log" in out
+        assert "use read to view it" in out
+        assert "offset/limit" not in out
+
     def test_multibyte_safe_decode(self):
         # 3-byte chars — split position cannot fall mid-character.
         text = "日本語" * 10

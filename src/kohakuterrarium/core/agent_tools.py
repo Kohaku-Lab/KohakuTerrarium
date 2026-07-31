@@ -506,7 +506,13 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             if hasattr(result, "get_text_output")
             else str(output)[:5000]
         )
-        metadata = {"job_id": job_id, "output": preview}
+        metadata = {
+            "job_id": job_id,
+            # Full output for the session event log (recoverable via search_memory);
+            # preview stays for UI rendering.
+            "output": output,
+            "output_preview": preview,
+        }
         if is_subagent:
             metadata["result"] = preview
             metadata["turns"] = getattr(result, "turns", 0)

@@ -16,6 +16,10 @@ from kohakuterrarium.session.history import (
 )
 from kohakuterrarium.utils.logging import get_logger
 
+# Tool results are indexed up to this many chars so elided-but-≤256KB outputs
+# stay recoverable via search_memory without bloating the FTS index.
+TOOL_RESULT_INDEX_CHARS = 50_000
+
 logger = get_logger(__name__)
 
 
@@ -515,7 +519,7 @@ def _extract_blocks(
                         block_num=block_num,
                         agent=agent,
                         block_type="tool",
-                        content=content[:2000],
+                        content=content[:TOOL_RESULT_INDEX_CHARS],
                         ts=ts,
                         tool_name=name,
                     )

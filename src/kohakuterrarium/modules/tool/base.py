@@ -29,7 +29,7 @@ class ToolConfig:
     """Configure execution limits, environment, and background notification."""
 
     timeout: float = 60.0
-    max_output: int = 64 * 1024
+    max_output: int = 256 * 1024
     working_dir: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     notify_controller_on_background_complete: bool = True

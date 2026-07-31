@@ -15,6 +15,10 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+# Display cap per search result: large enough to surface the meaningful body
+# of a recovered tool output while bounding the tool-result context.
+SEARCH_RESULT_DISPLAY_CHARS = 2000
+
 
 @register_builtin("search_memory")
 class SearchMemoryTool(BaseTool):
@@ -79,8 +83,11 @@ class SearchMemoryTool(BaseTool):
             lines.append(header)
             # Bound each result so one event cannot consume the tool-result context.
             content = r.content
-            if len(content) > 500:
-                content = content[:500] + f"... ({len(r.content)} chars total)"
+            if len(content) > SEARCH_RESULT_DISPLAY_CHARS:
+                content = (
+                    content[:SEARCH_RESULT_DISPLAY_CHARS]
+                    + f"... ({len(r.content)} chars total)"
+                )
             lines.append(content)
             lines.append("")
 
