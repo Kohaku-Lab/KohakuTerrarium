@@ -123,12 +123,10 @@ ALLOWLIST_600 = {
     # the soft cap. Splitting transport-side bookkeeping from handler
     # dispatch would fragment a single cohesive lifecycle.
     "laboratory/_internal/client.py",
-    # TerrariumService Protocol + LocalTerrariumService — full
-    # per-creature API surface (chat / state / mutation / wiring /
-    # cluster snapshot). One cohesive Protocol definition with a
-    # uniform LocalImpl method per Protocol method; splitting along
-    # category lines would scatter related implementations across
-    # files that all consume the same engine handle.
+    # TerrariumService Protocol + the shared LocalTerrariumService
+    # facade. Command methods already live in local_command_service.py;
+    # the remaining methods keep one uniform engine-backed implementation
+    # beside the Protocol surface they implement.
     "terrarium/service.py",
     # RemoteTerrariumService — wire-call counterpart to service.py,
     # one method per Protocol entry. Same shape rationale.
