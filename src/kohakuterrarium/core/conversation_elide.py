@@ -121,7 +121,10 @@ def estimate_tokens(conversation: Any) -> int:
         total_chars += len(text)
         for call in getattr(msg, "tool_calls", None) or []:
             fn = call.get("function") or {}
-            total_chars += len(fn.get("arguments") or "")
+            args = fn.get("arguments") or ""
+            if not isinstance(args, str):
+                args = str(args)
+            total_chars += len(args)
     return max(1, int(total_chars / CHARS_PER_TOKEN))
 
 

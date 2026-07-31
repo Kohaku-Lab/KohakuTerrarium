@@ -271,7 +271,7 @@ class Executor:
                 # its path via this metadata key (see builtins.tools.bash).
                 saved_to=result_metadata.get("raw_output_path"),
             )
-            metadata = dict(result.metadata or {})
+            metadata = dict(result_metadata)
             metadata.update(normalized.metadata)
 
             job_result = JobResult(
