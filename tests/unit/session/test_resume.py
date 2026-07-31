@@ -656,6 +656,13 @@ class _FakeController:
         self.conversation = Conversation()
 
 
+class _ElideConfig:
+    name = "alice"
+    elide_tool_results = True
+    elide_threshold_ratio = 0.6
+    elide_max_tokens = 256_000
+
+
 class _FakeAgentForInject:
     def __init__(self):
         self.config = _FakeConfig()
@@ -1004,6 +1011,97 @@ class TestResumeAgent:
         agent, store = resume_agent(path, io_mode="plain")
         try:
             assert agent.config.name == "resumee"
+        finally:
+            store.close()
+
+    def test_crowded_resume_elides_stale_tool_results(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            big = "y" * 1_000_000
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "q1"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "function": {
+                                    "name": "read",
+                                    "arguments": '{"path": "big.py"}',
+                                },
+                            }
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "c1", "content": big},
+                    {"role": "assistant", "content": "reading done"},
+                    {"role": "user", "content": "q2"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "c2",
+                                "function": {
+                                    "name": "grep",
+                                    "arguments": '{"pattern": "x"}',
+                                },
+                            }
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "c2", "content": "small"},
+                    {"role": "assistant", "content": "latest"},
+                ],
+            )
+            agent = _FakeAgentForInject()
+            agent.config = _ElideConfig()
+            agent.controller.config = _ElideConfig()
+            inject_saved_state(agent, store, "alice")
+            from kohakuterrarium.core.conversation_elide import ELISION_MARKER
+
+            contents = [
+                m.get("content", "")
+                for m in agent.controller.conversation.to_messages()
+            ]
+            # The 1MB tool result from the earlier round is stubbed out.
+            assert any(isinstance(c, str) and ELISION_MARKER in c for c in contents)
+            # The latest feedback round stays verbatim.
+            assert "small" in contents
+        finally:
+            store.close()
+
+    def test_spacious_resume_keeps_tool_results_verbatim(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "q1"},
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "tool_calls": [
+                            {
+                                "id": "c1",
+                                "function": {"name": "read", "arguments": "{}"},
+                            }
+                        ],
+                    },
+                    {"role": "tool", "tool_call_id": "c1", "content": "small"},
+                    {"role": "assistant", "content": "done"},
+                ],
+            )
+            agent = _FakeAgentForInject()
+            agent.config = _ElideConfig()
+            agent.controller.config = _ElideConfig()
+            inject_saved_state(agent, store, "alice")
+            contents = [
+                m.get("content", "")
+                for m in agent.controller.conversation.to_messages()
+            ]
+            assert "small" in contents
         finally:
             store.close()
 

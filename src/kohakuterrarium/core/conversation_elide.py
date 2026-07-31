@@ -105,3 +105,41 @@ def elide_stale_tool_results(conversation: Any) -> int:
         conversation._metadata.total_chars = conversation.get_context_length()
         logger.debug("Stale tool results elided", count=elided)
     return elided
+
+
+# Conservative chars-per-token for prompt-size estimation: slightly low for
+# English/code, which over-estimates tokens and errs toward eliding when a
+# rebuilt conversation is close to the threshold.
+CHARS_PER_TOKEN = 3.5
+
+
+def estimate_tokens(conversation: Any) -> int:
+    """Conservative prompt-token estimate for a rebuilt conversation."""
+    total_chars = 0
+    for msg in conversation.get_messages():
+        text = extract_message_text(msg) or ""
+        total_chars += len(text)
+        for call in getattr(msg, "tool_calls", None) or []:
+            fn = call.get("function") or {}
+            total_chars += len(fn.get("arguments") or "")
+    return max(1, int(total_chars / CHARS_PER_TOKEN))
+
+
+def maybe_elide(
+    conversation: Any,
+    prompt_tokens: int,
+    *,
+    threshold_ratio: float,
+    elide_max_tokens: int,
+) -> int:
+    """Elide stale tool results when the prompt is crowded; else no-op.
+
+    Shared by the per-turn controller check and the resume/branch reload
+    paths so rebuilt conversations get the same bounded-prompt treatment.
+    Returns the number of tool-feedback messages elided.
+    """
+    if prompt_tokens <= 0 or elide_max_tokens <= 0:
+        return 0
+    if prompt_tokens / elide_max_tokens < threshold_ratio:
+        return 0
+    return elide_stale_tool_results(conversation)

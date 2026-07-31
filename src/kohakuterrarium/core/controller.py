@@ -27,7 +27,7 @@ from kohakuterrarium.core.controller_plugins import (
 from kohakuterrarium.core.conversation import Conversation, ConversationConfig
 from kohakuterrarium.core.conversation_elide import (
     TOOL_FEEDBACK_KIND,
-    elide_stale_tool_results,
+    maybe_elide,
 )
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.core.controller_context import format_events_for_context
@@ -714,14 +714,6 @@ class Controller:
             resolved_messages.append(resolved_msg)
         return resolved_messages
 
-    def _should_elide_tool_results(self) -> bool:
-        """True when the last model call already filled most of the window."""
-        prompt_tokens = self._last_usage.get("prompt_tokens", 0)
-        if prompt_tokens <= 0:
-            return False
-        ratio = prompt_tokens / self.config.elide_max_tokens
-        return ratio >= self.config.elide_threshold_ratio
-
     async def run_once(self) -> AsyncIterator[ParseEvent]:
         """
         Run one controller turn.
@@ -764,8 +756,13 @@ class Controller:
         # controller can reference what it read without re-running tools;
         # once the window is crowded, stubbing prevents the endless-compact
         # loop that unconditional retention used to trigger.
-        if self.config.elide_tool_results and self._should_elide_tool_results():
-            elide_stale_tool_results(self.conversation)
+        if self.config.elide_tool_results:
+            maybe_elide(
+                self.conversation,
+                self._last_usage.get("prompt_tokens", 0),
+                threshold_ratio=self.config.elide_threshold_ratio,
+                elide_max_tokens=self.config.elide_max_tokens,
+            )
 
         messages = self.conversation.to_messages()
         messages = await self._resolve_message_files(messages)

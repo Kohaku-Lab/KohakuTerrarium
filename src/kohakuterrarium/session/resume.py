@@ -9,6 +9,7 @@ from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_serde import unpack_agent_config
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation_elide import estimate_tokens, maybe_elide
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.packages.resolve import resolve_any_path
@@ -220,6 +221,18 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
     if saved_messages:
         agent.controller.conversation = _build_conversation(saved_messages)
+        # Rebuilds restore tool outputs elided during live turns, so re-apply
+        # elision when the estimated prompt is crowded (mirrors the per-turn
+        # controller check and keeps the resumed prompt bounded).
+        controller = agent.controller
+        config = getattr(controller, "config", None)
+        if config is not None and getattr(config, "elide_tool_results", False):
+            maybe_elide(
+                controller.conversation,
+                estimate_tokens(controller.conversation),
+                threshold_ratio=config.elide_threshold_ratio,
+                elide_max_tokens=config.elide_max_tokens,
+            )
         logger.info(
             "Conversation restored", agent=agent_name, messages=len(saved_messages)
         )
