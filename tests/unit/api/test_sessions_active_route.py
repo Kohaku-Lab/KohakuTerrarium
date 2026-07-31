@@ -110,13 +110,21 @@ class TestCreateTerrariumSession:
         assert body["session_id"] == "s1"
         assert body["name"] == "alice"
 
-    def test_remote_node_not_implemented(self):
+    def test_remote_node_forwarded(self, monkeypatch):
+        seen = {}
+
+        async def fake(service, **kw):
+            seen.update(kw)
+            return _session(session_id="g1")
+
+        monkeypatch.setattr(active_mod.lifecycle, "start_terrarium", fake)
         client = TestClient(self._setup_app())
         resp = client.post(
             "/active/terrarium",
             json={"config_path": "/x", "on_node": "worker-1"},
         )
-        assert resp.status_code == 501
+        assert resp.status_code == 200
+        assert seen["on_node"] == "worker-1"
 
     def test_value_error(self, monkeypatch):
         async def boom(service, **kw):
@@ -185,13 +193,21 @@ class TestLegacyCreateTerrarium:
         assert resp.status_code == 200
         assert resp.json()["terrarium_id"] == "g1"
 
-    def test_remote_node_not_implemented(self):
+    def test_remote_node_forwarded(self, monkeypatch):
+        seen = {}
+
+        async def fake(service, **kw):
+            seen.update(kw)
+            return _session(session_id="g1")
+
+        monkeypatch.setattr(active_mod.lifecycle, "start_terrarium", fake)
         client = TestClient(self._app())
         resp = client.post(
             "/active/terrariums",
             json={"config_path": "/x", "on_node": "worker-1"},
         )
-        assert resp.status_code == 501
+        assert resp.status_code == 200
+        assert seen["on_node"] == "worker-1"
 
     def test_value_error(self, monkeypatch):
         async def boom(service, **kw):

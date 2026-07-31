@@ -313,7 +313,10 @@ info = await service.add_creature(cfg, on_node="worker-gpu-1")
 
 A *terrarium* (multi-creature graph) can span workers via cross-node
 channels. Recipe files don't (yet) include per-creature node
-targeting, so build the topology imperatively:
+targeting. Studio's **Run on** selector (or `apply_recipe(...,
+on_node="worker-1")`) deploys the complete recipe to one connected
+worker, which also owns its session persistence. To split one
+terrarium across multiple workers, build the topology imperatively:
 
 ```python
 # Spawn alpha on worker-1, bravo on worker-2
@@ -444,7 +447,7 @@ won't appear in the host's logs.
 
 | Symptom | Likely cause |
 |---------|--------------|
-| `"on_node" is required` on spawn | You're in lab-host mode and tried to spawn on the host. Pick a worker, or use a recipe (recipes still run on the coordination engine). |
+| `"on_node" is required` on spawn | You're in lab-host mode and tried to spawn on the host. Pick a connected worker. A selected recipe runs wholly on that worker; it is not split across workers automatically. |
 | Worker connects then immediately disconnects | Token mismatch. Hello/Welcome handshake logs the rejection at INFO. |
 | `worker 'X' resume failed: Session has no config_path or config_snapshot in metadata` | The mirror file pre-dates 1.5.x meta-sync ordering. Spawn the creature fresh and resume from the new file. |
 | Codex `re-login due to process mismatch` errors | You're using the host's Codex token from a worker process. Log Codex in **on the worker** via Settings → Providers (with Manage on: set to that worker). |

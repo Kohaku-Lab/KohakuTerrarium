@@ -15,6 +15,7 @@ from kohakuterrarium.laboratory.protocols import LabRegistrar
 from kohakuterrarium.llm.backends import set_remote_backend
 from kohakuterrarium.llm.preset_store import preset_from_data, set_remote_preset
 from kohakuterrarium.llm.profile_types import LLMBackend
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.creature_ops import (
     agent_command_inventory,
     agent_env,
@@ -42,7 +43,7 @@ from kohakuterrarium.terrarium.creature_ops import (
     session_attach_policies_for,
     wire_creature_on_engine,
 )
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.terrarium.recipe_discard import discard_recipe_graph_shielded
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import (
     LocalTerrariumService,
@@ -308,6 +309,54 @@ class TerrariumRuntimeAdapter:
             case "status_snapshot":
                 return {"status": self._engine.status()}
 
+            case "apply_recipe":
+                llm = msg.body.get("llm")
+                if llm is not None and not isinstance(llm, str):
+                    raise ValueError("llm must be a selector string")
+                await self._prewarm_profile_by_selector(llm or "")
+                recipe_path = str(msg.body.get("recipe_path") or "")
+                if not recipe_path:
+                    raise ValueError("recipe_path is required")
+                if "session_path" in msg.body:
+                    raise ValueError(
+                        "session_path is worker-owned and cannot be provided"
+                    )
+                persist = msg.body.get("persist", False)
+                if not isinstance(persist, bool):
+                    raise ValueError("persist must be a boolean")
+                graph = await self._engine.apply_recipe(
+                    recipe_path,
+                    pwd=msg.body.get("pwd"),
+                    llm=llm,
+                    strict=bool(msg.body.get("strict", True)),
+                    start=bool(msg.body.get("start", True)),
+                    session=True if persist else False,
+                )
+                creatures = [
+                    pack_creature_info(creature_to_info(creature))
+                    for creature in self._engine.list_creatures()
+                    if creature.graph_id == graph.graph_id
+                ]
+                return {
+                    "graph": pack_graph_topology(graph),
+                    "creatures": creatures,
+                }
+            case "discard_recipe":
+                graph_id = str(msg.body.get("graph_id") or "")
+                if not graph_id:
+                    raise ValueError("graph_id is required")
+                await discard_recipe_graph_shielded(
+                    self._engine,
+                    graph_id,
+                    before_store_close=(
+                        lambda: (
+                            self._session_attacher.discard_graph(graph_id)
+                            if self._session_attacher is not None
+                            else None
+                        )
+                    ),
+                )
+                return {}
             case "add_creature":
                 config = unpack_creature_build_input(msg.body["config"])
                 # LLM construction needs remote profiles and credentials already cached.

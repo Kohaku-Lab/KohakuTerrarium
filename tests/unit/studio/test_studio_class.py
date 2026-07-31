@@ -140,11 +140,19 @@ class TestClassmethodConstructors:
         captured = {}
 
         async def fake_start_terrarium(
-            service, *, config_path=None, config=None, pwd=None, name=None, llm=None
+            service,
+            *,
+            config_path=None,
+            config=None,
+            pwd=None,
+            name=None,
+            llm=None,
+            on_node="_host",
         ):
             captured["config_path"] = config_path
             captured["llm"] = llm
             captured["name"] = name
+            captured["on_node"] = on_node
             return SimpleNamespace(session_id="g1")
 
         monkeypatch.setattr(_lifecycle, "start_terrarium", fake_start_terrarium)
@@ -153,6 +161,7 @@ class TestClassmethodConstructors:
         assert captured["config_path"] == "/x"
         assert captured["llm"] == "profile-x"
         assert captured["name"] == "team"
+        assert captured["on_node"] == "_host"
         await studio.shutdown()
 
 

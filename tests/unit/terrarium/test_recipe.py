@@ -5,10 +5,14 @@ instances — the engine layer only cares about ``Creature.agent``
 shape, which our fake satisfies.
 """
 
+import asyncio
 from pathlib import Path
 
 import pytest
+
 from kohakuterrarium.terrarium import recipe as recipe_mod
+from kohakuterrarium.terrarium import graph_checkpoint as checkpoint_mod
+from kohakuterrarium.terrarium import recipe_apply as recipe_apply_mod
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
@@ -36,6 +40,20 @@ def _creature_cfg(name, listen=None, send=None):
         listen_channels=list(listen or []),
         send_channels=list(send or []),
     )
+
+
+class _StartFailAgent(_FakeAgent):
+    async def start(self) -> None:
+        raise RuntimeError("start failed")
+
+
+class _BlockingStartAgent(_FakeAgent):
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def start(self) -> None:
+        self.started.set()
+        await self.release.wait()
 
 
 def _recipe(creatures=None, channels=None, root=None):
@@ -197,6 +215,535 @@ class TestApplyRecipe:
         finally:
             await engine.shutdown()
 
+    async def test_concurrent_applies_reserve_distinct_id_sets(self):
+        engine = Terrarium()
+        both_applies_entered = asyncio.Event()
+        release_applies = asyncio.Event()
+        entered = 0
+
+        original_add = engine.add_creature
+
+        async def blocked_add(*args, **kwargs):
+            nonlocal entered
+            entered += 1
+            if entered == 2:
+                both_applies_entered.set()
+            await release_applies.wait()
+            return await original_add(*args, **kwargs)
+
+        engine.add_creature = blocked_add
+        first_ids: list[str] = []
+        second_ids: list[str] = []
+        recipe = _recipe(creatures=[_creature_cfg("alice"), _creature_cfg("bob")])
+        try:
+            first = asyncio.create_task(
+                recipe_mod.apply_recipe(
+                    engine,
+                    recipe,
+                    creature_builder=_fake_builder,
+                    created_ids=first_ids,
+                )
+            )
+            second = asyncio.create_task(
+                recipe_mod.apply_recipe(
+                    engine,
+                    recipe,
+                    creature_builder=_fake_builder,
+                    created_ids=second_ids,
+                )
+            )
+            await asyncio.wait_for(both_applies_entered.wait(), timeout=1)
+            release_applies.set()
+            await asyncio.gather(first, second)
+
+            assert first_ids == ["alice", "bob"]
+            assert second_ids == ["alice_2", "bob_2"]
+            assert set(first_ids).isdisjoint(second_ids)
+        finally:
+            release_applies.set()
+            await engine.shutdown()
+
+    async def test_existing_id_uses_next_available_suffix(self):
+        engine = Terrarium()
+        try:
+            existing = _fake_builder(_creature_cfg("alice"), creature_id="alice")
+            await engine.add_creature(existing, start=False, session=False)
+            created_ids: list[str] = []
+
+            await recipe_mod.apply_recipe(
+                engine,
+                _recipe(creatures=[_creature_cfg("alice")]),
+                start=False,
+                creature_builder=_fake_builder,
+                created_ids=created_ids,
+            )
+
+            assert created_ids == ["alice_2"]
+        finally:
+            await engine.shutdown()
+
+    async def test_builder_error_releases_reservation_and_does_not_deadlock(self):
+        engine = Terrarium()
+
+        def failing_builder(*args, **kwargs):
+            raise RuntimeError("build failed")
+
+        try:
+            recipe = _recipe(creatures=[_creature_cfg("alice")])
+            with pytest.raises(RuntimeError, match="build failed"):
+                await recipe_mod.apply_recipe(
+                    engine, recipe, creature_builder=failing_builder
+                )
+
+            created_ids: list[str] = []
+            await asyncio.wait_for(
+                recipe_mod.apply_recipe(
+                    engine,
+                    recipe,
+                    start=False,
+                    creature_builder=_fake_builder,
+                    created_ids=created_ids,
+                ),
+                timeout=1,
+            )
+            assert created_ids == ["alice"]
+        finally:
+            await engine.shutdown()
+
+    async def test_cancellation_releases_reservation(self):
+        engine = Terrarium()
+        add_entered = asyncio.Event()
+        never_release = asyncio.Event()
+        original_add = engine.add_creature
+
+        async def blocked_add(*args, **kwargs):
+            add_entered.set()
+            await never_release.wait()
+            return await original_add(*args, **kwargs)
+
+        engine.add_creature = blocked_add
+        recipe = _recipe(creatures=[_creature_cfg("alice")])
+        task = asyncio.create_task(
+            recipe_mod.apply_recipe(engine, recipe, creature_builder=_fake_builder)
+        )
+        try:
+            await asyncio.wait_for(add_entered.wait(), timeout=1)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            engine.add_creature = original_add
+            created_ids: list[str] = []
+            await asyncio.wait_for(
+                recipe_mod.apply_recipe(
+                    engine,
+                    recipe,
+                    start=False,
+                    creature_builder=_fake_builder,
+                    created_ids=created_ids,
+                ),
+                timeout=1,
+            )
+            assert created_ids == ["alice"]
+        finally:
+            task.cancel()
+            await engine.shutdown()
+
+    async def test_rejects_duplicate_logical_names_before_mutation(self):
+        engine = Terrarium()
+        recipe = _recipe(creatures=[_creature_cfg("alice"), _creature_cfg("alice")])
+        try:
+            with pytest.raises(ValueError, match="duplicate logical creature name"):
+                await recipe_mod.apply_recipe(
+                    engine, recipe, creature_builder=_fake_builder
+                )
+            assert engine.list_graphs() == []
+            assert engine.list_creatures() == []
+        finally:
+            await engine.shutdown()
+
+    async def test_rejects_root_section_and_regular_root_name(self):
+        engine = Terrarium()
+        recipe = _recipe(
+            creatures=[_creature_cfg("root")],
+            root=RootConfig(config_data={"name": "root"}, base_dir=Path(".")),
+        )
+        try:
+            with pytest.raises(ValueError, match="regular creature named 'root'"):
+                await recipe_mod.apply_recipe(
+                    engine, recipe, creature_builder=_fake_builder
+                )
+            assert engine.list_graphs() == []
+            assert engine.list_creatures() == []
+        finally:
+            await engine.shutdown()
+
+    async def test_existing_graph_rejects_duplicate_logical_name(self):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("alice"), creature_id="existing")
+        try:
+            added = await engine.add_creature(existing, start=False, session=False)
+            with pytest.raises(ValueError, match="already contains creature name"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(creatures=[_creature_cfg("alice")]),
+                    graph=added.graph_id,
+                    creature_builder=_fake_builder,
+                )
+            assert engine.get_graph(added.graph_id).creature_ids == {"existing"}
+        finally:
+            await engine.shutdown()
+
+    async def test_existing_graph_rejects_declared_agent_alias_before_mutation(
+        self, monkeypatch
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        existing.agent.config.name = "shared"
+        candidate = _creature_cfg("new-member")
+        candidate.config_data["name"] = "shared"
+
+        async def unexpected_add_channel(*_args, **_kwargs):
+            raise AssertionError("recipe mutation began before alias preflight")
+
+        try:
+            added = await engine.add_creature(existing, start=False, session=False)
+            monkeypatch.setattr(engine, "add_channel", unexpected_add_channel)
+            with pytest.raises(ValueError, match="already contains creature name"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(creatures=[candidate]),
+                    graph=added.graph_id,
+                    creature_builder=_fake_builder,
+                )
+            graph = engine.get_graph(added.graph_id)
+            assert graph.creature_ids == {"existing"}
+            assert graph.channels == {}
+        finally:
+            await engine.shutdown()
+
+    async def test_duplicate_declared_agent_aliases_fail_before_mutation(
+        self, monkeypatch
+    ):
+        engine = Terrarium()
+        alice = _creature_cfg("alice")
+        bob = _creature_cfg("bob")
+        alice.config_data["name"] = "shared"
+        bob.config_data["name"] = "shared"
+
+        async def unexpected_add_channel(*_args, **_kwargs):
+            raise AssertionError("recipe mutation began before alias validation")
+
+        monkeypatch.setattr(engine, "add_channel", unexpected_add_channel)
+        try:
+            with pytest.raises(ValueError, match="duplicate creature name alias"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(creatures=[alice, bob]),
+                    creature_builder=_fake_builder,
+                )
+            assert engine.list_graphs() == []
+            assert engine.list_creatures() == []
+        finally:
+            await engine.shutdown()
+
+    async def test_existing_graph_starts_only_new_members(self):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        try:
+            added = await engine.add_creature(existing, start=False, session=False)
+            created_ids: list[str] = []
+
+            await recipe_mod.apply_recipe(
+                engine,
+                _recipe(creatures=[_creature_cfg("new")]),
+                graph=added.graph_id,
+                creature_builder=_fake_builder,
+                created_ids=created_ids,
+            )
+
+            assert existing.agent.start_calls == 0
+            assert engine.get_creature("new").agent.start_calls == 1
+            assert created_ids == ["new"]
+        finally:
+            await engine.shutdown()
+
+    async def test_existing_persisted_graph_attaches_store_to_new_members(
+        self, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        try:
+            added = await engine.add_creature(
+                existing,
+                start=False,
+                session=tmp_path / "existing.kohakutr",
+            )
+            store = engine._session_stores[added.graph_id]
+
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("new")]),
+                graph=added.graph_id,
+                start=False,
+                creature_builder=_fake_builder,
+            )
+
+            assert engine.get_creature("new").agent.session_store is store
+            assert store.meta["agents"] == ["existing", "new"]
+            assert store.meta["config_type"] == "terrarium"
+        finally:
+            await engine.shutdown()
+
+
+class TestRecipeRollback:
+    async def test_builder_cannot_return_preexisting_creature_id(self):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+
+        def bad_builder(config, **kwargs):
+            return _fake_builder(config, creature_id="existing")
+
+        try:
+            await engine.add_creature(existing, start=False, session=False)
+            with pytest.raises(ValueError, match="reserved"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(creatures=[_creature_cfg("worker")]),
+                    creature_builder=bad_builder,
+                )
+            assert [creature.creature_id for creature in engine.list_creatures()] == [
+                "existing"
+            ]
+        finally:
+            await engine.shutdown()
+
+    async def test_start_failure_rolls_back_only_new_members(self):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        built = {}
+
+        def failing_builder(config, **kwargs):
+            creature = _fake_builder(config, **kwargs)
+            if config.name == "bad":
+                creature.agent = _StartFailAgent("bad")
+            built[config.name] = creature
+            return creature
+
+        try:
+            added = await engine.add_creature(existing, start=False, session=False)
+            with pytest.raises(RuntimeError, match="start failed"):
+                await recipe_mod.apply_recipe(
+                    engine,
+                    _recipe(creatures=[_creature_cfg("good"), _creature_cfg("bad")]),
+                    graph=added.graph_id,
+                    creature_builder=failing_builder,
+                )
+
+            assert [creature.creature_id for creature in engine.list_creatures()] == [
+                "existing"
+            ]
+            graph = engine.get_graph(added.graph_id)
+            assert graph.creature_ids == {"existing"}
+            assert graph.channels == {}
+            assert existing.send_channels == []
+            assert graph.send_edges.get("existing", set()) == set()
+            assert built["good"].agent.trigger_manager._triggers == {}
+            assert built["bad"].agent.trigger_manager._triggers == {}
+        finally:
+            await engine.shutdown()
+
+    async def test_engine_session_failure_rolls_back_created_graph(self, monkeypatch):
+        engine = Terrarium()
+
+        async def fail_attach(*args, **kwargs):
+            raise RuntimeError("session attach failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.autosession.attach_for_recipe",
+            fail_attach,
+        )
+        with pytest.raises(RuntimeError, match="session attach failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("worker")]),
+                start=False,
+                creature_builder=_fake_builder,
+            )
+
+        assert engine.list_creatures() == []
+        assert engine.list_graphs() == []
+        await engine.shutdown()
+
+    async def test_checkpoint_failure_closes_owned_recipe_store(
+        self, monkeypatch, tmp_path
+    ):
+        engine = Terrarium()
+
+        async def fail_checkpoint(*args, **kwargs):
+            raise RuntimeError("checkpoint failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            fail_checkpoint,
+        )
+        session_path = tmp_path / "run.kohakutr"
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("worker")]),
+                start=False,
+                session=session_path,
+            )
+
+        assert engine.list_creatures() == []
+        assert engine.list_graphs() == []
+        assert engine._session_stores == {}
+        assert engine._owned_sessions == set()
+        await engine.shutdown()
+
+    async def test_existing_graph_checkpoint_failure_removes_stale_membership(
+        self, monkeypatch, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        added = await engine.add_creature(existing, start=False, session=False)
+        await engine.add_channel(added.graph_id, "worker")
+
+        real_checkpoint = checkpoint_mod.checkpoint
+
+        async def fail_checkpoint(engine_arg, graph_id):
+            if checkpoint_mod._suppression.get(engine_arg, 0):
+                return await real_checkpoint(engine_arg, graph_id)
+            raise RuntimeError("checkpoint failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            fail_checkpoint,
+        )
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("worker")]),
+                graph=added.graph_id,
+                start=False,
+                session=tmp_path / "run.kohakutr",
+                creature_builder=_fake_builder,
+            )
+
+        graph = engine.get_graph(added.graph_id)
+        assert graph.creature_ids == {"existing"}
+        assert set(engine._creatures) == {"existing"}
+        assert set(graph.channels) == {"worker"}
+        assert engine._session_stores == {}
+        assert engine._owned_sessions == set()
+        assert existing.agent.session_store is None
+        await engine.shutdown()
+
+    async def test_failed_store_replacement_restores_open_previous_store(
+        self, monkeypatch, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        added = await engine.add_creature(
+            existing,
+            start=False,
+            session=tmp_path / "previous.kohakutr",
+        )
+        previous = engine._session_stores[added.graph_id]
+        real_checkpoint = checkpoint_mod.checkpoint
+
+        async def fail_checkpoint(engine_arg, graph_id):
+            if checkpoint_mod._suppression.get(engine_arg, 0):
+                return await real_checkpoint(engine_arg, graph_id)
+            raise RuntimeError("checkpoint failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            fail_checkpoint,
+        )
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("new")]),
+                graph=added.graph_id,
+                start=False,
+                session=tmp_path / "replacement.kohakutr",
+                creature_builder=_fake_builder,
+            )
+
+        assert engine._session_stores[added.graph_id] is previous
+        assert getattr(previous, "_closed", False) is False
+        assert existing.agent.session_store is previous
+        assert set(engine._creatures) == {"existing"}
+        await engine.shutdown()
+
+    async def test_failed_existing_store_reuse_restores_session_meta(
+        self, monkeypatch, tmp_path
+    ):
+        engine = Terrarium()
+        existing = _fake_builder(_creature_cfg("existing"), creature_id="existing")
+        added = await engine.add_creature(
+            existing,
+            start=False,
+            session=tmp_path / "existing.kohakutr",
+        )
+        store = engine._session_stores[added.graph_id]
+
+        async def fail_checkpoint(*args, **kwargs):
+            raise RuntimeError("checkpoint failed")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.graph_checkpoint.checkpoint",
+            fail_checkpoint,
+        )
+        with pytest.raises(RuntimeError, match="checkpoint failed"):
+            await engine.apply_recipe(
+                _recipe(creatures=[_creature_cfg("new")]),
+                graph=added.graph_id,
+                start=False,
+                creature_builder=_fake_builder,
+            )
+
+        assert engine._session_stores[added.graph_id] is store
+        assert store.meta["agents"] == ["existing"]
+        assert store.meta["config_type"] == "agent"
+        assert existing.agent.session_store is store
+        assert set(engine._creatures) == {"existing"}
+        await engine.shutdown()
+
+    async def test_cancelled_start_finishes_rollback_and_releases_identity(self):
+        engine = Terrarium()
+        _BlockingStartAgent.started = asyncio.Event()
+        _BlockingStartAgent.release = asyncio.Event()
+
+        def blocking_builder(config, **kwargs):
+            creature = _fake_builder(config, **kwargs)
+            creature.agent = _BlockingStartAgent(config.name)
+            return creature
+
+        task = asyncio.create_task(
+            recipe_mod.apply_recipe(
+                engine,
+                _recipe(creatures=[_creature_cfg("worker")]),
+                creature_builder=blocking_builder,
+            )
+        )
+        await _BlockingStartAgent.started.wait()
+        task.cancel()
+        _BlockingStartAgent.release.set()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert engine.list_graphs() == []
+        assert engine.list_creatures() == []
+        graph = await recipe_mod.apply_recipe(
+            engine,
+            _recipe(creatures=[_creature_cfg("worker")]),
+            creature_builder=_fake_builder,
+            start=False,
+        )
+        try:
+            assert graph.creature_ids == {"worker"}
+        finally:
+            await engine.shutdown()
+
 
 # ── _build_recipe_creature ────────────────────────────────────
 
@@ -205,13 +752,24 @@ class TestBuildRecipeCreature:
     def test_use_default_builder_passes_kwargs(self):
         called = {}
 
-        def default(cfg, *, creature_id, pwd, llm, environment, strict=True):
+        def default(
+            cfg,
+            *,
+            creature_id,
+            graph_id,
+            pwd,
+            llm,
+            environment,
+            strict=True,
+        ):
             called.update(
                 {
                     "creature_id": creature_id,
+                    "graph_id": graph_id,
                     "pwd": pwd,
                     "llm": llm,
                     "environment": environment,
+                    "strict": strict,
                 }
             )
             return Creature(
@@ -222,32 +780,46 @@ class TestBuildRecipeCreature:
 
         cfg = _creature_cfg("x")
         env = object()
-        recipe_mod._build_recipe_creature(
+        recipe_apply_mod._build_recipe_creature(
             default,
             cfg,
             creature_id="cid",
+            graph_id="gid",
             pwd="/wd",
             llm="model",
-            env=env,
+            strict=False,
+            environment=env,
             use_default_builder=True,
         )
         assert called == {
             "creature_id": "cid",
+            "graph_id": "gid",
             "pwd": "/wd",
             "llm": "model",
             "environment": env,
+            "strict": False,
         }
 
-    def test_stub_builder_injects_env(self):
+    def test_custom_builder_keeps_public_contract_and_injects_env(self):
         cfg = _creature_cfg("x")
         env = object()
-        out = recipe_mod._build_recipe_creature(
-            _fake_builder,
+
+        def strict_custom_builder(config, *, creature_id, pwd=None):
+            return Creature(
+                creature_id=creature_id,
+                name=config.name,
+                agent=_FakeAgent(name=config.name),
+            )
+
+        out = recipe_apply_mod._build_recipe_creature(
+            strict_custom_builder,
             cfg,
             creature_id="cid",
-            pwd=None,
-            llm=None,
-            env=env,
+            graph_id="gid",
+            pwd="/wd",
+            llm="model",
+            strict=True,
+            environment=env,
             use_default_builder=False,
         )
         assert out.agent.environment is env

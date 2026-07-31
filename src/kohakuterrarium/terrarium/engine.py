@@ -17,9 +17,12 @@ from typing import TYPE_CHECKING, Any
 import kohakuterrarium.terrarium.autosession as _autosession
 import kohakuterrarium.terrarium.channel_lifecycle as _lifecycle
 import kohakuterrarium.terrarium.channels as _channels
+import kohakuterrarium.terrarium.engine_creature_add as _engine_creature_add
 import kohakuterrarium.terrarium.engine_observability as _observability
 import kohakuterrarium.terrarium.graph_checkpoint as _checkpoint
 import kohakuterrarium.terrarium.recipe as _recipe
+import kohakuterrarium.terrarium.recipe_identity as _recipe_identity
+import kohakuterrarium.terrarium.recipe_transaction as _recipe_transaction
 import kohakuterrarium.terrarium.resume as _resume
 import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
@@ -30,7 +33,6 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
     CreatureBuildInput,
-    apply_creature_name,
     build_creature,
 )
 from kohakuterrarium.terrarium.events import (
@@ -109,8 +111,9 @@ class Terrarium:
         )
         self._topology = TopologyState()
         self._creatures: dict[str, Creature] = {}
+        self._recipe_identities = _recipe_identity.RecipeIdentityReservations()
+        self._recipe_graph_locks: dict[str, asyncio.Lock] = {}
         self._environments: dict[str, Environment] = {}
-        # graph_id -> attached SessionStore.
         self._session_stores: dict[str, "SessionStore"] = {}
         # graph_ids whose stores THIS engine minted (closed on shutdown).
         self._owned_sessions: set[str] = set()
@@ -247,13 +250,11 @@ class Terrarium:
             raise RuntimeError("this terrarium has no Drive runtime to reconfigure")
         return self._drive_runtime.reconfigure(drive_registrations)
 
-    # ------------------------------------------------------------------
     # creature CRUD
-    # ------------------------------------------------------------------
 
     async def add_creature(
         self,
-        config: "CreatureBuildInput | Creature",
+        config: CreatureBuildInput | Creature,
         *,
         graph: GraphRef | None = None,
         creature_id: str | None = None,
@@ -264,184 +265,34 @@ class Terrarium:
         parent_creature_id: str | None = None,
         io: str = "config",
         strict: bool = True,
-        session: "bool | str | Path | SessionStore | None" = None,
+        session: bool | str | Path | SessionStore | None = None,
         name: str | None = None,
         tools: list[Any] | None = None,
         plugins: list[Any] | None = None,
+        _identity_reserved: bool = False,
     ) -> Creature:
-        """Add a creature to the engine.
-
-        ``config`` may be a path (or ``@pkg/...`` reference),
-        ``AgentConfig``, ``CreatureConfig``, or a pre-built ``Creature``
-        (tests / advanced callers).  With ``graph=None`` a fresh
-        singleton graph is minted.  ``start`` toggles auto-start of the
-        underlying agent.
-
-        ``llm`` binds the creature's LLM — a provider instance, a
-        selector string, an ``LLMProfile``, or None (resolve from the
-        config).
-
-        ``io`` selects how much of the config's I/O boots:
-        ``"config"`` (as declared), ``"none"`` (input suppressed —
-        Studio / Lab managed spawns driven via the attach WebSocket),
-        or ``"headless"`` (input suppressed AND default output
-        silenced — batch / programmatic runs).
-
-        ``session`` controls persistence without requiring callers to manually
-        create a ``SessionStore``, initialize metadata, and attach it:
-        a path mints the store at exactly that file; ``True`` mints in
-        the default session dir; ``False`` disables persistence even
-        under autosession; a ``SessionStore`` attaches as-is; ``None``
-        (default) follows the engine — autosession when
-        ``Terrarium(session_dir=...)`` was set, joins the graph's
-        existing store otherwise, else no persistence.
-
-        ``name`` is a spawn-time display-name override (the name the
-        user typed in the Studio "new creature" form).  When set it is
-        applied across the creature + its nested objects, so a creature
-        spawned on a worker carries the user's chosen name — not the
-        config file's own ``name``.
-
-        ``tools`` / ``plugins`` are INSTANCES (e.g. ``kt.tool``
-        adapters, ``BasePlugin`` subclass objects) injected into the
-        underlying agent at build time — same contract as
-        ``Agent.build(tools=, plugins=)``.  Not applicable to a
-        pre-built ``Creature`` (raises like the other build kwargs).
-
-        ``is_privileged`` marks the creature as having access to the
-        group_* tool surface — set by direct user actions (solo
-        ``kt run``, Studio "new creature") and by recipe-root assignment
-        (via :meth:`assign_root`). False for tool-spawned workers.
-        **Elevate-only**: passing ``False`` here on a pre-built
-        :class:`Creature` whose ``is_privileged`` is already ``True``
-        (tests, advanced callers) does not demote it. Callers cannot
-        downgrade privilege through this method.
-
-        ``parent_creature_id`` is also additive: it overwrites only when
-        non-None. None means "leave whatever the pre-built creature
-        already has."
-
-        Example: ``alice = await t.add_creature("alice.yaml")``.
-        """
-        if isinstance(config, Creature):
-            # Build-time kwargs cannot apply to an already-built
-            # creature — silently ignoring them hid real caller bugs.
-            ignored = [
-                kw
-                for kw, val in (
-                    ("llm", llm),
-                    ("pwd", pwd),
-                    ("io", io),
-                    ("tools", tools),
-                    ("plugins", plugins),
-                )
-                if val not in (None, "config")
-            ]
-            if ignored:
-                raise ValueError(
-                    f"add_creature received a pre-built Creature; build-time "
-                    f"argument(s) {', '.join(ignored)} cannot be applied. "
-                    f"Pass them to build_creature / the config-based overload."
-                )
-            creature = config
-        else:
-            creature = build_creature(
-                config,
-                creature_id=creature_id,
-                pwd=pwd if pwd is not None else self._pwd,
-                llm=llm,
-                io=io,
-                strict=strict,
-                tools=tools,
-                plugins=plugins,
-            )
-        if creature_id and creature.creature_id != creature_id:
-            creature.creature_id = creature_id
-        _identity.bind_runtime_creature_id(creature)
-        if name and name.strip():
-            apply_creature_name(creature, name.strip())
-        if creature.creature_id in self._creatures:
-            raise ValueError(f"creature_id {creature.creature_id!r} already exists")
-
-        graph_id = self._resolve_graph_id(graph) if graph is not None else None
-        if graph_id is not None:
-            _identity.guard_add_name(self, creature, graph_id)
-            await _checkpoint.preflight_add(
-                self,
-                graph_id,
-                creature,
-                will_persist=session is not False
-                and (session is not None or self._session_dir is not None),
-            )
-        gid = _topo.add_creature(
-            self._topology, creature.creature_id, graph_id=graph_id
+        """Build and insert one creature into the engine."""
+        return await _engine_creature_add.add_creature(
+            self,
+            config,
+            graph=graph,
+            creature_id=creature_id,
+            llm=llm,
+            pwd=pwd,
+            start=start,
+            is_privileged=is_privileged,
+            parent_creature_id=parent_creature_id,
+            io=io,
+            strict=strict,
+            session=session,
+            name=name,
+            tools=tools,
+            plugins=plugins,
+            identity_reserved=_identity_reserved,
+            builder=build_creature,
+            register_basic=force_register_basic_tools,
+            register_privileged=force_register_privileged_tools,
         )
-        creature.graph_id = gid
-        # ``is_privileged`` and ``parent_creature_id`` are additive. A
-        # pre-built creature (tests, advanced callers) may already carry
-        # these flags; we never demote them via add_creature.
-        if is_privileged:
-            creature.is_privileged = True
-        if parent_creature_id is not None:
-            creature.parent_creature_id = parent_creature_id
-        # Allocate or reuse the graph's environment, then bind the
-        # creature's agent + executor to it so ToolContext is correct
-        # even when joining a non-empty graph.
-        if gid not in self._environments:
-            self._environments[gid] = Environment(env_id=f"env_{gid}")
-        graph_env = self._environments[gid]
-        _channels.bind_creature_to_environment(creature, graph_env)
-        _channels.register_engine_handle(graph_env, self)
-        self._creatures[creature.creature_id] = creature
-        _wiring.install_output_wiring_resolver(self)
-
-        # Every engine-backed creature gets the basic comm tools
-        # (``send_channel`` / ``group_send``); only privileged creatures
-        # additionally get the graph-mutating ``group_*`` surface.
-        force_register_basic_tools(creature.agent)
-        if creature.is_privileged:
-            force_register_privileged_tools(creature.agent)
-
-        # Drive-enabled engines inject the self-service Drive tools + prompt
-        # and register the Drive service on the graph environment. A
-        # Drive-disabled engine skips this entirely.
-        if self._drive_runtime is not None:
-            await self._drive_runtime.attach_creature(creature, graph_env)
-
-        self._emit(
-            EngineEvent(
-                kind=EventKind.CREATURE_ADDED,
-                creature_id=creature.creature_id,
-                graph_id=gid,
-            )
-        )
-        if start:
-            await creature.start()
-        # Resolve the persistence ``session=`` argument after the
-        # agent starts (matching the Studio attach ordering the turn
-        # viewer depends on).  Minted meta is written BEFORE
-        # ``attach_session`` assigns ``_session_stores`` (the Lab
-        # worker's observing dict snapshots ``load_meta()`` on that
-        # assignment).
-        await _autosession.attach_for_new_creature(
-            self, creature, config=config, session=session
-        )
-        if start:
-            # STARTED fires only when the agent actually started —
-            # ``start=False`` adds used to emit it anyway.
-            self._emit(
-                EngineEvent(
-                    kind=EventKind.CREATURE_STARTED,
-                    creature_id=creature.creature_id,
-                    graph_id=gid,
-                )
-            )
-            # Reconcile this creature's Drives once it crosses the
-            # restoration barrier, rather than immediately on start().
-            if self._drive_runtime is not None:
-                self._drive_runtime.schedule_reconcile(creature)
-        await _checkpoint.checkpoint(self, gid)
-        return creature
 
     async def remove_creature(self, creature: CreatureRef) -> None:
         """Stop and remove a creature.  May split the graph it lived in.
@@ -757,13 +608,8 @@ class Terrarium:
     ) -> GraphTopology:
         """Apply a terrarium recipe into this engine.
 
-        ``session`` follows the same contract as ``add_creature`` but
-        mints ONE terrarium-typed store for the whole graph, with the
-        recipe path recorded as ``config_path`` so resume can rebuild
-        the topology.
-
-        ``created_ids`` collects the id of every creature this call adds
-        (for precise rollback by the resume path).
+        ``session`` follows ``add_creature`` and creates one graph store.
+        ``created_ids`` collects only creatures added by this call.
         """
         kwargs = {
             "graph": graph,
@@ -775,15 +621,31 @@ class Terrarium:
         }
         if llm is not None:
             kwargs["llm"] = llm
+        transaction = _recipe_transaction.RecipeApplyTransaction(self)
+        kwargs["transaction"] = transaction
         topo = None
-        with _checkpoint.suppress(self):
-            topo = await _recipe.apply_recipe(self, recipe, **kwargs)
+        try:
+            with _checkpoint.suppress(self):
+                topo = await _recipe.apply_recipe(self, recipe, **kwargs)
+                if topo is not None:
+                    previous_store = self._session_stores.get(topo.graph_id)
+                    if (
+                        previous_store is not None
+                        and session is not False
+                        and not _autosession.recipe_session_reuses_store(
+                            previous_store, session
+                        )
+                    ):
+                        transaction.stage_session_replacement(topo.graph_id)
+                    await _autosession.attach_for_recipe(
+                        self, topo.graph_id, recipe=recipe, session=session
+                    )
             if topo is not None:
-                await _autosession.attach_for_recipe(
-                    self, topo.graph_id, recipe=recipe, session=session
-                )
-        if topo is not None:
-            await _checkpoint.checkpoint(self, topo.graph_id)
+                await _checkpoint.checkpoint(self, topo.graph_id)
+        except BaseException:
+            await _recipe_transaction.rollback_shielded(transaction)
+            raise
+        await transaction.commit()
         return topo
 
     # ------------------------------------------------------------------
