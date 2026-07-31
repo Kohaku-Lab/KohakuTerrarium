@@ -148,10 +148,19 @@ class PathBoundaryGuard:
         if self.mode == "off":
             return None
 
-        resolved = str(Path(path).resolve())
+        resolved = Path(path).resolve()
+        cwd = Path(self.cwd)
 
-        # Check if path is under cwd
-        if resolved.startswith(self.cwd + os.sep) or resolved == self.cwd:
+        # Check if path is under cwd. Use relative_to rather than
+        # ``str.startswith(self.cwd + os.sep)``: at a filesystem root
+        # ("E:\\" or "/") the naive prefix becomes "E:\\\\" / "//" and
+        # every child path is misjudged as outside the workspace.
+        # relative_to is also case-insensitive on Windows.
+        try:
+            resolved.relative_to(cwd)
+        except ValueError:
+            pass  # outside cwd
+        else:
             return None  # inside cwd, always OK
 
         if self.mode == "block":
@@ -161,10 +170,10 @@ class PathBoundaryGuard:
             )
 
         # "warn" mode: first attempt is blocked, retry is allowed
-        if resolved in self._warned_paths:
+        if str(resolved) in self._warned_paths:
             return None  # already warned, allow this time
 
-        self._warned_paths.add(resolved)
+        self._warned_paths.add(str(resolved))
         return (
             f"Warning: '{path}' is outside the working directory ({self.cwd}). "
             "If this is intentional, retry the same operation to proceed."
