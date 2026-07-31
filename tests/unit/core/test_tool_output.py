@@ -67,6 +67,12 @@ class TestTruncateUtf8:
         assert meta["omitted_text_bytes"] >= 990
         assert meta["max_output_bytes"] == 10
 
+    def test_truncation_note_suggests_narrower_scope(self):
+        text = "x" * 1000
+        out, _ = truncate_text_utf8(text, 10)
+        assert "offset/limit" in out
+        assert "omitted sections" in out
+
     def test_multibyte_safe_decode(self):
         # 3-byte chars — split position cannot fall mid-character.
         text = "日本語" * 10

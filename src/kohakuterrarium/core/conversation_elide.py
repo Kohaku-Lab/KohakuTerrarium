@@ -2,10 +2,11 @@
 
 Tool results are kept verbatim only for the LATEST feedback round —
 the trailing run of tool-feedback messages. Every earlier round is
-reduced in place to a short head plus a recovery notice, so the
-controller still sees WHAT it called without paying the full context
-cost every turn. Full outputs stay in the session event log, so the
-agent can re-run the tool or use ``search_memory`` to get them back.
+reduced in place to a short head plus a recovery notice that names the
+originating tool call (name + arguments), so the controller sees WHAT
+it called and can re-run exactly that call instead of guessing. Full
+outputs stay in the session event log, so the agent can re-run the tool
+or use ``search_memory`` to get them back.
 """
 
 from typing import Any
@@ -26,6 +27,30 @@ TOOL_FEEDBACK_KIND = "tool_results"
 HEAD_CHARS = 200
 # Below this size a stub saves nothing — leave the message alone.
 MIN_ELIDABLE_CHARS = 320
+MAX_DESC_CHARS = 80
+
+
+def _describe_tool_call(conversation, tool_call_id):
+    """Recover 'name(args…)' for a tool message from the matching assistant call."""
+    if not tool_call_id:
+        return "a tool"
+    for msg in reversed(conversation.get_messages()):
+        calls = getattr(msg, "tool_calls", None)
+        if not calls:
+            continue
+        for call in calls:
+            if call.get("id") != tool_call_id:
+                continue
+            fn = call.get("function") or {}
+            name = fn.get("name") or "tool"
+            args = fn.get("arguments") or ""
+            if isinstance(args, dict):
+                args = str(args)
+            args = " ".join(str(args).split())
+            if len(args) > MAX_DESC_CHARS:
+                args = args[:MAX_DESC_CHARS] + "…"
+            return f"{name}({args})"
+    return "a tool"
 
 
 def _is_tool_feedback(msg: Any) -> bool:
@@ -35,11 +60,11 @@ def _is_tool_feedback(msg: Any) -> bool:
     return isinstance(meta, dict) and meta.get("kind") == TOOL_FEEDBACK_KIND
 
 
-def _stub(text: str) -> str:
+def _stub(text: str, desc: str = "a tool") -> str:
     dropped = len(text) - HEAD_CHARS
     return (
-        f"{text[:HEAD_CHARS]}\n… {ELISION_MARKER} — {dropped} chars dropped. "
-        "Re-run the tool or use search_memory if the full output is needed again]"
+        f"{text[:HEAD_CHARS]}\n… {ELISION_MARKER} — {dropped} chars dropped "
+        f"from {desc}. Re-run the tool or use search_memory if the full output is needed again]"
     )
 
 
@@ -68,7 +93,10 @@ def elide_stale_tool_results(conversation: Any) -> int:
         text = extract_message_text(msg) or ""
         if len(text) < MIN_ELIDABLE_CHARS or ELISION_MARKER in text[: HEAD_CHARS + 80]:
             continue
-        msg.content = _stub(text)
+        msg.content = _stub(
+            text,
+            _describe_tool_call(conversation, getattr(msg, "tool_call_id", None)),
+        )
         if isinstance(meta, dict):
             meta["tool_results_elided"] = True
         elided += 1

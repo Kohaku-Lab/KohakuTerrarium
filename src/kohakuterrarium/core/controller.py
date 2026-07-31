@@ -77,6 +77,12 @@ class ControllerConfig:
     system_prompt: str = "You are a helpful assistant."
     include_job_status: bool = True
     include_tools_list: bool = True
+    # Elide stale tool results only when the prompt is near the compact
+    # threshold; with ample context the controller keeps full results so it
+    # can reference what it read without re-running tools.
+    elide_tool_results: bool = True
+    elide_threshold_ratio: float = 0.60
+    elide_max_tokens: int = 256_000
     batch_stackable_events: bool = True
     max_messages: int = 50
     ephemeral: bool = False
@@ -708,6 +714,14 @@ class Controller:
             resolved_messages.append(resolved_msg)
         return resolved_messages
 
+    def _should_elide_tool_results(self) -> bool:
+        """True when the last model call already filled most of the window."""
+        prompt_tokens = self._last_usage.get("prompt_tokens", 0)
+        if prompt_tokens <= 0:
+            return False
+        ratio = prompt_tokens / self.config.elide_max_tokens
+        return ratio >= self.config.elide_threshold_ratio
+
     async def run_once(self) -> AsyncIterator[ParseEvent]:
         """
         Run one controller turn.
@@ -744,9 +758,14 @@ class Controller:
             if events and all(e.type == EventType.TOOL_COMPLETE for e in events):
                 msg.metadata["kind"] = TOOL_FEEDBACK_KIND
 
-        # Only the latest round keeps full tool output; older rounds are
-        # stubbed in place so tool results never accumulate in context.
-        elide_stale_tool_results(self.conversation)
+        # Elide stale tool results only when the prompt is close to the
+        # compact threshold (elide_threshold_ratio of elide_max_tokens).
+        # With ample context older tool results stay verbatim so the
+        # controller can reference what it read without re-running tools;
+        # once the window is crowded, stubbing prevents the endless-compact
+        # loop that unconditional retention used to trigger.
+        if self.config.elide_tool_results and self._should_elide_tool_results():
+            elide_stale_tool_results(self.conversation)
 
         messages = self.conversation.to_messages()
         messages = await self._resolve_message_files(messages)

@@ -86,3 +86,33 @@ class TestElideStaleToolResults:
         # Second pass finds nothing new and rewrites nothing.
         assert elide_stale_tool_results(conv) == 0
         assert big.content == stubbed
+
+    def test_stub_names_the_originating_tool_call(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        calls = [
+            {
+                "id": "call_1",
+                "type": "function",
+                "function": {"name": "read", "arguments": '{"path": "big.py"}'},
+            }
+        ]
+        conv.append("assistant", "dispatch", tool_calls=calls)
+        old = conv.append("tool", "file content " + BIG, tool_call_id="call_1")
+        conv.append("assistant", "again", tool_calls=[{**calls[0], "id": "call_2"}])
+        latest = conv.append("tool", "new content " + BIG, tool_call_id="call_2")
+
+        assert elide_stale_tool_results(conv) == 1
+        assert 'read({"path": "big.py"})' in old.content
+        assert "from read" in old.content
+        assert latest.content.endswith(BIG)
+
+    def test_stub_without_call_id_falls_back_to_generic(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        first = _feedback(conv, "[tool result] round1 " + BIG)
+        conv.append("assistant", "more tools")
+        _feedback(conv, "[tool result] round2 " + BIG)
+
+        assert elide_stale_tool_results(conv) == 1
+        assert "from a tool" in first.content

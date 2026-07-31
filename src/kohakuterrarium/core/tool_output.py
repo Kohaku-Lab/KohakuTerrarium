@@ -67,7 +67,8 @@ def truncate_text_utf8(text: str, max_bytes: int) -> tuple[str, dict[str, Any]]:
     omitted = max(0, original_bytes - kept_bytes)
     note = (
         f"\n... [tool output truncated to {max_bytes} bytes; "
-        f"{omitted} bytes omitted]"
+        f"{omitted} bytes omitted. Re-run the tool with a smaller scope "
+        f"(e.g. offset/limit) to read the omitted sections]"
     )
     return (
         prefix + note,

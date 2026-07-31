@@ -23,6 +23,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+MAX_DEFAULT_LINES = 2000
+
 
 @register_builtin("read")
 class ReadTool(BaseTool):
@@ -82,7 +84,6 @@ class ReadTool(BaseTool):
         limit = int(args.get("limit", 0))
 
         max_output_bytes = int(self.config.extra.get("max_output_bytes", 200000))
-
         try:
             async with aiofiles.open(
                 file_path, encoding="utf-8", errors="replace"
@@ -97,6 +98,11 @@ class ReadTool(BaseTool):
                 lines = lines[offset:]
             if limit > 0:
                 lines = lines[:limit]
+            elif total_lines > MAX_DEFAULT_LINES:
+                # guard against unbounded full reads: cap the default read
+                # so huge files don't flood the context; the notice below
+                # tells the model how to navigate with offset/limit
+                lines = lines[:MAX_DEFAULT_LINES]
 
             # Format with line numbers
             output_lines = []
@@ -119,6 +125,11 @@ class ReadTool(BaseTool):
             # Add truncation notice if applicable
             if limit > 0 and offset + limit < total_lines:
                 output += f"\n\n... (showing lines {offset + 1}-{offset + len(lines)} of {total_lines})"
+            elif limit == 0 and offset + len(lines) < total_lines:
+                output += (
+                    f"\n\n... (showing lines {offset + 1}-{offset + len(lines)} "
+                    f"of {total_lines}. Use offset/limit to read more.)"
+                )
 
             # Truncate total output if it exceeds max bytes
             if max_output_bytes > 0 and len(output.encode("utf-8")) > max_output_bytes:
