@@ -240,12 +240,13 @@ def reconcile(
         total=len(on_disk_paths),
         elapsed_ms=elapsed,
     )
-    logger.info(
-        "session index reconciled",
-        read=report.read,
-        deleted=report.deleted,
-        total=report.total,
-        elapsed_ms=round(report.elapsed_ms, 1),
-        full=full,
-    )
+    if report.read or report.deleted:
+        logger.info(
+            "session index reconciled",
+            read=report.read,
+            deleted=report.deleted,
+            total=report.total,
+            elapsed_ms=round(report.elapsed_ms, 1),
+            full=full,
+        )
     return report
