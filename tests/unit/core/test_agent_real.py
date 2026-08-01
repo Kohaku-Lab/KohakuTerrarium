@@ -17,6 +17,7 @@ and using a `OutputRecorder` as the default output module.
 """
 
 import asyncio
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -1816,6 +1817,28 @@ class TestDriveInput:
             assert agent.controller.conversation.get_last_assistant_message()
         finally:
             await agent.stop()
+
+    async def test_drive_input_waits_when_generic_input_returns_none(self, monkeypatch):
+        agent = Agent.__new__(Agent)
+        agent._pending_resume_events = None
+        agent._pending_resume_triggers = None
+        agent._startup_settled = asyncio.Event()
+        agent._fire_startup_trigger = AsyncMock()
+        agent._running = True
+        agent.input = type(
+            "GenericInput", (), {"get_input": AsyncMock(return_value=None)}
+        )()
+
+        async def stop_after_wait(delay):
+            agent._running = False
+
+        sleep = AsyncMock(side_effect=stop_after_wait)
+        monkeypatch.setattr("kohakuterrarium.core.agent.asyncio.sleep", sleep)
+
+        await agent._drive_input()
+
+        agent.input.get_input.assert_awaited_once()
+        sleep.assert_awaited_once_with(0.01)
 
 
 # ── update_system_prompt edge cases ──────────────────────────────
