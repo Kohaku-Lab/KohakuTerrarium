@@ -11,7 +11,10 @@ from typing import Any
 import yaml
 
 from kohakuterrarium.errors import ConfigNotFoundError
-from kohakuterrarium.core.config_merge import merge_configs as _merge_configs
+from kohakuterrarium.core.config_merge import (
+    merge_configs as _merge_configs,
+    _merge_identity_list as _merge_identity_list,
+)
 from kohakuterrarium.core.config_types import (
     AgentConfig,
     InputConfig,
@@ -21,6 +24,7 @@ from kohakuterrarium.core.config_types import (
     ToolConfigItem,
     TriggerConfig,
 )
+from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
 from kohakuterrarium.core.output_wiring import parse_wiring_list
 from kohakuterrarium.packages.resolve import resolve_any_path, resolve_package_path
 
@@ -537,6 +541,25 @@ def _render_prompt_context(config: AgentConfig) -> None:
         )
 
 
+def _merge_global_mcp_servers(config_data: dict[str, Any]) -> dict[str, Any]:
+    """Merge global mcp_servers.yaml into creature config as implicit baseline.
+
+    Global servers are added unless the creature already defines a server
+    with the same ``name`` (creature-wins, :func:`_merge_identity_list`
+    semantics); a missing or malformed global file degrades silently.
+    """
+    global_servers = load_global_mcp_servers()
+    if not global_servers:
+        return config_data
+
+    creature_servers = config_data.get("mcp_servers") or []
+    # global = base, creature = child → creature wins on name collision
+    config_data["mcp_servers"] = _merge_identity_list(
+        global_servers, creature_servers, "name"
+    )
+    return config_data
+
+
 def build_agent_config(
     config_data: dict[str, Any],
     agent_path: Path | None = None,
@@ -566,6 +589,7 @@ def build_agent_config(
         agent_path = Path.cwd()
     config_data = _interpolate_env_vars(config_data)
     config_data = _resolve_inheritance(config_data, agent_path)
+    config_data = _merge_global_mcp_servers(config_data)
     config = _construct_agent_config(config_data, agent_path)
     _load_prompt_chain(config, config_data)
     _render_prompt_context(config)

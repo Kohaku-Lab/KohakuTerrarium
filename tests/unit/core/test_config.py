@@ -625,3 +625,40 @@ class TestBuildAgentConfig:
     def test_inline_dict_without_path_or_name_defaults(self):
         cfg = build_agent_config({"system_prompt": "hi"})
         assert cfg.name == "agent"
+
+
+# ── global mcp_servers bridge ────────────────────────────────────
+
+
+class TestMergeGlobalMcpServers:
+    """_merge_global_mcp_servers merges the global mcp_servers.yaml as an
+    implicit baseline for every creature config."""
+
+    def test_no_global_servers_returns_unchanged(self, monkeypatch):
+        monkeypatch.setattr(
+            "kohakuterrarium.core.config.load_global_mcp_servers",
+            lambda: [],
+        )
+        data = {"name": "x", "mcp_servers": [{"name": "a", "url": "u"}]}
+        assert cfg_mod._merge_global_mcp_servers(data) == data
+
+    def test_merges_global_servers(self, monkeypatch):
+        monkeypatch.setattr(
+            "kohakuterrarium.core.config.load_global_mcp_servers",
+            lambda: [{"name": "g1", "url": "g"}, {"name": "g2", "url": "g"}],
+        )
+        data = {"name": "x", "mcp_servers": [{"name": "c1", "url": "c"}]}
+        merged = cfg_mod._merge_global_mcp_servers(data)
+        names = [s["name"] for s in merged["mcp_servers"]]
+        assert names == ["g1", "g2", "c1"]
+
+    def test_creature_wins_on_name_collision(self, monkeypatch):
+        monkeypatch.setattr(
+            "kohakuterrarium.core.config.load_global_mcp_servers",
+            lambda: [{"name": "a", "url": "global"}],
+        )
+        data = {"name": "x", "mcp_servers": [{"name": "a", "url": "creature"}]}
+        merged = cfg_mod._merge_global_mcp_servers(data)
+        assert [s for s in merged["mcp_servers"] if s["name"] == "a"] == [
+            {"name": "a", "url": "creature"}
+        ]

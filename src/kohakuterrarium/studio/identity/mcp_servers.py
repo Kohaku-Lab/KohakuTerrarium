@@ -12,6 +12,7 @@ from typing import Any, Callable
 
 import yaml
 
+from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
 from kohakuterrarium.utils.config_dir import config_dir
 
 # Retain legacy display constants; live persistence resolves through
@@ -31,15 +32,7 @@ def mcp_config_path() -> Path:
 
 def load_servers() -> list[dict[str, Any]]:
     """Load the global registry, returning an empty list on any read error."""
-    path = mcp_config_path()
-    if not path.exists():
-        return []
-    try:
-        with open(path, encoding="utf-8") as f:
-            data = yaml.safe_load(f)
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
+    return load_global_mcp_servers()
 
 
 def save_servers(servers: list[dict[str, Any]]) -> None:
