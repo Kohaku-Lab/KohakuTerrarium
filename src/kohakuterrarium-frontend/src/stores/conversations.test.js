@@ -122,6 +122,39 @@ describe("conversations store", () => {
     expect(tabs.surfaceTabsForTarget("runtime-one").chat).toBeDefined()
   })
 
+  it.each([
+    ["history", "chat"],
+    ["cancel", "inspector"],
+  ])("keeps the rail side-effect free when resume chooses %s", async (_action, surface) => {
+    const store = useConversationsStore()
+    const tabs = useTabsStore()
+    const instances = useInstancesStore()
+    const createSession = vi.spyOn(tabs, "createSession").mockResolvedValue(null)
+    const openSurface = vi.spyOn(tabs, "openSurface")
+    const fetchInstances = vi.spyOn(instances, "fetchAll")
+    const row = {
+      id: "saved-one",
+      runtime_id: null,
+      saved_name: "saved-one",
+      config_name: "Pvpn",
+      type: "terrarium",
+      status: "paused",
+      is_live: false,
+      node_id: "_host",
+    }
+
+    await expect(store.openSurface(row, surface)).resolves.toBeNull()
+
+    expect(createSession).toHaveBeenCalledTimes(1)
+    expect(openSurface).not.toHaveBeenCalled()
+    expect(fetchInstances).not.toHaveBeenCalled()
+    expect(sessionAPI.listOpen).not.toHaveBeenCalled()
+    expect(tabs.tabs.some((tab) => tab.id === "attach:null" || tab.id === "inspect:null")).toBe(
+      false,
+    )
+    expect(store.isResuming("saved-one")).toBe(false)
+  })
+
   it("queues one authoritative refresh behind an in-flight fetch", async () => {
     const store = useConversationsStore()
     const initial = promiseWithResolvers()

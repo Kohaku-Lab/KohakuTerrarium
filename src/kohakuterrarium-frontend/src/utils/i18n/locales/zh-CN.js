@@ -6,6 +6,15 @@ export default {
   "common.available": "可用",
   "common.cached": "已缓存",
   "common.cancel": "取消",
+  "workspaceResume.title": "工作目录不可用",
+  "workspaceResume.body":
+    "已保存的工作目录不可用。请选择现有目录，仅替换当前失效的目录组；也可只查看历史或取消恢复。",
+  "workspaceResume.viewHistory": "只查看历史",
+  "workspaceResume.cancel": "取消",
+  "workspaceResume.chooseFolder": "选择目录",
+  "workspaceResume.remotePathHint": ({ node }) =>
+    `请输入工作节点 ${node} 上的现有目录。恢复前会先验证该目录。`,
+  "workspaceResume.remotePathPlaceholder": "工作节点上的绝对目录路径",
   "common.channel": "频道",
   "common.channels": "频道",
   "common.close": "关闭",
@@ -127,7 +136,9 @@ export default {
   "sessions.resumeFailed": "恢复失败：{message}",
   "sessions.workdirMissingTitle": "工作目录不存在",
   "sessions.workdirMissingPrompt":
-    "保存的工作目录已不存在：{pwd}。请输入新的工作目录（留空则使用服务器默认目录）：",
+    "保存的工作目录已不存在：{pwd}。请选择新目录、只看历史，或关闭此对话框取消恢复。",
+  "sessions.workdirChoose": "选择新目录",
+  "sessions.workdirHistory": "只看历史",
   "sessions.workdirSet": "工作目录已设置：{path}",
   "sessions.workdirSetFailed": "设置工作目录失败：{message}",
   "sessions.deleteConfirm": "要删除会话“{name}”吗？",

@@ -197,6 +197,16 @@ await engine.apply_recipe("@kt-biome/terrariums/swe_team", session="runs/team.ko
 
 恢复根据会话元数据里记录的配置路径（包括 `@pkg` 引用）重建拓扑，
 并使用每个 Agent 各自的工作目录，不会对你的进程 `os.chdir`。
+恢复会在创建 writer store、runtime、lifecycle 或 adoption 之前执行只读
+工作目录预检。目录失效时必须选择新目录、只看历史或取消，不会静默回退到
+KohakuTerrarium 进程目录。使用 `workspace_overrides={"creature-id":
+"/new/path"}` 只替换确认的成员；共享失效路径也可以使用预检返回的
+`gap_id` 成组替换。标量 `pwd=` 仅保留为显式全队兼容覆盖，不能与
+`workspace_overrides` 同时使用。成功替换会永久写回 manifest；远程和集群
+会在实际 worker 上校验路径，并在第一次 adoption 前完成全成员预检。集群
+API 还可按成员会话 ID 限定替换，让不同 worker 上相同的 creature 或路径组
+目标选择不同目录。若回滚无法持久化，会话会标记为 `partial_dirty`；后续预检
+和恢复会失败关闭，直到会话修复。
 
 ### 读取：`SessionReader`
 

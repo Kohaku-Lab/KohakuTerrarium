@@ -8,6 +8,11 @@ from kohakuterrarium.api.routes.persistence.resume_coordinator import (
     ResumeCoordinator,
     session_coordination_key,
 )
+from kohakuterrarium.api.routes.persistence.resume import (
+    ClusterMember,
+    ResumeRequest,
+)
+from kohakuterrarium.api.routes.persistence.resume_request import resume_intent
 from kohakuterrarium.session.store import SessionStore
 
 
@@ -103,6 +108,76 @@ async def test_conflicting_intent_is_rejected_without_second_operation():
     release.set()
 
     assert await first == "resumed"
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_nested_override_order_shares_but_changed_override_conflicts():
+    coordinator = ResumeCoordinator()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def resume():
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return object()
+
+    first_body = ResumeRequest(
+        on_node="w1",
+        members=[
+            ClusterMember(sid="sid-a", on_node="w1"),
+            ClusterMember(sid="sid-b", on_node="w2"),
+        ],
+        member_workspace_overrides={
+            "sid-a": {"alice": "/work/a", "shared": "/work/shared"},
+            "sid-b": {"bob": "/work/b"},
+        },
+        member_pwd_overrides={"sid-b": "/fallback/b"},
+    )
+    reordered_body = ResumeRequest(
+        on_node="w1",
+        members=[
+            ClusterMember(sid="sid-b", on_node="w2"),
+            ClusterMember(sid="sid-a", on_node="w1"),
+        ],
+        member_workspace_overrides={
+            "sid-b": {"bob": "/work/b"},
+            "sid-a": {"shared": "/work/shared", "alice": "/work/a"},
+        },
+        member_pwd_overrides={"sid-b": "/fallback/b"},
+    )
+    changed_body = reordered_body.model_copy(deep=True)
+    changed_body.member_workspace_overrides["sid-a"]["alice"] = "/work/other"
+
+    first_intent = resume_intent(first_body)
+    assert resume_intent(reordered_body) == first_intent
+    assert resume_intent(changed_body) != first_intent
+
+    first = asyncio.create_task(
+        coordinator.run("session-a", resume, intent=first_intent)
+    )
+    await started.wait()
+    same = asyncio.create_task(
+        coordinator.run(
+            "session-a",
+            resume,
+            intent=resume_intent(reordered_body),
+        )
+    )
+    await asyncio.sleep(0)
+    with pytest.raises(RuntimeError, match="conflicting resume request"):
+        await coordinator.run(
+            "session-a",
+            resume,
+            intent=resume_intent(changed_body),
+        )
+
+    release.set()
+    first_result, same_result = await asyncio.gather(first, same)
+    assert first_result is same_result
     assert calls == 1
 
 

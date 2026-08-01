@@ -8,6 +8,7 @@ cannot provide cross-node creature visibility.
 
 import os
 import sys
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
@@ -107,6 +108,22 @@ def get_service(
         _service = LocalTerrariumService(engine)
         _service.set_runtime_graph_meta_lookup(partial(get_session_meta, _service))
     return _service
+
+
+def get_service_factory(
+    conn_info: HTTPConnection,
+    user: User | None = Depends(get_optional_user),
+) -> Callable[[], TerrariumService]:
+    """Return a request-scoped lazy service resolver."""
+    resolved: TerrariumService | None = None
+
+    def resolve() -> TerrariumService:
+        nonlocal resolved
+        if resolved is None:
+            resolved = get_service(conn_info, user)
+        return resolved
+
+    return resolve
 
 
 def resolve_request_session_dir(

@@ -10,9 +10,10 @@ mounts the full-screen TUI.
 import asyncio
 import os
 import sys
+from typing import Literal
 
 from kohakuterrarium.cli.run import _resolve_session
-from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
@@ -55,10 +56,13 @@ def resume_cli(
         return 1
 
     announce_migration_if_needed(path)
-    pwd_override = _resolve_missing_pwd(path, pwd_override)
+    resolved_pwd = _resolve_missing_pwd(path, pwd_override)
+    if resolved_pwd is False:
+        print("Resume cancelled.")
+        return 0
 
     try:
-        return asyncio.run(_run(path, pwd_override, llm, io_mode))
+        return asyncio.run(_run(path, resolved_pwd, llm, io_mode))
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 0
@@ -71,28 +75,26 @@ def resume_cli(
             print(f"  kt resume {path.stem}")
 
 
-def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None:
+def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None | Literal[False]:
     """Resolve a usable working directory for a resumed session."""
     if pwd_override:
         return pwd_override
     try:
-        store = SessionStore(path)
-        try:
-            saved = (store.load_meta() or {}).get("pwd", "")
-        finally:
-            store.close()
+        saved = (read_session_meta(path) or {}).get("pwd", "")
     except Exception:
         return pwd_override
     if not saved or os.path.isdir(saved):
         return pwd_override
     if not sys.stdin.isatty():
-        print(f"Warning: saved working dir missing: {saved} (using current dir)")
-        return pwd_override
+        print(
+            f"Saved working dir missing: {saved}; cannot resume without an explicit --pwd"
+        )
+        return False
     print(f"Saved working dir no longer exists: {saved}")
     while True:
-        entered = input("New working dir (empty = current dir): ").strip()
+        entered = input("New working dir (empty = cancel): ").strip()
         if not entered:
-            return os.getcwd()
+            return False
         if os.path.isdir(entered):
             return entered
         print(f"Not a directory: {entered}")
@@ -100,26 +102,23 @@ def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None:
 
 async def _run(path, pwd_override, llm, io_mode: str | None) -> int:
     """Resume the engine and run the selected interactive surface."""
-    store = SessionStore(path)
-    try:
-        engine = await Terrarium.resume(store, pwd=pwd_override, llm=llm)
-        async with engine:
-            graph_id = next(iter(engine._topology.graphs.keys()), None)
-            if graph_id is None:
-                print("Resume produced no graphs; session is empty.")
-                return 1
-            focus = _pick_focus(engine, graph_id)
-            # Resume rebuilds the focus creature with NoneInput and starts
-            # it, so neither launcher's stdin-swap fires; both drive input
-            # via ``inject_input``. ``plain`` has no distinct engine surface
-            # — alias it to the rich inline CLI.
-            if io_mode in ("cli", "plain"):
-                await run_engine_with_rich_cli(engine, focus, store)
-            else:
-                await run_engine_with_tui(engine, focus, store)
-            return 0
-    finally:
-        store.close()
+    engine = await Terrarium.resume(str(path), pwd=pwd_override, llm=llm)
+    async with engine:
+        graph_id = next(iter(engine._topology.graphs.keys()), None)
+        if graph_id is None:
+            print("Resume produced no graphs; session is empty.")
+            return 1
+        store = engine._session_stores[graph_id]
+        focus = _pick_focus(engine, graph_id)
+        # Resume rebuilds the focus creature with NoneInput and starts
+        # it, so neither launcher's stdin-swap fires; both drive input
+        # via ``inject_input``. ``plain`` has no distinct engine surface
+        # — alias it to the rich inline CLI.
+        if io_mode in ("cli", "plain"):
+            await run_engine_with_rich_cli(engine, focus, store)
+        else:
+            await run_engine_with_tui(engine, focus, store)
+        return 0
 
 
 def _pick_focus(engine: Terrarium, graph_id: str) -> str:

@@ -1,5 +1,6 @@
 """Transfer and adopt saved session stores on Laboratory workers."""
 
+import asyncio
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -18,6 +19,7 @@ async def push_and_resume_member(
     path: Path,
     on_node: str,
     pwd_override: str | None = None,
+    workspace_overrides: dict[str, str] | None = None,
 ) -> tuple[str, dict, bool | None, str, list[dict[str, Any]]]:
     """Transfer one saved store and return its adopted worker identity."""
     mirror = getattr(request.app.state, "session_mirror", None)
@@ -74,8 +76,13 @@ async def push_and_resume_member(
             namespace="terrarium.session",
             type="resume",
             body={
+                "scope": "config://",
+                "rel": rel,
+                # Older workers consume the absolute path while updated workers
+                # resolve scope+rel against their own config root.
                 "path": worker_path,
                 "pwd_override": pwd_override,
+                "workspace_overrides": workspace_overrides,
                 "resume_token": resume_token,
             },
             timeout=60.0,
@@ -134,7 +141,7 @@ async def push_and_resume_member(
                     "is_privileged": bool(item.get("is_privileged", False)),
                 }
             )
-    except Exception as exc:
+    except BaseException as exc:
         if resumed_sid:
             try:
                 await host.request(
@@ -144,7 +151,7 @@ async def push_and_resume_member(
                     body={"graph_id": resumed_sid},
                     timeout=60.0,
                 )
-            except Exception:
+            except BaseException:
                 pass
         elif transferred and worker_path:
             try:
@@ -158,7 +165,7 @@ async def push_and_resume_member(
                     },
                     timeout=30.0,
                 )
-            except Exception:
+            except BaseException:
                 pass
         elif transferred:
             try:
@@ -169,9 +176,13 @@ async def push_and_resume_member(
                     body={"scope": "config://", "path": rel},
                     timeout=30.0,
                 )
-            except Exception:
+            except BaseException:
                 pass
+        if isinstance(exc, asyncio.CancelledError):
+            raise
         if isinstance(exc, HTTPException):
+            raise
+        if not isinstance(exc, Exception):
             raise
         raise HTTPException(
             status_code=502, detail=f"lab transport error: {exc}"

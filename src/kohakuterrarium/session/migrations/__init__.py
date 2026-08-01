@@ -175,6 +175,17 @@ def migrate(source_path: str | Path, target_version: int) -> Path:
     return current_path
 
 
+def latest_readable_version(base_path: str | Path) -> Path:
+    """Pick the newest readable version without migrating or writing files."""
+    candidates = discover_versions(base_path)
+    if not candidates:
+        return Path(base_path)
+    readable = [
+        candidate for candidate in candidates if candidate[0] <= MAX_SUPPORTED_VERSION
+    ]
+    return readable[0][1] if readable else candidates[0][1]
+
+
 def ensure_latest_version(base_path: str | Path) -> Path:
     """Pick the newest readable version for ``base_path``, migrating if needed.
 

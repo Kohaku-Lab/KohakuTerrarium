@@ -12,7 +12,13 @@ from unittest.mock import AsyncMock
 import pytest
 
 from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.session.readonly import read_session_meta as read_meta_strict
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.terrarium.graph_manifest import (
+    GraphManifest,
+    ManifestCreature,
+    save_manifest,
+)
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 from kohakuterrarium.terrarium.config import TerrariumConfig
@@ -49,6 +55,85 @@ class TestResolveStorePath:
 
 
 class TestResumeIntoEngine:
+    async def test_pwd_and_workspace_overrides_are_mutually_exclusive(self, tmp_path):
+        t = await TestTerrariumBuilder().build()
+        try:
+            with pytest.raises(ValueError, match="mutually exclusive"):
+                await resume_mod.resume_into_engine(
+                    t,
+                    tmp_path / "saved.kohakutr",
+                    pwd=str(tmp_path),
+                    workspace_overrides={"creature:a": str(tmp_path)},
+                )
+        finally:
+            await t.shutdown()
+
+    @pytest.fixture(autouse=True)
+    def _stub_legacy_workspace_preflight(self, monkeypatch):
+        monkeypatch.setattr(
+            resume_mod,
+            "preflight_legacy_workspace",
+            lambda path, pwd=None: str(pwd or "."),
+        )
+        monkeypatch.setattr(resume_mod, "read_session_meta", lambda path: {})
+
+    async def test_resume_selects_latest_readable_version_before_preflight(
+        self, monkeypatch, tmp_path
+    ):
+        base = tmp_path / "saved.kohakutr"
+        old = SessionStore(base)
+        old.meta["format_version"] = 1
+        old.meta["pwd"] = str(tmp_path)
+        old.close(update_status=False)
+        latest_path = tmp_path / "saved.kohakutr.v2"
+        latest = SessionStore(latest_path)
+        latest.meta["format_version"] = 2
+        manifest = GraphManifest(
+            graph_id="new-graph",
+            creatures=(
+                ManifestCreature(
+                    creature_id="c1",
+                    name="one",
+                    config_snapshot={"name": "one"},
+                    source_ref=None,
+                    pwd=str(tmp_path),
+                    is_privileged=False,
+                    parent_creature_id=None,
+                ),
+            ),
+            channels=(),
+            listen=(),
+            send=(),
+            revision=1,
+        )
+        save_manifest(latest, manifest)
+        latest.close(update_status=False)
+        seen = []
+        real_read = read_meta_strict
+
+        def read_meta(path):
+            seen.append(Path(path))
+            return real_read(path)
+
+        async def manifest_resume(*args, **kwargs):
+            return "new-graph"
+
+        monkeypatch.setattr(resume_mod, "read_session_meta", read_meta)
+        monkeypatch.setattr(resume_mod, "_resume_manifest_into_engine", manifest_resume)
+        monkeypatch.setattr(
+            resume_mod,
+            "detect_session_type",
+            lambda store: pytest.fail("legacy branch must not run"),
+        )
+        t = await TestTerrariumBuilder().build()
+        try:
+            graph_id = await resume_mod.resume_into_engine(t, base)
+        finally:
+            await t.shutdown()
+
+        assert graph_id == "new-graph"
+        assert seen == [latest_path]
+
     async def test_unknown_session_type_raises(self, monkeypatch, tmp_path):
         monkeypatch.setattr(resume_mod, "detect_session_type", lambda p: "bogus")
         t = await TestTerrariumBuilder().build()
@@ -87,6 +172,9 @@ class TestResumeIntoEngine:
             return fake_agent, fake_store
 
         monkeypatch.setattr(resume_mod, "resume_agent", _resume_agent)
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
 
         t = await TestTerrariumBuilder().build()
         try:
@@ -131,6 +219,9 @@ class TestResumeIntoEngine:
             injects.append(name)
 
         monkeypatch.setattr(resume_mod, "inject_saved_state", _inject)
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
 
         t = await TestTerrariumBuilder().build()
         try:
@@ -198,6 +289,7 @@ class TestResumeIntoEngine:
         # Stub apply_recipe to build a fake creature directly.
 
         async def _fake_apply_recipe(config, pwd=None, **_):
+            assert pwd == "."
             t = engine_holder["t"]
             agent = _FakeAgent(name="alice")
             agent.config = SimpleNamespace(name="alice")
@@ -212,6 +304,9 @@ class TestResumeIntoEngine:
             return t._topology.graphs[c.graph_id]
 
         monkeypatch.setattr(resume_mod, "inject_saved_state", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
 
         engine_holder = {}
         t = await TestTerrariumBuilder().build()
@@ -276,6 +371,9 @@ class TestResumeIntoEngine:
                 running_at_replay.append(engine.get_creature(cid).agent.is_running)
 
         monkeypatch.setattr(resume_mod._topo_snap, "replay", _fake_replay)
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
 
         t = await TestTerrariumBuilder().build()
         engine_holder["t"] = t
@@ -322,6 +420,9 @@ class TestResumeIntoEngine:
         fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
         monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
         monkeypatch.setattr(resume_mod, "inject_saved_state", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
 
         session_dir = tmp_path / "sessions"
         session_dir.mkdir()
@@ -565,6 +666,9 @@ class TestResumeIntoEngine:
         )
         monkeypatch.setattr(
             resume_mod, "resume_agent", lambda *a, **k: (fake_agent, fake_store)
+        )
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
         )
 
         t = Terrarium(

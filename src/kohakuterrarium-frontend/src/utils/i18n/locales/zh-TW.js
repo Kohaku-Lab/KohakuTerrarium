@@ -6,6 +6,15 @@ export default {
   "common.available": "可用",
   "common.cached": "已快取",
   "common.cancel": "取消",
+  "workspaceResume.title": "工作目錄無法使用",
+  "workspaceResume.body":
+    "已儲存的工作目錄無法使用。請選擇現有目錄，只替換目前失效的目錄群組；也可只查看歷史或取消恢復。",
+  "workspaceResume.viewHistory": "只查看歷史",
+  "workspaceResume.cancel": "取消",
+  "workspaceResume.chooseFolder": "選擇目錄",
+  "workspaceResume.remotePathHint": ({ node }) =>
+    `請輸入工作節點 ${node} 上的現有目錄。恢復前會先驗證該目錄。`,
+  "workspaceResume.remotePathPlaceholder": "工作節點上的絕對目錄路徑",
   "common.channel": "頻道",
   "common.channels": "頻道",
   "common.close": "關閉",
@@ -127,7 +136,9 @@ export default {
   "sessions.resumeFailed": "恢復失敗：{message}",
   "sessions.workdirMissingTitle": "工作目錄不存在",
   "sessions.workdirMissingPrompt":
-    "儲存的工作目錄已不存在：{pwd}。請輸入新的工作目錄（留空則使用伺服器預設目錄）：",
+    "儲存的工作目錄已不存在：{pwd}。請選擇新目錄、只看歷史，或關閉此對話框取消恢復。",
+  "sessions.workdirChoose": "選擇新目錄",
+  "sessions.workdirHistory": "只看歷史",
   "sessions.workdirSet": "工作目錄已設定：{path}",
   "sessions.workdirSetFailed": "設定工作目錄失敗：{message}",
   "sessions.deleteConfirm": "要刪除工作階段「{name}」嗎？",

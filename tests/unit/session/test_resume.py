@@ -12,6 +12,7 @@ import pytest
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.session.resume import (
     IO_MODES,
     _build_conversation,
@@ -883,6 +884,44 @@ class TestResumeAgent:
             assert str(agent.executor._working_dir) == str(workdir.resolve())
         finally:
             store.close()
+
+    def test_missing_saved_workspace_requires_explicit_replacement(
+        self, monkeypatch, tmp_path, patched_llm
+    ):
+        config_dir = tmp_path / "creature"
+        _write_agent_config(config_dir)
+        missing = tmp_path / "deleted-workspace"
+        path = tmp_path / "missing-workspace.kohakutr.v2"
+        store = SessionStore(str(path))
+        try:
+            store.meta["format_version"] = 2
+            store.init_meta("sess", "agent", str(config_dir), str(missing), ["resumee"])
+            store.flush()
+        finally:
+            store.close()
+
+        import kohakuterrarium.session.resume as resume_mod
+
+        real_open = resume_mod._open_store_with_migration
+        writer_calls = []
+
+        def tracking_open(session_path, *, writer_lock=False):
+            if writer_lock:
+                writer_calls.append(str(session_path))
+            return real_open(session_path, writer_lock=writer_lock)
+
+        monkeypatch.setattr(resume_mod, "_open_store_with_migration", tracking_open)
+        with pytest.raises(
+            SessionNotResumableError, match="Choose a replacement directory"
+        ):
+            resume_agent(path)
+        assert writer_calls == []
+
+        agent, resumed = resume_agent(path, pwd_override=str(tmp_path))
+        try:
+            assert str(agent.executor._working_dir) == str(tmp_path.resolve())
+        finally:
+            resumed.close()
 
     def test_rejects_non_agent_session(self, tmp_path, patched_llm):
         config_dir = tmp_path / "creature"

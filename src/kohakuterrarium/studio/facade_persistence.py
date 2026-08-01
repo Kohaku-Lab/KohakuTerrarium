@@ -103,12 +103,14 @@ class _PersistenceNS:
         store_or_path: str | Path,
         *,
         pwd_override: str | None = None,
+        workspace_overrides: dict[str, str] | None = None,
         llm: str | None = None,
     ) -> _session_handles.Session:
         return await _persistence_resume.resume_session(
             self._studio._service,
             store_or_path,
             pwd_override=pwd_override,
+            workspace_overrides=workspace_overrides,
             llm=llm,
         )
 
