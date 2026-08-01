@@ -153,17 +153,17 @@ class TestLogHelpers:
         assert out["text"] == "not a log line"
 
     def test_find_current_process_log_no_dir(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(log_mod, "DEFAULT_LOG_DIR", tmp_path / "ghost")
+        monkeypatch.setattr(log_mod, "_default_log_dir", lambda: tmp_path / "ghost")
         assert log_mod._find_current_process_log() is None
 
     def test_find_current_process_log_no_matches(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(log_mod, "DEFAULT_LOG_DIR", tmp_path)
+        monkeypatch.setattr(log_mod, "_default_log_dir", lambda: tmp_path)
         # Create a log file with a different pid pattern.
         (tmp_path / "20260101_000000_pid99999_x.log").write_text("x")
         assert log_mod._find_current_process_log() is None
 
     def test_find_current_process_log_picks_newest(self, monkeypatch, tmp_path):
-        monkeypatch.setattr(log_mod, "DEFAULT_LOG_DIR", tmp_path)
+        monkeypatch.setattr(log_mod, "_default_log_dir", lambda: tmp_path)
         pid = os.getpid()
         old = tmp_path / f"20260101_000000_pid{pid}_x.log"
         old.write_text("old")

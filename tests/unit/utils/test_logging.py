@@ -10,6 +10,7 @@ import io
 import logging
 import os
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -358,6 +359,22 @@ class TestGetLogger:
         get_logger("kohakuterrarium.gl_no_env")
         root = logging.getLogger("kohakuterrarium")
         assert not any(isinstance(h, FlushingStreamHandler) for h in root.handlers)
+
+    def test_enable_file_logging_moves_handler_to_active_config_dir(
+        self, tmp_path, monkeypatch
+    ):
+        first = tmp_path / "first"
+        second = tmp_path / "second"
+        monkeypatch.setenv("KT_CONFIG_DIR", str(first))
+        get_logger("kohakuterrarium.gl_first")
+
+        monkeypatch.setenv("KT_CONFIG_DIR", str(second))
+        ktlog.enable_file_logging()
+
+        assert ktlog._handler is not None
+        path = Path(ktlog._handler.baseFilename)
+        assert path.parent == second / "logs"
+        assert f"pid{os.getpid()}_" in path.name
 
 
 # ── set_level ────────────────────────────────────────────────────────
