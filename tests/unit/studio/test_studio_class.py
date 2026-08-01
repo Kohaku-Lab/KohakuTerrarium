@@ -116,13 +116,19 @@ class TestClassmethodConstructors:
         await studio.shutdown()
 
     async def test_resume_delegates(self, monkeypatch):
+        import kohakuterrarium.studio.studio as studio_mod
         from kohakuterrarium.studio.studio import _PersistenceNS
 
         captured = {}
 
-        async def fake_resume(self, path, *, pwd_override=None, llm=None):
+        async def fake_resume(
+            self, path, *, pwd_override=None, workspace_overrides=None, llm=None
+        ):
             captured["path"] = path
 
+        monkeypatch.setattr(
+            studio_mod, "prepare_resume_workspace", lambda *a, **k: None
+        )
         monkeypatch.setattr(_PersistenceNS, "resume", fake_resume)
         studio = await Studio.resume("/x.kohakutr")
         assert isinstance(studio, Studio)

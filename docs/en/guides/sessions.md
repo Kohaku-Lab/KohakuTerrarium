@@ -84,9 +84,33 @@ graph_id = await engine.adopt_session("runs/other.kohakutr")
 ```
 
 Both accept a path or a `SessionStore`; `llm=` is an optional selector
-string override. A file that exists but cannot be resumed (unknown
-saved-session type, missing config path in the metadata) raises a
-`ValueError`.
+string override. Modern graph sessions persist one working directory per
+creature. Resume performs a read-only workspace preflight before acquiring a
+writer store, constructing a runtime, registering lifecycle state, or adopting
+a creature. If a saved directory is unavailable, callers must either provide a
+replacement, open the read-only history, or cancel; there is no silent fallback
+to the KohakuTerrarium process directory.
+
+Use `workspace_overrides={"creature-id": "/new/path"}` for targeted
+replacement. A grouped missing path may also be addressed by the preflight
+`gap_id`, replacing only the members in that group. The scalar `pwd=` argument
+is retained as an explicit compatibility override and broadcasts one directory
+to every member. It is mutually exclusive with `workspace_overrides`.
+
+After successful adoption, confirmed replacements are written back to the
+authoritative graph manifest and legacy metadata projection, so later resumes
+keep them. If the persistence checkpoint fails, resume restores the old
+workspace metadata; an incomplete restoration is recorded as
+`partial_dirty` instead of being reported as clean; later preflight and resume
+fail closed until that session is repaired. Remote and clustered
+sessions validate paths on the worker that will execute each member, and all
+cluster members are preflighted before the first adoption. Cluster API callers
+can scope replacements by member session ID, so identical creature or path-group
+targets on different workers may resolve to different directories.
+
+A file that exists but cannot be resumed (unknown saved-session type, missing
+config path or unresolved workspace in the metadata) raises a typed session
+resume error.
 
 What resume does:
 

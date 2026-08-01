@@ -1,39 +1,133 @@
-// Post-resume missing-workdir recovery, shared by every resume entry
-// point (sessions list, dashboard recent row, tab-store reopen). The
-// sessions list additionally pre-prompts BEFORE resume when the list
-// row already carries pwd_exists=false — this helper is the fallback
-// for paths where that flag only arrives with the resume response.
-export async function promptForMissingWorkdirAfterResume(result) {
-  if (result?.session?.pwd_exists !== false) return
-  // Lazy imports: this module sits on the dashboard/tab-store import
-  // chains — a static element-plus pull here bloats their module-load
-  // cost for a dialog that almost never opens.
-  const { ElMessage, ElMessageBox } = await import("element-plus")
-  const { useI18n } = await import("@/utils/i18n")
-  const { t } = useI18n()
-  const saved = result.session?.pwd || ""
-  const creatures = (result.session?.creatures || []).filter((c) => c.creature_id)
-  let value
-  try {
-    ;({ value } = await ElMessageBox.prompt(
-      t("sessions.workdirMissingPrompt", { pwd: saved }),
-      t("sessions.workdirMissingTitle"),
-      { inputValue: "" },
-    ))
-  } catch {
-    return // keep the server-side fallback dir
-  }
-  const dir = (value || "").trim()
-  if (!dir || !creatures.length) return
-  const { terrariumAPI } = await import("@/utils/api")
-  try {
-    for (const c of creatures) {
-      await terrariumAPI.setWorkingDir(result.instance_id, c.creature_id, dir)
+// Workspace resume is resolved before runtime creation. This helper is shared
+// by every resume entry point so cancel and history-only remain side-effect free.
+const workspaceResolverListeners = new Set()
+let lastWorkspaceResumeAction = null
+
+export function consumeWorkspaceResumeAction() {
+  const action = lastWorkspaceResumeAction
+  lastWorkspaceResumeAction = null
+  return action
+}
+
+export function installWorkspaceResumeResolver(listener) {
+  workspaceResolverListeners.add(listener)
+  return () => workspaceResolverListeners.delete(listener)
+}
+
+function requestWorkspaceResumeChoice(detail) {
+  const listener = workspaceResolverListeners.values().next().value
+  if (!listener) throw new Error("Workspace resume chooser is unavailable")
+  return listener(detail)
+}
+
+export function openSavedSessionHistory(sessionName) {
+  window.dispatchEvent(
+    new CustomEvent("kt:open-saved-session-history", { detail: { sessionName } }),
+  )
+}
+
+function clusterMembers(items) {
+  if (!Array.isArray(items)) return undefined
+  const members = items.filter(
+    (item) => typeof item.sid === "string" && typeof item.on_node === "string",
+  )
+  return members.length ? members : undefined
+}
+
+function describeGap(gap) {
+  const rawMembers = Array.isArray(gap.creature_ids) ? gap.creature_ids : gap.members
+  const members = Array.isArray(rawMembers) ? rawMembers.filter(Boolean) : []
+  const suffix = members.length ? ` (${members.join(", ")})` : ""
+  return `${gap.saved_pwd || gap.path || "workspace"}${suffix}`
+}
+
+export async function prepareWorkspaceResume(sessionName, opts = {}) {
+  const { sessionAPI } = await import("@/utils/api")
+  const preflight = await sessionAPI.preflightResume(sessionName, opts)
+  if (preflight?.ready !== false) {
+    lastWorkspaceResumeAction = "resume"
+    return {
+      action: "resume",
+      workspaceOverrides: {},
+      memberWorkspaceOverrides: {},
+      memberPwdOverrides: {},
+      members: clusterMembers(preflight?.members) || opts.members,
+      pwd: undefined,
     }
-    ElMessage.success(t("sessions.workdirSet", { path: dir }))
-  } catch (err) {
-    ElMessage.error(
-      t("sessions.workdirSetFailed", { message: err.response?.data?.detail || err.message }),
-    )
+  }
+
+  const chooseWorkspace = opts.chooseWorkspace || requestWorkspaceResumeChoice
+  const memberResults = (preflight.members || []).filter(
+    (item) =>
+      typeof item.sid === "string" && typeof item.on_node === "string" && Array.isArray(item.gaps),
+  )
+  const members = memberResults.map((item) => ({ sid: item.sid, on_node: item.on_node }))
+  const gaps = (preflight.gaps || []).length
+    ? preflight.gaps.map((gap) => ({
+        ...gap,
+        legacy: preflight.legacy,
+        ...(opts.onNode && opts.onNode !== "_host" ? { onNode: opts.onNode } : {}),
+      }))
+    : memberResults.flatMap((member) =>
+        member.gaps.map((gap) => ({
+          ...gap,
+          sid: member.sid,
+          onNode: member.on_node,
+          legacy: member.legacy,
+        })),
+      )
+
+  const workspaceOverrides = {}
+  const memberWorkspaceOverrides = {}
+  const memberPwdOverrides = {}
+  let pwd
+  for (const gap of gaps) {
+    const choice = await chooseWorkspace({
+      sessionName,
+      gap,
+      label: describeGap(gap),
+    })
+    if (!choice || choice.action === "cancel") {
+      lastWorkspaceResumeAction = "cancel"
+      return { action: "cancel", workspaceOverrides: {} }
+    }
+    if (choice.action === "history") {
+      lastWorkspaceResumeAction = "history"
+      return { action: "history", workspaceOverrides: {} }
+    }
+    const directory = String(choice.path || "").trim()
+    if (choice.action !== "choose" || !directory) {
+      throw new Error("Workspace resume chooser returned an invalid selection")
+    }
+    if (gap.sid && gap.legacy) memberPwdOverrides[gap.sid] = directory
+    else if (gap.sid) {
+      memberWorkspaceOverrides[gap.sid] ||= {}
+      memberWorkspaceOverrides[gap.sid][gap.gap_id] = directory
+    } else if (gap.legacy) pwd = directory
+    else workspaceOverrides[gap.gap_id] = directory
+  }
+
+  const candidates = {
+    ...opts,
+    chooseWorkspace: undefined,
+    members: members.length ? members : opts.members,
+    workspaceOverrides,
+    memberWorkspaceOverrides,
+    memberPwdOverrides,
+    pwd,
+  }
+  const validated = await sessionAPI.preflightResume(sessionName, candidates)
+  if (validated?.ready === false) {
+    lastWorkspaceResumeAction = "cancel"
+    return { action: "cancel", workspaceOverrides: {} }
+  }
+  lastWorkspaceResumeAction = "resume"
+  return {
+    action: "resume",
+    workspaceOverrides,
+    memberWorkspaceOverrides,
+    memberPwdOverrides,
+    members: candidates.members,
+    pwd,
   }
 }

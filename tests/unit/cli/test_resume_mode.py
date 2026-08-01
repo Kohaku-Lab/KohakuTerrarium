@@ -27,6 +27,7 @@ from kohakuterrarium.cli import resume as resume_mod
 class _FakeEngine:
     def __init__(self):
         self._topology = types.SimpleNamespace(graphs={"g1": object()})
+        self._session_stores = {"g1": _FakeStore("attached")}
 
     async def __aenter__(self):
         return self
@@ -53,7 +54,6 @@ class _FakeTerrarium:
 def _install_run_fakes(monkeypatch) -> list:
     """Stub the engine + both launchers; return the call-record list."""
     calls: list = []
-    monkeypatch.setattr(resume_mod, "SessionStore", _FakeStore)
     monkeypatch.setattr(resume_mod, "Terrarium", _FakeTerrarium)
     monkeypatch.setattr(resume_mod, "_pick_focus", lambda engine, gid: "focus-1")
 
@@ -83,11 +83,11 @@ class TestResumeRunRouting:
         assert rc == 0
         assert [(name, focus) for name, focus, _ in calls] == [("tui", "focus-1")]
 
-    def test_store_closed_after_run(self, monkeypatch):
+    def test_engine_owns_store_after_run(self, monkeypatch):
         calls = _install_run_fakes(monkeypatch)
         asyncio.run(resume_mod._run("s.kohakutr", None, None, "cli"))
         _, _, store = calls[0]
-        assert store.closed is True
+        assert store.closed is False
 
 
 def _install_entry_fakes(monkeypatch, module) -> dict:

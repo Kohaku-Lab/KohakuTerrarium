@@ -60,6 +60,7 @@ from kohakuterrarium.studio.identity import (
 from kohakuterrarium.studio.nodes import NodeMap, build_node_map_if_multi_node
 from kohakuterrarium.terrarium import LocalTerrariumService, TerrariumService
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.resume import prepare_resume_workspace
 
 
 class Studio:
@@ -181,11 +182,26 @@ class Studio:
         store_or_path: str | Path,
         *,
         pwd: str | None = None,
+        workspace_overrides: dict[str, str] | None = None,
         llm: str | None = None,
     ) -> "Studio":
         """Construct a Studio from a saved session, adopted into a fresh engine."""
+        prepare_resume_workspace(
+            store_or_path,
+            pwd=pwd,
+            workspace_overrides=workspace_overrides,
+        )
         studio = cls()
-        await studio.persistence.resume(store_or_path, pwd_override=pwd, llm=llm)
+        try:
+            await studio.persistence.resume(
+                store_or_path,
+                pwd_override=pwd,
+                workspace_overrides=workspace_overrides,
+                llm=llm,
+            )
+        except BaseException:
+            await studio.shutdown()
+            raise
         return studio
 
 

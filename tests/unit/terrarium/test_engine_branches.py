@@ -67,6 +67,12 @@ class TestTerrariumResumeNameMatch:
             update_status=lambda s: None,
         )
         monkeypatch.setattr(
+            resume_mod, "read_session_meta", lambda _path: fake_store.load_meta()
+        )
+        monkeypatch.setattr(
+            resume_mod, "preflight_legacy_workspace", lambda _path, _pwd: None
+        )
+        monkeypatch.setattr(
             resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
         )
         from kohakuterrarium.terrarium.config import TerrariumConfig
@@ -102,6 +108,9 @@ class TestTerrariumResumeNameMatch:
         from unittest.mock import AsyncMock
 
         t.attach_session = AsyncMock()
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
         try:
             await resume_mod.resume_into_engine(t, tmp_path / "saved.kohakutr")
             # ``alice`` matched the saved set → injected under "alice".
@@ -122,6 +131,12 @@ class TestTerrariumResumeNameMatch:
                 "agents": ["alice"],
             },
             update_status=lambda s: None,
+        )
+        monkeypatch.setattr(
+            resume_mod, "read_session_meta", lambda _path: fake_store.load_meta()
+        )
+        monkeypatch.setattr(
+            resume_mod, "preflight_legacy_workspace", lambda _path, _pwd: None
         )
         monkeypatch.setattr(
             resume_mod, "_open_store_with_migration", lambda p, **_kw: fake_store
@@ -158,6 +173,9 @@ class TestTerrariumResumeNameMatch:
         from unittest.mock import AsyncMock
 
         t.attach_session = AsyncMock()
+        monkeypatch.setattr(
+            resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
+        )
         try:
             # Must not raise despite the phantom membership entry.
             gid = await resume_mod.resume_into_engine(t, tmp_path / "saved.kohakutr")

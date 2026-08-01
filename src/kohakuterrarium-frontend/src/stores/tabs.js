@@ -607,10 +607,23 @@ export const useTabsStore = defineStore("tabs", {
       if (kind === "resume") {
         if (!sessionName) throw new Error("createSession: sessionName required for resume")
         const { sessionAPI } = await import("@/utils/api")
-        const result = await sessionAPI.resume(sessionName, { onNode })
+        const { prepareWorkspaceResume } = await import("@/utils/workdirPrompt")
+        const prepared = await prepareWorkspaceResume(sessionName, { onNode })
+        if (prepared.action === "history") {
+          const { openSavedSessionHistory } = await import("@/utils/workdirPrompt")
+          openSavedSessionHistory(sessionName)
+          return null
+        }
+        if (prepared.action !== "resume") return null
+        const result = await sessionAPI.resume(sessionName, {
+          onNode,
+          members: prepared.members,
+          workspaceOverrides: prepared.workspaceOverrides,
+          memberWorkspaceOverrides: prepared.memberWorkspaceOverrides,
+          memberPwdOverrides: prepared.memberPwdOverrides,
+          pwd: prepared.pwd,
+        })
         id = result.instance_id
-        const { promptForMissingWorkdirAfterResume } = await import("@/utils/workdirPrompt")
-        await promptForMissingWorkdirAfterResume(result)
       } else {
         if (!configPath) throw new Error("createSession: configPath required")
         if (!pwd) throw new Error("createSession: pwd required")

@@ -12,13 +12,14 @@
     <ShortcutHelp />
     <ToastCenter />
     <HostPickerModal :open="hostPickerOpen" @close="hostPickerOpen = false" />
+    <WorkspaceResumeDialog />
     <AdminTokenModal />
     <LoginPromptModal />
   </div>
 </template>
 
 <script setup>
-import { ref, watch } from "vue"
+import { onBeforeUnmount, ref, watch } from "vue"
 
 import AdminTokenModal from "@/components/auth/AdminTokenModal.vue"
 import AuthGate from "@/components/auth/AuthGate.vue"
@@ -28,6 +29,7 @@ import ShortcutHelp from "@/components/chrome/ShortcutHelp.vue"
 import ToastCenter from "@/components/chrome/ToastCenter.vue"
 import HostPickerModal from "@/components/host-picker/HostPickerModal.vue"
 import MacroShell from "@/components/shell/MacroShell.vue"
+import WorkspaceResumeDialog from "@/components/shell/modals/WorkspaceResumeDialog.vue"
 import { useArtifactDetector } from "@/composables/useArtifactDetector"
 import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
@@ -39,6 +41,7 @@ import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
 import { useLocaleStore } from "@/stores/locale"
 import { useThemeStore } from "@/stores/theme"
+import { useTabsStore } from "@/stores/tabs"
 
 const theme = useThemeStore()
 const locale = useLocaleStore()
@@ -81,16 +84,31 @@ useArtifactDetector()
 // event so we don't have to thread a prop through every shell
 // component.  The chip dispatches ``kt-open-host-picker`` on click.
 const hostPickerOpen = ref(false)
+const tabs = useTabsStore()
+
+function openHostPicker() {
+  hostPickerOpen.value = true
+}
+
+function openSavedSessionHistory(event) {
+  const name = event.detail?.sessionName
+  if (!name) return
+  tabs.openTab({ kind: "saved-sessions", id: "saved-sessions" })
+  tabs.openTab({ kind: "session-viewer", id: `session:${name}`, name })
+}
 
 if (typeof window !== "undefined") {
-  window.addEventListener("kt-open-host-picker", () => {
-    hostPickerOpen.value = true
-  })
+  window.addEventListener("kt-open-host-picker", openHostPicker)
+  window.addEventListener("kt:open-saved-session-history", openSavedSessionHistory)
   // Auto-open when an Android ``ktconnect://`` deep-link is
   // queued — the modal's own watcher will consume + apply the URI.
   const { pendingUri } = useConnectIntent()
   watch(pendingUri, (uri) => {
     if (uri) hostPickerOpen.value = true
+  })
+  onBeforeUnmount(() => {
+    window.removeEventListener("kt-open-host-picker", openHostPicker)
+    window.removeEventListener("kt:open-saved-session-history", openSavedSessionHistory)
   })
 }
 </script>
