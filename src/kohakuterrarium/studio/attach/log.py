@@ -11,7 +11,7 @@ from pathlib import Path
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from kohakuterrarium.utils.logging import DEFAULT_LOG_DIR, get_logger
+from kohakuterrarium.utils.logging import _default_log_dir, get_logger
 
 logger = get_logger(__name__)
 
@@ -24,11 +24,12 @@ _LINE_RE = re.compile(
 
 def _find_current_process_log() -> Path | None:
     """Locate the newest log file whose filename identifies this process."""
-    if not DEFAULT_LOG_DIR.exists():
+    log_dir = _default_log_dir()
+    if not log_dir.exists():
         return None
     pid = os.getpid()
     marker = f"pid{pid}_"
-    candidates = [p for p in DEFAULT_LOG_DIR.glob("*.log") if marker in p.name]
+    candidates = [p for p in log_dir.glob("*.log") if marker in p.name]
     if not candidates:
         return None
     # PID reuse can leave older matches, so modification time breaks the tie.

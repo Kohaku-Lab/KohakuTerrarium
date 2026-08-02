@@ -1,6 +1,7 @@
 """Push studio.attach.log._tail_file backfill + poll loop coverage."""
 
 import asyncio
+import os
 
 
 from kohakuterrarium.studio.attach import log as log_mod
@@ -12,6 +13,16 @@ class _FakeWebSocket:
 
     async def send_json(self, data):
         self.sent.append(data)
+
+
+def test_find_current_process_log_honors_config_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    expected = logs / f"2025-01-01_000000_pid{os.getpid()}_desktop.log"
+    expected.write_text("desktop log\n", encoding="utf-8")
+
+    assert log_mod._find_current_process_log() == expected
 
 
 class TestRunLogAttachErrorPath:

@@ -8,14 +8,34 @@ end-user-facing UI / platform-dependent — they fall under the
 
 import json
 import socket
+import sys
 
 import pytest
 
+import kohakuterrarium.serving.web as web_mod
 from kohakuterrarium.serving.web import (
     _publish_actual_port,
     _resolve_config_dirs,
+    _run_desktop_app_blocking,
     find_free_port,
 )
+
+# ── desktop logging ─────────────────────────────────────────────
+
+
+def test_desktop_blocking_ensures_file_logging(monkeypatch):
+    calls = []
+    monkeypatch.setattr(web_mod, "configure_utf8_stdio", lambda **kwargs: None)
+    monkeypatch.setattr(web_mod, "enable_file_logging", lambda: calls.append("file"))
+    monkeypatch.setattr(web_mod, "set_level", lambda level: None)
+    monkeypatch.setattr(web_mod, "enable_stderr_logging", lambda level: None)
+    monkeypatch.setitem(sys.modules, "webview", None)
+
+    with pytest.raises(SystemExit):
+        _run_desktop_app_blocking()
+
+    assert calls == ["file"]
+
 
 # ── find_free_port ──────────────────────────────────────────────
 

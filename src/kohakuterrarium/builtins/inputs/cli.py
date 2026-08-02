@@ -1,8 +1,11 @@
 """Terminal input modules for blocking and polled agent interaction."""
 
 import asyncio
+import queue
 import select
 import sys
+import threading
+from typing import TextIO
 
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.modules.input.base import BaseInputModule
@@ -80,6 +83,7 @@ class CLIInput(BaseInputModule):
             self._exit_requested = True
             return None
         except Exception as e:
+            self._exit_requested = True
             logger.error("Error reading input", error=str(e))
             return None
 
@@ -89,7 +93,10 @@ class CLIInput(BaseInputModule):
             sys.stdout.write(self.prompt)
             sys.stdout.flush()
 
-            line = sys.stdin.readline()
+            stdin = sys.stdin
+            if stdin is None:
+                return None
+            line = stdin.readline()
             if not line:
                 return None
             return line
@@ -159,44 +166,104 @@ class NonBlockingCLIInput(BaseInputModule):
         self.timeout = timeout
         self._buffer = ""
         self._prompt_shown = False
+        self._exit_requested = False
+        self._read_results: queue.Queue[tuple[bool, str | BaseException | None]] = (
+            queue.Queue(maxsize=1)
+        )
+        self._reader_thread: threading.Thread | None = None
+
+    async def _on_stop(self) -> None:
+        """Leave any Windows blocking read to finish in its daemon thread."""
+
+    @property
+    def exit_requested(self) -> bool:
+        """Return whether terminal input is permanently closed."""
+        return self._exit_requested
 
     async def get_input(self) -> TriggerEvent | None:
         """Return a complete input line when one is available."""
-        if not self._running:
+        if not self._running or self._exit_requested:
             return None
 
-        if not self._prompt_shown:
-            sys.stdout.write(self.prompt)
-            sys.stdout.flush()
-            self._prompt_shown = True
+        if sys.stdin is None:
+            self._exit_requested = True
+            return None
 
-        loop = asyncio.get_event_loop()
         try:
-            line = await asyncio.wait_for(
-                loop.run_in_executor(None, self._try_read),
-                timeout=self.timeout,
-            )
+            if not self._prompt_shown:
+                sys.stdout.write(self.prompt)
+                sys.stdout.flush()
+                self._prompt_shown = True
+
+            if sys.platform == "win32":
+                line = await self._poll_windows_read()
+            else:
+                line = await asyncio.to_thread(self._try_read)
             if line is not None:
                 self._prompt_shown = False
                 return create_user_input_event(line.strip())
-        except asyncio.TimeoutError:
-            pass
+        except (KeyboardInterrupt, EOFError):
+            self._exit_requested = True
         except Exception as e:
+            self._exit_requested = True
             logger.error("Error in non-blocking read", error=str(e))
 
         return None
 
-    def _try_read(self) -> str | None:
-        """Read one line if the platform reports stdin readiness."""
-        # Windows lacks the same ``select`` support for console handles.
-        if sys.platform != "win32":
-            ready, _, _ = select.select([sys.stdin], [], [], self.timeout)
-            if not ready:
-                return None
+    async def _poll_windows_read(self) -> str | None:
+        """Poll one daemon-backed Windows stdin read without queueing duplicates."""
+        if self._reader_thread is None:
+            stdin = sys.stdin
+            if stdin is None:
+                raise EOFError
+            self._reader_thread = threading.Thread(
+                target=self._read_windows_line,
+                args=(stdin,),
+                daemon=True,
+                name="non-blocking-cli-input",
+            )
+            self._reader_thread.start()
 
         try:
-            line = sys.stdin.readline()
-            return line if line else None
-        except Exception as e:
-            logger.warning("stdin readline failed", error=str(e), exc_info=True)
+            succeeded, result = self._read_results.get_nowait()
+        except queue.Empty:
+            await asyncio.sleep(self.timeout)
+            if not self._running:
+                return None
+            try:
+                succeeded, result = self._read_results.get_nowait()
+            except queue.Empty:
+                return None
+
+        self._reader_thread = None
+        if succeeded:
+            return result if isinstance(result, str) else None
+        if isinstance(result, BaseException):
+            raise result
+        raise EOFError
+
+    def _read_windows_line(self, stdin: TextIO) -> None:
+        """Perform one blocking Windows read and publish exactly one result."""
+        try:
+            line = stdin.readline()
+            if not line:
+                raise EOFError
+        except BaseException as error:
+            self._read_results.put((False, error))
+        else:
+            self._read_results.put((True, line))
+
+    def _try_read(self) -> str | None:
+        """Read one POSIX line if select reports stdin readiness."""
+        stdin = sys.stdin
+        if stdin is None:
+            raise EOFError
+
+        ready, _, _ = select.select([stdin], [], [], self.timeout)
+        if not ready:
             return None
+
+        line = stdin.readline()
+        if not line:
+            raise EOFError
+        return line

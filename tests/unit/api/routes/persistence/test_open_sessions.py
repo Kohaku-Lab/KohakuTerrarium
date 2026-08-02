@@ -227,6 +227,29 @@ class TestOpenSessions:
         finally:
             close_session_index()
 
+    def test_repeated_reads_reconcile_external_session_changes(self, tmp_path):
+        service = LocalTerrariumService(Terrarium())
+        app = FastAPI()
+        app.dependency_overrides[get_service] = lambda: service
+        app.dependency_overrides[resolve_request_session_dir] = lambda: tmp_path
+        app.include_router(open_sessions.router, prefix="/sessions")
+
+        try:
+            client = TestClient(app)
+            assert client.get("/sessions/open").json() == []
+
+            _saved_store(
+                tmp_path / "external.kohakutr",
+                session_id="external",
+                conversation_open=True,
+            )
+
+            response = client.get("/sessions/open")
+            assert response.status_code == 200
+            assert [row["saved_name"] for row in response.json()] == ["external"]
+        finally:
+            close_session_index()
+
     def test_end_route_closes_dormant_marker_without_resuming(self, tmp_path):
         path = tmp_path / "dormant.kohakutr"
         _saved_store(
