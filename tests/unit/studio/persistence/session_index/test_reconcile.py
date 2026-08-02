@@ -10,6 +10,7 @@ from kohakuterrarium.studio.persistence.session_index.reconcile import (
     _extract_text_preview,
     _first_user_input_preview,
     _has_vector_index,
+    logger as reconcile_logger,
     read_entry_from_disk,
     reconcile,
 )
@@ -323,6 +324,27 @@ class TestReadEntryFromDisk:
 
 
 class TestReconcile:
+    def test_noop_incremental_reconcile_does_not_log_info(
+        self, idx, session_dir, monkeypatch
+    ):
+        _make_session(session_dir, "quiet")
+        calls = []
+        monkeypatch.setattr(
+            reconcile_logger,
+            "info",
+            lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+
+        first = reconcile(idx, session_dir, full=False)
+        assert first.read == 1
+        assert len(calls) == 1
+
+        calls.clear()
+        second = reconcile(idx, session_dir, full=False)
+        assert second.read == 0
+        assert second.deleted == 0
+        assert calls == []
+
     def test_empty_session_dir_returns_zero_report(self, idx, tmp_path):
         missing = tmp_path / "no-such-dir"
         report = reconcile(idx, missing, full=True)

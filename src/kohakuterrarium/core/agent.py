@@ -724,6 +724,7 @@ class Agent(
                     ):
                         logger.info("Exit requested")
                         break
+                    await asyncio.sleep(0.01)
                     continue
 
                 idle_logged = False

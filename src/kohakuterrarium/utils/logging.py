@@ -336,6 +336,31 @@ def _create_file_handler() -> logging.Handler:
     return handler
 
 
+def enable_file_logging() -> None:
+    """Ensure this process logs to its per-PID file in the active config dir.
+
+    This also repairs a handler inherited from an earlier process or created
+    before ``KT_CONFIG_DIR`` was finalized.
+    """
+    global _handler
+
+    expected_dir = _default_log_dir().resolve()
+    current_path = getattr(_handler, "baseFilename", None)
+    if current_path is not None:
+        path = Path(current_path)
+        if path.parent.resolve() == expected_dir and f"pid{os.getpid()}_" in path.name:
+            return
+
+    root_logger = logging.getLogger("kohakuterrarium")
+    if _handler is not None:
+        root_logger.removeHandler(_handler)
+        _handler.close()
+
+    _handler = _create_file_handler()
+    _handler.addFilter(_TokenMaskingFilter())
+    root_logger.addHandler(_handler)
+
+
 def get_logger(name: str, level: int | str = logging.INFO) -> logging.Logger:
     """
     Get a configured logger for a module.
@@ -364,9 +389,7 @@ def get_logger(name: str, level: int | str = logging.INFO) -> logging.Logger:
         root_logger = logging.getLogger("kohakuterrarium")
 
         # Default: file handler only
-        _handler = _create_file_handler()
-        _handler.addFilter(_TokenMaskingFilter())
-        root_logger.addHandler(_handler)
+        enable_file_logging()
 
         # Optional: stderr handler if KT_LOG_STDERR=1
         if os.environ.get("KT_LOG_STDERR"):

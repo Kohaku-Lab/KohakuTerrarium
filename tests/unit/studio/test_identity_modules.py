@@ -321,7 +321,7 @@ class TestSettings:
         assert rc == 1
 
     def test_edit_config_with_editor(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("EDITOR", "true")
+        monkeypatch.setenv("EDITOR", "echo")
         # Override the config path to a temp location.
         target = tmp_path / "x.yaml"
         monkeypatch.setattr(
@@ -330,7 +330,7 @@ class TestSettings:
             lambda: {"llm_profiles": target},
         )
         rc = settings_mod.edit_config("llm_profiles")
-        # ``EDITOR=true`` exits 0 → edit_config returns that exit code,
+        # The editor exits 0, so edit_config returns that exit code,
         # and the config file is created if it was missing.
         assert rc == 0
         assert target.exists()

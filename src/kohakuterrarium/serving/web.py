@@ -21,6 +21,7 @@ from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
+    enable_file_logging,
     enable_stderr_logging,
     get_logger,
     set_level,
@@ -318,6 +319,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
 def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None:
     """Run uvicorn and the native desktop window until the UI closes."""
     configure_utf8_stdio(log=True)
+    enable_file_logging()
 
     # A stable application ID lets Windows associate the packaged taskbar icon.
     if sys.platform == "win32":
