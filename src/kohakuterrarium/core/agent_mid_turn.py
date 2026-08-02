@@ -12,6 +12,7 @@ from typing import Any
 
 from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import TriggerEvent
+from kohakuterrarium.core.pending_input import pending_id_of
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.utils.logging import get_logger
 
@@ -180,15 +181,21 @@ class AgentMidTurnMixin:
             # raises ``TypeError: not JSON serializable``. Round-trip through
             # ``content_parts_to_dicts`` so both sinks get a safe payload.
             serializable_content = _to_serializable_content(content)
-            self._record_injected_input_event(serializable_content)
+            pending_id = pending_id_of(evt)
+            self._record_injected_input_event(
+                serializable_content, pending_id=pending_id
+            )
+            metadata = {
+                "content": serializable_content,
+                "turn_index": self._turn_index,
+                "branch_id": self._branch_id,
+            }
+            if pending_id:
+                metadata["pending_id"] = pending_id
             self.output_router.notify_activity(
                 "user_input_injected",
                 "",
-                metadata={
-                    "content": serializable_content,
-                    "turn_index": self._turn_index,
-                    "branch_id": self._branch_id,
-                },
+                metadata=metadata,
             )
             await asyncio.sleep(0)
         logger.info(
@@ -267,7 +274,9 @@ class AgentMidTurnMixin:
             "failed."
         )
 
-    def _record_injected_input_event(self, content: Any) -> None:
+    def _record_injected_input_event(
+        self, content: Any, *, pending_id: str | None = None
+    ) -> None:
         """Append a ``user_input_injected`` event at the current
         ``(turn_index, branch_id)``. Distinct from ``user_input`` so
         the FE replay's ``(turn, branch)`` dedupe doesn't drop it —
@@ -277,10 +286,13 @@ class AgentMidTurnMixin:
         if store is None:
             return
         try:
+            payload = {"content": content}
+            if pending_id:
+                payload["pending_id"] = pending_id
             store.append_event(
                 self.config.name,
                 "user_input_injected",
-                {"content": content},
+                payload,
                 turn_index=self._turn_index,
                 branch_id=self._branch_id,
                 parent_branch_path=[

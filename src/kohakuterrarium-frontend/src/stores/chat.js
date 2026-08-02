@@ -1,16 +1,25 @@
 import { ElMessage } from "element-plus"
 import { getCurrentInstance } from "vue"
 
-import { terrariumAPI, agentAPI } from "@/utils/api"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
+import {
+  adoptLocalCommandResultSelections,
+  bindLocalCommandResultContexts,
+  buildLocalCommandResultMessage,
+  captureLocalCommandResultContext,
+  mergeLocalCommandResults,
+  registerLocalCommandResultContext,
+  releaseLocalCommandResultContext,
+} from "@/stores/chatCommandResults"
 import { useClusterStore } from "@/stores/cluster"
-import { useMessagesStore } from "@/stores/messages"
 import { useInstancesStore } from "@/stores/instances"
+import { useLocaleStore } from "@/stores/locale"
+import { useMessagesStore } from "@/stores/messages"
 import { useNotificationsStore } from "@/stores/notifications"
 import { useStatusStore } from "@/stores/status"
+import { agentAPI, terrariumAPI } from "@/utils/api"
 import { translate } from "@/utils/i18n"
-import { useLocaleStore } from "@/stores/locale"
 import { readLocalJsonPref, writeLocalJsonPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
 
@@ -335,6 +344,11 @@ export function _collectBranchMetadata(events, branchView = null) {
     liveIds.add(eid)
   }
   return { byTurn, liveIds, branchSelection }
+}
+
+function _commandResultBranchSelection(events, branchView) {
+  if (!Array.isArray(events)) return null
+  return _collectBranchMetadata(events, branchView).branchSelection
 }
 
 function _stableStringify(value) {
@@ -665,6 +679,9 @@ export function _replayEvents(messages, events, branchView = null) {
       const key = typeof ti === "number" && typeof bi === "number" ? `${ti}/${bi}` : null
       if (key && _seenUserRender.has(key)) {
         const prior = _seenUserRender.get(key)
+        if (prior && typeof evt.pending_id === "string") {
+          prior.eventId = evt.pending_id
+        }
         if (t === "user_message" && prior && typeof evt.event_id === "number") {
           prior.locator = { eventId: evt.event_id, turnIndex: ti, branchId: bi }
         }
@@ -677,6 +694,7 @@ export function _replayEvents(messages, events, branchView = null) {
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
+        eventId: typeof evt.pending_id === "string" ? evt.pending_id : undefined,
         timestamp: "",
         locator:
           t === "user_message" && typeof evt.event_id === "number"
@@ -709,6 +727,7 @@ export function _replayEvents(messages, events, branchView = null) {
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
+        eventId: typeof evt.pending_id === "string" ? evt.pending_id : undefined,
         turnIndex: typeof evt?.turn_index === "number" ? evt.turn_index : null,
         injectedMidTurn: true,
         timestamp: "",
@@ -1419,6 +1438,9 @@ const _chatStoreOptions = {
     _commandInventoryGenerationByTab: {},
     _commandInventoryRequestByTab: {},
     _slashTargetByTab: {},
+    _localCommandResultsByTab: {},
+    _pendingCommandResultContextsByTab: {},
+    _commandResultDispatchSeq: 0,
 
     /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number, homeNode: string}} Session metadata */
     sessionInfo: {
@@ -1743,6 +1765,9 @@ const _chatStoreOptions = {
       this._commandInventoryGenerationByTab = {}
       this._commandInventoryRequestByTab = {}
       this._slashTargetByTab = {}
+      this._localCommandResultsByTab = {}
+      this._pendingCommandResultContextsByTab = {}
+      this._commandResultDispatchSeq = 0
       this._clearBranchResyncTimers()
       // Reset multi-group state — group tree is per-scope, so a
       // different ``_instanceId`` means a different layout to load.
@@ -2071,13 +2096,25 @@ const _chatStoreOptions = {
       const marked = this._slashTargetByTab[tab.key]
       if (marked && marked.name.toLowerCase() === parsed.command) return marked
       const inventory = await this.loadCommandInventory(tab)
-      const command = inventory.commands?.find(
+      const commands = inventory.commands || []
+      const command = commands.find(
         (entry) =>
-          entry.name.toLowerCase() === parsed.command ||
-          entry.aliases?.some((alias) => alias.toLowerCase() === parsed.command),
+          entry.name.toLowerCase() === "goal" &&
+          (entry.name.toLowerCase() === parsed.command ||
+            entry.aliases?.some((alias) => alias.toLowerCase() === parsed.command)),
       )
       if (command) return { type: "command", name: command.name }
-      const skill = inventory.skills?.find((entry) => entry.name.toLowerCase() === parsed.command)
+      const commandNamespace = new Set(
+        commands.flatMap((entry) => [
+          entry.name.toLowerCase(),
+          ...(entry.aliases || []).map((alias) => alias.toLowerCase()),
+        ]),
+      )
+      if (commandNamespace.has(parsed.command)) return null
+      const skill = inventory.skills?.find(
+        (entry) =>
+          entry.enabled && !entry.invocation_blocked && entry.name.toLowerCase() === parsed.command,
+      )
       return skill ? { type: "skill", name: skill.name } : null
     },
 
@@ -2091,23 +2128,20 @@ const _chatStoreOptions = {
         const tabInfo = this.tabs[tab]
         const target = this._slashTargetByTab[tab]
         delete this._slashTargetByTab[tab]
-        if (target?.type === "skill" && target.name.toLowerCase() === slashCommand.command) {
-          const result = await terrariumAPI.invokeCreatureSkill(
+        const isGoal =
+          slashCommand.command === "goal" &&
+          (!target ||
+            (target.type === "command" && target.name.toLowerCase() === slashCommand.command))
+        if (isGoal) {
+          const result = await terrariumAPI.executeCreatureCommand(
             this._instanceGraphId || this._instanceId,
             tabInfo?.creature || tab,
-            target.name,
+            "goal",
             slashCommand.args,
           )
-          return { handled: "skill", result }
+          this.invalidateCommandInventory(tab)
+          return { handled: "command", result }
         }
-        const result = await terrariumAPI.executeCreatureCommand(
-          this._instanceGraphId || this._instanceId,
-          tabInfo?.creature || tab,
-          target?.type === "command" ? target.name : slashCommand.command,
-          slashCommand.args,
-        )
-        this.invalidateCommandInventory(tab)
-        return { handled: "command", result }
       }
       if (!this._ws) return
 
@@ -3958,12 +3992,37 @@ const _chatStoreOptions = {
         }
         if (!data?.events) {
           if (this._branchResyncPendingByTab[tab]?.active) return false
-          if (data?.messages?.length) this.messagesByTab[tab] = _convertHistory(data.messages)
+          if (Array.isArray(data?.messages)) {
+            const branchSelection = new Map()
+            adoptLocalCommandResultSelections(
+              this._pendingCommandResultContextsByTab[tab],
+              this._localCommandResultsByTab[tab],
+              branchSelection,
+            )
+            this.messagesByTab[tab] = mergeLocalCommandResults(
+              _convertHistory(data.messages),
+              this._localCommandResultsByTab[tab],
+              branchSelection,
+            )
+          }
           if (data?.is_processing) this.processingByTab[tab] = true
           return true
         }
         if (options.initialLoad && data.events.length === 0 && !data.messages?.length) {
-          if (preFetchMessages?.length) this.messagesByTab[tab] = preFetchMessages
+          const messages = (preFetchMessages || []).filter(
+            (message) => message.role !== "command_result",
+          )
+          const branchSelection = new Map()
+          adoptLocalCommandResultSelections(
+            this._pendingCommandResultContextsByTab[tab],
+            this._localCommandResultsByTab[tab],
+            branchSelection,
+          )
+          this.messagesByTab[tab] = mergeLocalCommandResults(
+            messages,
+            this._localCommandResultsByTab[tab],
+            branchSelection,
+          )
           if (data?.is_processing) this.processingByTab[tab] = true
           return true
         }
@@ -4085,7 +4144,17 @@ const _chatStoreOptions = {
       // the backend withholds synthetic terminals for still-live jobs,
       // so a terminal in the cached log means the job is dead.
       const { messages, pendingJobs } = _replayEvents([], events, branchView)
-      this.messagesByTab[tab] = messages
+      const branchSelection = _commandResultBranchSelection(events, branchView)
+      adoptLocalCommandResultSelections(
+        this._pendingCommandResultContextsByTab[tab],
+        this._localCommandResultsByTab[tab],
+        branchSelection,
+      )
+      this.messagesByTab[tab] = mergeLocalCommandResults(
+        messages,
+        this._localCommandResultsByTab[tab],
+        branchSelection,
+      )
       // Canonical history is authoritative for this tab's running jobs.
       // ``fetchedAt`` (set only by _resyncHistory) unlocks removals of
       // tab-owned jobs the history no longer lists; branch-switch
@@ -4232,9 +4301,13 @@ const _chatStoreOptions = {
       // form (e.g. backend emitted a plain string while FE queued a
       // content-parts list) still pops the right entry instead of
       // sticking the banner forever AND appending a phantom bubble.
-      let idx = queue.findIndex(
-        (m) => contentSignature(m.contentParts || m.content || "") === target,
-      )
+      let idx =
+        typeof data.pending_id === "string"
+          ? queue.findIndex((message) => message.eventId === data.pending_id)
+          : -1
+      if (idx === -1) {
+        idx = queue.findIndex((m) => contentSignature(m.contentParts || m.content || "") === target)
+      }
       if (idx === -1 && targetText) {
         idx = queue.findIndex(
           (m) => textSignature(m.contentParts || m.content || "") === targetText,
@@ -4259,6 +4332,7 @@ const _chatStoreOptions = {
           role: "user",
           content: original.content,
           contentParts: original.contentParts,
+          eventId: original.eventId,
           timestamp: original.timestamp,
           injectedMidTurn: true,
         })
@@ -4432,8 +4506,104 @@ const _chatStoreOptions = {
 
     _addMsg(tabKey, msg) {
       if (!this.messagesByTab[tabKey]) this.messagesByTab[tabKey] = []
+      if (
+        msg?.role === "user" &&
+        typeof msg?.eventId === "string" &&
+        msg.eventId.startsWith("c_")
+      ) {
+        const pending = this._pendingCommandResultContextsByTab[tabKey] || []
+        const currentSelection = _commandResultBranchSelection(
+          this.eventsByTab[tabKey],
+          this.branchViewByTab[tabKey] || null,
+        )
+        const remaining = bindLocalCommandResultContexts(
+          pending,
+          this._localCommandResultsByTab[tabKey],
+          msg,
+          currentSelection,
+        )
+        if (remaining.length) {
+          this._pendingCommandResultContextsByTab[tabKey] = remaining
+        } else {
+          delete this._pendingCommandResultContextsByTab[tabKey]
+        }
+      }
       this.messagesByTab[tabKey].push(msg)
       this._historyMutationSeqByTab[tabKey] = (this._historyMutationSeqByTab[tabKey] || 0) + 1
+    },
+
+    captureCommandResultContext(tabKey) {
+      const events = this.eventsByTab[tabKey]
+      const branchSelection = _commandResultBranchSelection(
+        events,
+        this.branchViewByTab[tabKey] || null,
+      )
+      return captureLocalCommandResultContext(
+        this.messagesByTab[tabKey],
+        Array.isArray(events),
+        branchSelection,
+      )
+    },
+
+    registerCommandResultContext(tabKey) {
+      const context = registerLocalCommandResultContext(
+        this.captureCommandResultContext(tabKey),
+        ++this._commandResultDispatchSeq,
+      )
+      if (!this._pendingCommandResultContextsByTab[tabKey]) {
+        this._pendingCommandResultContextsByTab[tabKey] = []
+      }
+      this._pendingCommandResultContextsByTab[tabKey].push(context)
+      return context
+    },
+
+    releaseCommandResultContext(tabKey, context) {
+      const pending = this._pendingCommandResultContextsByTab[tabKey]
+      if (!pending?.length || !context) return
+      const remaining = releaseLocalCommandResultContext(pending, context)
+      if (remaining.length) {
+        this._pendingCommandResultContextsByTab[tabKey] = remaining
+      } else {
+        delete this._pendingCommandResultContextsByTab[tabKey]
+      }
+    },
+
+    addCommandResult(tabKey, commandText, response, context = null) {
+      if (!tabKey) return
+      const resultContext = context ?? this.captureCommandResultContext(tabKey)
+      const message = buildLocalCommandResultMessage({
+        id: `command_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        commandText,
+        response,
+        context: resultContext,
+        timestamp: new Date().toISOString(),
+      })
+      if (!this._localCommandResultsByTab[tabKey]) {
+        this._localCommandResultsByTab[tabKey] = []
+      }
+      this._localCommandResultsByTab[tabKey].push(message)
+      const canonical = (this.messagesByTab[tabKey] || []).filter(
+        (current) => current.role !== "command_result",
+      )
+      const currentSelection = _commandResultBranchSelection(
+        this.eventsByTab[tabKey],
+        this.branchViewByTab[tabKey] || null,
+      )
+      this.messagesByTab[tabKey] = mergeLocalCommandResults(
+        canonical,
+        this._localCommandResultsByTab[tabKey],
+        currentSelection,
+      )
+      if (
+        Number.isInteger(resultContext?.dispatchSeq) &&
+        !Number.isInteger(message._anchorIndex) &&
+        !resultContext.beforeMessageId &&
+        !resultContext.beforeEventId
+      ) {
+        resultContext.resultAdded = true
+      } else {
+        this.releaseCommandResultContext(tabKey, resultContext)
+      }
     },
 
     // ── Job timer (reactive elapsed tracking) ──
@@ -4502,6 +4672,9 @@ const _chatStoreOptions = {
       this.queuedMessagesByTab = {}
       this.processingByTab = {}
       this.eventsByTab = {}
+      this._localCommandResultsByTab = {}
+      this._pendingCommandResultContextsByTab = {}
+      this._commandResultDispatchSeq = 0
       this.branchViewByTab = {}
       this.branchOperationByTab = {}
       this.branchOperationErrorByTab = {}
@@ -4541,6 +4714,7 @@ const _chatStoreOptions = {
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
       this._historyRequestSeqByTab = {}
+      this._pendingCommandResultContextsByTab = {}
       this._appliedMaxEventIdByTab = {}
       this._clearBranchResyncTimers()
       if (this._reconnectTimer) {

@@ -12,6 +12,7 @@ from kohakuterrarium.core.agent_mid_turn import _to_serializable_content
 from kohakuterrarium.core.agent_runtime_tools import _make_job_label
 from kohakuterrarium.core.event_inbox import EventEnvelope, TurnOutcome
 from kohakuterrarium.core.metrics_hook import metrics
+from kohakuterrarium.core.pending_input import pending_id_of
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.skills.hints import inject_skill_path_hint
@@ -277,10 +278,14 @@ class AgentEventLoopMixin:
             else (event.content or "")
         )
         ppath = [tuple(p) for p in self._parent_branch_path]
+        payload = {"content": content}
+        pending_id = pending_id_of(event)
+        if pending_id:
+            payload["pending_id"] = pending_id
         self.session_store.append_event(
             self.config.name,
             "user_input",
-            {"content": content},
+            dict(payload),
             turn_index=self._turn_index,
             branch_id=self._branch_id,
             parent_branch_path=ppath,
@@ -288,7 +293,7 @@ class AgentEventLoopMixin:
         self.session_store.append_event(
             self.config.name,
             "user_message",
-            {"content": content},
+            dict(payload),
             turn_index=self._turn_index,
             branch_id=self._branch_id,
             parent_branch_path=ppath,
@@ -298,15 +303,19 @@ class AgentEventLoopMixin:
         """Record + notify one folded user_input/trigger event so the FE
         pops its queued banner and replay shows it as its own bubble."""
         content = _to_serializable_content(self._resolve_injected_content(evt))
-        self._record_injected_input_event(content)
+        pending_id = pending_id_of(evt)
+        self._record_injected_input_event(content, pending_id=pending_id)
+        metadata = {
+            "content": content,
+            "turn_index": self._turn_index,
+            "branch_id": self._branch_id,
+        }
+        if pending_id:
+            metadata["pending_id"] = pending_id
         self.output_router.notify_activity(
             "user_input_injected",
             "",
-            metadata={
-                "content": content,
-                "turn_index": self._turn_index,
-                "branch_id": self._branch_id,
-            },
+            metadata=metadata,
         )
         await asyncio.sleep(0)
 

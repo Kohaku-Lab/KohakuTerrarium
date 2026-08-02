@@ -315,6 +315,7 @@ _STREAM_METADATA_KEYS = (
     "source_turn_index",
     "turn_index",
     "branch_id",
+    "pending_id",
     "final_state",
     # File-mutating tools may include a preview for immediate canvas rendering.
     "canvas_preview",
