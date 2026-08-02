@@ -104,11 +104,17 @@ class TestStreamOutputSync:
         so.on_activity_with_metadata(
             "tool_call",
             "[bash] ls",
-            metadata={"args": ["-la"], "job_id": "j1", "unknown_key": "x"},
+            metadata={
+                "args": ["-la"],
+                "job_id": "j1",
+                "pending_id": "c_input",
+                "unknown_key": "x",
+            },
         )
         msg = q.get_nowait()
         assert msg["args"] == ["-la"]
         assert msg["job_id"] == "j1"
+        assert msg["pending_id"] == "c_input"
         # Unknown keys are filtered.
         assert "unknown_key" not in msg
 

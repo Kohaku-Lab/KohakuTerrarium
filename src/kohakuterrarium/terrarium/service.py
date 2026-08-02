@@ -404,15 +404,6 @@ class TerrariumService(DriveServiceProtocol, Protocol):
 
     async def command_inventory(self, creature_id: str) -> dict[str, Any]: ...
 
-    async def invoke_skill(
-        self,
-        creature_id: str,
-        skill: str,
-        args: str | dict[str, Any] | None = None,
-        *,
-        source: str = "web:skill",
-    ) -> dict[str, Any]: ...
-
     async def execute_command(
         self,
         creature_id: str,

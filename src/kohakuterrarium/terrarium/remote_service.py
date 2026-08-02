@@ -624,27 +624,6 @@ class RemoteTerrariumService(
         )
         return body
 
-    async def invoke_skill(
-        self,
-        creature_id: str,
-        skill: str,
-        args: str | dict[str, Any] | None = None,
-        *,
-        source: str = "web:skill",
-    ) -> dict[str, Any]:
-        body = _maybe_raise(
-            await self._req(
-                "invoke_skill",
-                {
-                    "creature_id": creature_id,
-                    "skill": skill,
-                    "args": args,
-                    "source": source,
-                },
-            )
-        )
-        return body
-
     async def execute_command(
         self,
         creature_id: str,

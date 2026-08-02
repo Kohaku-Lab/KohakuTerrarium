@@ -4,6 +4,8 @@
     {{ message.content }}
   </div>
 
+  <CommandResultMessage v-else-if="message.role === 'command_result'" :message="message" />
+
   <!-- Context cleared banner -->
   <div v-else-if="message.role === 'clear'" class="flex items-center gap-3 py-2">
     <div class="flex-1 border-t border-warm-300 dark:border-warm-600 border-dashed" />
@@ -268,6 +270,7 @@
 import { ElMessage } from "element-plus"
 
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import CommandResultMessage from "@/components/chat/CommandResultMessage.vue"
 import ToolCallBatch from "@/components/chat/ToolCallBatch.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import UIEventBlock from "@/components/chat/UIEventBlock.vue"

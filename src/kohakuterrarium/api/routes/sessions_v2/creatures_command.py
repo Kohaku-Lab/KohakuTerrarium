@@ -1,4 +1,4 @@
-"""Per-creature slash command, inventory, and explicit skill routes."""
+"""Per-creature slash command and inventory routes."""
 
 from fastapi import APIRouter, Depends, HTTPException
 from starlette.requests import HTTPConnection
@@ -7,7 +7,6 @@ from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_
 from kohakuterrarium.api.auth.models import User
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.schemas import SlashCommand
-from kohakuterrarium.terrarium.command_inventory import InvocationResolutionError
 from kohakuterrarium.terrarium.service import TerrariumService
 
 from ._helpers import resolve_creature_id
@@ -40,28 +39,6 @@ async def get_creature_command_inventory(
         return await service.command_inventory(resolved)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Creature not found") from exc
-
-
-@router.post("/{session_id}/creatures/{creature_id}/skill-input")
-async def invoke_creature_skill(
-    session_id: str,
-    creature_id: str,
-    body: SlashCommand,
-    service: TerrariumService = Depends(get_service),
-) -> dict:
-    """Validate and inject a user-selected skill into the creature turn queue."""
-    resolved = await resolve_creature_id(service, creature_id, session_id)
-    try:
-        return await service.invoke_skill(
-            resolved,
-            body.command,
-            body.args,
-            source="web:skill",
-        )
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail="Creature not found") from exc
-    except (InvocationResolutionError, ValueError) as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/{session_id}/creatures/{creature_id}/command")

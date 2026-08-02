@@ -1,5 +1,5 @@
 <template>
-  <div v-if="open" id="slash-command-menu" class="absolute inset-x-0 bottom-full z-40 mb-2 overflow-hidden rounded-xl border border-warm-200 bg-white shadow-xl dark:border-warm-700 dark:bg-warm-850" role="listbox" :aria-label="t('chat.slash.available')">
+  <div v-if="open" id="slash-command-menu" class="absolute inset-x-0 bottom-full z-40 mb-2 max-h-80 overflow-y-auto rounded-xl border border-warm-200 bg-white shadow-xl dark:border-warm-700 dark:bg-warm-800" role="listbox" :aria-label="t('chat.slash.available')">
     <div v-if="loading" class="px-3 py-2 text-xs text-warm-500">{{ t("chat.slash.loading") }}</div>
     <div v-else-if="!visualEntries.length" class="px-3 py-2 text-xs text-warm-500">{{ t("chat.slash.empty") }}</div>
     <template v-for="item in visualEntries" :key="item.key">

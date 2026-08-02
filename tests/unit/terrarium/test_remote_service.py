@@ -568,19 +568,12 @@ class TestModulesAndCommands:
         out = await svc.toggle_module("cid", "plugin", "n")
         assert out == {"toggled": True}
 
-    async def test_command_inventory_and_skill_input(self):
-        svc = _make_service(
-            {
-                "command_inventory": {"commands": [], "skills": []},
-                "invoke_skill": {"accepted": True},
-            }
-        )
+    async def test_command_inventory(self):
+        svc = _make_service({"command_inventory": {"commands": [], "skills": []}})
 
         inventory = await svc.command_inventory("cid")
-        skill = await svc.invoke_skill("cid", "review", "diff")
 
         assert inventory == {"commands": [], "skills": []}
-        assert skill == {"accepted": True}
 
     async def test_execute_command(self):
         svc = _make_service({"execute_command": {"ok": True}})
