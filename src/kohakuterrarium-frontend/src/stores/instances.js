@@ -1,5 +1,5 @@
-import { agentAPI, sessionAPI, terrariumAPI } from "@/utils/api"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import { agentAPI, sessionAPI, terrariumAPI } from "@/utils/api"
 
 /**
  * Instances store — frontend's mirror of the engine's live sessions.
@@ -40,7 +40,8 @@ export const useInstancesStore = defineStore("instances", {
       if (this._inflightFetch) return this._inflightFetch
       this.loading = true
       const seq = ++this._fetchSeq
-      this._inflightFetch = (async () => {
+      let task
+      task = (async () => {
         try {
           const sessions = await sessionAPI.listActive()
           if (seq !== this._fetchSeq) return
@@ -48,18 +49,28 @@ export const useInstancesStore = defineStore("instances", {
         } catch (err) {
           console.error("Failed to fetch instances:", err)
         } finally {
-          this.loading = false
-          this._inflightFetch = null
+          if (this._inflightFetch === task) {
+            this.loading = false
+            this._inflightFetch = null
+          }
         }
       })()
-      return this._inflightFetch
+      this._inflightFetch = task
+      return task
     },
 
     async fetchOne(id) {
       this.loading = true
+      const seq = this._fetchSeq
       try {
         const data = await sessionAPI.getActive(id)
         const loaded = _mapSession(data)
+        if (seq !== this._fetchSeq) {
+          return (
+            this.list.find((item) => item.id === loaded.id) ??
+            (this.current?.id === loaded.id ? this.current : null)
+          )
+        }
         this.current = loaded
         const idx = this.list.findIndex((item) => item.id === loaded.id)
         if (idx >= 0) {
@@ -69,11 +80,12 @@ export const useInstancesStore = defineStore("instances", {
         }
         return loaded
       } catch (err) {
-        if (err?.response?.status === 404) {
+        if (err?.response?.status === 404 && seq === this._fetchSeq) {
           this.list = this.list.filter((i) => i.id !== id)
           if (this.current?.id === id) this.current = null
           return null
         }
+        if (err?.response?.status === 404) return null
         console.error("Failed to fetch instance:", err)
         throw err
       } finally {
@@ -103,15 +115,12 @@ export const useInstancesStore = defineStore("instances", {
       return session_id || agent_id
     },
 
-    async stop(id) {
-      try {
-        await sessionAPI.stopActive(id)
-        this.list = this.list.filter((i) => i.id !== id)
-        if (this.current?.id === id) this.current = null
-      } catch (err) {
-        console.error("Failed to stop instance:", err)
-        throw err
-      }
+    markRuntimeStopped(id) {
+      ++this._fetchSeq
+      this._inflightFetch = null
+      this.loading = false
+      this.list = this.list.filter((i) => i.id !== id)
+      if (this.current?.id === id) this.current = null
     },
 
     startPolling() {

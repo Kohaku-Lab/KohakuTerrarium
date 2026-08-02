@@ -99,7 +99,7 @@ describe("MacroShell — render", () => {
     expect(tabs.tabs.some((t) => t.kind === "dashboard")).toBe(true)
   })
 
-  it("renders one RailItem per open conversation", async () => {
+  it("renders only live conversations in the rail", async () => {
     const router = makeRouter()
     const conversations = useConversationsStore()
     const rows = [
@@ -128,9 +128,9 @@ describe("MacroShell — render", () => {
     })
     await router.isReady()
     const items = wrapper.findAllComponents(RailItem)
-    expect(items).toHaveLength(2)
+    expect(items).toHaveLength(1)
     expect(wrapper.text()).toContain("alice")
-    expect(wrapper.text()).toContain("swe-graph")
+    expect(wrapper.text()).not.toContain("swe-graph")
   })
 })
 
@@ -230,7 +230,7 @@ describe("MacroShell — surface indicators", () => {
     expect(tabs.surfaceTabsForTarget("agent-1").inspector).toBeDefined()
   })
 
-  it("resumes a dormant conversation only after its surface is clicked", async () => {
+  it("does not render dormant conversations in the rail", async () => {
     const router = makeRouter()
     const conversations = useConversationsStore()
     const rows = [
@@ -256,59 +256,7 @@ describe("MacroShell — surface indicators", () => {
     await flushPromises()
 
     expect(createSession).not.toHaveBeenCalled()
-
-    const cBtn = wrapper
-      .findComponent(RailItem)
-      .findAll("button")
-      .find((button) => button.text() === "C")
-    await cBtn.trigger("click")
-    await flushPromises()
-
-    expect(createSession).toHaveBeenCalledTimes(1)
-    expect(tabs.surfaceTabsForTarget("runtime-one").chat).toBeDefined()
-    expect(tabs.surfaceTabsForTarget("saved-one").chat).toBeUndefined()
-  })
-
-  it.each([
-    { action: "history", button: "C" },
-    { action: "cancel", button: "I" },
-  ])("does not open a null surface when rail resume chooses $action", async ({ button }) => {
-    const router = makeRouter()
-    const conversations = useConversationsStore()
-    const rows = [
-      {
-        id: "saved-one",
-        runtime_id: null,
-        saved_name: "saved-one",
-        is_live: false,
-        config_name: "Pvpn",
-        type: "terrarium",
-        status: "paused",
-      },
-    ]
-    conversations.rows = rows
-    sessionAPI.listOpen.mockResolvedValue(rows)
-    const tabs = useTabsStore()
-    const createSession = vi.spyOn(tabs, "createSession").mockResolvedValue(null)
-
-    const wrapper = mount(MacroShell, {
-      global: { plugins: [router] },
-    })
-    await router.isReady()
-    await flushPromises()
-
-    const surfaceButton = wrapper
-      .findComponent(RailItem)
-      .findAll("button")
-      .find((candidate) => candidate.text() === button)
-    await surfaceButton.trigger("click")
-    await flushPromises()
-
-    expect(createSession).toHaveBeenCalledTimes(1)
-    expect(tabs.tabs.some((tab) => tab.id === "attach:null" || tab.id === "inspect:null")).toBe(
-      false,
-    )
-    expect(tabs.surfaceTabsForTarget("saved-one").chat).toBeUndefined()
-    expect(tabs.surfaceTabsForTarget("saved-one").inspector).toBeUndefined()
+    expect(wrapper.findComponent(RailItem).exists()).toBe(false)
+    expect(wrapper.text()).not.toContain("Pvpn")
   })
 })
