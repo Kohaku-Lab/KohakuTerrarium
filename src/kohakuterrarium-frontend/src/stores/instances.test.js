@@ -6,7 +6,6 @@ vi.mock("@/utils/api", () => {
     sessionAPI: {
       listActive: vi.fn(),
       getActive: vi.fn(),
-      stopActive: vi.fn(),
     },
     agentAPI: {
       create: vi.fn(),
@@ -66,6 +65,54 @@ describe("instances.fetchAll — SessionListing payload shape", () => {
 })
 
 describe("instances store", () => {
+  it("invalidates a pre-stop list request and removes the stopped runtime immediately", async () => {
+    const store = useInstancesStore()
+    const deferred = promiseWithResolvers()
+    sessionAPI.listActive.mockReturnValue(deferred.promise)
+    store.list = [{ id: "graph_dead", status: "running" }]
+    store.current = { id: "graph_dead", status: "running" }
+
+    const staleFetch = store.fetchAll()
+    store.markRuntimeStopped("graph_dead")
+
+    expect(store.list).toEqual([])
+    expect(store.current).toBeNull()
+
+    deferred.resolve([
+      {
+        session_id: "graph_dead",
+        name: "stale",
+        creatures: 1,
+      },
+    ])
+    await staleFetch
+
+    expect(store.list).toEqual([])
+    expect(store.current).toBeNull()
+  })
+
+  it("does not return a pre-stop detail response after the runtime is removed", async () => {
+    const store = useInstancesStore()
+    const deferred = promiseWithResolvers()
+    sessionAPI.getActive.mockReturnValue(deferred.promise)
+    store.list = [{ id: "graph_dead", status: "running" }]
+    store.current = { id: "graph_dead", status: "running" }
+
+    const staleFetch = store.fetchOne("graph_dead")
+    store.markRuntimeStopped("graph_dead")
+    deferred.resolve({
+      session_id: "graph_dead",
+      name: "stale",
+      creatures: [],
+      channels: [],
+    })
+    const result = await staleFetch
+
+    expect(result).toBeNull()
+    expect(store.list).toEqual([])
+    expect(store.current).toBeNull()
+  })
+
   it("clears stale current instance on fetchOne 404", async () => {
     const store = useInstancesStore()
     store.list = [{ id: "graph_dead", type: "creature" }]
@@ -151,3 +198,13 @@ describe("instances store", () => {
     expect(result.creatures[0].name).toBe("alice")
   })
 })
+
+function promiseWithResolvers() {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}

@@ -21,20 +21,19 @@
 import { ref } from "vue"
 
 import ModalShell from "@/components/common/ModalShell.vue"
-import { useInstancesStore } from "@/stores/instances"
+import { stopRuntime } from "@/stores/runtimeLifecycle"
 import { useTabsStore } from "@/stores/tabs"
 
 const props = defineProps({ instance: { type: Object, required: true } })
 const emit = defineEmits(["close", "stopped"])
 
-const instances = useInstancesStore()
 const tabs = useTabsStore()
 const stopping = ref(false)
 
 async function onStop() {
   stopping.value = true
   try {
-    await instances.stop(props.instance.id)
+    await stopRuntime(props.instance.id)
     // Close any open surface tabs for this target
     await tabs.detach(props.instance.id)
     emit("stopped")

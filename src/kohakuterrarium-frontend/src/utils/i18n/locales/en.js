@@ -1143,7 +1143,7 @@ export default {
   "shell.rail.attached": "Attached",
   "shell.rail.attachedEmpty": "No running targets",
   "shell.rail.conversations": "Conversations",
-  "shell.rail.conversationsEmpty": "No open conversations",
+  "shell.rail.conversationsEmpty": "No active conversations",
   "shell.rail.openChat": "Open chat",
   "shell.rail.closeChat": "Close chat",
   "shell.rail.openInspector": "Open inspector",
