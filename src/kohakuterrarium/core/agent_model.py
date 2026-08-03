@@ -84,15 +84,9 @@ class AgentModelMixin:
         # Persist the canonical identifier (not the raw user input) so a
         # resume can restore it — a bare alias the user typed may become
         # ambiguous later, while ``provider/name[@variations]`` round-trips
-        # safely. Best-effort; a detached agent has no store and skips.
-        try:
-            persist_model_selection(self, identifier)
-        except Exception:  # pragma: no cover - persistence must not break switching
-            logger.warning(
-                "model selection persist failed",
-                agent_name=self.config.name,
-                exc_info=True,
-            )
+        # safely. Best-effort: persist_model_selection swallows failures
+        # (a detached agent has no store and simply skips).
+        persist_model_selection(self, identifier)
 
         # ``llm_name`` in the session_info metadata now carries the full
         # ``provider/name@variations`` form so every display surface can

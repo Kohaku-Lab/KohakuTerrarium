@@ -288,14 +288,12 @@ async def agent_toggle_plugin(
             await pm.load_pending()
     else:
         pm.disable(plugin_name)
-    # Persist the enabled set so a resume can restore it.
-    try:
-        persist_plugin_selection(
-            agent,
-            [p["name"] for p in pm.list_plugins() if p.get("enabled")],
-        )
-    except Exception:  # pragma: no cover - persistence must not break a toggle
-        logger.warning("plugin selection persist skipped", exc_info=True)
+    # Persist the enabled set so a resume can restore it. Best-effort:
+    # persist_plugin_selection swallows persistence failures.
+    persist_plugin_selection(
+        agent,
+        [p["name"] for p in pm.list_plugins() if p.get("enabled")],
+    )
     return {"name": plugin_name, "enabled": target}
 
 

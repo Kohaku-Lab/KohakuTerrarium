@@ -98,6 +98,15 @@ class TestLoad:
         names, ok = load_plugin_selection(agent)
         assert names == [] and ok is False
 
+    def test_load_plugin_selection_blank_value_is_not_empty_snapshot(self):
+        # A present-but-blank key is corruption, not "user disabled all".
+        for blank in (None, ""):
+            store = _Store()
+            store.state["alice:plugin_selection"] = blank
+            agent = _Agent(store=store)
+            names, ok = load_plugin_selection(agent)
+            assert names == [] and ok is False
+
     def test_load_plugin_selection_absent(self):
         agent = _Agent()
         names, ok = load_plugin_selection(agent)

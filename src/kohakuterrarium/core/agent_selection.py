@@ -84,8 +84,11 @@ def load_plugin_selection(
     if store is None or key is None or key not in store.state:
         return [], False
     raw = store.state.get(key)
-    if not raw:
-        return [], True
+    if raw is None or raw == "":
+        # Corrupted/migrated blank values are treated like an absent
+        # snapshot, not an explicit empty set — otherwise resume would
+        # disable every plugin.
+        return [], False
     try:
         parsed = json.loads(str(raw))
     except (TypeError, ValueError):
