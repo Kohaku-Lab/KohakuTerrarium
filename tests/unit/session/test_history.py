@@ -171,6 +171,22 @@ class TestReplayConversation:
         out = replay_conversation(events)
         assert out[0]["name"] == "grep"
 
+    def test_tool_result_non_string_name_coerced(self):
+        # Legacy/malformed events with a non-string name and no usable job
+        # id must still yield a provider-safe string, not a None/int.
+        for bad in (None, 123):
+            events = [
+                {
+                    "type": "tool_result",
+                    "output": "r",
+                    "call_id": "",
+                    "name": bad,
+                    "event_id": 0,
+                }
+            ]
+            out = replay_conversation(events)
+            assert out[0]["name"] == ""
+
     def test_system_prompt_set(self):
         events = [{"type": "system_prompt_set", "content": "be nice", "event_id": 0}]
         out = replay_conversation(events)

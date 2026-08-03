@@ -456,7 +456,7 @@ def _clean_tool_name(evt: dict) -> str:
             return tool_name
     if isinstance(name, str) and "[" in name:
         return name.split("[", 1)[0]
-    return name
+    return name if isinstance(name, str) else ""
 
 
 def replay_conversation(
