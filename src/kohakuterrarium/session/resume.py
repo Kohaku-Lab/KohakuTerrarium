@@ -7,6 +7,7 @@ from typing import Any
 from kohakuterrarium.builtins.inputs import create_builtin_input
 from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.core.agent_selection import restore_selections
 from kohakuterrarium.core.config_serde import unpack_agent_config
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.conversation_elide import (
@@ -292,6 +293,17 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
             "Resumable triggers loaded",
             agent=agent_name,
             count=len(saved_triggers),
+        )
+
+    # Re-apply the persisted model / plugin selections (best-effort;
+    # stale profiles/plugins degrade to the config defaults).
+    try:
+        restore_selections(agent)
+    except Exception:  # pragma: no cover - resume continues without selections
+        logger.warning(
+            "selection restore failed",
+            agent=agent_name,
+            exc_info=True,
         )
 
 

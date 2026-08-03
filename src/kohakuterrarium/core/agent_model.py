@@ -6,6 +6,7 @@ Provide model switching and canonical LLM identifiers for agents.
 from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
+from kohakuterrarium.core.agent_selection import persist_model_selection
 from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
 from kohakuterrarium.utils.logging import get_logger
 
@@ -79,6 +80,17 @@ class AgentModelMixin:
             identifier=identifier,
             model=model_name,
         )
+
+        # Persist the selection so a resume can restore it (best-effort;
+        # a detached agent has no store and simply skips).
+        try:
+            persist_model_selection(self, profile_name)
+        except Exception:  # pragma: no cover - persistence must not break switching
+            logger.warning(
+                "model selection persist failed",
+                agent_name=self.config.name,
+                exc_info=True,
+            )
 
         # ``llm_name`` in the session_info metadata now carries the full
         # ``provider/name@variations`` form so every display surface can
