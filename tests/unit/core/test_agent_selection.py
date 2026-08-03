@@ -95,13 +95,27 @@ class TestLoad:
         store = _Store()
         store.state["alice:plugin_selection"] = "{not json"
         agent = _Agent(store=store)
-        assert load_plugin_selection(agent) == []
+        names, ok = load_plugin_selection(agent)
+        assert names == [] and ok is False
+
+    def test_load_plugin_selection_absent(self):
+        agent = _Agent()
+        names, ok = load_plugin_selection(agent)
+        assert names == [] and ok is False
+
+    def test_load_plugin_selection_empty_ok(self):
+        store = _Store()
+        store.state["alice:plugin_selection"] = json.dumps([])
+        agent = _Agent(store=store)
+        names, ok = load_plugin_selection(agent)
+        assert names == [] and ok is True
 
     def test_load_plugin_selection_filters_non_strings(self):
         store = _Store()
         store.state["alice:plugin_selection"] = json.dumps(["budget", 42])
         agent = _Agent(store=store)
-        assert load_plugin_selection(agent) == ["budget"]
+        names, ok = load_plugin_selection(agent)
+        assert names == ["budget"] and ok is True
 
 
 class TestRestore:
@@ -110,6 +124,15 @@ class TestRestore:
         store.state["alice:model_selection"] = "openai/gpt-5.4"
         agent = _Agent(store=store)
         restore_selections(agent)
+        assert agent.switched == ["openai/gpt-5.4"]
+
+    def test_restore_model_selection_with_explicit_store(self):
+        # Resume calls restore before attach_session_store; the store must
+        # be passable explicitly and still restore the model.
+        store = _Store()
+        store.state["alice:model_selection"] = "openai/gpt-5.4"
+        agent = _Agent(store=None)  # session_store not yet attached
+        restore_selections(agent, store)
         assert agent.switched == ["openai/gpt-5.4"]
 
     def test_restore_ignores_invalid_model(self):
@@ -142,6 +165,15 @@ class TestRestore:
         agent = _Agent(plugins=_PluginManager(["budget"]))
         restore_selections(agent)
         assert agent.plugins.is_enabled("budget")
+
+    def test_restore_malformed_plugin_snapshot_keeps_defaults(self):
+        # A corrupted snapshot must be treated like "never saved": do not
+        # disable every plugin.
+        store = _Store()
+        store.state["alice:plugin_selection"] = "{not json"
+        agent = _Agent(store=store, plugins=_PluginManager(["budget"]))
+        restore_selections(agent)
+        assert agent.plugins.is_enabled("budget") is True
 
     def test_restore_empty_snapshot_disables_all(self):
         store = _Store()

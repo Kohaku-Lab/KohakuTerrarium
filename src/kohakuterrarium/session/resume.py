@@ -296,9 +296,10 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
         )
 
     # Re-apply the persisted model / plugin selections (best-effort;
-    # stale profiles/plugins degrade to the config defaults).
+    # stale profiles/plugins degrade to the config defaults). The store
+    # is passed explicitly because attach_session_store runs after this.
     try:
-        restore_selections(agent)
+        restore_selections(agent, store)
     except Exception:  # pragma: no cover - resume continues without selections
         logger.warning(
             "selection restore failed",

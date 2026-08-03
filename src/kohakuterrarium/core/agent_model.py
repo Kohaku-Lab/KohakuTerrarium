@@ -81,10 +81,12 @@ class AgentModelMixin:
             model=model_name,
         )
 
-        # Persist the selection so a resume can restore it (best-effort;
-        # a detached agent has no store and simply skips).
+        # Persist the canonical identifier (not the raw user input) so a
+        # resume can restore it — a bare alias the user typed may become
+        # ambiguous later, while ``provider/name[@variations]`` round-trips
+        # safely. Best-effort; a detached agent has no store and skips.
         try:
-            persist_model_selection(self, profile_name)
+            persist_model_selection(self, identifier)
         except Exception:  # pragma: no cover - persistence must not break switching
             logger.warning(
                 "model selection persist failed",

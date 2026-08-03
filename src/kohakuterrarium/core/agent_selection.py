@@ -10,17 +10,24 @@ the default rather than failing the resume.
 """
 
 import json
-import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 MODEL_SELECTION_STATE_KEY = "model_selection"
 PLUGIN_SELECTION_STATE_KEY = "plugin_selection"
 
 
-def _store_of(agent: Any) -> Any | None:
-    """Resolve the agent's session store, or ``None`` when detached."""
+def _store_of(agent: Any, store: Any | None = None) -> Any | None:
+    """Resolve the session store: an explicit store wins, else the agent's.
+
+    Resume calls restore before ``attach_session_store``, so callers must
+    be able to pass the store being restored from explicitly.
+    """
+    if store is not None:
+        return store
     return getattr(agent, "session_store", None)
 
 
@@ -54,8 +61,8 @@ def persist_plugin_selection(agent: Any, enabled_names: list[str]) -> None:
         logger.warning("plugin selection persist skipped", exc_info=True)
 
 
-def load_model_selection(agent: Any) -> str | None:
-    store = _store_of(agent)
+def load_model_selection(agent: Any, store: Any | None = None) -> str | None:
+    store = _store_of(agent, store)
     key = _state_key(agent, MODEL_SELECTION_STATE_KEY)
     if store is None or key is None:
         return None
@@ -63,31 +70,42 @@ def load_model_selection(agent: Any) -> str | None:
     return str(raw) if raw else None
 
 
-def load_plugin_selection(agent: Any) -> list[str]:
-    store = _store_of(agent)
+def load_plugin_selection(
+    agent: Any, store: Any | None = None
+) -> tuple[list[str], bool]:
+    """Return ``(enabled_names, snapshot_ok)``.
+
+    ``snapshot_ok`` is False when the snapshot is absent or malformed, so
+    callers can keep config defaults instead of treating a corrupted key
+    as an explicit empty set.
+    """
+    store = _store_of(agent, store)
     key = _state_key(agent, PLUGIN_SELECTION_STATE_KEY)
-    if store is None or key is None:
-        return []
+    if store is None or key is None or key not in store.state:
+        return [], False
     raw = store.state.get(key)
     if not raw:
-        return []
+        return [], True
     try:
         parsed = json.loads(str(raw))
     except (TypeError, ValueError):
-        return []
-    return [p for p in parsed if isinstance(p, str)] if isinstance(parsed, list) else []
+        return [], False
+    if not isinstance(parsed, list):
+        return [], False
+    return [p for p in parsed if isinstance(p, str)], True
 
 
-def restore_selections(agent: Any) -> None:
+def restore_selections(agent: Any, store: Any | None = None) -> None:
     """Re-apply persisted model / plugin selections on resume.
 
     Called after the conversation, scratchpad, and native-tool-option
-    state have been restored. Both restores are best-effort:
-    ``switch_model`` validates the profile and plugin toggles tolerate
-    names that no longer exist, so a stale selection degrades to the
-    default instead of failing the resume.
+    state have been restored. ``store`` may be passed explicitly because
+    resume calls this before ``attach_session_store``. Both restores are
+    best-effort: ``switch_model`` validates the profile and plugin toggles
+    tolerate names that no longer exist, so a stale selection degrades to
+    the default instead of failing the resume.
     """
-    selector = load_model_selection(agent)
+    selector = load_model_selection(agent, store)
     if selector:
         switch = getattr(agent, "switch_model", None)
         if callable(switch):
@@ -100,16 +118,14 @@ def restore_selections(agent: Any) -> None:
                     exc_info=True,
                 )
 
-    enabled = load_plugin_selection(agent)
+    enabled, snapshot_ok = load_plugin_selection(agent, store)
     pm = getattr(agent, "plugins", None)
     if pm is None or not hasattr(pm, "enable") or not hasattr(pm, "disable"):
         return
-    # Only align when a snapshot exists: an empty set is meaningful (the
-    # user disabled everything) but an absent key means "never saved" and
-    # must leave the config defaults untouched.
-    store = _store_of(agent)
-    key = _state_key(agent, PLUGIN_SELECTION_STATE_KEY)
-    if store is None or key is None or key not in store.state:
+    # Only align when a snapshot parses successfully: an empty set is
+    # meaningful (the user disabled everything) but an absent or malformed
+    # key means "never saved" and must leave the config defaults untouched.
+    if not snapshot_ok:
         return
     # Align the manager to the persisted set: enable plugins that were on
     # and disable plugins the user had turned off (config defaults would
