@@ -295,7 +295,10 @@ class _PMgr:
         self.enabled = set(p for p, _ in self._plugins.items())
 
     def list_plugins(self):
-        return [p for _, p in self._plugins.items()]
+        # Match the real PluginManager contract: list of dicts.
+        return [
+            {"name": name, "enabled": p.enabled} for name, p in self._plugins.items()
+        ]
 
     def list_plugins_with_options(self):
         return [
