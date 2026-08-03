@@ -4,6 +4,8 @@ import json
 from collections.abc import Hashable
 from typing import Any, Iterable
 
+from kohakuterrarium.core.job_label import make_job_label
+
 # Parent paths identify the selected branches of earlier turns. Legacy events
 # derive this ancestry from event order when no explicit path was persisted.
 
@@ -435,6 +437,28 @@ def dedupe_adjacent_duplicate_events(
     return out
 
 
+def _clean_tool_name(evt: dict) -> str:
+    """Resolve the provider-safe tool name for a ``tool_result`` event.
+
+    The event's ``name`` may be a UI display label (``bash[ff6427]``) or
+    already clean (``bash``). A clean name is used as-is; a label or a
+    missing name is resolved from the job id through the shared job-label
+    helper (``bash_ff642767`` -> ``bash``), the same source the live
+    conversation path uses. Falls back to stripping the bracketed suffix.
+    """
+    name = evt.get("name", "")
+    if isinstance(name, str) and name and "[" not in name:
+        return name
+    call_id = evt.get("call_id") or evt.get("job_id") or ""
+    if call_id:
+        tool_name, _ = make_job_label(str(call_id))
+        if tool_name:
+            return tool_name
+    if isinstance(name, str) and "[" in name:
+        return name.split("[", 1)[0]
+    return name
+
+
 def replay_conversation(
     events: Iterable[dict[str, Any]],
     *,
@@ -540,7 +564,7 @@ def replay_conversation(
                     "role": "tool",
                     "content": evt.get("output", "") or "",
                     "tool_call_id": evt.get("call_id", "") or evt.get("job_id", ""),
-                    "name": evt.get("name", ""),
+                    "name": _clean_tool_name(evt),
                 }
             )
         elif etype == "system_prompt_set":

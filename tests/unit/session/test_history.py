@@ -125,6 +125,52 @@ class TestReplayConversation:
             }
         ]
 
+    def test_tool_result_strips_job_label_suffix(self):
+        # Resume replay must not pass the UI job label ("bash[ff6427]")
+        # through as the tool message name — providers reject names that
+        # do not match ^[a-zA-Z0-9_-]+$. The clean name is derived from
+        # the job id (shared job-label logic), not by parsing the label.
+        events = [
+            {
+                "type": "tool_result",
+                "output": "result",
+                "call_id": "bash_ff642767",
+                "name": "bash[ff6427]",
+                "event_id": 0,
+            }
+        ]
+        out = replay_conversation(events)
+        assert out[0]["name"] == "bash"
+        assert out[0]["tool_call_id"] == "bash_ff642767"
+
+    def test_tool_result_clean_name_unchanged(self):
+        events = [
+            {
+                "type": "tool_result",
+                "output": "r",
+                "call_id": "c1",
+                "name": "group_status",
+                "event_id": 0,
+            }
+        ]
+        out = replay_conversation(events)
+        assert out[0]["name"] == "group_status"
+
+    def test_tool_result_derives_name_from_call_id(self):
+        # When the stored name is missing but the job id carries the tool
+        # name, the clean name still resolves.
+        events = [
+            {
+                "type": "tool_result",
+                "output": "r",
+                "call_id": "grep_1234abcd",
+                "name": "",
+                "event_id": 0,
+            }
+        ]
+        out = replay_conversation(events)
+        assert out[0]["name"] == "grep"
+
     def test_system_prompt_set(self):
         events = [{"type": "system_prompt_set", "content": "be nice", "event_id": 0}]
         out = replay_conversation(events)
