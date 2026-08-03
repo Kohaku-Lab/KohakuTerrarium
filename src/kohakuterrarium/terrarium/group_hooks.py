@@ -20,6 +20,10 @@ the studio layer present.
 
 from typing import Any, Callable
 
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
 # (engine, creature, *, config_path: str = "", config_type: str = "agent") -> None
 StoreAttachHook = Callable[..., None]
 # (creature, name) -> None
@@ -70,7 +74,14 @@ def attach_session_store(
             engine, creature, config_path=config_path, config_type=config_type
         )
     except Exception:
-        pass
+        # Never break the spawn, but surface the failure: a creature that
+        # fails store attach silently loses its entire session history.
+        logger.warning(
+            "session store attach failed",
+            creature=getattr(creature, "name", "?"),
+            config_path=config_path,
+            exc_info=True,
+        )
 
 
 def apply_creature_name(creature: Any, name: str) -> None:
