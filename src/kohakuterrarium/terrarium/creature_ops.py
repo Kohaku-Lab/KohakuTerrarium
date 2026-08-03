@@ -25,6 +25,7 @@ import kohakuterrarium.terrarium.channels as _terrarium_channels
 import kohakuterrarium.terrarium.topology as _terrarium_topology
 import kohakuterrarium.terrarium.topology_snapshot as _terrarium_topology_snap
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
+from kohakuterrarium.core.agent_selection import persist_plugin_selection
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.session.history import project_branch_metadata
@@ -287,6 +288,12 @@ async def agent_toggle_plugin(
             await pm.load_pending()
     else:
         pm.disable(plugin_name)
+    # Persist the enabled set so a resume can restore it. Best-effort:
+    # persist_plugin_selection swallows persistence failures.
+    persist_plugin_selection(
+        agent,
+        [p["name"] for p in pm.list_plugins() if p.get("enabled")],
+    )
     return {"name": plugin_name, "enabled": target}
 
 

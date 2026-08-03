@@ -111,6 +111,12 @@ class TestTogglePluginLoadPending:
             def is_enabled(self, name):
                 return name in self._enabled
 
+            def list_plugins(self):
+                return [
+                    {"name": name, "enabled": name in self._enabled}
+                    for name in self._registered
+                ]
+
             def enable(self, name):
                 self._enabled.add(name)
 
