@@ -973,3 +973,80 @@ class TestRunCompactGenericException:
         await mgr._run_compact()
         # Compaction failed but no exception escaped.
         assert mgr._compact_count == 0
+
+
+# ── compact companion: elide live-zone tool results ─────────────
+
+
+class TestCompactElidesLiveZone:
+    async def test_compact_elides_stale_tool_results_keeps_latest(self):
+        # Compact summarizes the compact zone but leaves the live zone
+        # untouched; elide (the compact companion) must stub stale tool
+        # results there so the post-compact prompt actually drops below
+        # the threshold. The latest round stays verbatim.
+        from kohakuterrarium.core.conversation_elide import ELISION_MARKER
+
+        conv = Conversation()
+        conv.append("system", "sys")
+        big = "Z" * 1000  # > MIN_ELIDABLE_CHARS
+        for i in range(10):
+            conv.append("user", f"q{i}")
+            conv.append(
+                "assistant",
+                f"a{i}",
+                tool_calls=[
+                    {"id": f"c{i}", "function": {"name": "read", "arguments": "{}"}}
+                ],
+            )
+            conv.append("tool", f"tool-result-{i} " + big, tool_call_id=f"c{i}")
+
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]))
+        await mgr._run_compact()
+        assert mgr._compact_count == 1
+
+        messages = conv.get_messages()
+        # The compact zone became a summary.
+        assert any(m.role == "assistant" and "S" in (m.content or "") for m in messages)
+        # Stale live-zone tool results were stubbed.
+        elided = [
+            m
+            for m in messages
+            if m.role == "tool" and ELISION_MARKER in (m.content or "")
+        ]
+        assert elided, "expected stale tool results to be elided after compact"
+        # The latest round's tool result is still verbatim.
+        assert any(
+            m.role == "tool" and f"tool-result-9 {big}" == m.content for m in messages
+        )
+
+    async def test_compact_skips_elide_when_disabled(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        big = "Z" * 1000
+        for i in range(10):
+            conv.append("user", f"q{i}")
+            conv.append(
+                "assistant",
+                f"a{i}",
+                tool_calls=[
+                    {"id": f"c{i}", "function": {"name": "read", "arguments": "{}"}}
+                ],
+            )
+            conv.append("tool", f"tool-result-{i} " + big, tool_call_id=f"c{i}")
+
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]))
+        # Controller config present and elide explicitly disabled.
+        from types import SimpleNamespace
+
+        mgr._controller = SimpleNamespace(
+            conversation=conv,
+            config=SimpleNamespace(elide_tool_results=False),
+        )
+        await mgr._run_compact()
+
+        from kohakuterrarium.core.conversation_elide import ELISION_MARKER
+
+        assert not any(
+            m.role == "tool" and ELISION_MARKER in (m.content or "")
+            for m in conv.get_messages()
+        )

@@ -29,6 +29,7 @@ from kohakuterrarium.core.compact_text import (
     extract_message_text,
     format_messages_for_summary,
 )
+from kohakuterrarium.core.conversation_elide import elide_after_compact
 from kohakuterrarium.core.single_flight import SingleFlightDispatch, SingleFlightLease
 from kohakuterrarium.utils.logging import get_logger
 
@@ -403,6 +404,11 @@ class CompactManager:
             # prompt — drop it so it can't re-trigger a compact.
             if self._controller is not None:
                 self._controller._last_usage = {}
+
+            # Compact summarizes the compact zone but leaves the live zone
+            # (recent turns) untouched; elide stale tool results there so
+            # the post-compact prompt actually drops below the threshold.
+            elide_after_compact(self._controller)
 
             # Notify output for TUI/frontend display
             if self._output_router:

@@ -27,7 +27,6 @@ from kohakuterrarium.core.controller_plugins import (
 from kohakuterrarium.core.conversation import Conversation, ConversationConfig
 from kohakuterrarium.core.conversation_elide import (
     TOOL_FEEDBACK_KIND,
-    maybe_elide,
 )
 from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.core.controller_context import format_events_for_context
@@ -81,8 +80,6 @@ class ControllerConfig:
     # threshold; with ample context the controller keeps full results so it
     # can reference what it read without re-running tools.
     elide_tool_results: bool = True
-    elide_threshold_ratio: float = 0.60
-    elide_max_tokens: int = 256_000
     batch_stackable_events: bool = True
     max_messages: int = 50
     ephemeral: bool = False
@@ -749,20 +746,6 @@ class Controller:
             # elided).
             if events and all(e.type == EventType.TOOL_COMPLETE for e in events):
                 msg.metadata["kind"] = TOOL_FEEDBACK_KIND
-
-        # Elide stale tool results only when the prompt is close to the
-        # compact threshold (elide_threshold_ratio of elide_max_tokens).
-        # With ample context older tool results stay verbatim so the
-        # controller can reference what it read without re-running tools;
-        # once the window is crowded, stubbing prevents the endless-compact
-        # loop that unconditional retention used to trigger.
-        if self.config.elide_tool_results:
-            maybe_elide(
-                self.conversation,
-                self._last_usage.get("prompt_tokens", 0),
-                threshold_ratio=self.config.elide_threshold_ratio,
-                elide_max_tokens=self.config.elide_max_tokens,
-            )
 
         messages = self.conversation.to_messages()
         messages = await self._resolve_message_files(messages)
