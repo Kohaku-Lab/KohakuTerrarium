@@ -660,8 +660,16 @@ class _FakeController:
 class _ElideConfig:
     name = "alice"
     elide_tool_results = True
-    elide_threshold_ratio = 0.6
-    elide_max_tokens = 256_000
+
+
+class _FakeCompactConfig:
+    enabled = True
+    max_tokens = 256_000
+    threshold = 0.8
+
+
+class _FakeCompactManager:
+    config = _FakeCompactConfig()
 
 
 class _FakeAgentForInject:
@@ -671,7 +679,7 @@ class _FakeAgentForInject:
         self.session = _FakeAgentSession()
         self.executor = _FakeNamed()
         self.trigger_manager = _FakeNamed()
-        self.compact_manager = _FakeNamed()
+        self.compact_manager = _FakeCompactManager()
         self.native_tool_options = None
 
 

@@ -128,21 +128,17 @@ def estimate_tokens(conversation: Any) -> int:
     return max(1, int(total_chars / CHARS_PER_TOKEN))
 
 
-def maybe_elide(
-    conversation: Any,
-    prompt_tokens: int,
-    *,
-    threshold_ratio: float,
-    elide_max_tokens: int,
-) -> int:
-    """Elide stale tool results when the prompt is crowded; else no-op.
+def elide_after_compact(controller: Any) -> int:
+    """Elide stale tool results after a compact splice (compact companion).
 
-    Shared by the per-turn controller check and the resume/branch reload
-    paths so rebuilt conversations get the same bounded-prompt treatment.
-    Returns the number of tool-feedback messages elided.
+    Compact summarizes the compact zone but leaves the live zone (recent
+    turns) untouched; eliding there makes the post-compact prompt actually
+    drop below the threshold instead of re-triggering compaction. Respects
+    ``controller.config.elide_tool_results`` (absent config defaults to on).
     """
-    if prompt_tokens <= 0 or elide_max_tokens <= 0:
+    if controller is None:
         return 0
-    if prompt_tokens / elide_max_tokens < threshold_ratio:
+    config = getattr(controller, "config", None)
+    if config is not None and not getattr(config, "elide_tool_results", True):
         return 0
-    return elide_stale_tool_results(conversation)
+    return elide_stale_tool_results(controller.conversation)

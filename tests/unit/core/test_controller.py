@@ -149,7 +149,11 @@ class TestEphemeralMode:
 
 
 class TestStaleToolResultElision:
-    async def test_prior_round_results_elided_from_context_when_window_is_full(self):
+    async def test_prior_round_results_kept_even_when_window_is_full(self):
+        # Elision moved out of the controller into the compact step: the
+        # controller must never stub tool results on its own, even when the
+        # window is crowded, so models keep full freedom to reference what
+        # they read between compactions.
         env = TestAgentBuilder().with_llm_script(["r1", "r2"]).build()
         big = "X" * 2000
         # Simulate a crowded context window (78% of the 256k budget).
@@ -171,10 +175,8 @@ class TestStaleToolResultElision:
             if (m.metadata or {}).get("kind") == TOOL_FEEDBACK_KIND
         ]
         assert len(feedback) == 2
-        # Round-1 results were stubbed before the round-2 LLM call; the
-        # latest round keeps its full output.
-        assert ELISION_MARKER in feedback[0].content
-        assert big not in feedback[0].content
+        assert big in feedback[0].content
+        assert ELISION_MARKER not in feedback[0].content
         assert big in feedback[1].content
 
     async def test_prior_round_results_kept_when_context_is_spacious(self):

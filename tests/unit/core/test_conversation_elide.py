@@ -6,7 +6,6 @@ from kohakuterrarium.core.conversation_elide import (
     TOOL_FEEDBACK_KIND,
     elide_stale_tool_results,
     estimate_tokens,
-    maybe_elide,
 )
 
 BIG = "R" * 2000
@@ -118,61 +117,6 @@ class TestElideStaleToolResults:
 
         assert elide_stale_tool_results(conv) == 1
         assert "from a tool" in first.content
-
-
-class TestMaybeElide:
-    def test_skips_when_below_threshold(self):
-        conv = Conversation()
-        conv.append("system", "sys")
-        _feedback(conv, "[tool result] small " + "x" * 100)
-        conv.append("assistant", "ok")
-
-        assert (
-            maybe_elide(conv, 10_000, threshold_ratio=0.6, elide_max_tokens=256_000)
-            == 0
-        )
-        assert "x" * 100 in conv.get_messages()[1].content
-
-    def test_elides_when_crowded(self):
-        conv = Conversation()
-        conv.append("system", "sys")
-        first = _feedback(conv, "[tool result] round1 " + BIG)
-        conv.append("assistant", "more tools")
-        _feedback(conv, "[tool result] round2 " + BIG)
-
-        assert (
-            maybe_elide(conv, 200_000, threshold_ratio=0.6, elide_max_tokens=256_000)
-            == 1
-        )
-        assert ELISION_MARKER in first.content
-
-    def test_skips_when_no_usage_yet(self):
-        conv = Conversation()
-        conv.append("system", "sys")
-        _feedback(conv, "[tool result] round1 " + BIG)
-
-        # Mirrors the resumed controller before the first real LLM call:
-        # an empty/zero usage must not elide anything by itself.
-        assert maybe_elide(conv, 0, threshold_ratio=0.6, elide_max_tokens=256_000) == 0
-
-    def test_idempotent_across_repeated_calls(self):
-        conv = Conversation()
-        conv.append("system", "sys")
-        first = _feedback(conv, "[tool result] round1 " + BIG)
-        conv.append("assistant", "more tools")
-        _feedback(conv, "[tool result] round2 " + BIG)
-
-        # Reload paths may run before the per-turn check; the second call
-        # must not re-stub already-elided messages.
-        assert (
-            maybe_elide(conv, 200_000, threshold_ratio=0.6, elide_max_tokens=256_000)
-            == 1
-        )
-        assert (
-            maybe_elide(conv, 200_000, threshold_ratio=0.6, elide_max_tokens=256_000)
-            == 0
-        )
-        assert ELISION_MARKER in first.content
 
 
 class TestEstimateTokens:
