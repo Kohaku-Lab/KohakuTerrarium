@@ -193,6 +193,26 @@ class TestSessionArg:
         finally:
             await t.shutdown()
 
+    async def test_joining_graph_with_closed_store_rebuilds(self, tmp_path):
+        # Defensive: a closed store in engine._session_stores (e.g. after a
+        # merge replaced it) must not be attached; a fresh store is minted.
+        t = Terrarium(session_dir=str(tmp_path / "runs"))
+        try:
+            first = await t.add_creature(_prebuilt("alice"), start=False)
+            stale = t._session_stores[first.graph_id]
+            stale.close(update_status=False)
+            # New creature on the same graph — previously would attach the
+            # closed store and lose its session.
+            await t.add_creature(_prebuilt("bob"), graph=first.graph_id, start=False)
+            new_store = t._session_stores[first.graph_id]
+            assert not getattr(new_store, "_closed", False)
+            # The fresh store serves the joining creature; alice's history
+            # lived in the closed store and is unrecoverable by design.
+            meta = new_store.load_meta()
+            assert "bob" in set(meta["agents"])
+        finally:
+            await t.shutdown()
+
 
 class TestAttachSessionMintMode:
     async def test_path_attach_mints_with_meta(self, tmp_path):
