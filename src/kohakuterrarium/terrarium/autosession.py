@@ -173,10 +173,19 @@ async def attach_for_new_creature(
 
     if session is None and existing is not None:
         # Joining a graph that already persists — fold this creature in.
-        register_agents_in_meta(existing, [creature.name])
-        if hasattr(creature.agent, "attach_session_store"):
-            creature.agent.attach_session_store(existing)
-        return existing
+        if getattr(existing, "_closed", False):
+            # Defensive: never attach a closed store (e.g. after a merge
+            # replaced the graph store); treat it as absent and rebuild.
+            logger.warning(
+                "engine session store is closed; rebuilding",
+                graph_id=gid,
+            )
+            existing = None
+        else:
+            register_agents_in_meta(existing, [creature.name])
+            if hasattr(creature.agent, "attach_session_store"):
+                creature.agent.attach_session_store(existing)
+            return existing
 
     path: "str | Path | None"
     if isinstance(session, (str, Path)):

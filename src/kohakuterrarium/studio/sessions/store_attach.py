@@ -45,6 +45,19 @@ def attach_session_store_for_creature(
         existing = session_stores.get(sid) or getattr(
             engine, "_session_stores", {}
         ).get(sid)
+        # A stale closed handle can survive in the studio registry after a
+        # graph merge/split replaces the store (session_coord closes
+        # superseded stores but never refreshes stores_for). Prefer the
+        # engine's live store; rebuild when even that is closed.
+        if existing is not None and getattr(existing, "_closed", False):
+            logger.warning(
+                "stale closed session store; refreshing",
+                sid=sid,
+            )
+            session_stores.pop(sid, None)
+            existing = getattr(engine, "_session_stores", {}).get(sid)
+            if existing is not None and getattr(existing, "_closed", False):
+                existing = None
         if existing is not None:
             creature.agent.attach_session_store(existing)
             session_stores[sid] = existing
