@@ -3,6 +3,7 @@ import asyncio
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import TriggerEvent
+from kohakuterrarium.core.job_label import make_job_label
 from kohakuterrarium.core.tool_output import render_content_text
 from kohakuterrarium.parsing import CommandResultEvent, SubAgentCallEvent, ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -10,12 +11,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _make_job_label(job_id: str) -> tuple[str, str]:
-    """Extract (tool_name, label) from a job_id."""
-    tool_name = job_id.rsplit("_", 1)[0] if "_" in job_id else job_id
-    short_id = job_id.rsplit("_", 1)[-1][:6] if "_" in job_id else ""
-    label = f"{tool_name}[{short_id}]" if short_id else tool_name
-    return tool_name, label
+_make_job_label = make_job_label
 
 
 class AgentRuntimeToolsMixin:
