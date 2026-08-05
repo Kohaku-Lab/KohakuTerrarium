@@ -522,8 +522,59 @@ class TestLifecycle:
         assignment = await manager.get_assignment(record.drive_id)
         assert assignment.assignment_state == "orphaned"
 
+    # ── per-graph partitioning (Phase F, design §3.1) ─────────────
 
-# ── per-graph partitioning (Phase F, design §3.1) ─────────────
+    async def test_on_creature_removed_tolerates_closed_repo(self):
+        # A stale registry entry can point at an already-closed repository
+        # (Windows closes a session-backed repo's sqlite connection with its
+        # store after a merge/split). Removal must treat that as quiescence
+        # instead of propagating DriveRepositoryClosedError.
+        from kohakuterrarium.terrarium.drive.store import (
+            DriveRepositoryClosedError,
+        )
+
+        clock = _Clock()
+        rt = _runtime(clock=clock)
+
+        async def _boom(*_a, **_k):
+            raise DriveRepositoryClosedError(
+                "Drive repository is closed; its executor has been shut down"
+            )
+
+        mgr = rt.manager_for("g1")
+        mgr.on_creature_removed = _boom
+        # Must not raise.
+        affected = await rt.on_creature_removed(
+            "worker", graph_id="g1", graph_member_ids=frozenset()
+        )
+        assert affected == ()
+
+    async def test_on_creature_stopped_tolerates_closed_repo(self):
+        from kohakuterrarium.terrarium.drive.store import (
+            DriveRepositoryClosedError,
+        )
+
+        clock = _Clock()
+        rt = _runtime(clock=clock)
+
+        async def _boom(*_a, **_k):
+            raise DriveRepositoryClosedError(
+                "Drive repository is closed; its executor has been shut down"
+            )
+
+        # Register a creature so _manager_for_creature resolves via graph_id.
+        engine = rt._engine
+        engine._creatures["worker"] = type("C", (), {"graph_id": "g1"})()
+        mgr = rt.manager_for("g1")
+        mgr.on_creature_stopped = _boom
+        # Must not raise.
+        await rt.on_creature_stopped("worker")
+
+    async def test_on_creature_stopped_skips_when_no_manager(self):
+        clock = _Clock()
+        rt = _runtime(clock=clock)
+        # No creature registered -> _manager_for_creature returns None.
+        await rt.on_creature_stopped("ghost")
 
 
 class TestPerGraph:

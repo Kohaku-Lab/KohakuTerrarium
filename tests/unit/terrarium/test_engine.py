@@ -13,6 +13,9 @@ import pytest
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.terrarium.creature_host import Creature
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.drive.store import (
+    DriveRepositoryClosedError,
+)
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.testing.terrarium import _FakeAgent, TestTerrariumBuilder
 
@@ -159,6 +162,28 @@ class TestAddRemoveCreature:
         t = Terrarium()
         with pytest.raises(KeyError):
             await t.remove_creature("ghost")
+
+    async def test_remove_survives_closed_drive_repo(self):
+        # A stale drive registry entry can point at an already-closed
+        # repository (Windows closes a session-backed repo's sqlite connection
+        # with its store after a merge/split). Creature removal must treat
+        # that as quiescence and STILL remove the creature from the topology —
+        # otherwise a dead node lingers and later splits into its own session.
+        t = await TestTerrariumBuilder().with_creature("alice").build()
+        try:
+            assert "alice" in t
+
+            async def _boom(*_a, **_k):
+                raise DriveRepositoryClosedError(
+                    "Drive repository is closed; its executor has been shut down"
+                )
+
+            t._drive_runtime.on_creature_removed = _boom
+            await t.remove_creature("alice")
+            assert "alice" not in t
+            assert t.list_graphs() == []
+        finally:
+            await t.shutdown()
 
     async def test_get_creature(self):
         t = await TestTerrariumBuilder().with_creature("alice").build()
