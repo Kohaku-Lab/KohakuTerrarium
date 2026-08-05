@@ -13,6 +13,8 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.errors import SessionNotResumableError
+from kohakuterrarium.session.resume_branch import snapshot_mismatches_branch
+
 from kohakuterrarium.session.resume import (
     IO_MODES,
     _build_conversation,
@@ -683,6 +685,81 @@ class TestLoadConversationFallback:
 # ── detect_session_type ──────────────────────────────────────────
 
 
+# ── P3b: snapshot branch matching on resume ───────────────────────
+
+
+class _BranchAgent:
+    """Minimal agent exposing branch state for matching tests."""
+
+    def __init__(self, turn_index=1, branch_id=1, parent_branch_path=None):
+        self._turn_index = turn_index
+        self._branch_id = branch_id
+        self._parent_branch_path = parent_branch_path or []
+
+
+class TestSnapshotMismatchesBranch:
+    def test_no_tag_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            agent = _BranchAgent(turn_index=2, branch_id=1, parent_branch_path=[(1, 1)])
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+    def test_matching_prefix_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            # snapshot path [(1,1),(2,1)] is prefix of agent path [(1,1),(2,1)]
+            agent = _BranchAgent(turn_index=2, branch_id=1, parent_branch_path=[(1, 1)])
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+    def test_ancestor_snapshot_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            # agent continued to turn3 on same path -> snapshot is ancestor
+            agent = _BranchAgent(
+                turn_index=3, branch_id=1, parent_branch_path=[(1, 1), (2, 1)]
+            )
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+    def test_sibling_branch_snapshot_mismatches(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            # agent landed on branch2 (sibling) -> snapshot must be rebuilt
+            agent = _BranchAgent(turn_index=2, branch_id=2, parent_branch_path=[(1, 1)])
+            assert snapshot_mismatches_branch(store, agent, "alice") is True
+        finally:
+            store.close()
+
+    def test_bad_tag_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = "not-a-dict"
+            agent = _BranchAgent(turn_index=2, branch_id=1)
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+
 class TestDetectSessionType:
     def test_agent_by_default(self, tmp_path):
         path = tmp_path / "x.kohakutr"
@@ -864,6 +941,124 @@ class TestInjectSavedState:
             # The trigger load (which runs after the native-tool-options
             # block) still completed.
             assert agent._pending_resume_triggers == [{"name": "t1"}]
+        finally:
+            store.close()
+
+    def test_replays_when_snapshot_branch_differs(self, tmp_path):
+        # Snapshot was saved on branch1 but the latest live subtree is
+        # branch2 (sibling). inject_saved_state must discard the stale
+        # snapshot and rebuild the conversation for the target branch.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "text_chunk",
+                {"content": "R1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2a"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.append_event(
+                "alice",
+                "text_chunk",
+                {"content": "R2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "U1"},
+                    {"role": "assistant", "content": "R1"},
+                    {"role": "user", "content": "U2a"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = 5
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            store.flush()
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, store, "alice")
+            contents = [
+                m.content
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "user"
+            ]
+            # rebuilt for branch2 -> U2b present (branch2's content)
+            assert "U2b" in contents
+            # branch1-only turn2 content must NOT be in the restored view
+            assert "U2a" not in contents
+        finally:
+            store.close()
+
+    def test_keeps_snapshot_when_branch_matches(self, tmp_path):
+        # Snapshot and target branch agree -> trust the snapshot, do not
+        # replay (branch1 content stays).
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2a"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "U1"},
+                    {"role": "user", "content": "U2a"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = 2
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            store.flush()
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, store, "alice")
+            contents = [
+                m.content
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "user"
+            ]
+            assert contents == ["U1", "U2a"]
         finally:
             store.close()
 
@@ -1284,7 +1479,6 @@ class TestDetectSessionTypeDefensive:
         finally:
             store.close()
 
-
     def test_backfill_maps_snapshot_users_to_last_events(self, tmp_path):
         # Compaction keeps only the live zone verbatim, so snapshot user
         # messages are the MOST RECENT turns, not the first ones. Backfill
@@ -1315,9 +1509,7 @@ class TestDetectSessionTypeDefensive:
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
             user_meta = [
-                m["metadata"]["turn_index"]
-                for m in out
-                if m.get("role") == "user"
+                m["metadata"]["turn_index"] for m in out if m.get("role") == "user"
             ]
             assert user_meta == [4, 5]
         finally:

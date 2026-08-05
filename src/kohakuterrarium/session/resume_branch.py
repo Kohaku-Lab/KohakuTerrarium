@@ -1,0 +1,121 @@
+"""Branch-matching helpers for resume (kept small for the file-size guard).
+
+Split out of :mod:`resume` so it stays under the line limit. These helpers
+decide whether a saved conversation snapshot still matches the branch the
+agent resumes onto, or must be rebuilt from the event log.
+"""
+
+from typing import Any
+
+from kohakuterrarium.session.history import (
+    normalize_resumable_events,
+    replay_conversation,
+    select_live_event_ids,
+)
+
+
+def snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
+    """Return whether the snapshot carries user turn metadata.
+
+    Edit/regenerate targeting resolves the edited turn through message
+    metadata; legacy snapshots saved without it force content matching,
+    which is ambiguous when a turn's wording repeats. Such snapshots are
+    backfilled from the event log so targeting stays deterministic.
+    """
+    return any(
+        m.get("role") == "user"
+        and isinstance(m.get("metadata"), dict)
+        and m["metadata"].get("turn_index") is not None
+        for m in snapshot
+    )
+
+
+def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dict]:
+    """Backfill user-turn metadata onto a legacy metadata-less snapshot.
+
+    The snapshot is the canonical persisted state (compaction exists only
+    there), so it is trusted verbatim: a full replay would resurrect the
+    pre-compact history and drop snapshot-only in-flight messages. Turn
+    identity is recovered from the live ``user_message`` events so edit
+    targeting stays deterministic.
+
+    Snapshot user messages hold the most recent turns verbatim (compaction
+    summarizes the prefix and keeps only the live zone), so they map to the
+    LAST ``user_message`` events, not the first ones.
+    """
+    live_ids = set(select_live_event_ids(events))
+    meta_by_pos: list[dict] = []
+    for evt in events:
+        if evt.get("type") not in ("user_message", "user_input"):
+            continue
+        if isinstance(evt.get("event_id"), int) and evt["event_id"] not in live_ids:
+            continue
+        ti = evt.get("turn_index")
+        bi = evt.get("branch_id")
+        if isinstance(ti, int) and isinstance(bi, int):
+            meta_by_pos.append({"turn_index": ti, "branch_id": bi})
+    user_messages = [m for m in snapshot if m.get("role") == "user"]
+    tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
+    out: list[dict] = []
+    for msg in snapshot:
+        m = dict(msg)
+        if m.get("role") == "user" and tail_meta:
+            meta = dict(m.get("metadata") or {})
+            meta.setdefault("turn_index", tail_meta[0]["turn_index"])
+            meta.setdefault("branch_id", tail_meta[0]["branch_id"])
+            m["metadata"] = meta
+            tail_meta = tail_meta[1:]
+        out.append(m)
+    return out
+
+
+def is_path_prefix(sub: list[tuple[int, int]], full: list[tuple[int, int]]) -> bool:
+    """Whether ``sub`` is a strict/equal prefix of ``full``."""
+    return len(sub) <= len(full) and full[: len(sub)] == sub
+
+
+def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
+    """Whether the saved snapshot belongs to a different branch than the one
+    resume lands on (the latest live subtree, restored by
+    ``_restore_turn_branch_state``).
+
+    A snapshot tagged with a branch that is an ANCESTOR of the target branch
+    is still usable — resume appends the post-snapshot tail. Only a snapshot
+    whose path diverges (a sibling branch) must be discarded and rebuilt.
+    """
+    try:
+        branch = store.state.get(f"{agent_name}:snapshot_branch")
+    except (KeyError, TypeError):
+        return False
+    if not isinstance(branch, dict):
+        return False  # legacy snapshot without a tag -> trust it
+    ti = branch.get("turn_index")
+    bi = branch.get("branch_id")
+    if not isinstance(ti, int) or not isinstance(bi, int) or ti <= 0:
+        return False
+    a_ti = getattr(agent, "_turn_index", None)
+    a_bi = getattr(agent, "_branch_id", None)
+    a_ppath = getattr(agent, "_parent_branch_path", None) or []
+    if not isinstance(a_ti, int) or not isinstance(a_bi, int):
+        return False
+    snapshot_path = [tuple(p) for p in (branch.get("parent_branch_path") or [])] + [
+        (ti, bi)
+    ]
+    agent_path = [tuple(p) for p in a_ppath] + [(a_ti, a_bi)]
+    return not is_path_prefix(snapshot_path, agent_path)
+
+
+def replayed_messages_for(store: Any, agent_name: str) -> list[dict]:
+    """Replay the latest live subtree from the event log (branch-aware).
+
+    Used by resume when the saved snapshot belongs to a different branch.
+    """
+    try:
+        events = list(store.get_events(agent_name))
+    except Exception:  # pragma: no cover - defensive
+        return []
+    if not events:
+        return []
+    return replay_conversation(
+        normalize_resumable_events(events), include_metadata=True
+    )

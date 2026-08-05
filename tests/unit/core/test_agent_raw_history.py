@@ -120,3 +120,95 @@ def test_reload_preserves_the_runtime_conversation_config():
     )
 
     assert agent.controller.conversation.config is config
+
+
+# ── P4: reload preserves the branch's compact baseline ────────────
+
+
+def _compact_event(event_id, replaced_from, replaced_to, summary="[S]"):
+    return {
+        "event_id": event_id,
+        "type": "compact_replace",
+        "summary_text": summary,
+        "replaced_from_event_id": replaced_from,
+        "replaced_to_event_id": replaced_to,
+    }
+
+
+def test_reload_keeps_compact_baseline_for_compacted_target():
+    # turn1-2 were compacted (replaced 1..4). Editing turn2 must keep the
+    # summary for turn1 and materialize only the target — no resurrection of
+    # the compacted prefix.
+    events = [
+        _event(1, "user_message", turn=1, content="U1"),
+        _event(2, "text_chunk", turn=1, content="R1"),
+        _event(3, "user_message", turn=2, content="U2", path=[[1, 1]]),
+        _event(4, "text_chunk", turn=2, content="R2", path=[[1, 1]]),
+        _event(5, "user_message", turn=3, content="U3", path=[[1, 1], [2, 1]]),
+        _event(6, "text_chunk", turn=3, content="R3", path=[[1, 1], [2, 1]]),
+        _compact_event(7, 1, 4),
+    ]
+    agent = _agent(events)
+
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=3, turn_index=2, branch_id=1),
+    )
+
+    messages = agent.controller.conversation.get_messages()
+    assert [(m.role, m.content) for m in messages] == [
+        ("system", "current runtime prompt"),
+        ("assistant", "[S]"),
+        ("user", "U2"),
+    ]
+
+
+def test_reload_keeps_compact_baseline_for_later_target():
+    # Editing turn3 (after the compacted turn1-2) still preserves the
+    # compact baseline — turn1-2 stay summarized, turn3 materializes.
+    events = [
+        _event(1, "user_message", turn=1, content="U1"),
+        _event(2, "text_chunk", turn=1, content="R1"),
+        _event(3, "user_message", turn=2, content="U2", path=[[1, 1]]),
+        _event(4, "text_chunk", turn=2, content="R2", path=[[1, 1]]),
+        _event(5, "user_message", turn=3, content="U3", path=[[1, 1], [2, 1]]),
+        _event(6, "text_chunk", turn=3, content="R3", path=[[1, 1], [2, 1]]),
+        _compact_event(7, 1, 4),
+    ]
+    agent = _agent(events)
+
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=5, turn_index=3, branch_id=1),
+    )
+
+    messages = agent.controller.conversation.get_messages()
+    assert [(m.role, m.content) for m in messages] == [
+        ("system", "current runtime prompt"),
+        ("assistant", "[S]"),
+        ("user", "U3"),
+    ]
+
+
+def test_reload_uncompacted_target_unchanged():
+    # No compaction -> existing behavior preserved (full raw prefix).
+    events = [
+        _event(1, "user_message", turn=1, content="U1"),
+        _event(2, "text_chunk", turn=1, content="R1"),
+        _event(3, "user_message", turn=2, content="U2", path=[[1, 1]]),
+        _event(4, "text_chunk", turn=2, content="R2", path=[[1, 1]]),
+    ]
+    agent = _agent(events)
+
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=3, turn_index=2, branch_id=1),
+    )
+
+    messages = agent.controller.conversation.get_messages()
+    assert [(m.role, m.content) for m in messages] == [
+        ("system", "current runtime prompt"),
+        ("user", "U1"),
+        ("assistant", "R1"),
+        ("user", "U2"),
+    ]

@@ -23,13 +23,18 @@ from kohakuterrarium.session.history import (
     _resolve_selected_branches,
     normalize_resumable_events,
     replay_conversation,
-    select_live_event_ids,
 )
 from kohakuterrarium.session.migrations import (
     ensure_latest_version,
     latest_readable_version,
 )
 from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.resume_branch import (
+    backfill_turn_metadata,
+    replayed_messages_for,
+    snapshot_has_turn_metadata,
+    snapshot_mismatches_branch,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -90,61 +95,6 @@ def _build_conversation(messages: list[dict]) -> Conversation:
     return conv
 
 
-def _snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
-    """Return whether the snapshot carries user turn metadata.
-
-    Edit/regenerate targeting resolves the edited turn through message
-    metadata; legacy snapshots saved without it force content matching,
-    which is ambiguous when a turn's wording repeats. Such snapshots are
-    backfilled from the event log so targeting stays deterministic.
-    """
-    return any(
-        m.get("role") == "user"
-        and isinstance(m.get("metadata"), dict)
-        and m["metadata"].get("turn_index") is not None
-        for m in snapshot
-    )
-
-
-def _backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dict]:
-    """Backfill user-turn metadata onto a legacy metadata-less snapshot.
-
-    The snapshot is the canonical persisted state (compaction exists only
-    there), so it is trusted verbatim: a full replay would resurrect the
-    pre-compact history and drop snapshot-only in-flight messages. Turn
-    identity is recovered from the live ``user_message`` events so edit
-    targeting stays deterministic.
-
-    Snapshot user messages hold the most recent turns verbatim (compaction
-    summarizes the prefix and keeps only the live zone), so they map to the
-    LAST ``user_message`` events, not the first ones.
-    """
-    live_ids = set(select_live_event_ids(events))
-    meta_by_pos: list[dict] = []
-    for evt in events:
-        if evt.get("type") not in ("user_message", "user_input"):
-            continue
-        if isinstance(evt.get("event_id"), int) and evt["event_id"] not in live_ids:
-            continue
-        ti = evt.get("turn_index")
-        bi = evt.get("branch_id")
-        if isinstance(ti, int) and isinstance(bi, int):
-            meta_by_pos.append({"turn_index": ti, "branch_id": bi})
-    user_messages = [m for m in snapshot if m.get("role") == "user"]
-    tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
-    out: list[dict] = []
-    for msg in snapshot:
-        m = dict(msg)
-        if m.get("role") == "user" and tail_meta:
-            meta = dict(m.get("metadata") or {})
-            meta.setdefault("turn_index", tail_meta[0]["turn_index"])
-            meta.setdefault("branch_id", tail_meta[0]["branch_id"])
-            m["metadata"] = meta
-            tail_meta = tail_meta[1:]
-        out.append(m)
-    return out
-
-
 def _load_conversation_with_replay_fallback(
     store: SessionStore, agent_name: str
 ) -> list[dict] | None:
@@ -168,13 +118,13 @@ def _load_conversation_with_replay_fallback(
         cached_up_to = None
     if snapshot is not None and isinstance(cached_up_to, int):
         if cached_up_to >= last_event_id:
-            if _snapshot_has_turn_metadata(snapshot):
+            if snapshot_has_turn_metadata(snapshot):
                 return snapshot
             logger.info(
                 "Legacy snapshot lacks turn metadata — backfill",
                 agent=agent_name,
             )
-            return _backfill_turn_metadata(snapshot, events)
+            return backfill_turn_metadata(snapshot, events)
         # Compaction exists only in the snapshot, so replay just its normalized tail.
         tail = [
             evt
@@ -212,13 +162,13 @@ def _load_conversation_with_replay_fallback(
             snapshot_event_id=cached_up_to,
         )
     if snapshot is not None and cached_up_to is None:
-        if _snapshot_has_turn_metadata(snapshot):
+        if snapshot_has_turn_metadata(snapshot):
             return snapshot
         logger.info(
             "Legacy snapshot lacks turn metadata — backfill",
             agent=agent_name,
         )
-        return _backfill_turn_metadata(snapshot, events)
+        return backfill_turn_metadata(snapshot, events)
     replayed = replay_conversation(
         normalize_resumable_events(events), include_metadata=True
     )
@@ -326,6 +276,18 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
         )
 
     _restore_turn_branch_state(agent, store, agent_name)
+
+    # A snapshot saved on a DIFFERENT branch (a sibling path) is stale for
+    # the restored target branch: discard it and rebuild via the branch-aware
+    # replay so the restored conversation matches the branch the agent is on.
+    if snapshot_mismatches_branch(store, agent, agent_name):
+        logger.info(
+            "Snapshot belongs to another branch — replaying target branch",
+            agent=agent_name,
+        )
+        replayed = replayed_messages_for(store, agent_name)
+        if replayed:
+            agent.controller.conversation = _build_conversation(replayed)
 
     pad_data = store.load_scratchpad(agent_name)
     if pad_data:
