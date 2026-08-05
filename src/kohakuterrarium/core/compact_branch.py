@@ -182,13 +182,22 @@ def compute_replaced_range(
     """
     if not path:
         return None
+    # Deduplicate by turn so a duplicated user_message event (graph merge /
+    # migration) cannot shift the "first live" turn and over-replace.
     user_turns: list[int] = []
+    seen_turns: set[int] = set()
     for evt in events:
         if evt.get("type") != "user_message":
             continue
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
-        if isinstance(ti, int) and isinstance(bi, int) and (ti, bi) in path:
+        if (
+            isinstance(ti, int)
+            and isinstance(bi, int)
+            and (ti, bi) in path
+            and ti not in seen_turns
+        ):
+            seen_turns.add(ti)
             user_turns.append(ti)
     if len(user_turns) <= keep_count:
         return None

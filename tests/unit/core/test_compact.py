@@ -1109,3 +1109,20 @@ class TestBranchAwareCompactMetadata:
             {"event_id": 5, "type": "user_message", "turn_index": 1, "branch_id": 1},
         ]
         assert compute_replaced_range(events, 1, set()) is None
+
+
+class TestComputeReplacedRangeDedupe:
+    def test_duplicate_last_turn_does_not_shift_first_live(self):
+        events = [
+            {"event_id": 1, "type": "user_message", "turn_index": 1, "branch_id": 1},
+            {"event_id": 2, "type": "text_chunk", "turn_index": 1, "branch_id": 1},
+            {"event_id": 3, "type": "user_message", "turn_index": 2, "branch_id": 1},
+            {"event_id": 4, "type": "user_message", "turn_index": 2, "branch_id": 2},
+            {"event_id": 5, "type": "text_chunk", "turn_index": 2, "branch_id": 2},
+            {"event_id": 6, "type": "user_message", "turn_index": 3, "branch_id": 2},
+            {"event_id": 7, "type": "user_message", "turn_index": 3, "branch_id": 2},
+            {"event_id": 8, "type": "text_chunk", "turn_index": 3, "branch_id": 2},
+        ]
+        path = {(1, 1), (2, 2), (3, 2)}
+        # keep 2 live turns (turn2, turn3) -> cover turn1 only
+        assert compute_replaced_range(events, 2, path) == (1, 2)

@@ -562,15 +562,32 @@ def replay_conversation(
             messages.append({"role": "assistant", "content": content})
         text_buf.clear()
 
-    def _flush_pending_summaries(eid: int) -> None:
+    def _flush_pending_summaries(
+        eid: int, turn_index: object, branch_id: object
+    ) -> None:
         nonlocal pending_next
         while pending_next < len(pending_rules):
-            frm, _to, _path, summary = pending_rules[pending_next]
+            rule = pending_rules[pending_next]
+            frm, to, _path, summary = rule
             if frm > eid:
                 break
-            if summary:
-                messages.append({"role": "assistant", "content": summary})
-            pending_next += 1
+            # Inject the summary only when the current branch actually has an
+            # event covered by this rule; a rule whose path does not intersect
+            # the selected branch must NOT inject a spurious summary. Rules
+            # without a path (legacy migration data) cover the whole range.
+            if _covered_by_replace(eid, turn_index, branch_id, [rule]):
+                # Flush buffered assistant text that precedes the replaced
+                # range before injecting the summary (a covered event does not
+                # otherwise delimit the text buffer).
+                _flush_text()
+                if summary:
+                    messages.append({"role": "assistant", "content": summary})
+                pending_next += 1
+            elif eid > to:
+                # Range passed with no covered event on this branch — drop.
+                pending_next += 1
+            else:
+                break
 
     for evt in events_list:
         etype = evt.get("type", "")
@@ -582,9 +599,9 @@ def replay_conversation(
 
         if isinstance(eid, int):
             # A compact covers id range [replaced_from..replaced_to]; its
-            # summary is inserted where that content began, i.e. as soon as
-            # the stream reaches an event at/after replaced_from.
-            _flush_pending_summaries(eid)
+            # summary is inserted where the covered content sat, i.e. as soon
+            # as the stream reaches a covered event on this branch.
+            _flush_pending_summaries(eid, evt.get("turn_index"), evt.get("branch_id"))
 
         if etype != "compact_replace" and _covered_by_replace(
             eid,

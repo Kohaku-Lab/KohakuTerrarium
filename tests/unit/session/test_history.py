@@ -551,6 +551,67 @@ class TestReplayBranching:
             {"role": "assistant", "content": "R3b"},
         ]
 
+    def test_compact_path_not_intersecting_branch_does_not_inject_summary(self):
+        # A compact_replace whose compact_path does not intersect the selected
+        # branch replaces nothing on that branch — replay must NOT inject a
+        # spurious summary there.
+        events = [
+            {
+                "type": "user_message",
+                "content": "U1",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "content": "U2a",
+                "event_id": 3,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2b",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "compact_replace",
+                "summary_text": "[S: b2]",
+                "event_id": 5,
+                "replaced_from_event_id": 4,
+                "replaced_to_event_id": 4,
+                "compact_path": [[2, 2]],
+            },
+        ]
+        # branch1: nothing on its path is covered -> no summary, full history
+        out1 = replay_conversation(events, branch_view={1: 1, 2: 1})
+        assert out1 == [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "user", "content": "U2a"},
+        ]
+        # branch2: U2b covered -> summary injected in place, R1 stays before it
+        out2 = replay_conversation(events, branch_view={1: 1, 2: 2})
+        assert out2 == [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "assistant", "content": "[S: b2]"},
+        ]
+
 
 # ── dedupe_adjacent_duplicate_events ──────────────────────────────
 

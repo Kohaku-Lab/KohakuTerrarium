@@ -760,6 +760,59 @@ class TestSnapshotMismatchesBranch:
             store.close()
 
 
+# ── Copilot review: backfill dedupe + malformed-path resilience ──
+
+
+class TestBackfillDedupeAndPathResilience:
+    def test_backfill_dedupes_duplicate_user_events(self):
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [
+            {"role": "user", "content": "U1"},
+            {"role": "user", "content": "U2"},
+        ]
+        events = [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 2,
+                "type": "user_message",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 3,
+                "type": "user_message",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        assert out[0]["metadata"]["turn_index"] == 1
+        assert out[1]["metadata"]["turn_index"] == 2
+
+    def test_snapshot_mismatch_tolerates_malformed_path(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [1, "bad", [2, 3]],
+            }
+            agent = _BranchAgent(turn_index=2, branch_id=1, parent_branch_path=[(1, 1)])
+            # Must not raise.
+            snapshot_mismatches_branch(store, agent, "alice")
+        finally:
+            store.close()
+
+
 class TestDetectSessionType:
     def test_agent_by_default(self, tmp_path):
         path = tmp_path / "x.kohakutr"

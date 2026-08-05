@@ -45,6 +45,7 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
     """
     live_ids = set(select_live_event_ids(events))
     meta_by_pos: list[dict] = []
+    seen: set[tuple[int, int]] = set()
     for evt in events:
         if evt.get("type") not in ("user_message", "user_input"):
             continue
@@ -52,7 +53,10 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
             continue
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
-        if isinstance(ti, int) and isinstance(bi, int):
+        # Deduplicate per (turn, branch): a merged/migrated store can carry
+        # duplicate user events that would otherwise mis-align the tail map.
+        if isinstance(ti, int) and isinstance(bi, int) and (ti, bi) not in seen:
+            seen.add((ti, bi))
             meta_by_pos.append({"turn_index": ti, "branch_id": bi})
     user_messages = [m for m in snapshot if m.get("role") == "user"]
     tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
@@ -72,6 +76,26 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
 def is_path_prefix(sub: list[tuple[int, int]], full: list[tuple[int, int]]) -> bool:
     """Whether ``sub`` is a strict/equal prefix of ``full``."""
     return len(sub) <= len(full) and full[: len(sub)] == sub
+
+
+def _safe_branch_path(raw: Any) -> list[tuple[int, int]]:
+    """Parse a persisted branch path defensively.
+
+    Malformed entries (int, string, wrong length, non-int coords) are
+    skipped so resume never crashes on corrupt state.
+    """
+    out: list[tuple[int, int]] = []
+    if not isinstance(raw, (list, tuple)):
+        return out
+    for item in raw:
+        if not isinstance(item, (list, tuple)) or len(item) != 2:
+            continue
+        try:
+            t, b = int(item[0]), int(item[1])
+        except (TypeError, ValueError):
+            continue
+        out.append((t, b))
+    return out
 
 
 def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
@@ -98,10 +122,8 @@ def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
     a_ppath = getattr(agent, "_parent_branch_path", None) or []
     if not isinstance(a_ti, int) or not isinstance(a_bi, int):
         return False
-    snapshot_path = [tuple(p) for p in (branch.get("parent_branch_path") or [])] + [
-        (ti, bi)
-    ]
-    agent_path = [tuple(p) for p in a_ppath] + [(a_ti, a_bi)]
+    snapshot_path = _safe_branch_path(branch.get("parent_branch_path")) + [(ti, bi)]
+    agent_path = _safe_branch_path(a_ppath) + [(a_ti, a_bi)]
     return not is_path_prefix(snapshot_path, agent_path)
 
 

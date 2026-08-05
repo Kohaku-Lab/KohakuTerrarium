@@ -73,9 +73,10 @@ def reload_raw_prefix_for_target(
             if not isinstance(frm, int) or not isinstance(to, int):
                 continue
             # Keep the branch's compaction baseline whenever it covers
-            # anything before the target; cap the range below the target so
-            # the edited turn is never swallowed by the summary.
-            if frm <= target_id:
+            # anything BEFORE the target; cap the range below the target so
+            # the edited turn is never swallowed by the summary. A compact
+            # that starts at/after the target has nothing before it to keep.
+            if frm < target_id:
                 capped = dict(evt)
                 if to >= target_id:
                     capped["replaced_to_event_id"] = target_id - 1

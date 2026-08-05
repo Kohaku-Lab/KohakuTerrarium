@@ -212,3 +212,26 @@ def test_reload_uncompacted_target_unchanged():
         ("assistant", "R1"),
         ("user", "U2"),
     ]
+
+
+def test_reload_compact_starting_at_target_not_kept():
+    # A compact_replace whose range starts at the target has nothing BEFORE
+    # the target to preserve; it must not be kept (capping would create an
+    # invalid to<from range and a spurious summary).
+    events = [
+        _event(1, "user_message", turn=1, content="U1"),
+        _event(2, "user_message", turn=2, content="U2", path=[[1, 1]]),
+        _event(3, "text_chunk", turn=2, content="R2", path=[[1, 1]]),
+        _compact_event(4, 2, 4),
+    ]
+    agent = _agent(events)
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=2, turn_index=2, branch_id=1),
+    )
+    messages = agent.controller.conversation.get_messages()
+    assert [(m.role, m.content) for m in messages] == [
+        ("system", "current runtime prompt"),
+        ("user", "U1"),
+        ("user", "U2"),
+    ]
