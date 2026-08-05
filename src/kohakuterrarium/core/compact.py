@@ -434,7 +434,9 @@ class CompactManager:
                 try:
                     self._session_store.save_conversation(
                         self._agent_name,
-                        conversation.to_messages(preserve_pending_tail=True),
+                        conversation.to_messages(
+                            preserve_pending_tail=True, include_metadata=True
+                        ),
                     )
                 except Exception as e:
                     logger.warning(

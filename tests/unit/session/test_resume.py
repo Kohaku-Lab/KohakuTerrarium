@@ -431,10 +431,12 @@ class TestLoadConversationFallback:
         finally:
             store.close()
 
-    def test_snapshot_fresh_without_metadata_full_replays(self, tmp_path):
+    def test_snapshot_fresh_without_metadata_backfills(self, tmp_path):
         # Legacy snapshots carry no turn metadata, so edit targeting
-        # (turn_index lookup) cannot resolve. Rebuild via replay with
-        # metadata rather than trusting the opaque snapshot.
+        # (turn_index lookup) cannot resolve. Backfill turn identity from
+        # the event log while trusting the snapshot verbatim — a full
+        # replay would resurrect pre-compact history and drop snapshot-only
+        # in-flight messages.
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             _, eid = store.append_event(
@@ -448,8 +450,9 @@ class TestLoadConversationFallback:
             store.state["alice:snapshot_event_id"] = eid
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
-            assert out[0]["content"] == "x"
+            assert out[0]["content"] == "snap"
             assert out[0]["metadata"]["turn_index"] == 1
+            assert out[0]["metadata"]["branch_id"] == 1
         finally:
             store.close()
 
@@ -629,7 +632,7 @@ class TestLoadConversationFallback:
         finally:
             store.close()
 
-    def test_missing_snapshot_event_id_without_metadata_replays(self, tmp_path):
+    def test_missing_snapshot_event_id_without_metadata_backfills(self, tmp_path):
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             store.append_event(
@@ -642,7 +645,7 @@ class TestLoadConversationFallback:
             store.save_conversation("alice", [{"role": "user", "content": "snap"}])
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
-            assert out[0]["content"] == "x"
+            assert out[0]["content"] == "snap"
             assert out[0]["metadata"]["turn_index"] == 1
         finally:
             store.close()
@@ -650,8 +653,8 @@ class TestLoadConversationFallback:
     def test_state_get_raising_treated_as_no_cache(self, tmp_path, monkeypatch):
         # If reading the cached snapshot_event_id from store.state raises
         # (TypeError / KeyError), the helper treats it as "no cache" and
-        # falls back to replaying the events with metadata rather than
-        # trusting a metadata-less snapshot or crashing.
+        # backfills turn metadata onto the trusted snapshot rather than
+        # crashing.
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             store.append_event(
@@ -669,9 +672,9 @@ class TestLoadConversationFallback:
 
             monkeypatch.setattr(store.state, "get", _boom_get)
             out = _load_conversation_with_replay_fallback(store, "alice")
-            # cached_up_to is None → legacy snapshot without metadata is
-            # replayed (events carry authoritative content + metadata).
-            assert out[0]["content"] == "x"
+            # cached_up_to is None → legacy snapshot without metadata gets
+            # turn metadata backfilled from the event log.
+            assert out[0]["content"] == "snap"
             assert out[0]["metadata"]["turn_index"] == 1
         finally:
             store.close()
@@ -1245,3 +1248,62 @@ class TestDetectSessionTypeDefensive:
         monkeypatch.setattr(resume_mod, "ensure_latest_version", _boom)
         # Falls back to the raw path -> still reports the stored type.
         assert detect_session_type(path) == "agent"
+
+    def test_backfill_trusts_snapshot_not_replay(self, tmp_path):
+        # The snapshot is authoritative (it may hold a post-compact view or
+        # in-flight messages that never reached the event log). Backfill must
+        # keep snapshot content verbatim and only attach turn metadata.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            _, eid = store.append_event(
+                "alice",
+                "user_message",
+                {"content": "real-event-content"},
+                turn_index=3,
+                branch_id=1,
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "compact-summary"},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "user", "content": "latest-turn"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = eid
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["content"] == "compact-summary"  # verbatim, not replay
+            assert out[0]["metadata"]["turn_index"] == 3
+            assert out[0]["metadata"]["branch_id"] == 1
+            assert [m["content"] for m in out] == [
+                "compact-summary",
+                "ok",
+                "latest-turn",
+            ]
+        finally:
+            store.close()
+
+    def test_backfill_preserves_metadata_less_user(self, tmp_path):
+        # When the event log has fewer user turns than the snapshot, trailing
+        # user messages simply stay without metadata instead of erroring.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation(
+                "alice",
+                [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}],
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["metadata"]["turn_index"] == 1
+            meta1 = out[1].get("metadata")
+            assert meta1 is None or meta1.get("turn_index") is None
+        finally:
+            store.close()

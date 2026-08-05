@@ -23,6 +23,7 @@ from kohakuterrarium.session.history import (
     _resolve_selected_branches,
     normalize_resumable_events,
     replay_conversation,
+    select_live_event_ids,
 )
 from kohakuterrarium.session.migrations import (
     ensure_latest_version,
@@ -95,7 +96,7 @@ def _snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
     Edit/regenerate targeting resolves the edited turn through message
     metadata; legacy snapshots saved without it force content matching,
     which is ambiguous when a turn's wording repeats. Such snapshots are
-    rebuilt via replay so targeting stays deterministic.
+    backfilled from the event log so targeting stays deterministic.
     """
     return any(
         m.get("role") == "user"
@@ -103,6 +104,40 @@ def _snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
         and m["metadata"].get("turn_index") is not None
         for m in snapshot
     )
+
+
+def _backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dict]:
+    """Backfill user-turn metadata onto a legacy metadata-less snapshot.
+
+    The snapshot is the canonical persisted state (compaction exists only
+    there), so it is trusted verbatim: a full replay would resurrect the
+    pre-compact history and drop snapshot-only in-flight messages. Turn
+    identity is recovered from the live ``user_message`` events so edit
+    targeting stays deterministic.
+    """
+    live_ids = set(select_live_event_ids(events))
+    meta_by_pos: list[dict] = []
+    for evt in events:
+        if evt.get("type") not in ("user_message", "user_input"):
+            continue
+        if isinstance(evt.get("event_id"), int) and evt["event_id"] not in live_ids:
+            continue
+        ti = evt.get("turn_index")
+        bi = evt.get("branch_id")
+        if isinstance(ti, int) and isinstance(bi, int):
+            meta_by_pos.append({"turn_index": ti, "branch_id": bi})
+    out: list[dict] = []
+    user_pos = 0
+    for msg in snapshot:
+        m = dict(msg)
+        if m.get("role") == "user" and user_pos < len(meta_by_pos):
+            meta = dict(m.get("metadata") or {})
+            meta.setdefault("turn_index", meta_by_pos[user_pos]["turn_index"])
+            meta.setdefault("branch_id", meta_by_pos[user_pos]["branch_id"])
+            m["metadata"] = meta
+            user_pos += 1
+        out.append(m)
+    return out
 
 
 def _load_conversation_with_replay_fallback(
@@ -131,12 +166,10 @@ def _load_conversation_with_replay_fallback(
             if _snapshot_has_turn_metadata(snapshot):
                 return snapshot
             logger.info(
-                "Legacy snapshot lacks turn metadata — full replay",
+                "Legacy snapshot lacks turn metadata — backfill",
                 agent=agent_name,
             )
-            return replay_conversation(
-                normalize_resumable_events(events), include_metadata=True
-            )
+            return _backfill_turn_metadata(snapshot, events)
         # Compaction exists only in the snapshot, so replay just its normalized tail.
         tail = [
             evt
@@ -177,12 +210,10 @@ def _load_conversation_with_replay_fallback(
         if _snapshot_has_turn_metadata(snapshot):
             return snapshot
         logger.info(
-            "Legacy snapshot lacks turn metadata — full replay",
+            "Legacy snapshot lacks turn metadata — backfill",
             agent=agent_name,
         )
-        return replay_conversation(
-            normalize_resumable_events(events), include_metadata=True
-        )
+        return _backfill_turn_metadata(snapshot, events)
     replayed = replay_conversation(
         normalize_resumable_events(events), include_metadata=True
     )
