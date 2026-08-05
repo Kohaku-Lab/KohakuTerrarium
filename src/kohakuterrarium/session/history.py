@@ -1,7 +1,7 @@
 """Normalize, branch-select, and replay persisted session events."""
 
 import json
-from collections.abc import Hashable
+from collections.abc import Hashable, Mapping
 from typing import Any, Iterable
 
 from kohakuterrarium.core.job_label import make_job_label
@@ -459,6 +459,50 @@ def _clean_tool_name(evt: dict) -> str:
     return name if isinstance(name, str) else ""
 
 
+def _compact_path_from_event(evt: Mapping[str, Any]) -> set[tuple[int, int]] | None:
+    """Parse a compact_replace's ``compact_path`` (list of [turn, branch]).
+
+    Returns ``None`` when absent — the legacy v1_to_v2 migration product has no
+    path, so replay falls back to the global id-range behaviour for it.
+    """
+    raw = evt.get("compact_path")
+    if not isinstance(raw, (list, tuple)):
+        return None
+    out: set[tuple[int, int]] = set()
+    for item in raw:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            try:
+                out.add((int(item[0]), int(item[1])))
+            except (TypeError, ValueError):
+                continue
+    return out or None
+
+
+def _covered_by_replace(
+    eid: object,
+    turn_index: object,
+    branch_id: object,
+    rules: list[tuple[int, int, set[tuple[int, int]] | None, str]],
+) -> bool:
+    """Whether event ``eid`` is covered by a compaction replacement rule.
+
+    A rule is ``(replaced_from, replaced_to, compact_path_or_None, summary)``.
+    With a path, only events on that path are covered (branch-aware); without
+    a path (legacy migration data) the whole id range is covered.
+    """
+    if not isinstance(eid, int):
+        return False
+    for frm, to, path, _summary in rules:
+        if not (frm <= eid <= to):
+            continue
+        if path is None:
+            return True
+        if isinstance(turn_index, int) and isinstance(branch_id, int):
+            if (turn_index, branch_id) in path:
+                return True
+    return False
+
+
 def replay_conversation(
     events: Iterable[dict[str, Any]],
     *,
@@ -476,15 +520,31 @@ def replay_conversation(
     # Nested branch ancestry determines the live event set.
     live_ids = select_live_event_ids(events_list, branch_view=branch_view)
 
-    # Compaction summaries replace every covered source event.
-    replaced_ids: set[int] = set()
+    # Compaction summaries replace every covered source event. Each
+    # compact_replace may carry a ``compact_path`` so a replacement recorded
+    # on one branch never deletes the sibling branch's events.
+    replaced_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = []
     for evt in events_list:
         if evt.get("type") == "compact_replace":
             frm = evt.get("replaced_from_event_id")
             to = evt.get("replaced_to_event_id")
             if isinstance(frm, int) and isinstance(to, int):
-                for eid in range(frm, to + 1):
-                    replaced_ids.add(eid)
+                replaced_rules.append(
+                    (
+                        frm,
+                        to,
+                        _compact_path_from_event(evt),
+                        evt.get("summary_text", ""),
+                    )
+                )
+    # Summaries are emitted where the replaced content sat, not at the
+    # compact_replace event's own stream position (a compact runs after the
+    # live tail it preserves). pending summaries are ordered by replaced_from
+    # and flushed when the live stream reaches the first event past a range.
+    pending_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = sorted(
+        replaced_rules, key=lambda r: r[0]
+    )
+    pending_next = 0
 
     messages: list[dict[str, Any]] = []
     text_buf: list[str] = []
@@ -501,6 +561,16 @@ def replay_conversation(
             messages.append({"role": "assistant", "content": content})
         text_buf.clear()
 
+    def _flush_pending_summaries(eid: int) -> None:
+        nonlocal pending_next
+        while pending_next < len(pending_rules):
+            frm, _to, _path, summary = pending_rules[pending_next]
+            if frm > eid:
+                break
+            if summary:
+                messages.append({"role": "assistant", "content": summary})
+            pending_next += 1
+
     for evt in events_list:
         etype = evt.get("type", "")
         eid = evt.get("event_id")
@@ -509,7 +579,22 @@ def replay_conversation(
         if isinstance(eid, int) and eid not in live_ids:
             continue
 
-        if isinstance(eid, int) and eid in replaced_ids and etype != "compact_replace":
+        if isinstance(eid, int):
+            # A compact covers id range [replaced_from..replaced_to]; its
+            # summary is inserted where that content began, i.e. as soon as
+            # the stream reaches an event at/after replaced_from.
+            _flush_pending_summaries(eid)
+
+        if etype != "compact_replace" and _covered_by_replace(
+            eid,
+            evt.get("turn_index"),
+            evt.get("branch_id"),
+            replaced_rules,
+        ):
+            continue
+
+        if etype == "compact_replace":
+            # Handled by _flush_pending_summaries above; never emitted inline.
             continue
 
         if etype in ("text_chunk", "text"):
@@ -579,13 +664,6 @@ def replay_conversation(
             )
         elif etype == "system_prompt_set":
             messages.append({"role": "system", "content": evt.get("content", "")})
-        elif etype == "compact_replace":
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": evt.get("summary_text", ""),
-                }
-            )
 
     _flush_text()
     return messages

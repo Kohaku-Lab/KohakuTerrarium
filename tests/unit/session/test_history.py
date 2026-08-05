@@ -415,6 +415,7 @@ class TestReplayBranching:
                 "summary_text": "[S: branch2 compact]",
                 "replaced_from_event_id": 0,
                 "replaced_to_event_id": 7,
+                "compact_path": [[0, 1], [1, 2]],
                 "round": 1,
                 "event_id": 10,
             },
