@@ -1284,6 +1284,45 @@ class TestDetectSessionTypeDefensive:
         finally:
             store.close()
 
+
+    def test_backfill_maps_snapshot_users_to_last_events(self, tmp_path):
+        # Compaction keeps only the live zone verbatim, so snapshot user
+        # messages are the MOST RECENT turns, not the first ones. Backfill
+        # must map them to the last user_message events, or edit targeting
+        # would resolve the wrong turn.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            for i in range(1, 6):
+                store.append_event(
+                    "alice",
+                    "user_message",
+                    {"content": "turn-%d" % i},
+                    turn_index=i,
+                    branch_id=1,
+                )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "system", "content": "sys"},
+                    {
+                        "role": "assistant",
+                        "content": "[Previous context summary (compact round 2)]\n",
+                    },
+                    {"role": "user", "content": "turn-4"},
+                    {"role": "user", "content": "turn-5"},
+                ],
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            user_meta = [
+                m["metadata"]["turn_index"]
+                for m in out
+                if m.get("role") == "user"
+            ]
+            assert user_meta == [4, 5]
+        finally:
+            store.close()
+
     def test_backfill_preserves_metadata_less_user(self, tmp_path):
         # When the event log has fewer user turns than the snapshot, trailing
         # user messages simply stay without metadata instead of erroring.

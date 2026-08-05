@@ -114,6 +114,10 @@ def _backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[di
     pre-compact history and drop snapshot-only in-flight messages. Turn
     identity is recovered from the live ``user_message`` events so edit
     targeting stays deterministic.
+
+    Snapshot user messages hold the most recent turns verbatim (compaction
+    summarizes the prefix and keeps only the live zone), so they map to the
+    LAST ``user_message`` events, not the first ones.
     """
     live_ids = set(select_live_event_ids(events))
     meta_by_pos: list[dict] = []
@@ -126,16 +130,17 @@ def _backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[di
         bi = evt.get("branch_id")
         if isinstance(ti, int) and isinstance(bi, int):
             meta_by_pos.append({"turn_index": ti, "branch_id": bi})
+    user_messages = [m for m in snapshot if m.get("role") == "user"]
+    tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
     out: list[dict] = []
-    user_pos = 0
     for msg in snapshot:
         m = dict(msg)
-        if m.get("role") == "user" and user_pos < len(meta_by_pos):
+        if m.get("role") == "user" and tail_meta:
             meta = dict(m.get("metadata") or {})
-            meta.setdefault("turn_index", meta_by_pos[user_pos]["turn_index"])
-            meta.setdefault("branch_id", meta_by_pos[user_pos]["branch_id"])
+            meta.setdefault("turn_index", tail_meta[0]["turn_index"])
+            meta.setdefault("branch_id", tail_meta[0]["branch_id"])
             m["metadata"] = meta
-            user_pos += 1
+            tail_meta = tail_meta[1:]
         out.append(m)
     return out
 
