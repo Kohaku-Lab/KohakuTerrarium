@@ -316,6 +316,128 @@ class TestReplayBranching:
         out = replay_conversation(events, branch_view={0: 1})
         assert out == [{"role": "user", "content": "old"}]
 
+    def test_compact_replace_global_id_range_mis_covers_sibling_branch(self):
+        # Regression: a compact_replace recorded on ONE branch with a GLOBAL
+        # id range (as v1_to_v2 migration produces) must not delete the other
+        # branch's events. Only events on the compact path get replaced.
+        #
+        # Tree:
+        #   turn0-b1 (common)
+        #     |-- turn1-b1 -> turn2-b1   [branch 1]
+        #     `-- turn1-b2 -> turn2-b2   [branch 2, fork at turn1]
+        #
+        # branch 2 compacts events [0..7] (turn0 + turn1 on its path); the
+        # live tail turn2-b2 stays. branch 1 is untouched by branch 2's
+        # compact and must keep its full history.
+        events = [
+            {
+                "type": "user_message",
+                "content": "U0",
+                "event_id": 0,
+                "turn_index": 0,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R0",
+                "event_id": 1,
+                "turn_index": 0,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "content": "U1a",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1a",
+                "event_id": 3,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2a",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1), (1, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2a",
+                "event_id": 5,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1), (1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U1b",
+                "event_id": 6,
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1b",
+                "event_id": 7,
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2b",
+                "event_id": 8,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1), (1, 2)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2b",
+                "event_id": 9,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1), (1, 2)],
+            },
+            {
+                "type": "compact_replace",
+                "summary_text": "[S: branch2 compact]",
+                "replaced_from_event_id": 0,
+                "replaced_to_event_id": 7,
+                "round": 1,
+                "event_id": 10,
+            },
+        ]
+        # branch 1: only the common ancestor turn0-b1 is folded into the
+        # summary (it was compacted on branch 2's path); branch-1-specific
+        # turns stay intact.
+        out1 = replay_conversation(events, branch_view={0: 1, 1: 1, 2: 1})
+        assert out1 == [
+            {"role": "assistant", "content": "[S: branch2 compact]"},
+            {"role": "user", "content": "U1a"},
+            {"role": "assistant", "content": "R1a"},
+            {"role": "user", "content": "U2a"},
+            {"role": "assistant", "content": "R2a"},
+        ]
+        # branch 2: compacted zone [0..7] -> summary, live tail U2b/R2b kept.
+        out2 = replay_conversation(events, branch_view={0: 1, 1: 2, 2: 2})
+        assert out2 == [
+            {"role": "assistant", "content": "[S: branch2 compact]"},
+            {"role": "user", "content": "U2b"},
+            {"role": "assistant", "content": "R2b"},
+        ]
+
 
 # ── dedupe_adjacent_duplicate_events ──────────────────────────────
 
