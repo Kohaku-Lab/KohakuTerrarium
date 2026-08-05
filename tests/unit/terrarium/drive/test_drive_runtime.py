@@ -19,6 +19,7 @@ from kohakuterrarium.terrarium.drive.config import (
 )
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.memory import MemoryDriveRepository
+from kohakuterrarium.terrarium.drive.store import DriveRepositoryClosedError
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.registration import (
     DriveRegistrationDescriptor,
@@ -529,10 +530,6 @@ class TestLifecycle:
         # (Windows closes a session-backed repo's sqlite connection with its
         # store after a merge/split). Removal must treat that as quiescence
         # instead of propagating DriveRepositoryClosedError.
-        from kohakuterrarium.terrarium.drive.store import (
-            DriveRepositoryClosedError,
-        )
-
         clock = _Clock()
         rt = _runtime(clock=clock)
 
@@ -550,10 +547,6 @@ class TestLifecycle:
         assert affected == ()
 
     async def test_on_creature_stopped_tolerates_closed_repo(self):
-        from kohakuterrarium.terrarium.drive.store import (
-            DriveRepositoryClosedError,
-        )
-
         clock = _Clock()
         rt = _runtime(clock=clock)
 
