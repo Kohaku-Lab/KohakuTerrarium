@@ -488,6 +488,10 @@ def replay_conversation(
 
     messages: list[dict[str, Any]] = []
     text_buf: list[str] = []
+    # A turn/branch owns exactly one user_message. Graph merge and
+    # migration can copy the same event twice; duplicate user messages
+    # would break turn-targeted edit resolution and pollute the view.
+    seen_user_messages: set[tuple[int, int]] = set()
 
     def _flush_text() -> None:
         if not text_buf:
@@ -534,6 +538,12 @@ def replay_conversation(
         _flush_text()
 
         if etype == "user_message":
+            ti = evt.get("turn_index")
+            bi = evt.get("branch_id")
+            if isinstance(ti, int) and isinstance(bi, int):
+                if (ti, bi) in seen_user_messages:
+                    continue
+                seen_user_messages.add((ti, bi))
             message = {"role": "user", "content": evt.get("content", "")}
             if include_metadata:
                 message["metadata"] = {

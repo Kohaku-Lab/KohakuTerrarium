@@ -72,6 +72,52 @@ class TestReplayConversation:
         out = replay_conversation(events)
         assert out == [{"role": "user", "content": "hi"}]
 
+    def test_duplicate_user_message_same_turn_branch_deduped(self):
+        # Graph merge / migration can copy the same turn's user_message
+        # event twice; replay must emit it once so turn-targeted edit
+        # resolution stays unambiguous.
+        events = [
+            {
+                "type": "user_message",
+                "content": "q",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+            {
+                "type": "user_message",
+                "content": "q",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+        ]
+        out = replay_conversation(events, include_metadata=True)
+        assert len(out) == 1
+        assert out[0]["content"] == "q"
+        assert out[0]["metadata"]["turn_index"] == 1
+
+    def test_same_content_different_turns_kept(self):
+        # Same wording in different turns is legitimately distinct.
+        events = [
+            {
+                "type": "user_message",
+                "content": "再试",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+            {
+                "type": "user_message",
+                "content": "再试",
+                "event_id": 2,
+                "turn_index": 2,
+                "branch_id": 1,
+            },
+        ]
+        out = replay_conversation(events, include_metadata=True)
+        assert [m["metadata"]["turn_index"] for m in out] == [1, 2]
+
     def test_text_chunks_collapse(self):
         events = [
             {"type": "text_chunk", "content": "Hel", "event_id": 0},
