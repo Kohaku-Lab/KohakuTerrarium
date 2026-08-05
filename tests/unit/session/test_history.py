@@ -439,6 +439,118 @@ class TestReplayBranching:
             {"role": "assistant", "content": "R2b"},
         ]
 
+    def test_compact_complete_with_path_replayed_branch_aware(self):
+        # P2: v2 runtime compaction emits compact_complete with a replaced
+        # range + compact_path (unlike the legacy compact_replace). Replay
+        # must consume it branch-aware exactly like compact_replace.
+        events = [
+            {
+                "type": "user_message",
+                "content": "U1",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "content": "U2a",
+                "event_id": 3,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2a",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U3a",
+                "event_id": 5,
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R3a",
+                "event_id": 6,
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2b",
+                "event_id": 7,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2b",
+                "event_id": 8,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U3b",
+                "event_id": 9,
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 2)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R3b",
+                "event_id": 10,
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 2)],
+            },
+            {
+                "type": "compact_complete",
+                "summary": "[S: branch2]",
+                "event_id": 11,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 8,
+                "compact_path": [[1, 1], [2, 2]],
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 2)],
+            },
+        ]
+        out1 = replay_conversation(events, branch_view={1: 1, 2: 1, 3: 1})
+        assert out1 == [
+            {"role": "assistant", "content": "[S: branch2]"},
+            {"role": "user", "content": "U2a"},
+            {"role": "assistant", "content": "R2a"},
+            {"role": "user", "content": "U3a"},
+            {"role": "assistant", "content": "R3a"},
+        ]
+        out2 = replay_conversation(events, branch_view={1: 1, 2: 2, 3: 2})
+        assert out2 == [
+            {"role": "assistant", "content": "[S: branch2]"},
+            {"role": "user", "content": "U3b"},
+            {"role": "assistant", "content": "R3b"},
+        ]
+
 
 # ── dedupe_adjacent_duplicate_events ──────────────────────────────
 

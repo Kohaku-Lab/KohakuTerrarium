@@ -5,6 +5,10 @@ import types
 from typing import Any
 
 
+from kohakuterrarium.core.compact_branch import (
+    compute_replaced_range,
+    current_path,
+)
 from kohakuterrarium.core.compact import (
     COMPACT_PROMPT,
     DEFAULT_KEEP_RECENT,
@@ -1050,3 +1054,58 @@ class TestCompactElidesLiveZone:
             m.role == "tool" and ELISION_MARKER in (m.content or "")
             for m in conv.get_messages()
         )
+
+
+# ── P2: branch-aware compact metadata ────────────────────────────
+
+
+class TestBranchAwareCompactMetadata:
+    def test_current_path_expands_agent_branch_path(self):
+        from types import SimpleNamespace
+
+        mgr = CompactManager()
+        mgr._agent = SimpleNamespace(
+            _parent_branch_path=[(1, 1), (2, 2)],
+            _turn_index=3,
+            _branch_id=2,
+        )
+        assert current_path(mgr._agent) == {(1, 1), (2, 2), (3, 2)}
+
+    def test_current_path_empty_without_agent(self):
+        mgr = CompactManager()
+        assert current_path(mgr._agent) == set()
+
+    def test_compute_replaced_range_covers_path_turns_only(self):
+        events = [
+            # common ancestor turn1-b1 (one copy, shared by all branches)
+            {"event_id": 1, "type": "user_message", "turn_index": 1, "branch_id": 1},
+            {"event_id": 2, "type": "text_chunk", "turn_index": 1, "branch_id": 1},
+            # sibling branch (branch 1) specific turns - ignored
+            {"event_id": 3, "type": "user_message", "turn_index": 2, "branch_id": 1},
+            {"event_id": 4, "type": "text_chunk", "turn_index": 2, "branch_id": 1},
+            {"event_id": 5, "type": "user_message", "turn_index": 3, "branch_id": 1},
+            {"event_id": 6, "type": "text_chunk", "turn_index": 3, "branch_id": 1},
+            # branch 2 specific turns: turn2-b2, turn3-b2
+            {"event_id": 7, "type": "user_message", "turn_index": 2, "branch_id": 2},
+            {"event_id": 8, "type": "text_chunk", "turn_index": 2, "branch_id": 2},
+            {"event_id": 9, "type": "user_message", "turn_index": 3, "branch_id": 2},
+            {"event_id": 10, "type": "text_chunk", "turn_index": 3, "branch_id": 2},
+        ]
+        path = {(1, 1), (2, 2), (3, 2)}
+        # keep turn3 -> cover turn1-b1 (1,2) + turn2-b2 (7,8) = events 1..8
+        assert compute_replaced_range(events, 1, path) == (1, 8)
+        # keep turn2+turn3 -> cover turn1-b1 only = events 1..2
+        assert compute_replaced_range(events, 2, path) == (1, 2)
+
+    def test_compute_replaced_range_none_when_all_live(self):
+        events = [
+            {"event_id": 5, "type": "user_message", "turn_index": 1, "branch_id": 1},
+        ]
+        path = {(1, 1)}
+        assert compute_replaced_range(events, 1, path) is None
+
+    def test_compute_replaced_range_none_without_path(self):
+        events = [
+            {"event_id": 5, "type": "user_message", "turn_index": 1, "branch_id": 1},
+        ]
+        assert compute_replaced_range(events, 1, set()) is None

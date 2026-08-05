@@ -223,6 +223,25 @@ class SessionOutput(OutputModule):
                 self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (
                     last_event_id
                 )
+                # The snapshot is the "last active branch" view; tag it with
+                # the agent's branch so resume can reject it when the target
+                # branch differs and rebuild via replay instead.
+                agent = getattr(self, "_agent", None)
+                if agent is not None:
+                    branch = {
+                        "turn_index": getattr(agent, "_turn_index", None),
+                        "branch_id": getattr(agent, "_branch_id", None),
+                        "parent_branch_path": getattr(
+                            agent, "_parent_branch_path", None
+                        ),
+                    }
+                    if (
+                        isinstance(branch["turn_index"], int)
+                        and branch["turn_index"] > 0
+                    ):
+                        self._store.state[
+                            f"{self._event_key_prefix}:snapshot_branch"
+                        ] = branch
             except Exception as e:
                 logger.warning(
                     "Failed to save snapshot_event_id",
@@ -598,6 +617,12 @@ class SessionOutput(OutputModule):
                 "round": metadata.get("round", 0),
                 "summary": metadata.get("summary", ""),
                 "messages_compacted": metadata.get("messages_compacted", 0),
+                "replaced_from_event_id": metadata.get("replaced_from_event_id"),
+                "replaced_to_event_id": metadata.get("replaced_to_event_id"),
+                "compact_path": metadata.get("compact_path"),
+                "turn_index": metadata.get("turn_index"),
+                "branch_id": metadata.get("branch_id"),
+                "parent_branch_path": metadata.get("parent_branch_path"),
             },
         )
 

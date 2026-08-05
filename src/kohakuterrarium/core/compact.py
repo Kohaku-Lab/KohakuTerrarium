@@ -19,6 +19,10 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
+from kohakuterrarium.core.compact_branch import (
+    build_compact_metadata,
+    persist_compacted,
+)
 from kohakuterrarium.core.compact_splice import (
     count_keep_messages,
     prefix_fingerprint,
@@ -82,6 +86,7 @@ class CompactManager:
         self._last_skip_reason: str = ""
         # References set by agent
         self._controller: Any = None
+        self._agent: Any = None
         self._llm: Any = None
         self._session_store: Any = None
         self._output_router: Any = None
@@ -160,7 +165,7 @@ class CompactManager:
         # clean ``compact_skipped`` without flipping the compacting flag
         # or misleadingly showing a "compacting..." banner.
         messages = self._controller.conversation.get_messages()
-        keep_count = self._count_keep_messages(messages)
+        keep_count = count_keep_messages(messages, self.config.keep_recent_turns)
         boundary = len(messages) - keep_count
         if boundary <= 1:
             if self._output_router:
@@ -277,7 +282,7 @@ class CompactManager:
 
             # Find boundary: keep system prompt + last N turns
             # A "turn" is roughly: user message + assistant response + tool calls
-            keep_count = self._count_keep_messages(messages)
+            keep_count = count_keep_messages(messages, self.config.keep_recent_turns)
             boundary = len(messages) - keep_count
             # Tool-safe boundary BEFORE summarization — adjusting at
             # splice time would keep already-summarized content raw
@@ -287,7 +292,10 @@ class CompactManager:
 
             if boundary <= 1:
                 logger.debug("Not enough messages to compact")
-                self._emit_compact_skipped("nothing_to_compact", "Nothing to compact")
+                self._emit_compact_skipped(
+                    "nothing_to_compact",
+                    "Nothing to compact",
+                )
                 terminal_sent = True
                 return
 
@@ -296,7 +304,10 @@ class CompactManager:
             compact_messages = messages[1:boundary]
 
             if not compact_messages:
-                self._emit_compact_skipped("nothing_to_compact", "Nothing to compact")
+                self._emit_compact_skipped(
+                    "nothing_to_compact",
+                    "Nothing to compact",
+                )
                 terminal_sent = True
                 return
 
@@ -312,7 +323,8 @@ class CompactManager:
                 )
                 if not proceed:
                     self._emit_compact_skipped(
-                        "plugin_veto", "Compaction vetoed by plugin"
+                        "plugin_veto",
+                        "Compaction vetoed by plugin",
                     )
                     terminal_sent = True
                     logger.info(
@@ -328,7 +340,7 @@ class CompactManager:
                     return
 
             # Build the text to summarize
-            summary_input = self._format_messages_for_summary(compact_messages)
+            summary_input = format_messages_for_summary(compact_messages)
             expected_fingerprint = prefix_fingerprint(compact_messages)
 
             # Call LLM to summarize
@@ -412,14 +424,24 @@ class CompactManager:
 
             # Notify output for TUI/frontend display
             if self._output_router:
+                events = []
+                if self._session_store is not None:
+                    try:
+                        events = list(self._session_store.get_events(self._agent_name))
+                    except Exception:  # pragma: no cover - defensive
+                        events = []
+                metadata = build_compact_metadata(
+                    self._agent,
+                    events,
+                    keep_count,
+                    compact_round=self._compact_count,
+                    summary=summary,
+                    messages_compacted=boundary - 1,
+                )
                 self._output_router.notify_activity(
                     "compact_complete",
                     f"Context auto-compact done (round {self._compact_count})",
-                    metadata={
-                        "round": self._compact_count,
-                        "summary": summary,
-                        "messages_compacted": boundary - 1,
-                    },
+                    metadata=metadata,
                 )
             terminal_sent = True
 
@@ -427,53 +449,14 @@ class CompactManager:
             # (The compact_complete event is already recorded by SessionOutput
             # via notify_activity above — no need to append_event separately.)
             if self._session_store:
-                # Overwrite conversation snapshot with post-compact version
-                # so resume gets the compacted conversation, not the full one
-                # The splice runs mid-turn: keep the in-flight tail
-                # announcement so resume can reconstruct the active round.
-                try:
-                    self._session_store.save_conversation(
-                        self._agent_name,
-                        conversation.to_messages(
-                            preserve_pending_tail=True, include_metadata=True
-                        ),
-                    )
-                except Exception as e:
-                    logger.warning(
-                        "Failed to save compacted conversation",
-                        error=str(e),
-                        exc_info=True,
-                    )
-
-                # Persist compact_count for resume continuity and
-                # stamp the snapshot watermark to the latest event so
-                # resume can trust the compacted snapshot. Persisting
-                # ``last_compact_time`` lets resume restore the cooldown
-                # window — without it, every resume would permit an
-                # immediate re-compact regardless of how recent the last
-                # one was (audit finding 3j).
-                try:
-                    last_event_id = 0
-                    for evt in self._session_store.get_events(self._agent_name):
-                        eid = evt.get("event_id")
-                        if isinstance(eid, int) and eid > last_event_id:
-                            last_event_id = eid
-                    self._session_store.save_state(
-                        self._agent_name,
-                        compact_count=self._compact_count,
-                    )
-                    self._session_store.state[
-                        f"{self._agent_name}:snapshot_event_id"
-                    ] = last_event_id
-                    self._session_store.state[
-                        f"{self._agent_name}:last_compact_time"
-                    ] = self._last_compact_time
-                except Exception as e:
-                    logger.warning(
-                        "Failed to save compact_count state",
-                        error=str(e),
-                        exc_info=True,
-                    )
+                persist_compacted(
+                    self._session_store,
+                    self._agent_name,
+                    self._agent,
+                    conversation,
+                    self._compact_count,
+                    self._last_compact_time,
+                )
 
             logger.info(
                 "Auto-compact complete",
@@ -501,7 +484,8 @@ class CompactManager:
             if not terminal_sent:
                 try:
                     self._emit_compact_skipped(
-                        abort_reason, f"Compaction {abort_reason}"
+                        abort_reason,
+                        f"Compaction {abort_reason}",
                     )
                 except Exception:  # pragma: no cover - defensive
                     pass

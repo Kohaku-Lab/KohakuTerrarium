@@ -525,18 +525,19 @@ def replay_conversation(
     # on one branch never deletes the sibling branch's events.
     replaced_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = []
     for evt in events_list:
-        if evt.get("type") == "compact_replace":
-            frm = evt.get("replaced_from_event_id")
-            to = evt.get("replaced_to_event_id")
-            if isinstance(frm, int) and isinstance(to, int):
-                replaced_rules.append(
-                    (
-                        frm,
-                        to,
-                        _compact_path_from_event(evt),
-                        evt.get("summary_text", ""),
-                    )
+        if evt.get("type") not in ("compact_replace", "compact_complete"):
+            continue
+        frm = evt.get("replaced_from_event_id")
+        to = evt.get("replaced_to_event_id")
+        if isinstance(frm, int) and isinstance(to, int):
+            replaced_rules.append(
+                (
+                    frm,
+                    to,
+                    _compact_path_from_event(evt),
+                    evt.get("summary", "") or evt.get("summary_text", ""),
                 )
+            )
     # Summaries are emitted where the replaced content sat, not at the
     # compact_replace event's own stream position (a compact runs after the
     # live tail it preserves). pending summaries are ordered by replaced_from
