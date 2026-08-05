@@ -89,6 +89,22 @@ def _build_conversation(messages: list[dict]) -> Conversation:
     return conv
 
 
+def _snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
+    """Return whether the snapshot carries user turn metadata.
+
+    Edit/regenerate targeting resolves the edited turn through message
+    metadata; legacy snapshots saved without it force content matching,
+    which is ambiguous when a turn's wording repeats. Such snapshots are
+    rebuilt via replay so targeting stays deterministic.
+    """
+    return any(
+        m.get("role") == "user"
+        and isinstance(m.get("metadata"), dict)
+        and m["metadata"].get("turn_index") is not None
+        for m in snapshot
+    )
+
+
 def _load_conversation_with_replay_fallback(
     store: SessionStore, agent_name: str
 ) -> list[dict] | None:
@@ -112,7 +128,15 @@ def _load_conversation_with_replay_fallback(
         cached_up_to = None
     if snapshot is not None and isinstance(cached_up_to, int):
         if cached_up_to >= last_event_id:
-            return snapshot
+            if _snapshot_has_turn_metadata(snapshot):
+                return snapshot
+            logger.info(
+                "Legacy snapshot lacks turn metadata — full replay",
+                agent=agent_name,
+            )
+            return replay_conversation(
+                normalize_resumable_events(events), include_metadata=True
+            )
         # Compaction exists only in the snapshot, so replay just its normalized tail.
         tail = [
             evt
@@ -133,7 +157,9 @@ def _load_conversation_with_replay_fallback(
             for evt in tail
         )
         if not tail_has_forks:
-            appended = replay_conversation(normalize_resumable_events(tail))
+            appended = replay_conversation(
+                normalize_resumable_events(tail), include_metadata=True
+            )
             logger.info(
                 "Resume appended post-snapshot tail",
                 agent=agent_name,
@@ -148,8 +174,18 @@ def _load_conversation_with_replay_fallback(
             snapshot_event_id=cached_up_to,
         )
     if snapshot is not None and cached_up_to is None:
-        return snapshot
-    replayed = replay_conversation(normalize_resumable_events(events))
+        if _snapshot_has_turn_metadata(snapshot):
+            return snapshot
+        logger.info(
+            "Legacy snapshot lacks turn metadata — full replay",
+            agent=agent_name,
+        )
+        return replay_conversation(
+            normalize_resumable_events(events), include_metadata=True
+        )
+    replayed = replay_conversation(
+        normalize_resumable_events(events), include_metadata=True
+    )
     if replayed:
         logger.info(
             "Resume rebuilt conversation via replay",

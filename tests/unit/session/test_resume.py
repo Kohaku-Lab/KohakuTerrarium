@@ -409,15 +409,47 @@ class TestLoadConversationFallback:
         finally:
             store.close()
 
-    def test_snapshot_fresh_returns_snapshot(self, tmp_path):
+    def test_snapshot_fresh_with_metadata_returns_snapshot(self, tmp_path):
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             _, eid = store.append_event("alice", "x", {})
-            store.save_conversation("alice", [{"role": "user", "content": "snap"}])
+            store.save_conversation(
+                "alice",
+                [
+                    {
+                        "role": "user",
+                        "content": "snap",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    }
+                ],
+            )
             store.state["alice:snapshot_event_id"] = eid
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
             assert out[0]["content"] == "snap"
+            assert out[0]["metadata"]["turn_index"] == 1
+        finally:
+            store.close()
+
+    def test_snapshot_fresh_without_metadata_full_replays(self, tmp_path):
+        # Legacy snapshots carry no turn metadata, so edit targeting
+        # (turn_index lookup) cannot resolve. Rebuild via replay with
+        # metadata rather than trusting the opaque snapshot.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            _, eid = store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation("alice", [{"role": "user", "content": "snap"}])
+            store.state["alice:snapshot_event_id"] = eid
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["content"] == "x"
+            assert out[0]["metadata"]["turn_index"] == 1
         finally:
             store.close()
 
@@ -574,26 +606,61 @@ class TestLoadConversationFallback:
         assert "tool" not in roles
         assert roles == ["user", "assistant"]
 
-    def test_missing_snapshot_event_id_uses_snapshot(self, tmp_path):
+    def test_missing_snapshot_event_id_with_metadata_uses_snapshot(self, tmp_path):
         # When there's a snapshot but no recorded snapshot_event_id,
-        # the snapshot is trusted (avoid false-positive replays).
+        # a metadata-bearing snapshot is trusted (avoid false-positive
+        # replays); a legacy one without metadata is replayed.
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             store.append_event("alice", "user_message", {"content": "x"})
-            store.save_conversation("alice", [{"role": "user", "content": "snap"}])
+            store.save_conversation(
+                "alice",
+                [
+                    {
+                        "role": "user",
+                        "content": "snap",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    }
+                ],
+            )
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
             assert out[0]["content"] == "snap"
         finally:
             store.close()
 
+    def test_missing_snapshot_event_id_without_metadata_replays(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation("alice", [{"role": "user", "content": "snap"}])
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["content"] == "x"
+            assert out[0]["metadata"]["turn_index"] == 1
+        finally:
+            store.close()
+
     def test_state_get_raising_treated_as_no_cache(self, tmp_path, monkeypatch):
         # If reading the cached snapshot_event_id from store.state raises
         # (TypeError / KeyError), the helper treats it as "no cache" and
-        # falls back to trusting the snapshot rather than crashing.
+        # falls back to replaying the events with metadata rather than
+        # trusting a metadata-less snapshot or crashing.
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
-            store.append_event("alice", "user_message", {"content": "x"})
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
             store.save_conversation("alice", [{"role": "user", "content": "snap"}])
             store.flush()
 
@@ -602,8 +669,10 @@ class TestLoadConversationFallback:
 
             monkeypatch.setattr(store.state, "get", _boom_get)
             out = _load_conversation_with_replay_fallback(store, "alice")
-            # cached_up_to is None → snapshot is trusted.
-            assert out[0]["content"] == "snap"
+            # cached_up_to is None → legacy snapshot without metadata is
+            # replayed (events carry authoritative content + metadata).
+            assert out[0]["content"] == "x"
+            assert out[0]["metadata"]["turn_index"] == 1
         finally:
             store.close()
 
