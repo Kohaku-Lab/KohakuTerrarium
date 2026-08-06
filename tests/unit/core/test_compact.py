@@ -1142,6 +1142,42 @@ class TestCurrentPathResilience:
         assert current_path(agent) == {(1, 2), (2, 1)}
 
 
+class TestTagSnapshotBranch:
+    def _store_and_agent(self, turn=3, branch=2, path=None):
+        from types import SimpleNamespace
+
+        store = _Store()
+        agent = SimpleNamespace(
+            _turn_index=turn,
+            _branch_id=branch,
+            _parent_branch_path=path or [(1, 1), (2, 2)],
+        )
+        return store, agent
+
+    def test_persists_tag_when_branch_valid(self):
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        store, agent = self._store_and_agent()
+        tag_snapshot_branch(store, agent, "alice")
+        assert store.state["alice:snapshot_branch"]["branch_id"] == 2
+
+    def test_skips_tag_when_branch_id_invalid(self):
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        for bad_branch in (None, 0, -1, "2"):
+            store, agent = self._store_and_agent(branch=bad_branch)
+            tag_snapshot_branch(store, agent, "alice")
+            assert "alice:snapshot_branch" not in store.state
+
+    def test_skips_tag_when_turn_index_invalid(self):
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        for bad_turn in (None, 0, -1):
+            store, agent = self._store_and_agent(turn=bad_turn)
+            tag_snapshot_branch(store, agent, "alice")
+            assert "alice:snapshot_branch" not in store.state
+
+
 class TestCompactCompleteReplacedRange:
     async def test_replaced_range_uses_turn_window_not_message_count(self):
         """compact_complete carries a replaced range replay can use.

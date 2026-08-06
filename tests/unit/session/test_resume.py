@@ -796,7 +796,12 @@ class TestBackfillDedupeAndPathResilience:
         ]
         out = backfill_turn_metadata(snapshot, events)
         assert out[0]["metadata"]["turn_index"] == 1
+        assert out[0]["metadata"]["branch_id"] == 1
+        assert out[0]["metadata"]["event_id"] == 1
         assert out[1]["metadata"]["turn_index"] == 2
+        assert out[1]["metadata"]["branch_id"] == 1
+        # Last live user_message wins after dedupe (event 3 dropped).
+        assert out[1]["metadata"]["event_id"] == 2
 
     def test_snapshot_mismatch_tolerates_malformed_path(self, tmp_path):
         store = SessionStore(str(tmp_path / "x.kohakutr"))

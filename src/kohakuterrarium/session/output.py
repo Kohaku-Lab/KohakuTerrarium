@@ -240,6 +240,8 @@ class SessionOutput(OutputModule):
                     if (
                         isinstance(branch["turn_index"], int)
                         and branch["turn_index"] > 0
+                        and isinstance(branch["branch_id"], int)
+                        and branch["branch_id"] > 0
                     ):
                         self._store.state[
                             f"{self._event_key_prefix}:snapshot_branch"

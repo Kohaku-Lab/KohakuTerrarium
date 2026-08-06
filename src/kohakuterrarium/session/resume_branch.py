@@ -60,7 +60,16 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
         # duplicate user events that would otherwise mis-align the tail map.
         if isinstance(ti, int) and isinstance(bi, int) and (ti, bi) not in seen:
             seen.add((ti, bi))
-            meta_by_pos.append({"turn_index": ti, "branch_id": bi})
+            meta_by_pos.append(
+                {
+                    # Same shape as replay(include_metadata=True) so legacy
+                    # snapshots and replay-built views carry identical user
+                    # turn identity (event_id included).
+                    "event_id": evt.get("event_id"),
+                    "turn_index": ti,
+                    "branch_id": bi,
+                }
+            )
     user_messages = [m for m in snapshot if m.get("role") == "user"]
     tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
     out: list[dict] = []
@@ -72,6 +81,7 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
             # later messages keep their correct turn; an existing metadata is
             # preserved (never overwritten).
             if meta.get("turn_index") is None:
+                meta.setdefault("event_id", tail_meta[0]["event_id"])
                 meta.setdefault("turn_index", tail_meta[0]["turn_index"])
                 meta.setdefault("branch_id", tail_meta[0]["branch_id"])
                 m["metadata"] = meta

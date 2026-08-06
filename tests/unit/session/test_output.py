@@ -398,6 +398,23 @@ class TestProcessingLifecycle:
         finally:
             store.close()
 
+    async def test_end_tags_snapshot_branch_only_when_valid(self, tmp_path):
+        # A tag with an invalid branch_id would be ignored by
+        # snapshot_mismatches_branch (treated as "no tag" -> trust), silently
+        # disabling mismatch detection — so it must not be persisted.
+        for i, (turn, branch) in enumerate(((2, 1), (2, None), (0, 1), (None, None))):
+            agent = _FakeAgent(turn=turn, branch=branch)
+            store, out = _make(tmp_path / f"iter{i}", agent=agent)
+            try:
+                await out.on_processing_end()
+                tag = store.state.get("alice:snapshot_branch")
+                if turn == 2 and branch == 1:
+                    assert tag is not None and tag["branch_id"] == 1
+                else:
+                    assert tag is None
+            finally:
+                store.close()
+
     async def test_end_does_not_overwrite_cumulative_token_state(self, tmp_path):
         # UXI-03: _handle_token_usage owns the cumulative token_usage slot.
         # on_processing_end must NOT clobber those running totals with the

@@ -123,7 +123,7 @@ def tag_snapshot_branch(store: Any, agent: Any, agent_name: str) -> None:
         return
     ti = getattr(agent, "_turn_index", None)
     bi = getattr(agent, "_branch_id", None)
-    if not isinstance(ti, int) or ti <= 0:
+    if not isinstance(ti, int) or ti <= 0 or not isinstance(bi, int) or bi <= 0:
         return
     try:
         store.state[f"{agent_name}:snapshot_branch"] = {
