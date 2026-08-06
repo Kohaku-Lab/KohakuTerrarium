@@ -418,6 +418,27 @@ class TestProcessingLifecycle:
             finally:
                 store.close()
 
+    async def test_end_clears_stale_branch_tag_when_agent_branch_invalid(
+        self, tmp_path
+    ):
+        # The snapshot is rewritten every on_processing_end, so a stale tag
+        # from a prior run would point at a branch that no longer matches.
+        # When the current agent's branch state is invalid, the tag must be
+        # cleared — not left behind.
+        store, out = _make(tmp_path, agent=_FakeAgent(turn=2, branch=1))
+        try:
+            await out.on_processing_end()
+            assert store.state.get("alice:snapshot_branch") is not None
+        finally:
+            store.close()
+        # Same store, but now the agent has no valid branch state.
+        store2, out2 = _make(tmp_path, agent=_FakeAgent(turn=0, branch=1))
+        try:
+            await out2.on_processing_end()
+            assert store2.state.get("alice:snapshot_branch") is None
+        finally:
+            store2.close()
+
     async def test_end_does_not_overwrite_cumulative_token_state(self, tmp_path):
         # UXI-03: _handle_token_usage owns the cumulative token_usage slot.
         # on_processing_end must NOT clobber those running totals with the

@@ -132,7 +132,7 @@ def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
         return False  # legacy snapshot without a tag -> trust it
     ti = branch.get("turn_index")
     bi = branch.get("branch_id")
-    if not isinstance(ti, int) or not isinstance(bi, int) or ti <= 0:
+    if not isinstance(ti, int) or not isinstance(bi, int) or ti <= 0 or bi <= 0:
         return False
     a_ti = getattr(agent, "_turn_index", None)
     a_bi = getattr(agent, "_branch_id", None)

@@ -244,6 +244,14 @@ class SessionOutput(OutputModule):
                         self._store.state[
                             f"{self._event_key_prefix}:snapshot_branch"
                         ] = branch
+                    else:
+                        # The snapshot was rewritten above but the agent's
+                        # branch state is missing/invalid; clear any stale tag
+                        # from a prior run so resume does not trust a branch
+                        # that no longer matches this snapshot.
+                        self._store.state.pop(
+                            f"{self._event_key_prefix}:snapshot_branch", None
+                        )
             except Exception as e:
                 logger.warning(
                     "Failed to save snapshot_event_id",

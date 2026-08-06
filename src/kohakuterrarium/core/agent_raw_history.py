@@ -4,7 +4,10 @@ from typing import Any, Protocol
 
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm.message import dicts_to_messages
-from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.history import (
+    _compact_path_from_event,
+    replay_conversation,
+)
 from kohakuterrarium.session.raw_history import (
     UserMessageSelector,
     select_raw_history_prefix,
@@ -62,7 +65,16 @@ def reload_raw_prefix_for_target(
     # A compact_replace that fired AFTER the target in the event stream still
     # covers it by id range. Keep its summary as the branch's compact baseline
     # but cap the range just below the target so the edited turn materializes.
+    # Only compacts whose path intersects the target branch's lineage are kept
+    # (a sibling-branch compact covering the same id range must not restore a
+    # foreign baseline; legacy pathless compacts are kept for the v1 migration
+    # fallback).
     target_id = prefix.target.get("event_id")
+    target_path: set[tuple[int, int]] = {
+        (turn, branch)
+        for turn, branch in prefix.branch_view.items()
+        if turn < prefix.target.get("turn_index")
+    }
     covering_compacts: list[dict[str, Any]] = []
     if isinstance(target_id, int):
         for evt in all_events:
@@ -71,6 +83,11 @@ def reload_raw_prefix_for_target(
             frm = evt.get("replaced_from_event_id")
             to = evt.get("replaced_to_event_id")
             if not isinstance(frm, int) or not isinstance(to, int):
+                continue
+            evt_path = _compact_path_from_event(evt)
+            # Pathless legacy rules apply to the whole range; path-carrying
+            # rules only when they intersect the target branch's lineage.
+            if evt_path is not None and not evt_path & target_path:
                 continue
             # Keep the branch's compaction baseline whenever it covers
             # anything BEFORE the target; cap the range below the target so

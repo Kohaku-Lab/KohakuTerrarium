@@ -237,6 +237,61 @@ def test_reload_compact_starting_at_target_not_kept():
     ]
 
 
+def test_reload_ignores_sibling_branch_compact():
+    # A compact recorded on a SIBLING branch whose compact_path shares NO turn
+    # with the target lineage (here branch-1 turns 2..3, while the target is
+    # branch-2 turn 2 under turn1-branch1) must not be kept as the target
+    # branch's baseline — replay would otherwise see a foreign rule and (for
+    # legacy pathless data) could resurrect or mis-summarize the prefix.
+    # A compact that DOES cover a shared ancestor (e.g. path [[1,1],[2,1]])
+    # is still kept — that is the existing baseline-preservation behavior.
+    events = [
+        _event(1, "user_message", turn=1, content="U1"),
+        _event(2, "text_chunk", turn=1, content="R1"),
+        # branch-2 target turn
+        {
+            "event_id": 3,
+            "type": "user_message",
+            "content": "U2",
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [(1, 1)],
+        },
+        {
+            "event_id": 4,
+            "type": "text_chunk",
+            "content": "R2",
+            "turn_index": 2,
+            "branch_id": 2,
+            "parent_branch_path": [(1, 1)],
+        },
+        # Sibling branch-1 compact whose path has NO turn in common with the
+        # target lineage (branch-1 turns 2..3 only; turn1-branch1 is absent).
+        {
+            "event_id": 5,
+            "type": "compact_complete",
+            "summary": "[SIB]",
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 4,
+            "compact_path": [[2, 1], [3, 1]],
+            "turn_index": 3,
+            "branch_id": 1,
+        },
+    ]
+    agent = _agent(events)
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=3, turn_index=2, branch_id=2),
+    )
+    messages = agent.controller.conversation.get_messages()
+    assert [(m.role, m.content) for m in messages] == [
+        ("system", "current runtime prompt"),
+        ("user", "U1"),
+        ("assistant", "R1"),
+        ("user", "U2"),
+    ]
+
+
 def _compact_complete_event(event_id, replaced_from, replaced_to, summary="[S]"):
     # Runtime (v2) compaction persists compact_complete, not compact_replace.
     return {
