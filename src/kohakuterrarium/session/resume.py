@@ -19,10 +19,10 @@ from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.history import (
-    _index_parent_paths,
-    _resolve_selected_branches,
+    index_parent_paths,
     normalize_resumable_events,
     replay_conversation,
+    resolve_selected_branches,
 )
 from kohakuterrarium.session.migrations import (
     ensure_latest_version,
@@ -217,8 +217,8 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
         return
     # Use replay's path-aware selector so restored branch ancestry actually existed.
     events_list = list(events)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, None)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, None)
     if not selected:
         return
     max_turn = max(selected.keys())

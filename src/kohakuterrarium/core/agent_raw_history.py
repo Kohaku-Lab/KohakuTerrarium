@@ -5,7 +5,7 @@ from typing import Any, Protocol
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm.message import dicts_to_messages
 from kohakuterrarium.session.history import (
-    _compact_path_from_event,
+    compact_path_from_event,
     replay_conversation,
 )
 from kohakuterrarium.session.raw_history import (
@@ -84,7 +84,7 @@ def reload_raw_prefix_for_target(
             to = evt.get("replaced_to_event_id")
             if not isinstance(frm, int) or not isinstance(to, int):
                 continue
-            evt_path = _compact_path_from_event(evt)
+            evt_path = compact_path_from_event(evt)
             # Pathless legacy rules apply to the whole range; path-carrying
             # rules only when they intersect the target branch's lineage.
             if evt_path is not None and not evt_path & target_path:

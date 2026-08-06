@@ -30,13 +30,15 @@ def _coerce_path(raw: Any) -> tuple[tuple[int, int], ...]:
     return tuple(out)
 
 
-def _index_parent_paths(
+def index_parent_paths(
     events_list: list[dict[str, Any]],
 ) -> dict[int, tuple[tuple[int, int], ...]]:
     """Map each event_id → its parent_branch_path.
 
     Explicit paths take precedence. Legacy events inherit the latest branch seen
     for each earlier turn at that point in event order.
+    Public: shared by replay selection and ``session.resume`` branch-state
+    restore.
     """
     paths: dict[int, tuple[tuple[int, int], ...]] = {}
     latest_by_turn: dict[int, int] = {}
@@ -77,7 +79,7 @@ def _path_matches(
     return True
 
 
-def _resolve_selected_branches(
+def resolve_selected_branches(
     events_list: list[dict[str, Any]],
     parent_paths: dict[int, tuple[tuple[int, int], ...]],
     branch_view: dict[int, int] | None,
@@ -87,6 +89,8 @@ def _resolve_selected_branches(
     Turns resolve in ascending order. Valid overrides win; otherwise the highest
     compatible branch is selected. Turns with no compatible branch are omitted
     from the live subtree.
+    Public: shared by replay selection and ``session.resume`` branch-state
+    restore.
     """
     branches_by_turn: dict[int, list[tuple[int, int]]] = {}
     for evt in events_list:
@@ -161,7 +165,7 @@ def resolve_branch_view_strict(
     """Validate a branch view and return its authoritative branch projection."""
     events_list = list(events)
     requested = _coerce_branch_view(branch_view)
-    parent_paths = _index_parent_paths(events_list)
+    parent_paths = index_parent_paths(events_list)
 
     pairs: set[tuple[int, int]] = set()
     pair_paths: dict[tuple[int, int], tuple[tuple[int, int], ...]] = {}
@@ -241,7 +245,7 @@ def project_branch_metadata(
     """Project branch choices, ancestry, and the selected coherent path."""
     events_list = list(events)
     selected = resolve_branch_view_strict(events_list, branch_view)
-    parent_paths = _index_parent_paths(events_list)
+    parent_paths = index_parent_paths(events_list)
     branches: dict[int, dict[int, set[tuple[tuple[int, int], ...]]]] = {}
 
     for evt in events_list:
@@ -295,8 +299,8 @@ def collect_branch_metadata(
     navigator counts reflect the visible subtree.
     """
     events_list = list(events)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, branch_view)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
 
     out: dict[int, dict[str, Any]] = {}
     for evt in events_list:
@@ -338,8 +342,8 @@ def collect_user_groups(
     """
     events_list = list(events)
     meta = collect_branch_metadata(events_list, branch_view=branch_view)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, branch_view)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
     contents: dict[int, dict[int, str]] = {}
     for evt in events_list:
         if evt.get("type") not in ("user_message", "user_input"):
@@ -380,8 +384,8 @@ def select_live_event_ids(
     override, the latest compatible branch is selected at every turn.
     """
     events_list = list(events)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, branch_view)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
 
     live: set[int] = set()
     for evt in events_list:
@@ -459,11 +463,13 @@ def _clean_tool_name(evt: dict) -> str:
     return name if isinstance(name, str) else ""
 
 
-def _compact_path_from_event(evt: Mapping[str, Any]) -> set[tuple[int, int]] | None:
-    """Parse a compact_replace's ``compact_path`` (list of [turn, branch]).
+def compact_path_from_event(evt: Mapping[str, Any]) -> set[tuple[int, int]] | None:
+    """Parse a compact event's ``compact_path`` (list of [turn, branch]).
 
-    Returns ``None`` when absent — the legacy v1_to_v2 migration product has no
-    path, so replay falls back to the global id-range behaviour for it.
+    Returns ``None`` when absent — the legacy v1_to_v2 migration product has
+    no path, so replay falls back to the global id-range behaviour for it.
+    Public: shared by ``session.history`` (replay) and
+    ``core.agent_raw_history`` (edit reload baseline selection).
     """
     raw = evt.get("compact_path")
     if not isinstance(raw, (list, tuple)):
@@ -559,7 +565,7 @@ def replay_conversation(
                 (
                     frm,
                     to,
-                    _compact_path_from_event(evt),
+                    compact_path_from_event(evt),
                     evt.get("summary", "") or evt.get("summary_text", ""),
                 )
             )

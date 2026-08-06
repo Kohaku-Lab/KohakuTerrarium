@@ -5,9 +5,9 @@ import pytest
 from kohakuterrarium.session.history import (
     InvalidBranchViewError,
     _coerce_path,
-    _index_parent_paths,
+    index_parent_paths,
     _path_matches,
-    _resolve_selected_branches,
+    resolve_selected_branches,
     collect_branch_metadata,
     collect_user_groups,
     dedupe_adjacent_duplicate_events,
@@ -1455,7 +1455,7 @@ class TestSelectLiveEventIds:
         assert live == {0}
 
 
-# ── _index_parent_paths ───────────────────────────────────────────
+# ── index_parent_paths ───────────────────────────────────────────
 
 
 class TestIndexParentPaths:
@@ -1468,7 +1468,7 @@ class TestIndexParentPaths:
                 "parent_branch_path": [[0, 99]],
             }
         ]
-        paths = _index_parent_paths(events)
+        paths = index_parent_paths(events)
         assert paths[0] == ((0, 99),)
 
     def test_implicit_path_from_prior_turns(self):
@@ -1476,14 +1476,14 @@ class TestIndexParentPaths:
             {"event_id": 0, "turn_index": 0, "branch_id": 1},
             {"event_id": 1, "turn_index": 1, "branch_id": 1},
         ]
-        paths = _index_parent_paths(events)
+        paths = index_parent_paths(events)
         # Event 0 (turn 0) has no priors.
         assert paths[0] == ()
         # Event 1 (turn 1) has turn 0 latest branch in its path.
         assert paths[1] == ((0, 1),)
 
 
-# ── _resolve_selected_branches ────────────────────────────────────
+# ── resolve_selected_branches ────────────────────────────────────
 
 
 class TestResolveSelectedBranches:
@@ -1493,7 +1493,7 @@ class TestResolveSelectedBranches:
             {"event_id": 1, "turn_index": 0, "branch_id": 3},
             {"event_id": 2, "turn_index": 0, "branch_id": 2},
         ]
-        sel = _resolve_selected_branches(events, _index_parent_paths(events), None)
+        sel = resolve_selected_branches(events, index_parent_paths(events), None)
         assert sel == {0: 3}
 
     def test_branch_view_respected(self):
@@ -1501,7 +1501,7 @@ class TestResolveSelectedBranches:
             {"event_id": 0, "turn_index": 0, "branch_id": 1},
             {"event_id": 1, "turn_index": 0, "branch_id": 2},
         ]
-        sel = _resolve_selected_branches(events, _index_parent_paths(events), {0: 1})
+        sel = resolve_selected_branches(events, index_parent_paths(events), {0: 1})
         assert sel == {0: 1}
 
     def test_branch_view_unknown_branch_falls_back(self):
@@ -1510,5 +1510,5 @@ class TestResolveSelectedBranches:
             {"event_id": 1, "turn_index": 0, "branch_id": 2},
         ]
         # Branch 99 doesn't exist — falls back to max.
-        sel = _resolve_selected_branches(events, _index_parent_paths(events), {0: 99})
+        sel = resolve_selected_branches(events, index_parent_paths(events), {0: 99})
         assert sel == {0: 2}
