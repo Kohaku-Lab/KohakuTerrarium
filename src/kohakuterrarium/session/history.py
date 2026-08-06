@@ -503,6 +503,31 @@ def _covered_by_replace(
     return False
 
 
+def _rule_supersedes(
+    newer: tuple[int, int, set[tuple[int, int]] | None, str],
+    older: tuple[int, int, set[tuple[int, int]] | None, str],
+) -> bool:
+    """Whether a later compaction rule fully replaces an earlier one.
+
+    Same-lineage compactions nest: the later rule's range covers the earlier
+    range and its ``compact_path`` is a superset, so the earlier summary is
+    subsumed by the newest one and must not be injected again (replay would
+    otherwise stack summaries that never coexist in the saved snapshot). A
+    later path-carrying rule also supersedes an earlier legacy pathless rule
+    with an enclosing range — the legacy global rule is a migration fallback,
+    and the live branch's own summary is authoritative for it.
+    """
+    f1, t1, p1, _ = older
+    f2, t2, p2, _ = newer
+    if not (f2 <= f1 and t2 >= t1):
+        return False
+    if p1 is None:
+        return True
+    if p2 is None:
+        return False
+    return p1.issubset(p2)
+
+
 def replay_conversation(
     events: Iterable[dict[str, Any]],
     *,
@@ -538,6 +563,17 @@ def replay_conversation(
                     evt.get("summary", "") or evt.get("summary_text", ""),
                 )
             )
+    # Multiple compaction rounds on the same lineage nest (each later range
+    # covers the earlier one and its path grows), so keep only the newest rule
+    # per lineage — injecting every round's summary would stack summaries that
+    # never coexist in the saved snapshot.
+    kept_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = []
+    for rule in replaced_rules:
+        kept_rules = [
+            older for older in kept_rules if not _rule_supersedes(rule, older)
+        ]
+        kept_rules.append(rule)
+    replaced_rules = kept_rules
     # Summaries are emitted where the replaced content sat, not at the
     # compact_replace event's own stream position (a compact runs after the
     # live tail it preserves). pending summaries are ordered by replaced_from

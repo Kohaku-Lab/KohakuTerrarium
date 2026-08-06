@@ -26,8 +26,11 @@ class _FakeSession:
 
 
 class _FakeConversation:
-    def to_messages(self):
-        return [{"role": "user", "content": "from controller"}]
+    def to_messages(self, *, include_metadata=False):
+        message = {"role": "user", "content": "from controller"}
+        if include_metadata:
+            message["metadata"] = {"turn_index": 2, "branch_id": 1}
+        return [message]
 
 
 class _FakeController:
@@ -381,9 +384,17 @@ class TestProcessingLifecycle:
         store, out = _make(tmp_path, agent=agent)
         try:
             await out.on_processing_end()
-            # Snapshot from controller conversation.
+            # Snapshot from controller conversation, with turn metadata
+            # preserved (snapshots are the allowed metadata carrier, so
+            # resume does not have to backfill an "always legacy" snapshot).
             snap = store.load_conversation("alice")
-            assert snap == [{"role": "user", "content": "from controller"}]
+            assert snap == [
+                {
+                    "role": "user",
+                    "content": "from controller",
+                    "metadata": {"turn_index": 2, "branch_id": 1},
+                }
+            ]
         finally:
             store.close()
 

@@ -613,6 +613,159 @@ class TestReplayBranching:
         ]
 
 
+class TestCompactRuleSupersession:
+    def _events(self):
+        events = []
+        eid = 0
+        for turn in range(1, 7):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 1,
+                    "parent_branch_path": [(t, 1) for t in range(1, turn)],
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 1,
+                    "parent_branch_path": [(t, 1) for t in range(1, turn)],
+                }
+            )
+        return events
+
+    def test_later_round_supersedes_earlier_on_same_lineage(self):
+        # Two compaction rounds on the same branch: round2's range covers
+        # round1's and its path grows, so only the newest summary is
+        # injected — never stacked summaries.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S1 round1]",
+                "event_id": 13,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1]],
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S2 round2]",
+                "event_id": 14,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 8,
+                "compact_path": [[1, 1], [2, 1], [3, 1], [4, 1]],
+                "turn_index": 4,
+                "branch_id": 1,
+            }
+        )
+        out = replay_conversation(events, branch_view={t: 1 for t in range(1, 7)})
+        assert out == [
+            {"role": "assistant", "content": "[S2 round2]"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+        ]
+
+    def test_identical_duplicate_rules_collapse(self):
+        # The same round recorded twice (non-adjacent, so adjacent-dedup
+        # cannot help) must not inject its summary twice.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S]",
+                "event_id": 13,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1]],
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_start",
+                "round": 1,
+                "event_id": 14,
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S]",
+                "event_id": 15,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1]],
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        out = replay_conversation(events, branch_view={t: 1 for t in range(1, 7)})
+        assert out == [
+            {"role": "assistant", "content": "[S]"},
+            {"role": "user", "content": "U3"},
+            {"role": "assistant", "content": "R3"},
+            {"role": "user", "content": "U4"},
+            {"role": "assistant", "content": "R4"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+        ]
+
+    def test_later_path_rule_supersedes_legacy_pathless_rule(self):
+        # Migration data carries a pathless compact_replace; a later live
+        # compact_complete on the same lineage with an enclosing range is
+        # authoritative.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_replace",
+                "summary_text": "[S legacy]",
+                "event_id": 13,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S live]",
+                "event_id": 14,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 8,
+                "compact_path": [[1, 1], [2, 1], [3, 1], [4, 1]],
+                "turn_index": 4,
+                "branch_id": 1,
+            }
+        )
+        out = replay_conversation(events, branch_view={t: 1 for t in range(1, 7)})
+        assert out == [
+            {"role": "assistant", "content": "[S live]"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+        ]
+
+
 # ── dedupe_adjacent_duplicate_events ──────────────────────────────
 
 
