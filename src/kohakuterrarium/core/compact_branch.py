@@ -124,6 +124,14 @@ def tag_snapshot_branch(store: Any, agent: Any, agent_name: str) -> None:
     ti = getattr(agent, "_turn_index", None)
     bi = getattr(agent, "_branch_id", None)
     if not isinstance(ti, int) or ti <= 0 or not isinstance(bi, int) or bi <= 0:
+        # persist_compacted rewrote the snapshot above; the agent's branch
+        # state is missing/invalid, so clear any stale tag from a prior run
+        # rather than leave it pointing at a branch that no longer matches
+        # this snapshot (mirrors session/output.py:on_processing_end).
+        try:
+            store.state.pop(f"{agent_name}:snapshot_branch", None)
+        except Exception:  # pragma: no cover - defensive
+            pass
         return
     try:
         store.state[f"{agent_name}:snapshot_branch"] = {

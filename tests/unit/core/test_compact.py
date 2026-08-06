@@ -1177,6 +1177,21 @@ class TestTagSnapshotBranch:
             tag_snapshot_branch(store, agent, "alice")
             assert "alice:snapshot_branch" not in store.state
 
+    def test_clears_stale_tag_when_branch_invalid(self):
+        # persist_compacted rewrites the snapshot regardless; a stale tag from
+        # a prior run must be cleared when the current branch state is
+        # invalid, otherwise resume trusts a branch that no longer matches.
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        for bad in (None, 0, -1, "2"):
+            store, agent = self._store_and_agent(branch=bad)
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 5,
+                "branch_id": 5,
+            }
+            tag_snapshot_branch(store, agent, "alice")
+            assert "alice:snapshot_branch" not in store.state
+
 
 class TestCompactCompleteReplacedRange:
     async def test_replaced_range_uses_turn_window_not_message_count(self):

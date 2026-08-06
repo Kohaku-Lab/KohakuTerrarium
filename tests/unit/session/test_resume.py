@@ -764,6 +764,45 @@ class TestSnapshotMismatchesBranch:
 
 
 class TestBackfillDedupeAndPathResilience:
+    def test_snapshot_has_turn_metadata_requires_positive_int(self):
+        from kohakuterrarium.session.resume_branch import snapshot_has_turn_metadata
+
+        valid = [
+            {
+                "role": "user",
+                "content": "U1",
+                "metadata": {"turn_index": 1, "branch_id": 1},
+            }
+        ]
+        assert snapshot_has_turn_metadata(valid) is True
+
+        # Missing / non-int / non-positive turn_index or branch_id must NOT
+        # be trusted — edit targeting compares against an int and would fail
+        # to locate the turn, so these must trigger backfill.
+        bad_turn = [
+            {
+                "role": "user",
+                "content": "U1",
+                "metadata": {"turn_index": "1", "branch_id": 1},
+            }
+        ]
+        assert snapshot_has_turn_metadata(bad_turn) is False
+        for meta in (
+            {"branch_id": 1},
+            {"turn_index": 0, "branch_id": 1},
+            {"turn_index": -1, "branch_id": 1},
+            {"turn_index": 1, "branch_id": "1"},
+            {"turn_index": 1, "branch_id": 0},
+            {"turn_index": 1},
+            "not-a-dict",
+        ):
+            assert (
+                snapshot_has_turn_metadata(
+                    [{"role": "user", "content": "U1", "metadata": meta}]
+                )
+                is False
+            ), f"expected False for metadata={meta!r}"
+
     def test_backfill_dedupes_duplicate_user_events(self):
         from kohakuterrarium.session.resume_branch import backfill_turn_metadata
 

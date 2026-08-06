@@ -15,19 +15,27 @@ from kohakuterrarium.session.history import (
 
 
 def snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
-    """Return whether the snapshot carries user turn metadata.
+    """Return whether the snapshot carries valid user turn metadata.
 
     Edit/regenerate targeting resolves the edited turn through message
     metadata; legacy snapshots saved without it force content matching,
     which is ambiguous when a turn's wording repeats. Such snapshots are
     backfilled from the event log so targeting stays deterministic.
+
+    A metadata entry is only "valid" when ``turn_index`` and ``branch_id``
+    are positive ints — the exact shape every writer produces (backfill,
+    replay, live snapshot). A non-int (corrupt/legacy-typed) value would be
+    trusted here but fail edit targeting, so it must trigger backfill too.
     """
     return all(
         not isinstance(m, dict)
         or m.get("role") != "user"
         or (
             isinstance(m.get("metadata"), dict)
-            and m["metadata"].get("turn_index") is not None
+            and isinstance(m["metadata"].get("turn_index"), int)
+            and m["metadata"]["turn_index"] > 0
+            and isinstance(m["metadata"].get("branch_id"), int)
+            and m["metadata"]["branch_id"] > 0
         )
         for m in snapshot
     )
