@@ -148,6 +148,20 @@ def _load_conversation_with_replay_fallback(
             appended = replay_conversation(
                 normalize_resumable_events(tail), include_metadata=True
             )
+            # A legacy snapshot portion must be backfilled too, otherwise the
+            # resumed conversation becomes a mix of metadata-less (snapshot)
+            # and metadata-bearing (tail) user messages. Backfill uses only
+            # events up to the snapshot watermark so the tail's user turns do
+            # not shift the mapping.
+            base = snapshot
+            if not snapshot_has_turn_metadata(snapshot):
+                pre_events = [
+                    evt
+                    for evt in events
+                    if isinstance(evt.get("event_id"), int)
+                    and evt["event_id"] <= cached_up_to
+                ]
+                base = backfill_turn_metadata(snapshot, pre_events)
             logger.info(
                 "Resume appended post-snapshot tail",
                 agent=agent_name,
@@ -155,7 +169,7 @@ def _load_conversation_with_replay_fallback(
                 last_event_id=last_event_id,
                 appended=len(appended),
             )
-            return list(snapshot) + appended
+            return list(base) + appended
         logger.info(
             "Post-snapshot tail contains branch forks — full replay",
             agent=agent_name,

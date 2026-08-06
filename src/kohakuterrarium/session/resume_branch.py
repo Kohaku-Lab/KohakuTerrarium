@@ -22,10 +22,13 @@ def snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
     which is ambiguous when a turn's wording repeats. Such snapshots are
     backfilled from the event log so targeting stays deterministic.
     """
-    return any(
-        m.get("role") == "user"
-        and isinstance(m.get("metadata"), dict)
-        and m["metadata"].get("turn_index") is not None
+    return all(
+        not isinstance(m, dict)
+        or m.get("role") != "user"
+        or (
+            isinstance(m.get("metadata"), dict)
+            and m["metadata"].get("turn_index") is not None
+        )
         for m in snapshot
     )
 
@@ -65,9 +68,13 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
         m = dict(msg)
         if m.get("role") == "user" and tail_meta:
             meta = dict(m.get("metadata") or {})
-            meta.setdefault("turn_index", tail_meta[0]["turn_index"])
-            meta.setdefault("branch_id", tail_meta[0]["branch_id"])
-            m["metadata"] = meta
+            # Position-aligned: every user message consumes one tail slot so
+            # later messages keep their correct turn; an existing metadata is
+            # preserved (never overwritten).
+            if meta.get("turn_index") is None:
+                meta.setdefault("turn_index", tail_meta[0]["turn_index"])
+                meta.setdefault("branch_id", tail_meta[0]["branch_id"])
+                m["metadata"] = meta
             tail_meta = tail_meta[1:]
         out.append(m)
     return out

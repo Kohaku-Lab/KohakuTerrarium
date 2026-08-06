@@ -24,6 +24,8 @@ def current_path(agent: Any) -> set[tuple[int, int]]:
     raw = getattr(agent, "_parent_branch_path", None)
     if raw:
         for item in raw:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                continue
             try:
                 t, b = int(item[0]), int(item[1])
             except (TypeError, ValueError):

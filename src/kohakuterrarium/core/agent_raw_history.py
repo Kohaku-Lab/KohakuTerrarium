@@ -66,7 +66,7 @@ def reload_raw_prefix_for_target(
     covering_compacts: list[dict[str, Any]] = []
     if isinstance(target_id, int):
         for evt in all_events:
-            if evt.get("type") != "compact_replace":
+            if evt.get("type") not in ("compact_replace", "compact_complete"):
                 continue
             frm = evt.get("replaced_from_event_id")
             to = evt.get("replaced_to_event_id")
@@ -84,7 +84,12 @@ def reload_raw_prefix_for_target(
     raw_events = [
         event
         for event in prefix.events
-        if event.get("type") not in {"compact_replace", "conversation_snapshot"}
+        if event.get("type")
+        not in {
+            "compact_replace",
+            "compact_complete",
+            "conversation_snapshot",
+        }
     ]
     raw_events.extend(covering_compacts)
     raw_events.append(prefix.target)

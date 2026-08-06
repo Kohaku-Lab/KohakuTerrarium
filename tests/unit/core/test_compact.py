@@ -1126,3 +1126,17 @@ class TestComputeReplacedRangeDedupe:
         path = {(1, 1), (2, 2), (3, 2)}
         # keep 2 live turns (turn2, turn3) -> cover turn1 only
         assert compute_replaced_range(events, 2, path) == (1, 2)
+
+
+class TestCurrentPathResilience:
+    def test_tolerates_malformed_parent_path(self):
+        from types import SimpleNamespace
+        from kohakuterrarium.core.compact_branch import current_path
+
+        agent = SimpleNamespace(
+            _parent_branch_path=[1, [], [1], [1, 2], "ab"],
+            _turn_index=2,
+            _branch_id=1,
+        )
+        # malformed entries skipped; valid [1,2] + current (2,1) kept
+        assert current_path(agent) == {(1, 2), (2, 1)}

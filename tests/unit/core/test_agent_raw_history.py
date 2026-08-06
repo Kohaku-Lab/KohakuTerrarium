@@ -235,3 +235,41 @@ def test_reload_compact_starting_at_target_not_kept():
         ("user", "U1"),
         ("user", "U2"),
     ]
+
+
+def _compact_complete_event(event_id, replaced_from, replaced_to, summary="[S]"):
+    # Runtime (v2) compaction persists compact_complete, not compact_replace.
+    return {
+        "event_id": event_id,
+        "type": "compact_complete",
+        "summary": summary,
+        "replaced_from_event_id": replaced_from,
+        "replaced_to_event_id": replaced_to,
+        "compact_path": [[1, 1], [2, 1]],
+        "turn_index": 3,
+        "branch_id": 1,
+    }
+
+
+def test_reload_keeps_v2_compact_complete_baseline():
+    # Runtime compaction persists compact_complete; editing a turn covered by
+    # it must keep the baseline (summary) instead of resurrecting full history.
+    events = [
+        _event(1, "user_message", turn=1, content="U1"),
+        _event(2, "text_chunk", turn=1, content="R1"),
+        _event(3, "user_message", turn=2, content="U2", path=[[1, 1]]),
+        _event(4, "text_chunk", turn=2, content="R2", path=[[1, 1]]),
+        _event(5, "user_message", turn=3, content="U3", path=[[1, 1], [2, 1]]),
+        _compact_complete_event(6, 1, 4),
+    ]
+    agent = _agent(events)
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=3, turn_index=2, branch_id=1),
+    )
+    messages = agent.controller.conversation.get_messages()
+    assert [(m.role, m.content) for m in messages] == [
+        ("system", "current runtime prompt"),
+        ("assistant", "[S]"),
+        ("user", "U2"),
+    ]

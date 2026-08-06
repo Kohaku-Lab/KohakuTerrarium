@@ -813,6 +813,48 @@ class TestBackfillDedupeAndPathResilience:
             store.close()
 
 
+class TestTailAppendBackfillsLegacySnapshot:
+    def test_legacy_snapshot_portion_gains_metadata(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2"},
+                turn_index=2,
+                branch_id=1,
+            )
+            # legacy snapshot: user messages carry NO metadata
+            store.save_conversation(
+                "alice",
+                [{"role": "user", "content": "U1"}, {"role": "user", "content": "U2"}],
+            )
+            store.state["alice:snapshot_event_id"] = 2
+            # post-snapshot tail, no fork
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U3"},
+                turn_index=3,
+                branch_id=1,
+                parent_branch_path=[(1, 1), (2, 1)],
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            metas = [m.get("metadata") for m in out if m.get("role") == "user"]
+            # snapshot portion (U1,U2) backfilled + tail (U3) has metadata
+            assert [m["turn_index"] for m in metas] == [1, 2, 3]
+        finally:
+            store.close()
+
+
 class TestDetectSessionType:
     def test_agent_by_default(self, tmp_path):
         path = tmp_path / "x.kohakutr"
