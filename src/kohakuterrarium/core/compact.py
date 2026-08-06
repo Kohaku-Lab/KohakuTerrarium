@@ -433,7 +433,11 @@ class CompactManager:
                 metadata = build_compact_metadata(
                     self._agent,
                     events,
-                    keep_count,
+                    # keep_count is a MESSAGE count; compute_replaced_range
+                    # expects the number of live USER TURNS, so pass the
+                    # configured turn window — otherwise the replaced range
+                    # is dropped and compact_complete becomes unreplayable.
+                    self.config.keep_recent_turns,
                     compact_round=self._compact_count,
                     summary=summary,
                     messages_compacted=boundary - 1,

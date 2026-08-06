@@ -93,6 +93,10 @@ def reload_raw_prefix_for_target(
     ]
     raw_events.extend(covering_compacts)
     raw_events.append(prefix.target)
+    # A covering compact can carry an event_id larger than the target's;
+    # restore stream order so replay sees a monotonic event stream (its
+    # pending-summary flush/drop logic assumes one).
+    raw_events.sort(key=lambda evt: evt.get("event_id", 0))
     messages = replay_conversation(
         raw_events,
         branch_view=prefix.branch_view,

@@ -1140,3 +1140,60 @@ class TestCurrentPathResilience:
         )
         # malformed entries skipped; valid [1,2] + current (2,1) kept
         assert current_path(agent) == {(1, 2), (2, 1)}
+
+
+class TestCompactCompleteReplacedRange:
+    async def test_replaced_range_uses_turn_window_not_message_count(self):
+        """compact_complete carries a replaced range replay can use.
+
+        Regression: compact.py passed ``count_keep_messages()`` — a MESSAGE
+        count — while ``compute_replaced_range()`` interprets its argument as
+        the number of USER TURNS to keep. With 14 turns the 17-message window
+        made the range vanish (``compact_complete`` unreplayable); the
+        configured 8-turn window must produce (1, 12).
+        """
+        from types import SimpleNamespace
+
+        conv = _build_conversation(n_user=14)
+        store = _Store()
+        store.events = []
+        eid = 0
+        for turn in range(1, 15):
+            eid += 1
+            store.events.append(
+                {
+                    "event_id": eid,
+                    "type": "user_message",
+                    "turn_index": turn,
+                    "branch_id": 1,
+                }
+            )
+            eid += 1
+            store.events.append(
+                {
+                    "event_id": eid,
+                    "type": "text_chunk",
+                    "turn_index": turn,
+                    "branch_id": 1,
+                }
+            )
+        router = _Router()
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=_LLM(chunks=["summary"]),
+            router=router,
+            store=store,
+        )
+        mgr._agent = SimpleNamespace(
+            _parent_branch_path=[(t, 1) for t in range(1, 14)],
+            _turn_index=14,
+            _branch_id=1,
+        )
+        await mgr._run_compact()
+        complete = [c for c in router.calls if c[0] == "compact_complete"]
+        assert len(complete) == 1
+        metadata = complete[0][2]
+        # DEFAULT_KEEP_RECENT=8 keeps turns 7..14 live; turns 1..6
+        # (events 1..12) are replaced by the summary.
+        assert metadata.get("replaced_from_event_id") == 1
+        assert metadata.get("replaced_to_event_id") == 12
