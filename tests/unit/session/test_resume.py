@@ -800,8 +800,66 @@ class TestBackfillDedupeAndPathResilience:
         assert out[0]["metadata"]["event_id"] == 1
         assert out[1]["metadata"]["turn_index"] == 2
         assert out[1]["metadata"]["branch_id"] == 1
-        # Last live user_message wins after dedupe (event 3 dropped).
+        # First live user_message per (turn, branch) wins after dedupe —
+        # duplicate event 3 is dropped, so event 2's id is attached.
         assert out[1]["metadata"]["event_id"] == 2
+
+    def test_backfill_metadata_matches_replay_metadata(self):
+        # Cross-path consistency guard: backfilled legacy snapshots and
+        # replay(include_metadata=True) must attach IDENTICAL user message
+        # metadata for the same store state. Every path that rebuilds user
+        # turn identity has historically drifted (event_id missing, wrong
+        # shape), so this equivalence is asserted directly.
+        from kohakuterrarium.session.history import replay_conversation
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        events = [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 2,
+                "type": "text_chunk",
+                "content": "R1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 3,
+                "type": "user_message",
+                "content": "U2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 4,
+                "type": "text_chunk",
+                "content": "R2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+        ]
+        snapshot = [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "user", "content": "U2"},
+            {"role": "assistant", "content": "R2"},
+        ]
+        backfilled = backfill_turn_metadata(snapshot, events)
+        replayed = replay_conversation(events, include_metadata=True)
+        backfilled_users = [m for m in backfilled if m.get("role") == "user"]
+        replayed_users = [m for m in replayed if m.get("role") == "user"]
+        assert len(backfilled_users) == len(replayed_users) == 2
+        assert backfilled_users[0]["metadata"] == replayed_users[0]["metadata"]
+        assert backfilled_users[1]["metadata"] == replayed_users[1]["metadata"]
 
     def test_snapshot_mismatch_tolerates_malformed_path(self, tmp_path):
         store = SessionStore(str(tmp_path / "x.kohakutr"))

@@ -170,6 +170,23 @@ class Conversation:
             )
         return messages
 
+    def snapshot_messages(
+        self,
+        *,
+        preserve_pending_tail: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Serialize this conversation for a persisted snapshot.
+
+        Snapshots are the one place message identity metadata is allowed
+        (see :meth:`to_messages`); every snapshot writer must include it,
+        otherwise resume treats the snapshot as legacy and backfills. Use
+        this helper instead of calling ``to_messages`` directly.
+        """
+        return self.to_messages(
+            preserve_pending_tail=preserve_pending_tail,
+            include_metadata=True,
+        )
+
     @staticmethod
     def sanitize_orphan_tool_pairs(
         messages: list[dict[str, Any]],

@@ -57,7 +57,7 @@ def persist_compacted(
     try:
         store.save_conversation(
             agent_name,
-            conversation.to_messages(preserve_pending_tail=True, include_metadata=True),
+            conversation.snapshot_messages(preserve_pending_tail=True),
         )
     except Exception as e:
         logger.warning(

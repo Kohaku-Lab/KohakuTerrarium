@@ -581,7 +581,6 @@ def replay_conversation(
     pending_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = sorted(
         replaced_rules, key=lambda r: r[0]
     )
-    pending_next = 0
 
     messages: list[dict[str, Any]] = []
     text_buf: list[str] = []
@@ -601,29 +600,35 @@ def replay_conversation(
     def _flush_pending_summaries(
         eid: int, turn_index: object, branch_id: object
     ) -> None:
-        nonlocal pending_next
-        while pending_next < len(pending_rules):
-            rule = pending_rules[pending_next]
-            frm, to, _path, summary = rule
+        # Scan every pending rule, not just the front one: a rule whose range
+        # has not passed and whose path does not intersect this branch (e.g. a
+        # sibling-branch compact) must not block a later rule that DOES apply —
+        # otherwise that summary is injected late or lost entirely.
+        i = 0
+        while i < len(pending_rules):
+            frm, to, _path, summary = pending_rules[i]
             if frm > eid:
                 break
             # Inject the summary only when the current branch actually has an
             # event covered by this rule; a rule whose path does not intersect
             # the selected branch must NOT inject a spurious summary. Rules
             # without a path (legacy migration data) cover the whole range.
-            if _covered_by_replace(eid, turn_index, branch_id, [rule]):
+            if _covered_by_replace(eid, turn_index, branch_id, [pending_rules[i]]):
                 # Flush buffered assistant text that precedes the replaced
                 # range before injecting the summary (a covered event does not
                 # otherwise delimit the text buffer).
                 _flush_text()
                 if summary:
                     messages.append({"role": "assistant", "content": summary})
-                pending_next += 1
-            elif eid > to:
+                pending_rules.pop(i)
+                continue
+            if eid > to:
                 # Range passed with no covered event on this branch — drop.
-                pending_next += 1
-            else:
-                break
+                pending_rules.pop(i)
+                continue
+            # Range not passed and event not covered — keep pending and scan
+            # the next rule; it may apply to this branch right now.
+            i += 1
 
     for evt in events_list:
         etype = evt.get("type", "")

@@ -210,11 +210,9 @@ class SessionOutput(OutputModule):
         try:
             events = self._store.get_events(self._event_key_prefix)
             if self._agent and hasattr(self._agent, "controller"):
-                messages = self._agent.controller.conversation.to_messages(
-                    include_metadata=True
-                )
+                messages = self._agent.controller.conversation.snapshot_messages()
             else:
-                messages = replay_conversation(events)
+                messages = replay_conversation(events, include_metadata=True)
             last_event_id = 0
             for evt in events:
                 eid = evt.get("event_id")

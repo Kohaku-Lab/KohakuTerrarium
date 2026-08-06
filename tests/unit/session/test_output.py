@@ -32,6 +32,9 @@ class _FakeConversation:
             message["metadata"] = {"turn_index": 2, "branch_id": 1}
         return [message]
 
+    def snapshot_messages(self, **kwargs):
+        return self.to_messages(include_metadata=True)
+
 
 class _FakeController:
     def __init__(self, last_usage=None):
@@ -445,6 +448,31 @@ class TestProcessingLifecycle:
             await out.on_processing_end()
             snap = store.load_conversation("alice")
             assert snap == [{"role": "assistant", "content": "hello"}]
+        finally:
+            store.close()
+
+    async def test_end_fallback_replay_snapshot_carries_metadata(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            # No agent/controller: the fallback replay must still attach turn
+            # metadata, matching the controller path (to_messages with
+            # include_metadata=True) so resume never backfills this snapshot.
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            await out.on_processing_end()
+            snap = store.load_conversation("alice")
+            assert snap == [
+                {
+                    "role": "user",
+                    "content": "U1",
+                    "metadata": {"event_id": 1, "turn_index": 1, "branch_id": 1},
+                }
+            ]
         finally:
             store.close()
 

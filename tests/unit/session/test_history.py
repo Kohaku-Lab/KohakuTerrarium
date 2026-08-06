@@ -766,6 +766,141 @@ class TestCompactRuleSupersession:
         ]
 
 
+class TestPendingSummaryScan:
+    def _events(self):
+        events = []
+        eid = 0
+        for turn in range(1, 9):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+        # branch 3 (live at turns 9..12) — interleaved, not covered by SEL
+        for turn in range(9, 13):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 3,
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 3,
+                }
+            )
+        for turn in range(13, 17):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+        return events
+
+    def test_sibling_rule_does_not_block_later_summary(self):
+        # A sibling-branch compact (range 10..20, path branch 1) sorts before
+        # the selected branch's compact (15..30). The pending-summary flush
+        # must not stop at the sibling rule (whose range has not passed and
+        # which never intersects this branch) — otherwise [SEL] is injected
+        # after the interleaved branch-3 turns instead of before them.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[SIB]",
+                "event_id": 33,
+                "replaced_from_event_id": 10,
+                "replaced_to_event_id": 20,
+                "compact_path": [[5, 1], [6, 1], [7, 1], [8, 1], [9, 1], [10, 1]],
+                "turn_index": 10,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[SEL]",
+                "event_id": 34,
+                "replaced_from_event_id": 15,
+                "replaced_to_event_id": 30,
+                "compact_path": [[t, 2] for t in range(1, 17)],
+                "turn_index": 16,
+                "branch_id": 2,
+            }
+        )
+        branch_view = {t: 2 for t in list(range(1, 9)) + list(range(13, 17))}
+        branch_view.update({t: 3 for t in range(9, 13)})
+        out = replay_conversation(events, branch_view=branch_view)
+        # [SEL] must sit before the branch-3 turns (u9..a12) that follow the
+        # replaced branch-2 prefix, and turn 16 stays live.
+        assert out == [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "user", "content": "U2"},
+            {"role": "assistant", "content": "R2"},
+            {"role": "user", "content": "U3"},
+            {"role": "assistant", "content": "R3"},
+            {"role": "user", "content": "U4"},
+            {"role": "assistant", "content": "R4"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+            {"role": "user", "content": "U7"},
+            {"role": "assistant", "content": "R7"},
+            {"role": "assistant", "content": "[SEL]"},
+            {"role": "user", "content": "U9"},
+            {"role": "assistant", "content": "R9"},
+            {"role": "user", "content": "U10"},
+            {"role": "assistant", "content": "R10"},
+            {"role": "user", "content": "U11"},
+            {"role": "assistant", "content": "R11"},
+            {"role": "user", "content": "U12"},
+            {"role": "assistant", "content": "R12"},
+            {"role": "user", "content": "U16"},
+            {"role": "assistant", "content": "R16"},
+        ]
+
+
 # ── dedupe_adjacent_duplicate_events ──────────────────────────────
 
 

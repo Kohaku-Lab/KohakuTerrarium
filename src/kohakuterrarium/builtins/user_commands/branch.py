@@ -80,7 +80,7 @@ class BranchCommand(BaseUserCommand):
         if tokens[0] == "latest":
             # An empty branch view makes replay select each turn's latest branch.
             agent._branch_view = {}
-            replayed = replay_conversation(events)
+            replayed = replay_conversation(events, include_metadata=True)
             agent.controller.conversation = _rebuild_conv(
                 replayed, agent.controller.conversation.__class__
             )
@@ -115,7 +115,7 @@ class BranchCommand(BaseUserCommand):
         view[turn_index] = branch_id
         agent._branch_view = view
 
-        replayed = replay_conversation(events, branch_view=view)
+        replayed = replay_conversation(events, branch_view=view, include_metadata=True)
         agent.controller.conversation = _rebuild_conv(
             replayed, agent.controller.conversation.__class__
         )
@@ -138,5 +138,7 @@ def _rebuild_conv(messages: list[dict], conv_cls):
             kwargs["tool_call_id"] = msg["tool_call_id"]
         if msg.get("name"):
             kwargs["name"] = msg["name"]
+        if msg.get("metadata"):
+            kwargs["metadata"] = msg["metadata"]
         conv.append(msg.get("role", "user"), msg.get("content", ""), **kwargs)
     return conv
