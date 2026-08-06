@@ -256,6 +256,34 @@ def align_agent_name(agent, agent_name: str) -> None:
         compact_manager._agent_name = agent_name
 
 
+def _apply_restore_elision(agent: Any) -> None:
+    """Re-apply tool-result elision after restoring/rebuilding a conversation.
+
+    Rebuilds restore tool outputs elided during live turns, so re-apply
+    elision when the estimated prompt is already past the compact threshold
+    (prevents the first resumed LLM call from overflowing). Elision is a
+    compact companion: it only fires under real pressure.
+    """
+    controller = getattr(agent, "controller", None)
+    if controller is None:
+        return
+    config = getattr(controller, "config", None)
+    if config is None or not getattr(config, "elide_tool_results", False):
+        return
+    compact = getattr(agent, "compact_manager", None)
+    compact_max = (
+        compact.config.max_tokens
+        if compact is not None
+        and compact.config.enabled
+        and getattr(compact.config, "max_tokens", 0)
+        else 0
+    )
+    if compact_max and estimate_tokens(controller.conversation) >= int(
+        compact_max * compact.config.threshold
+    ):
+        elide_stale_tool_results(controller.conversation)
+
+
 def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     """Restore identity, conversation, branch state, scratchpad, and triggers.
 
@@ -266,25 +294,7 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
     if saved_messages:
         agent.controller.conversation = _build_conversation(saved_messages)
-        # Rebuilds restore tool outputs elided during live turns, so re-apply
-        # elision when the estimated prompt is already past the compact
-        # threshold (prevents the first resumed LLM call from overflowing).
-        # Elision is a compact companion: it only fires under real pressure.
-        controller = agent.controller
-        config = getattr(controller, "config", None)
-        if config is not None and getattr(config, "elide_tool_results", False):
-            compact = getattr(agent, "compact_manager", None)
-            compact_max = (
-                compact.config.max_tokens
-                if compact is not None
-                and compact.config.enabled
-                and getattr(compact.config, "max_tokens", 0)
-                else 0
-            )
-            if compact_max and estimate_tokens(controller.conversation) >= int(
-                compact_max * compact.config.threshold
-            ):
-                elide_stale_tool_results(controller.conversation)
+        _apply_restore_elision(agent)
         logger.info(
             "Conversation restored", agent=agent_name, messages=len(saved_messages)
         )
@@ -302,6 +312,7 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
         replayed = replayed_messages_for(store, agent_name)
         if replayed:
             agent.controller.conversation = _build_conversation(replayed)
+            _apply_restore_elision(agent)
 
     pad_data = store.load_scratchpad(agent_name)
     if pad_data:

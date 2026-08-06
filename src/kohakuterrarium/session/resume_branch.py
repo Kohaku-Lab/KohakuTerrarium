@@ -56,7 +56,8 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
     """
     live_ids = set(select_live_event_ids(events))
     meta_by_pos: list[dict] = []
-    seen: set[tuple[int, int]] = set()
+    pos_by_key: dict[tuple[int, int], int] = {}
+    type_by_key: dict[tuple[int, int], str] = {}
     for evt in events:
         if evt.get("type") not in ("user_message", "user_input"):
             continue
@@ -64,20 +65,28 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
             continue
         ti = evt.get("turn_index")
         bi = evt.get("branch_id")
-        # Deduplicate per (turn, branch): a merged/migrated store can carry
-        # duplicate user events that would otherwise mis-align the tail map.
-        if isinstance(ti, int) and isinstance(bi, int) and (ti, bi) not in seen:
-            seen.add((ti, bi))
-            meta_by_pos.append(
-                {
-                    # Same shape as replay(include_metadata=True) so legacy
-                    # snapshots and replay-built views carry identical user
-                    # turn identity (event_id included).
-                    "event_id": evt.get("event_id"),
-                    "turn_index": ti,
-                    "branch_id": bi,
-                }
-            )
+        if not isinstance(ti, int) or not isinstance(bi, int):
+            continue
+        key = (ti, bi)
+        etype = evt.get("type", "")
+        meta = {
+            "event_id": evt.get("event_id"),
+            "turn_index": ti,
+            "branch_id": bi,
+        }
+        if key in pos_by_key:
+            # A turn usually carries BOTH user_input (written first) and
+            # user_message (the canonical editable event). Edit targeting
+            # requires event_id to point at a user_message, so if we recorded
+            # a user_input first, replace it with the user_message event_id.
+            # A duplicate user_message must NOT overwrite the first one.
+            if etype == "user_message" and type_by_key[key] != "user_message":
+                meta_by_pos[pos_by_key[key]] = meta
+                type_by_key[key] = etype
+            continue
+        type_by_key[key] = etype
+        pos_by_key[key] = len(meta_by_pos)
+        meta_by_pos.append(meta)
     user_messages = [m for m in snapshot if m.get("role") == "user"]
     tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
     out: list[dict] = []

@@ -803,6 +803,55 @@ class TestBackfillDedupeAndPathResilience:
                 is False
             ), f"expected False for metadata={meta!r}"
 
+    def test_backfill_prefers_user_message_event_id(self):
+        # A turn carries BOTH user_input (written first) and user_message (the
+        # canonical editable event). Edit targeting requires event_id to point
+        # at a user_message (select_raw_history_prefix rejects others), so the
+        # backfilled metadata must use the user_message event_id, not the
+        # earlier user_input one.
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [{"role": "user", "content": "U1"}]
+        events = [
+            {
+                "event_id": 10,
+                "type": "user_input",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 11,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        assert out[0]["metadata"]["event_id"] == 11
+        assert out[0]["metadata"]["turn_index"] == 1
+        assert out[0]["metadata"]["branch_id"] == 1
+
+    def test_backfill_falls_back_to_user_input_when_no_user_message(self):
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [{"role": "user", "content": "U1"}]
+        events = [
+            {
+                "event_id": 10,
+                "type": "user_input",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        assert out[0]["metadata"]["event_id"] == 10
+
     def test_backfill_dedupes_duplicate_user_events(self):
         from kohakuterrarium.session.resume_branch import backfill_turn_metadata
 
@@ -1211,6 +1260,67 @@ class TestInjectSavedState:
             assert "U2b" in contents
             # branch1-only turn2 content must NOT be in the restored view
             assert "U2a" not in contents
+        finally:
+            store.close()
+
+    def test_replay_branch_rebuild_applies_elision(self, tmp_path, monkeypatch):
+        # The branch-mismatch rebuild (replay) must re-apply tool-result
+        # elision like the snapshot path does; otherwise the first resumed
+        # LLM call can overflow when the replayed branch view is past the
+        # compact threshold.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.append_event(
+                "alice",
+                "text_chunk",
+                {"content": "R2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "U1"},
+                    {"role": "user", "content": "U2a"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = 3
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            store.flush()
+            agent = _FakeAgentForInject()
+            # Enable elision on the controller config.
+            agent.controller.config = _ElideConfig()
+            elided = []
+            monkeypatch.setattr(
+                "kohakuterrarium.session.resume.estimate_tokens",
+                lambda conv: 999_999,
+            )
+            monkeypatch.setattr(
+                "kohakuterrarium.session.resume.elide_stale_tool_results",
+                lambda conv: elided.append(conv),
+            )
+            inject_saved_state(agent, store, "alice")
+            assert elided, "expected elision to run after branch-mismatch rebuild"
         finally:
             store.close()
 
