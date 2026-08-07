@@ -26,16 +26,21 @@ def snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
     are positive ints — the exact shape every writer produces (backfill,
     replay, live snapshot). A non-int (corrupt/legacy-typed) value would be
     trusted here but fail edit targeting, so it must trigger backfill too.
+    A non-dict entry is malformed data that ``_build_conversation`` would
+    crash on, so it must also trigger backfill/replay rather than being
+    trusted.
     """
     return all(
-        not isinstance(m, dict)
-        or m.get("role") != "user"
-        or (
-            isinstance(m.get("metadata"), dict)
-            and isinstance(m["metadata"].get("turn_index"), int)
-            and m["metadata"]["turn_index"] > 0
-            and isinstance(m["metadata"].get("branch_id"), int)
-            and m["metadata"]["branch_id"] > 0
+        isinstance(m, dict)
+        and (
+            m.get("role") != "user"
+            or (
+                isinstance(m.get("metadata"), dict)
+                and isinstance(m["metadata"].get("turn_index"), int)
+                and m["metadata"]["turn_index"] > 0
+                and isinstance(m["metadata"].get("branch_id"), int)
+                and m["metadata"]["branch_id"] > 0
+            )
         )
         for m in snapshot
     )
@@ -87,10 +92,18 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
         type_by_key[key] = etype
         pos_by_key[key] = len(meta_by_pos)
         meta_by_pos.append(meta)
-    user_messages = [m for m in snapshot if m.get("role") == "user"]
+    user_messages = [
+        m for m in snapshot if isinstance(m, dict) and m.get("role") == "user"
+    ]
     tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
     out: list[dict] = []
     for msg in snapshot:
+        if not isinstance(msg, dict):
+            # Malformed snapshot entry (corrupt data): keep it verbatim so
+            # backfill never crashes here; resume's downstream build drops or
+            # tolerates it rather than trusting a broken message shape.
+            out.append(msg)
+            continue
         m = dict(msg)
         if m.get("role") == "user" and tail_meta:
             meta = dict(m.get("metadata") or {})

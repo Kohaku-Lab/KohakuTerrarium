@@ -803,6 +803,67 @@ class TestBackfillDedupeAndPathResilience:
                 is False
             ), f"expected False for metadata={meta!r}"
 
+    def test_snapshot_has_turn_metadata_rejects_non_dict_entries(self):
+        from kohakuterrarium.session.resume_branch import snapshot_has_turn_metadata
+
+        # A non-dict entry is malformed data _build_conversation would crash
+        # on; it must not be trusted (trigger backfill/replay instead).
+        assert snapshot_has_turn_metadata([None]) is False
+        assert snapshot_has_turn_metadata(["not-a-msg"]) is False
+        assert snapshot_has_turn_metadata([42]) is False
+        assert (
+            snapshot_has_turn_metadata(
+                [
+                    {
+                        "role": "user",
+                        "content": "U1",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    },
+                    None,
+                ]
+            )
+            is False
+        )
+
+    def test_backfill_tolerates_non_dict_entries(self):
+        # A corrupted snapshot containing non-dict entries must not crash
+        # backfill; valid entries still get metadata, malformed ones pass
+        # through verbatim.
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [
+            None,
+            {"role": "user", "content": "U1"},
+            "junk",
+        ]
+        events = [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        assert out[0] is None
+        assert out[2] == "junk"
+        assert out[1]["metadata"]["event_id"] == 1
+
+    def test_build_conversation_skips_non_dict_entries(self):
+        from kohakuterrarium.session.resume import _build_conversation
+
+        conv = _build_conversation(
+            [
+                None,
+                {"role": "user", "content": "U1"},
+                "junk",
+            ]
+        )
+        contents = [m.content for m in conv.get_messages() if m.role == "user"]
+        assert contents == ["U1"]
+
     def test_backfill_prefers_user_message_event_id(self):
         # A turn carries BOTH user_input (written first) and user_message (the
         # canonical editable event). Edit targeting requires event_id to point

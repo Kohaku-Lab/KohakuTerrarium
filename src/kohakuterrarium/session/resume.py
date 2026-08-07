@@ -78,6 +78,10 @@ def _build_conversation(messages: list[dict]) -> Conversation:
     """
     conv = Conversation()
     for msg in messages:
+        if not isinstance(msg, dict):
+            # Malformed persisted entry (corrupt snapshot): skip it rather
+            # than crashing on msg.get(...).
+            continue
         role = msg.get("role", "user")
         content = msg.get("content", "")
         kwargs = {}
