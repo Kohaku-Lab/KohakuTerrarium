@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 from typing import Any
 
+from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
     AgentConfig,
@@ -654,8 +655,6 @@ class TestTuiStdinStealFix:
         # set, don't clobber it.
         import asyncio as _asyncio
 
-        from kohakuterrarium.builtins.tui.output import TUIOutput
-
         class _SentinelSession:
             """Stand-in for the engine_cli-created TUISession."""
 
@@ -677,6 +676,70 @@ class TestTuiStdinStealFix:
             "this is the entire reason the engine pre-wires it before "
             "starting the creature."
         )
+
+    async def test_injected_help_renders_on_target_creature_tab(self, tmp_path):
+        config = AgentConfig(
+            name="help-repro",
+            system_prompt="Test agent.",
+            include_tools_in_prompt=False,
+            include_hints_in_prompt=False,
+            tool_format="bracket",
+            agent_path=tmp_path,
+            input=InputConfig(type="none"),
+            output=OutputConfig(type="none"),
+            tools=[],
+        )
+        agent = await Agent.build(
+            config,
+            llm=ScriptedLLM(["unused"]),
+            io="none",
+        )
+
+        class _RecordingTUI:
+            def __init__(self):
+                self.notices: list[dict[str, Any]] = []
+
+            def add_system_notice(
+                self,
+                text: str,
+                command: str = "",
+                error: bool = False,
+                target: str = "",
+            ) -> None:
+                self.notices.append(
+                    {
+                        "text": text,
+                        "command": command,
+                        "error": error,
+                        "target": target,
+                    }
+                )
+
+            def end_streaming(self, target: str = "") -> None:
+                pass
+
+        tui = _RecordingTUI()
+        output = TUIOutput(session_key="creature-b")
+        output._tui = tui
+        output._default_target = "creature-b"
+        agent.output_router.default_output = output
+
+        await agent.start()
+        try:
+            calls_before = agent.llm.call_count
+
+            handled = await agent.inject_input("/help", source="tui")
+
+            assert handled is True
+            assert agent.llm.call_count == calls_before
+            assert len(tui.notices) == 1
+            assert tui.notices[0]["command"] == "help"
+            assert tui.notices[0]["target"] == "creature-b"
+            assert tui.notices[0]["error"] is False
+            assert "Available commands:" in tui.notices[0]["text"]
+            assert "TUI model picker" in tui.notices[0]["text"]
+        finally:
+            await agent.stop()
 
     def test_handle_tui_slash_opens_model_picker_for_bare_slash_model(self):
         # Regression: ``/model`` (no args) MUST open the Textual model
