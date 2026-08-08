@@ -26,6 +26,7 @@ from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
 from kohakuterrarium.builtins.cli_rich.multiplex import MultiplexedRichOutput
 from kohakuterrarium.builtins.plugins.goal.plugin import GoalCommand
 from kohakuterrarium.builtins.user_commands.drives import DrivesCommand
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.user_command.base import (
     UserCommandContext,
     UserCommandResult,
@@ -41,6 +42,15 @@ from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.terrarium import _FakeAgent as _EngineFakeAgent
 
 
+class _FakeOutputRouter:
+    def __init__(self):
+        self.default_output = None
+        self.submitted_replies = []
+
+    def submit_reply(self, reply) -> None:
+        self.submitted_replies.append(reply)
+
+
 class _FakeAgent:
     """Minimal Agent-shaped namespace for app setup."""
 
@@ -48,7 +58,7 @@ class _FakeAgent:
         self.config = SimpleNamespace(name=name)
         self.llm = SimpleNamespace(model=f"model-for-{name}", _profile_max_context=0)
         self.input = None
-        self.output_router = SimpleNamespace(default_output=None)
+        self.output_router = _FakeOutputRouter()
         self.injected: list[str] = []
         self._processing_task = None
         self._active_handles: dict = {}
@@ -297,6 +307,116 @@ class TestHandleCreatureEventRouting:
         # Should not raise.
         await app._handle_creature_event("nobody", "text", {"text": "x"})
 
+    @pytest.mark.asyncio
+    async def test_structured_notification_commits_to_source_creature(
+        self, app_and_engine
+    ):
+        app, _, _ = app_and_engine
+        event = OutputEvent(
+            type="notification",
+            payload={"title": "Build", "text": "complete", "level": "success"},
+        )
+
+        await app._handle_creature_event("c2", "emit", {"event": event})
+
+        bob_commits = app.committer.captured_for("c2")
+        assert any(
+            "complete" in args[0] for method, args in bob_commits if method == "text"
+        )
+        assert app.committer.captured_for("c1") == []
+
+    @pytest.mark.asyncio
+    async def test_interactive_event_reply_returns_to_source_creature(
+        self, app_and_engine
+    ):
+        app, _, creatures = app_and_engine
+        bob_event = OutputEvent(
+            type="confirm",
+            id="confirm-bob",
+            interactive=True,
+            payload={
+                "prompt": "Deploy Bob?",
+                "options": [{"id": "yes", "label": "Yes", "style": "primary"}],
+            },
+        )
+        carol_event = OutputEvent(
+            type="confirm",
+            id="confirm-carol",
+            interactive=True,
+            payload={
+                "prompt": "Deploy Carol?",
+                "options": [{"id": "yes", "label": "Yes", "style": "primary"}],
+            },
+        )
+
+        await app._handle_creature_event("c2", "emit", {"event": bob_event})
+        await app._handle_creature_event("c3", "emit", {"event": carol_event})
+        assert app.bus_overlay.visible is True
+        assert app.bus_overlay.handle_key("enter") is True
+        assert app.bus_overlay.visible is True
+        assert app.bus_overlay.handle_key("enter") is True
+
+        assert creatures[0].agent.output_router.submitted_replies == []
+        bob_replies = creatures[1].agent.output_router.submitted_replies
+        assert [(reply.event_id, reply.action_id) for reply in bob_replies] == [
+            ("confirm-bob", "yes")
+        ]
+        carol_replies = creatures[2].agent.output_router.submitted_replies
+        assert [(reply.event_id, reply.action_id) for reply in carol_replies] == [
+            ("confirm-carol", "yes")
+        ]
+
+    @pytest.mark.asyncio
+    async def test_tool_activity_updates_source_creature_widget(self, app_and_engine):
+        app, _, _ = app_and_engine
+
+        await app._handle_creature_event(
+            "c2",
+            "activity",
+            {
+                "activity_type": "tool_start",
+                "detail": "[bash] command",
+                "metadata": {"job_id": "job-1", "args": {"cmd": "pwd"}},
+            },
+        )
+
+        assert "job-1" in app.live_region_widgets["c2"].tool_blocks
+        assert "job-1" not in app.live_region_widgets["c1"].tool_blocks
+
+    @pytest.mark.asyncio
+    async def test_command_result_and_error_commit_to_source_creature(
+        self, app_and_engine
+    ):
+        app, _, _ = app_and_engine
+
+        await app._handle_creature_event(
+            "c2",
+            "activity",
+            {
+                "activity_type": "command_result",
+                "detail": "Available commands",
+                "metadata": {"command": "/help", "source": "cli"},
+            },
+        )
+        await app._handle_creature_event(
+            "c2",
+            "activity",
+            {
+                "activity_type": "command_error",
+                "detail": "Unknown command",
+                "metadata": {"command": "/nope", "source": "cli"},
+            },
+        )
+
+        text_commits = [
+            args[0]
+            for method, args in app.committer.captured_for("c2")
+            if method == "text"
+        ]
+        assert any("Available commands" in text for text in text_commits)
+        assert any("Unknown command" in text for text in text_commits)
+        assert app.committer.captured_for("c1") == []
+
 
 class TestFocusSwap:
     def test_focus_next_swaps_agent_and_resets_unread(self, app_and_engine):
@@ -518,10 +638,18 @@ class TestRuntimeGraphChanges:
     @pytest.mark.asyncio
     async def test_teardown_restores_every_managed_sink(self):
         app, _, c1, c2 = self._build()
+        c1_sink = c1.agent.output_router.default_output
+        await c1_sink.start()
+        assert c1_sink.is_running is True
+
         await app.teardown_multi_creature()
+
+        assert c1_sink.is_running is False
+        assert c1_sink._owner_loop is None
         assert c1.agent.output_router.default_output is None
         assert c2.agent.output_router.default_output is None
         assert app._managed_outputs == {}
+        assert app._creature_renderers == {}
 
     @pytest.mark.asyncio
     async def test_teardown_without_watcher_is_safe(self):

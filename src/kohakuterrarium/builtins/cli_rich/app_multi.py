@@ -51,7 +51,9 @@ from kohakuterrarium.builtins.cli_rich.focus import FocusController
 from kohakuterrarium.builtins.cli_rich.live_region import LiveRegion
 from kohakuterrarium.builtins.cli_rich.live_state import LiveRegionState
 from kohakuterrarium.builtins.cli_rich.multiplex import MultiplexedRichOutput
+from kohakuterrarium.builtins.cli_rich.output import RichCLIOutput
 from kohakuterrarium.builtins.cli_rich.roster import RosterWidget
+from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -80,6 +82,7 @@ class AppMultiCreatureMixin:
         self.live_region_widgets: dict[str, LiveRegion] = {}
         # Preserve replaced sinks so removal and teardown can restore them.
         self._managed_outputs: dict[str, Any] = {}
+        self._creature_renderers: dict[str, RichCLIOutput] = {}
         self._engine_watch_task: asyncio.Task | None = None
         for c in creatures:
             self._install_creature_slot(c, is_focus=c.creature_id == focus_creature_id)
@@ -121,6 +124,10 @@ class AppMultiCreatureMixin:
         widget = self.live_region_widgets[cid]
         agent = getattr(creature, "agent", None)
         if agent is not None:
+            self._creature_renderers[cid] = RichCLIOutput(
+                self,
+                reply_router=getattr(agent, "output_router", None),
+            )
             try:
                 model = (
                     agent.llm_identifier()
@@ -297,6 +304,9 @@ class AppMultiCreatureMixin:
         state = self.live_regions.get(creature_id)
         if state is None:
             return
+        renderer = self._creature_renderers.get(creature_id)
+        if renderer is None:
+            return
         is_focus = creature_id == self.focus_controller.focus_id
         # Existing output handlers route through self.live_region, so swap it only
         # for this dispatch and let unfocused widgets accumulate silently.
@@ -334,13 +344,17 @@ class AppMultiCreatureMixin:
                     pass
             elif kind == "activity":
                 try:
-                    self.on_activity_with_metadata(
+                    renderer.on_activity_with_metadata(
                         payload.get("activity_type", ""),
                         payload.get("detail", ""),
                         payload.get("metadata", {}),
                     )
                 except Exception:
                     pass
+            elif kind == "emit":
+                event = payload.get("event")
+                if isinstance(event, OutputEvent):
+                    await renderer.emit(event)
         finally:
             self.live_region = prev
             if capture_swapped:
@@ -563,6 +577,7 @@ class AppMultiCreatureMixin:
         old_focus = self.focus_controller.focus_id
         new_focus = self.focus_controller.remove(creature_id)
         self.live_regions.pop(creature_id, None)
+        self._creature_renderers.pop(creature_id, None)
         self.draft_by_creature.pop(creature_id, None)
         try:
             self.committer.clear_capture(creature_id)
@@ -587,10 +602,30 @@ class AppMultiCreatureMixin:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
-        if not self._managed_outputs:
-            return
         for cid in list(self._managed_outputs.keys()):
+            sink = None
+            if self.engine is not None:
+                try:
+                    creature = self.engine.get_creature(cid)
+                    sink = getattr(
+                        getattr(creature.agent, "output_router", None),
+                        "default_output",
+                        None,
+                    )
+                except Exception:
+                    pass
+            if isinstance(sink, MultiplexedRichOutput) and sink.is_running:
+                try:
+                    await sink.stop()
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.warning(
+                        "multiplexed sink stop failed",
+                        creature_id=cid,
+                        error=str(e),
+                        exc_info=True,
+                    )
             self.restore_creature_sink(cid)
+        self._creature_renderers.clear()
 
     async def dispatch_topology_command(self, name: str, args: str) -> bool:
         """Run engine-aware commands with focused-creature context."""

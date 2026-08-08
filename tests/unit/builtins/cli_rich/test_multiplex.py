@@ -1,5 +1,7 @@
 """Tests for :mod:`builtins.cli_rich.multiplex`."""
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.builtins.cli_rich.multiplex import MultiplexedRichOutput
@@ -48,6 +50,35 @@ class TestLifecycle:
         await sink.on_processing_start()
         await sink.on_processing_end()
         assert [c[1] for c in rec.calls] == ["processing_start", "processing_end"]
+
+    @pytest.mark.asyncio
+    async def test_worker_thread_activity_returns_to_owner_loop(self):
+        rec = _Recorder()
+        sink = MultiplexedRichOutput(rec, "alice")
+        await sink.start()
+
+        await asyncio.to_thread(
+            sink.on_activity_with_metadata,
+            "tool_start",
+            "[bash] command",
+            {"job_id": "job-1"},
+        )
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if rec.calls:
+                break
+
+        assert rec.calls == [
+            (
+                "alice",
+                "activity",
+                {
+                    "activity_type": "tool_start",
+                    "detail": "[bash] command",
+                    "metadata": {"job_id": "job-1"},
+                },
+            )
+        ]
 
 
 class TestEmit:
