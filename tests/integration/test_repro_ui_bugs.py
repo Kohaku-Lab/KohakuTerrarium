@@ -879,11 +879,27 @@ class TestTuiStdinStealFix:
                 raise AssertionError("should not be called for /help")
 
         # Bare /model is the modal path; with args it falls through.
-        for variant in ("/help", "/clear", "/exit", "/status"):
+        for variant in ("/help", "/clear", "/status"):
             handled = _asyncio.run(_handle_tui_slash(variant, _NoModalTUI(), object()))
             assert (
                 handled is False
             ), f"{variant!r} should fall through to agent slash dispatch"
+
+        # Engine-managed TUI sessions replace stdin inputs with NoneInput.
+        # Dispatching /exit through that input only toggles a flag which this
+        # runner never observes, so the runner must stop its own TUISession.
+        class _RecordingTUI:
+            def __init__(self):
+                self.stop_calls = 0
+
+            def stop(self) -> None:
+                self.stop_calls += 1
+
+        for variant in ("/exit", "/quit", "/q"):
+            tui = _RecordingTUI()
+            handled = _asyncio.run(_handle_tui_slash(variant, tui, object()))
+            assert handled is True
+            assert tui.stop_calls == 1
 
     def test_handle_tui_slash_targets_active_tab_agent(self):
         # Multi-creature: ``/model`` (no args) must open the picker for

@@ -68,6 +68,15 @@ async def _handle_tui_slash(text: str, tui: "TUISession", focus: Any) -> bool:
     resolver = getattr(tui, "agent_for_tab", None)
     target_agent = (resolver() if callable(resolver) else None) or focus
 
+    # The engine runner owns Textual's input loop. Its creatures use
+    # ``NoneInput``, so forwarding ExitCommand would only set that module's
+    # private flag -- a flag this loop never reads. Stop the TUISession here;
+    # ``stop()`` wakes ``get_input()`` with an empty value so the runner can
+    # leave the loop and perform its normal cleanup.
+    if name in ("exit", "quit", "q"):
+        tui.stop()
+        return True
+
     if name == "model" and not stripped_args:
         await tui.show_model_picker_modal(target_agent)
         return True
