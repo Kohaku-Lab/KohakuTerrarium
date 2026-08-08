@@ -638,10 +638,18 @@ class TestRuntimeGraphChanges:
     @pytest.mark.asyncio
     async def test_teardown_restores_every_managed_sink(self):
         app, _, c1, c2 = self._build()
+        c1_sink = c1.agent.output_router.default_output
+        await c1_sink.start()
+        assert c1_sink.is_running is True
+
         await app.teardown_multi_creature()
+
+        assert c1_sink.is_running is False
+        assert c1_sink._owner_loop is None
         assert c1.agent.output_router.default_output is None
         assert c2.agent.output_router.default_output is None
         assert app._managed_outputs == {}
+        assert app._creature_renderers == {}
 
     @pytest.mark.asyncio
     async def test_teardown_without_watcher_is_safe(self):

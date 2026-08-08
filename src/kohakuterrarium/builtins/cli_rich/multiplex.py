@@ -54,6 +54,9 @@ class MultiplexedRichOutput(BaseOutputModule):
     async def _on_start(self) -> None:
         self._owner_loop = asyncio.get_running_loop()
 
+    async def _on_stop(self) -> None:
+        self._owner_loop = None
+
     async def _dispatch(self, kind: str, payload: dict[str, Any]) -> None:
         self._owner_loop = asyncio.get_running_loop()
         try:

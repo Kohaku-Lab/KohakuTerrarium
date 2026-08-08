@@ -602,10 +602,30 @@ class AppMultiCreatureMixin:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
-        if not self._managed_outputs:
-            return
         for cid in list(self._managed_outputs.keys()):
+            sink = None
+            if self.engine is not None:
+                try:
+                    creature = self.engine.get_creature(cid)
+                    sink = getattr(
+                        getattr(creature.agent, "output_router", None),
+                        "default_output",
+                        None,
+                    )
+                except Exception:
+                    pass
+            if isinstance(sink, MultiplexedRichOutput) and sink.is_running:
+                try:
+                    await sink.stop()
+                except Exception as e:  # pragma: no cover - defensive
+                    logger.warning(
+                        "multiplexed sink stop failed",
+                        creature_id=cid,
+                        error=str(e),
+                        exc_info=True,
+                    )
             self.restore_creature_sink(cid)
+        self._creature_renderers.clear()
 
     async def dispatch_topology_command(self, name: str, args: str) -> bool:
         """Run engine-aware commands with focused-creature context."""
