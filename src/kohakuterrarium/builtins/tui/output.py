@@ -382,6 +382,19 @@ class TUIOutput(BaseOutputModule):
                 error_type = metadata.get("error_type", "Error")
                 error_msg = metadata.get("error", rest)
                 self._tui.add_error_block(error_type, error_msg, target=t)
+            case "command_result":
+                self._tui.add_system_notice(
+                    name_detail,
+                    command=_command_name(metadata),
+                    target=t,
+                )
+            case "command_error":
+                self._tui.add_system_notice(
+                    name_detail,
+                    command=_command_name(metadata),
+                    error=True,
+                    target=t,
+                )
             case "interrupt":
                 # Background jobs and sub-agents own their cancellation lifecycle.
                 self._tui.end_streaming(target=self._target)
@@ -636,7 +649,16 @@ def _format_args_preview(tool_name: str, args: dict) -> str:
                 if k == "content" or k.startswith("_"):
                     continue
                 return f"{k}={str(v)[:40]}"
-            return ""
+    return ""
+
+
+def _command_name(metadata: dict) -> str:
+    """Return a compact slash-command label for command activity notices."""
+    raw = str(metadata.get("command", "") or "").strip()
+    if not raw:
+        return "command"
+    name = raw.lstrip("/").split(None, 1)[0]
+    return name or "command"
 
 
 # -- Resume rendering ------------------------------------------------------
