@@ -44,8 +44,18 @@ class MultiplexedRichOutput(BaseOutputModule):
         self.handler = handler
         self.creature_id = creature_id
         self.creature_name = creature_name or creature_id
+        try:
+            self._owner_loop: asyncio.AbstractEventLoop | None = (
+                asyncio.get_running_loop()
+            )
+        except RuntimeError:
+            self._owner_loop = None
+
+    async def _on_start(self) -> None:
+        self._owner_loop = asyncio.get_running_loop()
 
     async def _dispatch(self, kind: str, payload: dict[str, Any]) -> None:
+        self._owner_loop = asyncio.get_running_loop()
         try:
             await self.handler(self.creature_id, kind, payload)
         except Exception as e:  # pragma: no cover - defensive
@@ -83,25 +93,29 @@ class MultiplexedRichOutput(BaseOutputModule):
     def on_activity_with_metadata(
         self, activity_type: str, detail: str, metadata: dict[str, Any]
     ) -> None:
-        try:
-            self.handler
-        except AttributeError:
+        # Synchronous callbacks may arrive from worker threads, where Python 3.12
+        # deliberately provides no implicit event loop. Schedule construction of
+        # the coroutine back on the loop which owns this sink.
+        loop = self._owner_loop
+        if loop is None:
+            try:
+                loop = asyncio.get_running_loop()
+                self._owner_loop = loop
+            except RuntimeError:
+                return
+        if loop.is_closed():
             return
-        # Synchronous callbacks may arrive from worker threads.
+        payload = {
+            "activity_type": activity_type,
+            "detail": detail,
+            "metadata": dict(metadata) if metadata else {},
+        }
+
+        def _schedule_dispatch() -> None:
+            asyncio.create_task(self._dispatch("activity", payload))
+
         try:
-            loop = asyncio.get_event_loop()
-        except RuntimeError:
-            return
-        coro = self._dispatch(
-            "activity",
-            {
-                "activity_type": activity_type,
-                "detail": detail,
-                "metadata": dict(metadata) if metadata else {},
-            },
-        )
-        try:
-            asyncio.run_coroutine_threadsafe(coro, loop)
+            loop.call_soon_threadsafe(_schedule_dispatch)
         except RuntimeError:
             return
 
