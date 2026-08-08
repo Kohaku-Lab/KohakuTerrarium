@@ -789,8 +789,18 @@ class TUISession(TabModelRegistryMixin):
         finally:
             self.running = False
             self._stop_event.set()
-            # Empty input wakes a pending reader and signals shutdown.
-            self._app._input_queue.put_nowait("")
+            self._signal_input_shutdown()
+
+    def _signal_input_shutdown(self) -> None:
+        """Discard pending submissions and wake the runner with shutdown."""
+        if not self._app:
+            return
+        while True:
+            try:
+                self._app._input_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        self._app._input_queue.put_nowait("")
 
     async def get_input(self, prompt: str = "You: ") -> str:
         if not self._app:
@@ -879,8 +889,7 @@ class TUISession(TabModelRegistryMixin):
         self.running = False
         self._stop_event.set()
         if self._app:
-            # Empty input wakes a pending reader and signals shutdown.
-            self._app._input_queue.put_nowait("")
+            self._signal_input_shutdown()
             if self._app.is_running:
                 self._app.exit()
 

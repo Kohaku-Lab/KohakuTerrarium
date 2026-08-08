@@ -957,6 +957,14 @@ class TestTuiStdinStealFix:
         solo.host_agent = host
         assert solo.agent_for_tab() is host
 
+        # Explicit stop must discard already-queued input before adding the
+        # empty shutdown sentinel. Otherwise /exit can process a later queued
+        # message before the runner observes shutdown.
+        asyncio.run(solo.start())
+        solo._app._input_queue.put_nowait("queued before exit")
+        solo.stop()
+        assert asyncio.run(solo.get_input()) == ""
+
     def test_tui_session_per_target_model_registry(self):
         # A sibling creature's model switch must NOT stomp the visible
         # tab's ``Model:`` line; switching tabs re-renders the line
