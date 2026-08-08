@@ -38,15 +38,16 @@ class BusInteractiveOverlay:
         self._get_textarea_text = get_textarea_text
         self._clear_textarea = clear_textarea
         self.visible: bool = False
-        self._queue: list[OutputEvent] = []
+        self._queue: list[tuple[OutputEvent, Any]] = []
         self._current: OutputEvent | None = None
+        self._current_router: Any = None
 
         self._option_index: int = 0
         self._multi_selected: set[str] = set()
 
-    def open(self, event: OutputEvent) -> None:
+    def open(self, event: OutputEvent, *, router: Any = None) -> None:
         """Queue an event; open if nothing is currently displayed."""
-        self._queue.append(event)
+        self._queue.append((event, router))
         if not self.visible:
             self._activate_next()
 
@@ -55,6 +56,7 @@ class BusInteractiveOverlay:
         if dismiss_current and self._current is not None:
             self._submit("cancel", values={})
         self._current = None
+        self._current_router = None
         self.visible = False
         self._reset_state()
         if self._queue:
@@ -64,7 +66,7 @@ class BusInteractiveOverlay:
         if not self._queue:
             self.visible = False
             return
-        self._current = self._queue.pop(0)
+        self._current, self._current_router = self._queue.pop(0)
         self._reset_state()
         payload = self._current.payload or {}
         default_id = payload.get("default")
@@ -218,7 +220,11 @@ class BusInteractiveOverlay:
     def _submit(self, action_id: str, values: dict[str, Any]) -> None:
         if self._current is None:
             return
-        router = self._get_router()
+        router = (
+            self._current_router
+            if self._current_router is not None
+            else self._get_router()
+        )
         if router is None:
             return
         try:

@@ -27,9 +27,10 @@ def _make_label(job_id: str, name: str) -> str:
 class RichCLIOutput(BaseOutputModule):
     """Output module that routes agent events into RichCLIApp."""
 
-    def __init__(self, app):
+    def __init__(self, app: Any, *, reply_router: Any = None):
         super().__init__()
         self.app = app
+        self.reply_router = reply_router
 
     async def write(self, content: str) -> None:
         if not content or self.app is None:
@@ -155,7 +156,7 @@ class RichCLIOutput(BaseOutputModule):
                     logger.exception("CLI panel fallback failed", error=str(e))
             return
         try:
-            overlay.open(event)
+            overlay.open(event, router=self.reply_router)
             self.app._invalidate()
         except Exception as e:
             logger.exception(
@@ -207,6 +208,23 @@ class RichCLIOutput(BaseOutputModule):
         job_id = metadata.get("job_id", "")
         name_from_label = self._extract_name(detail)
         args_preview = self._extract_args_preview(metadata)
+
+        if activity_type == "command_result":
+            self.app.on_notification_event(
+                {
+                    "title": self._command_name(metadata),
+                    "text": detail,
+                    "level": "info",
+                }
+            )
+            return
+
+        if activity_type == "command_error":
+            self.app.on_processing_error(
+                error_type=self._command_name(metadata),
+                error=detail,
+            )
+            return
 
         # Nested tool events identify their parent sub-agent block by job_id.
         if activity_type == "subagent_tool_start":
@@ -378,6 +396,14 @@ class RichCLIOutput(BaseOutputModule):
                 if isinstance(p, dict) and p.get("type") == "text"
             )
         return ""
+
+    @staticmethod
+    def _command_name(metadata: dict[str, Any]) -> str:
+        """Return a compact slash-command label for command notices."""
+        raw = str(metadata.get("command", "") or "").strip()
+        if not raw:
+            return "command"
+        return raw.lstrip("/").split(None, 1)[0] or "command"
 
     @staticmethod
     def _extract_name(detail: str) -> str:
