@@ -25,9 +25,12 @@ config under `tools:` by bare name.
 
 ### Shell and scripting
 
-**`bash`**: Run a shell command. Picks the first available of `bash`,
-`zsh`, `sh`, `fish`, `pwsh`. Respects `KT_SHELL_PATH`. Captures stdout
-and stderr, truncated to a cap. Direct execution.
+**`bash`**: Run a shell command. Uses `bash` by default on every platform
+(Git Bash on Windows). Pass `type="..."` to select another supported shell:
+`bash`, `zsh`, `sh`, `fish`, `pwsh`, or `powershell`. A per-shell
+`KT_<SHELL>_PATH` override takes precedence over `KT_SHELL_PATH`; the
+process `$SHELL` does not change the default executable. Captures stdout and
+stderr, truncated to a cap. Direct execution.
 
 - Args: `command` (str), `working_dir` (str, optional),
   `timeout` (float, optional).

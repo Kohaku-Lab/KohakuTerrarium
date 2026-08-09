@@ -24,8 +24,7 @@ KohakuTerrarium 隨附的所有內建工具、子代理、輸入、輸出、使�
 
 ### Shell 與腳本
 
-**`bash`**：執行 shell 命令。會在 `bash`、`zsh`、`sh`、`fish`、`pwsh`
-之中選擇第一個可用者。遵守 `KT_SHELL_PATH`。會擷取 stdout 與 stderr，並在達到上限時截斷。直接執行。
+**`bash`**：執行 shell 命令。所有平台預設使用 `bash`（Windows 上使用 Git Bash）。可透過 `type="..."` 選擇其他 shell：`bash`、`zsh`、`sh`、`fish`、`pwsh` 或 `powershell`。按 shell 指定的 `KT_<SHELL>_PATH` 優先於通用的 `KT_SHELL_PATH`；程序的 `$SHELL` 不會改變預設 executable。會擷取 stdout 與 stderr，並在達到上限時截斷。直接執行。
 
 - 參數：`command`（str）、`working_dir`（str，可選）、
   `timeout`（float，可選）。

@@ -47,19 +47,30 @@ _SHELL_SPECS: dict[str, tuple[str, list[str]]] = {
 _AVAILABLE_SHELLS: list[str] | None = None
 
 
+def _shell_override_name(shell_type: str) -> str | None:
+    """Return the environment variable providing the active shell override."""
+    specific_name = f"KT_{shell_type.upper()}_PATH"
+    if os.environ.get(specific_name):
+        return specific_name
+    if os.environ.get("KT_SHELL_PATH"):
+        return "KT_SHELL_PATH"
+    return None
+
+
 def _shell_override_env(shell_type: str) -> str | None:
-    specific = os.environ.get(f"KT_{shell_type.upper()}_PATH")
-    if specific:
-        return specific
-    generic = os.environ.get("KT_SHELL_PATH")
-    if generic:
-        return generic
-    if shell_type in {"bash", "zsh", "sh"}:
-        env_shell = os.environ.get("SHELL")
-        if env_shell and any(
-            name in env_shell.lower() for name in ("bash", "zsh", "sh")
-        ):
-            return env_shell
+    override_name = _shell_override_name(shell_type)
+    return os.environ.get(override_name) if override_name else None
+
+
+def _resolve_override_executable(override: str | None) -> str | None:
+    """Resolve an explicit shell override without selecting a fallback."""
+    if not override:
+        return None
+    resolved = shutil.which(override)
+    if resolved:
+        return resolved
+    if Path(override).exists():
+        return override
     return None
 
 
@@ -75,10 +86,8 @@ def _resolve_shell_executable(shell_type: str) -> str | None:
         if bundled is not None:
             return str(bundled)
 
-    override = _shell_override_env(shell_type)
-    if override and shutil.which(override):
-        return shutil.which(override)
-    if override and Path(override).exists():
+    override = _resolve_override_executable(_shell_override_env(shell_type))
+    if override:
         return override
 
     exe = _SHELL_SPECS[shell_type][0]

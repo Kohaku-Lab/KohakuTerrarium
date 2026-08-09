@@ -580,7 +580,8 @@ MCP server 也可以放在 `~/.kohakuterrarium/mcp_servers.yaml` 全域目录，
 | `EDITOR`、`VISUAL` | `kt edit` / `kt config edit` 用的编辑器。 |
 | `VIRTUAL_ENV` | `kt --version --verbose` 会印出。 |
 | `<PROVIDER>_API_KEY` | 每个 provider 的 `api_key_env` 指到的变数。 |
-| `KT_SHELL_PATH` | 覆盖 `bash` 工具用的 shell。 |
+| `KT_<SHELL>_PATH` | 覆盖指定 shell 的 executable（例如 `KT_BASH_PATH`）；优先于 `KT_SHELL_PATH`。 |
+| `KT_SHELL_PATH` | 在没有指定 shell 专用覆盖时，覆盖 `bash` 工具使用的 shell executable。 |
 | `KT_SESSION_DIR` | 覆盖 web API 的会话目录 (默认 `~/.kohakuterrarium/sessions`)。 |
 
 ## Exit code

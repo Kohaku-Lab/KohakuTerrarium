@@ -580,7 +580,8 @@ MCP server 也可以放在 `~/.kohakuterrarium/mcp_servers.yaml` 的全域目錄
 | `EDITOR`、`VISUAL` | `kt edit` / `kt config edit` 用的編輯器。 |
 | `VIRTUAL_ENV` | `kt --version --verbose` 會印出。 |
 | `<PROVIDER>_API_KEY` | 每個 provider 的 `api_key_env` 指到的變數。 |
-| `KT_SHELL_PATH` | 覆寫 `bash` 工具用的 shell。 |
+| `KT_<SHELL>_PATH` | 覆寫指定 shell 的 executable（例如 `KT_BASH_PATH`）；優先於 `KT_SHELL_PATH`。 |
+| `KT_SHELL_PATH` | 在沒有指定 shell 專用覆寫時，覆寫 `bash` 工具使用的 shell executable。 |
 | `KT_SESSION_DIR` | 覆寫 web API 的工作階段目錄 (預設 `~/.kohakuterrarium/sessions`)。 |
 
 ## Exit code

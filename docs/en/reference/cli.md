@@ -633,7 +633,8 @@ auto-attached but can be referenced by name.
 | `EDITOR`, `VISUAL` | Editor for `kt edit` / `kt config edit`. |
 | `VIRTUAL_ENV` | Reported by `kt --version --verbose`. |
 | `<PROVIDER>_API_KEY` | Whatever `api_key_env` each provider references. |
-| `KT_SHELL_PATH` | Override shell used by the `bash` tool. |
+| `KT_<SHELL>_PATH` | Override a specific shell executable (for example, `KT_BASH_PATH`); takes precedence over `KT_SHELL_PATH`. |
+| `KT_SHELL_PATH` | Generic shell executable override used by the `bash` tool when no per-shell override is set. |
 | `KT_SESSION_DIR` | Override session directory for the web API (default `~/.kohakuterrarium/sessions`). |
 
 ## Exit codes
