@@ -242,6 +242,54 @@ class AgentTUI(App):
             logger.warning("Failed to get active tab name", error=str(e), exc_info=True)
         return self._terrarium_tabs[0] if self._terrarium_tabs else ""
 
+    async def reconcile_terrarium_tabs(self, tab_names: list[str]) -> None:
+        """Reconcile mounted chat panes with the current terrarium topology."""
+        desired = list(dict.fromkeys(tab_names))
+        active_name = self.get_active_tab_name()
+        try:
+            tabs = self.query_one("#chat-tabs", TabbedContent)
+        except Exception as e:
+            logger.warning("Failed to find terrarium tabs", error=str(e), exc_info=True)
+            return
+
+        mounted: dict[str, TabPane] = {}
+        for pane in tabs.query(TabPane):
+            if pane.id:
+                mounted[_id_to_name(pane.id.removeprefix("tab-"))] = pane
+
+        for name, pane in list(mounted.items()):
+            if name not in desired and pane.id:
+                await tabs.remove_pane(pane.id)
+                mounted.pop(name)
+
+        for index, name in enumerate(desired):
+            if name in mounted:
+                continue
+            pane = TabPane(
+                name,
+                VerticalScroll(
+                    id=f"chat-{_safe_id(name)}",
+                    classes="chat-tab-scroll",
+                ),
+                id=f"tab-{_safe_id(name)}",
+            )
+            next_name = next(
+                (
+                    candidate
+                    for candidate in desired[index + 1 :]
+                    if candidate in mounted
+                ),
+                None,
+            )
+            before = mounted[next_name].id if next_name else None
+            await tabs.add_pane(pane, before=before)
+            mounted[name] = pane
+
+        self._terrarium_tabs = desired
+        if desired:
+            selected = active_name if active_name in desired else desired[0]
+            tabs.active = f"tab-{_safe_id(selected)}"
+
     def action_interrupt(self) -> None:
         if self.on_interrupt:
             self.on_interrupt()
@@ -366,14 +414,15 @@ class AgentTUI(App):
 
 
 def _safe_id(name: str) -> str:
-    """Convert a tab name to a CSS-safe ID."""
-    if name.startswith("#"):
-        return "ch_" + name[1:].replace("-", "_")
-    return name.replace("-", "_")
+    """Encode a tab name as a reversible CSS-safe ID component."""
+    return f"t_{name.encode('utf-8').hex()}"
 
 
 def _id_to_name(safe: str) -> str:
-    """Convert a CSS-safe tab ID back to its name."""
-    if safe.startswith("ch_"):
-        return "#" + safe[3:]
-    return safe
+    """Decode a CSS-safe tab ID component back to its original name."""
+    if not safe.startswith("t_"):
+        return safe
+    try:
+        return bytes.fromhex(safe[2:]).decode("utf-8")
+    except (UnicodeDecodeError, ValueError):
+        return safe
