@@ -109,6 +109,8 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         self._command_registry: dict = {}
         self._command_registry_agents: list[weakref.ReferenceType] = []
         self._pending_task: asyncio.Task | None = None
+        self._pending_task_target: str | None = None
+        self._turn_tasks: dict[str, asyncio.Task] = {}
         self._ctrl_c_armed = False
         self._ctrl_c_reset_task: asyncio.Task | None = None
         self._render_ticker_task: asyncio.Task | None = None
@@ -209,12 +211,15 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
                     await self._ctrl_c_reset_task
                 except (asyncio.CancelledError, Exception):
                     pass
-            if self._pending_task and not self._pending_task.done():
-                self._pending_task.cancel()
-                try:
-                    await self._pending_task
-                except (asyncio.CancelledError, Exception):
-                    pass
+            pending = set(self._turn_tasks.values())
+            if self._pending_task:
+                pending.add(self._pending_task)
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
+            self._turn_tasks.clear()
             self.app = None
             print()  # Leave the shell cursor on a clean line.
 
@@ -444,16 +449,19 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         # Mid-turn input remains pending until the agent confirms its injection.
         is_slash = text.startswith("/")
         is_at_name = self.multi_creature_enabled and text.startswith("@")
-        if self._processing and not is_slash and not is_at_name:
+        if self._focused_is_processing() and not is_slash and not is_at_name:
+            target_agent = self.agent
             self.live_region.add_queued_input(text)
             self._invalidate()
-            spawn(self._mid_turn_inject(text))
+            spawn(self._mid_turn_inject(text, target_agent))
             return
 
-        if self._pending_task and not self._pending_task.done():
-            self._pending_task.cancel()
+        pending = self._focused_pending_task()
+        focused_processing = self._focused_is_processing()
+        if pending and not pending.done():
+            pending.cancel()
             # The engine owns the active turn, so cancelling this wrapper is insufficient.
-            if self._processing:
+            if focused_processing:
                 self.agent.interrupt()
 
         # Resolve @name before slash commands so targeted commands reach that creature.
@@ -463,6 +471,7 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
                 if redirect.is_broadcast:
                     self.commit_user_message_broadcast(text)
                     self._pending_task = spawn(self.broadcast_to_all(redirect.payload))
+                    self._pending_task_target = self._focused_target_id()
                 else:
                     target = self.resolve_creature_by_name(redirect.name)
                     if target is None:
@@ -472,38 +481,100 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
                         self._invalidate()
                         return
                     self.commit_user_message_for(target.creature_id, text)
-                    self._pending_task = spawn(
-                        self.inject_to_creature(target.creature_id, redirect.payload)
+                    self._spawn_agent_turn(
+                        redirect.payload,
+                        target_id=target.creature_id,
+                        target_agent=target.agent,
+                        target_region=self.live_region_widgets[target.creature_id],
                     )
                 return
 
         self._commit_user_message(text)
 
         if text.startswith("/"):
-            self._pending_task = spawn(self._handle_slash(text))
+            self._spawn_slash(text)
             return
 
-        self._processing = True
-        self.live_region.set_processing(True)
+        self._spawn_agent_turn(
+            text,
+            target_id=self._focused_target_id(),
+            target_agent=self.agent,
+            target_region=self.live_region,
+        )
+
+    def _focused_target_id(self) -> str:
+        if self.multi_creature_enabled:
+            return self.focus_controller.focus_id
+        return ""
+
+    def _focused_pending_task(self) -> asyncio.Task | None:
+        if not self.multi_creature_enabled:
+            return self._pending_task
+        target_id = self._focused_target_id()
+        turn_task = self._turn_tasks.get(target_id)
+        if turn_task and not turn_task.done():
+            return turn_task
+        if self._pending_task_target == target_id:
+            return self._pending_task
+        return None
+
+    def _focused_is_processing(self) -> bool:
+        if not self.multi_creature_enabled and self._processing:
+            return True
+        target_id = self._focused_target_id()
+        turn_task = self._turn_tasks.get(target_id)
+        if turn_task and not turn_task.done():
+            return True
+        processing_task = getattr(self.agent, "_processing_task", None)
+        return bool(processing_task and not processing_task.done())
+
+    def _spawn_agent_turn(
+        self,
+        text: str,
+        *,
+        target_id: str,
+        target_agent: Any,
+        target_region: LiveRegion,
+    ) -> asyncio.Task:
+        """Start and track one foreground turn for a captured creature."""
+        key = target_id if self.multi_creature_enabled else ""
+        target_region.set_processing(True)
+        if not self.multi_creature_enabled:
+            self._processing = True
         self._invalidate()
 
-        async def _send():
+        async def _send() -> None:
             try:
-                await self.agent.inject_input(text, source="cli")
+                await target_agent.inject_input(text, source="cli")
             except Exception as e:
                 logger.exception("Error processing input", error=str(e))
             finally:
-                self._processing = False
-                self.live_region.set_processing(False)
-                # Close a deferred rule even when the turn ends without more output.
-                self.committer.flush_block_close()
-                self._invalidate()
+                current = asyncio.current_task()
+                if self._turn_tasks.get(key) is current:
+                    self._turn_tasks.pop(key, None)
+                    target_region.set_processing(False)
+                    if not self.multi_creature_enabled:
+                        self._processing = False
+                    self.committer.flush_block_close()
+                    self._invalidate()
 
-        self._pending_task = spawn(_send())
+        task = spawn(_send())
+        self._turn_tasks[key] = task
+        self._pending_task = task
+        self._pending_task_target = key
+        return task
 
-    async def _mid_turn_inject(self, text: str) -> None:
+    def _spawn_slash(self, text: str) -> asyncio.Task:
+        """Run a slash command and associate it with the focused creature."""
+        target_id = self._focused_target_id()
+        task = spawn(self._handle_slash(text))
+        self._pending_task = task
+        self._pending_task_target = target_id
+        return task
+
+    async def _mid_turn_inject(self, text: str, target_agent: Any = None) -> None:
         try:
-            await self.agent.inject_input(text, source="cli")
+            await (target_agent or self.agent).inject_input(text, source="cli")
         except asyncio.CancelledError:
             raise
         except Exception as e:
@@ -566,6 +637,9 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         self._invalidate()
 
     async def _handle_slash(self, text: str) -> None:
+        target_id = self._focused_target_id()
+        target_agent = self.agent
+        target_region = self.live_region
         name, args = parse_slash_command(text)
 
         # Bare /model is interactive; selectors use the command implementation.
@@ -605,7 +679,7 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
             return
 
         try:
-            result = await self.agent._try_slash_command_text(text)
+            result = await target_agent._try_slash_command_text(text)
         except Exception as e:
             self._commit_text(f"[red]Command error:[/red] {e}")
             return
@@ -619,22 +693,12 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         elif result.output and result.consumed:
             self._commit_text(result.output)
         elif result.output:
-            self._processing = True
-            self.live_region.set_processing(True)
-            self._invalidate()
-
-            async def _send_skill_turn():
-                try:
-                    await self.agent.inject_input(result.output, source="cli")
-                except Exception as e:
-                    logger.exception("Error processing skill slash input", error=str(e))
-                finally:
-                    self._processing = False
-                    self.live_region.set_processing(False)
-                    self.committer.flush_block_close()
-                    self._invalidate()
-
-            self._pending_task = spawn(_send_skill_turn())
+            self._spawn_agent_turn(
+                result.output,
+                target_id=target_id,
+                target_agent=target_agent,
+                target_region=target_region,
+            )
 
         if name in ("exit", "quit"):
             self._exit_requested = True
@@ -707,14 +771,14 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         if self._ctrl_c_reset_task and not self._ctrl_c_reset_task.done():
             self._ctrl_c_reset_task.cancel()
             self._ctrl_c_reset_task = None
-        if self._processing and self.agent:
+        if self._focused_is_processing() and self.agent:
             try:
                 self.agent.interrupt()
             except Exception as e:
                 logger.exception("Interrupt failed", error=str(e))
 
     def _on_ctrl_c(self) -> None:
-        if self._processing:
+        if self._focused_is_processing():
             self._on_interrupt()
             return
         if self._ctrl_c_armed:
@@ -793,7 +857,7 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         """Apply a picker selection through the standard /model command path."""
         if not selector:
             return
-        self._pending_task = spawn(self._handle_slash(f"/model {selector}"))
+        self._spawn_slash(f"/model {selector}")
 
     def _get_composer_text(self) -> str:
         """Return composer text for interactive overlay prompts."""

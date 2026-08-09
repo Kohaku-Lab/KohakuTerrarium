@@ -15,6 +15,7 @@ a real terminal). They DO exercise:
   so the Tab / Shift+Tab / Ctrl+A keys reach the right handlers
 """
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -29,6 +30,7 @@ class _FakeAgent:
         self.input = None
         self.output_router = SimpleNamespace(default_output=None)
         self.injected: list[str] = []
+        self.interrupt_calls = 0
         self._processing_task = None
         self._active_handles: dict = {}
         self._last_activity_ts = None
@@ -39,6 +41,9 @@ class _FakeAgent:
 
     async def inject_input(self, text, source="cli"):
         self.injected.append(text)
+
+    def interrupt(self):
+        self.interrupt_calls += 1
 
 
 class _FakeCreature:
@@ -163,6 +168,129 @@ class TestComposerCallbacks:
         assert app.agent_overlay.visible is False
         app.composer._on_open_overlay()
         assert app.agent_overlay.visible is True
+
+
+class TestPerCreatureTurnLifecycle:
+    @pytest.mark.asyncio
+    async def test_targeted_turn_interrupts_target_after_focus_change(self, multi_app):
+        app, engine = multi_app
+        bob = engine.get_creature("c2").agent
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_for_release(text, source="cli"):
+            bob.injected.append(text)
+            started.set()
+            await release.wait()
+
+        bob.inject_input = wait_for_release
+        app._handle_submit("@bob long task")
+        task = app._pending_task
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        assert app.live_region_widgets["c2"]._turn_active is True
+        app.set_focus("c2")
+        app._on_ctrl_c()
+
+        assert bob.interrupt_calls == 1
+        assert app._ctrl_c_armed is False
+        release.set()
+        await task
+
+    @pytest.mark.asyncio
+    async def test_turn_completion_clears_its_original_live_region(self, multi_app):
+        app, engine = multi_app
+        alice = engine.get_creature("c1").agent
+        started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_for_release(text, source="cli"):
+            alice.injected.append(text)
+            started.set()
+            await release.wait()
+
+        alice.inject_input = wait_for_release
+        app._handle_submit("alice task")
+        task = app._pending_task
+        await asyncio.wait_for(started.wait(), timeout=1)
+        assert app.live_region_widgets["c1"]._turn_active is True
+
+        app.set_focus("c2")
+        release.set()
+        await task
+
+        assert app.live_region_widgets["c1"]._turn_active is False
+        assert app.live_region_widgets["c2"]._turn_active is False
+
+    @pytest.mark.asyncio
+    async def test_idle_focus_can_start_turn_while_another_creature_runs(
+        self, multi_app
+    ):
+        app, engine = multi_app
+        alice = engine.get_creature("c1").agent
+        bob = engine.get_creature("c2").agent
+        alice_started = asyncio.Event()
+        bob_started = asyncio.Event()
+        release = asyncio.Event()
+
+        async def wait_alice(text, source="cli"):
+            alice.injected.append(text)
+            alice_started.set()
+            await release.wait()
+
+        async def wait_bob(text, source="cli"):
+            bob.injected.append(text)
+            bob_started.set()
+            await release.wait()
+
+        alice.inject_input = wait_alice
+        bob.inject_input = wait_bob
+        app._handle_submit("alice task")
+        alice_task = app._pending_task
+        await asyncio.wait_for(alice_started.wait(), timeout=1)
+
+        app.set_focus("c2")
+        app._handle_submit("bob task")
+        bob_task = app._pending_task
+        await asyncio.wait_for(bob_started.wait(), timeout=1)
+
+        assert bob_task is not alice_task
+        assert app.live_region_widgets["c1"]._turn_active is True
+        assert app.live_region_widgets["c2"]._turn_active is True
+
+        release.set()
+        await asyncio.gather(alice_task, bob_task)
+
+    @pytest.mark.asyncio
+    async def test_mid_turn_injection_keeps_submit_time_agent(self, multi_app):
+        app, engine = multi_app
+        alice = engine.get_creature("c1").agent
+        bob = engine.get_creature("c2").agent
+        first_started = asyncio.Event()
+        follow_up_seen = asyncio.Event()
+        release = asyncio.Event()
+
+        async def inject_alice(text, source="cli"):
+            alice.injected.append(text)
+            if text == "first task":
+                first_started.set()
+                await release.wait()
+            else:
+                follow_up_seen.set()
+
+        alice.inject_input = inject_alice
+        app._handle_submit("first task")
+        first_task = app._pending_task
+        await asyncio.wait_for(first_started.wait(), timeout=1)
+
+        app._handle_submit("follow up")
+        app.set_focus("c2")
+        await asyncio.wait_for(follow_up_seen.wait(), timeout=1)
+
+        assert alice.injected == ["first task", "follow up"]
+        assert bob.injected == []
+        release.set()
+        await first_task
 
 
 class TestPickerIntegration:
