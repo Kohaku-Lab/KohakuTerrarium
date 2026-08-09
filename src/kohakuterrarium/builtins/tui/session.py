@@ -88,10 +88,19 @@ class TUISession(TabModelRegistryMixin):
         self._pending_safe_calls: list[tuple[Any, tuple[Any, ...]]] = []
 
     def set_terrarium_tabs(self, tabs: list[str]) -> None:
-        """Configure terrarium tabs before startup."""
-        self._terrarium_tabs = tabs
-        if tabs:
-            self._active_target = tabs[0]
+        """Configure terrarium tabs and reconcile a running application."""
+        normalized = list(dict.fromkeys(tabs))
+        active = self.get_active_tab() if self._app else self._active_target
+        self._terrarium_tabs = normalized
+        self._active_target = (
+            active if active in normalized else normalized[0] if normalized else ""
+        )
+        if not self._app:
+            return
+        if not self._app.is_running:
+            self._app._terrarium_tabs = normalized
+            return
+        self._safe_call(self._app.reconcile_terrarium_tabs, normalized)
 
     def set_active_target(self, target: str) -> None:
         """Set the tab that receives new output widgets."""
