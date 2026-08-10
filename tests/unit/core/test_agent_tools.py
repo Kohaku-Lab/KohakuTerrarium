@@ -857,7 +857,7 @@ class TestStartToolAsync:
 
         ex = Executor()
         ex.register_tool(_Echo())
-        ex._results["pre"] = JobResult(job_id="pre", output="cached")
+        ex.job_store.store_result(JobResult(job_id="pre", output="cached"))
 
         # Stub submit_from_event to return our pre-cached job id, with
         # no Task entry in ``_tasks`` — exercising the synthetic-task path.
