@@ -19,6 +19,7 @@ from kohakuterrarium.core.config_types import (
 )
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.output import OutputRecorder
+from kohakuterrarium.utils.async_utils import cancel_tasks
 
 
 async def _make_agent(tmp_path, llm_holder):
@@ -879,7 +880,7 @@ class TestTuiStdinStealFix:
             "F2 / F3 modal action handlers can reach the live agent."
         )
 
-    def test_tui_main_loop_uses_fire_and_forget_inject(self):
+    async def test_tui_main_loop_uses_fire_and_forget_inject(self):
         # Regression: the engine's input loop MUST NOT ``await
         # focus.inject_input(text)`` inline. Awaiting blocks the loop
         # for the entire turn — a second user message that arrives
@@ -922,6 +923,27 @@ class TestTuiStdinStealFix:
             "focus.inject_input(text, ...)`` inline — this defeats "
             "mid-turn injection."
         )
+
+        cleanup_idx = text.index("await cancel_tasks(inflight_inputs)", try_idx)
+        finally_idx = text.index("    finally:", try_idx)
+        assert cleanup_idx > finally_idx
+
+        cancelled = asyncio.Event()
+
+        async def _pending_input() -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        task = asyncio.create_task(_pending_input())
+        await asyncio.sleep(0)
+        inflight = {task}
+        await cancel_tasks(inflight)
+
+        assert task.cancelled()
+        assert cancelled.is_set()
+        assert inflight == set()
 
     def test_handle_tui_slash_falls_through_for_other_commands(self):
         # Other slash commands (e.g. ``/help``, ``/clear``) MUST fall
