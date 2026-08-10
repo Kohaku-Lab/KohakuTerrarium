@@ -515,7 +515,7 @@ class SubAgent:
             for tc, result in zip(tool_calls, tool_results):
                 prefix = f"[{tc.name}]"
                 if result.startswith(prefix):
-                    if "Error:" in result:
+                    if result.startswith(f"{prefix} Error:"):
                         error_msg = result.split("Error:", 1)[-1].strip()[:100]
                         self.on_tool_activity("tool_error", tc.name, error_msg)
                     else:
