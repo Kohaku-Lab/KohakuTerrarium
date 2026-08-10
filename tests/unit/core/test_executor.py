@@ -9,7 +9,7 @@ import pytest
 
 from kohakuterrarium.core.events import EventType
 from kohakuterrarium.core.executor import Executor
-from kohakuterrarium.core.job import JobState
+from kohakuterrarium.core.job import JobState, JobStore
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -177,6 +177,7 @@ class TestErrorPaths:
         assert result.exit_code == 1
         status = ex.get_status(jid)
         assert status.state == JobState.ERROR
+        assert ex.get_result(jid) is result
 
 
 def _agent(skill_mode="dynamic", has_info=True):
@@ -390,8 +391,8 @@ class TestWaitTimeouts:
         ex.register_tool(_EchoTool())
         jid = await ex.submit("echo", {"msg": "x"})
         await ex.wait_for(jid)
-        # Drop task — second wait hits cached _results path.
-        ex._tasks.pop(jid, None)
+        await asyncio.sleep(0)
+        assert ex.get_task(jid) is None
         cached = await ex.wait_for(jid)
         assert cached is not None
         assert cached.output == "x"
@@ -403,13 +404,18 @@ class TestWaitTimeouts:
     async def test_wait_for_timeout(self):
         ex = Executor()
         ex.register_tool(_SlowTool())
-        jid = await ex.submit("slow", {"seconds": 5.0})
+        jid = await ex.submit("slow", {"seconds": 0.05})
         out = await ex.wait_for(jid, timeout=0.005)
-        # Either ``None`` (timeout path) or a cancelled JobResult — both
-        # acceptable outcomes depending on how the race resolves. The
-        # important invariant is the wait returned promptly.
-        assert out is None or out.error is not None
-        await ex.cancel(jid)
+        assert out is None
+        assert ex.get_status(jid).state == JobState.RUNNING
+        task = ex.get_task(jid)
+        assert task is not None
+        assert task.done() is False
+
+        completed = await ex.wait_for(jid, timeout=1.0)
+        assert completed is not None
+        assert completed.output == "done"
+        assert completed.error is None
 
     async def test_wait_all_empty(self):
         ex = Executor()
@@ -427,14 +433,15 @@ class TestWaitTimeouts:
     async def test_wait_all_timeout_returns_done_so_far(self):
         ex = Executor()
         ex.register_tool(_SlowTool())
-        jid = await ex.submit("slow", {"seconds": 5.0})
+        jid = await ex.submit("slow", {"seconds": 0.05})
         await asyncio.sleep(0.001)
-        # Timeout short — wait_all returns whatever finished by then.
         out = await ex.wait_all(timeout=0.005)
-        # If anything came back, it was the cancelled job's result.
-        for r in out.values():
-            assert r.error is not None
-        await ex.cancel(jid)
+        assert jid not in out
+        assert ex.get_status(jid).state == JobState.RUNNING
+
+        completed = await ex.wait_for(jid, timeout=1.0)
+        assert completed is not None
+        assert completed.output == "done"
 
 
 # ── output normalisation hook ────────────────────────────────────
@@ -486,6 +493,24 @@ class TestAccessors:
         jid = await ex.submit("slow", {"seconds": 1.0})
         assert ex.get_pending_count() == 1
         await ex.cancel(jid)
+        await ex.wait_for(jid)
+        assert ex.get_pending_count() == 0
+
+    async def test_completed_tasks_follow_job_store_retention(self):
+        ex = Executor(job_store=JobStore(max_completed=2))
+        ex.register_tool(_EchoTool())
+        job_ids = []
+        for index in range(5):
+            job_id = await ex.submit("echo", {"msg": str(index)})
+            job_ids.append(job_id)
+            await ex.wait_for(job_id)
+        await asyncio.sleep(0)
+
+        assert ex._tasks == {}
+        assert ex.get_pending_count() == 0
+        assert ex.get_result(job_ids[0]) is None
+        assert ex.get_result(job_ids[-1]).output == "4"
+        assert set(await ex.wait_all()) == set(job_ids[-2:])
 
     async def test_get_task(self):
         ex = Executor()
@@ -494,6 +519,8 @@ class TestAccessors:
         task = ex.get_task(jid)
         assert task is not None
         await task
+        await asyncio.sleep(0)
+        assert ex.get_task(jid) is None
         assert ex.get_task("nope") is None
 
     async def test_get_running_jobs(self):

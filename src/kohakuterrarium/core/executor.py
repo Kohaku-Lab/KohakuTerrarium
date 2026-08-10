@@ -34,7 +34,6 @@ class Executor:
         self.job_store = job_store or JobStore()
         self._tools: dict[str, Tool] = {}
         self._tasks: dict[str, asyncio.Task[JobResult]] = {}
-        self._results: dict[str, JobResult] = {}
         self._on_complete = on_complete
         self._event_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
 
@@ -160,6 +159,11 @@ class Executor:
 
         task = asyncio.create_task(self._run_tool(job_id, tool, args, is_direct))
         self._tasks[job_id] = task
+        task.add_done_callback(
+            lambda completed, jid=job_id, direct=is_direct: self._finalize_task(
+                jid, completed, direct
+            )
+        )
 
         logger.info("Running tool: %s", tool_name)
         logger.debug("Tool job submitted", job_id=job_id, tool_name=tool_name)
@@ -230,7 +234,7 @@ class Executor:
                     exit_code=1,
                     error=error_msg,
                 )
-                self._results[job_id] = job_result
+                self.job_store.store_result(job_result)
                 return job_result
 
             context = self._build_tool_context()
@@ -291,7 +295,6 @@ class Executor:
                 error=result.error,
             )
             self.job_store.store_result(job_result)
-            self._results[job_id] = job_result
 
             status = "done" if result.success else "failed"
             logger.info("Tool %s: %s", tool.tool_name, status)
@@ -324,7 +327,6 @@ class Executor:
 
             job_result = JobResult(job_id=job_id, error=error_msg)
             self.job_store.store_result(job_result)
-            self._results[job_id] = job_result
 
             if not is_direct:
                 event = create_tool_complete_event(
@@ -349,7 +351,6 @@ class Executor:
 
             job_result = JobResult(job_id=job_id, error=str(e))
             self.job_store.store_result(job_result)
-            self._results[job_id] = job_result
 
             if not is_direct:
                 event = create_tool_complete_event(
@@ -362,6 +363,46 @@ class Executor:
                 await self._event_queue.put(event)
 
             return job_result
+
+    def _finalize_task(
+        self,
+        job_id: str,
+        task: asyncio.Task[JobResult],
+        is_direct: bool,
+    ) -> None:
+        """Release completed tasks and record cancellation before coroutine entry."""
+        if self._tasks.get(job_id) is task:
+            self._tasks.pop(job_id, None)
+        if not task.cancelled() or self.job_store.get_result(job_id) is not None:
+            return
+
+        error_msg = "User manually interrupted this job."
+        self.job_store.update_status(
+            job_id,
+            state=JobState.CANCELLED,
+            error=error_msg,
+        )
+        result = JobResult(job_id=job_id, error=error_msg)
+        self.job_store.store_result(result)
+        if is_direct:
+            return
+        event = create_tool_complete_event(
+            job_id=job_id,
+            content="",
+            error=error_msg,
+        )
+        if self._on_complete:
+            self._on_complete(event)
+        self._event_queue.put_nowait(event)
+
+    def _retained_results(self) -> dict[str, JobResult]:
+        """Return the bounded completed-result history owned by the JobStore."""
+        results: dict[str, JobResult] = {}
+        for status in self.job_store.get_completed_jobs():
+            result = self.job_store.get_result(status.job_id)
+            if result is not None:
+                results[status.job_id] = result
+        return results
 
     def _build_tool_context(self) -> ToolContext:
         """Build ToolContext for context-aware tools."""
@@ -391,43 +432,29 @@ class Executor:
         """Wait for a job result, returning ``None`` on timeout or unknown id."""
         task = self._tasks.get(job_id)
         if task is None:
-            return self._results.get(job_id)
+            return self.job_store.get_result(job_id)
 
         try:
-            return await asyncio.wait_for(task, timeout=timeout)
+            return await asyncio.wait_for(asyncio.shield(task), timeout=timeout)
         except asyncio.TimeoutError:
             logger.warning("Wait timed out", job_id=job_id)
             return None
+        except asyncio.CancelledError:
+            if task.cancelled():
+                return self.job_store.get_result(job_id)
+            raise
 
     async def wait_all(
         self,
         timeout: float | None = None,
     ) -> dict[str, JobResult]:
         """Wait for tracked jobs and return results available before timeout."""
-        if not self._tasks:
-            return {}
-
         tasks = list(self._tasks.values())
-        job_ids = list(self._tasks.keys())
-
-        try:
-            results = await asyncio.wait_for(
-                asyncio.gather(*tasks, return_exceptions=True),
-                timeout=timeout,
-            )
-
-            return {
-                job_id: result
-                for job_id, result in zip(job_ids, results)
-                if isinstance(result, JobResult)
-            }
-        except asyncio.TimeoutError:
-            logger.warning("Wait all timed out")
-            return {
-                job_id: self._results[job_id]
-                for job_id in job_ids
-                if job_id in self._results
-            }
+        if tasks:
+            _, pending = await asyncio.wait(tasks, timeout=timeout)
+            if pending:
+                logger.warning("Wait all timed out")
+        return self._retained_results()
 
     async def cancel(self, job_id: str) -> bool:
         """Cancel a running job and report whether cancellation was requested."""
@@ -446,15 +473,15 @@ class Executor:
 
     def get_result(self, job_id: str) -> JobResult | None:
         """Get job result (if completed)."""
-        return self._results.get(job_id) or self.job_store.get_result(job_id)
+        return self.job_store.get_result(job_id)
 
     def get_task(self, job_id: str) -> asyncio.Task | None:
         """Return the task tracking ``job_id``, if present."""
         return self._tasks.get(job_id)
 
     def get_pending_count(self) -> int:
-        """Return the number of tasks still tracked by the executor."""
-        return len(self._tasks)
+        """Return the number of unfinished tasks tracked by the executor."""
+        return sum(not task.done() for task in self._tasks.values())
 
     def get_running_jobs(self) -> list[JobStatus]:
         """Get all running jobs."""
