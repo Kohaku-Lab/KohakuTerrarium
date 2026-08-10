@@ -487,7 +487,9 @@ class SubAgent:
             preview=preview + ("..." if len(assistant_content) > 200 else ""),
         )
 
-    async def _execute_and_report_tools(self, tool_calls: list[ToolCallEvent]) -> str:
+    async def _execute_and_report_tools(
+        self, tool_calls: list[ToolCallEvent]
+    ) -> list[str]:
         """Execute tools, notifying parent of start/done via callback."""
         logger.info(
             "Sub-agent executing tools",
@@ -508,36 +510,31 @@ class SubAgent:
         tool_results = await self._execute_tools(tool_calls)
 
         if self.on_tool_activity:
-            for tc in tool_calls:
+            # Results are positional: attribute each preview to its own call so
+            # several calls to the same tool don't all report the first block.
+            for tc, result in zip(tool_calls, tool_results):
                 prefix = f"[{tc.name}]"
-                for block in tool_results.split("\n\n"):
-                    if block.startswith(prefix):
-                        if "Error:" in block:
-                            error_msg = block.split("Error:", 1)[-1].strip()[:100]
-                            self.on_tool_activity("tool_error", tc.name, error_msg)
-                        else:
-                            preview = block[len(prefix) :].strip()[:100]
-                            self.on_tool_activity("tool_done", tc.name, preview)
-                        break
+                if result.startswith(prefix):
+                    if "Error:" in result:
+                        error_msg = result.split("Error:", 1)[-1].strip()[:100]
+                        self.on_tool_activity("tool_error", tc.name, error_msg)
+                    else:
+                        preview = result[len(prefix) :].strip()[:100]
+                        self.on_tool_activity("tool_done", tc.name, preview)
                 else:
                     self.on_tool_activity("tool_done", tc.name, "")
 
         return tool_results
 
     def _append_tool_results(
-        self, tool_calls: list[ToolCallEvent], tool_results: str
+        self, tool_calls: list[ToolCallEvent], tool_results: list[str]
     ) -> None:
         """Add tool results to conversation in the appropriate format."""
         if self._is_native:
-            for tc in tool_calls:
+            for tc, result_text in zip(tool_calls, tool_results):
                 tool_call_id = tc.args.get("_tool_call_id", "")
-                result_text = ""
-                for r in tool_results.split("\n\n") if tool_results else []:
-                    if r.startswith(f"[{tc.name}]"):
-                        result_text = r
-                        break
                 if not result_text:
-                    result_text = tool_results or "(no output)"
+                    result_text = "(no output)"
                 if tool_call_id:
                     self.conversation.append(
                         "tool",
@@ -547,7 +544,7 @@ class SubAgent:
                     )
         else:
             if tool_results:
-                self.conversation.append("user", tool_results)
+                self.conversation.append("user", "\n\n".join(tool_results))
 
     def _build_result(
         self, output_parts: list[str], tools_used: list[str]
@@ -595,8 +592,8 @@ class SubAgent:
             metadata={"tools_used": tools_used},
         )
 
-    async def _execute_tools(self, tool_calls: list[ToolCallEvent]) -> str:
-        """Execute tool calls and return formatted results."""
+    async def _execute_tools(self, tool_calls: list[ToolCallEvent]) -> list[str]:
+        """Execute tool calls and return one formatted result per call."""
         results: list[str] = []
 
         for tool_call in tool_calls:
@@ -674,7 +671,7 @@ class SubAgent:
                     error=str(e),
                 )
 
-        return "\n\n".join(results)
+        return results
 
     def _calculate_duration(self) -> float:
         """Calculate elapsed time."""

@@ -302,6 +302,58 @@ class TestNativeMode:
         assert result.total_tokens == 30  # 15 per turn × 2 turns
         assert result.cached_tokens == 6
 
+    async def test_native_same_name_tool_calls_keep_own_results(self):
+        # Regression: several calls to the SAME tool in one turn must each
+        # receive their own result and preview; the old first-prefix-match
+        # logic replayed the first block for every call.
+        class _ReadStub(BaseTool):
+            @property
+            def tool_name(self):
+                return "read"
+
+            @property
+            def description(self):
+                return "stub read"
+
+            async def execute(self, args, context=None):
+                return ToolResult(output=f"content of {args['path']}")
+
+        activities: list[tuple] = []
+
+        class _TwoReadLLM(_NativeLLM):
+            async def chat(self, messages, *, stream=True, tools=None, **kwargs):
+                self._turn += 1
+                if self._turn == 1:
+                    self.last_tool_calls = [
+                        _NativeToolCall("call-a", "read", '{"path": "a.go"}'),
+                        _NativeToolCall("call-b", "read", '{"path": "b.go"}'),
+                    ]
+                    yield ""
+                else:
+                    self.last_tool_calls = []
+                    yield "native run complete"
+
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["read"], max_turns=5),
+            _registry(_ReadStub()),
+            _TwoReadLLM(),
+            tool_format="native",
+        )
+        sa.on_tool_activity = lambda *args: activities.append(args)
+        result = await sa.run("read both")
+        assert result.success is True
+
+        tool_msgs = [
+            m for m in sa.conversation.to_messages() if m.get("role") == "tool"
+        ]
+        by_id = {m.get("tool_call_id"): m.get("content") for m in tool_msgs}
+        # Each native call id receives its own file's content, not the first.
+        assert by_id["call-a"] == "[read]\ncontent of a.go"
+        assert by_id["call-b"] == "[read]\ncontent of b.go"
+
+        dones = [a for a in activities if a[0] == "tool_done"]
+        assert [a[2] for a in dones] == ["content of a.go", "content of b.go"]
+
 
 class _UsageLLM:
     """Text-mode LLM that reports token usage."""
@@ -491,7 +543,7 @@ class TestToolExecutionEdgeCases:
         results = await sa._execute_tools(
             [ToolCallEvent(name="not_registered", args={})]
         )
-        assert "Error: Tool not available" in results
+        assert "Error: Tool not available" in results[0]
 
     async def test_str_returning_tool_is_wrapped(self):
         # A tool whose execute() yields a bare str (not ToolResult) is
@@ -520,7 +572,7 @@ class TestToolExecutionEdgeCases:
         from kohakuterrarium.parsing import ToolCallEvent
 
         results = await sa._execute_tools([ToolCallEvent(name="stringy", args={})])
-        assert "raw string" in results
+        assert "raw string" in results[0]
 
     async def test_tool_raising_exception_is_caught(self):
         class _RaiseTool(BaseTool):
@@ -548,7 +600,7 @@ class TestToolExecutionEdgeCases:
 
         results = await sa._execute_tools([ToolCallEvent(name="raiser", args={})])
         # The exception is caught and surfaced as an error block.
-        assert "Error: tool internal error" in results
+        assert "Error: tool internal error" in results[0]
 
 
 class TestParserFormatResolution:

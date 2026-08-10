@@ -259,7 +259,7 @@ class InteractiveSubAgent(SubAgent):
 
                     tool_results = await self._execute_tools(tool_calls)
                     if tool_results:
-                        self.conversation.append("user", tool_results)
+                        self.conversation.append("user", "\n\n".join(tool_results))
 
                 final_output = "".join(output_parts).strip()
                 complete_output = InteractiveOutput(
