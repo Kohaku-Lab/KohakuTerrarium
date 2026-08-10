@@ -24,9 +24,7 @@ class TestResolveConsoleScripts:
         expected = windows_script if service.os.name == "nt" else bin_script
         assert service._resolve_kt_executable() == str(expected)
 
-    def test_kt_falls_back_to_windows_virtualenv_scripts(
-        self, tmp_path, monkeypatch
-    ):
+    def test_kt_falls_back_to_windows_virtualenv_scripts(self, tmp_path, monkeypatch):
         monkeypatch.setattr(service.shutil, "which", lambda _name: None)
         monkeypatch.setattr(service.sys, "exec_prefix", str(tmp_path))
         executable = tmp_path / "Scripts" / "kt.exe"
