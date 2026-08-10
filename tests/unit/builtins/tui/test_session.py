@@ -57,8 +57,6 @@ async def test_background_tab_culling_keeps_target_history_count() -> None:
             session.add_system_notice(f"background-{index}", target="bob")
             await pilot.pause()
 
-        bob_chat = session._app.query_one(
-            f"#chat-{_safe_id('bob')}", VerticalScroll
-        )
+        bob_chat = session._app.query_one(f"#chat-{_safe_id('bob')}", VerticalScroll)
         assert len(bob_chat.children) == 2
         assert session._culled_count == {"bob": 2}

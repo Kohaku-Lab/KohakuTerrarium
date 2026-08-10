@@ -924,9 +924,7 @@ class TestTuiStdinStealFix:
             "mid-turn injection."
         )
 
-        cleanup_idx = text.index(
-            "await cancel_tasks(inflight_inputs)", try_idx
-        )
+        cleanup_idx = text.index("await cancel_tasks(inflight_inputs)", try_idx)
         finally_idx = text.index("    finally:", try_idx)
         assert cleanup_idx > finally_idx
 
