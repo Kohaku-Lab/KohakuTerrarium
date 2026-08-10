@@ -13,6 +13,7 @@ Pins the headline contracts:
 import kohakuterrarium as kt
 from kohakuterrarium.bootstrap.plugins import _load_one
 from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputConfig
+from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.function import FunctionTool
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -53,6 +54,17 @@ class TestFunctionTool:
     async def test_sync_function_executes(self):
         result = await add_numbers.execute({"a": 2, "b": 40})
         assert result.output == "42"
+
+    async def test_sync_function_executes_through_executor(self):
+        executor = Executor()
+        executor.register_tool(add_numbers)
+        job_id = await executor.submit("add_numbers", {"a": 2, "b": 40})
+
+        result = await executor.wait_for(job_id)
+
+        assert result is not None
+        assert result.output == "42"
+        assert result.error is None
 
     async def test_async_function_executes(self):
         result = await async_shout.execute({"text": "hi"})
