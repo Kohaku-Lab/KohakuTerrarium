@@ -44,6 +44,7 @@ from kohakuterrarium.terrarium.engine_cli_commands import (
 )
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.utils.async_utils import cancel_tasks
 from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
 
 logger = get_logger(__name__)
@@ -324,13 +325,21 @@ async def run_engine_with_tui(
     # first turn holds the lock. Firing as a task hands the second
     # call into the agent immediately; ``_process_event`` detects the
     # lock is held and buffers it for the current turn's drain.
-    inflight_inputs: list[asyncio.Task] = []
+    inflight_inputs: set[asyncio.Task[Any]] = set()
 
     def _spawn_inject(coro) -> None:
         task = asyncio.create_task(coro)
-        inflight_inputs.append(task)
-        # Reap finished tasks so the list doesn't grow forever.
-        inflight_inputs[:] = [t for t in inflight_inputs if not t.done()]
+        inflight_inputs.add(task)
+
+        def _reap(completed: asyncio.Task[Any]) -> None:
+            inflight_inputs.discard(completed)
+            if completed.cancelled():
+                return
+            error = completed.exception()
+            if error is not None:
+                logger.error("TUI input injection failed", error=str(error))
+
+        task.add_done_callback(_reap)
 
     try:
         while True:
@@ -387,6 +396,7 @@ async def run_engine_with_tui(
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
     finally:
+        await cancel_tasks(inflight_inputs)
         restore_logging()
         refresh_task.cancel()
         try:

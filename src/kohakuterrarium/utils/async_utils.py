@@ -63,6 +63,17 @@ async def gather_with_concurrency(
     )
 
 
+async def cancel_tasks(tasks: set[asyncio.Task[Any]]) -> None:
+    """Cancel and join a mutable set of owned tasks, then clear it."""
+    pending = tuple(tasks)
+    for task in pending:
+        if not task.done():
+            task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
+    tasks.clear()
+
+
 async def retry_async(
     func: Callable[..., Awaitable[T]],
     *args: Any,

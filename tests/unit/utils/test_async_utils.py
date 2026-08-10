@@ -6,6 +6,7 @@ import pytest
 
 from kohakuterrarium.utils.async_utils import (
     AsyncQueue,
+    cancel_tasks,
     collect_async_iterator,
     first_result,
     gather_with_concurrency,
@@ -91,6 +92,27 @@ class TestGatherWithConcurrency:
         assert out[0] == 1
         assert isinstance(out[1], RuntimeError)
         assert out[2] == 1
+
+
+class TestCancelTasks:
+    async def test_cancels_joins_and_clears_owned_tasks(self):
+        cancelled = asyncio.Event()
+
+        async def pending():
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        task = asyncio.create_task(pending())
+        await asyncio.sleep(0)
+        tasks = {task}
+
+        await cancel_tasks(tasks)
+
+        assert task.cancelled()
+        assert cancelled.is_set()
+        assert tasks == set()
 
 
 # ── retry_async ──────────────────────────────────────────────────────

@@ -150,6 +150,7 @@ class TUISession(TabModelRegistryMixin):
         if not self._app or not self._app.is_running:
             return
         scroll_id = self._get_chat_scroll_id(target)
+        target_key = target or self._active_target or "_default"
 
         def _do():
             try:
@@ -157,13 +158,13 @@ class TUISession(TabModelRegistryMixin):
                 chat.mount(widget)
                 if scroll:
                     chat.scroll_end(animate=False)
-                self._cull_chat_widgets(chat)
+                self._cull_chat_widgets(chat, target_key)
             except Exception as e:
                 logger.warning("TUI safe_mount failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
-    def _cull_chat_widgets(self, chat: VerticalScroll) -> None:
+    def _cull_chat_widgets(self, chat: VerticalScroll, target: str) -> None:
         """Cull old widgets while retaining the configured recent window."""
         children = list(chat.children)
         if len(children) <= self._max_chat_widgets:
@@ -172,7 +173,6 @@ class TUISession(TabModelRegistryMixin):
         remove_count = len(children) - self._cull_keep
         to_remove = children[:remove_count]
 
-        target = self._active_target or "_default"
         self._culled_count[target] = self._culled_count.get(target, 0) + remove_count
 
         for w in to_remove:
@@ -559,6 +559,7 @@ class TUISession(TabModelRegistryMixin):
         if not widget:
             return
         scroll_id = self._get_chat_scroll_id(target)
+        target_key = target or self._active_target or "_default"
 
         def _do():
             try:
@@ -574,7 +575,7 @@ class TUISession(TabModelRegistryMixin):
                 widget.remove()
                 if at_bottom:
                     chat.scroll_end(animate=False)
-                self._cull_chat_widgets(chat)
+                self._cull_chat_widgets(chat, target_key)
             except Exception as e:
                 logger.warning("TUI end_streaming failed", error=str(e), exc_info=True)
 
