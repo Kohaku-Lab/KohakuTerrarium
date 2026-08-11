@@ -18,8 +18,10 @@ _GENERIC_CONTRACT = (
     "an ordinary event. You interpret it, act with your normal tools, and report "
     "outcomes — the runtime owns identity, delivery, and recovery.\n"
     "- Ownership: you may create and manage your own drives; a drive owned by "
-    "someone else that is merely assigned to you is report/propose-only — do not "
-    "cancel, reassign, or retire it.\n"
+    "someone else that is merely assigned to you is report/propose-only — you "
+    "may set it to 'waiting' or 'blocked' to suspend pursuit (use 'blocked' when "
+    "you need user intervention), but do not cancel, reassign, retire, or pause "
+    "it.\n"
     "- Recovery: a redelivered drive may follow an attempt that already ran side "
     "effects. Inspect current state and reconcile before repeating actions.\n"
     "- Delivery: the active Drive's projected objective and identity arrive in "
@@ -28,8 +30,9 @@ _GENERIC_CONTRACT = (
     "- Progress: report material progress with evidence rather than narrating.\n"
     "- Completion: propose completion or failure with evidence for verification; "
     "do not assert a terminal outcome yourself.\n"
-    "- Budgets: obey wait/pause policy and any declared budgets; exhausting a "
-    "budget pauses or blocks a drive, it never means success."
+    "- Budgets: obey declared budgets; exhausting a budget stops continuation "
+    "without changing the drive's status — it never completes and never resumes "
+    "on its own. Recovery is an explicit owner act (raise the budget and wake)."
 )
 
 

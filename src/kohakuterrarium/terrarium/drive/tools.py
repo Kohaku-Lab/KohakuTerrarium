@@ -23,6 +23,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationDisabledError,
     DriveRegistrationIncompatibleError,
     DriveRegistrationNotFoundError,
+    DriveValidationError,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveRecord, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import (
@@ -232,15 +233,81 @@ class DriveCreateTool(_BaseDriveTool):
 
     @property
     def description(self) -> str:
-        return "Create a durable drive you own (kind, title, spec)"
+        return (
+            "Create a durable drive you own (kind, title, spec). Use kind='goal': "
+            "it is the only kind users can see and manage (via /goal), so prefer "
+            "it for anything a human should track. For 'goal', spec must include "
+            "a non-empty 'objective' and set spec.autonomy='continue_when_ready' "
+            "so the goal keeps driving you automatically."
+        )
 
     def get_parameters_schema(self) -> dict:
         return {
             "type": "object",
             "properties": {
-                "kind": {"type": "string"},
+                "kind": {
+                    "type": "string",
+                    "description": (
+                        "Drive kind; use 'goal' — the only kind with a "
+                        "user-facing surface (users see and manage it via /goal). "
+                        "Other kinds (e.g. 'generic') have no user command and are "
+                        "invisible to users. For 'goal', see the spec description."
+                    ),
+                },
                 "title": {"type": "string"},
-                "spec": {"type": "object"},
+                "spec": {
+                    "type": "object",
+                    "description": (
+                        "Kind-specific spec. For kind='goal', use the properties "
+                        "below ('objective' is required); other kinds treat spec "
+                        "as opaque."
+                    ),
+                    "properties": {
+                        "objective": {
+                            "type": "string",
+                            "description": (
+                                "Required for 'goal': the durable objective to pursue."
+                            ),
+                        },
+                        "autonomy": {
+                            "type": "string",
+                            "enum": ["manual", "continue_when_ready"],
+                            "description": (
+                                "Set 'continue_when_ready' so the goal keeps "
+                                "driving you automatically."
+                            ),
+                        },
+                        "success_criteria": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Optional criteria that would demonstrate completion."
+                            ),
+                        },
+                        "constraints": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional constraints the goal must respect.",
+                        },
+                        "completion_policy": {
+                            "type": "string",
+                            "enum": ["self_propose", "user_confirm", "verifier"],
+                            "description": "Optional; default 'self_propose'.",
+                        },
+                        "budgets": {
+                            "type": "object",
+                            "description": (
+                                "Optional pursuit limits; continuation stops when "
+                                "exhausted."
+                            ),
+                            "properties": {
+                                "max_turns": {"type": "integer"},
+                                "max_tool_calls": {"type": "integer"},
+                                "max_walltime_s": {"type": "integer"},
+                            },
+                        },
+                    },
+                },
                 "priority": {"type": "integer"},
                 "idempotency_key": {"type": "string"},
             },
@@ -285,6 +352,14 @@ class DriveCreateTool(_BaseDriveTool):
                 graph_id=call.graph_id,
                 is_privileged=call.is_privileged,
             )
+        except DriveValidationError as exc:
+            if kind == "goal":
+                return _err(
+                    f"invalid goal spec: {exc}; kind='goal' requires a spec with "
+                    "a non-empty 'objective' — e.g. spec={'objective': '...', "
+                    "'autonomy': 'continue_when_ready'}"
+                )
+            return _drive_error_result(exc)
         except DriveError as exc:
             return _drive_error_result(exc)
         return _ok(await _summary_with_actions(call, record))
@@ -455,17 +530,49 @@ class DriveTransitionTool(_BaseDriveTool):
 
     @property
     def description(self) -> str:
-        return "Transition a drive (pause/resume/…) or propose completed/failed"
+        return (
+            "Transition a drive you own, or as the assignee of a foreign-owned "
+            "drive set it to 'waiting'/'blocked' (use 'blocked' when you need "
+            "user intervention; 'paused'/'cancelled' are owner-only). Control "
+            "transitions require 'expected_revision' (see drive_status); "
+            "completed/failed go through proposal with evidence."
+        )
 
     def get_parameters_schema(self) -> dict:
         return {
             "type": "object",
             "properties": {
                 "drive_id": {"type": "string"},
-                "status": {"type": "string"},
-                "expected_revision": {"type": "integer"},
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "active",
+                        "waiting",
+                        "blocked",
+                        "paused",
+                        "cancelled",
+                        "completed",
+                        "failed",
+                    ],
+                    "description": (
+                        "Target status. As an assignee you may only set "
+                        "'waiting' or 'blocked'; 'paused'/'cancelled' require "
+                        "the owner; completed/failed go through proposal with "
+                        "evidence."
+                    ),
+                },
+                "expected_revision": {
+                    "type": "integer",
+                    "description": (
+                        "Current revision from drive_status; required for control "
+                        "transitions, optional for completed/failed proposals."
+                    ),
+                },
                 "reason": {"type": "string"},
-                "evidence": {"type": "object"},
+                "evidence": {
+                    "type": "object",
+                    "description": "Evidence for completed/failed proposals.",
+                },
             },
             "required": ["drive_id", "status"],
         }
@@ -509,6 +616,13 @@ class DriveTransitionTool(_BaseDriveTool):
                 actor=call.actor,
                 status_reason=(args.get("reason") or None),
                 is_privileged=call.is_privileged,
+            )
+        except DrivePermissionError as exc:
+            return _err(
+                f"permission denied: {exc}; as an assignee you may only "
+                "transition to 'waiting' or 'blocked' (use 'blocked' when you "
+                "need user intervention); 'paused' and 'cancelled' require the "
+                "owner"
             )
         except DriveError as exc:
             return _drive_error_result(exc)

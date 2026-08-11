@@ -145,8 +145,9 @@ _PROMPT = (
     "continuing commitment — never invent a new objective. On a recovery event, "
     "inspect the current world before repeating any side effect. Report material "
     "progress (or blocking) with evidence, and propose completion with evidence "
-    "rather than asserting it. Obey the goal's budgets and wait/pause policy; if a "
-    "budget is exhausted, propose pausing, never completing."
+    "rather than asserting it. Obey the goal's budgets; exhausting a budget stops "
+    "continuation without completing or resuming the goal — stop and report the "
+    "state so the owner can raise the budget and wake it."
 )
 
 # Per-field limits keep goal projections bounded before aggregate size checks.
