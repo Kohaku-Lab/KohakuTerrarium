@@ -50,6 +50,7 @@ def _fake_view(
     kind="goal",
     title="obj",
     created_at=0,
+    owner=ActorRef("user", "alice"),
 ):
     return SimpleNamespace(
         record=SimpleNamespace(
@@ -59,7 +60,7 @@ def _fake_view(
             kind=kind,
             spec=spec or {"objective": title, "autonomy": "manual"},
             title=title,
-            owner=ActorRef("user", "alice"),
+            owner=owner,
             created_at=created_at,
         ),
         assignee_creature_id="worker",
@@ -276,6 +277,63 @@ class TestGoalCommand:
         assert res.success, res.error
         assert svc.transition_call.target == DriveStatus.PAUSED
         assert svc.transition_call.is_privileged is False
+
+    async def test_pause_elevates_operator_for_creature_owned_goal(self):
+        # A goal created by a creature (owner=creature) is not the user's own;
+        # an operator user still manages it via explicit operator privilege.
+        svc = _FakeService(
+            views=[_fake_view(drive_id="d1", owner=ActorRef("creature", "worker"))]
+        )
+        cmd = GoalCommand()
+        res = await cmd._execute(
+            "pause d1",
+            _ctx(
+                service=svc,
+                creature_id="worker",
+                principal="user:alice",
+                is_operator=True,
+            ),
+        )
+        assert res.success, res.error
+        assert svc.transition_call.target == DriveStatus.PAUSED
+        assert svc.transition_call.is_privileged is True
+
+    async def test_pause_non_operator_user_does_not_elevate(self):
+        # A non-operator user is never elevated, even for creature-owned goals.
+        svc = _FakeService(
+            views=[_fake_view(drive_id="d1", owner=ActorRef("creature", "worker"))]
+        )
+        cmd = GoalCommand()
+        res = await cmd._execute(
+            "pause d1",
+            _ctx(
+                service=svc,
+                creature_id="worker",
+                principal="user:alice",
+                is_operator=False,
+            ),
+        )
+        assert res.success, res.error
+        assert svc.transition_call.is_privileged is False
+
+    async def test_complete_elevates_operator_for_creature_owned_goal(self):
+        # Completion of a creature-owned goal also rides the operator grant.
+        svc = _FakeService(
+            views=[_fake_view(drive_id="d1", owner=ActorRef("creature", "worker"))]
+        )
+        cmd = GoalCommand()
+        res = await cmd._execute(
+            "complete d1",
+            _ctx(
+                service=svc,
+                creature_id="worker",
+                principal="user:alice",
+                is_operator=True,
+            ),
+        )
+        assert res.success, res.error
+        assert svc.propose_call.target == DriveStatus.COMPLETED
+        assert svc.propose_call.is_privileged is True
 
     async def test_list_shows_only_live_goals_with_explicit_status(self):
         svc = _FakeService(

@@ -218,13 +218,15 @@ class GoalCommand(BaseUserCommand):
         view = await _select_eligible(ctx, drive_id, sub)
         if view is None:
             return _no_eligible_goal(sub)
-        # The authenticated owner can manage lifecycle without operator elevation.
+        # The authenticated owner can manage lifecycle without operator elevation;
+        # an operator user also manages goals created by their creatures.
+        elevated = ctx.is_operator and view.record.owner != ctx.principal
         updated = await ctx.service.transition_drive(
             view.record.drive_id,
             _TRANSITION_TARGETS[sub],
             expected_revision=view.record.revision,
             actor=ctx.principal,
-            is_privileged=False,
+            is_privileged=elevated,
         )
         return _panel(_TRANSITION_TITLES[sub], updated)
 
@@ -233,7 +235,9 @@ class GoalCommand(BaseUserCommand):
         if view is None:
             return _no_eligible_goal("complete")
         # Completion is proposed with owner evidence; the registration applies
-        # the drive's configured completion policy.
+        # the drive's configured completion policy. An operator user may also
+        # complete goals created by their creatures.
+        elevated = ctx.is_operator and view.record.owner != ctx.principal
         try:
             result = await ctx.service.propose_drive_transition(
                 view.record.drive_id,
@@ -241,7 +245,7 @@ class GoalCommand(BaseUserCommand):
                 actor=ctx.principal,
                 evidence={"confirmed_by": ctx.principal.format()},
                 expected_revision=view.record.revision,
-                is_privileged=False,
+                is_privileged=elevated,
             )
         except DriveTransitionError as exc:
             return UserCommandResult(error=f"completion rejected: {exc}")
