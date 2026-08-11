@@ -1,18 +1,4 @@
-"""
-Non-blocking auto-compact system.
-
-Automatically summarizes old conversation context in the background
-when approaching token limits. The agent keeps working during compaction.
-
-Design:
-  - Two-zone model: compact zone (old, will be summarized) + live zone (recent, untouched)
-  - Background task: LLM summarizes the compact zone asynchronously
-  - Atomic splice: when summary is ready, replaces compact zone
-  - Incremental: each round's summary includes the previous summary
-  - Failure preserves context unchanged — no emergency truncation, no
-    silent data loss; the agent keeps the full context if the LLM call
-    fails so the user can retry / switch model / etc.
-"""
+"""Non-blocking context compaction with atomic summary splicing."""
 
 import asyncio
 import time
@@ -22,6 +8,7 @@ from typing import Any
 from kohakuterrarium.core.compact_splice import (
     count_keep_messages,
     prefix_fingerprint,
+    select_compact_boundary,
     splice_conversation,
 )
 from kohakuterrarium.core.compact_text import (
@@ -42,6 +29,7 @@ logger = get_logger(__name__)
 # of max_tokens. If context somehow exceeds max_tokens, emergency truncation.
 DEFAULT_MAX_TOKENS = 256_000
 DEFAULT_THRESHOLD = 0.80  # compact when prompt_tokens >= 80% of max_tokens
+DEFAULT_TARGET = 0.50  # aim for 50% of max_tokens after compact
 DEFAULT_KEEP_RECENT = 8  # keep last 8 turns raw (not summarized)
 
 # Usage from an LLM round that STARTED before a splice can land long
@@ -56,6 +44,7 @@ class CompactConfig:
 
     max_tokens: int = DEFAULT_MAX_TOKENS
     threshold: float = DEFAULT_THRESHOLD
+    target: float = DEFAULT_TARGET
     keep_recent_turns: int = DEFAULT_KEEP_RECENT
     enabled: bool = True
     cooldown_seconds: float = 30.0
@@ -160,8 +149,7 @@ class CompactManager:
         # clean ``compact_skipped`` without flipping the compacting flag
         # or misleadingly showing a "compacting..." banner.
         messages = self._controller.conversation.get_messages()
-        keep_count = self._count_keep_messages(messages)
-        boundary = len(messages) - keep_count
+        boundary = self._compact_boundary(messages)
         if boundary <= 1:
             if self._output_router:
                 self._output_router.notify_activity(
@@ -275,16 +263,10 @@ class CompactManager:
             conversation = self._controller.conversation
             messages = conversation.get_messages()
 
-            # Find boundary: keep system prompt + last N turns
-            # A "turn" is roughly: user message + assistant response + tool calls
-            keep_count = self._count_keep_messages(messages)
-            boundary = len(messages) - keep_count
-            # Tool-safe boundary BEFORE summarization — adjusting at
-            # splice time would keep already-summarized content raw
-            # (duplicated in summary AND live zone).
-            while boundary > 1 and getattr(messages[boundary], "role", None) == "tool":
-                boundary -= 1
-
+            boundary = self._compact_boundary(messages)
+            preferred_boundary = select_compact_boundary(
+                messages, self.config.keep_recent_turns
+            )
             if boundary <= 1:
                 logger.debug("Not enough messages to compact")
                 self._emit_compact_skipped("nothing_to_compact", "Nothing to compact")
@@ -383,6 +365,7 @@ class CompactManager:
                 summary,
                 expected_last=compact_messages[-1],
                 expected_fingerprint=expected_fingerprint,
+                retain_latest_user=boundary > preferred_boundary,
             )
             if not applied:
                 logger.warning(
@@ -511,6 +494,17 @@ class CompactManager:
     def _count_keep_messages(self, messages: list) -> int:
         return count_keep_messages(messages, self.config.keep_recent_turns)
 
+    def _compact_boundary(self, messages: list) -> int:
+        usage = getattr(self._controller, "_last_usage", {}) or {}
+        prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
+        return select_compact_boundary(
+            messages,
+            self.config.keep_recent_turns,
+            target_tokens=int(self.config.max_tokens * self.config.target),
+            prompt_tokens=prompt_tokens,
+            summary_tokens=self._summary_max_tokens(),
+        )
+
     def _format_messages_for_summary(self, messages: list) -> str:
         return format_messages_for_summary(messages)
 
@@ -567,6 +561,7 @@ class CompactManager:
         summary: str,
         expected_last: Any = None,
         expected_fingerprint: tuple | None = None,
+        retain_latest_user: bool = False,
     ) -> bool:
         """Atomic splice — see :func:`compact_splice.splice_conversation`."""
         return splice_conversation(
@@ -576,6 +571,7 @@ class CompactManager:
             self._compact_count + 1,
             expected_last=expected_last,
             expected_fingerprint=expected_fingerprint,
+            retain_latest_user=retain_latest_user,
         )
 
     async def wait_for_current(self) -> None:
