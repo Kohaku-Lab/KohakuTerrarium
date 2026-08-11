@@ -48,6 +48,9 @@ def test_generic_contract_always_present():
     assert text is not None
     assert "Drive runtime" in text
     assert "do not begin by listing or inspecting Drives" in text
+    # Assignee lifecycle + budget semantics are spelled out, not implied.
+    assert "'blocked' when you need user intervention" in text
+    assert "raise the budget and wake" in text
     # An empty snapshot contributes NO kind prose.
     assert "Drive kind:" not in text
 
