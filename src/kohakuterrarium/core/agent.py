@@ -395,6 +395,7 @@ class Agent(
         compact_cfg = CompactConfig(
             max_tokens=compact_data.get("max_tokens", default_compact_max),
             threshold=compact_data.get("threshold", CompactConfig.threshold),
+            target=compact_data.get("target", CompactConfig.target),
             keep_recent_turns=compact_data.get(
                 "keep_recent_turns", CompactConfig.keep_recent_turns
             ),

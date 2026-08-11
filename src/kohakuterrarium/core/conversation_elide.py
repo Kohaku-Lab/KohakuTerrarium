@@ -113,19 +113,28 @@ def elide_stale_tool_results(conversation: Any) -> int:
 CHARS_PER_TOKEN = 3.5
 
 
+def estimate_message_tokens(msg: Any) -> int:
+    """Conservatively estimate one message's model-visible tokens."""
+    total_chars = 0
+    text = extract_message_text(msg) or ""
+    total_chars += len(text)
+    for call in getattr(msg, "tool_calls", None) or []:
+        fn = call.get("function") or {}
+        args = fn.get("arguments") or ""
+        if not isinstance(args, str):
+            args = str(args)
+        total_chars += len(args)
+    return max(1, int(total_chars / CHARS_PER_TOKEN))
+
+
+def estimate_messages_tokens(messages: list[Any]) -> int:
+    """Conservatively estimate a sequence of model-visible messages."""
+    return sum(estimate_message_tokens(msg) for msg in messages)
+
+
 def estimate_tokens(conversation: Any) -> int:
     """Conservative prompt-token estimate for a rebuilt conversation."""
-    total_chars = 0
-    for msg in conversation.get_messages():
-        text = extract_message_text(msg) or ""
-        total_chars += len(text)
-        for call in getattr(msg, "tool_calls", None) or []:
-            fn = call.get("function") or {}
-            args = fn.get("arguments") or ""
-            if not isinstance(args, str):
-                args = str(args)
-            total_chars += len(args)
-    return max(1, int(total_chars / CHARS_PER_TOKEN))
+    return estimate_messages_tokens(conversation.get_messages())
 
 
 def elide_after_compact(controller: Any) -> int:

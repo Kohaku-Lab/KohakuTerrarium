@@ -331,6 +331,7 @@ setup tool via a `tools` entry with `type: trigger, name: add_schedule`
 | `enabled` | bool | `true` | Turn compaction on. |
 | `max_tokens` | int | profile-default | Target token ceiling. |
 | `threshold` | float | `0.8` | Fraction of `max_tokens` at which compaction starts. |
+| `target` | float | `0.5` | Target fraction after compaction; recent turns remain verbatim when they fit. |
 | `keep_recent_turns` | int | `8` | Turns preserved verbatim. |
 | `compact_model` | str | controller's model | Override LLM used for summarisation. |
 

@@ -1022,6 +1022,7 @@ class TestCoreIntegration:
             # Compact manager + termination checker were built by start().
             assert agent.compact_manager.config.max_tokens == 100
             assert agent.compact_manager.config.threshold == 0.5
+            assert agent.compact_manager.config.target == 0.2
             assert agent._termination_checker.is_active is True
 
             # Run several turns to build a conversation long enough for

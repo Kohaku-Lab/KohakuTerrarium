@@ -926,8 +926,6 @@ class TestCompactManagerInit:
         agent.config.compact = {
             "max_tokens": 10_000,
             "threshold": 0.5,
-            # Legacy key from configs written before ``target`` was
-            # removed — must be ignored, never crash agent init.
             "target": 0.3,
             "keep_recent_turns": 4,
             "cooldown_seconds": 5.0,
@@ -938,7 +936,7 @@ class TestCompactManagerInit:
             cfg = agent.compact_manager.config
             assert cfg.max_tokens == 10_000
             assert cfg.threshold == 0.5
-            assert not hasattr(cfg, "target")
+            assert cfg.target == 0.3
             assert cfg.keep_recent_turns == 4
             assert cfg.cooldown_seconds == 5.0
         finally:
