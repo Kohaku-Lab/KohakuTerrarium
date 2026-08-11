@@ -26,7 +26,6 @@ from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.tui.input import TUIInput
 from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.builtins.tui.session import TUISession
-from kohakuterrarium.builtins.tui.widgets import ChatInput
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
@@ -313,7 +312,10 @@ async def run_engine_with_tui(
     commands = {n: get_builtin_user_command(n) for n in list_builtin_user_commands()}
     aliases = _build_command_aliases(commands)
     cmd_context = _engine_command_context(focus, engine, focus_creature_id, commands)
-    _set_command_hints(tui, commands)
+    tui.command_hint_fallback = commands
+    for creature in graph_creatures:
+        tui.watch_command_agent(creature.creature_id, creature.agent)
+    tui.refresh_command_hints_for_tab(focus_creature_id)
 
     # Track in-flight inject_input tasks so we can drain them on exit
     # but DON'T await them inline. Awaiting inline blocks the input
@@ -486,18 +488,6 @@ def _update_terrarium_panel(
     tui.update_terrarium(creature_info, env.shared_channels.get_channel_info())
 
 
-def _set_command_hints(tui: TUISession, commands: dict) -> None:
-    if not tui._app:
-        return
-    try:
-        inp = tui._app.query_one("#input-box", ChatInput)
-        inp.command_names = list(commands.keys())
-    except Exception as e:
-        logger.warning(
-            "Failed to set command hints on TUI input", error=str(e), exc_info=True
-        )
-
-
 def _wire_new_channels(env, tui: "TUISession", wired: set[str]) -> None:
     """Install on_send callbacks on every channel not already wired.
 
@@ -575,6 +565,7 @@ async def _refresh_tui_on_topology_change(
                 creature_out._default_target = creature.creature_id
                 creature.agent.output_router.default_output = creature_out
                 routed_creatures.add(creature.creature_id)
+                tui.watch_command_agent(creature.creature_id, creature.agent)
                 # New tab → seed its model line so the panel is right
                 # the first time the user switches to it.
                 _seed_tab_models(tui, [creature])
