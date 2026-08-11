@@ -235,10 +235,12 @@ class DriveCreateTool(_BaseDriveTool):
     def description(self) -> str:
         return (
             "Create a durable drive you own (kind, title, spec). Use kind='goal': "
-            "it is the only kind users can see and manage (via /goal), so prefer "
-            "it for anything a human should track. For 'goal', spec must include "
-            "a non-empty 'objective' and set spec.autonomy='continue_when_ready' "
-            "so the goal keeps driving you automatically."
+            "it is the only kind with a user-facing /goal command surface, so "
+            "prefer it for anything a human should track. For 'goal', spec must "
+            "include a non-empty 'objective' and set "
+            "spec.autonomy='continue_when_ready' so the goal keeps driving you "
+            "automatically. Other kinds (e.g. 'generic') have no dedicated "
+            "command surface and are managed via the drive tools."
         )
 
     def get_parameters_schema(self) -> dict:
@@ -248,10 +250,11 @@ class DriveCreateTool(_BaseDriveTool):
                 "kind": {
                     "type": "string",
                     "description": (
-                        "Drive kind; use 'goal' — the only kind with a "
-                        "user-facing surface (users see and manage it via /goal). "
-                        "Other kinds (e.g. 'generic') have no user command and are "
-                        "invisible to users. For 'goal', see the spec description."
+                        "Drive kind; prefer 'goal' — the only kind with a "
+                        "user-facing /goal command surface. Other kinds "
+                        "(e.g. 'generic') have no dedicated command surface and "
+                        "are managed via the drive tools. For 'goal', see the "
+                        "spec description."
                     ),
                 },
                 "title": {"type": "string"},
