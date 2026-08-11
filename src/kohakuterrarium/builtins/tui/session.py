@@ -84,6 +84,8 @@ class TUISession(TabModelRegistryMixin):
         # active tab's model and context details.
         self._model_by_target: dict[str, str] = {}
         self._context_by_target: dict[str, tuple[int, int]] = {}
+        self._command_hint_watches: set[tuple[str, int]] = set()
+        self.command_hint_fallback: dict[str, Any] = {}
         # Buffer mutations until Textual mounts so startup events are not lost.
         self._pending_safe_calls: list[tuple[Any, tuple[Any, ...]]] = []
 
