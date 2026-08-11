@@ -62,6 +62,7 @@ def build_compact_manager(
         CompactConfig(
             max_tokens=int(data.get("max_tokens") or default_max),
             threshold=float(data.get("threshold", 0.75)),
+            target=float(data.get("target", CompactConfig.target)),
             keep_recent_turns=int(data.get("keep_recent_turns", 4)),
             cooldown_seconds=float(
                 data.get("cooldown", data.get("cooldown_seconds", 20.0))

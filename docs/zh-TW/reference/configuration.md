@@ -263,6 +263,7 @@ subagents:
 | `enabled` | bool | `true` | 開啟壓縮。 |
 | `max_tokens` | int | profile 預設 | 目標 token 上限。 |
 | `threshold` | float | `0.8` | 達到 `max_tokens` 多少比例時啟動壓縮。 |
+| `target` | float | `0.5` | 壓縮後的目標比例；預算允許時近期回合仍原樣保留。 |
 | `keep_recent_turns` | int | `8` | 原樣保留的回合數。 |
 | `compact_model` | str | 控制器的 model | 摘要用的 LLM 覆寫。 |
 
