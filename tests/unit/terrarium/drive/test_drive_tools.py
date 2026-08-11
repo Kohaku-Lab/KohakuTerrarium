@@ -80,6 +80,27 @@ class TestDriveCreate:
         finally:
             await engine.shutdown()
 
+    def test_goal_spec_schema_is_expanded(self):
+        # The goal spec schema exposes concrete fields so the model can build a
+        # valid spec instead of guessing from prose.
+        schema = DriveCreateTool().get_parameters_schema()
+        spec = schema["properties"]["spec"]
+        assert spec["type"] == "object"
+        props = spec["properties"]
+        assert "objective" in props
+        assert "required" in props["objective"]["description"].lower()
+        assert props["autonomy"]["enum"] == ["manual", "continue_when_ready"]
+        assert props["completion_policy"]["enum"] == [
+            "self_propose",
+            "user_confirm",
+            "verifier",
+        ]
+        assert set(props["budgets"]["properties"]) == {
+            "max_turns",
+            "max_tool_calls",
+            "max_walltime_s",
+        }
+
     async def test_actor_is_never_taken_from_args(self):
         # Passing owner/actor/scope in args must be ignored — ownership is
         # forced to the trusted caller identity (design §9.3, rule §4.15).
@@ -115,6 +136,8 @@ class TestDriveCreate:
             )
             assert res.error is not None
             assert "objective" in res.error
+            # The error points the model at the working spec shape.
+            assert "continue_when_ready" in res.error
         finally:
             await engine.shutdown()
 
@@ -213,6 +236,24 @@ class TestDriveUpdateStatusReport:
 
 
 class TestDriveTransition:
+    def test_transition_status_enum_covers_self_service_targets(self):
+        # Regression: the provider-visible enum must include every self-service
+        # transition target — draft was missing and would have been rejected
+        # before reaching the tool.
+        enum = DriveTransitionTool().get_parameters_schema()["properties"]["status"][
+            "enum"
+        ]
+        assert set(enum) == {
+            "draft",
+            "active",
+            "waiting",
+            "blocked",
+            "paused",
+            "cancelled",
+            "completed",
+            "failed",
+        }
+
     async def test_pause_then_propose_completion(self):
         engine, worker = await _engine_with_worker()
         try:
@@ -313,6 +354,19 @@ class TestForeignOwnedAcl:
             )
             assert cancel.error is not None
             assert "permission denied" in cancel.error
+            # Pausing a foreign-owned drive is also owner-only; the error hints
+            # at the assignee's actual transition targets.
+            paused = await DriveTransitionTool()._execute(
+                {
+                    "drive_id": record.drive_id,
+                    "status": "paused",
+                    "expected_revision": record.revision,
+                },
+                context=ctx,
+            )
+            assert paused.error is not None
+            assert "permission denied" in paused.error
+            assert "'waiting' or 'blocked'" in paused.error
             # Updating a foreign-owned drive is denied too.
             upd = await DriveUpdateTool()._execute(
                 {
