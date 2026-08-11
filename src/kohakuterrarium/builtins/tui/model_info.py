@@ -4,9 +4,10 @@ Tabbed sessions retain model and context limits per creature, resolve modal
 actions against that creature, and ignore sibling updates until their tab is active.
 """
 
+import weakref
 from typing import Any
 
-from kohakuterrarium.builtins.tui.widgets import SessionInfoPanel
+from kohakuterrarium.builtins.tui.widgets import ChatInput, SessionInfoPanel
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,6 +22,8 @@ class TabModelRegistryMixin:
     _terrarium_tabs: list[str] | None
     _model_by_target: dict[str, str]
     _context_by_target: dict[str, tuple[int, int]]
+    _command_hint_watches: set[tuple[str, int]]
+    command_hint_fallback: dict[str, Any]
 
     def agent_for_tab(self, tab: str | None = None) -> Any:
         """Resolve creature tabs to live agents; channels and failures use the host."""
@@ -33,6 +36,48 @@ class TabModelRegistryMixin:
             if agent is not None:
                 return agent
         return self.host_agent
+
+    def set_command_hints(self, commands: dict, *, target: str = "") -> None:
+        """Render one tab's live command registry when that tab is active."""
+        if target and target != self.get_active_tab():
+            return
+        registry = commands or self.command_hint_fallback
+        names = list(registry)
+        for command in registry.values():
+            names.extend(getattr(command, "aliases", None) or [])
+        names = sorted(set(names))
+
+        def _apply() -> None:
+            inp = self._app.query_one("#input-box", ChatInput)
+            inp.command_names = names
+            inp.on_text_area_changed()
+
+        self._safe_call(_apply)
+
+    def refresh_command_hints_for_tab(self, tab: str = "") -> None:
+        """Read command hints from the currently selected tab's live agent."""
+        target = tab or self.get_active_tab()
+        agent = self.agent_for_tab(target)
+        lister = getattr(agent, "list_user_commands", None)
+        commands = lister() if callable(lister) else {}
+        self.set_command_hints(commands, target=target)
+
+    def watch_command_agent(self, target: str, agent: Any) -> None:
+        """Subscribe a creature tab to runtime command-registry changes."""
+        key = (target, id(agent))
+        if key in self._command_hint_watches:
+            return
+        self._command_hint_watches.add(key)
+        add_listener = getattr(agent, "add_user_command_listener", None)
+        if callable(add_listener):
+            session_ref = weakref.ref(self)
+
+            def _on_commands_changed(commands: dict) -> None:
+                session = session_ref()
+                if session is not None:
+                    session.set_command_hints(commands, target=target)
+
+            add_listener(_on_commands_changed)
 
     def update_target_model(
         self,

@@ -369,6 +369,9 @@ class AgentTUI(App):
         refresh = getattr(self.tui_session, "refresh_model_for_tab", None)
         if callable(refresh):
             refresh(self.get_active_tab_name())
+        refresh_hints = getattr(self.tui_session, "refresh_command_hints_for_tab", None)
+        if callable(refresh_hints):
+            refresh_hints(self.get_active_tab_name())
 
     def start_thinking_animation(self) -> None:
         self._thinking_active = True
