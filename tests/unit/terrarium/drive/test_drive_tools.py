@@ -236,6 +236,24 @@ class TestDriveUpdateStatusReport:
 
 
 class TestDriveTransition:
+    def test_transition_status_enum_covers_self_service_targets(self):
+        # Regression: the provider-visible enum must include every self-service
+        # transition target — draft was missing and would have been rejected
+        # before reaching the tool.
+        enum = DriveTransitionTool().get_parameters_schema()["properties"]["status"][
+            "enum"
+        ]
+        assert set(enum) == {
+            "draft",
+            "active",
+            "waiting",
+            "blocked",
+            "paused",
+            "cancelled",
+            "completed",
+            "failed",
+        }
+
     async def test_pause_then_propose_completion(self):
         engine, worker = await _engine_with_worker()
         try:
