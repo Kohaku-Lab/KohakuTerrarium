@@ -81,6 +81,16 @@ def _register_enhanced_keyboard_keys() -> None:
 
       ``mods`` values: 2 = shift, 5 = ctrl, 6 = ctrl+shift.
 
+    - **Functional keys** under Kitty's legacy CSI form:
+
+      - Press:   ``ESC [ 1 ; <mods> [ABCDEFHPQS]``
+      - Repeat:  ``ESC [ 1 ; <mods> : 2 [ABCDEFHPQS]``
+      - Release: ``ESC [ 1 ; <mods> : 3 [ABCDEFHPQS]`` (ignored)
+
+      Existing prompt_toolkit modifier mappings are mirrored; explicit
+      unmodified (``mods=1``) arrows, Home/End, and supported F-keys use their
+      legacy-key equivalents.
+
     Out of scope (deliberately not registered): Alt+letter, Ctrl+Shift+
     letter, and Cmd/Super+letter. prompt_toolkit has no enum slots for
     most of them, they conflict with classic encodings, and users rarely
@@ -115,6 +125,27 @@ def _register_enhanced_keyboard_keys() -> None:
     ANSI_SEQUENCES["\x1b[13u"] = Keys.ControlM  # Enter
     ANSI_SEQUENCES["\x1b[9u"] = Keys.ControlI  # Tab
     ANSI_SEQUENCES["\x1b[127u"] = Keys.ControlH  # Backspace
+
+    functional_keys = {
+        "A": Keys.Up,
+        "B": Keys.Down,
+        "C": Keys.Right,
+        "D": Keys.Left,
+        "E": Keys.Ignore,
+        "F": Keys.End,
+        "H": Keys.Home,
+        "P": Keys.F1,
+        "Q": Keys.F2,
+        "S": Keys.F4,
+    }
+    for final, plain_key in functional_keys.items():
+        for modifiers in range(1, 9):
+            press = f"\x1b[1;{modifiers}{final}"
+            key = ANSI_SEQUENCES.get(press, plain_key)
+            ANSI_SEQUENCES[press] = key
+            ANSI_SEQUENCES[f"\x1b[1;{modifiers}:1{final}"] = key
+            ANSI_SEQUENCES[f"\x1b[1;{modifiers}:2{final}"] = key
+            ANSI_SEQUENCES[f"\x1b[1;{modifiers}:3{final}"] = Keys.Ignore
 
 
 _register_enhanced_keyboard_keys()
