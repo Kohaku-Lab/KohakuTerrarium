@@ -302,7 +302,6 @@ async def run_engine_with_tui(
         _refresh_tui_on_topology_change(
             engine,
             tui,
-            graph_id,
             focus_creature_id,
             wired_channels,
             routed_creatures,
@@ -506,7 +505,6 @@ def _wire_new_channels(env, tui: "TUISession", wired: set[str]) -> None:
 async def _refresh_tui_on_topology_change(
     engine: Terrarium,
     tui: "TUISession",
-    graph_id: str,
     focus_creature_id: str,
     wired_channels: set[str],
     routed_creatures: set[str],
@@ -531,6 +529,9 @@ async def _refresh_tui_on_topology_change(
     )
     try:
         async for _ev in engine.subscribe(filt):
+            graph_id = engine._topology.creature_to_graph.get(focus_creature_id)
+            if graph_id is None:
+                continue
             graph = engine._topology.graphs.get(graph_id)
             if graph is None:
                 continue
