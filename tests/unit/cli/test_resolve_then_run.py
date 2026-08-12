@@ -6,6 +6,8 @@ no-path runs the picker on a TTY; a cancelled picker is a clean no-op; a
 non-TTY refuses instead of hanging.
 """
 
+import os
+
 from kohakuterrarium.cli import run as runmod
 
 
@@ -86,3 +88,20 @@ class TestResolveThenRun:
         rc = runmod.resolve_then_run(None, io_mode="cli")
         assert rc == 2
         assert called == []
+
+
+class TestResolveSession:
+    def test_last_compares_current_and_legacy_extensions_together(
+        self, monkeypatch, tmp_path
+    ):
+        current = tmp_path / "older.kohakutr"
+        legacy = tmp_path / "newer.kt"
+        current.touch()
+        legacy.touch()
+        os.utime(current, (100, 100))
+        os.utime(legacy, (200, 200))
+        monkeypatch.setattr(runmod, "_SESSION_DIR", tmp_path)
+
+        resolved = runmod._resolve_session(None, last=True)
+
+        assert resolved == legacy
