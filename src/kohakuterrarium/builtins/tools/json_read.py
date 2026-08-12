@@ -85,6 +85,11 @@ class JsonReadTool(BaseTool):
             return ToolResult(error="Path is required")
 
         file_path = resolve_tool_path(path, context)
+        if context and context.path_guard:
+            msg = context.path_guard.check(str(file_path))
+            if msg:
+                return ToolResult(error=msg)
+
         if not file_path.exists():
             return ToolResult(error=f"File not found: {path}")
 
