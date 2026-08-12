@@ -7,6 +7,7 @@ import pytest
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.builtins.outputs.stdout import StdoutOutput
+from kohakuterrarium.modules.trigger.base import BaseTrigger
 from kohakuterrarium.terrarium.creature_host import Creature, build_creature
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.terrarium import _FakeAgent
@@ -250,6 +251,45 @@ class TestStartStop:
         c = _creature()
         await c.start()
         assert c._input_task is None
+
+    async def test_failed_agent_start_rolls_back_partial_resources(self, tmp_path):
+        class FailingTrigger(BaseTrigger):
+            def __init__(self):
+                super().__init__()
+                self.stop_calls = 0
+
+            async def _on_start(self):
+                raise RuntimeError("startup failed")
+
+            async def _on_stop(self):
+                self.stop_calls += 1
+
+            async def wait_for_trigger(self):
+                await asyncio.Event().wait()
+
+        (tmp_path / "config.yaml").write_text(
+            "name: failing\ninput:\n  type: none\noutput:\n  type: none\n",
+            encoding="utf-8",
+        )
+        creature = build_creature(
+            str(tmp_path), llm=ScriptedLLM(["unused"]), io="headless"
+        )
+        trigger = FailingTrigger()
+        await creature.agent.trigger_manager.add(
+            trigger, trigger_id="failing", autostart=False
+        )
+
+        with pytest.raises(RuntimeError, match="startup failed"):
+            await creature.start()
+
+        assert trigger.is_running is False
+        assert trigger.stop_calls == 1
+        assert creature.agent.is_running is False
+        assert creature.is_running is False
+        assert creature.restoration_state == "added"
+
+        await creature.stop()
+        assert trigger.stop_calls == 1
 
 
 # ── inject_input ──────────────────────────────────────────────
