@@ -426,16 +426,9 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
         return None
 
     sessions = sorted(
-        _SESSION_DIR.glob("*.kohakutr"),
+        [*_SESSION_DIR.glob("*.kohakutr"), *_SESSION_DIR.glob("*.kt")],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
-    )
-    sessions.extend(
-        sorted(
-            _SESSION_DIR.glob("*.kt"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
     )
 
     if not sessions:
