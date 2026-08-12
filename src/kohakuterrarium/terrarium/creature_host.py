@@ -150,7 +150,21 @@ class Creature:
                 return
             self._ensure_chat_pipe()
             self._restoration_state = RESTORATION_RESTORING
-            await self.agent.start()
+            try:
+                await self.agent.start()
+            except BaseException:
+                self._restoration_state = RESTORATION_ADDED
+                try:
+                    await self.agent.stop()
+                except Exception as cleanup_error:
+                    logger.error(
+                        "Creature startup rollback failed",
+                        creature_id=self.creature_id,
+                        creature_name=self.name,
+                        error=str(cleanup_error),
+                        exc_info=True,
+                    )
+                raise
             self._running = True
             self._ever_started = True
             self._input_loop_error = None
