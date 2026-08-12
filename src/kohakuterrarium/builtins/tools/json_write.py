@@ -97,6 +97,10 @@ class JsonWriteTool(BaseTool):
             value = value_str
 
         file_path = resolve_tool_path(path, context)
+        if context and context.path_guard:
+            msg = context.path_guard.check(str(file_path))
+            if msg:
+                return ToolResult(error=msg)
 
         if file_path.exists():
             try:
