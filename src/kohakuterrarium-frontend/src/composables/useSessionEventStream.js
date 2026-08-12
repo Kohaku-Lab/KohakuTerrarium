@@ -34,12 +34,12 @@ export function useSessionEventStream() {
   let ws = null
   let retryTimer = null
   let retryDelay = 500
-  let closedByCaller = false
+  let connectionGeneration = 0
   let currentName = ""
   let currentAgent = null
 
   function _disconnect() {
-    closedByCaller = true
+    connectionGeneration += 1
     if (retryTimer) {
       clearTimeout(retryTimer)
       retryTimer = null
@@ -56,33 +56,37 @@ export function useSessionEventStream() {
     subscribed.value = false
   }
 
-  function _scheduleReconnect() {
+  function _scheduleReconnect(generation) {
     if (retryTimer) clearTimeout(retryTimer)
     retryTimer = setTimeout(() => {
+      if (generation !== connectionGeneration || !currentName) return
       retryDelay = Math.min(retryDelay * 2, 5000)
-      _open(currentName, currentAgent)
+      _open(currentName, currentAgent, generation)
     }, retryDelay)
   }
 
-  function _open(sessionName, agent) {
-    closedByCaller = false
+  function _open(sessionName, agent, generation = connectionGeneration) {
     let path = `/ws/sessions/${encodeURIComponent(sessionName)}/events`
     if (agent) path += `?agent=${encodeURIComponent(agent)}`
+    let socket
     try {
-      ws = new WebSocket(_wsUrl(path))
+      socket = new WebSocket(_wsUrl(path))
+      ws = socket
     } catch (err) {
       error.value = String(err)
-      _scheduleReconnect()
+      _scheduleReconnect(generation)
       return
     }
 
-    ws.onopen = () => {
+    socket.onopen = () => {
+      if (generation !== connectionGeneration || ws !== socket) return
       connected.value = true
       error.value = ""
       retryDelay = 500
     }
 
-    ws.onmessage = (ev) => {
+    socket.onmessage = (ev) => {
+      if (generation !== connectionGeneration || ws !== socket) return
       let data
       try {
         data = JSON.parse(ev.data)
@@ -106,15 +110,17 @@ export function useSessionEventStream() {
       }
     }
 
-    ws.onerror = () => {
+    socket.onerror = () => {
+      if (generation !== connectionGeneration || ws !== socket) return
       error.value = "WebSocket error"
     }
 
-    ws.onclose = () => {
+    socket.onclose = () => {
+      if (generation !== connectionGeneration || ws !== socket) return
       connected.value = false
       subscribed.value = false
       ws = null
-      if (!closedByCaller) _scheduleReconnect()
+      _scheduleReconnect(generation)
     }
   }
 
@@ -126,7 +132,7 @@ export function useSessionEventStream() {
     events.value = []
     newSinceLastClear.value = 0
     error.value = ""
-    _open(sessionName, agent)
+    _open(sessionName, agent, connectionGeneration)
   }
 
   function detach() {
