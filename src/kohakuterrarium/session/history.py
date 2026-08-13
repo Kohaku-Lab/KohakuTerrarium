@@ -509,29 +509,21 @@ def _covered_by_replace(
     return False
 
 
-def _rule_supersedes(
-    newer: tuple[int, int, set[tuple[int, int]] | None, str],
-    older: tuple[int, int, set[tuple[int, int]] | None, str],
-) -> bool:
-    """Whether a later compaction rule fully replaces an earlier one.
+def _rule_priority(
+    rule: tuple[int, int, set[tuple[int, int]] | None, str],
+    selected_pairs: set[tuple[int, int]],
+) -> tuple[int, int]:
+    """Rank a compaction rule against a selected branch projection.
 
-    Same-lineage compactions nest: the later rule's range covers the earlier
-    range and its ``compact_path`` is a superset, so the earlier summary is
-    subsumed by the newest one and must not be injected again (replay would
-    otherwise stack summaries that never coexist in the saved snapshot). A
-    later path-carrying rule also supersedes an earlier legacy pathless rule
-    with an enclosing range — the legacy global rule is a migration fallback,
-    and the live branch's own summary is authoritative for it.
+    Path-carrying rules beat legacy pathless rules, and a deeper match on the
+    selected branch (more shared turns) beats a shallower sibling. Range is
+    ignored here: a rule's own range covers its prefix, and the deepest
+    matching lineage is authoritative for the shared prefix it covers.
     """
-    f1, t1, p1, _ = older
-    f2, t2, p2, _ = newer
-    if not (f2 <= f1 and t2 >= t1):
-        return False
-    if p1 is None:
-        return True
-    if p2 is None:
-        return False
-    return p1.issubset(p2)
+    _frm, _to, path, _summary = rule
+    if path is None:
+        return (0, 0)
+    return (1, len(path & selected_pairs))
 
 
 def replay_conversation(
@@ -548,8 +540,12 @@ def replay_conversation(
     Unknown observability events are ignored.
     """
     events_list = dedupe_adjacent_duplicate_events(events)
-    # Nested branch ancestry determines the live event set.
+    # Nested branch ancestry determines the live event set and the selected
+    # branch projection compaction rules are validated against.
     live_ids = select_live_event_ids(events_list, branch_view=branch_view)
+    selected = resolve_selected_branches(
+        events_list, index_parent_paths(events_list), branch_view
+    )
 
     # Compaction summaries replace every covered source event. Each
     # compact_replace may carry a ``compact_path`` so a replacement recorded
@@ -569,17 +565,19 @@ def replay_conversation(
                     evt.get("summary", "") or evt.get("summary_text", ""),
                 )
             )
-    # Multiple compaction rounds on the same lineage nest (each later range
-    # covers the earlier one and its path grows), so keep only the newest rule
-    # per lineage — injecting every round's summary would stack summaries that
-    # never coexist in the saved snapshot.
-    kept_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = []
-    for rule in replaced_rules:
-        kept_rules = [
-            older for older in kept_rules if not _rule_supersedes(rule, older)
+    # A single replay projects ONE linear branch, so at most one compaction
+    # summary is live: the deepest compaction on the lineage matching the
+    # selected branch. Same-lineage rounds nest (the deeper one wins); a
+    # sibling branch's compaction shares only a shorter prefix and must not
+    # stack on top of this branch's own summary. Newest wins on an exact tie.
+    if replaced_rules:
+        selected_pairs = {(turn, branch) for turn, branch in selected.items()}
+        replaced_rules = [
+            max(
+                enumerate(replaced_rules),
+                key=lambda item: (*_rule_priority(item[1], selected_pairs), item[0]),
+            )[1]
         ]
-        kept_rules.append(rule)
-    replaced_rules = kept_rules
     # Summaries are emitted where the replaced content sat, not at the
     # compact_replace event's own stream position (a compact runs after the
     # live tail it preserves). pending summaries are ordered by replaced_from

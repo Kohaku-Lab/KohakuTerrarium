@@ -18,7 +18,11 @@ from kohakuterrarium.core.compact import (
     CompactConfig,
     CompactManager,
 )
-from kohakuterrarium.core.compact_splice import select_compact_boundary
+from kohakuterrarium.core.compact_splice import (
+    count_keep_messages,
+    select_compact_boundary,
+)
+from kohakuterrarium.core.compact_text import format_messages_for_summary
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm.message import create_message
 
@@ -210,60 +214,59 @@ class TestTriggerCompact:
         assert mgr._compact_count == 1
 
 
-# ── _count_keep_messages ─────────────────────────────────────────
+# ── count_keep_messages ─────────────────────────────────────────
 
 
 class TestCountKeepMessages:
     def test_empty(self):
-        mgr = CompactManager()
-        assert mgr._count_keep_messages([]) == 0
+        assert count_keep_messages([], DEFAULT_KEEP_RECENT) == 0
 
     def test_single(self):
-        mgr = CompactManager()
-        assert mgr._count_keep_messages([types.SimpleNamespace(role="user")]) == 0
+        assert (
+            count_keep_messages(
+                [types.SimpleNamespace(role="user")], DEFAULT_KEEP_RECENT
+            )
+            == 0
+        )
 
     def test_keeps_recent_turns(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=2))
         msgs = []
         for i in range(5):
             msgs.append(types.SimpleNamespace(role="user"))
             msgs.append(types.SimpleNamespace(role="assistant"))
         # 5 user turns, want to keep last 2 — counts back until 2 user msgs hit.
-        keep = mgr._count_keep_messages(msgs)
+        keep = count_keep_messages(msgs, 2)
         # Walking from the end, we find 2 "user" within the last 4 entries.
         assert keep == 4
 
     def test_half_cap_fallback_when_few_user_turns(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=8))
         # 1 user + 10 assistant/tool messages (no more users).
         msgs = [types.SimpleNamespace(role="user")]
         for _ in range(10):
             msgs.append(types.SimpleNamespace(role="assistant"))
         # Phase 1 finds only 1 user → fallback to half-cap.
-        keep = mgr._count_keep_messages(msgs)
+        keep = count_keep_messages(msgs, DEFAULT_KEEP_RECENT)
         # n = 11; half-cap = 5; n-1 = 10 → min = 5.
         assert keep == 5
 
     def test_tiny_conversation_no_fallback(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=8))
         # 3 messages total — below MIN_COMPACTABLE (8).
         msgs = [
             types.SimpleNamespace(role="user"),
             types.SimpleNamespace(role="assistant"),
             types.SimpleNamespace(role="user"),
         ]
-        keep = mgr._count_keep_messages(msgs)
+        keep = count_keep_messages(msgs, DEFAULT_KEEP_RECENT)
         # Returns by_turn_count or n-1 — whichever is smaller.
         assert keep == 2  # n-1
 
     def test_tool_feedback_does_not_count_as_user_turn(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=2))
         msgs = [types.SimpleNamespace(role="user", metadata={})]
         for _ in range(12):
             msgs.append(
                 types.SimpleNamespace(role="user", metadata={"kind": "tool_results"})
             )
-        assert mgr._count_keep_messages(msgs) == len(msgs) // 2
+        assert count_keep_messages(msgs, 2) == len(msgs) // 2
 
     def test_target_tightens_only_an_oversized_live_zone(self):
         conv = Conversation()
@@ -298,7 +301,7 @@ class TestCountKeepMessages:
         )
         messages = conv.get_messages()
         assert mgr._compact_boundary(messages) == (
-            len(messages) - mgr._count_keep_messages(messages)
+            len(messages) - count_keep_messages(messages, DEFAULT_KEEP_RECENT)
         )
 
     def test_target_can_summarize_a_completed_500_call_tool_round(self):
@@ -356,36 +359,33 @@ class TestCountKeepMessages:
         assert "goal-7" in user_text
 
 
-# ── _format_messages_for_summary ─────────────────────────────────
+# ── format_messages_for_summary ─────────────────────────────────
 
 
 class TestFormatMessagesForSummary:
     def test_simple(self):
-        mgr = CompactManager()
         msgs = [
             types.SimpleNamespace(role="user", content="hello"),
             types.SimpleNamespace(role="assistant", content="hi"),
         ]
-        out = mgr._format_messages_for_summary(msgs)
+        out = format_messages_for_summary(msgs)
         assert "[user]: hello" in out
         assert "[assistant]: hi" in out
 
     def test_truncates_long_tool_output(self):
-        mgr = CompactManager()
         big = "x" * 1000
         msgs = [types.SimpleNamespace(role="tool", content=big)]
-        out = mgr._format_messages_for_summary(msgs)
+        out = format_messages_for_summary(msgs)
         # Truncated with summary note.
         assert "1000 chars total" in out
         assert len(out) < 1000
 
     def test_empty_content_skipped(self):
-        mgr = CompactManager()
         msgs = [
             types.SimpleNamespace(role="user", content=""),
             types.SimpleNamespace(role="assistant", content="ok"),
         ]
-        out = mgr._format_messages_for_summary(msgs)
+        out = format_messages_for_summary(msgs)
         # Empty user not included.
         assert "[user]:" not in out
         assert "[assistant]: ok" in out
@@ -980,22 +980,19 @@ class TestCancel:
 
 class TestRunCompactEmptyCompactZone:
     async def test_empty_compact_messages_short_circuits(self):
-        """Mock _count_keep_messages to return n-1 so messages[1:1]
-        triggers the ``if not compact_messages`` early-return (line 285)."""
+        """Smoke-test the defensive ``if not compact_messages`` guard.
+
+        The branch is unreachable through normal flow (``boundary <= 1`` is
+        caught first), so force ``_compact_boundary`` to a value that passes
+        the outer guard and still slices a non-empty compact zone.
+        """
         conv = _build_conversation(n_user=10)
         mgr = _build_mgr(conversation=conv, llm=_LLM())
-        # Mock _count_keep_messages to return one less than total → boundary=1.
-        # But then the outer ``if boundary <= 1`` catches it first; instead
-        # patch it to return exactly len-1 to fall past that check.
 
-        def fake_count(messages):
-            # Return len(messages) - boundary_target. We want boundary=2
-            # (passes the > 1 guard) but compact_messages = messages[1:2]
-            # = one item — non-empty. So this slot is genuinely
-            # unreachable in practice; lines 284-285 are defensive.
-            return len(messages) - 2
+        def fake_boundary(messages):
+            return 2
 
-        mgr._count_keep_messages = fake_count
+        mgr._compact_boundary = fake_boundary
         await mgr._run_compact()
 
 

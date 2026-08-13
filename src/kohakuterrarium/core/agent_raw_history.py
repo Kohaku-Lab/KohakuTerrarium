@@ -68,7 +68,7 @@ def reload_raw_prefix_for_target(
     # Only compacts whose path intersects the target branch's lineage are kept
     # (a sibling-branch compact covering the same id range must not restore a
     # foreign baseline; legacy pathless compacts are kept for the v1 migration
-    # fallback).
+    # fallback). Replay then selects the single deepest matching rule.
     target_id = prefix.target.get("event_id")
     target_path: set[tuple[int, int]] = {
         (turn, branch)

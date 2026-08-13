@@ -94,24 +94,6 @@ def persist_compact_state(
         )
 
 
-def emit_compact_skipped(
-    router: Any, compact_count: int, reason: str, message: str
-) -> None:
-    """Terminal for a started round that did not complete. Every
-    ``compact_start`` must be closed by exactly one terminal
-    (``compact_complete`` or ``compact_skipped``) — FE / TUI / rich
-    CLI all keep a "compacting…" indicator open until one lands."""
-    if router is not None:
-        router.notify_activity(
-            "compact_skipped",
-            message,
-            metadata={
-                "reason": reason,
-                "round": compact_count + 1,
-            },
-        )
-
-
 def tag_snapshot_branch(store: Any, agent: Any, agent_name: str) -> None:
     """Tag the saved snapshot with the branch it was created on.
 

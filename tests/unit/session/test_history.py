@@ -766,6 +766,128 @@ class TestCompactRuleSupersession:
         ]
 
 
+class TestDivergentBranchCompaction:
+    """Two compactions on branches that share a prefix must not stack.
+
+    branch1 compacts its prefix, then a sibling branch2 forks from the shared
+    prefix and compacts its own (longer) prefix. Each branch's replay must see
+    exactly one summary — its own — never the sibling's, and never both.
+    """
+
+    def _events(self):
+        return [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 2,
+                "type": "text_chunk",
+                "content": "R1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 3,
+                "type": "user_message",
+                "content": "U2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 4,
+                "type": "text_chunk",
+                "content": "R2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 5,
+                "type": "user_message",
+                "content": "U3a",
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 6,
+                "type": "text_chunk",
+                "content": "R3a",
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 7,
+                "type": "compact_complete",
+                "summary": "[S1]",
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1], [3, 1]],
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 8,
+                "type": "user_message",
+                "content": "U3b",
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 9,
+                "type": "text_chunk",
+                "content": "R3b",
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 10,
+                "type": "user_message",
+                "content": "U4b",
+                "turn_index": 4,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1), (3, 2)],
+            },
+            {
+                "event_id": 11,
+                "type": "text_chunk",
+                "content": "R4b",
+                "turn_index": 4,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1), (3, 2)],
+            },
+            {
+                "event_id": 12,
+                "type": "compact_complete",
+                "summary": "[S2]",
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 9,
+                "compact_path": [[1, 1], [2, 1], [3, 2], [4, 2]],
+                "turn_index": 4,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1), (3, 2)],
+            },
+        ]
+
+    def test_each_branch_sees_only_its_own_summary(self):
+        events = self._events()
+        out1 = replay_conversation(events, branch_view={1: 1, 2: 1, 3: 1})
+        assert [m["content"] for m in out1] == ["[S1]", "U3a", "R3a"]
+        out2 = replay_conversation(events, branch_view={1: 1, 2: 1, 3: 2, 4: 2})
+        assert [m["content"] for m in out2] == ["[S2]", "U4b", "R4b"]
+
+
 class TestPendingSummaryScan:
     def _events(self):
         events = []

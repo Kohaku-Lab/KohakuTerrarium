@@ -10,7 +10,6 @@ from kohakuterrarium.core.compact_branch import (
     persist_compacted,
 )
 from kohakuterrarium.core.compact_splice import (
-    count_keep_messages,
     prefix_fingerprint,
     select_compact_boundary,
     splice_conversation,
@@ -481,9 +480,6 @@ class CompactManager:
                 self._active_lease = None
             self._compact_task = None
 
-    def _count_keep_messages(self, messages: list) -> int:
-        return count_keep_messages(messages, self.config.keep_recent_turns)
-
     def _compact_boundary(self, messages: list) -> int:
         usage = getattr(self._controller, "_last_usage", {}) or {}
         prompt_tokens = int(usage.get("prompt_tokens", 0) or 0)
@@ -494,9 +490,6 @@ class CompactManager:
             prompt_tokens=prompt_tokens,
             summary_tokens=self._summary_max_tokens(),
         )
-
-    def _format_messages_for_summary(self, messages: list) -> str:
-        return format_messages_for_summary(messages)
 
     def _summary_max_tokens(self) -> int:
         """Return a conservative output cap for the summarization request.

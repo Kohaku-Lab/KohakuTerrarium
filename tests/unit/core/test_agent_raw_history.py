@@ -292,6 +292,70 @@ def test_reload_ignores_sibling_branch_compact():
     ]
 
 
+def test_reload_ignores_sibling_compact_sharing_ancestor():
+    # Two compactions on branches that share a prefix (turns 1-2) then diverge
+    # at turn 3. Editing branch-2's turn 3 must keep ONLY branch-2's compact
+    # baseline — branch-1's summary is a foreign baseline that shares the same
+    # ancestor prefix and must not stack on top of branch-2's.
+    events = [
+        _event(1, "user_message", turn=1, content="U1"),
+        _event(2, "text_chunk", turn=1, content="R1"),
+        _event(3, "user_message", turn=2, content="U2", path=[[1, 1]]),
+        _event(4, "text_chunk", turn=2, content="R2", path=[[1, 1]]),
+        _event(5, "user_message", turn=3, content="U3a", path=[[1, 1], [2, 1]]),
+        _event(6, "text_chunk", turn=3, content="R3a", path=[[1, 1], [2, 1]]),
+        {
+            "event_id": 7,
+            "type": "compact_complete",
+            "summary": "[S1]",
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 4,
+            "compact_path": [[1, 1], [2, 1], [3, 1]],
+            "turn_index": 3,
+            "branch_id": 1,
+            "parent_branch_path": [(1, 1), (2, 1)],
+        },
+        {
+            "event_id": 8,
+            "type": "user_message",
+            "content": "U3b",
+            "turn_index": 3,
+            "branch_id": 2,
+            "parent_branch_path": [(1, 1), (2, 1)],
+        },
+        {
+            "event_id": 9,
+            "type": "text_chunk",
+            "content": "R3b",
+            "turn_index": 3,
+            "branch_id": 2,
+            "parent_branch_path": [(1, 1), (2, 1)],
+        },
+        {
+            "event_id": 10,
+            "type": "compact_complete",
+            "summary": "[S2]",
+            "replaced_from_event_id": 1,
+            "replaced_to_event_id": 9,
+            "compact_path": [[1, 1], [2, 1], [3, 2]],
+            "turn_index": 3,
+            "branch_id": 2,
+            "parent_branch_path": [(1, 1), (2, 1)],
+        },
+    ]
+    agent = _agent(events)
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=8, turn_index=3, branch_id=2),
+    )
+    messages = agent.controller.conversation.get_messages()
+    assert [(m.role, m.content) for m in messages] == [
+        ("system", "current runtime prompt"),
+        ("assistant", "[S2]"),
+        ("user", "U3b"),
+    ]
+
+
 def _compact_complete_event(event_id, replaced_from, replaced_to, summary="[S]"):
     # Runtime (v2) compaction persists compact_complete, not compact_replace.
     return {
