@@ -10,6 +10,41 @@ deploys.
 from kohakuterrarium.cli import service
 
 
+class TestResolveConsoleScripts:
+    def test_interpreter_native_layout_wins(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(service.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(service.sys, "exec_prefix", str(tmp_path))
+        bin_script = tmp_path / "bin" / "kt"
+        windows_script = tmp_path / "Scripts" / "kt.exe"
+        bin_script.parent.mkdir()
+        windows_script.parent.mkdir()
+        bin_script.touch()
+        windows_script.touch()
+
+        expected = windows_script if service.os.name == "nt" else bin_script
+        assert service._resolve_kt_executable() == str(expected)
+
+    def test_kt_falls_back_to_windows_virtualenv_scripts(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(service.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(service.sys, "exec_prefix", str(tmp_path))
+        executable = tmp_path / "Scripts" / "kt.exe"
+        executable.parent.mkdir()
+        executable.touch()
+
+        assert service._resolve_kt_executable() == str(executable)
+
+    def test_kt_aio_falls_back_to_windows_virtualenv_scripts(
+        self, tmp_path, monkeypatch
+    ):
+        monkeypatch.setattr(service.shutil, "which", lambda _name: None)
+        monkeypatch.setattr(service.sys, "exec_prefix", str(tmp_path))
+        executable = tmp_path / "Scripts" / "kt-aio.exe"
+        executable.parent.mkdir()
+        executable.touch()
+
+        assert service._resolve_kt_aio_executable() == str(executable)
+
+
 class TestRenderHostUnit:
     def test_host_unit_carries_required_directives(self):
         unit = service._render_host_unit(

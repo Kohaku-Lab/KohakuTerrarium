@@ -71,21 +71,32 @@ def _read_template(name: str) -> str:
     )
 
 
-def _resolve_kt_executable() -> str:
-    """Absolute path to the ``kt`` console script.
-
-    Prefer ``shutil.which("kt")`` — that's what the user already has
-    on PATH and what the unit will use after a reboot. Fall back to
-    the running interpreter's ``Scripts/bin`` dir.
-    """
-    found = shutil.which("kt")
+def _find_console_script(name: str) -> str | None:
+    """Find a console script on PATH or beside the running interpreter."""
+    found = shutil.which(name)
     if found:
         return found
-    candidate = Path(sys.exec_prefix) / "bin" / "kt"
-    if candidate.is_file():
-        return str(candidate)
+
+    bin_script = Path(sys.exec_prefix) / "bin" / name
+    windows_script = Path(sys.exec_prefix) / "Scripts" / f"{name}.exe"
+    candidates = (
+        (windows_script, bin_script)
+        if os.name == "nt"
+        else (bin_script, windows_script)
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _resolve_kt_executable() -> str:
+    """Absolute path to the ``kt`` console script."""
+    found = _find_console_script("kt")
+    if found:
+        return found
     raise FileNotFoundError(
-        "Could not locate `kt` on PATH or in this interpreter's bin dir. "
+        "Could not locate `kt` on PATH or in this interpreter's Scripts/bin dir. "
         "Install KohakuTerrarium globally (or in a venv on PATH) before "
         "running `kt service install`."
     )
@@ -93,15 +104,13 @@ def _resolve_kt_executable() -> str:
 
 def _resolve_kt_aio_executable() -> str:
     """Absolute path to the ``kt-aio`` console script."""
-    found = shutil.which("kt-aio")
+    found = _find_console_script("kt-aio")
     if found:
         return found
-    candidate = Path(sys.exec_prefix) / "bin" / "kt-aio"
-    if candidate.is_file():
-        return str(candidate)
     raise FileNotFoundError(
-        "Could not locate `kt-aio` on PATH. The `kt-aio` console script "
-        "is shipped by KohakuTerrarium 1.5+; reinstall the package."
+        "Could not locate `kt-aio` on PATH or in this interpreter's "
+        "Scripts/bin dir. The `kt-aio` console script is shipped by "
+        "KohakuTerrarium 1.5+; reinstall the package."
     )
 
 

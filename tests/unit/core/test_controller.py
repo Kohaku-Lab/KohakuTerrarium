@@ -84,7 +84,7 @@ class TestControllerContext:
 
         ex = Executor()
         result = JobResult(job_id="x", output="ok")
-        ex._results["x"] = result
+        ex.job_store.store_result(result)
         ctrl = types.SimpleNamespace(executor=ex)
         ctx = ControllerContext(
             controller=ctrl, job_store=JobStore(), registry=Registry()

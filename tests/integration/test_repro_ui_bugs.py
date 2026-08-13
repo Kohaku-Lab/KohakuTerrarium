@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 from typing import Any
 
+from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
     AgentConfig,
@@ -18,6 +19,7 @@ from kohakuterrarium.core.config_types import (
 )
 from kohakuterrarium.testing.llm import ScriptedLLM
 from kohakuterrarium.testing.output import OutputRecorder
+from kohakuterrarium.utils.async_utils import cancel_tasks
 
 
 async def _make_agent(tmp_path, llm_holder):
@@ -654,8 +656,6 @@ class TestTuiStdinStealFix:
         # set, don't clobber it.
         import asyncio as _asyncio
 
-        from kohakuterrarium.builtins.tui.output import TUIOutput
-
         class _SentinelSession:
             """Stand-in for the engine_cli-created TUISession."""
 
@@ -677,6 +677,70 @@ class TestTuiStdinStealFix:
             "this is the entire reason the engine pre-wires it before "
             "starting the creature."
         )
+
+    async def test_injected_help_renders_on_target_creature_tab(self, tmp_path):
+        config = AgentConfig(
+            name="help-repro",
+            system_prompt="Test agent.",
+            include_tools_in_prompt=False,
+            include_hints_in_prompt=False,
+            tool_format="bracket",
+            agent_path=tmp_path,
+            input=InputConfig(type="none"),
+            output=OutputConfig(type="none"),
+            tools=[],
+        )
+        agent = await Agent.build(
+            config,
+            llm=ScriptedLLM(["unused"]),
+            io="none",
+        )
+
+        class _RecordingTUI:
+            def __init__(self):
+                self.notices: list[dict[str, Any]] = []
+
+            def add_system_notice(
+                self,
+                text: str,
+                command: str = "",
+                error: bool = False,
+                target: str = "",
+            ) -> None:
+                self.notices.append(
+                    {
+                        "text": text,
+                        "command": command,
+                        "error": error,
+                        "target": target,
+                    }
+                )
+
+            def end_streaming(self, target: str = "") -> None:
+                pass
+
+        tui = _RecordingTUI()
+        output = TUIOutput(session_key="creature-b")
+        output._tui = tui
+        output._default_target = "creature-b"
+        agent.output_router.default_output = output
+
+        await agent.start()
+        try:
+            calls_before = agent.llm.call_count
+
+            handled = await agent.inject_input("/help", source="tui")
+
+            assert handled is True
+            assert agent.llm.call_count == calls_before
+            assert len(tui.notices) == 1
+            assert tui.notices[0]["command"] == "help"
+            assert tui.notices[0]["target"] == "creature-b"
+            assert tui.notices[0]["error"] is False
+            assert "Available commands:" in tui.notices[0]["text"]
+            assert "TUI model picker" in tui.notices[0]["text"]
+        finally:
+            await agent.stop()
 
     def test_handle_tui_slash_opens_model_picker_for_bare_slash_model(self):
         # Regression: ``/model`` (no args) MUST open the Textual model
@@ -816,7 +880,7 @@ class TestTuiStdinStealFix:
             "F2 / F3 modal action handlers can reach the live agent."
         )
 
-    def test_tui_main_loop_uses_fire_and_forget_inject(self):
+    async def test_tui_main_loop_uses_fire_and_forget_inject(self):
         # Regression: the engine's input loop MUST NOT ``await
         # focus.inject_input(text)`` inline. Awaiting blocks the loop
         # for the entire turn — a second user message that arrives
@@ -860,6 +924,27 @@ class TestTuiStdinStealFix:
             "mid-turn injection."
         )
 
+        cleanup_idx = text.index("await cancel_tasks(inflight_inputs)", try_idx)
+        finally_idx = text.index("    finally:", try_idx)
+        assert cleanup_idx > finally_idx
+
+        cancelled = asyncio.Event()
+
+        async def _pending_input() -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cancelled.set()
+
+        task = asyncio.create_task(_pending_input())
+        await asyncio.sleep(0)
+        inflight = {task}
+        await cancel_tasks(inflight)
+
+        assert task.cancelled()
+        assert cancelled.is_set()
+        assert inflight == set()
+
     def test_handle_tui_slash_falls_through_for_other_commands(self):
         # Other slash commands (e.g. ``/help``, ``/clear``) MUST fall
         # through to the agent's standard slash dispatch by returning
@@ -879,11 +964,27 @@ class TestTuiStdinStealFix:
                 raise AssertionError("should not be called for /help")
 
         # Bare /model is the modal path; with args it falls through.
-        for variant in ("/help", "/clear", "/exit", "/status"):
+        for variant in ("/help", "/clear", "/status"):
             handled = _asyncio.run(_handle_tui_slash(variant, _NoModalTUI(), object()))
             assert (
                 handled is False
             ), f"{variant!r} should fall through to agent slash dispatch"
+
+        # Engine-managed TUI sessions replace stdin inputs with NoneInput.
+        # Dispatching /exit through that input only toggles a flag which this
+        # runner never observes, so the runner must stop its own TUISession.
+        class _RecordingTUI:
+            def __init__(self):
+                self.stop_calls = 0
+
+            def stop(self) -> None:
+                self.stop_calls += 1
+
+        for variant in ("/exit", "/quit", "/q"):
+            tui = _RecordingTUI()
+            handled = _asyncio.run(_handle_tui_slash(variant, tui, object()))
+            assert handled is True
+            assert tui.stop_calls == 1
 
     def test_handle_tui_slash_targets_active_tab_agent(self):
         # Multi-creature: ``/model`` (no args) must open the picker for
@@ -940,6 +1041,14 @@ class TestTuiStdinStealFix:
         solo = TUISession(agent_name="a")
         solo.host_agent = host
         assert solo.agent_for_tab() is host
+
+        # Explicit stop must discard already-queued input before adding the
+        # empty shutdown sentinel. Otherwise /exit can process a later queued
+        # message before the runner observes shutdown.
+        asyncio.run(solo.start())
+        solo._app._input_queue.put_nowait("queued before exit")
+        solo.stop()
+        assert asyncio.run(solo.get_input()) == ""
 
     def test_tui_session_per_target_model_registry(self):
         # A sibling creature's model switch must NOT stomp the visible

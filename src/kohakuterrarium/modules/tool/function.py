@@ -47,6 +47,7 @@ class FunctionTool(BaseTool):
         description: str | None = None,
         execution_mode: ExecutionMode = ExecutionMode.DIRECT,
     ) -> None:
+        super().__init__()
         self._fn = fn
         self._name = name or fn.__name__
         doc = inspect.getdoc(fn) or ""

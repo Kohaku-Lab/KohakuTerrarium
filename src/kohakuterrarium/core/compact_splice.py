@@ -7,6 +7,10 @@ guard.
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.core.conversation_elide import (
+    estimate_message_tokens,
+    estimate_messages_tokens,
+)
 from kohakuterrarium.llm.message import create_message
 
 
@@ -43,6 +47,7 @@ def splice_conversation(
     compact_round: int,
     expected_last: Any = None,
     expected_fingerprint: tuple | None = None,
+    retain_latest_user: bool = False,
 ) -> bool:
     """Atomic splice: replace compact zone with summary message.
 
@@ -53,7 +58,7 @@ def splice_conversation(
     """
     messages = conversation.get_messages()
 
-    if boundary >= len(messages) or boundary <= 1:
+    if boundary > len(messages) or boundary <= 1:
         return False
     if expected_last is not None and messages[boundary - 1] is not expected_last:
         return False
@@ -66,11 +71,21 @@ def splice_conversation(
     # summarizer ran — moving it here would keep already-summarized
     # content raw, duplicating it). A tool-result head means the
     # conversation changed shape: reject.
-    if getattr(messages[boundary], "role", None) == "tool":
+    if boundary < len(messages) and getattr(messages[boundary], "role", None) == "tool":
         return False
 
     system_msg = messages[0]  # The system prompt survives every compaction round.
     live_zone = messages[boundary:]  # Messages after the boundary remain verbatim.
+    retained_user = None
+    if retain_latest_user:
+        retained_user = next(
+            (
+                msg
+                for msg in reversed(messages[1:boundary])
+                if is_real_user_message(msg)
+            ),
+            None,
+        )
 
     conversation._messages.clear()
     conversation._messages.append(system_msg)
@@ -81,6 +96,8 @@ def splice_conversation(
         f"[Previous context summary (compact round {compact_round})]\n\n{summary}",
     )
     conversation._messages.append(summary_msg)
+    if retained_user is not None:
+        conversation._messages.append(retained_user)
 
     # Restore live zone
     conversation._messages.extend(live_zone)
@@ -97,6 +114,78 @@ def splice_conversation(
     conversation._metadata.total_chars = conversation.get_context_length()
     conversation._metadata.updated_at = datetime.now()
     return True
+
+
+def is_real_user_message(msg: Any) -> bool:
+    """Return whether a message represents explicit user input."""
+    if getattr(msg, "role", None) != "user":
+        return False
+    metadata = getattr(msg, "metadata", None)
+    return not isinstance(metadata, dict) or metadata.get("kind") != "tool_results"
+
+
+def select_compact_boundary(
+    messages: list,
+    keep_recent_turns: int,
+    *,
+    target_tokens: int | None = None,
+    prompt_tokens: int = 0,
+    summary_tokens: int = 0,
+) -> int:
+    """Select the old turn boundary, tightening it only when over budget."""
+    n = len(messages)
+    boundary = n - count_keep_messages(messages, keep_recent_turns)
+    while boundary > 1 and boundary < n and messages[boundary].role == "tool":
+        boundary -= 1
+
+    if target_tokens is None or prompt_tokens <= 0:
+        return boundary
+
+    estimated_history = estimate_messages_tokens(messages)
+    fixed_tokens = max(0, prompt_tokens - estimated_history)
+    if fixed_tokens + summary_tokens >= target_tokens:
+        return boundary
+    live_budget = max(1, target_tokens - fixed_tokens - summary_tokens)
+    live_tokens = estimate_message_tokens(messages[0]) + sum(
+        estimate_message_tokens(msg) for msg in messages[boundary:]
+    )
+    if live_tokens <= live_budget:
+        return boundary
+
+    suffix_tokens = estimate_message_tokens(messages[0])
+    token_boundary = n
+    for index in range(n - 1, 0, -1):
+        message_tokens = estimate_message_tokens(messages[index])
+        if suffix_tokens + message_tokens > live_budget:
+            break
+        suffix_tokens += message_tokens
+        token_boundary = index
+
+    while token_boundary < n and messages[token_boundary].role == "tool":
+        token_boundary += 1
+
+    pending_start = _pending_tool_round_start(messages)
+    if pending_start is not None:
+        token_boundary = min(token_boundary, pending_start)
+    return max(boundary, token_boundary)
+
+
+def _pending_tool_round_start(messages: list) -> int | None:
+    result_ids: set[str] = set()
+    for index in range(len(messages) - 1, 0, -1):
+        msg = messages[index]
+        if getattr(msg, "role", None) == "tool":
+            tool_call_id = getattr(msg, "tool_call_id", None)
+            if tool_call_id:
+                result_ids.add(tool_call_id)
+            continue
+        calls = getattr(msg, "tool_calls", None)
+        if getattr(msg, "role", None) == "assistant" and calls:
+            call_ids = {call.get("id") for call in calls if call.get("id")}
+            if len(call_ids) != len(calls) or not call_ids.issubset(result_ids):
+                return index
+        return None
+    return None
 
 
 def count_keep_messages(messages: list, keep_recent_turns: int) -> int:
@@ -128,7 +217,7 @@ def count_keep_messages(messages: list, keep_recent_turns: int) -> int:
     found_target = False
     for msg in reversed(messages):
         by_turn_count += 1
-        if msg.role == "user":
+        if is_real_user_message(msg):
             turns += 1
             if turns >= keep_recent_turns:
                 found_target = True

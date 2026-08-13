@@ -84,14 +84,25 @@ class TUISession(TabModelRegistryMixin):
         # active tab's model and context details.
         self._model_by_target: dict[str, str] = {}
         self._context_by_target: dict[str, tuple[int, int]] = {}
+        self._command_hint_watches: set[tuple[str, int]] = set()
+        self.command_hint_fallback: dict[str, Any] = {}
         # Buffer mutations until Textual mounts so startup events are not lost.
         self._pending_safe_calls: list[tuple[Any, tuple[Any, ...]]] = []
 
     def set_terrarium_tabs(self, tabs: list[str]) -> None:
-        """Configure terrarium tabs before startup."""
-        self._terrarium_tabs = tabs
-        if tabs:
-            self._active_target = tabs[0]
+        """Configure terrarium tabs and reconcile a running application."""
+        normalized = list(dict.fromkeys(tabs))
+        active = self.get_active_tab() if self._app else self._active_target
+        self._terrarium_tabs = normalized
+        self._active_target = (
+            active if active in normalized else normalized[0] if normalized else ""
+        )
+        if not self._app:
+            return
+        if not self._app.is_running:
+            self._app._terrarium_tabs = normalized
+            return
+        self._safe_call(self._app.reconcile_terrarium_tabs, normalized)
 
     def set_active_target(self, target: str) -> None:
         """Set the tab that receives new output widgets."""
@@ -141,6 +152,7 @@ class TUISession(TabModelRegistryMixin):
         if not self._app or not self._app.is_running:
             return
         scroll_id = self._get_chat_scroll_id(target)
+        target_key = target or self._active_target or "_default"
 
         def _do():
             try:
@@ -148,13 +160,13 @@ class TUISession(TabModelRegistryMixin):
                 chat.mount(widget)
                 if scroll:
                     chat.scroll_end(animate=False)
-                self._cull_chat_widgets(chat)
+                self._cull_chat_widgets(chat, target_key)
             except Exception as e:
                 logger.warning("TUI safe_mount failed", error=str(e), exc_info=True)
 
         self._safe_call(_do)
 
-    def _cull_chat_widgets(self, chat: VerticalScroll) -> None:
+    def _cull_chat_widgets(self, chat: VerticalScroll, target: str) -> None:
         """Cull old widgets while retaining the configured recent window."""
         children = list(chat.children)
         if len(children) <= self._max_chat_widgets:
@@ -163,7 +175,6 @@ class TUISession(TabModelRegistryMixin):
         remove_count = len(children) - self._cull_keep
         to_remove = children[:remove_count]
 
-        target = self._active_target or "_default"
         self._culled_count[target] = self._culled_count.get(target, 0) + remove_count
 
         for w in to_remove:
@@ -550,6 +561,7 @@ class TUISession(TabModelRegistryMixin):
         if not widget:
             return
         scroll_id = self._get_chat_scroll_id(target)
+        target_key = target or self._active_target or "_default"
 
         def _do():
             try:
@@ -565,7 +577,7 @@ class TUISession(TabModelRegistryMixin):
                 widget.remove()
                 if at_bottom:
                     chat.scroll_end(animate=False)
-                self._cull_chat_widgets(chat)
+                self._cull_chat_widgets(chat, target_key)
             except Exception as e:
                 logger.warning("TUI end_streaming failed", error=str(e), exc_info=True)
 
@@ -789,8 +801,18 @@ class TUISession(TabModelRegistryMixin):
         finally:
             self.running = False
             self._stop_event.set()
-            # Empty input wakes a pending reader and signals shutdown.
-            self._app._input_queue.put_nowait("")
+            self._signal_input_shutdown()
+
+    def _signal_input_shutdown(self) -> None:
+        """Discard pending submissions and wake the runner with shutdown."""
+        if not self._app:
+            return
+        while True:
+            try:
+                self._app._input_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        self._app._input_queue.put_nowait("")
 
     async def get_input(self, prompt: str = "You: ") -> str:
         if not self._app:
@@ -879,8 +901,7 @@ class TUISession(TabModelRegistryMixin):
         self.running = False
         self._stop_event.set()
         if self._app:
-            # Empty input wakes a pending reader and signals shutdown.
-            self._app._input_queue.put_nowait("")
+            self._signal_input_shutdown()
             if self._app.is_running:
                 self._app.exit()
 

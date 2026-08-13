@@ -13,10 +13,12 @@ from kohakuterrarium.core.compact import (
     COMPACT_PROMPT,
     DEFAULT_KEEP_RECENT,
     DEFAULT_MAX_TOKENS,
+    DEFAULT_TARGET,
     DEFAULT_THRESHOLD,
     CompactConfig,
     CompactManager,
 )
+from kohakuterrarium.core.compact_splice import select_compact_boundary
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm.message import create_message
 
@@ -112,6 +114,7 @@ class TestCompactConfig:
         c = CompactConfig()
         assert c.max_tokens == DEFAULT_MAX_TOKENS
         assert c.threshold == DEFAULT_THRESHOLD
+        assert c.target == DEFAULT_TARGET
         assert c.keep_recent_turns == DEFAULT_KEEP_RECENT
         assert c.enabled is True
         assert c.cooldown_seconds == 30.0
@@ -252,6 +255,105 @@ class TestCountKeepMessages:
         keep = mgr._count_keep_messages(msgs)
         # Returns by_turn_count or n-1 — whichever is smaller.
         assert keep == 2  # n-1
+
+    def test_tool_feedback_does_not_count_as_user_turn(self):
+        mgr = CompactManager(CompactConfig(keep_recent_turns=2))
+        msgs = [types.SimpleNamespace(role="user", metadata={})]
+        for _ in range(12):
+            msgs.append(
+                types.SimpleNamespace(role="user", metadata={"kind": "tool_results"})
+            )
+        assert mgr._count_keep_messages(msgs) == len(msgs) // 2
+
+    def test_target_tightens_only_an_oversized_live_zone(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        for index in range(8):
+            conv.append("user", f"goal-{index}")
+            conv.append("assistant", "done")
+        for _ in range(2_984):
+            conv.append("assistant", "x" * 350)
+
+        mgr = CompactManager(
+            CompactConfig(
+                max_tokens=400_000,
+                threshold=0.8,
+                target=0.5,
+                keep_recent_turns=8,
+            )
+        )
+        mgr._controller = types.SimpleNamespace(
+            conversation=conv,
+            _last_usage={"prompt_tokens": 370_000},
+        )
+        boundary = mgr._compact_boundary(conv.get_messages())
+        assert boundary > len(conv.get_messages()) // 2
+
+    def test_target_keeps_the_existing_boundary_when_it_already_fits(self):
+        conv = _build_conversation(n_user=5)
+        mgr = CompactManager(CompactConfig(max_tokens=10_000, target=0.5))
+        mgr._controller = types.SimpleNamespace(
+            conversation=conv,
+            _last_usage={"prompt_tokens": 8_500},
+        )
+        messages = conv.get_messages()
+        assert mgr._compact_boundary(messages) == (
+            len(messages) - mgr._count_keep_messages(messages)
+        )
+
+    def test_target_can_summarize_a_completed_500_call_tool_round(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        conv.append("user", "run the batch")
+        calls = [
+            {
+                "id": f"tc_{index}",
+                "type": "function",
+                "function": {"name": "work", "arguments": "{}"},
+            }
+            for index in range(500)
+        ]
+        conv.append("assistant", "", tool_calls=calls)
+        for index in range(500):
+            conv.append("tool", "x" * 350, tool_call_id=f"tc_{index}")
+
+        messages = conv.get_messages()
+        completed_boundary = select_compact_boundary(
+            messages,
+            8,
+            target_tokens=10_000,
+            prompt_tokens=50_000,
+            summary_tokens=1_000,
+        )
+        assert completed_boundary == len(messages)
+
+        conv._messages.pop()
+        pending_boundary = select_compact_boundary(
+            conv.get_messages(),
+            8,
+            target_tokens=10_000,
+            prompt_tokens=50_000,
+            summary_tokens=1_000,
+        )
+        assert pending_boundary == 2
+
+    async def test_target_compaction_retains_latest_real_user_message(self):
+        conv = Conversation()
+        conv.append("system", "sys")
+        for index in range(8):
+            conv.append("user", f"goal-{index}")
+            conv.append("assistant", "done")
+        for _ in range(100):
+            conv.append("assistant", "x" * 350)
+
+        mgr = _build_mgr(conversation=conv, llm=_LLM(chunks=["S"]))
+        mgr.config = CompactConfig(max_tokens=10_000, target=0.5)
+        mgr._controller._last_usage = {"prompt_tokens": 9_000}
+        await mgr._run_compact()
+
+        assert mgr._compact_count == 1
+        user_text = [msg.content for msg in conv.get_messages() if msg.role == "user"]
+        assert "goal-7" in user_text
 
 
 # ── _format_messages_for_summary ─────────────────────────────────

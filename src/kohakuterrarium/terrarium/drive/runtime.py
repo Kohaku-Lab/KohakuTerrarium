@@ -405,8 +405,15 @@ class DriveRuntime:
 
     async def on_creature_stopped(self, creature_id: str) -> None:
         manager = self._manager_for_creature(creature_id)
-        if manager is not None:
+        if manager is None:
+            return
+        try:
             await manager.on_creature_stopped(creature_id)
+        except DriveRepositoryClosedError:
+            # Repository closure is a quiescence signal, not an error: the
+            # graph's drive repo may already be closed (Windows closes a
+            # session-backed repo's sqlite connection with its store).
+            return
 
     async def on_creature_removed(
         self,
@@ -422,9 +429,13 @@ class DriveRuntime:
         )
         if manager is None:
             return ()
-        return await manager.on_creature_removed(
-            creature_id, graph_member_ids=graph_member_ids
-        )
+        try:
+            return await manager.on_creature_removed(
+                creature_id, graph_member_ids=graph_member_ids
+            )
+        except DriveRepositoryClosedError:
+            # Repository closure is a quiescence signal, not an error.
+            return ()
 
     def _manager_for_creature(self, creature_id: str) -> DriveManager | None:
         creature = self._engine._creatures.get(creature_id)

@@ -28,6 +28,9 @@ import kohakuterrarium.terrarium.root as _root
 import kohakuterrarium.terrarium.topology as _topo
 import kohakuterrarium.terrarium.wiring as _wiring
 import kohakuterrarium.terrarium.drive.runtime as _drive_runtime
+from kohakuterrarium.terrarium.drive.store import (
+    DriveRepositoryClosedError,
+)
 from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import (
@@ -309,6 +312,11 @@ class Terrarium:
         # A creature-scoped Drive orphans-and-blocks on removal,
         # a graph-scoped one unassigns / auto-assigns among the remaining
         # graph members — never a silent semantic reassignment.
+        # Drive cleanup must never block the creature removal itself: the
+        # repository may already be closed (Windows closes a session-backed
+        # repo's sqlite connection when its store closes; a stale registry
+        # entry can survive a merge/split). Treat that as quiescence and
+        # continue the topology removal below.
         if self._drive_runtime is not None:
             old_graph = self._topology.graphs.get(old_gid)
             members = (
@@ -316,9 +324,17 @@ class Terrarium:
                 if old_graph is not None
                 else frozenset()
             )
-            await self._drive_runtime.on_creature_removed(
-                cid, graph_id=old_gid, graph_member_ids=members
-            )
+            try:
+                await self._drive_runtime.on_creature_removed(
+                    cid, graph_id=old_gid, graph_member_ids=members
+                )
+            except DriveRepositoryClosedError as exc:
+                _logger.warning(
+                    "Drive cleanup skipped during creature removal "
+                    "(repository closed)",
+                    creature_id=cid,
+                    error=str(exc),
+                )
         delta = _topo.remove_creature(self._topology, cid)
         self._creatures.pop(cid, None)
         _wiring.install_output_wiring_resolver(self)

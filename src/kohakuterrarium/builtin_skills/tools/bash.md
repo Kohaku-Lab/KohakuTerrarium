@@ -33,9 +33,16 @@ Using dedicated tools gives structured output and enables safety guards.
 ## Shell Type
 
 By default, all commands run in **bash** on every platform (including
-Windows, via git bash). If bash is not available, the tool will report
-which shells are installed so you can choose an alternative with
-`type="..."`.
+Windows, via Git Bash). The process `$SHELL` does not replace this default.
+Use `type="..."` to select another shell explicitly. Supported values are
+`bash`, `zsh`, `sh`, `fish`, `pwsh`, and `powershell`. If the requested shell
+is not available, the tool reports which shells are installed.
+
+Shell executable overrides are checked in this order:
+
+1. `KT_<SHELL>_PATH`, such as `KT_BASH_PATH`
+2. `KT_SHELL_PATH`
+3. Platform shell discovery
 
 ## Git Safety
 
@@ -53,8 +60,8 @@ which shells are installed so you can choose an alternative with
 
 ## Behavior
 
-- Commands run in bash on all platforms (git bash on Windows).
-- Use `type` parameter to switch shell if bash is unavailable.
+- Commands run in bash on all platforms (Git Bash on Windows) unless `type` selects another shell.
+- Use the `type` parameter to switch shells explicitly.
 - stdout and stderr are combined in the output.
 - Commands have a configurable timeout; pass `timeout` per call to override the tool default.
 - `timeout: 0` disables the execution timeout for long-running commands.

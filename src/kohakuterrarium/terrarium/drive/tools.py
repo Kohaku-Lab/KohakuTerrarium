@@ -7,32 +7,25 @@ model while structured payloads remain available in :class:`ToolResult` metadata
 
 from typing import Any
 
-from kohakuterrarium.modules.tool.base import (
-    BaseTool,
-    ExecutionMode,
-    ToolContext,
-    ToolResult,
-)
-from kohakuterrarium.terrarium.channels import DRIVE_SERVICE_KEY
+from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult
 from kohakuterrarium.terrarium.drive.errors import (
-    DriveConflictError,
     DriveError,
-    DriveIdempotencyConflictError,
-    DriveNotFoundError,
     DrivePermissionError,
-    DriveRegistrationDisabledError,
-    DriveRegistrationIncompatibleError,
-    DriveRegistrationNotFoundError,
+    DriveValidationError,
 )
-from kohakuterrarium.terrarium.drive.models import ActorRef, DriveRecord, DriveStatus
+from kohakuterrarium.terrarium.drive.models import DriveRecord, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import (
     CreateDriveRequest,
     DrivePatch,
     DriveQuery,
 )
-from kohakuterrarium.terrarium.group_tool_context import (
-    GroupToolError,
-    resolve_group_context,
+from kohakuterrarium.terrarium.drive.tools_common import (
+    _BaseDriveTool,
+    _DriveCall,
+    _drive_error_result,
+    _err,
+    _ok,
+    _summary_with_actions,
 )
 
 # Terminal states require proposal verification; administrative retirement is
@@ -50,179 +43,6 @@ _TRANSITION_TARGETS = frozenset(
 )
 
 
-class _DriveCall:
-    """Hold the trusted runtime context for one Drive tool invocation."""
-
-    __slots__ = (
-        "manager",
-        "runtime",
-        "engine",
-        "caller",
-        "actor",
-        "graph_id",
-        "is_privileged",
-    )
-
-    def __init__(self, manager, runtime, engine, caller) -> None:
-        self.manager = manager
-        self.runtime = runtime
-        self.engine = engine
-        self.caller = caller
-        self.actor = ActorRef("creature", caller.creature_id)
-        self.graph_id = caller.graph_id
-        self.is_privileged = bool(getattr(caller, "is_privileged", False))
-
-
-def _resolve_call(ctx: ToolContext | None) -> _DriveCall:
-    """Resolve the caller, engine, and graph-scoped Drive manager."""
-    gctx = resolve_group_context(ctx, require_privileged=False)
-    runtime = ctx.environment.get(DRIVE_SERVICE_KEY) if ctx.environment else None
-    if runtime is None:
-        raise GroupToolError("the Drive runtime is not enabled on this terrarium")
-    manager = runtime.manager_for(gctx.caller.graph_id)
-    if manager is None:
-        raise GroupToolError("no Drive manager is available for this graph")
-    return _DriveCall(manager, runtime, gctx.engine, gctx.caller)
-
-
-def _err(message: str) -> ToolResult:
-    return ToolResult(error=message)
-
-
-def _format_value(value: Any) -> str:
-    if value is None:
-        return "none"
-    if isinstance(value, bool):
-        return "yes" if value else "no"
-    if isinstance(value, (list, tuple)):
-        return ", ".join(str(item) for item in value) or "none"
-    return str(value)
-
-
-def _format_drive(summary: dict[str, Any]) -> str:
-    lines = [
-        f"Drive {summary['drive_id']}: {summary['title']}",
-        f"Status: {summary['status']} | Kind: {summary['kind']} | Revision: {summary['revision']}",
-        f"Owner: {summary['owner']} | Assignee: {_format_value(summary.get('assignee'))}",
-        f"Scope: {summary['scope_type']}:{summary['scope_id']} | Priority: {summary['priority']}",
-    ]
-    if summary.get("availability") is not None:
-        lines.append(f"Availability: {summary['availability']}")
-    if summary.get("durability") is not None:
-        lines.append(f"Durability: {summary['durability']}")
-    if summary.get("proposal") is not None:
-        lines.append(f"Proposal: {summary['proposal']}")
-    actions = summary.get("allowed_actions") or []
-    if actions:
-        lines.append(f"Allowed actions: {_format_value(actions)}")
-    return "\n".join(lines)
-
-
-def _format_payload(payload: dict[str, Any]) -> str:
-    drives = payload.get("drives")
-    if isinstance(drives, list):
-        if not drives:
-            return "No matching drives."
-        return "\n\n".join(_format_drive(item) for item in drives)
-    if {"drive_id", "title", "status", "kind"}.issubset(payload):
-        return _format_drive(payload)
-    if "progress_id" in payload:
-        return (
-            f"Progress recorded for drive {payload['drive_id']}.\n"
-            f"Progress ID: {payload['progress_id']}"
-        )
-    if "proposal_id" in payload:
-        return (
-            f"Transition proposed for drive {payload['drive_id']}: "
-            f"{payload['target_status']} ({payload.get('proposal', 'pending')}).\n"
-            f"Proposal ID: {payload['proposal_id']}"
-        )
-    if "delivery_id" in payload:
-        return (
-            f"Delivery {payload['delivery_id']} replayed for drive "
-            f"{payload['drive_id']}."
-        )
-    return "\n".join(f"{key}: {_format_value(value)}" for key, value in payload.items())
-
-
-def _ok(payload: dict[str, Any]) -> ToolResult:
-    return ToolResult(
-        output=_format_payload(payload),
-        exit_code=0,
-        metadata={"drive": payload},
-    )
-
-
-def _drive_error_result(exc: DriveError) -> ToolResult:
-    """Map a typed Drive error to a distinct, model-shaped tool error."""
-    if isinstance(exc, (DriveConflictError, DriveIdempotencyConflictError)):
-        return _err(f"conflict: {exc}")
-    if isinstance(exc, DrivePermissionError):
-        return _err(f"permission denied: {exc}")
-    if isinstance(
-        exc,
-        (
-            DriveRegistrationDisabledError,
-            DriveRegistrationIncompatibleError,
-            DriveRegistrationNotFoundError,
-        ),
-    ):
-        return _err(f"registration unavailable: {exc}")
-    if isinstance(exc, DriveNotFoundError):
-        return _err(f"not found: {exc}")
-    return _err(f"invalid: {exc}")
-
-
-def _record_summary(call: _DriveCall, record: DriveRecord) -> dict[str, Any]:
-    """Build a bounded authorized summary without exposing the raw Drive spec."""
-    return {
-        "drive_id": record.drive_id,
-        "kind": record.kind,
-        "title": record.title,
-        "status": record.status.value,
-        "revision": record.revision,
-        "scope_type": record.scope_type,
-        "scope_id": record.scope_id,
-        "owner": record.owner.format(),
-        "priority": record.priority,
-        # Durability must describe the record's graph rather than a possibly
-        # mixed aggregate across the engine.
-        "durability": call.runtime.durability_for(call.graph_id),
-    }
-
-
-async def _summary_with_actions(
-    call: _DriveCall, record: DriveRecord
-) -> dict[str, Any]:
-    assignment = await call.manager.get_assignment(record.drive_id)
-    summary = _record_summary(call, record)
-    summary["assignee"] = (
-        assignment.assignee_creature_id if assignment is not None else None
-    )
-    summary["allowed_actions"] = list(
-        call.manager.allowed_actions(
-            call.actor, record, assignment, is_privileged=call.is_privileged
-        )
-    )
-    return summary
-
-
-class _BaseDriveTool(BaseTool):
-    needs_context = True
-
-    @property
-    def execution_mode(self) -> ExecutionMode:
-        return ExecutionMode.DIRECT
-
-    async def _resolve_or_error(
-        self, ctx: ToolContext | None
-    ) -> tuple[_DriveCall | None, ToolResult | None]:
-        try:
-            return _resolve_call(ctx), None
-        except GroupToolError as exc:
-            return None, _err(str(exc))
-
-
 class DriveCreateTool(_BaseDriveTool):
     """Create a caller-owned, caller-scoped Drive of an enabled kind."""
 
@@ -232,15 +52,86 @@ class DriveCreateTool(_BaseDriveTool):
 
     @property
     def description(self) -> str:
-        return "Create a durable drive you own (kind, title, spec)"
+        return (
+            "Create a durable drive you own (kind, title, spec). Use kind='goal': "
+            "it is the only kind with a user-facing /goal command surface, so "
+            "prefer it for anything a human should track. For 'goal', spec must "
+            "include a non-empty 'objective'; set "
+            "spec.autonomy='continue_when_ready' (the default is 'manual') so "
+            "the goal keeps driving you automatically. Other kinds (e.g. "
+            "'generic') have no dedicated command surface and are managed via "
+            "the drive tools."
+        )
 
     def get_parameters_schema(self) -> dict:
         return {
             "type": "object",
             "properties": {
-                "kind": {"type": "string"},
+                "kind": {
+                    "type": "string",
+                    "description": (
+                        "Drive kind; prefer 'goal' — the only kind with a "
+                        "user-facing /goal command surface. Other kinds "
+                        "(e.g. 'generic') have no dedicated command surface and "
+                        "are managed via the drive tools. For 'goal', see the "
+                        "spec description."
+                    ),
+                },
                 "title": {"type": "string"},
-                "spec": {"type": "object"},
+                "spec": {
+                    "type": "object",
+                    "description": (
+                        "Kind-specific spec. For kind='goal', use the properties "
+                        "below ('objective' is required); other kinds treat spec "
+                        "as opaque."
+                    ),
+                    "properties": {
+                        "objective": {
+                            "type": "string",
+                            "description": (
+                                "Required for 'goal': the durable objective to pursue."
+                            ),
+                        },
+                        "autonomy": {
+                            "type": "string",
+                            "enum": ["manual", "continue_when_ready"],
+                            "description": (
+                                "Optional; defaults to 'manual'. Set "
+                                "'continue_when_ready' so the goal keeps "
+                                "driving you automatically."
+                            ),
+                        },
+                        "success_criteria": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": (
+                                "Optional criteria that would demonstrate completion."
+                            ),
+                        },
+                        "constraints": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Optional constraints the goal must respect.",
+                        },
+                        "completion_policy": {
+                            "type": "string",
+                            "enum": ["self_propose", "user_confirm", "verifier"],
+                            "description": "Optional; default 'self_propose'.",
+                        },
+                        "budgets": {
+                            "type": "object",
+                            "description": (
+                                "Optional pursuit limits; continuation stops when "
+                                "exhausted."
+                            ),
+                            "properties": {
+                                "max_turns": {"type": "integer"},
+                                "max_tool_calls": {"type": "integer"},
+                                "max_walltime_s": {"type": "integer"},
+                            },
+                        },
+                    },
+                },
                 "priority": {"type": "integer"},
                 "idempotency_key": {"type": "string"},
             },
@@ -285,6 +176,14 @@ class DriveCreateTool(_BaseDriveTool):
                 graph_id=call.graph_id,
                 is_privileged=call.is_privileged,
             )
+        except DriveValidationError as exc:
+            if kind == "goal":
+                return _err(
+                    f"invalid goal spec: {exc}; kind='goal' requires a spec with "
+                    "a non-empty 'objective' — e.g. spec={'objective': '...', "
+                    "'autonomy': 'continue_when_ready'}"
+                )
+            return _drive_error_result(exc)
         except DriveError as exc:
             return _drive_error_result(exc)
         return _ok(await _summary_with_actions(call, record))
@@ -455,17 +354,50 @@ class DriveTransitionTool(_BaseDriveTool):
 
     @property
     def description(self) -> str:
-        return "Transition a drive (pause/resume/…) or propose completed/failed"
+        return (
+            "Transition a drive you own, or as the assignee of a foreign-owned "
+            "drive set it to 'waiting'/'blocked' (use 'blocked' when you need "
+            "user intervention; 'paused'/'cancelled' are owner-only). Control "
+            "transitions require 'expected_revision' (see drive_status); "
+            "completed/failed go through proposal with evidence."
+        )
 
     def get_parameters_schema(self) -> dict:
         return {
             "type": "object",
             "properties": {
                 "drive_id": {"type": "string"},
-                "status": {"type": "string"},
-                "expected_revision": {"type": "integer"},
+                "status": {
+                    "type": "string",
+                    "enum": [
+                        "draft",
+                        "active",
+                        "waiting",
+                        "blocked",
+                        "paused",
+                        "cancelled",
+                        "completed",
+                        "failed",
+                    ],
+                    "description": (
+                        "Target status. As an assignee you may only set "
+                        "'waiting' or 'blocked'; 'paused'/'cancelled' require "
+                        "the owner; completed/failed go through proposal with "
+                        "evidence."
+                    ),
+                },
+                "expected_revision": {
+                    "type": "integer",
+                    "description": (
+                        "Current revision from drive_status; required for control "
+                        "transitions, optional for completed/failed proposals."
+                    ),
+                },
                 "reason": {"type": "string"},
-                "evidence": {"type": "object"},
+                "evidence": {
+                    "type": "object",
+                    "description": "Evidence for completed/failed proposals.",
+                },
             },
             "required": ["drive_id", "status"],
         }
@@ -484,8 +416,8 @@ class DriveTransitionTool(_BaseDriveTool):
             target = DriveStatus(status_raw)
         except ValueError:
             return _err(
-                f"unknown status {status_raw!r}; use one of active, waiting, "
-                "blocked, paused, cancelled, completed, failed"
+                f"unknown status {status_raw!r}; use one of draft, active, "
+                "waiting, blocked, paused, cancelled, completed, failed"
             )
         expected_revision = args.get("expected_revision")
         if expected_revision is not None and (
@@ -509,6 +441,13 @@ class DriveTransitionTool(_BaseDriveTool):
                 actor=call.actor,
                 status_reason=(args.get("reason") or None),
                 is_privileged=call.is_privileged,
+            )
+        except DrivePermissionError as exc:
+            return _err(
+                f"permission denied: {exc}; as an assignee you may only "
+                "transition to 'waiting' or 'blocked' (use 'blocked' when you "
+                "need user intervention); 'paused' and 'cancelled' require the "
+                "owner"
             )
         except DriveError as exc:
             return _drive_error_result(exc)

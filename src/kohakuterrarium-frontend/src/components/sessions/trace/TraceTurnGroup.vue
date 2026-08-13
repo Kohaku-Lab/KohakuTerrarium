@@ -27,14 +27,13 @@
 </template>
 
 <script setup>
-import { computed, watch } from "vue"
+import { computed, onUnmounted, watch } from "vue"
 
 import TraceEventRow from "@/components/sessions/trace/TraceEventRow.vue"
-import { useEventStreamStore } from "@/stores/eventStream"
+import { disposeEventStreamStore, useEphemeralEventStreamStore } from "@/stores/eventStream"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
-const stream = useEventStreamStore()
 
 const props = defineProps({
   turn: { type: Object, required: true },
@@ -46,6 +45,10 @@ const props = defineProps({
   selectedEventId: { type: Number, default: null },
 })
 const emit = defineEmits(["toggle", "select-event"])
+const streamScope = `trace:${encodeURIComponent(props.sessionName)}:${encodeURIComponent(props.agent)}:${props.turn.turn_index}`
+const stream = useEphemeralEventStreamStore(streamScope)
+
+onUnmounted(() => disposeEventStreamStore(streamScope))
 
 function onToggle() {
   emit("toggle", props.turn.turn_index)
@@ -93,7 +96,7 @@ const isCompact = computed(() => Boolean(props.turn.compacted))
 // Apply filters client-side. Combines store events + the turn's slice
 // of live-attach events the parent has buffered.
 const displayedEvents = computed(() => {
-  const own = isThisTurnInStore() ? stream.events : []
+  const own = stream.events
   const live = (props.liveEvents || []).filter((e) => e.turn_index === props.turn.turn_index)
   const combined = [...own]
   for (const e of live) {
@@ -101,10 +104,6 @@ const displayedEvents = computed(() => {
   }
   return combined.filter(_passesFilter)
 })
-
-function isThisTurnInStore() {
-  return stream.turnIndex === props.turn.turn_index
-}
 
 const TYPE_GROUPS = {
   tool: new Set(["tool_call", "tool_result", "tool_error"]),
@@ -144,7 +143,7 @@ watch(
   () => [props.expanded, props.turn.turn_index, props.agent],
   ([exp, ti]) => {
     if (!exp) return
-    if (stream.turnIndex !== ti || stream.sessionName !== props.sessionName) {
+    if (stream.turnIndex !== ti || stream.sessionName !== props.sessionName || stream.agent !== (props.agent || "")) {
       stream.loadTurn(props.sessionName, {
         agent: props.agent || null,
         turnIndex: ti,
