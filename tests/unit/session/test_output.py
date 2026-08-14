@@ -26,8 +26,14 @@ class _FakeSession:
 
 
 class _FakeConversation:
-    def to_messages(self):
-        return [{"role": "user", "content": "from controller"}]
+    def to_messages(self, *, include_metadata=False):
+        message = {"role": "user", "content": "from controller"}
+        if include_metadata:
+            message["metadata"] = {"turn_index": 2, "branch_id": 1}
+        return [message]
+
+    def snapshot_messages(self, **kwargs):
+        return self.to_messages(include_metadata=True)
 
 
 class _FakeController:
@@ -381,11 +387,57 @@ class TestProcessingLifecycle:
         store, out = _make(tmp_path, agent=agent)
         try:
             await out.on_processing_end()
-            # Snapshot from controller conversation.
+            # Snapshot from controller conversation, with turn metadata
+            # preserved (snapshots are the allowed metadata carrier, so
+            # resume does not have to backfill an "always legacy" snapshot).
             snap = store.load_conversation("alice")
-            assert snap == [{"role": "user", "content": "from controller"}]
+            assert snap == [
+                {
+                    "role": "user",
+                    "content": "from controller",
+                    "metadata": {"turn_index": 2, "branch_id": 1},
+                }
+            ]
         finally:
             store.close()
+
+    async def test_end_tags_snapshot_branch_only_when_valid(self, tmp_path):
+        # A tag with an invalid branch_id would be ignored by
+        # snapshot_mismatches_branch (treated as "no tag" -> trust), silently
+        # disabling mismatch detection — so it must not be persisted.
+        for i, (turn, branch) in enumerate(((2, 1), (2, None), (0, 1), (None, None))):
+            agent = _FakeAgent(turn=turn, branch=branch)
+            store, out = _make(tmp_path / f"iter{i}", agent=agent)
+            try:
+                await out.on_processing_end()
+                tag = store.state.get("alice:snapshot_branch")
+                if turn == 2 and branch == 1:
+                    assert tag is not None and tag["branch_id"] == 1
+                else:
+                    assert tag is None
+            finally:
+                store.close()
+
+    async def test_end_clears_stale_branch_tag_when_agent_branch_invalid(
+        self, tmp_path
+    ):
+        # The snapshot is rewritten every on_processing_end, so a stale tag
+        # from a prior run would point at a branch that no longer matches.
+        # When the current agent's branch state is invalid, the tag must be
+        # cleared — not left behind.
+        store, out = _make(tmp_path, agent=_FakeAgent(turn=2, branch=1))
+        try:
+            await out.on_processing_end()
+            assert store.state.get("alice:snapshot_branch") is not None
+        finally:
+            store.close()
+        # Same store, but now the agent has no valid branch state.
+        store2, out2 = _make(tmp_path, agent=_FakeAgent(turn=0, branch=1))
+        try:
+            await out2.on_processing_end()
+            assert store2.state.get("alice:snapshot_branch") is None
+        finally:
+            store2.close()
 
     async def test_end_does_not_overwrite_cumulative_token_state(self, tmp_path):
         # UXI-03: _handle_token_usage owns the cumulative token_usage slot.
@@ -417,6 +469,31 @@ class TestProcessingLifecycle:
             await out.on_processing_end()
             snap = store.load_conversation("alice")
             assert snap == [{"role": "assistant", "content": "hello"}]
+        finally:
+            store.close()
+
+    async def test_end_fallback_replay_snapshot_carries_metadata(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            # No agent/controller: the fallback replay must still attach turn
+            # metadata, matching the controller path (to_messages with
+            # include_metadata=True) so resume never backfills this snapshot.
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            await out.on_processing_end()
+            snap = store.load_conversation("alice")
+            assert snap == [
+                {
+                    "role": "user",
+                    "content": "U1",
+                    "metadata": {"event_id": 1, "turn_index": 1, "branch_id": 1},
+                }
+            ]
         finally:
             store.close()
 

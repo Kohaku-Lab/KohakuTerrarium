@@ -405,6 +405,7 @@ class Agent(
         )
         self.compact_manager = CompactManager(compact_cfg)
         self.compact_manager._controller = self.controller
+        self.compact_manager._agent = self
         self.compact_manager._llm = self._build_compact_llm(compact_cfg)
         self.compact_manager._output_router = self.output_router
         self.compact_manager._agent_name = self.config.name

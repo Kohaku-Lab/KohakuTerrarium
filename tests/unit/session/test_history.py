@@ -5,9 +5,9 @@ import pytest
 from kohakuterrarium.session.history import (
     InvalidBranchViewError,
     _coerce_path,
-    _index_parent_paths,
+    index_parent_paths,
     _path_matches,
-    _resolve_selected_branches,
+    resolve_selected_branches,
     collect_branch_metadata,
     collect_user_groups,
     dedupe_adjacent_duplicate_events,
@@ -71,6 +71,52 @@ class TestReplayConversation:
         events = [{"type": "user_message", "content": "hi", "event_id": 0}]
         out = replay_conversation(events)
         assert out == [{"role": "user", "content": "hi"}]
+
+    def test_duplicate_user_message_same_turn_branch_deduped(self):
+        # Graph merge / migration can copy the same turn's user_message
+        # event twice; replay must emit it once so turn-targeted edit
+        # resolution stays unambiguous.
+        events = [
+            {
+                "type": "user_message",
+                "content": "q",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+            {
+                "type": "user_message",
+                "content": "q",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+        ]
+        out = replay_conversation(events, include_metadata=True)
+        assert len(out) == 1
+        assert out[0]["content"] == "q"
+        assert out[0]["metadata"]["turn_index"] == 1
+
+    def test_same_content_different_turns_kept(self):
+        # Same wording in different turns is legitimately distinct.
+        events = [
+            {
+                "type": "user_message",
+                "content": "再试",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+            {
+                "type": "user_message",
+                "content": "再试",
+                "event_id": 2,
+                "turn_index": 2,
+                "branch_id": 1,
+            },
+        ]
+        out = replay_conversation(events, include_metadata=True)
+        assert [m["metadata"]["turn_index"] for m in out] == [1, 2]
 
     def test_text_chunks_collapse(self):
         events = [
@@ -269,6 +315,721 @@ class TestReplayBranching:
         ]
         out = replay_conversation(events, branch_view={0: 1})
         assert out == [{"role": "user", "content": "old"}]
+
+    def test_compact_replace_global_id_range_mis_covers_sibling_branch(self):
+        # Regression: a compact_replace recorded on ONE branch with a GLOBAL
+        # id range (as v1_to_v2 migration produces) must not delete the other
+        # branch's events. Only events on the compact path get replaced.
+        #
+        # Tree:
+        #   turn0-b1 (common)
+        #     |-- turn1-b1 -> turn2-b1   [branch 1]
+        #     `-- turn1-b2 -> turn2-b2   [branch 2, fork at turn1]
+        #
+        # branch 2 compacts events [0..7] (turn0 + turn1 on its path); the
+        # live tail turn2-b2 stays. branch 1 is untouched by branch 2's
+        # compact and must keep its full history.
+        events = [
+            {
+                "type": "user_message",
+                "content": "U0",
+                "event_id": 0,
+                "turn_index": 0,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R0",
+                "event_id": 1,
+                "turn_index": 0,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "content": "U1a",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1a",
+                "event_id": 3,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2a",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1), (1, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2a",
+                "event_id": 5,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1), (1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U1b",
+                "event_id": 6,
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1b",
+                "event_id": 7,
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2b",
+                "event_id": 8,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1), (1, 2)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2b",
+                "event_id": 9,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1), (1, 2)],
+            },
+            {
+                "type": "compact_replace",
+                "summary_text": "[S: branch2 compact]",
+                "replaced_from_event_id": 0,
+                "replaced_to_event_id": 7,
+                "compact_path": [[0, 1], [1, 2]],
+                "round": 1,
+                "event_id": 10,
+            },
+        ]
+        # branch 1: branch 2's summary carries branch-2-specific content, so
+        # it must NOT leak into branch 1. Branch 1 keeps its full history
+        # (the shared ancestor turn0-b1 included), untouched by branch 2's
+        # compact.
+        out1 = replay_conversation(events, branch_view={0: 1, 1: 1, 2: 1})
+        assert out1 == [
+            {"role": "user", "content": "U0"},
+            {"role": "assistant", "content": "R0"},
+            {"role": "user", "content": "U1a"},
+            {"role": "assistant", "content": "R1a"},
+            {"role": "user", "content": "U2a"},
+            {"role": "assistant", "content": "R2a"},
+        ]
+        # branch 2: compacted zone [0..7] -> summary, live tail U2b/R2b kept.
+        out2 = replay_conversation(events, branch_view={0: 1, 1: 2, 2: 2})
+        assert out2 == [
+            {"role": "assistant", "content": "[S: branch2 compact]"},
+            {"role": "user", "content": "U2b"},
+            {"role": "assistant", "content": "R2b"},
+        ]
+
+    def test_compact_complete_with_path_replayed_branch_aware(self):
+        # P2: v2 runtime compaction emits compact_complete with a replaced
+        # range + compact_path (unlike the legacy compact_replace). Replay
+        # must consume it branch-aware exactly like compact_replace.
+        events = [
+            {
+                "type": "user_message",
+                "content": "U1",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "content": "U2a",
+                "event_id": 3,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2a",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U3a",
+                "event_id": 5,
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R3a",
+                "event_id": 6,
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2b",
+                "event_id": 7,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R2b",
+                "event_id": 8,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U3b",
+                "event_id": 9,
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 2)],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R3b",
+                "event_id": 10,
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 2)],
+            },
+            {
+                "type": "compact_complete",
+                "summary": "[S: branch2]",
+                "event_id": 11,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 8,
+                "compact_path": [[1, 1], [2, 2]],
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 2)],
+            },
+        ]
+        out1 = replay_conversation(events, branch_view={1: 1, 2: 1, 3: 1})
+        # branch1 must NOT see branch2's summary (it carries branch-2-specific
+        # turn2 content); branch1 keeps its full history.
+        assert out1 == [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "user", "content": "U2a"},
+            {"role": "assistant", "content": "R2a"},
+            {"role": "user", "content": "U3a"},
+            {"role": "assistant", "content": "R3a"},
+        ]
+        out2 = replay_conversation(events, branch_view={1: 1, 2: 2, 3: 2})
+        assert out2 == [
+            {"role": "assistant", "content": "[S: branch2]"},
+            {"role": "user", "content": "U3b"},
+            {"role": "assistant", "content": "R3b"},
+        ]
+
+    def test_compact_path_not_intersecting_branch_does_not_inject_summary(self):
+        # A compact_replace whose compact_path does not intersect the selected
+        # branch replaces nothing on that branch — replay must NOT inject a
+        # spurious summary there.
+        events = [
+            {
+                "type": "user_message",
+                "content": "U1",
+                "event_id": 1,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R1",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "content": "U2a",
+                "event_id": 3,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2b",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "type": "compact_replace",
+                "summary_text": "[S: b2]",
+                "event_id": 5,
+                "replaced_from_event_id": 4,
+                "replaced_to_event_id": 4,
+                "compact_path": [[2, 2]],
+            },
+        ]
+        # branch1: nothing on its path is covered -> no summary, full history
+        out1 = replay_conversation(events, branch_view={1: 1, 2: 1})
+        assert out1 == [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "user", "content": "U2a"},
+        ]
+        # branch2: U2b covered -> summary injected in place, R1 stays before it
+        out2 = replay_conversation(events, branch_view={1: 1, 2: 2})
+        assert out2 == [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "assistant", "content": "[S: b2]"},
+        ]
+
+
+class TestCompactRuleSupersession:
+    def _events(self):
+        events = []
+        eid = 0
+        for turn in range(1, 7):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 1,
+                    "parent_branch_path": [(t, 1) for t in range(1, turn)],
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 1,
+                    "parent_branch_path": [(t, 1) for t in range(1, turn)],
+                }
+            )
+        return events
+
+    def test_later_round_supersedes_earlier_on_same_lineage(self):
+        # Two compaction rounds on the same branch: round2's range covers
+        # round1's and its path grows, so only the newest summary is
+        # injected — never stacked summaries.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S1 round1]",
+                "event_id": 13,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1]],
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S2 round2]",
+                "event_id": 14,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 8,
+                "compact_path": [[1, 1], [2, 1], [3, 1], [4, 1]],
+                "turn_index": 4,
+                "branch_id": 1,
+            }
+        )
+        out = replay_conversation(events, branch_view={t: 1 for t in range(1, 7)})
+        assert out == [
+            {"role": "assistant", "content": "[S2 round2]"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+        ]
+
+    def test_identical_duplicate_rules_collapse(self):
+        # The same round recorded twice (non-adjacent, so adjacent-dedup
+        # cannot help) must not inject its summary twice.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S]",
+                "event_id": 13,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1]],
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_start",
+                "round": 1,
+                "event_id": 14,
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S]",
+                "event_id": 15,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1]],
+                "turn_index": 2,
+                "branch_id": 1,
+            }
+        )
+        out = replay_conversation(events, branch_view={t: 1 for t in range(1, 7)})
+        assert out == [
+            {"role": "assistant", "content": "[S]"},
+            {"role": "user", "content": "U3"},
+            {"role": "assistant", "content": "R3"},
+            {"role": "user", "content": "U4"},
+            {"role": "assistant", "content": "R4"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+        ]
+
+    def test_later_path_rule_supersedes_legacy_pathless_rule(self):
+        # Migration data carries a pathless compact_replace; a later live
+        # compact_complete on the same lineage with an enclosing range is
+        # authoritative.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_replace",
+                "summary_text": "[S legacy]",
+                "event_id": 13,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[S live]",
+                "event_id": 14,
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 8,
+                "compact_path": [[1, 1], [2, 1], [3, 1], [4, 1]],
+                "turn_index": 4,
+                "branch_id": 1,
+            }
+        )
+        out = replay_conversation(events, branch_view={t: 1 for t in range(1, 7)})
+        assert out == [
+            {"role": "assistant", "content": "[S live]"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+        ]
+
+
+class TestDivergentBranchCompaction:
+    """Two compactions on branches that share a prefix must not stack.
+
+    branch1 compacts its prefix, then a sibling branch2 forks from the shared
+    prefix and compacts its own (longer) prefix. Each branch's replay must see
+    exactly one summary — its own — never the sibling's, and never both.
+    """
+
+    def _events(self):
+        return [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 2,
+                "type": "text_chunk",
+                "content": "R1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 3,
+                "type": "user_message",
+                "content": "U2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 4,
+                "type": "text_chunk",
+                "content": "R2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 5,
+                "type": "user_message",
+                "content": "U3a",
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 6,
+                "type": "text_chunk",
+                "content": "R3a",
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 7,
+                "type": "compact_complete",
+                "summary": "[S1]",
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 4,
+                "compact_path": [[1, 1], [2, 1], [3, 1]],
+                "turn_index": 3,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 8,
+                "type": "user_message",
+                "content": "U3b",
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 9,
+                "type": "text_chunk",
+                "content": "R3b",
+                "turn_index": 3,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1)],
+            },
+            {
+                "event_id": 10,
+                "type": "user_message",
+                "content": "U4b",
+                "turn_index": 4,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1), (3, 2)],
+            },
+            {
+                "event_id": 11,
+                "type": "text_chunk",
+                "content": "R4b",
+                "turn_index": 4,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1), (3, 2)],
+            },
+            {
+                "event_id": 12,
+                "type": "compact_complete",
+                "summary": "[S2]",
+                "replaced_from_event_id": 1,
+                "replaced_to_event_id": 9,
+                "compact_path": [[1, 1], [2, 1], [3, 2], [4, 2]],
+                "turn_index": 4,
+                "branch_id": 2,
+                "parent_branch_path": [(1, 1), (2, 1), (3, 2)],
+            },
+        ]
+
+    def test_each_branch_sees_only_its_own_summary(self):
+        events = self._events()
+        out1 = replay_conversation(events, branch_view={1: 1, 2: 1, 3: 1})
+        assert [m["content"] for m in out1] == ["[S1]", "U3a", "R3a"]
+        out2 = replay_conversation(events, branch_view={1: 1, 2: 1, 3: 2, 4: 2})
+        assert [m["content"] for m in out2] == ["[S2]", "U4b", "R4b"]
+
+
+class TestPendingSummaryScan:
+    def _events(self):
+        events = []
+        eid = 0
+        for turn in range(1, 9):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+        # branch 3 (live at turns 9..12) — interleaved, not covered by SEL
+        for turn in range(9, 13):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 3,
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 3,
+                }
+            )
+        for turn in range(13, 17):
+            eid += 1
+            events.append(
+                {
+                    "type": "user_message",
+                    "content": f"U{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+            eid += 1
+            events.append(
+                {
+                    "type": "text_chunk",
+                    "content": f"R{turn}",
+                    "event_id": eid,
+                    "turn_index": turn,
+                    "branch_id": 2,
+                }
+            )
+        return events
+
+    def test_sibling_rule_does_not_block_later_summary(self):
+        # A sibling-branch compact (range 10..20, path branch 1) sorts before
+        # the selected branch's compact (15..30). The pending-summary flush
+        # must not stop at the sibling rule (whose range has not passed and
+        # which never intersects this branch) — otherwise [SEL] is injected
+        # after the interleaved branch-3 turns instead of before them.
+        events = self._events()
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[SIB]",
+                "event_id": 33,
+                "replaced_from_event_id": 10,
+                "replaced_to_event_id": 20,
+                "compact_path": [[5, 1], [6, 1], [7, 1], [8, 1], [9, 1], [10, 1]],
+                "turn_index": 10,
+                "branch_id": 1,
+            }
+        )
+        events.append(
+            {
+                "type": "compact_complete",
+                "summary": "[SEL]",
+                "event_id": 34,
+                "replaced_from_event_id": 15,
+                "replaced_to_event_id": 30,
+                # branch2's own turns only (1..8, 13..16); turns 9..12 belong to
+                # branch3 in the selected view and must not be claimed.
+                "compact_path": [
+                    [t, 2] for t in list(range(1, 9)) + list(range(13, 17))
+                ],
+                "turn_index": 16,
+                "branch_id": 2,
+            }
+        )
+        branch_view = {t: 2 for t in list(range(1, 9)) + list(range(13, 17))}
+        branch_view.update({t: 3 for t in range(9, 13)})
+        out = replay_conversation(events, branch_view=branch_view)
+        # [SEL] must sit before the branch-3 turns (u9..a12) that follow the
+        # replaced branch-2 prefix, and turn 16 stays live.
+        assert out == [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "user", "content": "U2"},
+            {"role": "assistant", "content": "R2"},
+            {"role": "user", "content": "U3"},
+            {"role": "assistant", "content": "R3"},
+            {"role": "user", "content": "U4"},
+            {"role": "assistant", "content": "R4"},
+            {"role": "user", "content": "U5"},
+            {"role": "assistant", "content": "R5"},
+            {"role": "user", "content": "U6"},
+            {"role": "assistant", "content": "R6"},
+            {"role": "user", "content": "U7"},
+            {"role": "assistant", "content": "R7"},
+            {"role": "assistant", "content": "[SEL]"},
+            {"role": "user", "content": "U9"},
+            {"role": "assistant", "content": "R9"},
+            {"role": "user", "content": "U10"},
+            {"role": "assistant", "content": "R10"},
+            {"role": "user", "content": "U11"},
+            {"role": "assistant", "content": "R11"},
+            {"role": "user", "content": "U12"},
+            {"role": "assistant", "content": "R12"},
+            {"role": "user", "content": "U16"},
+            {"role": "assistant", "content": "R16"},
+        ]
 
 
 # ── dedupe_adjacent_duplicate_events ──────────────────────────────
@@ -825,7 +1586,7 @@ class TestSelectLiveEventIds:
         assert live == {0}
 
 
-# ── _index_parent_paths ───────────────────────────────────────────
+# ── index_parent_paths ───────────────────────────────────────────
 
 
 class TestIndexParentPaths:
@@ -838,7 +1599,7 @@ class TestIndexParentPaths:
                 "parent_branch_path": [[0, 99]],
             }
         ]
-        paths = _index_parent_paths(events)
+        paths = index_parent_paths(events)
         assert paths[0] == ((0, 99),)
 
     def test_implicit_path_from_prior_turns(self):
@@ -846,14 +1607,14 @@ class TestIndexParentPaths:
             {"event_id": 0, "turn_index": 0, "branch_id": 1},
             {"event_id": 1, "turn_index": 1, "branch_id": 1},
         ]
-        paths = _index_parent_paths(events)
+        paths = index_parent_paths(events)
         # Event 0 (turn 0) has no priors.
         assert paths[0] == ()
         # Event 1 (turn 1) has turn 0 latest branch in its path.
         assert paths[1] == ((0, 1),)
 
 
-# ── _resolve_selected_branches ────────────────────────────────────
+# ── resolve_selected_branches ────────────────────────────────────
 
 
 class TestResolveSelectedBranches:
@@ -863,7 +1624,7 @@ class TestResolveSelectedBranches:
             {"event_id": 1, "turn_index": 0, "branch_id": 3},
             {"event_id": 2, "turn_index": 0, "branch_id": 2},
         ]
-        sel = _resolve_selected_branches(events, _index_parent_paths(events), None)
+        sel = resolve_selected_branches(events, index_parent_paths(events), None)
         assert sel == {0: 3}
 
     def test_branch_view_respected(self):
@@ -871,7 +1632,7 @@ class TestResolveSelectedBranches:
             {"event_id": 0, "turn_index": 0, "branch_id": 1},
             {"event_id": 1, "turn_index": 0, "branch_id": 2},
         ]
-        sel = _resolve_selected_branches(events, _index_parent_paths(events), {0: 1})
+        sel = resolve_selected_branches(events, index_parent_paths(events), {0: 1})
         assert sel == {0: 1}
 
     def test_branch_view_unknown_branch_falls_back(self):
@@ -880,5 +1641,5 @@ class TestResolveSelectedBranches:
             {"event_id": 1, "turn_index": 0, "branch_id": 2},
         ]
         # Branch 99 doesn't exist — falls back to max.
-        sel = _resolve_selected_branches(events, _index_parent_paths(events), {0: 99})
+        sel = resolve_selected_branches(events, index_parent_paths(events), {0: 99})
         assert sel == {0: 2}

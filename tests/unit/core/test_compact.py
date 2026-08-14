@@ -5,6 +5,10 @@ import types
 from typing import Any
 
 
+from kohakuterrarium.core.compact_branch import (
+    compute_replaced_range,
+    current_path,
+)
 from kohakuterrarium.core.compact import (
     COMPACT_PROMPT,
     DEFAULT_KEEP_RECENT,
@@ -14,7 +18,11 @@ from kohakuterrarium.core.compact import (
     CompactConfig,
     CompactManager,
 )
-from kohakuterrarium.core.compact_splice import select_compact_boundary
+from kohakuterrarium.core.compact_splice import (
+    count_keep_messages,
+    select_compact_boundary,
+)
+from kohakuterrarium.core.compact_text import format_messages_for_summary
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm.message import create_message
 
@@ -206,60 +214,59 @@ class TestTriggerCompact:
         assert mgr._compact_count == 1
 
 
-# ── _count_keep_messages ─────────────────────────────────────────
+# ── count_keep_messages ─────────────────────────────────────────
 
 
 class TestCountKeepMessages:
     def test_empty(self):
-        mgr = CompactManager()
-        assert mgr._count_keep_messages([]) == 0
+        assert count_keep_messages([], DEFAULT_KEEP_RECENT) == 0
 
     def test_single(self):
-        mgr = CompactManager()
-        assert mgr._count_keep_messages([types.SimpleNamespace(role="user")]) == 0
+        assert (
+            count_keep_messages(
+                [types.SimpleNamespace(role="user")], DEFAULT_KEEP_RECENT
+            )
+            == 0
+        )
 
     def test_keeps_recent_turns(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=2))
         msgs = []
         for i in range(5):
             msgs.append(types.SimpleNamespace(role="user"))
             msgs.append(types.SimpleNamespace(role="assistant"))
         # 5 user turns, want to keep last 2 — counts back until 2 user msgs hit.
-        keep = mgr._count_keep_messages(msgs)
+        keep = count_keep_messages(msgs, 2)
         # Walking from the end, we find 2 "user" within the last 4 entries.
         assert keep == 4
 
     def test_half_cap_fallback_when_few_user_turns(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=8))
         # 1 user + 10 assistant/tool messages (no more users).
         msgs = [types.SimpleNamespace(role="user")]
         for _ in range(10):
             msgs.append(types.SimpleNamespace(role="assistant"))
         # Phase 1 finds only 1 user → fallback to half-cap.
-        keep = mgr._count_keep_messages(msgs)
+        keep = count_keep_messages(msgs, DEFAULT_KEEP_RECENT)
         # n = 11; half-cap = 5; n-1 = 10 → min = 5.
         assert keep == 5
 
     def test_tiny_conversation_no_fallback(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=8))
         # 3 messages total — below MIN_COMPACTABLE (8).
         msgs = [
             types.SimpleNamespace(role="user"),
             types.SimpleNamespace(role="assistant"),
             types.SimpleNamespace(role="user"),
         ]
-        keep = mgr._count_keep_messages(msgs)
+        keep = count_keep_messages(msgs, DEFAULT_KEEP_RECENT)
         # Returns by_turn_count or n-1 — whichever is smaller.
         assert keep == 2  # n-1
 
     def test_tool_feedback_does_not_count_as_user_turn(self):
-        mgr = CompactManager(CompactConfig(keep_recent_turns=2))
         msgs = [types.SimpleNamespace(role="user", metadata={})]
         for _ in range(12):
             msgs.append(
                 types.SimpleNamespace(role="user", metadata={"kind": "tool_results"})
             )
-        assert mgr._count_keep_messages(msgs) == len(msgs) // 2
+        assert count_keep_messages(msgs, 2) == len(msgs) // 2
 
     def test_target_tightens_only_an_oversized_live_zone(self):
         conv = Conversation()
@@ -294,7 +301,7 @@ class TestCountKeepMessages:
         )
         messages = conv.get_messages()
         assert mgr._compact_boundary(messages) == (
-            len(messages) - mgr._count_keep_messages(messages)
+            len(messages) - count_keep_messages(messages, DEFAULT_KEEP_RECENT)
         )
 
     def test_target_can_summarize_a_completed_500_call_tool_round(self):
@@ -352,36 +359,33 @@ class TestCountKeepMessages:
         assert "goal-7" in user_text
 
 
-# ── _format_messages_for_summary ─────────────────────────────────
+# ── format_messages_for_summary ─────────────────────────────────
 
 
 class TestFormatMessagesForSummary:
     def test_simple(self):
-        mgr = CompactManager()
         msgs = [
             types.SimpleNamespace(role="user", content="hello"),
             types.SimpleNamespace(role="assistant", content="hi"),
         ]
-        out = mgr._format_messages_for_summary(msgs)
+        out = format_messages_for_summary(msgs)
         assert "[user]: hello" in out
         assert "[assistant]: hi" in out
 
     def test_truncates_long_tool_output(self):
-        mgr = CompactManager()
         big = "x" * 1000
         msgs = [types.SimpleNamespace(role="tool", content=big)]
-        out = mgr._format_messages_for_summary(msgs)
+        out = format_messages_for_summary(msgs)
         # Truncated with summary note.
         assert "1000 chars total" in out
         assert len(out) < 1000
 
     def test_empty_content_skipped(self):
-        mgr = CompactManager()
         msgs = [
             types.SimpleNamespace(role="user", content=""),
             types.SimpleNamespace(role="assistant", content="ok"),
         ]
-        out = mgr._format_messages_for_summary(msgs)
+        out = format_messages_for_summary(msgs)
         # Empty user not included.
         assert "[user]:" not in out
         assert "[assistant]: ok" in out
@@ -976,22 +980,19 @@ class TestCancel:
 
 class TestRunCompactEmptyCompactZone:
     async def test_empty_compact_messages_short_circuits(self):
-        """Mock _count_keep_messages to return n-1 so messages[1:1]
-        triggers the ``if not compact_messages`` early-return (line 285)."""
+        """Smoke-test the defensive ``if not compact_messages`` guard.
+
+        The branch is unreachable through normal flow (``boundary <= 1`` is
+        caught first), so force ``_compact_boundary`` to a value that passes
+        the outer guard and still slices a non-empty compact zone.
+        """
         conv = _build_conversation(n_user=10)
         mgr = _build_mgr(conversation=conv, llm=_LLM())
-        # Mock _count_keep_messages to return one less than total → boundary=1.
-        # But then the outer ``if boundary <= 1`` catches it first; instead
-        # patch it to return exactly len-1 to fall past that check.
 
-        def fake_count(messages):
-            # Return len(messages) - boundary_target. We want boundary=2
-            # (passes the > 1 guard) but compact_messages = messages[1:2]
-            # = one item — non-empty. So this slot is genuinely
-            # unreachable in practice; lines 284-285 are defensive.
-            return len(messages) - 2
+        def fake_boundary(messages):
+            return 2
 
-        mgr._count_keep_messages = fake_count
+        mgr._compact_boundary = fake_boundary
         await mgr._run_compact()
 
 
@@ -1152,3 +1153,197 @@ class TestCompactElidesLiveZone:
             m.role == "tool" and ELISION_MARKER in (m.content or "")
             for m in conv.get_messages()
         )
+
+
+# ── P2: branch-aware compact metadata ────────────────────────────
+
+
+class TestBranchAwareCompactMetadata:
+    def test_current_path_expands_agent_branch_path(self):
+        from types import SimpleNamespace
+
+        mgr = CompactManager()
+        mgr._agent = SimpleNamespace(
+            _parent_branch_path=[(1, 1), (2, 2)],
+            _turn_index=3,
+            _branch_id=2,
+        )
+        assert current_path(mgr._agent) == {(1, 1), (2, 2), (3, 2)}
+
+    def test_current_path_empty_without_agent(self):
+        mgr = CompactManager()
+        assert current_path(mgr._agent) == set()
+
+    def test_compute_replaced_range_covers_path_turns_only(self):
+        events = [
+            # common ancestor turn1-b1 (one copy, shared by all branches)
+            {"event_id": 1, "type": "user_message", "turn_index": 1, "branch_id": 1},
+            {"event_id": 2, "type": "text_chunk", "turn_index": 1, "branch_id": 1},
+            # sibling branch (branch 1) specific turns - ignored
+            {"event_id": 3, "type": "user_message", "turn_index": 2, "branch_id": 1},
+            {"event_id": 4, "type": "text_chunk", "turn_index": 2, "branch_id": 1},
+            {"event_id": 5, "type": "user_message", "turn_index": 3, "branch_id": 1},
+            {"event_id": 6, "type": "text_chunk", "turn_index": 3, "branch_id": 1},
+            # branch 2 specific turns: turn2-b2, turn3-b2
+            {"event_id": 7, "type": "user_message", "turn_index": 2, "branch_id": 2},
+            {"event_id": 8, "type": "text_chunk", "turn_index": 2, "branch_id": 2},
+            {"event_id": 9, "type": "user_message", "turn_index": 3, "branch_id": 2},
+            {"event_id": 10, "type": "text_chunk", "turn_index": 3, "branch_id": 2},
+        ]
+        path = {(1, 1), (2, 2), (3, 2)}
+        # keep turn3 -> cover turn1-b1 (1,2) + turn2-b2 (7,8) = events 1..8
+        assert compute_replaced_range(events, 1, path) == (1, 8)
+        # keep turn2+turn3 -> cover turn1-b1 only = events 1..2
+        assert compute_replaced_range(events, 2, path) == (1, 2)
+
+    def test_compute_replaced_range_none_when_all_live(self):
+        events = [
+            {"event_id": 5, "type": "user_message", "turn_index": 1, "branch_id": 1},
+        ]
+        path = {(1, 1)}
+        assert compute_replaced_range(events, 1, path) is None
+
+    def test_compute_replaced_range_none_without_path(self):
+        events = [
+            {"event_id": 5, "type": "user_message", "turn_index": 1, "branch_id": 1},
+        ]
+        assert compute_replaced_range(events, 1, set()) is None
+
+
+class TestComputeReplacedRangeDedupe:
+    def test_duplicate_last_turn_does_not_shift_first_live(self):
+        events = [
+            {"event_id": 1, "type": "user_message", "turn_index": 1, "branch_id": 1},
+            {"event_id": 2, "type": "text_chunk", "turn_index": 1, "branch_id": 1},
+            {"event_id": 3, "type": "user_message", "turn_index": 2, "branch_id": 1},
+            {"event_id": 4, "type": "user_message", "turn_index": 2, "branch_id": 2},
+            {"event_id": 5, "type": "text_chunk", "turn_index": 2, "branch_id": 2},
+            {"event_id": 6, "type": "user_message", "turn_index": 3, "branch_id": 2},
+            {"event_id": 7, "type": "user_message", "turn_index": 3, "branch_id": 2},
+            {"event_id": 8, "type": "text_chunk", "turn_index": 3, "branch_id": 2},
+        ]
+        path = {(1, 1), (2, 2), (3, 2)}
+        # keep 2 live turns (turn2, turn3) -> cover turn1 only
+        assert compute_replaced_range(events, 2, path) == (1, 2)
+
+
+class TestCurrentPathResilience:
+    def test_tolerates_malformed_parent_path(self):
+        from types import SimpleNamespace
+        from kohakuterrarium.core.compact_branch import current_path
+
+        agent = SimpleNamespace(
+            _parent_branch_path=[1, [], [1], [1, 2], "ab"],
+            _turn_index=2,
+            _branch_id=1,
+        )
+        # malformed entries skipped; valid [1,2] + current (2,1) kept
+        assert current_path(agent) == {(1, 2), (2, 1)}
+
+
+class TestTagSnapshotBranch:
+    def _store_and_agent(self, turn=3, branch=2, path=None):
+        from types import SimpleNamespace
+
+        store = _Store()
+        agent = SimpleNamespace(
+            _turn_index=turn,
+            _branch_id=branch,
+            _parent_branch_path=path or [(1, 1), (2, 2)],
+        )
+        return store, agent
+
+    def test_persists_tag_when_branch_valid(self):
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        store, agent = self._store_and_agent()
+        tag_snapshot_branch(store, agent, "alice")
+        assert store.state["alice:snapshot_branch"]["branch_id"] == 2
+
+    def test_skips_tag_when_branch_id_invalid(self):
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        for bad_branch in (None, 0, -1, "2"):
+            store, agent = self._store_and_agent(branch=bad_branch)
+            tag_snapshot_branch(store, agent, "alice")
+            assert "alice:snapshot_branch" not in store.state
+
+    def test_skips_tag_when_turn_index_invalid(self):
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        for bad_turn in (None, 0, -1):
+            store, agent = self._store_and_agent(turn=bad_turn)
+            tag_snapshot_branch(store, agent, "alice")
+            assert "alice:snapshot_branch" not in store.state
+
+    def test_clears_stale_tag_when_branch_invalid(self):
+        # persist_compacted rewrites the snapshot regardless; a stale tag from
+        # a prior run must be cleared when the current branch state is
+        # invalid, otherwise resume trusts a branch that no longer matches.
+        from kohakuterrarium.core.compact_branch import tag_snapshot_branch
+
+        for bad in (None, 0, -1, "2"):
+            store, agent = self._store_and_agent(branch=bad)
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 5,
+                "branch_id": 5,
+            }
+            tag_snapshot_branch(store, agent, "alice")
+            assert "alice:snapshot_branch" not in store.state
+
+
+class TestCompactCompleteReplacedRange:
+    async def test_replaced_range_uses_turn_window_not_message_count(self):
+        """compact_complete carries a replaced range replay can use.
+
+        Regression: compact.py passed ``count_keep_messages()`` — a MESSAGE
+        count — while ``compute_replaced_range()`` interprets its argument as
+        the number of USER TURNS to keep. With 14 turns the 17-message window
+        made the range vanish (``compact_complete`` unreplayable); the
+        configured 8-turn window must produce (1, 12).
+        """
+        from types import SimpleNamespace
+
+        conv = _build_conversation(n_user=14)
+        store = _Store()
+        store.events = []
+        eid = 0
+        for turn in range(1, 15):
+            eid += 1
+            store.events.append(
+                {
+                    "event_id": eid,
+                    "type": "user_message",
+                    "turn_index": turn,
+                    "branch_id": 1,
+                }
+            )
+            eid += 1
+            store.events.append(
+                {
+                    "event_id": eid,
+                    "type": "text_chunk",
+                    "turn_index": turn,
+                    "branch_id": 1,
+                }
+            )
+        router = _Router()
+        mgr = _build_mgr(
+            conversation=conv,
+            llm=_LLM(chunks=["summary"]),
+            router=router,
+            store=store,
+        )
+        mgr._agent = SimpleNamespace(
+            _parent_branch_path=[(t, 1) for t in range(1, 14)],
+            _turn_index=14,
+            _branch_id=1,
+        )
+        await mgr._run_compact()
+        complete = [c for c in router.calls if c[0] == "compact_complete"]
+        assert len(complete) == 1
+        metadata = complete[0][2]
+        # DEFAULT_KEEP_RECENT=8 keeps turns 7..14 live; turns 1..6
+        # (events 1..12) are replaced by the summary.
+        assert metadata.get("replaced_from_event_id") == 1
+        assert metadata.get("replaced_to_event_id") == 12
