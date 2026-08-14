@@ -26,6 +26,11 @@ import kohakuterrarium.terrarium.topology as _terrarium_topology
 import kohakuterrarium.terrarium.topology_snapshot as _terrarium_topology_snap
 from kohakuterrarium.builtins.user_commands import get_builtin_user_command
 from kohakuterrarium.core.agent_selection import persist_plugin_selection
+from kohakuterrarium.core.agent_tool_options import (
+    agent_get_tool_options,
+    agent_set_tool_options,
+    agent_tool_inventory,
+)
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
 from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.session.history import project_branch_metadata
@@ -309,6 +314,7 @@ def agent_list_modules(agent: Any) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     out.extend(_inventory_plugins(agent))
     out.extend(_inventory_native_tools(agent))
+    out.extend(_inventory_tools(agent))
     return out
 
 
@@ -331,6 +337,16 @@ def agent_get_module_options(agent: Any, module_type: str, name: str) -> dict[st
                     "options": entry.get("values", {}),
                 }
         raise KeyError(name)
+    if module_type == "tool":
+        for entry in agent_tool_inventory(agent):
+            if entry["name"] == name:
+                return {
+                    "type": "tool",
+                    "name": name,
+                    "schema": entry.get("option_schema", {}),
+                    "options": entry.get("values", {}),
+                }
+        raise KeyError(name)
     raise ValueError(f"Unknown module type: {module_type!r}")
 
 
@@ -344,6 +360,8 @@ def agent_set_module_options(
         return agent_set_plugin_options(agent, name, values or {})
     if module_type == "native_tool":
         return agent_set_native_tool_options(agent, name, values or {})
+    if module_type == "tool":
+        return agent_set_tool_options(agent, name, values or {})
     raise ValueError(f"Unknown module type: {module_type!r}")
 
 
@@ -352,7 +370,7 @@ async def agent_toggle_module(
 ) -> dict[str, Any]:
     if module_type == "plugin":
         return await agent_toggle_plugin(agent, name)
-    if module_type == "native_tool":
+    if module_type in {"native_tool", "tool"}:
         raise ValueError("Module type does not support toggle")
     raise ValueError(f"Unknown module type: {module_type!r}")
 
@@ -383,6 +401,20 @@ def _inventory_native_tools(agent: Any) -> list[dict[str, Any]]:
             "enabled": None,
         }
         for entry in agent_native_tool_inventory(agent)
+    ]
+
+
+def _inventory_tools(agent: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "tool",
+            "name": entry["name"],
+            "description": entry.get("description", ""),
+            "schema": entry.get("option_schema", {}),
+            "options": entry.get("values", {}),
+            "enabled": None,
+        }
+        for entry in agent_tool_inventory(agent)
     ]
 
 
@@ -904,6 +936,7 @@ __all__ = [
     "agent_get_module_options",
     "agent_get_native_tool_options",
     "agent_get_plugin_options",
+    "agent_get_tool_options",
     "agent_list_modules",
     "agent_list_plugins",
     "agent_native_tool_inventory",
@@ -913,10 +946,12 @@ __all__ = [
     "agent_set_module_options",
     "agent_set_native_tool_options",
     "agent_set_plugin_options",
+    "agent_set_tool_options",
     "agent_set_working_dir",
     "agent_system_prompt",
     "agent_toggle_module",
     "agent_toggle_plugin",
+    "agent_tool_inventory",
     "agent_triggers",
     "agent_working_dir",
     "attach_policies_for",

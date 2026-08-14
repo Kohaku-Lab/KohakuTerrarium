@@ -96,10 +96,15 @@ With options:
 ```yaml
 tools:
   - name: web_search
-    options:
-      max_results: 10
-      region: us-en
+    backend: duckduckgo
+    deepseek_model: deepseek-v4-flash
+    fallback: none
 ```
+
+`web_search` keeps DuckDuckGo as its no-key default. To opt into DeepSeek,
+run `kt config key set deepseek`, then either set `backend: deepseek` in the
+creature config or switch the live creature with
+`/module set web_search backend deepseek`.
 
 Custom (local module):
 

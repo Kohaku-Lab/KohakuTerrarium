@@ -1,13 +1,14 @@
 """Expose mutable and read-only state from live creature agents.
 
 This module covers scratchpads, triggers, environment views, system prompts,
-working directories, and provider-native tool options.
+working directories, and tool options.
 """
 
 import os
 from typing import Any
 
 from kohakuterrarium.core.scratchpad import is_reserved_scratchpad_key
+from kohakuterrarium.core.agent_tool_options import agent_tool_inventory
 from kohakuterrarium.studio.sessions.lifecycle import find_creature
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium import TerrariumService
@@ -188,4 +189,27 @@ def set_native_tool_options(
     helper = getattr(agent, "native_tool_options", None)
     if helper is None:
         raise ValueError(f"Creature {creature_id!r} has no native_tool_options helper")
+    return helper.set(tool, values or {})
+
+
+def tool_inventory(
+    service: "TerrariumService", session_id: str, creature_id: str
+) -> list[dict]:
+    engine = as_engine(service)
+    agent = _get_agent(engine, session_id, creature_id)
+    return agent_tool_inventory(agent)
+
+
+def set_tool_options(
+    service: "TerrariumService",
+    session_id: str,
+    creature_id: str,
+    tool: str,
+    values: dict[str, Any],
+) -> dict:
+    engine = as_engine(service)
+    agent = _get_agent(engine, session_id, creature_id)
+    helper = getattr(agent, "tool_options", None)
+    if helper is None:
+        raise ValueError(f"Creature {creature_id!r} has no tool_options helper")
     return helper.set(tool, values or {})

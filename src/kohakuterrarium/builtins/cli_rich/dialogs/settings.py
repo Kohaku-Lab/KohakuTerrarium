@@ -176,6 +176,17 @@ class SettingsOverlay:
                     "readonly": False,
                 }
             )
+        for name in sorted(set(PROVIDER_KEY_MAP) - set(backends)):
+            key = get_api_key(name)
+            rows.append(
+                {
+                    "provider": name,
+                    "masked": _mask_key(key) if key else "(not set)",
+                    "has_key": bool(key),
+                    "env": PROVIDER_KEY_MAP[name],
+                    "readonly": False,
+                }
+            )
         return rows
 
     def _load_providers(self) -> list[dict[str, Any]]:

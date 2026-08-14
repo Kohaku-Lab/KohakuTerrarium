@@ -69,6 +69,15 @@ class TestListKeysPayload:
         assert openai_entry["has_key"] is True
         assert openai_entry["masked_key"] == "sk-...***"
 
+    def test_includes_credential_only_provider(self):
+        out = list_keys_payload()
+
+        deepseek = next(e for e in out if e["provider"] == "deepseek")
+        assert deepseek["backend_type"] == "credential"
+        assert deepseek["env_var"] == "DEEPSEEK_API_KEY"
+        assert deepseek["has_key"] is False
+        assert deepseek["available"] is False
+
 
 # ── list_keys_for_cli ────────────────────────────────────────────
 
@@ -94,6 +103,19 @@ class TestListKeysForCli:
         assert anth_row["source"] == "env"
         assert "(from env)" in anth_row["shown"]
 
+    def test_includes_credential_only_provider(self, monkeypatch):
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+        rows = list_keys_for_cli()
+
+        deepseek = next(r for r in rows if r["provider"] == "deepseek")
+        assert deepseek == {
+            "provider": "deepseek",
+            "env_var": "DEEPSEEK_API_KEY",
+            "source": "missing",
+            "shown": "",
+        }
+
 
 # ── set_key ──────────────────────────────────────────────────────
 
@@ -115,6 +137,11 @@ class TestSetKey:
         set_key("anthropic", "new-key")
         assert _mock_backend_layer["stored_keys"]["anthropic"] == "new-key"
 
+    def test_credential_only_provider_success(self, _mock_backend_layer):
+        set_key("deepseek", "ds-key")
+
+        assert _mock_backend_layer["stored_keys"]["deepseek"] == "ds-key"
+
 
 class TestRemoveKey:
     def test_unknown_provider(self):
@@ -124,6 +151,13 @@ class TestRemoveKey:
     def test_success(self, _mock_backend_layer):
         remove_key("openai")
         assert "openai" not in _mock_backend_layer["stored_keys"]
+
+    def test_credential_only_provider_success(self, _mock_backend_layer):
+        _mock_backend_layer["stored_keys"]["deepseek"] = "ds-key"
+
+        remove_key("deepseek")
+
+        assert "deepseek" not in _mock_backend_layer["stored_keys"]
 
 
 class TestGetExistingKey:

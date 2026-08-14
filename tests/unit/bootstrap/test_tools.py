@@ -95,6 +95,21 @@ class TestCreateToolBuiltin:
         assert tool.config.max_output == 1024
         assert tool.config.timeout == 30.0
 
+    def test_lenient_web_search_keeps_unavailable_config_editable(self, monkeypatch):
+        from kohakuterrarium.builtins.tools import web_search
+
+        monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)
+        cfg = ToolConfigItem(
+            name="web_search",
+            type="builtin",
+            options={"backend": "deepseek"},
+        )
+
+        tool = create_tool(cfg, loader=None, strict=False)
+
+        assert tool is not None
+        assert tool.backend == "deepseek"
+
 
 # ── create_tool: trigger ────────────────────────────────────────
 
@@ -236,6 +251,20 @@ class TestStrictMode:
 
         cfg = ToolConfigItem(name="bash", type="builtin", options={"timeout": "soon"})
         with pytest.raises(ConfigError, match="Invalid config value"):
+            create_tool(cfg, loader=None, strict=True)
+
+    def test_deepseek_search_without_key_raises(self, monkeypatch):
+        from kohakuterrarium.builtins.tools import web_search
+        from kohakuterrarium.errors import ConfigError
+
+        monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)
+        cfg = ToolConfigItem(
+            name="web_search",
+            type="builtin",
+            options={"backend": "deepseek"},
+        )
+
+        with pytest.raises(ConfigError, match="DeepSeek API key"):
             create_tool(cfg, loader=None, strict=True)
 
     def test_init_tools_strict_raises_on_first_bad(self):

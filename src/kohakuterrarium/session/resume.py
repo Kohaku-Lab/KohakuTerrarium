@@ -281,6 +281,17 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
                 error=str(exc),
             )
 
+    tool_options = getattr(agent, "tool_options", None)
+    if tool_options is not None:
+        try:
+            tool_options.apply()
+        except Exception as exc:  # pragma: no cover - resume continues without options
+            logger.warning(
+                "Failed to reapply tool options",
+                agent=agent_name,
+                error=str(exc),
+            )
+
     resume_events = store.get_resumable_events(agent_name)
     if resume_events:
         agent._pending_resume_events = resume_events

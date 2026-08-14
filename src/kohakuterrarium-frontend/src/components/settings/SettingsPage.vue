@@ -611,7 +611,8 @@ const nativeToolCatalog = ref([])
 
 const backendsWithAuth = computed(() => {
   const keyMetaByProvider = new Map(providerKeys.value.map((provider) => [provider.provider, provider]))
-  return backends.value.map((backend) => {
+  const backendNames = new Set(backends.value.map((backend) => backend.name))
+  const configuredBackends = backends.value.map((backend) => {
     const keyMeta = keyMetaByProvider.get(backend.name) || {}
     return {
       ...backend,
@@ -620,6 +621,20 @@ const backendsWithAuth = computed(() => {
       masked_key: keyMeta.masked_key || "",
     }
   })
+  const credentialOnlyProviders = providerKeys.value
+    .filter((provider) => !backendNames.has(provider.provider))
+    .map((provider) => ({
+      name: provider.provider,
+      backend_type: provider.backend_type || "credential",
+      base_url: "",
+      available: provider.available === true,
+      built_in: provider.built_in === true,
+      env_var: provider.env_var || "",
+      has_key: provider.has_key === true,
+      masked_key: provider.masked_key || "",
+      credential_only: true,
+    }))
+  return [...configuredBackends, ...credentialOnlyProviders]
 })
 
 const builtInBackends = computed(() => backendsWithAuth.value.filter((b) => b.built_in))

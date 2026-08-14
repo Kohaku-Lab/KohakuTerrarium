@@ -15,6 +15,7 @@ from kohakuterrarium.llm.api_keys import (
     PROVIDER_KEY_MAP,
     clear_api_key_resolver,
     get_api_key,
+    has_api_key,
     list_api_keys,
     register_api_key_resolver,
     save_api_key,
@@ -118,6 +119,11 @@ class TestResolutionOrder:
     def test_not_found_anywhere_returns_empty(self, keys_file):
         assert get_api_key("nonexistent") == ""
 
+    def test_availability_uses_stored_deepseek_key(self, keys_file):
+        assert has_api_key("deepseek") is False
+        save_api_key("deepseek", "ds-secret")
+        assert has_api_key("DEEPSEEK_API_KEY") is True
+
 
 # ---------------------------------------------------------------------------
 # Registered resolver (worker mode) — authoritative
@@ -148,6 +154,13 @@ class TestResolver:
         # docstring: worker-mode miss returns "" — never falls through to
         # the worker's own file/env (host-canonical identity design)
         assert get_api_key("openai") == ""
+
+    def test_availability_respects_authoritative_resolver(self, keys_file):
+        register_api_key_resolver(
+            lambda provider: "present" if provider == "deepseek" else ""
+        )
+        assert has_api_key("deepseek") is True
+        assert has_api_key("openai") is False
 
     def test_resolver_exception_treated_as_miss(self, keys_file, monkeypatch):
         save_api_key("openai", "file-key")
@@ -218,6 +231,7 @@ class TestProviderKeyMap:
         assert PROVIDER_KEY_MAP["anthropic"] == "ANTHROPIC_API_KEY"
         assert PROVIDER_KEY_MAP["openrouter"] == "OPENROUTER_API_KEY"
         assert PROVIDER_KEY_MAP["gemini"] == "GEMINI_API_KEY"
+        assert PROVIDER_KEY_MAP["deepseek"] == "DEEPSEEK_API_KEY"
         assert PROVIDER_KEY_MAP["mimo"] == "MIMO_API_KEY"
         assert PROVIDER_KEY_MAP["kimi-code"] == "KIMI_CODE_API_KEY"
         assert PROVIDER_KEY_MAP["glm-coding"] == "GLM_CODING_API_KEY"
