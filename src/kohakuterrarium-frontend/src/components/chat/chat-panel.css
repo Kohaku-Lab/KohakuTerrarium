@@ -53,3 +53,18 @@
     height: 2.75rem;
   }
 }
+
+/* Long-session rendering: message bodies are skipped entirely (layout,
+ * style, paint) while off-screen, so a transcript with thousands of
+ * messages only pays render cost for the visible viewport plus scroll
+ * estimates. ``auto`` in contain-intrinsic-size lets the browser remember
+ * each message's real height after its first paint, keeping scrollbar
+ * estimates accurate without forcing a layout of the whole list.
+ *
+ * Applied to inner content wrappers (never to roots carrying the
+ * absolutely-positioned hover action rows): paint containment clips
+ * descendants to the element's box. */
+.chat-cv {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 6rem;
+}

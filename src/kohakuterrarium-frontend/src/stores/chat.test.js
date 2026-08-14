@@ -1084,6 +1084,167 @@ describe("chat store — interrupted task handling", () => {
     expect(pendingJobs.agent_explore_1).toBeTruthy()
   })
 
+  it("derives replay message/part ids from the originating event_id", () => {
+    const events = [
+      { type: "user_input", event_id: 1, content: "q1" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text", event_id: 3, content: "answer " },
+      { type: "tool_call", event_id: 4, name: "bash", call_id: "job_1", args: {} },
+      { type: "tool_result", event_id: 5, name: "bash", call_id: "job_1", output: "ok" },
+      { type: "processing_end", event_id: 6 },
+      { type: "user_input", event_id: 7, content: "q2" },
+      { type: "processing_start", event_id: 8 },
+      { type: "text", event_id: 9, content: "answer2" },
+      { type: "processing_end", event_id: 10 },
+    ]
+
+    const { messages: replayed } = _replayEvents([], events)
+    const [user1, assistant1, user2, assistant2] = replayed
+
+    expect(user1.id).toBe("h_e1")
+    expect(assistant1.id).toBe("h_e2")
+    expect(assistant1.parts[0].id).toBe("txt_e3")
+    expect(assistant1.parts[0].content).toBe("answer ")
+    expect(assistant1.parts[1].id).toBe("tool_e4")
+    expect(user2.id).toBe("h_e7")
+    expect(assistant2.id).toBe("h_e8")
+    expect(assistant2.parts[0].id).toBe("txt_e9")
+  })
+
+  it("keeps later message ids stable when an earlier range is hidden by compact_replace", () => {
+    const baseEvents = [
+      { type: "user_input", event_id: 1, content: "q1" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text", event_id: 3, content: "long answer body" },
+      { type: "processing_end", event_id: 4 },
+      { type: "user_input", event_id: 7, content: "q2" },
+      { type: "processing_start", event_id: 8 },
+      { type: "text", event_id: 9, content: "answer2" },
+      { type: "processing_end", event_id: 10 },
+    ]
+    const { messages: before } = _replayEvents([], baseEvents)
+    const user2Before = before.find((m) => m.content === "q2")
+    const assistant2Before = before.find((m) => m.role === "assistant" && m.id !== before[1].id)
+
+    const compactedEvents = [
+      ...baseEvents,
+      {
+        type: "compact_replace",
+        event_id: 11,
+        replaced_from_event_id: 2,
+        replaced_to_event_id: 4,
+        round: 1,
+        summary_text: "summary",
+        messages_compacted: 2,
+      },
+    ]
+    const { messages: after } = _replayEvents([], compactedEvents)
+
+    // The compacted range disappears, but ids of every message that still
+    // renders must be unchanged — otherwise each resync remounts the whole
+    // tail of the conversation (positional ids shift by the hidden count).
+    const user2After = after.find((m) => m.content === "q2")
+    const assistant2After = after.find(
+      (m) => m.role === "assistant" && m.parts?.[0]?.content === "answer2",
+    )
+    expect(after.some((m) => m.role === "compact")).toBe(true)
+    expect(after.some((m) => m.parts?.[0]?.content === "long answer body")).toBe(false)
+    expect(user2After.id).toBe(user2Before.id)
+    expect(assistant2After.id).toBe(assistant2Before.id)
+  })
+
+  it("_setMessages reuses message and part object identity by id", () => {
+    const events = [
+      { type: "user_input", event_id: 1, content: "q1" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text", event_id: 3, content: "a1" },
+      { type: "tool_call", event_id: 4, name: "bash", call_id: "job_1", args: {} },
+      { type: "tool_result", event_id: 5, name: "bash", call_id: "job_1", output: "ok" },
+      { type: "processing_end", event_id: 6 },
+    ]
+    const chat = useChatStore()
+    chat.eventsByTab = { main: events }
+    chat._rebuildMessages("main")
+    const first = chat.messagesByTab.main.map((m) => m)
+    const firstTool = chat.messagesByTab.main[1].parts[1]
+
+    chat._rebuildMessages("main")
+    const second = chat.messagesByTab.main
+
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toBe(first[1])
+    expect(second[1].parts[1]).toBe(firstTool)
+    expect(second[1].parts[1].result).toBe("ok")
+  })
+
+  it("_findToolPart misses a job the latest rebuild dropped (no stale index hits)", () => {
+    const chat = useChatStore()
+    const withTool = [
+      { type: "processing_start", event_id: 2 },
+      { type: "tool_call", event_id: 3, name: "bash", call_id: "job_1", args: {} },
+      { type: "processing_end", event_id: 4 },
+    ]
+    chat.eventsByTab = { main: withTool }
+    chat._rebuildMessages("main")
+    expect(chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_1")).toBeTruthy()
+
+    chat.eventsByTab = {
+      main: [
+        { type: "processing_start", event_id: 10 },
+        { type: "text", event_id: 11, content: "plain" },
+        { type: "processing_end", event_id: 12 },
+      ],
+    }
+    chat._rebuildMessages("main")
+    expect(chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_1")).toBeNull()
+  })
+
+  it("_findToolPart still finds tools when the index was never seeded (fallback scan)", () => {
+    const chat = useChatStore()
+    // Bypass _setMessages: direct assignment simulates a code path that
+    // skipped index maintenance; the fallback scan must still answer.
+    chat.messagesByTab = {
+      main: [
+        {
+          id: "h_0",
+          role: "assistant",
+          parts: [{ type: "tool", id: "tool_0", jobId: "job_x", name: "bash", status: "done" }],
+        },
+      ],
+    }
+    const tool = chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_x")
+    expect(tool.jobId).toBe("job_x")
+  })
+
+  it("_handleChannelMessage dedupes by message_id via the id set", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { "ch:tasks": [] }
+    chat._rebuildMessageIndexes("ch:tasks")
+    const frame = {
+      channel: "tasks",
+      message_id: "m1",
+      sender: "a",
+      content: "hello",
+      timestamp: "t",
+    }
+    chat._handleChannelMessage(frame)
+    chat._handleChannelMessage(frame)
+    expect(chat.messagesByTab["ch:tasks"].length).toBe(1)
+  })
+
+  it("falls back to positional ids for events without event_id", () => {
+    const events = [
+      { type: "user_input", content: "q1" },
+      { type: "processing_start" },
+      { type: "text", content: "a1" },
+      { type: "processing_end" },
+    ]
+    const { messages: replayed } = _replayEvents([], events)
+    expect(replayed[0].id).toBe("h_0")
+    expect(replayed[1].id).toBe("h_1")
+    expect(replayed[1].parts[0].id).toBe("txt_2")
+  })
+
   it("background subagent without job_id still rebuilds as running, not interrupted", () => {
     // The same scenario but with a legacy / buggy backend that emitted
     // ``subagent_call`` without a ``job_id`` field. Pre-fix this fell
@@ -1206,7 +1367,7 @@ describe("chat store — interrupted task handling", () => {
       result: "User manually interrupted this job.",
     })
 
-    const tool = chat._findToolPart(chat.messagesByTab.main, "bash", "job_1")
+    const tool = chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_1")
     expect(tool.status).toBe("interrupted")
     expect(tool.result).toBe("User manually interrupted this job.")
     expect(chat.runningJobs.job_1).toBeUndefined()
@@ -4939,7 +5100,12 @@ describe("chat store — concurrent history resyncs apply in order", () => {
       active: true,
       baselineMaxEventId: null,
     })
-    expect(chat._branchResyncPendingByTab.main.baselinePhysicalFingerprint).toContain("old")
+    // The baseline fingerprints content LENGTH, not content — it must
+    // detect that the physical log advanced without re-serializing
+    // megabytes of message text.
+    const baseline = chat._branchResyncPendingByTab.main.baselinePhysicalFingerprint
+    expect(baseline).toBe(JSON.stringify([["user_input", null, null, 3]]))
+    expect(baseline).not.toContain("old")
     chat._clearBranchResyncTimers()
   })
 

@@ -78,7 +78,10 @@
               <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ resolvedEmptySubtitle }}</p>
             </div>
           </template>
-          <ChatMessage v-for="(msg, idx) in viewMessages" :key="msg.id" :message="msg" :prev-message="idx > 0 ? viewMessages[idx - 1] : null" :is-first="idx === 0" :message-idx="idx" :is-last-assistant="msg.role === 'assistant' && idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
+          <button v-if="windowStart > 0" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
+            {{ t("chat.showEarlier", { count: windowStart }) }}
+          </button>
+          <ChatMessage v-for="(msg, idx) in windowMessages" :key="msg.id" :message="msg" :prev-message="windowStart + idx > 0 ? viewMessages[windowStart + idx - 1] : null" :is-first="windowStart + idx === 0" :message-idx="windowStart + idx" :is-last-assistant="msg.role === 'assistant' && windowStart + idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
           <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
             <span class="text-sm text-amber/80 kohaku-pulse">{{ kohakuwuingLabel }}</span>
@@ -410,12 +413,17 @@ const kohakuwuingLabel = computed(() => {
   return t("chat.processing")
 })
 
-function scrollToPending() {
+async function scrollToPending() {
   const tab = viewActiveTab.value
   if (!tab) return
   const list = chat.messagesByTab?.[tab] || []
   const target = list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).pop()
   if (!target) return
+  const targetIdx = list.indexOf(target)
+  if (targetIdx >= 0 && targetIdx < windowStart.value) {
+    windowStartIndex.value = targetIdx
+    await nextTick()
+  }
   const el = messagesEl.value
   if (!el) return
   const node = el.querySelector(`[data-message-id="${target.id}"]`)
@@ -508,6 +516,38 @@ const isNearBottom = ref(true)
 const forceScrollOnNextMessageUpdate = ref(true)
 const scrollPositions = new Map()
 
+// Tail-anchored render window: very long transcripts mount only the
+// newest RENDER_WINDOW_STEP messages. ``windowStartIndex`` stays null
+// (auto tail) until the user expands upward; once explicit, new
+// messages never shift the top of the rendered slice.
+const RENDER_WINDOW_STEP = 400
+const windowStartIndex = ref(null)
+
+const windowStart = computed(() => {
+  const total = viewMessages.value.length
+  if (windowStartIndex.value == null) return Math.max(0, total - RENDER_WINDOW_STEP)
+  // Shrinkage (branch filter / compact_replace / retry splice) can push
+  // an explicit start past the end of the list; clamping to total - 1
+  // would collapse the view to one message. Fall back to the tail window
+  // and let ``loadEarlierMessages`` re-establish an explicit start.
+  if (windowStartIndex.value >= total) {
+    windowStartIndex.value = null
+    return Math.max(0, total - RENDER_WINDOW_STEP)
+  }
+  return windowStartIndex.value
+})
+const windowMessages = computed(() => viewMessages.value.slice(windowStart.value))
+
+async function loadEarlierMessages() {
+  const el = messagesEl.value
+  const prevHeight = el ? el.scrollHeight : 0
+  windowStartIndex.value = Math.max(0, windowStart.value - RENDER_WINDOW_STEP)
+  await nextTick()
+  // Compensate the prepended height so the content the user was
+  // reading stays under the cursor.
+  if (el && prevHeight) el.scrollTop += el.scrollHeight - prevHeight
+}
+
 function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
   if (!instanceId || !tab) return ""
   const suffix = props.groupId ? `:${props.groupId}` : ""
@@ -593,6 +633,7 @@ watch(
   ([instanceId, tab], previous) => {
     const [prevInstanceId, prevTab] = previous || []
     if (prevInstanceId && prevTab) saveScrollPosition(prevInstanceId, prevTab)
+    windowStartIndex.value = null
     restoreDraft()
     nextTick(() => {
       const hadSavedScroll = restoreScrollPosition(instanceId, tab)

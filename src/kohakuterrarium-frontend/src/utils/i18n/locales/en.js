@@ -444,6 +444,7 @@ export default {
   "chat.disconnected": "Disconnected — reconnecting…",
   "chat.dropToAttach": "Drop files to attach",
   "chat.queueShowMore": ({ count }) => `+${count} more queued`,
+  "chat.showEarlier": ({ count }) => `Show ${count} earlier messages`,
   "chat.queueCollapse": "Show fewer",
   "chat.queueEdit": "Edit queued message",
   "chat.queueCancel": "Cancel queued message",
