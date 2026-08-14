@@ -17,7 +17,17 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
             },
             "timeout": {
                 "type": "number",
-                "description": "Maximum execution time in seconds (0 = no timeout).",
+                "description": (
+                    "Maximum total call time in seconds, including lock waiting "
+                    "(0 = no timeout)."
+                ),
+            },
+            "allow_concurrent": {
+                "type": "boolean",
+                "description": (
+                    "Skip the unsafe-tool concurrency lock only when it is safe "
+                    "to run concurrently."
+                ),
             },
         },
         "required": ["command"],

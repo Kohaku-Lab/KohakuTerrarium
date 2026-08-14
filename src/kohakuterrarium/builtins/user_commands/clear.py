@@ -28,7 +28,7 @@ def _do_clear(context: UserCommandContext) -> str:
     if agent.session_store:
         agent.session_store.save_conversation(
             agent.config.name,
-            agent.controller.conversation.to_messages(),
+            agent.controller.conversation.snapshot_messages(),
         )
 
     return f"Conversation cleared ({msgs} messages removed from context)."
