@@ -1153,6 +1153,85 @@ describe("chat store — interrupted task handling", () => {
     expect(assistant2After.id).toBe(assistant2Before.id)
   })
 
+  it("_setMessages reuses message and part object identity by id", () => {
+    const events = [
+      { type: "user_input", event_id: 1, content: "q1" },
+      { type: "processing_start", event_id: 2 },
+      { type: "text", event_id: 3, content: "a1" },
+      { type: "tool_call", event_id: 4, name: "bash", call_id: "job_1", args: {} },
+      { type: "tool_result", event_id: 5, name: "bash", call_id: "job_1", output: "ok" },
+      { type: "processing_end", event_id: 6 },
+    ]
+    const chat = useChatStore()
+    chat.eventsByTab = { main: events }
+    chat._rebuildMessages("main")
+    const first = chat.messagesByTab.main.map((m) => m)
+    const firstTool = chat.messagesByTab.main[1].parts[1]
+
+    chat._rebuildMessages("main")
+    const second = chat.messagesByTab.main
+
+    expect(second[0]).toBe(first[0])
+    expect(second[1]).toBe(first[1])
+    expect(second[1].parts[1]).toBe(firstTool)
+    expect(second[1].parts[1].result).toBe("ok")
+  })
+
+  it("_findToolPart misses a job the latest rebuild dropped (no stale index hits)", () => {
+    const chat = useChatStore()
+    const withTool = [
+      { type: "processing_start", event_id: 2 },
+      { type: "tool_call", event_id: 3, name: "bash", call_id: "job_1", args: {} },
+      { type: "processing_end", event_id: 4 },
+    ]
+    chat.eventsByTab = { main: withTool }
+    chat._rebuildMessages("main")
+    expect(chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_1")).toBeTruthy()
+
+    chat.eventsByTab = {
+      main: [
+        { type: "processing_start", event_id: 10 },
+        { type: "text", event_id: 11, content: "plain" },
+        { type: "processing_end", event_id: 12 },
+      ],
+    }
+    chat._rebuildMessages("main")
+    expect(chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_1")).toBeNull()
+  })
+
+  it("_findToolPart still finds tools when the index was never seeded (fallback scan)", () => {
+    const chat = useChatStore()
+    // Bypass _setMessages: direct assignment simulates a code path that
+    // skipped index maintenance; the fallback scan must still answer.
+    chat.messagesByTab = {
+      main: [
+        {
+          id: "h_0",
+          role: "assistant",
+          parts: [{ type: "tool", id: "tool_0", jobId: "job_x", name: "bash", status: "done" }],
+        },
+      ],
+    }
+    const tool = chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_x")
+    expect(tool.jobId).toBe("job_x")
+  })
+
+  it("_handleChannelMessage dedupes by message_id via the id set", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { "ch:tasks": [] }
+    chat._rebuildMessageIndexes("ch:tasks")
+    const frame = {
+      channel: "tasks",
+      message_id: "m1",
+      sender: "a",
+      content: "hello",
+      timestamp: "t",
+    }
+    chat._handleChannelMessage(frame)
+    chat._handleChannelMessage(frame)
+    expect(chat.messagesByTab["ch:tasks"].length).toBe(1)
+  })
+
   it("falls back to positional ids for events without event_id", () => {
     const events = [
       { type: "user_input", content: "q1" },
@@ -1288,7 +1367,7 @@ describe("chat store — interrupted task handling", () => {
       result: "User manually interrupted this job.",
     })
 
-    const tool = chat._findToolPart(chat.messagesByTab.main, "bash", "job_1")
+    const tool = chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_1")
     expect(tool.status).toBe("interrupted")
     expect(tool.result).toBe("User manually interrupted this job.")
     expect(chat.runningJobs.job_1).toBeUndefined()

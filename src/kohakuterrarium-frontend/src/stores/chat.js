@@ -1,5 +1,5 @@
 import { ElMessage } from "element-plus"
-import { getCurrentInstance } from "vue"
+import { getCurrentInstance, markRaw } from "vue"
 
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
@@ -71,6 +71,57 @@ function contentSignature(content) {
   return JSON.stringify(normalized)
 }
 
+// ── Per-tab message indexes (module-level by design) ──
+// Live WS frames look up tool parts by job_id on every tool event;
+// scanning every message×part per frame is O(N) and dominates long
+// sessions. The indexes are pure caches over the message arrays,
+// rebuilt on every wholesale replacement (``_setMessages``), so they
+// stay out of Pinia state — reactive, devtools-visible copies would
+// cost more than the scans they replace.
+const _indexesByStore = new WeakMap()
+
+function _tabIndexes(store, tab) {
+  let byTab = _indexesByStore.get(store)
+  if (!byTab) {
+    byTab = new Map()
+    _indexesByStore.set(store, byTab)
+  }
+  let idx = byTab.get(tab)
+  if (!idx) {
+    idx = { tools: new Map(), channelIds: new Set() }
+    byTab.set(tab, idx)
+  }
+  return idx
+}
+
+function _indexMsgToolsInto(idx, msg) {
+  if (!Array.isArray(msg?.parts)) return
+  for (const p of msg.parts) {
+    if (p?.type === "tool" && p.jobId) idx.tools.set(p.jobId, p)
+  }
+}
+
+/** Reuse the previous message object (and matching per-part objects)
+ * when a rebuild produces a message with the same id, so ChatMessage
+ * props keep their identity across resyncs and Vue can skip whole
+ * re-renders of unchanged messages. */
+function _mergeMessageInPlace(oldMsg, freshMsg) {
+  const freshParts = Array.isArray(freshMsg.parts) ? freshMsg.parts : null
+  if (freshParts && Array.isArray(oldMsg.parts)) {
+    const partById = new Map()
+    for (const p of oldMsg.parts) if (p?.id != null) partById.set(p.id, p)
+    for (let i = 0; i < freshParts.length; i++) {
+      const fp = freshParts[i]
+      const op = fp?.id != null ? partById.get(fp.id) : undefined
+      if (op && op !== fp) {
+        Object.assign(op, fp)
+        freshParts[i] = op
+      }
+    }
+  }
+  Object.assign(oldMsg, freshMsg)
+}
+
 export function _parseSlashCommand(content) {
   let text = null
   if (typeof content === "string") {
@@ -121,10 +172,11 @@ function toolResultPayload(result, data = {}) {
   if (data.canvas_preview && (!resultMeta || !resultMeta.canvas_preview)) {
     resultMeta = { ...(resultMeta || {}), canvas_preview: data.canvas_preview }
   }
+  const parts = normalizeContentParts(result)
   return {
     result,
-    resultParts: normalizeContentParts(result),
-    resultMeta,
+    resultParts: parts ? markRaw(parts) : parts,
+    resultMeta: resultMeta ? markRaw(resultMeta) : resultMeta,
   }
 }
 
@@ -472,7 +524,7 @@ export function _replayEvents(messages, events, branchView = null) {
       jobId: jobId || "",
       name,
       kind,
-      args: args || {},
+      args: markRaw(args || {}),
       status: initialStatus,
       result: "",
       tools_used: [],
@@ -532,7 +584,7 @@ export function _replayEvents(messages, events, branchView = null) {
         id: curEventKey ? "tool_" + curEventKey : `tool_${_n++}`,
         name,
         kind: "tool",
-        args: args || {},
+        args: markRaw(args || {}),
         status: "done",
         result: "",
         tools_used: [],
@@ -1911,7 +1963,7 @@ const _chatStoreOptions = {
     _addTab(key) {
       if (!this.tabs.includes(key)) {
         this.tabs.push(key)
-        this.messagesByTab[key] = []
+        this._setMessages(key, [])
       }
       // When groups are active, also drop the tab into the focused
       // group so backend ``creature_added`` events surface in the
@@ -3031,19 +3083,21 @@ const _chatStoreOptions = {
         }
         const toolId = data.id || "tc_" + Date.now()
         const jobId = data.job_id || ""
-        last.parts.push({
+        const startedPart = {
           type: "tool",
           id: toolId,
           jobId,
           name,
           kind: at === "subagent_start" ? "subagent" : "tool",
-          args: data.args || { info: data.detail },
+          args: markRaw(data.args || { info: data.detail }),
           status: "running",
           result: "",
           tools_used: data.tools_used || [],
           children: [],
           startedAt: Date.now(),
-        })
+        }
+        last.parts.push(startedPart)
+        this._indexToolPart(source, startedPart)
         // Track all tasks as running jobs (direct tasks are promotable)
         const runKey = jobId || toolId
         const isBg = data.background || false
@@ -3056,7 +3110,7 @@ const _chatStoreOptions = {
         }
         this._ensureJobTimer()
       } else if (at === "tool_done" || at === "subagent_done") {
-        let tc = this._findToolPart(msgs, name, data.job_id)
+        let tc = this._findToolPart(source, msgs, name, data.job_id)
         if (!tc) {
           const last = this._ensureAssistantMsg(msgs)
           tc = {
@@ -3072,6 +3126,7 @@ const _chatStoreOptions = {
             children: [],
           }
           last.parts.push(tc)
+          this._indexToolPart(source, tc)
         }
         tc.status = "done"
         const payload = toolResultPayload(data.result || data.output || data.detail || "", data)
@@ -3088,7 +3143,7 @@ const _chatStoreOptions = {
         delete this.runningJobs[tc.jobId || tc.id]
         this._checkJobTimer()
       } else if (at === "tool_error" || at === "subagent_error") {
-        let tc = this._findToolPart(msgs, name, data.job_id)
+        let tc = this._findToolPart(source, msgs, name, data.job_id)
         if (!tc) {
           const last = this._ensureAssistantMsg(msgs)
           tc = {
@@ -3104,6 +3159,7 @@ const _chatStoreOptions = {
             children: [],
           }
           last.parts.push(tc)
+          this._indexToolPart(source, tc)
         }
         tc.status = data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
         const payload = toolResultPayload(data.result || data.error || data.detail || "", data)
@@ -3124,7 +3180,7 @@ const _chatStoreOptions = {
         const saName = data.subagent || ""
         const saJobId = data.job_id || ""
         this._recordSubagentUsage(source, saJobId, data)
-        const sa = this._findSubagentPart(msgs, saName, saJobId)
+        const sa = this._findSubagentPart(source, msgs, saName, saJobId)
         if (sa) {
           if (data.total_tokens) sa.total_tokens = data.total_tokens
           if (data.prompt_tokens) sa.prompt_tokens = data.prompt_tokens
@@ -3134,7 +3190,7 @@ const _chatStoreOptions = {
         // Sub-agent internal tool activity: find parent by job_id or name
         const saName = data.subagent || ""
         const saJobId = data.job_id || ""
-        const sa = this._findSubagentPart(msgs, saName, saJobId)
+        const sa = this._findSubagentPart(source, msgs, saName, saJobId)
         if (sa) {
           if (!sa.children) sa.children = []
           if (!sa.tools_used) sa.tools_used = []
@@ -3617,7 +3673,10 @@ const _chatStoreOptions = {
           cutAt = i
         }
       }
-      if (cutAt < msgs.length) msgs.splice(cutAt)
+      if (cutAt < msgs.length) {
+        msgs.splice(cutAt)
+        this._rebuildMessageIndexes(tab)
+      }
       // Snapshot state BEFORE the optimistic mutation so the catch
       // block can roll back cleanly when the API call fails. Without
       // this the tab gets stuck showing KohakUwUing forever (no WS
@@ -3844,6 +3903,7 @@ const _chatStoreOptions = {
           contentParts: normalized.contentParts,
         }
         msgs.splice(messageIdx, msgs.length - messageIdx, editedRow)
+        if (tab) this._rebuildMessageIndexes(tab)
       }
       if (predictedBranch != null && tab) {
         const injected = this._injectOptimisticBranch(tab, {
@@ -3903,7 +3963,7 @@ const _chatStoreOptions = {
             return this._branchOperationResult(true, tab, this.branchOperationByTab[tab])
           }
           delete this._branchResyncPendingByTab[tab]
-          if (previousMessages && tab) this.messagesByTab[tab] = previousMessages
+          if (previousMessages && tab) this._restoreMessages(tab, previousMessages)
           if (optimisticApplied && tab) {
             if (previousEvents !== undefined) {
               if (previousEvents == null) delete this.eventsByTab[tab]
@@ -4021,10 +4081,13 @@ const _chatStoreOptions = {
               this._localCommandResultsByTab[tab],
               branchSelection,
             )
-            this.messagesByTab[tab] = mergeLocalCommandResults(
-              _convertHistory(data.messages),
-              this._localCommandResultsByTab[tab],
-              branchSelection,
+            this._setMessages(
+              tab,
+              mergeLocalCommandResults(
+                _convertHistory(data.messages),
+                this._localCommandResultsByTab[tab],
+                branchSelection,
+              ),
             )
           }
           if (data?.is_processing) this.processingByTab[tab] = true
@@ -4040,10 +4103,13 @@ const _chatStoreOptions = {
             this._localCommandResultsByTab[tab],
             branchSelection,
           )
-          this.messagesByTab[tab] = mergeLocalCommandResults(
-            messages,
-            this._localCommandResultsByTab[tab],
-            branchSelection,
+          this._setMessages(
+            tab,
+            mergeLocalCommandResults(
+              messages,
+              this._localCommandResultsByTab[tab],
+              branchSelection,
+            ),
           )
           if (data?.is_processing) this.processingByTab[tab] = true
           return true
@@ -4172,10 +4238,9 @@ const _chatStoreOptions = {
         this._localCommandResultsByTab[tab],
         branchSelection,
       )
-      this.messagesByTab[tab] = mergeLocalCommandResults(
-        messages,
-        this._localCommandResultsByTab[tab],
-        branchSelection,
+      this._setMessages(
+        tab,
+        mergeLocalCommandResults(messages, this._localCommandResultsByTab[tab], branchSelection),
       )
       // Canonical history is authoritative for this tab's running jobs.
       // ``fetchedAt`` (set only by _resyncHistory) unlocks removals of
@@ -4209,10 +4274,82 @@ const _chatStoreOptions = {
     },
 
     /**
-     * Find a tool part by job_id (reliable, any status) or name (running only).
-     * Searches all messages backwards.
+     * Replace a tab's message array wholesale — the single choke point
+     * every rebuild goes through. Reuses previous message/part objects
+     * by id so component props keep their identity, then refreshes the
+     * per-tab lookup indexes.
      */
-    _findToolPart(msgs, name, jobId) {
+    _setMessages(tab, next) {
+      const prev = this.messagesByTab[tab]
+      if (Array.isArray(prev) && Array.isArray(next)) {
+        const byId = new Map()
+        for (const m of prev) if (m?.id != null) byId.set(m.id, m)
+        for (let i = 0; i < next.length; i++) {
+          const fresh = next[i]
+          const old = fresh?.id != null ? byId.get(fresh.id) : undefined
+          if (old && old !== fresh) {
+            _mergeMessageInPlace(old, fresh)
+            next[i] = old
+          }
+        }
+      }
+      this.messagesByTab[tab] = next
+      this._rebuildMessageIndexes(tab)
+    },
+
+    /** Restore a previously captured array (rollback) — identities are
+     * already correct; only the indexes need a rebuild. */
+    _restoreMessages(tab, arr) {
+      this.messagesByTab[tab] = arr
+      this._rebuildMessageIndexes(tab)
+    },
+
+    _rebuildMessageIndexes(tab) {
+      if (!tab) return
+      const idx = _tabIndexes(this, tab)
+      idx.tools.clear()
+      idx.channelIds.clear()
+      const msgs = this.messagesByTab[tab]
+      if (!Array.isArray(msgs)) return
+      if (tab.startsWith("ch:")) {
+        for (const m of msgs) if (m?.id != null) idx.channelIds.add(m.id)
+      }
+      for (const m of msgs) _indexMsgToolsInto(idx, m)
+    },
+
+    _indexMessage(tab, msg) {
+      if (!tab || !msg) return
+      const idx = _tabIndexes(this, tab)
+      if (tab.startsWith("ch:") && msg.id != null) idx.channelIds.add(msg.id)
+      _indexMsgToolsInto(idx, msg)
+    },
+
+    _indexToolPart(tab, part) {
+      if (!tab) return
+      if (part?.type === "tool" && part.jobId) _tabIndexes(this, tab).tools.set(part.jobId, part)
+    },
+
+    _hasChannelMessage(tab, id) {
+      const idx = _tabIndexes(this, tab)
+      if (idx.channelIds.size === 0) {
+        const msgs = this.messagesByTab[tab]
+        if (Array.isArray(msgs)) {
+          for (const m of msgs) if (m?.id != null) idx.channelIds.add(m.id)
+        }
+      }
+      return idx.channelIds.has(id)
+    },
+
+    /**
+     * Find a tool part by job_id (reliable, any status) or name (running only).
+     * Job-id lookups hit the per-tab index; the scans below are the
+     * fallback for parts the index hasn't seen (and reseed it).
+     */
+    _findToolPart(tab, msgs, name, jobId) {
+      if (jobId) {
+        const hit = _tabIndexes(this, tab).tools.get(jobId)
+        if (hit) return hit
+      }
       for (let i = msgs.length - 1; i >= 0; i--) {
         const msg = msgs[i]
         if (!msg.parts) continue
@@ -4220,7 +4357,10 @@ const _chatStoreOptions = {
           const p = msg.parts[j]
           if (p.type !== "tool") continue
           // Match by job_id: any status (handles replay "running" + live "running")
-          if (jobId && p.jobId === jobId) return p
+          if (jobId && p.jobId === jobId) {
+            if (tab) _tabIndexes(this, tab).tools.set(jobId, p)
+            return p
+          }
         }
       }
       // Fallback: match by name, running status only
@@ -4236,11 +4376,15 @@ const _chatStoreOptions = {
     },
 
     /**
-     * Find a sub-agent part. Match by job_id first, then name, then any running sub-agent.
+     * Find a sub-agent part. Indexed job_id match first, then name,
+     * then any running sub-agent (scans below double as the index
+     * seeding fallback).
      */
-    _findSubagentPart(msgs, saName, saJobId) {
+    _findSubagentPart(tab, msgs, saName, saJobId) {
       // 1. Match by job_id (most reliable - connects sub-agent tool events to parent)
       if (saJobId) {
+        const hit = _tabIndexes(this, tab).tools.get(saJobId)
+        if (hit && hit.kind === "subagent") return hit
         for (let i = msgs.length - 1; i >= 0; i--) {
           const msg = msgs[i]
           if (!msg.parts) continue
@@ -4400,18 +4544,20 @@ const _chatStoreOptions = {
 
       if (this.messagesByTab[tabKey]) {
         const existing = this.messagesByTab[tabKey]
-        if (data.message_id && existing.some((m) => m.id === data.message_id)) {
+        if (data.message_id && this._hasChannelMessage(tabKey, data.message_id)) {
           return
         }
         const normalized = normalizeMessageContent(data.content)
-        this.messagesByTab[tabKey].push({
+        const pushed = {
           id: data.message_id || "ch_" + Date.now(),
           role: "channel",
           sender: data.sender,
           content: normalized.content,
           contentParts: normalized.contentParts,
           timestamp: data.timestamp,
-        })
+        }
+        existing.push(pushed)
+        this._indexMessage(tabKey, pushed)
         if (this.activeTab !== tabKey) {
           this.unreadCounts[tabKey] = (this.unreadCounts[tabKey] || 0) + 1
         }
@@ -4551,6 +4697,7 @@ const _chatStoreOptions = {
         }
       }
       this.messagesByTab[tabKey].push(msg)
+      this._indexMessage(tabKey, msg)
       this._historyMutationSeqByTab[tabKey] = (this._historyMutationSeqByTab[tabKey] || 0) + 1
     },
 
@@ -4611,10 +4758,13 @@ const _chatStoreOptions = {
         this.eventsByTab[tabKey],
         this.branchViewByTab[tabKey] || null,
       )
-      this.messagesByTab[tabKey] = mergeLocalCommandResults(
-        canonical,
-        this._localCommandResultsByTab[tabKey],
-        currentSelection,
+      this._setMessages(
+        tabKey,
+        mergeLocalCommandResults(
+          canonical,
+          this._localCommandResultsByTab[tabKey],
+          currentSelection,
+        ),
       )
       if (
         Number.isInteger(resultContext?.dispatchSeq) &&
