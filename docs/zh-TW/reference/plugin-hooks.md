@@ -44,6 +44,16 @@ tags:
 
 ---
 
+## 工具可見性貢獻
+
+外掛可以在不修改 registry 的前提下，按請求裁切暴露給模型的原生工具目錄。多個外掛的限制會依類別取交集。
+
+| Hook | 簽章 | 觸發時機 | 回傳語意 |
+|---|---|---|---|
+| `get_tool_visibility` | `def get_tool_visibility(context: PluginContext) -> ToolVisibility \| None` | 每次建構原生請求的 tool schemas 與 provider-native tools 之前。 | `None` 不限制；回傳 `ToolVisibility(allowed_tools=..., allowed_subagents=...)` 只保留指定名稱，空 `frozenset` 隱藏整個類別。 |
+
+---
+
 ## 工具 hooks
 
 | Hook | 簽章 | 觸發時機 | 回傳語意 |

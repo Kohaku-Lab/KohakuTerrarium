@@ -61,6 +61,8 @@ class ProjectHeaderPlugin(BasePlugin):
 
 執行期外掛也可以實作 `get_prompt_content(context) -> str | None` 來貢獻 prompt 文字。這些內容會被聚合到框架提示之前，並同時適用於父代理與子代理。
 
+執行期外掛也可以實作 `get_tool_visibility(context) -> ToolVisibility | None`，按請求裁切暴露給模型的原生工具目錄（`allowed_tools` / `allowed_subagents`，`None` 表示不限制）。
+
 除了 prompt 外掛以外，工具本身也可以透過 `prompt_contribution()` 貢獻短的 prompt 指引；位置同樣在框架提示之前。
 
 Priority 越低越早執行。你可以藉此把外掛插到正確位置。

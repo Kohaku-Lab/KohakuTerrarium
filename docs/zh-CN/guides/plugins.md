@@ -60,6 +60,8 @@ class ProjectHeaderPlugin(BasePlugin):
 
 运行时插件也可以实现 `get_prompt_content(context) -> str | None` 来贡献 prompt 文本。这些内容会被聚合到框架提示之前，并同时适用于父代理与子代理。
 
+运行时插件还可以实现 `get_tool_visibility(context) -> ToolVisibility | None`，按请求裁剪暴露给模型的原生工具目录（`allowed_tools` / `allowed_subagents`，`None` 表示不限制）。
+
 除了 prompt 插件以外，工具本身也可以通过 `prompt_contribution()` 贡献短的 prompt 指引；位置同样在框架提示之前。
 
 Priority 越低越早执行。你可以借此把插件插到正确位置。

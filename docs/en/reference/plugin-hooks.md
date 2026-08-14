@@ -64,6 +64,27 @@ When a `post_llm_call` rewrite changes the final assistant text, the runtime emi
 
 ---
 
+## Tool visibility contributions
+
+Plugins can restrict the catalog exposed to the model on each native
+request without touching the registry. `PluginManager` intersects
+multiple contributions per category, so each plugin can only narrow the
+catalog.
+
+| Hook | Signature | Fired when | Return semantics |
+|---|---|---|---|
+| `get_tool_visibility` | `def get_tool_visibility(context: PluginContext) -> ToolVisibility \| None` | Before each native request's tool schemas and provider-native tools are built. | `None` keeps the catalog unrestricted. A `ToolVisibility(allowed_tools=..., allowed_subagents=...)` keeps only the named members; an empty `frozenset` hides the whole category. |
+
+`ToolVisibility` fields:
+
+- `allowed_tools: frozenset[str] | None` — `None` means unrestricted.
+- `allowed_subagents: frozenset[str] | None` — `None` means unrestricted.
+
+This contribution only affects native tool schemas; text-mode prompt
+filtering is left to prompt contributions.
+
+---
+
 ## Tool hooks
 
 | Hook | Signature | Fired when | Return semantics |
