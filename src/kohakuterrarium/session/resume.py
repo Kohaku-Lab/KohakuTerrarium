@@ -19,16 +19,22 @@ from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.history import (
-    _index_parent_paths,
-    _resolve_selected_branches,
+    index_parent_paths,
     normalize_resumable_events,
     replay_conversation,
+    resolve_selected_branches,
 )
 from kohakuterrarium.session.migrations import (
     ensure_latest_version,
     latest_readable_version,
 )
 from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.resume_branch import (
+    backfill_turn_metadata,
+    replayed_messages_for,
+    snapshot_has_turn_metadata,
+    snapshot_mismatches_branch,
+)
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
 
@@ -72,6 +78,10 @@ def _build_conversation(messages: list[dict]) -> Conversation:
     """
     conv = Conversation()
     for msg in messages:
+        if not isinstance(msg, dict):
+            # Malformed persisted entry (corrupt snapshot): skip it rather
+            # than crashing on msg.get(...).
+            continue
         role = msg.get("role", "user")
         content = msg.get("content", "")
         kwargs = {}
@@ -112,7 +122,13 @@ def _load_conversation_with_replay_fallback(
         cached_up_to = None
     if snapshot is not None and isinstance(cached_up_to, int):
         if cached_up_to >= last_event_id:
-            return snapshot
+            if snapshot_has_turn_metadata(snapshot):
+                return snapshot
+            logger.info(
+                "Legacy snapshot lacks turn metadata — backfill",
+                agent=agent_name,
+            )
+            return backfill_turn_metadata(snapshot, events)
         # Compaction exists only in the snapshot, so replay just its normalized tail.
         tail = [
             evt
@@ -133,7 +149,23 @@ def _load_conversation_with_replay_fallback(
             for evt in tail
         )
         if not tail_has_forks:
-            appended = replay_conversation(normalize_resumable_events(tail))
+            appended = replay_conversation(
+                normalize_resumable_events(tail), include_metadata=True
+            )
+            # A legacy snapshot portion must be backfilled too, otherwise the
+            # resumed conversation becomes a mix of metadata-less (snapshot)
+            # and metadata-bearing (tail) user messages. Backfill uses only
+            # events up to the snapshot watermark so the tail's user turns do
+            # not shift the mapping.
+            base = snapshot
+            if not snapshot_has_turn_metadata(snapshot):
+                pre_events = [
+                    evt
+                    for evt in events
+                    if isinstance(evt.get("event_id"), int)
+                    and evt["event_id"] <= cached_up_to
+                ]
+                base = backfill_turn_metadata(snapshot, pre_events)
             logger.info(
                 "Resume appended post-snapshot tail",
                 agent=agent_name,
@@ -141,15 +173,23 @@ def _load_conversation_with_replay_fallback(
                 last_event_id=last_event_id,
                 appended=len(appended),
             )
-            return list(snapshot) + appended
+            return list(base) + appended
         logger.info(
             "Post-snapshot tail contains branch forks — full replay",
             agent=agent_name,
             snapshot_event_id=cached_up_to,
         )
     if snapshot is not None and cached_up_to is None:
-        return snapshot
-    replayed = replay_conversation(normalize_resumable_events(events))
+        if snapshot_has_turn_metadata(snapshot):
+            return snapshot
+        logger.info(
+            "Legacy snapshot lacks turn metadata — backfill",
+            agent=agent_name,
+        )
+        return backfill_turn_metadata(snapshot, events)
+    replayed = replay_conversation(
+        normalize_resumable_events(events), include_metadata=True
+    )
     if replayed:
         logger.info(
             "Resume rebuilt conversation via replay",
@@ -181,8 +221,8 @@ def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> N
         return
     # Use replay's path-aware selector so restored branch ancestry actually existed.
     events_list = list(events)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, None)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, None)
     if not selected:
         return
     max_turn = max(selected.keys())
@@ -220,6 +260,34 @@ def align_agent_name(agent, agent_name: str) -> None:
         compact_manager._agent_name = agent_name
 
 
+def _apply_restore_elision(agent: Any) -> None:
+    """Re-apply tool-result elision after restoring/rebuilding a conversation.
+
+    Rebuilds restore tool outputs elided during live turns, so re-apply
+    elision when the estimated prompt is already past the compact threshold
+    (prevents the first resumed LLM call from overflowing). Elision is a
+    compact companion: it only fires under real pressure.
+    """
+    controller = getattr(agent, "controller", None)
+    if controller is None:
+        return
+    config = getattr(controller, "config", None)
+    if config is None or not getattr(config, "elide_tool_results", False):
+        return
+    compact = getattr(agent, "compact_manager", None)
+    compact_max = (
+        compact.config.max_tokens
+        if compact is not None
+        and compact.config.enabled
+        and getattr(compact.config, "max_tokens", 0)
+        else 0
+    )
+    if compact_max and estimate_tokens(controller.conversation) >= int(
+        compact_max * compact.config.threshold
+    ):
+        elide_stale_tool_results(controller.conversation)
+
+
 def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     """Restore identity, conversation, branch state, scratchpad, and triggers.
 
@@ -230,30 +298,25 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
     if saved_messages:
         agent.controller.conversation = _build_conversation(saved_messages)
-        # Rebuilds restore tool outputs elided during live turns, so re-apply
-        # elision when the estimated prompt is already past the compact
-        # threshold (prevents the first resumed LLM call from overflowing).
-        # Elision is a compact companion: it only fires under real pressure.
-        controller = agent.controller
-        config = getattr(controller, "config", None)
-        if config is not None and getattr(config, "elide_tool_results", False):
-            compact = getattr(agent, "compact_manager", None)
-            compact_max = (
-                compact.config.max_tokens
-                if compact is not None
-                and compact.config.enabled
-                and getattr(compact.config, "max_tokens", 0)
-                else 0
-            )
-            if compact_max and estimate_tokens(controller.conversation) >= int(
-                compact_max * compact.config.threshold
-            ):
-                elide_stale_tool_results(controller.conversation)
+        _apply_restore_elision(agent)
         logger.info(
             "Conversation restored", agent=agent_name, messages=len(saved_messages)
         )
 
     _restore_turn_branch_state(agent, store, agent_name)
+
+    # A snapshot saved on a DIFFERENT branch (a sibling path) is stale for
+    # the restored target branch: discard it and rebuild via the branch-aware
+    # replay so the restored conversation matches the branch the agent is on.
+    if snapshot_mismatches_branch(store, agent, agent_name):
+        logger.info(
+            "Snapshot belongs to another branch — replaying target branch",
+            agent=agent_name,
+        )
+        replayed = replayed_messages_for(store, agent_name)
+        if replayed:
+            agent.controller.conversation = _build_conversation(replayed)
+            _apply_restore_elision(agent)
 
     pad_data = store.load_scratchpad(agent_name)
     if pad_data:

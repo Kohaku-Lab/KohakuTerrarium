@@ -13,6 +13,8 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.errors import SessionNotResumableError
+from kohakuterrarium.session.resume_branch import snapshot_mismatches_branch
+
 from kohakuterrarium.session.resume import (
     IO_MODES,
     _build_conversation,
@@ -409,15 +411,50 @@ class TestLoadConversationFallback:
         finally:
             store.close()
 
-    def test_snapshot_fresh_returns_snapshot(self, tmp_path):
+    def test_snapshot_fresh_with_metadata_returns_snapshot(self, tmp_path):
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             _, eid = store.append_event("alice", "x", {})
+            store.save_conversation(
+                "alice",
+                [
+                    {
+                        "role": "user",
+                        "content": "snap",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    }
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = eid
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["content"] == "snap"
+            assert out[0]["metadata"]["turn_index"] == 1
+        finally:
+            store.close()
+
+    def test_snapshot_fresh_without_metadata_backfills(self, tmp_path):
+        # Legacy snapshots carry no turn metadata, so edit targeting
+        # (turn_index lookup) cannot resolve. Backfill turn identity from
+        # the event log while trusting the snapshot verbatim — a full
+        # replay would resurrect pre-compact history and drop snapshot-only
+        # in-flight messages.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            _, eid = store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
             store.save_conversation("alice", [{"role": "user", "content": "snap"}])
             store.state["alice:snapshot_event_id"] = eid
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
             assert out[0]["content"] == "snap"
+            assert out[0]["metadata"]["turn_index"] == 1
+            assert out[0]["metadata"]["branch_id"] == 1
         finally:
             store.close()
 
@@ -574,26 +611,61 @@ class TestLoadConversationFallback:
         assert "tool" not in roles
         assert roles == ["user", "assistant"]
 
-    def test_missing_snapshot_event_id_uses_snapshot(self, tmp_path):
+    def test_missing_snapshot_event_id_with_metadata_uses_snapshot(self, tmp_path):
         # When there's a snapshot but no recorded snapshot_event_id,
-        # the snapshot is trusted (avoid false-positive replays).
+        # a metadata-bearing snapshot is trusted (avoid false-positive
+        # replays); a legacy one without metadata is replayed.
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
             store.append_event("alice", "user_message", {"content": "x"})
-            store.save_conversation("alice", [{"role": "user", "content": "snap"}])
+            store.save_conversation(
+                "alice",
+                [
+                    {
+                        "role": "user",
+                        "content": "snap",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    }
+                ],
+            )
             store.flush()
             out = _load_conversation_with_replay_fallback(store, "alice")
             assert out[0]["content"] == "snap"
         finally:
             store.close()
 
+    def test_missing_snapshot_event_id_without_metadata_backfills(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation("alice", [{"role": "user", "content": "snap"}])
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["content"] == "snap"
+            assert out[0]["metadata"]["turn_index"] == 1
+        finally:
+            store.close()
+
     def test_state_get_raising_treated_as_no_cache(self, tmp_path, monkeypatch):
         # If reading the cached snapshot_event_id from store.state raises
         # (TypeError / KeyError), the helper treats it as "no cache" and
-        # falls back to trusting the snapshot rather than crashing.
+        # backfills turn metadata onto the trusted snapshot rather than
+        # crashing.
         store = SessionStore(str(tmp_path / "x.kohakutr"))
         try:
-            store.append_event("alice", "user_message", {"content": "x"})
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
             store.save_conversation("alice", [{"role": "user", "content": "snap"}])
             store.flush()
 
@@ -602,13 +674,401 @@ class TestLoadConversationFallback:
 
             monkeypatch.setattr(store.state, "get", _boom_get)
             out = _load_conversation_with_replay_fallback(store, "alice")
-            # cached_up_to is None → snapshot is trusted.
+            # cached_up_to is None → legacy snapshot without metadata gets
+            # turn metadata backfilled from the event log.
             assert out[0]["content"] == "snap"
+            assert out[0]["metadata"]["turn_index"] == 1
         finally:
             store.close()
 
 
 # ── detect_session_type ──────────────────────────────────────────
+
+
+# ── P3b: snapshot branch matching on resume ───────────────────────
+
+
+class _BranchAgent:
+    """Minimal agent exposing branch state for matching tests."""
+
+    def __init__(self, turn_index=1, branch_id=1, parent_branch_path=None):
+        self._turn_index = turn_index
+        self._branch_id = branch_id
+        self._parent_branch_path = parent_branch_path or []
+
+
+class TestSnapshotMismatchesBranch:
+    def test_no_tag_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            agent = _BranchAgent(turn_index=2, branch_id=1, parent_branch_path=[(1, 1)])
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+    def test_matching_prefix_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            # snapshot path [(1,1),(2,1)] is prefix of agent path [(1,1),(2,1)]
+            agent = _BranchAgent(turn_index=2, branch_id=1, parent_branch_path=[(1, 1)])
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+    def test_ancestor_snapshot_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            # agent continued to turn3 on same path -> snapshot is ancestor
+            agent = _BranchAgent(
+                turn_index=3, branch_id=1, parent_branch_path=[(1, 1), (2, 1)]
+            )
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+    def test_sibling_branch_snapshot_mismatches(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            # agent landed on branch2 (sibling) -> snapshot must be rebuilt
+            agent = _BranchAgent(turn_index=2, branch_id=2, parent_branch_path=[(1, 1)])
+            assert snapshot_mismatches_branch(store, agent, "alice") is True
+        finally:
+            store.close()
+
+    def test_bad_tag_trusted(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = "not-a-dict"
+            agent = _BranchAgent(turn_index=2, branch_id=1)
+            assert snapshot_mismatches_branch(store, agent, "alice") is False
+        finally:
+            store.close()
+
+
+# ── Copilot review: backfill dedupe + malformed-path resilience ──
+
+
+class TestBackfillDedupeAndPathResilience:
+    def test_snapshot_has_turn_metadata_requires_positive_int(self):
+        from kohakuterrarium.session.resume_branch import snapshot_has_turn_metadata
+
+        valid = [
+            {
+                "role": "user",
+                "content": "U1",
+                "metadata": {"turn_index": 1, "branch_id": 1},
+            }
+        ]
+        assert snapshot_has_turn_metadata(valid) is True
+
+        # Missing / non-int / non-positive turn_index or branch_id must NOT
+        # be trusted — edit targeting compares against an int and would fail
+        # to locate the turn, so these must trigger backfill.
+        bad_turn = [
+            {
+                "role": "user",
+                "content": "U1",
+                "metadata": {"turn_index": "1", "branch_id": 1},
+            }
+        ]
+        assert snapshot_has_turn_metadata(bad_turn) is False
+        for meta in (
+            {"branch_id": 1},
+            {"turn_index": 0, "branch_id": 1},
+            {"turn_index": -1, "branch_id": 1},
+            {"turn_index": 1, "branch_id": "1"},
+            {"turn_index": 1, "branch_id": 0},
+            {"turn_index": 1},
+            "not-a-dict",
+        ):
+            assert (
+                snapshot_has_turn_metadata(
+                    [{"role": "user", "content": "U1", "metadata": meta}]
+                )
+                is False
+            ), f"expected False for metadata={meta!r}"
+
+    def test_snapshot_has_turn_metadata_rejects_non_dict_entries(self):
+        from kohakuterrarium.session.resume_branch import snapshot_has_turn_metadata
+
+        # A non-dict entry is malformed data _build_conversation would crash
+        # on; it must not be trusted (trigger backfill/replay instead).
+        assert snapshot_has_turn_metadata([None]) is False
+        assert snapshot_has_turn_metadata(["not-a-msg"]) is False
+        assert snapshot_has_turn_metadata([42]) is False
+        assert (
+            snapshot_has_turn_metadata(
+                [
+                    {
+                        "role": "user",
+                        "content": "U1",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    },
+                    None,
+                ]
+            )
+            is False
+        )
+
+    def test_backfill_tolerates_non_dict_entries(self):
+        # A corrupted snapshot containing non-dict entries must not crash
+        # backfill; valid entries still get metadata, malformed ones pass
+        # through verbatim.
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [
+            None,
+            {"role": "user", "content": "U1"},
+            "junk",
+        ]
+        events = [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        assert out[0] is None
+        assert out[2] == "junk"
+        assert out[1]["metadata"]["event_id"] == 1
+
+    def test_build_conversation_skips_non_dict_entries(self):
+        from kohakuterrarium.session.resume import _build_conversation
+
+        conv = _build_conversation(
+            [
+                None,
+                {"role": "user", "content": "U1"},
+                "junk",
+            ]
+        )
+        contents = [m.content for m in conv.get_messages() if m.role == "user"]
+        assert contents == ["U1"]
+
+    def test_backfill_prefers_user_message_event_id(self):
+        # A turn carries BOTH user_input (written first) and user_message (the
+        # canonical editable event). Edit targeting requires event_id to point
+        # at a user_message (select_raw_history_prefix rejects others), so the
+        # backfilled metadata must use the user_message event_id, not the
+        # earlier user_input one.
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [{"role": "user", "content": "U1"}]
+        events = [
+            {
+                "event_id": 10,
+                "type": "user_input",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 11,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        assert out[0]["metadata"]["event_id"] == 11
+        assert out[0]["metadata"]["turn_index"] == 1
+        assert out[0]["metadata"]["branch_id"] == 1
+
+    def test_backfill_falls_back_to_user_input_when_no_user_message(self):
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [{"role": "user", "content": "U1"}]
+        events = [
+            {
+                "event_id": 10,
+                "type": "user_input",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        # turn/branch coordinates are preserved, but event_id must stay unset:
+        # a user_input's id is not a valid editable user_message target.
+        assert out[0]["metadata"]["turn_index"] == 1
+        assert out[0]["metadata"]["branch_id"] == 1
+        assert "event_id" not in out[0]["metadata"]
+
+    def test_backfill_dedupes_duplicate_user_events(self):
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [
+            {"role": "user", "content": "U1"},
+            {"role": "user", "content": "U2"},
+        ]
+        events = [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 2,
+                "type": "user_message",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 3,
+                "type": "user_message",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+        ]
+        out = backfill_turn_metadata(snapshot, events)
+        assert out[0]["metadata"]["turn_index"] == 1
+        assert out[0]["metadata"]["branch_id"] == 1
+        assert out[0]["metadata"]["event_id"] == 1
+        assert out[1]["metadata"]["turn_index"] == 2
+        assert out[1]["metadata"]["branch_id"] == 1
+        # First live user_message per (turn, branch) wins after dedupe —
+        # duplicate event 3 is dropped, so event 2's id is attached.
+        assert out[1]["metadata"]["event_id"] == 2
+
+    def test_backfill_metadata_matches_replay_metadata(self):
+        # Cross-path consistency guard: backfilled legacy snapshots and
+        # replay(include_metadata=True) must attach IDENTICAL user message
+        # metadata for the same store state. Every path that rebuilds user
+        # turn identity has historically drifted (event_id missing, wrong
+        # shape), so this equivalence is asserted directly.
+        from kohakuterrarium.session.history import replay_conversation
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        events = [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 2,
+                "type": "text_chunk",
+                "content": "R1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 3,
+                "type": "user_message",
+                "content": "U2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+            {
+                "event_id": 4,
+                "type": "text_chunk",
+                "content": "R2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+        ]
+        snapshot = [
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
+            {"role": "user", "content": "U2"},
+            {"role": "assistant", "content": "R2"},
+        ]
+        backfilled = backfill_turn_metadata(snapshot, events)
+        replayed = replay_conversation(events, include_metadata=True)
+        backfilled_users = [m for m in backfilled if m.get("role") == "user"]
+        replayed_users = [m for m in replayed if m.get("role") == "user"]
+        assert len(backfilled_users) == len(replayed_users) == 2
+        assert backfilled_users[0]["metadata"] == replayed_users[0]["metadata"]
+        assert backfilled_users[1]["metadata"] == replayed_users[1]["metadata"]
+
+    def test_snapshot_mismatch_tolerates_malformed_path(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [1, "bad", [2, 3]],
+            }
+            agent = _BranchAgent(turn_index=2, branch_id=1, parent_branch_path=[(1, 1)])
+            # Must not raise.
+            snapshot_mismatches_branch(store, agent, "alice")
+        finally:
+            store.close()
+
+
+class TestTailAppendBackfillsLegacySnapshot:
+    def test_legacy_snapshot_portion_gains_metadata(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2"},
+                turn_index=2,
+                branch_id=1,
+            )
+            # legacy snapshot: user messages carry NO metadata
+            store.save_conversation(
+                "alice",
+                [{"role": "user", "content": "U1"}, {"role": "user", "content": "U2"}],
+            )
+            store.state["alice:snapshot_event_id"] = 2
+            # post-snapshot tail, no fork
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U3"},
+                turn_index=3,
+                branch_id=1,
+                parent_branch_path=[(1, 1), (2, 1)],
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            metas = [m.get("metadata") for m in out if m.get("role") == "user"]
+            # snapshot portion (U1,U2) backfilled + tail (U3) has metadata
+            assert [m["turn_index"] for m in metas] == [1, 2, 3]
+        finally:
+            store.close()
 
 
 class TestDetectSessionType:
@@ -792,6 +1252,185 @@ class TestInjectSavedState:
             # The trigger load (which runs after the native-tool-options
             # block) still completed.
             assert agent._pending_resume_triggers == [{"name": "t1"}]
+        finally:
+            store.close()
+
+    def test_replays_when_snapshot_branch_differs(self, tmp_path):
+        # Snapshot was saved on branch1 but the latest live subtree is
+        # branch2 (sibling). inject_saved_state must discard the stale
+        # snapshot and rebuild the conversation for the target branch.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "text_chunk",
+                {"content": "R1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2a"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.append_event(
+                "alice",
+                "text_chunk",
+                {"content": "R2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "U1"},
+                    {"role": "assistant", "content": "R1"},
+                    {"role": "user", "content": "U2a"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = 5
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            store.flush()
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, store, "alice")
+            contents = [
+                m.content
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "user"
+            ]
+            # rebuilt for branch2 -> U2b present (branch2's content)
+            assert "U2b" in contents
+            # branch1-only turn2 content must NOT be in the restored view
+            assert "U2a" not in contents
+        finally:
+            store.close()
+
+    def test_replay_branch_rebuild_applies_elision(self, tmp_path, monkeypatch):
+        # The branch-mismatch rebuild (replay) must re-apply tool-result
+        # elision like the snapshot path does; otherwise the first resumed
+        # LLM call can overflow when the replayed branch view is past the
+        # compact threshold.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.append_event(
+                "alice",
+                "text_chunk",
+                {"content": "R2b"},
+                turn_index=2,
+                branch_id=2,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "U1"},
+                    {"role": "user", "content": "U2a"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = 3
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            store.flush()
+            agent = _FakeAgentForInject()
+            # Enable elision on the controller config.
+            agent.controller.config = _ElideConfig()
+            elided = []
+            monkeypatch.setattr(
+                "kohakuterrarium.session.resume.estimate_tokens",
+                lambda conv: 999_999,
+            )
+            monkeypatch.setattr(
+                "kohakuterrarium.session.resume.elide_stale_tool_results",
+                lambda conv: elided.append(conv),
+            )
+            inject_saved_state(agent, store, "alice")
+            assert elided, "expected elision to run after branch-mismatch rebuild"
+        finally:
+            store.close()
+
+    def test_keeps_snapshot_when_branch_matches(self, tmp_path):
+        # Snapshot and target branch agree -> trust the snapshot, do not
+        # replay (branch1 content stays).
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2a"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "U1"},
+                    {"role": "user", "content": "U2a"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = 2
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            store.flush()
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, store, "alice")
+            contents = [
+                m.content
+                for m in agent.controller.conversation.get_messages()
+                if m.role == "user"
+            ]
+            assert contents == ["U1", "U2a"]
         finally:
             store.close()
 
@@ -1176,3 +1815,98 @@ class TestDetectSessionTypeDefensive:
         monkeypatch.setattr(resume_mod, "ensure_latest_version", _boom)
         # Falls back to the raw path -> still reports the stored type.
         assert detect_session_type(path) == "agent"
+
+    def test_backfill_trusts_snapshot_not_replay(self, tmp_path):
+        # The snapshot is authoritative (it may hold a post-compact view or
+        # in-flight messages that never reached the event log). Backfill must
+        # keep snapshot content verbatim and only attach turn metadata.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            _, eid = store.append_event(
+                "alice",
+                "user_message",
+                {"content": "real-event-content"},
+                turn_index=3,
+                branch_id=1,
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "user", "content": "compact-summary"},
+                    {"role": "assistant", "content": "ok"},
+                    {"role": "user", "content": "latest-turn"},
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = eid
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["content"] == "compact-summary"  # verbatim, not replay
+            assert out[0]["metadata"]["turn_index"] == 3
+            assert out[0]["metadata"]["branch_id"] == 1
+            assert [m["content"] for m in out] == [
+                "compact-summary",
+                "ok",
+                "latest-turn",
+            ]
+        finally:
+            store.close()
+
+    def test_backfill_maps_snapshot_users_to_last_events(self, tmp_path):
+        # Compaction keeps only the live zone verbatim, so snapshot user
+        # messages are the MOST RECENT turns, not the first ones. Backfill
+        # must map them to the last user_message events, or edit targeting
+        # would resolve the wrong turn.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            for i in range(1, 6):
+                store.append_event(
+                    "alice",
+                    "user_message",
+                    {"content": "turn-%d" % i},
+                    turn_index=i,
+                    branch_id=1,
+                )
+            store.save_conversation(
+                "alice",
+                [
+                    {"role": "system", "content": "sys"},
+                    {
+                        "role": "assistant",
+                        "content": "[Previous context summary (compact round 2)]\n",
+                    },
+                    {"role": "user", "content": "turn-4"},
+                    {"role": "user", "content": "turn-5"},
+                ],
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            user_meta = [
+                m["metadata"]["turn_index"] for m in out if m.get("role") == "user"
+            ]
+            assert user_meta == [4, 5]
+        finally:
+            store.close()
+
+    def test_backfill_preserves_metadata_less_user(self, tmp_path):
+        # When the event log has fewer user turns than the snapshot, trailing
+        # user messages simply stay without metadata instead of erroring.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "x"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation(
+                "alice",
+                [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}],
+            )
+            store.flush()
+            out = _load_conversation_with_replay_fallback(store, "alice")
+            assert out[0]["metadata"]["turn_index"] == 1
+            meta1 = out[1].get("metadata")
+            assert meta1 is None or meta1.get("turn_index") is None
+        finally:
+            store.close()

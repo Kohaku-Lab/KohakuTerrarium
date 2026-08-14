@@ -1,7 +1,7 @@
 """Normalize, branch-select, and replay persisted session events."""
 
 import json
-from collections.abc import Hashable
+from collections.abc import Hashable, Mapping
 from typing import Any, Iterable
 
 from kohakuterrarium.core.job_label import make_job_label
@@ -30,13 +30,15 @@ def _coerce_path(raw: Any) -> tuple[tuple[int, int], ...]:
     return tuple(out)
 
 
-def _index_parent_paths(
+def index_parent_paths(
     events_list: list[dict[str, Any]],
 ) -> dict[int, tuple[tuple[int, int], ...]]:
     """Map each event_id → its parent_branch_path.
 
     Explicit paths take precedence. Legacy events inherit the latest branch seen
     for each earlier turn at that point in event order.
+    Public: shared by replay selection and ``session.resume`` branch-state
+    restore.
     """
     paths: dict[int, tuple[tuple[int, int], ...]] = {}
     latest_by_turn: dict[int, int] = {}
@@ -77,7 +79,7 @@ def _path_matches(
     return True
 
 
-def _resolve_selected_branches(
+def resolve_selected_branches(
     events_list: list[dict[str, Any]],
     parent_paths: dict[int, tuple[tuple[int, int], ...]],
     branch_view: dict[int, int] | None,
@@ -87,6 +89,8 @@ def _resolve_selected_branches(
     Turns resolve in ascending order. Valid overrides win; otherwise the highest
     compatible branch is selected. Turns with no compatible branch are omitted
     from the live subtree.
+    Public: shared by replay selection and ``session.resume`` branch-state
+    restore.
     """
     branches_by_turn: dict[int, list[tuple[int, int]]] = {}
     for evt in events_list:
@@ -161,7 +165,7 @@ def resolve_branch_view_strict(
     """Validate a branch view and return its authoritative branch projection."""
     events_list = list(events)
     requested = _coerce_branch_view(branch_view)
-    parent_paths = _index_parent_paths(events_list)
+    parent_paths = index_parent_paths(events_list)
 
     pairs: set[tuple[int, int]] = set()
     pair_paths: dict[tuple[int, int], tuple[tuple[int, int], ...]] = {}
@@ -241,7 +245,7 @@ def project_branch_metadata(
     """Project branch choices, ancestry, and the selected coherent path."""
     events_list = list(events)
     selected = resolve_branch_view_strict(events_list, branch_view)
-    parent_paths = _index_parent_paths(events_list)
+    parent_paths = index_parent_paths(events_list)
     branches: dict[int, dict[int, set[tuple[tuple[int, int], ...]]]] = {}
 
     for evt in events_list:
@@ -295,8 +299,8 @@ def collect_branch_metadata(
     navigator counts reflect the visible subtree.
     """
     events_list = list(events)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, branch_view)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
 
     out: dict[int, dict[str, Any]] = {}
     for evt in events_list:
@@ -338,8 +342,8 @@ def collect_user_groups(
     """
     events_list = list(events)
     meta = collect_branch_metadata(events_list, branch_view=branch_view)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, branch_view)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
     contents: dict[int, dict[int, str]] = {}
     for evt in events_list:
         if evt.get("type") not in ("user_message", "user_input"):
@@ -380,8 +384,8 @@ def select_live_event_ids(
     override, the latest compatible branch is selected at every turn.
     """
     events_list = list(events)
-    parent_paths = _index_parent_paths(events_list)
-    selected = _resolve_selected_branches(events_list, parent_paths, branch_view)
+    parent_paths = index_parent_paths(events_list)
+    selected = resolve_selected_branches(events_list, parent_paths, branch_view)
 
     live: set[int] = set()
     for evt in events_list:
@@ -459,6 +463,74 @@ def _clean_tool_name(evt: dict) -> str:
     return name if isinstance(name, str) else ""
 
 
+def compact_path_from_event(evt: Mapping[str, Any]) -> set[tuple[int, int]] | None:
+    """Parse a compact event's ``compact_path`` (list of [turn, branch]).
+
+    Returns ``None`` when absent — the legacy v1_to_v2 migration product has
+    no path, so replay falls back to the global id-range behaviour for it.
+    Public: shared by ``session.history`` (replay) and
+    ``core.agent_raw_history`` (edit reload baseline selection).
+    """
+    raw = evt.get("compact_path")
+    if not isinstance(raw, (list, tuple)):
+        return None
+    out: set[tuple[int, int]] = set()
+    for item in raw:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            try:
+                out.add((int(item[0]), int(item[1])))
+            except (TypeError, ValueError):
+                continue
+    return out or None
+
+
+def _covered_by_replace(
+    eid: object,
+    turn_index: object,
+    branch_id: object,
+    rules: list[tuple[int, int, set[tuple[int, int]] | None, str]],
+) -> bool:
+    """Whether event ``eid`` is covered by a compaction replacement rule.
+
+    A rule is ``(replaced_from, replaced_to, compact_path_or_None, summary)``.
+    With a path, only events on that path are covered (branch-aware); without
+    a path (legacy migration data) the whole id range is covered.
+    """
+    if not isinstance(eid, int):
+        return False
+    for frm, to, path, _summary in rules:
+        if not (frm <= eid <= to):
+            continue
+        if path is None:
+            return True
+        if isinstance(turn_index, int) and isinstance(branch_id, int):
+            if (turn_index, branch_id) in path:
+                return True
+    return False
+
+
+def _rule_priority(
+    rule: tuple[int, int, set[tuple[int, int]] | None, str],
+    selected_pairs: set[tuple[int, int]],
+) -> tuple[int, int]:
+    """Rank a compaction rule against a selected branch projection.
+
+    Rank 2: a path-carrying rule whose ENTIRE path lies on the selected
+    lineage (``path ⊆ selected``) — the summary covers only this branch's own
+    turns, and a deeper path (more turns) is authoritative for the prefix it
+    covers. Rank 1: a legacy pathless rule (fallback baseline). Rank 0: a
+    sibling/incompatible rule whose summary covers turns outside the selected
+    branch — its summary carries sibling-specific content, not just the shared
+    ancestor, so it must never leak into this branch's replay.
+    """
+    _frm, _to, path, _summary = rule
+    if path is None:
+        return (1, 0)
+    if not path.issubset(selected_pairs):
+        return (0, 0)
+    return (2, len(path))
+
+
 def replay_conversation(
     events: Iterable[dict[str, Any]],
     *,
@@ -473,21 +545,71 @@ def replay_conversation(
     Unknown observability events are ignored.
     """
     events_list = dedupe_adjacent_duplicate_events(events)
-    # Nested branch ancestry determines the live event set.
+    # Nested branch ancestry determines the live event set and the selected
+    # branch projection compaction rules are validated against.
     live_ids = select_live_event_ids(events_list, branch_view=branch_view)
+    selected = resolve_selected_branches(
+        events_list, index_parent_paths(events_list), branch_view
+    )
 
-    # Compaction summaries replace every covered source event.
-    replaced_ids: set[int] = set()
+    # Compaction summaries replace every covered source event. Each
+    # compact_replace may carry a ``compact_path`` so a replacement recorded
+    # on one branch never deletes the sibling branch's events.
+    replaced_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = []
     for evt in events_list:
-        if evt.get("type") == "compact_replace":
-            frm = evt.get("replaced_from_event_id")
-            to = evt.get("replaced_to_event_id")
-            if isinstance(frm, int) and isinstance(to, int):
-                for eid in range(frm, to + 1):
-                    replaced_ids.add(eid)
+        if evt.get("type") not in ("compact_replace", "compact_complete"):
+            continue
+        frm = evt.get("replaced_from_event_id")
+        to = evt.get("replaced_to_event_id")
+        if isinstance(frm, int) and isinstance(to, int):
+            replaced_rules.append(
+                (
+                    frm,
+                    to,
+                    compact_path_from_event(evt),
+                    evt.get("summary", "") or evt.get("summary_text", ""),
+                )
+            )
+    # A single replay projects ONE linear branch, so at most one compaction
+    # summary is live: the deepest compaction on the lineage matching the
+    # selected branch. Same-lineage rounds nest (the deeper one wins); a
+    # sibling branch's compaction shares only a shorter prefix and must not
+    # stack on top of this branch's own summary. Newest wins on an exact tie.
+    if replaced_rules:
+        selected_pairs = {(turn, branch) for turn, branch in selected.items()}
+        # Drop sibling/incompatible rules (rank 0) before selecting: their
+        # summaries carry sibling-specific content that must not leak into
+        # this branch's replay.
+        eligible = [
+            r for r in replaced_rules if _rule_priority(r, selected_pairs)[0] > 0
+        ]
+        replaced_rules = (
+            [
+                max(
+                    enumerate(eligible),
+                    key=lambda item: (
+                        *_rule_priority(item[1], selected_pairs),
+                        item[0],
+                    ),
+                )[1]
+            ]
+            if eligible
+            else []
+        )
+    # Summaries are emitted where the replaced content sat, not at the
+    # compact_replace event's own stream position (a compact runs after the
+    # live tail it preserves). pending summaries are ordered by replaced_from
+    # and flushed when the live stream reaches the first event past a range.
+    pending_rules: list[tuple[int, int, set[tuple[int, int]] | None, str]] = sorted(
+        replaced_rules, key=lambda r: r[0]
+    )
 
     messages: list[dict[str, Any]] = []
     text_buf: list[str] = []
+    # A turn/branch owns exactly one user_message. Graph merge and
+    # migration can copy the same event twice; duplicate user messages
+    # would break turn-targeted edit resolution and pollute the view.
+    seen_user_messages: set[tuple[int, int]] = set()
 
     def _flush_text() -> None:
         if not text_buf:
@@ -497,6 +619,39 @@ def replay_conversation(
             messages.append({"role": "assistant", "content": content})
         text_buf.clear()
 
+    def _flush_pending_summaries(
+        eid: int, turn_index: object, branch_id: object
+    ) -> None:
+        # Scan every pending rule, not just the front one: a rule whose range
+        # has not passed and whose path does not intersect this branch (e.g. a
+        # sibling-branch compact) must not block a later rule that DOES apply —
+        # otherwise that summary is injected late or lost entirely.
+        i = 0
+        while i < len(pending_rules):
+            frm, to, _path, summary = pending_rules[i]
+            if frm > eid:
+                break
+            # Inject the summary only when the current branch actually has an
+            # event covered by this rule; a rule whose path does not intersect
+            # the selected branch must NOT inject a spurious summary. Rules
+            # without a path (legacy migration data) cover the whole range.
+            if _covered_by_replace(eid, turn_index, branch_id, [pending_rules[i]]):
+                # Flush buffered assistant text that precedes the replaced
+                # range before injecting the summary (a covered event does not
+                # otherwise delimit the text buffer).
+                _flush_text()
+                if summary:
+                    messages.append({"role": "assistant", "content": summary})
+                pending_rules.pop(i)
+                continue
+            if eid > to:
+                # Range passed with no covered event on this branch — drop.
+                pending_rules.pop(i)
+                continue
+            # Range not passed and event not covered — keep pending and scan
+            # the next rule; it may apply to this branch right now.
+            i += 1
+
     for evt in events_list:
         etype = evt.get("type", "")
         eid = evt.get("event_id")
@@ -505,7 +660,22 @@ def replay_conversation(
         if isinstance(eid, int) and eid not in live_ids:
             continue
 
-        if isinstance(eid, int) and eid in replaced_ids and etype != "compact_replace":
+        if isinstance(eid, int):
+            # A compact covers id range [replaced_from..replaced_to]; its
+            # summary is inserted where the covered content sat, i.e. as soon
+            # as the stream reaches a covered event on this branch.
+            _flush_pending_summaries(eid, evt.get("turn_index"), evt.get("branch_id"))
+
+        if etype != "compact_replace" and _covered_by_replace(
+            eid,
+            evt.get("turn_index"),
+            evt.get("branch_id"),
+            replaced_rules,
+        ):
+            continue
+
+        if etype == "compact_replace":
+            # Handled by _flush_pending_summaries above; never emitted inline.
             continue
 
         if etype in ("text_chunk", "text"):
@@ -534,6 +704,12 @@ def replay_conversation(
         _flush_text()
 
         if etype == "user_message":
+            ti = evt.get("turn_index")
+            bi = evt.get("branch_id")
+            if isinstance(ti, int) and isinstance(bi, int):
+                if (ti, bi) in seen_user_messages:
+                    continue
+                seen_user_messages.add((ti, bi))
             message = {"role": "user", "content": evt.get("content", "")}
             if include_metadata:
                 message["metadata"] = {
@@ -569,13 +745,6 @@ def replay_conversation(
             )
         elif etype == "system_prompt_set":
             messages.append({"role": "system", "content": evt.get("content", "")})
-        elif etype == "compact_replace":
-            messages.append(
-                {
-                    "role": "assistant",
-                    "content": evt.get("summary_text", ""),
-                }
-            )
 
     _flush_text()
     return messages

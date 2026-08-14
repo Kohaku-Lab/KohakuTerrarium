@@ -210,9 +210,9 @@ class SessionOutput(OutputModule):
         try:
             events = self._store.get_events(self._event_key_prefix)
             if self._agent and hasattr(self._agent, "controller"):
-                messages = self._agent.controller.conversation.to_messages()
+                messages = self._agent.controller.conversation.snapshot_messages()
             else:
-                messages = replay_conversation(events)
+                messages = replay_conversation(events, include_metadata=True)
             last_event_id = 0
             for evt in events:
                 eid = evt.get("event_id")
@@ -223,6 +223,35 @@ class SessionOutput(OutputModule):
                 self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (
                     last_event_id
                 )
+                # The snapshot is the "last active branch" view; tag it with
+                # the agent's branch so resume can reject it when the target
+                # branch differs and rebuild via replay instead.
+                agent = getattr(self, "_agent", None)
+                if agent is not None:
+                    branch = {
+                        "turn_index": getattr(agent, "_turn_index", None),
+                        "branch_id": getattr(agent, "_branch_id", None),
+                        "parent_branch_path": getattr(
+                            agent, "_parent_branch_path", None
+                        ),
+                    }
+                    if (
+                        isinstance(branch["turn_index"], int)
+                        and branch["turn_index"] > 0
+                        and isinstance(branch["branch_id"], int)
+                        and branch["branch_id"] > 0
+                    ):
+                        self._store.state[
+                            f"{self._event_key_prefix}:snapshot_branch"
+                        ] = branch
+                    else:
+                        # The snapshot was rewritten above but the agent's
+                        # branch state is missing/invalid; clear any stale tag
+                        # from a prior run so resume does not trust a branch
+                        # that no longer matches this snapshot.
+                        self._store.state.pop(
+                            f"{self._event_key_prefix}:snapshot_branch", None
+                        )
             except Exception as e:
                 logger.warning(
                     "Failed to save snapshot_event_id",
@@ -598,6 +627,12 @@ class SessionOutput(OutputModule):
                 "round": metadata.get("round", 0),
                 "summary": metadata.get("summary", ""),
                 "messages_compacted": metadata.get("messages_compacted", 0),
+                "replaced_from_event_id": metadata.get("replaced_from_event_id"),
+                "replaced_to_event_id": metadata.get("replaced_to_event_id"),
+                "compact_path": metadata.get("compact_path"),
+                "turn_index": metadata.get("turn_index"),
+                "branch_id": metadata.get("branch_id"),
+                "parent_branch_path": metadata.get("parent_branch_path"),
             },
         )
 

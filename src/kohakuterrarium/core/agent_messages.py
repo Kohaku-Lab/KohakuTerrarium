@@ -322,7 +322,7 @@ class AgentMessagesMixin:
             if self.session_store:
                 try:
                     self.session_store.save_conversation(
-                        self.config.name, conv.to_messages(include_metadata=True)
+                        self.config.name, conv.snapshot_messages()
                     )
                 except Exception as e:
                     logger.warning(
