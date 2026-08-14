@@ -14,6 +14,78 @@ def _store(tmp_path, name="s.kohakutr") -> SessionStore:
     return SessionStore(str(tmp_path / name))
 
 
+def test_get_events_since_event_id_filters(tmp_path):
+    path = tmp_path / "since.kohakutr"
+    store = SessionStore(str(path))
+    try:
+        store.append_event("a", "user_input", {"content": "1"})
+        store.append_event("a", "text", {"content": "2"})
+        store.append_event("a", "text", {"content": "3"})
+        all_events = store.get_events("a")
+        cursor = all_events[1]["event_id"]
+        tail = store.get_events("a", since_event_id=cursor)
+        assert [e["content"] for e in tail] == ["3"]
+        assert store.get_events("a", since_event_id=10**9) == []
+    finally:
+        store.close()
+
+
+def test_max_event_id_never_underreports_mirrored_ids(tmp_path):
+    path = tmp_path / "mirror.kohakutr"
+    store = SessionStore(str(path))
+    try:
+        store.append_event("a", "text", {"content": "local"})
+        # A mirrored event carries its source id (larger than any local id).
+        store.append_event("a", "text", {"content": "mirrored", "event_id": 500})
+        # A later local event gets id 2 — at the last seq position — while a
+        # mirrored event earlier in the log holds 500.
+        store.append_event("a", "text", {"content": "local2"})
+        assert store.max_event_id("a") >= 500
+    finally:
+        store.close()
+
+
+def test_max_event_id_matches_full_scan(tmp_path):
+    path = tmp_path / "maxid.kohakutr"
+    store = SessionStore(str(path))
+    try:
+        assert store.max_event_id("a") == 0
+        for i in range(5):
+            store.append_event("a", "text", {"content": f"c{i}"})
+        expected = max(e["event_id"] for e in store.get_events("a"))
+        assert store.max_event_id("a") == expected
+        # Cross-agent isolation.
+        store.append_event("b", "text", {"content": "x"})
+        assert store.max_event_id("b") > 0
+    finally:
+        store.close()
+
+
+def test_append_persists_event_counter_for_reopen(tmp_path):
+    path = tmp_path / "sess.kohakutr"
+    store = SessionStore(str(path))
+    store.append_event("alpha", "user_input", {"content": "one"})
+    store.append_event("alpha", "text", {"content": "two"})
+    store.close()
+
+    # The persisted counter must have been written during appends/close.
+    from kohakuvault import KVault
+
+    state = KVault(str(path), table="state")
+    try:
+        assert state.get("counters:max_event_id") == 2
+    finally:
+        state.close()
+
+    reopened = SessionStore(str(path))
+    try:
+        assert reopened._global_event_id == 2
+        _, eid = reopened.append_event("alpha", "text", {"content": "three"})
+        assert eid == 3
+    finally:
+        reopened.close()
+
+
 # ── construction ──────────────────────────────────────────────────
 
 

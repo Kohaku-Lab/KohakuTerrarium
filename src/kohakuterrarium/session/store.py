@@ -22,6 +22,7 @@ from kohakuterrarium.session.rollup import (
     save_turn_rollup,
 )
 from kohakuterrarium.session.store_counters import (
+    persist_event_counter,
     restore_event_counters,
     restore_subagent_counters,
     restore_suffix_counters,
@@ -174,8 +175,10 @@ class SessionStore:
             self._companion_closers.append(closer)
 
     def _restore_counters(self) -> None:
-        """Scan existing keys to restore sequence counters after restart."""
-        self._global_event_id = restore_event_counters(self.events, self._event_seq)
+        """Restore sequence counters; persisted counters skip the value scan."""
+        self._global_event_id = restore_event_counters(
+            self.events, self._event_seq, state=self.state
+        )
         restore_suffix_counters(self.channels, ":m", self._channel_seq)
         restore_subagent_counters(self.subagents, self._subagent_runs)
 
@@ -271,6 +274,9 @@ class SessionStore:
         self._unflushed_event_count += 1
         self._maybe_flush_events()
 
+        if not self._readonly:
+            persist_event_counter(self.state, event_id)
+
         return key, event_id
 
     def _maybe_flush_events(self) -> None:
@@ -308,10 +314,12 @@ class SessionStore:
         except ValueError:
             pass
 
-    def get_events(self, agent: str) -> list[dict]:
-        """Get all events for an agent, ordered by sequence.
+    def get_events(self, agent: str, since_event_id: int | None = None) -> list[dict]:
+        """Get events for an agent, ordered by sequence.
 
-        Returns list of event dicts with keys sorted chronologically.
+        Returns list of event dicts with keys sorted chronologically. With
+        ``since_event_id``, only events whose ``event_id`` exceeds it are
+        returned (cursor-style incremental reads).
         """
         self.events.flush_cache()
         self._unflushed_event_count = 0
@@ -320,16 +328,51 @@ class SessionStore:
         result = []
         for key_bytes in sorted(iter_kv_keys(self.events, prefix=prefix)):
             try:
-                result.append(self.events[key_bytes])
+                evt = self.events[key_bytes]
             except Exception as e:
                 logger.warning("Failed to read event", error=str(e), exc_info=True)
+                continue
+            if since_event_id is not None:
+                eid = evt.get("event_id") if isinstance(evt, dict) else None
+                if not isinstance(eid, int) or eid <= since_event_id:
+                    continue
+            result.append(evt)
         return result
+
+    def max_event_id(self, agent: str) -> int:
+        """Return the largest ``event_id`` for an agent without a full log read.
+
+        Zero-padded keys order chronologically, so the prefix-max key is the
+        newest event; a single value read answers the query.
+        """
+        self.events.flush_cache()
+        self._unflushed_event_count = 0
+        self._last_flush_at = time.monotonic()
+        last_key = None
+        for key_bytes in iter_kv_keys(self.events, prefix=f"{agent}:e"):
+            if last_key is None or key_bytes > last_key:
+                last_key = key_bytes
+        if last_key is None:
+            return 0
+        try:
+            evt = self.events[last_key]
+        except Exception as e:
+            logger.warning("Failed to read latest event", error=str(e), exc_info=True)
+            return 0
+        eid = evt.get("event_id") if isinstance(evt, dict) else None
+        latest = eid if isinstance(eid, int) else 0
+        # Mirrored events carry a preset source ``event_id`` (see
+        # ``append_event``) that may exceed the locally-assigned one at the
+        # last sequence position; ``snapshot_event_id`` must never
+        # under-report, so take the running max into account.
+        return max(latest, self._global_event_id)
 
     def get_resumable_events(
         self,
         agent: str,
         *,
         live_job_ids: set[str] | None = None,
+        since_event_id: int | None = None,
     ) -> list[dict]:
         """Get agent events normalized for resume/history replay.
 
@@ -339,7 +382,9 @@ class SessionStore:
         resume-time callers (post-restart, every unfinished job IS dead)
         leave it ``None``.
         """
-        events = dedupe_adjacent_duplicate_events(self.get_events(agent))
+        events = dedupe_adjacent_duplicate_events(
+            self.get_events(agent, since_event_id=since_event_id)
+        )
         return normalize_resumable_events(events, live_job_ids=live_job_ids)
 
     def get_all_events(self) -> list[tuple[str, dict]]:
@@ -819,6 +864,8 @@ class SessionStore:
         self._closed = True
         if self._readonly:
             update_status = False
+        if not self._readonly:
+            persist_event_counter(self.state, self._global_event_id)
         if update_status:
             try:
                 self.update_status("paused")

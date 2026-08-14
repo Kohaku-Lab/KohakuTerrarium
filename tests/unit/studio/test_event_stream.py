@@ -376,3 +376,23 @@ class TestStreamOutputBranchTagging:
         assert msg["turn_index"] == 5
         assert msg["branch_id"] == 9
         assert msg["job_id"] == "j1"
+
+
+def test_event_log_ring_buffer_bounds_replay_history():
+    """The in-memory replay log must not grow past _EVENT_LOG_MAX frames."""
+    import kohakuterrarium.studio.attach._event_stream as mod
+
+    key = "ringtest:creature"
+    log = mod.get_event_log(key)
+    log.clear()
+    try:
+        q = asyncio.Queue()
+        out = StreamOutput("creature", q, log)
+        for i in range(mod._EVENT_LOG_MAX + 50):
+            out._put({"type": "text", "content": f"c{i}"})
+        assert len(log) == mod._EVENT_LOG_MAX
+        # Newest frames retained, oldest evicted.
+        assert log[-1]["content"] == f"c{mod._EVENT_LOG_MAX + 49}"
+        assert log[0]["content"] == "c50"
+    finally:
+        mod._event_logs.pop(key, None)

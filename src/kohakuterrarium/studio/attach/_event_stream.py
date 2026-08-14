@@ -1,6 +1,7 @@
 """Translate output events into websocket frames on an asynchronous queue."""
 
 import asyncio
+import os
 import time
 from typing import Any
 
@@ -9,6 +10,11 @@ from kohakuterrarium.modules.output.event import OutputEvent
 
 # The session and creature pair isolates replay history for each attachment target.
 _event_logs: dict[str, list] = {}
+
+# Reconnect replays need recent context, not the entire session. An unbounded
+# list keeps a second full copy of every streamed frame in RAM for the process
+# lifetime; a ring buffer bounds that copy. Overridable for lab harnesses.
+_EVENT_LOG_MAX = int(os.environ.get("KT_EVENT_LOG_MAX", "5000"))
 
 
 def get_event_log(key: str) -> list:
@@ -90,6 +96,9 @@ class StreamOutput(OutputModule):
             msg["branch_id"] = bi
         self._q.put_nowait(msg)
         self._log.append(msg)
+        overflow = len(self._log) - _EVENT_LOG_MAX
+        if overflow > 0:
+            del self._log[:overflow]
 
     async def start(self) -> None:
         pass
