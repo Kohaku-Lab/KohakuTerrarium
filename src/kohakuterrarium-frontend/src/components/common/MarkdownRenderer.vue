@@ -9,6 +9,8 @@ import MarkdownIt from "markdown-it"
 import markdownItKatex from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
 
+import { IncrementalMarkdownRenderer } from "@/utils/markdownIncremental"
+
 const props = defineProps({
   content: { type: String, default: "" },
   // ``breaks: true`` matches the chat-app convention: a single newline
@@ -155,6 +157,10 @@ function renderMarkdown(content) {
   }
 }
 
+// Reuse rendered HTML for the unchanged block prefix of streamed content;
+// only the changed tail block re-renders each throttle window.
+const incremental = new IncrementalMarkdownRenderer(renderMarkdown)
+
 /*
  * Throttled rendering.
  *
@@ -182,9 +188,10 @@ let pendingContent = null
 function doRender(content) {
   if (!content) {
     rendered.value = ""
+    incremental.reset()
     return
   }
-  rendered.value = renderMarkdown(preprocessLatex(content))
+  rendered.value = incremental.render(preprocessLatex(content))
   lastRenderAt = performance.now()
 }
 

@@ -17,6 +17,116 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
+describe("ChatPanel render window", () => {
+  function mountPanel(chat) {
+    chat._instanceId = "graph_1"
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku"]
+    chat.commandInventoryByTab = { kohaku: { commands: [], skills: [] } }
+    chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
+    return mount(ChatPanel, {
+      props: {
+        instance: {
+          id: "graph_1",
+          graph_id: "graph_1",
+          creatures: [{ name: "kohaku", status: "idle" }],
+        },
+      },
+      global: {
+        provide: { chatStore: chat },
+        stubs: {
+          ChatMessage: {
+            props: ["message", "prevMessage", "messageIdx", "tabId"],
+            template: '<div class="chat-message-stub">{{ message?.id }}</div>',
+          },
+          ModelSwitcher: true,
+          SiteChip: true,
+          StatusDot: true,
+        },
+      },
+    })
+  }
+
+  function renderedIds(wrapper) {
+    return wrapper.findAll(".chat-message-stub").map((el) => el.text())
+  }
+
+  function seedMessages(chat, count) {
+    chat.messagesByTab = {
+      kohaku: Array.from({ length: count }, (_, i) => ({
+        id: `m_${i}`,
+        role: i % 2 ? "assistant" : "user",
+        content: `message ${i}`,
+      })),
+    }
+  }
+
+  it("renders only the newest window for a very long transcript", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    expect(renderedIds(wrapper).length).toBe(400)
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+    expect(renderedIds(wrapper).at(-1)).toBe("m_449")
+    const earlier = wrapper.find("button.self-center")
+    expect(earlier.exists()).toBe(true)
+    expect(earlier.text()).toContain("50")
+  })
+
+  it("load-earlier expands the window toward the start", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+
+    expect(renderedIds(wrapper).length).toBe(450)
+    expect(renderedIds(wrapper)[0]).toBe("m_0")
+    expect(wrapper.find("button.self-center").exists()).toBe(false)
+  })
+
+  it("shrinkage below an expanded window start falls back to the tail window", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    // Expand once: explicit window start at index 0.
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper).length).toBe(450)
+
+    // A resync replaces the transcript with a much shorter one.
+    seedMessages(chat, 30)
+    await flushPromises()
+
+    // Without the out-of-range fallback the view would collapse to a
+    // single message (clamp to total - 1).
+    expect(renderedIds(wrapper).length).toBe(30)
+    expect(renderedIds(wrapper)[0]).toBe("m_0")
+    expect(wrapper.find("button.self-center").exists()).toBe(false)
+  })
+
+  it("new tail messages stay mounted inside the window while streaming", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 420)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    chat.messagesByTab.kohaku.push({ id: "m_420", role: "user", content: "live" })
+    await flushPromises()
+
+    expect(renderedIds(wrapper).length).toBe(400)
+    expect(renderedIds(wrapper).at(-1)).toBe("m_420")
+    expect(renderedIds(wrapper)).not.toContain("m_0")
+  })
+})
+
 describe("ChatPanel command results", () => {
   it("keeps clear behind the existing composer button", async () => {
     const command = vi.spyOn(terrariumAPI, "executeCreatureCommand").mockResolvedValue({

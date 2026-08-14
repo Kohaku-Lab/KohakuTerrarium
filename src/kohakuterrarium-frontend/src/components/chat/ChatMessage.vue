@@ -37,7 +37,7 @@
   </div>
 
   <!-- Processing error -->
-  <div v-else-if="message.role === 'error'" class="rounded-lg bg-coral/8 dark:bg-coral/12 border border-coral/25 dark:border-coral/30 overflow-hidden">
+  <div v-else-if="message.role === 'error'" class="rounded-lg bg-coral/8 dark:bg-coral/12 border border-coral/25 dark:border-coral/30 overflow-hidden chat-cv">
     <div role="button" tabindex="0" :aria-expanded="errorExpanded" class="flex items-center gap-2 py-2 px-3 cursor-pointer select-none hover:bg-coral/12 dark:hover:bg-coral/18" @click="errorExpanded = !errorExpanded" @keydown.enter="errorExpanded = !errorExpanded" @keydown.space.prevent="errorExpanded = !errorExpanded">
       <span class="text-coral font-bold text-sm">&#x2717;</span>
       <span class="text-coral dark:text-coral-light font-semibold text-xs flex-1">
@@ -91,7 +91,7 @@
 
   <!-- User message -->
   <div v-else-if="message.role === 'user'" class="ml-auto group relative" :class="editing ? 'w-[min(760px,92%)] max-w-[92%]' : 'max-w-[80%]'">
-    <div class="user-message" :class="{ 'opacity-70': message.queued, 'user-message-editing': editing }">
+    <div class="user-message chat-cv" :class="{ 'opacity-70': message.queued, 'user-message-editing': editing }">
       <div class="text-xs text-warm-400 mb-1 flex items-center gap-1.5">
         <span>You</span>
         <span v-if="message.queued" class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber/15 text-amber leading-none">Queued</span>
@@ -177,26 +177,28 @@
        keyed on the first tool's id so streaming new tools into an
        in-progress batch doesn't reshuffle ``expandedTools`` state. -->
   <div v-else-if="message.role === 'assistant' && message.parts" class="max-w-[90%] group relative">
-    <template v-for="(group, gi) in renderGroups" :key="gi">
-      <!-- Pass-through part -->
-      <template v-if="group.type === 'part'">
-        <div v-if="group.part.type === 'text' && group.part.content" class="text-body mb-1">
-          <MarkdownRenderer :content="group.part.content" />
-        </div>
-        <div v-else-if="group.part.type === 'tool'" class="mb-1.5">
-          <ToolCallBlock :tc="group.part" :expanded="expandedTools[group.part.id]" @toggle="toggleTool(group.part.id)" />
-        </div>
-        <div v-else-if="group.part.type === 'image_url'" class="mb-1.5">
-          <img :src="group.part.image_url?.url" class="chat-inline-image" :alt="group.part.meta?.source_name || 'generated image'" />
-        </div>
-      </template>
-      <!-- Tool-batch group (collapsed by default; per-tool expand state
+    <div class="chat-cv">
+      <template v-for="(group, gi) in renderGroups" :key="groupKey(group, gi)">
+        <!-- Pass-through part -->
+        <template v-if="group.type === 'part'">
+          <div v-if="group.part.type === 'text' && group.part.content" class="text-body mb-1">
+            <MarkdownRenderer :content="group.part.content" />
+          </div>
+          <div v-else-if="group.part.type === 'tool'" class="mb-1.5">
+            <ToolCallBlock :tc="group.part" :expanded="expandedTools[group.part.id]" @toggle="toggleTool(group.part.id)" />
+          </div>
+          <div v-else-if="group.part.type === 'image_url'" class="mb-1.5">
+            <img :src="group.part.image_url?.url" class="chat-inline-image" :alt="group.part.meta?.source_name || 'generated image'" />
+          </div>
+        </template>
+        <!-- Tool-batch group (collapsed by default; per-tool expand state
            lives in the same ``expandedTools`` map keyed by tool id, so
            opening the batch doesn't open the tools and vice-versa). -->
-      <div v-else-if="group.type === 'tool-batch'" class="mb-1.5">
-        <ToolCallBatch :tools="group.tools" :expanded="!!expandedTools[group.id]" :tool-expanded="expandedTools" @toggle="toggleTool(group.id)" @tool-toggle="toggleTool" />
-      </div>
-    </template>
+        <div v-else-if="group.type === 'tool-batch'" class="mb-1.5">
+          <ToolCallBatch :tools="group.tools" :expanded="!!expandedTools[group.id]" :tool-expanded="expandedTools" @toggle="toggleTool(group.id)" @tool-toggle="toggleTool" />
+        </div>
+      </template>
+    </div>
     <!-- Hover actions -->
     <div class="absolute -bottom-5 left-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--left">
       <!-- Branch navigator on the assistant bubble: shown only when
@@ -226,7 +228,7 @@
   </div>
 
   <!-- Assistant message (legacy: content + tool_calls) -->
-  <div v-else-if="message.role === 'assistant'" class="max-w-[90%]">
+  <div v-else-if="message.role === 'assistant'" class="max-w-[90%] chat-cv">
     <div v-if="message.tool_calls?.length" class="mb-2 flex flex-col gap-1.5">
       <ToolCallBlock v-for="tc in message.tool_calls" :key="tc.id" :tc="tc" :expanded="expandedTools[tc.id]" @toggle="toggleTool(tc.id)" />
     </div>
@@ -236,7 +238,7 @@
   </div>
 
   <!-- Channel message (group chat style) -->
-  <div v-else-if="message.role === 'channel'" class="max-w-[90%]">
+  <div v-else-if="message.role === 'channel'" class="max-w-[90%] chat-cv">
     <div v-if="showSenderHeader" class="flex items-center gap-2 mb-1" :class="{ 'mt-2': !isFirst }">
       <span class="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold text-white" :style="{ background: senderGemColor }">
         {{ message.sender.charAt(0).toUpperCase() }}
@@ -329,6 +331,14 @@ const editing = ref(false)
 // Sub-agent parts and any text / image break the run; runs below the
 // threshold (default 3) render flat.  See utils/chatToolGrouping.js.
 const renderGroups = computed(() => computeRenderGroups(props.message.parts || []))
+
+// Batch groups carry a stable id (first tool's id); pass-through groups
+// key on the part's own id when it has one so appending tools mid-stream
+// doesn't reshuffle subsequent group keys.
+function groupKey(group, gi) {
+  if (group.type === "tool-batch") return group.id
+  return group.part?.id ?? `g_${gi}`
+}
 
 const editText = ref("")
 const editAttachments = ref([])
