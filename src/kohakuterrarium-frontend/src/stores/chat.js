@@ -415,10 +415,22 @@ export function _replayEvents(messages, events, branchView = null) {
   const startedJobs = {} // jobId -> tool part reference
   const completedJobs = new Set() // jobIds that received done/error
 
+  // Positional ids ("h_" + result.length) shift whenever an earlier
+  // event is hidden (compact_replace ranges, branch filtering), which
+  // remounts every later message on each resync. Events carry stable
+  // numeric ids — derive message/part ids from the originating event so
+  // rebuilds reuse component instances. Falls back to the positional
+  // form for synthetic events without an event_id.
+  let curEventKey = null
+
+  function stableId(prefix) {
+    return prefix + (curEventKey ?? String(result.length))
+  }
+
   function ensureCur() {
     if (!cur) {
       cur = {
-        id: "h_" + result.length,
+        id: stableId("h_"),
         role: "assistant",
         parts: [],
         timestamp: "",
@@ -434,7 +446,7 @@ export function _replayEvents(messages, events, branchView = null) {
     if (tail && tail.type === "text") {
       tail.content += content
     } else {
-      c.parts.push({ type: "text", content })
+      c.parts.push({ type: "text", content, id: stableId("txt_") })
     }
   }
 
@@ -456,7 +468,7 @@ export function _replayEvents(messages, events, branchView = null) {
     const initialStatus = kind === "subagent" ? "running" : "done"
     const tool = {
       type: "tool",
-      id: `tool_${_n++}`,
+      id: curEventKey ? "tool_" + curEventKey : `tool_${_n++}`,
       jobId: jobId || "",
       name,
       kind,
@@ -517,7 +529,7 @@ export function _replayEvents(messages, events, branchView = null) {
     if (sa) {
       const tool = {
         type: "tool",
-        id: `tool_${_n++}`,
+        id: curEventKey ? "tool_" + curEventKey : `tool_${_n++}`,
         name,
         kind: "tool",
         args: args || {},
@@ -635,7 +647,7 @@ export function _replayEvents(messages, events, branchView = null) {
       return existing
     }
     const compact = {
-      id: "compact_" + result.length,
+      id: stableId("compact_"),
       role: "compact",
       round,
       summary,
@@ -649,6 +661,7 @@ export function _replayEvents(messages, events, branchView = null) {
 
   for (const evt of events) {
     const t = evt.type
+    curEventKey = typeof evt.event_id === "number" ? `e${evt.event_id}` : null
 
     // Skip events on a non-selected branch of their turn (siblings of
     // regen / edit+rerun stay on disk for the <1/N> navigator but
@@ -690,7 +703,7 @@ export function _replayEvents(messages, events, branchView = null) {
       cur = null
       const normalized = normalizeMessageContent(evt.content)
       const userMessage = {
-        id: "h_" + result.length,
+        id: stableId("h_"),
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
@@ -723,7 +736,7 @@ export function _replayEvents(messages, events, branchView = null) {
       cur = null
       const normalized = normalizeMessageContent(evt.content)
       result.push({
-        id: "h_" + result.length,
+        id: stableId("h_"),
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
@@ -734,7 +747,7 @@ export function _replayEvents(messages, events, branchView = null) {
       })
     } else if (t === "processing_start") {
       cur = {
-        id: "h_" + result.length,
+        id: stableId("h_"),
         role: "assistant",
         parts: [],
         timestamp: "",
@@ -762,7 +775,7 @@ export function _replayEvents(messages, events, branchView = null) {
         const ch = evt.channel || ""
         const sender = evt.sender || ""
         result.push({
-          id: "h_" + result.length,
+          id: stableId("h_"),
           role: "trigger",
           content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : evt.name,
           triggerContent: evt.content || "",
@@ -775,7 +788,7 @@ export function _replayEvents(messages, events, branchView = null) {
       } else if (at === "context_cleared") {
         cur = null
         result.push({
-          id: "clear_" + result.length,
+          id: stableId("clear_"),
           role: "clear",
           messagesCleared: evt.messages_cleared || 0,
           timestamp: "",
@@ -783,7 +796,7 @@ export function _replayEvents(messages, events, branchView = null) {
       } else if (at === "processing_error") {
         cur = null
         result.push({
-          id: "err_" + result.length,
+          id: stableId("err_"),
           role: "error",
           errorType: evt.error_type || "Error",
           content: evt.error || evt.detail || "Unknown error",
@@ -870,7 +883,7 @@ export function _replayEvents(messages, events, branchView = null) {
       // explanation.
       cur = null
       result.push({
-        id: "h_" + result.length,
+        id: stableId("h_"),
         role: "wire_inbound",
         from: evt.from || evt.detail || "",
         to: evt.to || "",
@@ -888,7 +901,7 @@ export function _replayEvents(messages, events, branchView = null) {
       const ch = evt.channel || ""
       const sender = evt.sender || ""
       result.push({
-        id: "h_" + result.length,
+        id: stableId("h_"),
         role: "trigger",
         content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : "",
         triggerContent: evt.content || "",
@@ -950,7 +963,7 @@ export function _replayEvents(messages, events, branchView = null) {
     } else if (t === "channel_message") {
       const normalized = normalizeMessageContent(evt.content)
       result.push({
-        id: "ch_" + result.length,
+        id: stableId("ch_"),
         role: "channel",
         sender: evt.sender || "",
         content: normalized.content,
@@ -985,7 +998,7 @@ export function _replayEvents(messages, events, branchView = null) {
       // A combined delivery banner carries `labels` (one per folded
       // completion); older single-event frames carry only `label`.
       result.push({
-        id: "bgres_" + result.length,
+        id: stableId("bgres_"),
         role: "bg_result",
         label: (Array.isArray(evt.labels) ? evt.labels.join(", ") : evt.label) || evt.job_id || "",
         kind: evt.kind || "tool",
@@ -1004,7 +1017,7 @@ export function _replayEvents(messages, events, branchView = null) {
     } else if (t === "processing_error") {
       cur = null
       result.push({
-        id: "err_" + result.length,
+        id: stableId("err_"),
         role: "error",
         errorType: evt.error_type || "Error",
         content: evt.error || "",
@@ -1013,7 +1026,7 @@ export function _replayEvents(messages, events, branchView = null) {
     } else if (t === "context_cleared") {
       cur = null
       result.push({
-        id: "clear_" + result.length,
+        id: stableId("clear_"),
         role: "clear",
         messagesCleared: evt.messages_cleared || 0,
         timestamp: "",
@@ -1028,6 +1041,7 @@ export function _replayEvents(messages, events, branchView = null) {
       }
       c.parts.push({
         type: "image_url",
+        id: stableId("img_"),
         image_url: {
           url: evt.url,
           detail: evt.detail || "auto",
@@ -3240,8 +3254,16 @@ const _chatStoreOptions = {
       if (expected?.baselineFromCache && !Object.hasOwn(next, "baselineMaxEventId")) {
         const physical = (this.eventsByTab[tab] || []).filter((evt) => !evt?._optimistic)
         next.baselineMaxEventId = this._maxEventId(physical)
+        // Length, not content: the fingerprint only needs to detect that
+        // the physical log advanced; stringifying full content
+        // re-serializes megabytes on branch-heavy tabs.
         next.baselinePhysicalFingerprint = JSON.stringify(
-          physical.map((evt) => [evt?.type, evt?.turn_index, evt?.branch_id, evt?.content]),
+          physical.map((evt) => [
+            evt?.type,
+            evt?.turn_index,
+            evt?.branch_id,
+            typeof evt?.content === "string" ? evt.content.length : 0,
+          ]),
         )
       }
       this._branchResyncPendingByTab[tab] = next
