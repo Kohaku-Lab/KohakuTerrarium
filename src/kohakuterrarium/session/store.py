@@ -279,6 +279,12 @@ class SessionStore:
 
         return key, event_id
 
+    def _flush_events_cache(self) -> None:
+        """Flush pending events and reset the durability counters."""
+        self.events.flush_cache()
+        self._unflushed_event_count = 0
+        self._last_flush_at = time.monotonic()
+
     def _maybe_flush_events(self) -> None:
         """Flush the events cache when either durability gate trips."""
         n_gate = (
@@ -321,9 +327,7 @@ class SessionStore:
         ``since_event_id``, only events whose ``event_id`` exceeds it are
         returned (cursor-style incremental reads).
         """
-        self.events.flush_cache()
-        self._unflushed_event_count = 0
-        self._last_flush_at = time.monotonic()
+        self._flush_events_cache()
         prefix = f"{agent}:e"
         result = []
         for key_bytes in sorted(iter_kv_keys(self.events, prefix=prefix)):
@@ -340,32 +344,34 @@ class SessionStore:
         return result
 
     def max_event_id(self, agent: str) -> int:
-        """Return the largest ``event_id`` for an agent without a full log read.
+        """Return the session-global max ``event_id`` (monotonic, per-session).
 
-        Zero-padded keys order chronologically, so the prefix-max key is the
-        newest event; a single value read answers the query.
+        Local events take ids from ``_global_event_id`` and mirrored events
+        ratchet it upward, so the counter is the authoritative maximum and
+        this is O(1). ``event_id`` is a session-global (not per-agent) cursor,
+        so ``agent`` is accepted for API symmetry with ``get_events`` and
+        intentionally unused.
         """
-        self.events.flush_cache()
-        self._unflushed_event_count = 0
-        self._last_flush_at = time.monotonic()
-        last_key = None
+        del agent
+        return self._global_event_id
+
+    def get_event_by_id(self, agent: str, event_id: int) -> dict | None:
+        """Fetch a single event by its session-global ``event_id``.
+
+        Scans the agent's keys but reads only values until the id matches —
+        the lazy companion to ``output_preview``-bounded history payloads
+        (frontend expands fetch the full output on demand).
+        """
+        self._flush_events_cache()
         for key_bytes in iter_kv_keys(self.events, prefix=f"{agent}:e"):
-            if last_key is None or key_bytes > last_key:
-                last_key = key_bytes
-        if last_key is None:
-            return 0
-        try:
-            evt = self.events[last_key]
-        except Exception as e:
-            logger.warning("Failed to read latest event", error=str(e), exc_info=True)
-            return 0
-        eid = evt.get("event_id") if isinstance(evt, dict) else None
-        latest = eid if isinstance(eid, int) else 0
-        # Mirrored events carry a preset source ``event_id`` (see
-        # ``append_event``) that may exceed the locally-assigned one at the
-        # last sequence position; ``snapshot_event_id`` must never
-        # under-report, so take the running max into account.
-        return max(latest, self._global_event_id)
+            try:
+                evt = self.events[key_bytes]
+            except Exception as e:
+                logger.warning("Failed to read event", error=str(e), exc_info=True)
+                continue
+            if isinstance(evt, dict) and evt.get("event_id") == event_id:
+                return evt
+        return None
 
     def get_resumable_events(
         self,

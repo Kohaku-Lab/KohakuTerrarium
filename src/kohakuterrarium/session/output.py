@@ -216,7 +216,15 @@ class SessionOutput(OutputModule):
             else:
                 events = self._store.get_events(self._event_key_prefix)
                 messages = replay_conversation(events, include_metadata=True)
-            last_event_id = self._store.max_event_id(self._event_key_prefix)
+            try:
+                last_event_id = self._store.max_event_id(self._event_key_prefix)
+            except AttributeError:
+                # Duck-typed store without the counter: fall back to a scan.
+                last_event_id = 0
+                for evt in self._store.get_events(self._event_key_prefix):
+                    eid = evt.get("event_id")
+                    if isinstance(eid, int) and eid > last_event_id:
+                        last_event_id = eid
             self._store.save_conversation(self._event_key_prefix, messages)
             try:
                 self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (

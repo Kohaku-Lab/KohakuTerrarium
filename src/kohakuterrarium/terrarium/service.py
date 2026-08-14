@@ -717,6 +717,20 @@ class LocalTerrariumService(LocalCommandServiceMixin, DriveServiceMixin):
     async def chat_history(self, creature_id: str) -> dict[str, Any]:
         return _chat_history_for(self._engine, creature_id)
 
+    async def chat_event(self, creature_id: str, event_id: int) -> dict[str, Any]:
+        """Fetch one persisted event (lazy full-output companion of history)."""
+        creature = self._engine.get_creature(creature_id)
+        agent = creature.agent
+        store = getattr(agent, "session_store", None)
+        if store is None:
+            store = self._engine._session_stores.get(creature.graph_id)
+        if store is None:
+            raise KeyError(creature_id)
+        evt = store.get_event_by_id(creature.name, event_id)
+        if evt is None:
+            raise KeyError(f"event {event_id} not found")
+        return {"event": evt, "creature_id": creature_id}
+
     async def chat_branches(self, creature_id: str) -> list[dict[str, Any]]:
         return _chat_branches_for(self._engine, creature_id)
 

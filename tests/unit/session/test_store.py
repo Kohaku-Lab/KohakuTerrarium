@@ -54,9 +54,9 @@ def test_max_event_id_matches_full_scan(tmp_path):
             store.append_event("a", "text", {"content": f"c{i}"})
         expected = max(e["event_id"] for e in store.get_events("a"))
         assert store.max_event_id("a") == expected
-        # Cross-agent isolation.
+        # event_id is session-global; the agent arg is API symmetry only.
         store.append_event("b", "text", {"content": "x"})
-        assert store.max_event_id("b") > 0
+        assert store.max_event_id("b") > expected
     finally:
         store.close()
 

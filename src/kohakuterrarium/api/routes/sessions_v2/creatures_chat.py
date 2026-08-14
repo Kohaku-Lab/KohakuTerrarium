@@ -200,6 +200,25 @@ async def creature_history(
     return payload
 
 
+@router.get("/{session_id}/creatures/{creature_id}/events/{event_id}")
+async def creature_event(
+    session_id: str,
+    creature_id: str,
+    event_id: int,
+    service: TerrariumService = Depends(get_service),
+):
+    """Lazy single-event fetch: full tool/subagent output on expand.
+
+    History payloads carry bounded ``output_preview`` strings; the client
+    calls this to load the full ``output``/``result`` of one event.
+    """
+    cid = await resolve_creature_id(service, creature_id, session_id)
+    try:
+        return await service.chat_event(cid, event_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
+
+
 @router.get("/{session_id}/creatures/{creature_id}/branches")
 async def creature_branches(
     session_id: str,
