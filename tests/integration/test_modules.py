@@ -50,6 +50,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext as RuntimePluginContext,
+    ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.subagent.base import SubAgent
@@ -130,6 +131,25 @@ class RecordingTool(BaseTool):
                 error="recorder failed: deliberate explosion", exit_code=1
             )
         return ToolResult(output=f"recorder saw: {msg}")
+
+
+class VisibilityProbeTool(BaseTool):
+    """A second DIRECT-mode tool used only to observe catalog filtering."""
+
+    @property
+    def tool_name(self) -> str:
+        return "visibility_probe"
+
+    @property
+    def description(self) -> str:
+        return "Probe whether the tool is visible to the model."
+
+    @property
+    def execution_mode(self) -> ExecutionMode:
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args: dict[str, Any], **kwargs: Any) -> ToolResult:
+        return ToolResult(output="visibility probe ran")
 
 
 class _DeepSeekResponse:
@@ -272,6 +292,19 @@ class ScopedPlugin(BasePlugin):
     async def pre_tool_execute(self, args: dict, **kwargs: Any) -> dict | None:
         self.pre_calls.append(kwargs.get("tool_name", ""))
         return {**args, "msg": "SCOPED-SHOULD-NOT-RUN"}
+
+
+class ToolVisibilityPlugin(BasePlugin):
+    """Restrict the native catalog to ``recorder`` — the probe tool and
+    every sub-agent must disappear from the request until disabled."""
+
+    name = "tool_visibility"
+
+    def get_tool_visibility(self, context: Any) -> ToolVisibility:
+        return ToolVisibility(
+            allowed_tools=frozenset({"recorder"}),
+            allowed_subagents=frozenset(),
+        )
 
 
 class PingCommand(BaseUserCommand):
@@ -468,12 +501,17 @@ class TestModulesIntegration:
         tool = RecordingTool()
         agent.registry.register_tool(tool)
         agent.executor.register_tool(tool)
+        probe = VisibilityProbeTool()
+        agent.registry.register_tool(probe)
+        agent.executor.register_tool(probe)
 
         plugin = GuardrailPlugin()
         scoped = ScopedPlugin()  # gated OUT — agent name does not match.
+        visibility_plugin = ToolVisibilityPlugin()
         mgr = PluginManager()
         mgr.register(plugin)
         mgr.register(scoped)
+        mgr.register(visibility_plugin)
         agent.plugins = mgr
         agent.controller.plugins = mgr
         # load_all wires the load-context so ``applies_to`` gating is
@@ -488,6 +526,26 @@ class TestModulesIntegration:
         contributions = mgr.collect_prompt_contributions(ctx)
         assert "GUARDRAIL-PLUGIN-BANNER: tool calls are policed." in contributions
         assert all("SCOPED" not in c for c in contributions)
+
+        # Tool-visibility contributions merge through the manager and the
+        # real Controller applies them to the native schema surface.
+        visibility = mgr.collect_tool_visibility(ctx)
+        assert visibility == ToolVisibility(
+            allowed_tools=frozenset({"recorder"}), allowed_subagents=frozenset()
+        )
+        assert [s.name for s in agent.controller._get_native_tool_schemas()] == [
+            "recorder"
+        ]
+        assert mgr.disable("tool_visibility") is True
+        assert {s.name for s in agent.controller._get_native_tool_schemas()} == {
+            "recorder",
+            "skill",
+            "visibility_probe",
+        }
+        assert mgr.enable("tool_visibility") is True
+        assert [s.name for s in agent.controller._get_native_tool_schemas()] == [
+            "recorder"
+        ]
 
         await agent.start()
         # on_agent_start fired on agent.start().
@@ -565,14 +623,19 @@ class TestModulesIntegration:
             assert agent.controller._event_queue.qsize() == before_q + 1
 
             # ── Manager introspection + enable/disable surface ──
-            # Both plugins are registered; list_plugins reports them with
-            # enabled flags, ordered by priority (guardrail=10 < scoped=20).
+            # All three plugins are registered; list_plugins reports them
+            # with enabled flags, ordered by priority (guardrail=10 <
+            # scoped=20 < tool_visibility=50).
             listed = mgr.list_plugins()
-            assert [p["name"] for p in listed] == ["guardrail", "scoped"]
+            assert [p["name"] for p in listed] == [
+                "guardrail",
+                "scoped",
+                "tool_visibility",
+            ]
             assert all(p["enabled"] for p in listed)
             assert mgr.get_plugin("guardrail") is plugin
             assert mgr.get_plugin("no_such") is None
-            assert len(mgr) == 2 and bool(mgr) is True
+            assert len(mgr) == 3 and bool(mgr) is True
             # Disable then re-enable the guardrail plugin.
             assert mgr.disable("guardrail") is True
             assert mgr.is_enabled("guardrail") is False
@@ -583,7 +646,11 @@ class TestModulesIntegration:
             assert mgr.disable("ghost") is False
             # list_plugins_with_options surfaces the (empty) option schema.
             with_opts = mgr.list_plugins_with_options()
-            assert {p["name"] for p in with_opts} == {"guardrail", "scoped"}
+            assert {p["name"] for p in with_opts} == {
+                "guardrail",
+                "scoped",
+                "tool_visibility",
+            }
             assert all(p["schema"] == {} and p["options"] == {} for p in with_opts)
             # set_plugin_options on an unknown plugin raises KeyError.
             with pytest.raises(KeyError):

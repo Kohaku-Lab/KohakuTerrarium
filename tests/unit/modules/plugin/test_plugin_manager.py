@@ -12,6 +12,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.manager import PluginManager
 
@@ -81,6 +82,16 @@ class _VetoPlugin(BasePlugin):
 
     async def on_compact_start(self, context_length):
         return self._vote
+
+
+class _VisibilityPlugin(BasePlugin):
+    def __init__(self, name, visibility):
+        super().__init__()
+        self.name = name
+        self._visibility = visibility
+
+    def get_tool_visibility(self, context):
+        return self._visibility
 
 
 # ── Registration / enable / disable ────────────────────────────────
@@ -475,6 +486,93 @@ class TestCollectors:
         mgr.register(_ServicePlugin("b", {"svc_b": 2}))
         merged = mgr.collect_runtime_services(None)
         assert merged == {"svc_a": 1, "svc_b": 2}
+
+    def test_collect_tool_visibility_empty_without_contributors(self):
+        assert PluginManager().collect_tool_visibility() is None
+
+    def test_collect_tool_visibility_returns_single_restriction(self):
+        mgr = PluginManager()
+        mgr.register(
+            _VisibilityPlugin(
+                "one",
+                ToolVisibility(
+                    allowed_tools=frozenset({"read", "bash"}),
+                    allowed_subagents=frozenset(),
+                ),
+            )
+        )
+        visibility = mgr.collect_tool_visibility()
+        assert visibility == ToolVisibility(
+            allowed_tools=frozenset({"bash", "read"}),
+            allowed_subagents=frozenset(),
+        )
+
+    def test_collect_tool_visibility_intersects_per_category(self):
+        # None = unrestricted; empty = hide all. Two plugins narrow by
+        # intersection without either one being able to widen.
+        mgr = PluginManager()
+        mgr.register(
+            _VisibilityPlugin(
+                "tools_only",
+                ToolVisibility(allowed_tools=frozenset({"read", "bash", "edit"})),
+            )
+        )
+        mgr.register(
+            _VisibilityPlugin(
+                "bash_only",
+                ToolVisibility(
+                    allowed_tools=frozenset({"bash"}),
+                    allowed_subagents=frozenset({"worker"}),
+                ),
+            )
+        )
+        visibility = mgr.collect_tool_visibility()
+        assert visibility is not None
+        assert visibility.allowed_tools == frozenset({"bash"})
+        assert visibility.allowed_subagents == frozenset({"worker"})
+
+    def test_collect_tool_visibility_none_never_widens(self):
+        mgr = PluginManager()
+        mgr.register(
+            _VisibilityPlugin(
+                "restricted", ToolVisibility(allowed_tools=frozenset({"read"}))
+            )
+        )
+        mgr.register(_VisibilityPlugin("unrestricted", None))
+        visibility = mgr.collect_tool_visibility()
+        assert visibility == ToolVisibility(allowed_tools=frozenset({"read"}))
+
+    def test_collect_tool_visibility_skips_disabled_and_raising(self):
+        class _RaisingVisibility(BasePlugin):
+            name = "bad"
+
+            def get_tool_visibility(self, context):
+                raise RuntimeError("boom")
+
+        mgr = PluginManager()
+        mgr.register(
+            _VisibilityPlugin(
+                "disabled", ToolVisibility(allowed_tools=frozenset({"read"}))
+            )
+        )
+        mgr.disable("disabled")
+        mgr.register(_RaisingVisibility())
+        mgr.register(
+            _VisibilityPlugin("kept", ToolVisibility(allowed_tools=frozenset({"bash"})))
+        )
+        visibility = mgr.collect_tool_visibility()
+        assert visibility == ToolVisibility(allowed_tools=frozenset({"bash"}))
+
+    def test_collect_tool_visibility_ignores_wrong_return_type(self):
+        class _WrongShape(BasePlugin):
+            name = "wrong"
+
+            def get_tool_visibility(self, context):
+                return frozenset({"read"})
+
+        mgr = PluginManager()
+        mgr.register(_WrongShape())
+        assert mgr.collect_tool_visibility() is None
 
 
 # ── Lifecycle: load / unload ───────────────────────────────────────

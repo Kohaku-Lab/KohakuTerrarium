@@ -12,6 +12,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.dispatch import (
     call_method as _call_method,
@@ -39,6 +40,31 @@ def _plugin_applies(plugin: BasePlugin, context: PluginContext | None) -> bool:
             exc_info=True,
         )
         return True
+
+
+def _intersect_names(
+    left: frozenset[str] | None, right: frozenset[str] | None
+) -> frozenset[str] | None:
+    """Intersect two per-category name restrictions; None means unrestricted."""
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return left & right
+
+
+def _merge_visibility(
+    current: ToolVisibility | None, extra: ToolVisibility
+) -> ToolVisibility:
+    """Merge an extra restriction into the running restriction set."""
+    if current is None:
+        return extra
+    return ToolVisibility(
+        allowed_tools=_intersect_names(current.allowed_tools, extra.allowed_tools),
+        allowed_subagents=_intersect_names(
+            current.allowed_subagents, extra.allowed_subagents
+        ),
+    )
 
 
 class PluginManager(PluginCommandRefreshMixin):
@@ -214,6 +240,41 @@ class PluginManager(PluginCommandRefreshMixin):
                 continue
             services.update(contributed)
         return services
+
+    def collect_tool_visibility(
+        self, context: PluginContext | None = None
+    ) -> ToolVisibility | None:
+        """Merge per-plugin tool catalog restrictions.
+
+        Multiple restrictions intersect per category so every contributor
+        can only narrow, never widen, the catalog. Plugins that return
+        None are unrestricted; failing plugins are skipped.
+        """
+        merged: ToolVisibility | None = None
+        for plugin in self._applicable_plugins():
+            try:
+                contributed = plugin.get_tool_visibility(
+                    context if context is not None else self._load_context
+                )
+            except Exception as e:
+                logger.warning(
+                    "Plugin get_tool_visibility raised",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    error=str(e),
+                    exc_info=True,
+                )
+                continue
+            if contributed is None:
+                continue
+            if not isinstance(contributed, ToolVisibility):
+                logger.warning(
+                    "Plugin returned non-ToolVisibility; ignoring",
+                    plugin_name=getattr(plugin, "name", "?"),
+                    returned_type=type(contributed).__name__,
+                )
+                continue
+            merged = _merge_visibility(merged, contributed)
+        return merged
 
     def collect_prompt_contributions(self, context: PluginContext) -> list[str]:
         """Collect runtime prompt prose in plugin priority order."""
