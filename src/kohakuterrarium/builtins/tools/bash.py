@@ -1,6 +1,7 @@
 """Cross-platform shell command execution with bounded output and timeouts."""
 
 import asyncio
+import math
 import os
 import shutil
 import subprocess
@@ -158,6 +159,8 @@ def _resolve_timeout_arg(
         timeout = float(raw_timeout)
     except (TypeError, ValueError):
         return 0.0, f"timeout must be numeric, got {raw_timeout!r}"
+    if not math.isfinite(timeout):
+        return 0.0, "timeout must be finite"
     if timeout < 0:
         return 0.0, "timeout must be >= 0"
     return timeout, None
@@ -289,7 +292,17 @@ class ShellTool(BaseTool):
                 },
                 "timeout": {
                     "type": "number",
-                    "description": "Maximum execution time in seconds (0 = no timeout).",
+                    "description": (
+                        "Maximum total call time in seconds, including lock waiting "
+                        "(0 = no timeout)."
+                    ),
+                },
+                "allow_concurrent": {
+                    "type": "boolean",
+                    "description": (
+                        "Skip the unsafe-tool concurrency lock only when it is safe "
+                        "to run concurrently."
+                    ),
                 },
             },
             "required": ["command"],

@@ -4,6 +4,7 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
+from kohakuterrarium.builtins.tools.bash import _resolve_timeout_arg
 from kohakuterrarium.core.events import TriggerEvent, create_tool_complete_event
 from kohakuterrarium.core.job import (
     JobResult,
@@ -14,7 +15,7 @@ from kohakuterrarium.core.job import (
     generate_job_id,
 )
 from kohakuterrarium.core.tool_output import normalize_tool_output
-from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext
+from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext, ToolResult
 from kohakuterrarium.parsing.events import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import default_workdir
@@ -201,6 +202,70 @@ class Executor:
             return False
         return True
 
+    async def _run_bash(
+        self,
+        tool: Tool,
+        args: dict[str, Any],
+        exec_fn: Callable[..., Any],
+        context: ToolContext,
+        needs_lock: bool,
+        allow_concurrent: bool,
+    ) -> ToolResult:
+        """Run Bash with one timeout budget shared by lock and subprocess."""
+        timeout, timeout_error = _resolve_timeout_arg(
+            args, tool.config.timeout if isinstance(tool, BaseTool) else 60.0
+        )
+        if timeout_error is not None:
+            return ToolResult(error=timeout_error)
+
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout if timeout > 0 else None
+        execute_args = dict(args)
+        lock_acquired = False
+        wait_start = loop.time()
+        try:
+            if needs_lock and not allow_concurrent:
+                if self._serial_lock is None:
+                    self._serial_lock = asyncio.Lock()
+                remaining = deadline - loop.time() if deadline is not None else None
+                try:
+                    if remaining is None:
+                        await self._serial_lock.acquire()
+                    else:
+                        await asyncio.wait_for(
+                            self._serial_lock.acquire(), timeout=max(0, remaining)
+                        )
+                except asyncio.TimeoutError:
+                    wait_ms = (loop.time() - wait_start) * 1000.0
+                    self._emit_tool_wait(tool.tool_name, wait_ms, "serial_lock")
+                    return ToolResult(
+                        error="Concurrency lock timeout; command not started; "
+                        "retry with allow_concurrent=true if safe.",
+                        metadata={
+                            "blocked": True,
+                            "blocked_by": "concurrency_lock",
+                            "command_started": False,
+                        },
+                    )
+                lock_acquired = True
+                wait_ms = (loop.time() - wait_start) * 1000.0
+                if wait_ms >= 1.0:
+                    self._emit_tool_wait(tool.tool_name, wait_ms, "serial_lock")
+
+            remaining = deadline - loop.time() if deadline is not None else None
+            if remaining is not None:
+                if remaining <= 0:
+                    return ToolResult(
+                        error="Command timed out before it started.",
+                        exit_code=-1,
+                        metadata={"timed_out": True, "command_started": False},
+                    )
+                execute_args["timeout"] = remaining
+            return await exec_fn(execute_args, context=context)
+        finally:
+            if lock_acquired:
+                self._serial_lock.release()
+
     async def _run_tool(
         self,
         job_id: str,
@@ -247,7 +312,19 @@ class Executor:
 
             # Only tools that declare unsafe shared-state access are serialized.
             needs_lock = isinstance(tool, BaseTool) and not tool.is_concurrency_safe
-            if needs_lock:
+            allow_concurrent = (
+                str(args.get("allow_concurrent", "")).strip().lower() == "true"
+            )
+            if tool.tool_name == "bash":
+                result = await self._run_bash(
+                    tool,
+                    args,
+                    exec_fn,
+                    context,
+                    needs_lock,
+                    allow_concurrent,
+                )
+            elif needs_lock and not allow_concurrent:
                 if self._serial_lock is None:
                     self._serial_lock = asyncio.Lock()
                 wait_start = asyncio.get_event_loop().time()

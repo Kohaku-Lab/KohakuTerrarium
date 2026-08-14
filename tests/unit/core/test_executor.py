@@ -75,14 +75,15 @@ class _ManualReadTool(BaseTool):
 class _UnsafeTool(BaseTool):
     is_concurrency_safe = False
 
-    def __init__(self, hold_seconds=0.05):
-        super().__init__()
+    def __init__(self, hold_seconds=0.05, *, timeout=60.0, name="unsafe"):
+        super().__init__(ToolConfig(timeout=timeout))
         self.hold = hold_seconds
+        self.name = name
         self.starts: list[float] = []
 
     @property
     def tool_name(self):
-        return "unsafe"
+        return self.name
 
     @property
     def description(self):
@@ -373,13 +374,92 @@ class TestSerialLock:
             ex.submit("unsafe", {}),
             ex.submit("unsafe", {}),
         )
-        # Wait all.
         results = await ex.wait_all(timeout=5.0)
         assert len(results) == 3
-        # Each run started AT LEAST hold_seconds after the previous one.
         starts = sorted(tool.starts)
         for a, b in zip(starts, starts[1:]):
-            assert b - a >= 0.02  # roughly the hold time
+            assert b - a >= 0.02
+
+    async def test_allow_concurrent_skips_serial_lock(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.03)
+        ex.register_tool(tool)
+        await ex.submit("unsafe", {})
+        await asyncio.sleep(0)
+        concurrent = await ex.submit("unsafe", {"allow_concurrent": True})
+        await ex.wait_for(concurrent, timeout=1.0)
+
+        assert len(tool.starts) == 2
+        assert tool.starts[1] - tool.starts[0] < 0.02
+
+    async def test_text_allow_concurrent_skips_serial_lock(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.03)
+        ex.register_tool(tool)
+        await ex.submit("unsafe", {})
+        await asyncio.sleep(0)
+        concurrent = await ex.submit("unsafe", {"allow_concurrent": "true"})
+        await ex.wait_for(concurrent, timeout=1.0)
+
+        assert len(tool.starts) == 2
+
+    async def test_bash_timeout_includes_lock_wait(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.08, timeout=0.02, name="bash")
+        ex.register_tool(tool)
+        await ex.submit("bash", {})
+        await asyncio.sleep(0)
+        blocked = await ex.submit("bash", {"timeout": 0.01})
+        result = await ex.wait_for(blocked, timeout=1.0)
+
+        assert result is not None
+        assert result.metadata["blocked"] is True
+        assert result.metadata["command_started"] is False
+        assert len(tool.starts) == 1
+
+    async def test_bash_timeout_budget_is_forwarded_after_lock(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.01, timeout=0.2, name="bash")
+        ex.register_tool(tool)
+        first = await ex.submit("bash", {})
+        await ex.wait_for(first, timeout=1.0)
+        second = await ex.submit("bash", {"timeout": 0.2})
+        await ex.wait_for(second, timeout=1.0)
+
+        assert len(tool.starts) == 2
+
+    async def test_bash_timeout_rejects_negative_values(self):
+        ex = Executor()
+        tool = _UnsafeTool(name="bash")
+        ex.register_tool(tool)
+        job_id = await ex.submit("bash", {"timeout": -1})
+        result = await ex.wait_for(job_id, timeout=1.0)
+
+        assert result is not None
+        assert result.error == "timeout must be >= 0"
+        assert tool.starts == []
+
+    async def test_bash_timeout_rejects_non_finite_values(self):
+        ex = Executor()
+        tool = _UnsafeTool(name="bash")
+        ex.register_tool(tool)
+        job_id = await ex.submit("bash", {"timeout": "nan"})
+        result = await ex.wait_for(job_id, timeout=1.0)
+
+        assert result is not None
+        assert result.error == "timeout must be finite"
+        assert tool.starts == []
+
+    async def test_allow_concurrent_can_bypass_any_unsafe_tool(self):
+        ex = Executor()
+        tool = _UnsafeTool(hold_seconds=0.03)
+        ex.register_tool(tool)
+        await ex.submit("unsafe", {})
+        await asyncio.sleep(0)
+        concurrent = await ex.submit("unsafe", {"allow_concurrent": True})
+        await ex.wait_for(concurrent, timeout=1.0)
+
+        assert len(tool.starts) == 2
 
 
 # ── wait_for / wait_all timeouts ─────────────────────────────────
