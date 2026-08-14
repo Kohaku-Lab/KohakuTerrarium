@@ -526,7 +526,15 @@ const windowStartIndex = ref(null)
 const windowStart = computed(() => {
   const total = viewMessages.value.length
   if (windowStartIndex.value == null) return Math.max(0, total - RENDER_WINDOW_STEP)
-  return Math.min(windowStartIndex.value, Math.max(0, total - 1))
+  // Shrinkage (branch filter / compact_replace / retry splice) can push
+  // an explicit start past the end of the list; clamping to total - 1
+  // would collapse the view to one message. Fall back to the tail window
+  // and let ``loadEarlierMessages`` re-establish an explicit start.
+  if (windowStartIndex.value >= total) {
+    windowStartIndex.value = null
+    return Math.max(0, total - RENDER_WINDOW_STEP)
+  }
+  return windowStartIndex.value
 })
 const windowMessages = computed(() => viewMessages.value.slice(windowStart.value))
 

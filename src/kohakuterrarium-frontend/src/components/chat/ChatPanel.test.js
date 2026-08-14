@@ -90,6 +90,28 @@ describe("ChatPanel render window", () => {
     expect(wrapper.find("button.self-center").exists()).toBe(false)
   })
 
+  it("shrinkage below an expanded window start falls back to the tail window", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    // Expand once: explicit window start at index 0.
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper).length).toBe(450)
+
+    // A resync replaces the transcript with a much shorter one.
+    seedMessages(chat, 30)
+    await flushPromises()
+
+    // Without the out-of-range fallback the view would collapse to a
+    // single message (clamp to total - 1).
+    expect(renderedIds(wrapper).length).toBe(30)
+    expect(renderedIds(wrapper)[0]).toBe("m_0")
+    expect(wrapper.find("button.self-center").exists()).toBe(false)
+  })
+
   it("new tail messages stay mounted inside the window while streaming", async () => {
     const chat = useChatStore("graph_1")
     seedMessages(chat, 420)

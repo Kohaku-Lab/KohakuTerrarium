@@ -32,7 +32,6 @@ const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/
 const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/
 const MATH_DELIM_RE = /^\s*\$\$\s*$/
 const REF_DEF_RE = /^ {0,3}\[[^\]]*\]:/
-const LIST_ITEM_RE = /^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]+|$)/
 
 function firstLine(block) {
   return block.split("\n", 1)[0] || ""
