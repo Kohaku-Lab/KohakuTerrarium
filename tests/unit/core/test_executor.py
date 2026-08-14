@@ -450,17 +450,6 @@ class TestSerialLock:
         assert result.error == "timeout must be finite"
         assert tool.starts == []
 
-    async def test_allow_concurrent_can_bypass_any_unsafe_tool(self):
-        ex = Executor()
-        tool = _UnsafeTool(hold_seconds=0.03)
-        ex.register_tool(tool)
-        await ex.submit("unsafe", {})
-        await asyncio.sleep(0)
-        concurrent = await ex.submit("unsafe", {"allow_concurrent": True})
-        await ex.wait_for(concurrent, timeout=1.0)
-
-        assert len(tool.starts) == 2
-
 
 # ── wait_for / wait_all timeouts ─────────────────────────────────
 

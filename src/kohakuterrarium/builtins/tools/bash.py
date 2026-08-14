@@ -1,7 +1,6 @@
 """Cross-platform shell command execution with bounded output and timeouts."""
 
 import asyncio
-import math
 import os
 import shutil
 import subprocess
@@ -29,6 +28,7 @@ from kohakuterrarium.utils.mobile_sandbox import (
     sandbox_bin_dir,
     sandbox_binary,
 )
+from kohakuterrarium.utils.timeouts import resolve_timeout_arg
 
 logger = get_logger(__name__)
 
@@ -146,24 +146,6 @@ def _get_available_shells() -> list[str]:
             name for name in _SHELL_SPECS if _resolve_shell_executable(name)
         ]
     return _AVAILABLE_SHELLS
-
-
-def _resolve_timeout_arg(
-    args: dict[str, Any], default_timeout: float
-) -> tuple[float, str | None]:
-    """Resolve per-call timeout, falling back to the configured default."""
-    raw_timeout = args.get("timeout", default_timeout)
-    if raw_timeout in (None, ""):
-        raw_timeout = default_timeout
-    try:
-        timeout = float(raw_timeout)
-    except (TypeError, ValueError):
-        return 0.0, f"timeout must be numeric, got {raw_timeout!r}"
-    if not math.isfinite(timeout):
-        return 0.0, "timeout must be finite"
-    if timeout < 0:
-        return 0.0, "timeout must be >= 0"
-    return timeout, None
 
 
 def _wait_timeout(timeout: float) -> float | None:
@@ -314,7 +296,7 @@ class ShellTool(BaseTool):
         command = args.get("command", "")
         if not command:
             return ToolResult(error="No command provided")
-        timeout, timeout_error = _resolve_timeout_arg(args, self.config.timeout)
+        timeout, timeout_error = resolve_timeout_arg(args, self.config.timeout)
         if timeout_error is not None:
             return ToolResult(error=timeout_error)
 

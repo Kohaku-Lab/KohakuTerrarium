@@ -66,7 +66,7 @@ Shell executable overrides are checked in this order:
 - stdout and stderr are combined in the output.
 - Commands have a configurable total timeout; `timeout` includes concurrency-lock waiting and command execution.
 - `timeout: 0` disables the total timeout for long-running commands.
-- Unsafe Bash calls wait for the shared concurrency lock by default. Set `allow_concurrent=true` only when the command is safe to run concurrently; this skips that lock at your own risk.
+- Unsafe tool calls wait for the shared concurrency lock by default. Set `allow_concurrent=true` only when the call is safe to run concurrently; this skips that lock at your own risk. This is an executor-level override and applies to any unsafe tool, although this manual documents its Bash use.
 - Large outputs may be truncated to the configured max size.
 
 ## WHEN TO USE

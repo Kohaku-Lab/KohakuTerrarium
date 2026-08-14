@@ -4,7 +4,6 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
-from kohakuterrarium.builtins.tools.bash import _resolve_timeout_arg
 from kohakuterrarium.core.events import TriggerEvent, create_tool_complete_event
 from kohakuterrarium.core.job import (
     JobResult,
@@ -19,6 +18,7 @@ from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext, ToolR
 from kohakuterrarium.parsing.events import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import default_workdir
+from kohakuterrarium.utils.timeouts import resolve_timeout_arg
 
 logger = get_logger(__name__)
 
@@ -212,7 +212,7 @@ class Executor:
         allow_concurrent: bool,
     ) -> ToolResult:
         """Run Bash with one timeout budget shared by lock and subprocess."""
-        timeout, timeout_error = _resolve_timeout_arg(
+        timeout, timeout_error = resolve_timeout_arg(
             args, tool.config.timeout if isinstance(tool, BaseTool) else 60.0
         )
         if timeout_error is not None:

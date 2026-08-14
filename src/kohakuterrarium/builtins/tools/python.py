@@ -14,7 +14,6 @@ from typing import Any
 
 from kohakuterrarium.builtins.tools.bash import (
     _format_timeout,
-    _resolve_timeout_arg,
     _subprocess_runner,
     _wait_timeout,
 )
@@ -23,6 +22,7 @@ from kohakuterrarium.builtins.tools.subprocess.shell_utils import (
     windows_process_kwargs,
 )
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.utils.timeouts import resolve_timeout_arg
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.utils.mobile_sandbox import is_mobile_profile
 
@@ -66,7 +66,7 @@ class PythonTool(BaseTool):
         code = args.get("code", "")
         if not code:
             return ToolResult(error="No code provided")
-        timeout, timeout_error = _resolve_timeout_arg(args, self.config.timeout)
+        timeout, timeout_error = resolve_timeout_arg(args, self.config.timeout)
         if timeout_error is not None:
             return ToolResult(error=timeout_error)
 
