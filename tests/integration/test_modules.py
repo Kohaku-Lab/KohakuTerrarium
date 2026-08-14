@@ -1556,7 +1556,8 @@ class TestModulesIntegration:
         search_result = next(
             event
             for event in store.get_events("modules_agent")
-            if event["type"] == "tool_result" and event["name"] == "web_search"
+            if event["type"] == "tool_result"
+            and event["call_id"].startswith("web_search_")
         )
         assert search_result["tool_metadata"]["backend"] == "deepseek"
         assert search_result["tool_metadata"]["citation_status"] == "verified"
