@@ -1,7 +1,7 @@
 """Dispatch per-creature module configuration across supported types.
 
-A module is any runtime-configurable creature component, such as a plugin or
-provider-native tool. All types expose a common shape::
+A module is any runtime-configurable creature component, such as a plugin,
+ordinary tool, or provider-native tool. All types expose a common shape::
 
     {
         "type": "plugin" | "native_tool" | ...,
@@ -59,6 +59,22 @@ def _inventory_native_tools(
     ]
 
 
+def _inventory_tools(
+    engine: Terrarium, session_id: str, creature_id: str
+) -> list[dict]:
+    return [
+        {
+            "type": "tool",
+            "name": entry["name"],
+            "description": entry.get("description", ""),
+            "schema": entry.get("option_schema", {}),
+            "options": entry.get("values", {}),
+            "enabled": None,
+        }
+        for entry in creature_state.tool_inventory(engine, session_id, creature_id)
+    ]
+
+
 def _get_options_plugin(
     engine: Terrarium, session_id: str, creature_id: str, name: str
 ) -> dict:
@@ -78,6 +94,20 @@ def _get_options_native_tool(
         if entry["name"] == name:
             return {
                 "type": "native_tool",
+                "name": name,
+                "schema": entry.get("option_schema", {}),
+                "options": entry.get("values", {}),
+            }
+    raise KeyError(name)
+
+
+def _get_options_tool(
+    engine: Terrarium, session_id: str, creature_id: str, name: str
+) -> dict:
+    for entry in creature_state.tool_inventory(engine, session_id, creature_id):
+        if entry["name"] == name:
+            return {
+                "type": "tool",
                 "name": name,
                 "schema": entry.get("option_schema", {}),
                 "options": entry.get("values", {}),
@@ -109,6 +139,18 @@ def _set_options_native_tool(
     )
 
 
+def _set_options_tool(
+    engine: Terrarium,
+    session_id: str,
+    creature_id: str,
+    name: str,
+    values: dict[str, Any],
+) -> dict[str, Any]:
+    return creature_state.set_tool_options(
+        engine, session_id, creature_id, name, values or {}
+    )
+
+
 async def _toggle_plugin(
     engine: Terrarium, session_id: str, creature_id: str, name: str
 ) -> dict:
@@ -132,6 +174,12 @@ _TYPE_DISPATCH: dict[str, dict[str, Any]] = {
         "inventory": _inventory_native_tools,
         "get_options": _get_options_native_tool,
         "set_options": _set_options_native_tool,
+        "toggle": _toggle_unsupported,
+    },
+    "tool": {
+        "inventory": _inventory_tools,
+        "get_options": _get_options_tool,
+        "set_options": _set_options_tool,
         "toggle": _toggle_unsupported,
     },
 }

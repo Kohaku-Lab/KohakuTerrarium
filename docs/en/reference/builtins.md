@@ -107,8 +107,9 @@ timeout. Direct.
 
 - Args: `url`.
 
-**`web_search`**: DuckDuckGo search returning markdown-formatted
-results. Direct.
+**`web_search`**: Web search with a DuckDuckGo default and an optional
+DeepSeek Responses backend. DeepSeek requires `kt config key set deepseek`;
+switch per creature with `/module set web_search backend deepseek`. Direct.
 
 - Args: `query`, `max_results` (int), `region` (str).
 

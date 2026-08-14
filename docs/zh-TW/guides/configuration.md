@@ -90,10 +90,15 @@ tools:
 ```yaml
 tools:
   - name: web_search
-    options:
-      max_results: 10
-      region: us-en
+    backend: duckduckgo
+    deepseek_model: deepseek-v4-flash
+    fallback: none
 ```
+
+`web_search` 預設使用不需 Key 的 DuckDuckGo。若要啟用 DeepSeek，先執行
+`kt config key set deepseek`，再於 Creature 設定中指定
+`backend: deepseek`，或透過 `/module set web_search backend deepseek`
+切換目前的 Creature。
 
 本地 custom 模組：
 

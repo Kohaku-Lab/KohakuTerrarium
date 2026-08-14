@@ -203,6 +203,8 @@ def _render_value(fld: "ModuleFormField", is_current: bool) -> Text:
                 out.append(f"[{opt}]", style="cyan bold")
             else:
                 out.append(f" {opt} ", style="dim")
+        for opt in fld.unavailable:
+            out.append(f" {opt} (unavailable) ", style="dim red")
         return out
     if fld.kind == "bool":
         for opt in ("true", "false"):

@@ -1,4 +1,4 @@
-"""Inspect and configure runtime plugins and provider-native tools."""
+"""Inspect and configure runtime plugins and tool options."""
 
 import json
 import os
@@ -11,6 +11,7 @@ from typing import Any
 import yaml
 
 from kohakuterrarium.builtins.user_commands.registry import register_user_command
+from kohakuterrarium.core.agent_tool_options import agent_tool_inventory
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
     CommandLayer,
@@ -25,7 +26,7 @@ class ModuleCommand(BaseUserCommand):
     aliases = ["modules", "mod"]
     description = (
         "List, inspect, toggle, or edit module options at runtime "
-        "(plugins + provider-native tools). "
+        "(plugins + tools + provider-native tools). "
         "/module enable|disable|set|edit|reset <name> …"
     )
     layer = CommandLayer.AGENT
@@ -78,10 +79,11 @@ class ModuleCommand(BaseUserCommand):
 
 
 def _inventory(agent: Any) -> list[dict[str, Any]]:
-    """Return normalized records for configurable plugins and native tools."""
+    """Return normalized records for every configurable module type."""
     out: list[dict[str, Any]] = []
     out.extend(_inventory_plugins(agent))
     out.extend(_inventory_native_tools(agent))
+    out.extend(_inventory_tools(agent))
     return out
 
 
@@ -135,6 +137,21 @@ def _inventory_native_tools(agent: Any) -> list[dict[str, Any]]:
     return out
 
 
+def _inventory_tools(agent: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "tool",
+            "name": entry["name"],
+            "description": entry.get("description", ""),
+            "schema": entry.get("option_schema", {}),
+            "options": entry.get("values", {}),
+            "enabled": None,
+            "priority": None,
+        }
+        for entry in agent_tool_inventory(agent)
+    ]
+
+
 def _resolve_or_error(agent: Any, ref: str) -> tuple[dict[str, Any] | None, str | None]:
     """Resolve a module reference, returning either its record or an error."""
     inv = _inventory(agent)
@@ -180,6 +197,7 @@ def _render_list(agent: Any, rest: list[str]) -> str:
     out: list[str] = []
     plugins = [m for m in inv if m["type"] == "plugin"]
     native_tools = [m for m in inv if m["type"] == "native_tool"]
+    tools = [m for m in inv if m["type"] == "tool"]
 
     if plugins:
         out.append("Plugins")
@@ -196,6 +214,13 @@ def _render_list(agent: Any, rest: list[str]) -> str:
             out.append("")
         out.append("Native tools")
         for m in sorted(native_tools, key=_sort_key):
+            out.append(_format_row(m))
+
+    if tools:
+        if plugins or native_tools:
+            out.append("")
+        out.append("Tools")
+        for m in sorted(tools, key=_sort_key):
             out.append(_format_row(m))
 
     out.append("")
@@ -242,6 +267,8 @@ def _render_show_module(m: dict[str, Any]) -> str:
         out.append(f"      = {current!r}")
         if spec.get("doc"):
             out.append(f"      {spec['doc']}")
+        for value, reason in (spec.get("disabled_values") or {}).items():
+            out.append(f"      unavailable: {value} — {reason}")
 
     out.append("")
     out.append(
@@ -317,18 +344,35 @@ def _do_reset(agent: Any, rest: list[str]) -> UserCommandResult:
             return UserCommandResult(
                 output=f"Reset all options on plugin/{m['name']} to defaults."
             )
-        helper = getattr(agent, "native_tool_options", None)
+        helper_name = (
+            "native_tool_options" if m["type"] == "native_tool" else "tool_options"
+        )
+        helper = getattr(agent, helper_name, None)
         if helper is None:
-            return UserCommandResult(error="No native_tool_options helper.")
+            return UserCommandResult(error=f"No {helper_name} helper.")
         helper.set(m["name"], {})
         return UserCommandResult(
-            output=f"Cleared overrides on native_tool/{m['name']}."
+            output=f"Cleared overrides on {m['type']}/{m['name']}."
         )
 
     schema = m.get("schema") or {}
     if key not in schema:
         return UserCommandResult(
             error=f"Unknown option {key!r} for {m['type']}/{m['name']}."
+        )
+    if m["type"] == "tool":
+        helper = getattr(agent, "tool_options", None)
+        if helper is None:
+            return UserCommandResult(error="No tool_options helper.")
+        try:
+            applied = helper.set(m["name"], {key: None})
+        except (KeyError, ValueError) as exc:
+            return UserCommandResult(error=str(exc))
+        return UserCommandResult(
+            output=(
+                f"{m['type']}/{m['name']}.{key} = {applied.get(key)!r}  "
+                "(config baseline)"
+            )
         )
     default = (schema[key] or {}).get("default")
     try:
@@ -397,6 +441,11 @@ def _apply_options(
         current = dict(helper.get(m["name"]))
         current.update(values)
         return helper.set(m["name"], current)
+    if m["type"] == "tool":
+        helper = getattr(agent, "tool_options", None)
+        if helper is None:
+            raise RuntimeError("agent has no tool_options helper")
+        return helper.set(m["name"], values)
     raise ValueError(f"Unsupported module type: {m['type']!r}")
 
 

@@ -178,6 +178,32 @@ class TestEmitDirectCompletion:
         assert meta["output_preview"] == big[:5000]
         assert len(meta["output_preview"]) == 5000
 
+    def test_tool_done_only_forwards_explicit_session_metadata(self, agent):
+        agent._register_direct_job("web_search_x", kind="tool", name="web_search")
+        result = JobResult(
+            job_id="web_search_x",
+            output="answer",
+            exit_code=0,
+            metadata={
+                "secret": "must-not-persist",
+                "session_metadata": {
+                    "backend": "deepseek",
+                    "citation_status": "verified",
+                },
+            },
+        )
+
+        agent._emit_direct_completion_activity("web_search_x", result)
+
+        meta = next(
+            c[2] for c in agent.output_router.activity_calls if c[0] == "tool_done"
+        )
+        assert meta["tool_metadata"] == {
+            "backend": "deepseek",
+            "citation_status": "verified",
+        }
+        assert "must-not-persist" not in repr(meta)
+
     def test_tool_error(self, agent):
         agent._register_direct_job("bash_x", kind="tool", name="bash")
         result = JobResult(job_id="bash_x", error="boom", output="")

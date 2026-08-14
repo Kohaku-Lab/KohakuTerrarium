@@ -288,6 +288,17 @@ def _apply_restore_elision(agent: Any) -> None:
         elide_stale_tool_results(controller.conversation)
 
 
+def _reapply_options(agent: Any, agent_name: str, attribute: str) -> None:
+    options = getattr(agent, attribute, None)
+    if options is None:
+        return
+    try:
+        options.apply()
+    except Exception as exc:  # pragma: no cover - resume continues without options
+        message = f"Failed to reapply {attribute.replace('_', ' ')}"
+        logger.warning(message, agent=agent_name, error=str(exc))
+
+
 def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     """Restore identity, conversation, branch state, scratchpad, and triggers.
 
@@ -333,16 +344,8 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
             visible_count += 1
         logger.info("Scratchpad restored", agent=agent_name, keys=visible_count)
 
-    native_tool_options = getattr(agent, "native_tool_options", None)
-    if native_tool_options is not None:
-        try:
-            native_tool_options.apply()
-        except Exception as exc:  # pragma: no cover - resume continues without options
-            logger.warning(
-                "Failed to reapply native tool options",
-                agent=agent_name,
-                error=str(exc),
-            )
+    _reapply_options(agent, agent_name, "native_tool_options")
+    _reapply_options(agent, agent_name, "tool_options")
 
     resume_events = store.get_resumable_events(agent_name)
     if resume_events:

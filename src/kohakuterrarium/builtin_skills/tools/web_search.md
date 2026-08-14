@@ -7,7 +7,8 @@ tags: [web, search, network]
 
 # web_search
 
-Search the web and return structured results with titles, URLs, and snippets.
+Search the web through the creature's configured backend. DuckDuckGo is the
+default; DeepSeek Responses web search is an explicit opt-in.
 
 ## Arguments
 
@@ -19,9 +20,19 @@ Search the web and return structured results with titles, URLs, and snippets.
 
 ## Behavior
 
-- No API key needed.
-- Results include title, URL, and snippet for each match.
+- DuckDuckGo needs no API key. DeepSeek requires a configured `deepseek` key.
+- DuckDuckGo returns result rows; DeepSeek returns a grounded synthesis plus
+  provider-supplied sources when available.
 - If the search backend is not available, returns an error. Tell the user.
+
+The operator can switch the current creature at runtime:
+
+```text
+kt config key set deepseek
+/module set web_search backend deepseek
+```
+
+`/module reset web_search` restores the creature configuration baseline.
 
 ## WHEN TO USE
 
@@ -48,7 +59,7 @@ Official documentation for the asyncio module...
 
 - Search may not be available in all configurations. If you get an error, tell the user.
 - May be rate-limited under heavy usage.
-- Results depend on the search engine's index and ranking.
+- Results depend on the selected backend's index and ranking.
 
 ## TIPS
 

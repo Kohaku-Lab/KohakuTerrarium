@@ -17,6 +17,7 @@ from kohakuterrarium.core.agent_observability import (
     wire_scratchpad_observer,
 )
 from kohakuterrarium.core.agent_plugin_options import PluginOptions
+from kohakuterrarium.core.agent_tool_options import ToolOptions
 from kohakuterrarium.core.agent_tools_metrics import emit_completion_metrics
 from kohakuterrarium.core.agent_workspace import WorkspaceController
 
@@ -30,11 +31,12 @@ def _fake_agent(**kw):
 
 
 class TestAttachSessionHelpers:
-    def test_attaches_three_helpers(self):
+    def test_attaches_session_helpers(self):
         agent = _fake_agent(config=types.SimpleNamespace(name="a"))
         attach_session_helpers(agent)
         assert isinstance(agent.native_tool_options, NativeToolOptions)
         assert isinstance(agent.plugin_options, PluginOptions)
+        assert isinstance(agent.tool_options, ToolOptions)
         assert isinstance(agent.workspace, WorkspaceController)
 
 

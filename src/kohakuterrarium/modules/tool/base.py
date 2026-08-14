@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from kohakuterrarium.builtin_skills import get_builtin_tool_doc
+from kohakuterrarium.modules.tool.runtime_options import validate_tool_options
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -167,6 +168,10 @@ class BaseTool:
         """
         return {}
 
+    def runtime_option_schema(self) -> dict[str, dict[str, Any]]:
+        """Declare runtime-mutable options for an ordinary local tool."""
+        return {}
+
     # Unsafe tools share a serial lock while safe tools may remain parallel.
     is_concurrency_safe: bool = True
 
@@ -176,6 +181,18 @@ class BaseTool:
     def __init__(self, config: ToolConfig | None = None):
         self.config = config or ToolConfig()
         self._manual_read = False
+
+    def validate_runtime_options(
+        self, values: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Validate configured runtime options without changing the tool."""
+        schema = self.runtime_option_schema() or {}
+        source = self.config.extra if values is None else values
+        selected = {key: source[key] for key in schema if key in source}
+        return validate_tool_options(self.tool_name, selected, schema)
+
+    def refresh_runtime_options(self, options: dict[str, Any]) -> None:
+        """Apply validated effective options after a runtime update."""
 
     @property
     @abstractmethod

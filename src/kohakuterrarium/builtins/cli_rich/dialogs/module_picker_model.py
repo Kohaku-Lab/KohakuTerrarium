@@ -11,7 +11,7 @@ types), a navigable list with a toggle column for plugins, and an
 edit form whose fields are derived from each module's
 ``option_schema``. Every operation routes through the same agent
 helpers (``agent.plugins`` / ``agent.plugin_options`` /
-``agent.native_tool_options``) the other surfaces use, so behaviour
+``agent.native_tool_options`` / ``agent.tool_options``) the other surfaces use, so behaviour
 stays consistent.
 """
 
@@ -22,8 +22,9 @@ from typing import Any
 TAB_LABELS = {
     "plugin": "Plugins",
     "native_tool": "Native tools",
+    "tool": "Tools",
 }
-DEFAULT_TAB_ORDER: list[str] = ["plugin", "native_tool"]
+DEFAULT_TAB_ORDER: list[str] = ["plugin", "native_tool", "tool"]
 
 
 @dataclass
@@ -48,6 +49,7 @@ class ModuleFormField:
     kind: str
     value: str = ""
     options: list[str] | None = None
+    unavailable: dict[str, str] = field(default_factory=dict)
     doc: str = ""
     minimum: float | None = None
     maximum: float | None = None

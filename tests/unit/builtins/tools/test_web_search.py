@@ -10,7 +10,11 @@ import pytest
 
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.web_search import (
+    DeepSeekSearchBackend,
+    SearchBackendOperationalError,
+    SearchBackendUnavailable,
     WebSearchTool,
+    _normalize_deepseek_response,
     _parse_ddg_html,
     _unwrap_ddg_redirect,
 )
@@ -190,3 +194,298 @@ class TestWebSearchFallback:
         result = await tool._execute({"query": ""})
         assert result.error is not None
         assert called == []
+
+
+class _Response:
+    def __init__(self, status_code=200, data=None):
+        self.status_code = status_code
+        self._data = data if data is not None else {}
+
+    def json(self):
+        return self._data
+
+
+class _Client:
+    def __init__(self, response, capture):
+        self.response = response
+        self.capture = capture
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def post(self, url, **kwargs):
+        self.capture.append((url, kwargs))
+        return self.response
+
+
+class TestDeepSeekSearch:
+    @pytest.mark.asyncio
+    async def test_sends_forced_search_and_normalizes_sources(self, monkeypatch):
+        capture = []
+        data = {
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "action": {"type": "search", "query": "kt search"},
+                },
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Grounded answer.",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "url": "https://example.com/source",
+                                    "title": "Source",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ],
+            "usage": {"input_tokens": 10, "output_tokens": 5},
+        }
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "secret-key")
+        monkeypatch.setattr(
+            web_search.httpx,
+            "AsyncClient",
+            lambda **kwargs: _Client(_Response(data=data), capture),
+        )
+
+        response = await DeepSeekSearchBackend("deepseek-v4-flash").search(
+            "kt search", 3, "cn-zh"
+        )
+
+        _, request = capture[0]
+        assert request["json"]["tools"] == [{"type": "web_search"}]
+        assert request["json"]["tool_choice"] == {"type": "web_search"}
+        assert request["headers"]["Authorization"] == "Bearer secret-key"
+        assert response.sources == [
+            {"title": "Source", "url": "https://example.com/source"}
+        ]
+        assert "Grounded answer" in response.output
+        assert response.metadata["citation_status"] == "verified"
+        assert response.metadata["annotation_count"] == 1
+        assert "secret-key" not in repr(response.metadata)
+
+    @pytest.mark.asyncio
+    async def test_missing_key_does_not_use_configured_fallback(self, monkeypatch):
+        called = []
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "")
+
+        async def fake_ddg(*args):
+            called.append("ddg")
+            return []
+
+        monkeypatch.setattr(web_search, "_search_httpx_ddg", fake_ddg)
+        tool = WebSearchTool(
+            ToolConfig(extra={"backend": "deepseek", "fallback": "duckduckgo"})
+        )
+
+        result = await tool._execute({"query": "anything"})
+
+        assert "API key is not configured" in result.error
+        assert called == []
+
+    @pytest.mark.asyncio
+    async def test_non_object_response_is_a_controlled_operational_error(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "configured")
+        monkeypatch.setattr(
+            web_search.httpx,
+            "AsyncClient",
+            lambda **kwargs: _Client(_Response(data=[]), []),
+        )
+
+        with pytest.raises(SearchBackendOperationalError, match="invalid response"):
+            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+
+    @pytest.mark.asyncio
+    async def test_failed_response_status_is_not_reported_as_empty_success(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "configured")
+        data = {
+            "status": "failed",
+            "error": {
+                "code": "authentication_error",
+                "message": "invalid credential",
+            },
+            "output": [],
+        }
+        monkeypatch.setattr(
+            web_search.httpx,
+            "AsyncClient",
+            lambda **kwargs: _Client(_Response(data=data), []),
+        )
+
+        with pytest.raises(SearchBackendUnavailable, match="authentication_error"):
+            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+
+    @pytest.mark.asyncio
+    async def test_transient_failed_response_status_is_fallback_eligible(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "configured")
+        data = {
+            "status": "failed",
+            "error": {"code": "rate_limit_error", "message": "try later"},
+            "output": [],
+        }
+        monkeypatch.setattr(
+            web_search.httpx,
+            "AsyncClient",
+            lambda **kwargs: _Client(_Response(data=data), []),
+        )
+
+        with pytest.raises(SearchBackendOperationalError, match="rate_limit_error"):
+            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+
+    @pytest.mark.asyncio
+    async def test_incomplete_response_with_partial_output_is_explicit(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "configured")
+        data = {
+            "status": "incomplete",
+            "incomplete_details": {"reason": "max_output_tokens"},
+            "output_text": "Partial grounded answer.",
+        }
+        monkeypatch.setattr(
+            web_search.httpx,
+            "AsyncClient",
+            lambda **kwargs: _Client(_Response(data=data), []),
+        )
+
+        response = await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+
+        assert "Partial grounded answer" in response.output
+        assert "Incomplete DeepSeek response: max_output_tokens" in response.output
+        assert response.metadata["response_status"] == "incomplete"
+        assert response.metadata["incomplete_reason"] == "max_output_tokens"
+
+    @pytest.mark.asyncio
+    async def test_incomplete_response_without_output_is_not_empty_success(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "configured")
+        data = {
+            "status": "incomplete",
+            "incomplete_details": {"reason": "content_filter"},
+            "output": [],
+        }
+        monkeypatch.setattr(
+            web_search.httpx,
+            "AsyncClient",
+            lambda **kwargs: _Client(_Response(data=data), []),
+        )
+
+        with pytest.raises(SearchBackendUnavailable, match="content_filter"):
+            await DeepSeekSearchBackend("deepseek-v4-flash").search("q", 3, "")
+
+    @pytest.mark.asyncio
+    async def test_operational_failure_uses_explicit_fallback(self, monkeypatch):
+        async def fail_search(*args):
+            raise SearchBackendOperationalError("rate limited")
+
+        async def fallback_search(*args):
+            return [{"href": "https://fallback", "title": "fallback", "body": ""}]
+
+        class _FailingBackend:
+            search = staticmethod(fail_search)
+
+        monkeypatch.setattr(WebSearchTool, "_backend", lambda self: _FailingBackend())
+        monkeypatch.setattr(web_search, "_has_ddg", lambda: False)
+        monkeypatch.setattr(web_search, "_search_httpx_ddg", fallback_search)
+        tool = WebSearchTool(
+            ToolConfig(extra={"backend": "deepseek", "fallback": "duckduckgo"})
+        )
+
+        result = await tool._execute({"query": "anything"})
+
+        assert "fallback" in result.output
+        assert result.metadata["fallback_from"] == "deepseek"
+
+    def test_schema_marks_deepseek_unavailable_without_key(self, monkeypatch):
+        monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)
+
+        schema = WebSearchTool().runtime_option_schema()
+
+        assert "deepseek" in schema["backend"]["disabled_values"]
+        assert schema["backend"]["default"] == "duckduckgo"
+
+    def test_untrusted_annotation_url_is_not_exposed(self):
+        response = _normalize_deepseek_response(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "answer",
+                                "annotations": [
+                                    {"url": "javascript:alert(1)", "title": "bad"}
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            "q",
+            10,
+            "deepseek-v4-flash",
+        )
+
+        assert response.sources == []
+        assert "javascript:" not in response.output
+
+    def test_provider_text_links_remain_visible_but_are_not_verified(self):
+        response = _normalize_deepseek_response(
+            {"output_text": "Read https://example.com/provider-text"},
+            "q",
+            10,
+            "deepseek-v4-flash",
+        )
+
+        assert "https://example.com/provider-text" in response.output
+        assert "unverified provider text" in response.output
+        assert response.sources == []
+        assert response.metadata["citation_status"] == "unverified_text"
+
+    def test_non_citation_annotation_with_http_url_is_not_trusted(self):
+        response = _normalize_deepseek_response(
+            {
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [
+                            {
+                                "type": "output_text",
+                                "text": "answer",
+                                "annotations": [
+                                    {
+                                        "type": "file_reference",
+                                        "url": "https://example.com/not-a-citation",
+                                        "title": "not a citation",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            },
+            "q",
+            10,
+            "deepseek-v4-flash",
+        )
+
+        assert response.sources == []
+        assert "not-a-citation" not in response.output
+        assert response.metadata["annotation_count"] == 1

@@ -581,13 +581,20 @@ class TestActivityHandlers:
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
-                "tool_done", "[bash] done", {"job_id": "j1", "result": "ok"}
+                "tool_done",
+                "[bash] done",
+                {
+                    "job_id": "j1",
+                    "result": "ok",
+                    "tool_metadata": {"backend": "deepseek"},
+                },
             )
             store.flush()
             evts = [e for e in store.get_events("alice") if e["type"] == "tool_result"]
             assert len(evts) == 1
             assert evts[0]["exit_code"] == 0
             assert evts[0]["output"] == "ok"
+            assert evts[0]["tool_metadata"] == {"backend": "deepseek"}
         finally:
             store.close()
 

@@ -164,6 +164,21 @@ class TestSetModuleOptionsDispatch:
         assert out == {"a": 1}
         assert store == {"t1": {"a": 1}}
 
+    def test_tool_dispatch(self):
+        store = {}
+
+        class _Helper:
+            def set(self, name, values):
+                store[name] = values
+                return values
+
+        agent = SimpleNamespace(tool_options=_Helper())
+        out = co.agent_set_module_options(
+            agent, "tool", "web_search", {"backend": "deepseek"}
+        )
+        assert out == {"backend": "deepseek"}
+        assert store == {"web_search": {"backend": "deepseek"}}
+
 
 # ---------------------------------------------------------------------------
 # _resumable_events — store raising

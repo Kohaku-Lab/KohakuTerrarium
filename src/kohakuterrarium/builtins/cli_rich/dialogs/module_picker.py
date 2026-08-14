@@ -1,5 +1,4 @@
-"""Module picker overlay — interactive runtime config for plugins +
-native tools rendered inside the Rich CLI live region.
+"""Module picker overlay for runtime-configurable modules.
 
 Pattern mirrors :class:`SettingsOverlay`:
 
@@ -36,6 +35,7 @@ from kohakuterrarium.builtins.cli_rich.dialogs.module_picker_model import (
 from kohakuterrarium.builtins.cli_rich.dialogs.module_picker_render import (
     render_overlay,
 )
+from kohakuterrarium.core.agent_tool_options import agent_tool_inventory
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -83,6 +83,7 @@ class ModulePicker:
             return
         plugins: list[ModuleEntry] = []
         natives: list[ModuleEntry] = []
+        tools: list[ModuleEntry] = []
         mgr = getattr(agent, "plugins", None)
         if mgr:
             for entry in mgr.list_plugins_with_options():
@@ -123,6 +124,18 @@ class ModulePicker:
                         priority=None,
                     )
                 )
+            for entry in agent_tool_inventory(agent):
+                tools.append(
+                    ModuleEntry(
+                        type="tool",
+                        name=entry["name"],
+                        description=entry.get("description", ""),
+                        schema=entry.get("option_schema", {}),
+                        options=entry.get("values", {}),
+                        enabled=None,
+                        priority=None,
+                    )
+                )
         plugins.sort(
             key=lambda m: (
                 0 if m.enabled else 1,
@@ -131,9 +144,11 @@ class ModulePicker:
             )
         )
         natives.sort(key=lambda m: m.name)
+        tools.sort(key=lambda m: m.name)
         self._entries_by_type = {
             "plugin": plugins,
             "native_tool": natives,
+            "tool": tools,
         }
         for tid, entries in self._entries_by_type.items():
             cur = self._cursor.get(tid, 0)
@@ -267,7 +282,13 @@ class ModulePicker:
             current = entry.options.get(key, spec.get("default"))
             value_text = _stringify(current, kind)
             options = (
-                [str(v) for v in (spec.get("values") or [])] if kind == "enum" else None
+                [
+                    str(v)
+                    for v in (spec.get("values") or [])
+                    if str(v) not in (spec.get("disabled_values") or {})
+                ]
+                if kind == "enum"
+                else None
             )
             fields.append(
                 ModuleFormField(
@@ -276,6 +297,10 @@ class ModulePicker:
                     kind=kind,
                     value=value_text,
                     options=options,
+                    unavailable={
+                        str(k): str(v)
+                        for k, v in (spec.get("disabled_values") or {}).items()
+                    },
                     doc=spec.get("doc", "") or "",
                     minimum=spec.get("min"),
                     maximum=spec.get("max"),
@@ -429,6 +454,11 @@ class ModulePicker:
                 merged = dict(helper.get(target.name))
                 merged.update(diff)
                 helper.set(target.name, merged)
+            elif target.type == "tool":
+                helper = getattr(agent, "tool_options", None)
+                if helper is None:
+                    raise RuntimeError("agent has no tool_options helper")
+                helper.set(target.name, diff)
             else:
                 raise ValueError(f"Unsupported module type: {target.type!r}")
         except Exception as e:

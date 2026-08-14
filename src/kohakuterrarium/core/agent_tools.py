@@ -529,6 +529,9 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         canvas_preview = tool_metadata.get("canvas_preview")
         if canvas_preview:
             metadata["canvas_preview"] = canvas_preview
+        session_metadata = tool_metadata.get("session_metadata")
+        if isinstance(session_metadata, dict):
+            metadata["tool_metadata"] = dict(session_metadata)
         self.output_router.notify_activity(
             done_activity,
             f"[{label}] {status}",

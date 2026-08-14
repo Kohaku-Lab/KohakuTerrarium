@@ -29,6 +29,7 @@ PROVIDER_KEY_MAP: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "gemini": "GEMINI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
     "mimo": "MIMO_API_KEY",
     "kimi-code": "KIMI_CODE_API_KEY",
     "glm-coding": "GLM_CODING_API_KEY",
@@ -99,6 +100,25 @@ def get_api_key(provider_or_env: str) -> str:
     if provider_or_env != env_var:
         key = os.environ.get(provider_or_env, "")
     return key
+
+
+def has_api_key(provider_or_env: str) -> bool:
+    """Check credential availability without logging resolver misses."""
+    provider = provider_or_env
+    for prov, env in PROVIDER_KEY_MAP.items():
+        if provider_or_env == env:
+            provider = prov
+            break
+    if _resolver is not None:
+        try:
+            return bool(_resolver(provider))
+        except Exception:  # pragma: no cover - resolver failures are external
+            return False
+    keys = _load_api_keys()
+    if keys.get(provider):
+        return True
+    env_var = PROVIDER_KEY_MAP.get(provider, provider_or_env)
+    return bool(os.environ.get(env_var, ""))
 
 
 def list_api_keys() -> dict[str, str]:
