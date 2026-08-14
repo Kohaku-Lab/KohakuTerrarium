@@ -442,6 +442,9 @@ class SessionOutput(OutputModule):
         canvas_preview = metadata.get("canvas_preview")
         if canvas_preview:
             event_data["canvas_preview"] = canvas_preview
+        tool_metadata = metadata.get("tool_metadata")
+        if isinstance(tool_metadata, dict):
+            event_data["tool_metadata"] = dict(tool_metadata)
         self._record("tool_result", event_data)
 
     def _handle_tool_error(self, name: str, detail: str, metadata: dict) -> None:

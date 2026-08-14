@@ -13,7 +13,7 @@
 
       <!-- enum -->
       <el-select v-if="entry.spec?.type === 'enum'" v-model="draft[entry.key]" size="small" :placeholder="String(entry.spec?.default ?? '')">
-        <el-option v-for="v in entry.spec?.values || []" :key="v" :value="v" :label="v" />
+        <el-option v-for="v in entry.spec?.values || []" :key="v" :value="v" :label="enumLabel(entry.spec, v)" :disabled="Boolean(entry.spec?.disabled_values?.[v])" />
       </el-select>
 
       <!-- bool -->
@@ -32,6 +32,7 @@
       <el-input v-else v-model="draft[entry.key]" size="small" :placeholder="String(entry.spec?.default ?? '')" />
 
       <p v-if="dictErrors[entry.key]" class="text-[10px] text-coral font-mono">{{ dictErrors[entry.key] }}</p>
+      <p v-for="(reason, value) in entry.spec?.disabled_values || {}" :key="`${entry.key}-${value}`" class="text-[10px] text-warm-400">{{ value }} unavailable: {{ reason }}</p>
     </div>
 
     <!-- status indicator (auto-sync) ─────────────────────────── -->
@@ -115,6 +116,10 @@ const hasDictError = computed(() => Object.values(dictErrors.value).some(Boolean
 function isWide(entry) {
   const t = entry?.spec?.type
   return t === "list" || t === "dict"
+}
+
+function enumLabel(spec, value) {
+  return spec?.disabled_values?.[value] ? `${value} — unavailable` : value
 }
 
 function deepClone(v) {

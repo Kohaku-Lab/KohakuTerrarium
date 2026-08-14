@@ -1255,6 +1255,22 @@ class TestInjectSavedState:
         finally:
             store.close()
 
+    def test_tool_options_apply_failure_is_swallowed(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.save_state("alice", triggers=[{"name": "t1"}])
+
+            class _BoomOptions:
+                def apply(self):
+                    raise RuntimeError("tool reapply failed")
+
+            agent = _FakeAgentForInject()
+            agent.tool_options = _BoomOptions()
+            inject_saved_state(agent, store, "alice")
+            assert agent._pending_resume_triggers == [{"name": "t1"}]
+        finally:
+            store.close()
+
     def test_replays_when_snapshot_branch_differs(self, tmp_path):
         # Snapshot was saved on branch1 but the latest live subtree is
         # branch2 (sibling). inject_saved_state must discard the stale

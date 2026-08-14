@@ -129,6 +129,7 @@ import { moduleAPI } from "@/utils/api"
 const TYPE_LABELS = {
   plugin: "Plugins",
   native_tool: "Native tools",
+  tool: "Tools",
 }
 
 const props = defineProps({
@@ -194,7 +195,7 @@ const typeTabs = computed(() => {
   // Stable order: plugin first, native_tool second, then any future
   // types alphabetically. Tabs with zero modules are still rendered
   // (disabled) so the structure is predictable across creatures.
-  const order = ["plugin", "native_tool"]
+  const order = ["plugin", "native_tool", "tool"]
   for (const t of [...counts.keys()].sort()) {
     if (!order.includes(t)) order.push(t)
   }
@@ -344,7 +345,7 @@ function pickInitialActiveType() {
   const counts = new Map()
   for (const m of modules.value) counts.set(m.type, (counts.get(m.type) || 0) + 1)
   if (counts.get(activeType.value)) return
-  for (const t of ["plugin", "native_tool"]) {
+  for (const t of ["plugin", "native_tool", "tool"]) {
     if (counts.get(t)) {
       activeType.value = t
       return

@@ -3044,6 +3044,25 @@ class TestAttachSessionStoreOptionsApply:
         agent.plugin_options.apply = boom  # type: ignore[method-assign]
         agent.attach_session_store(store)
 
+    async def test_tool_options_apply_failure_swallowed(self, make_agent, tmp_path):
+        from kohakuterrarium.session.store import SessionStore
+
+        store = SessionStore(str(tmp_path / "s.kohakutr.v2"))
+        store.init_meta(
+            session_id="x",
+            config_type="agent",
+            config_path="x",
+            pwd=str(tmp_path),
+            agents=["test_agent"],
+        )
+        agent = make_agent()
+
+        def boom():
+            raise RuntimeError("tool apply failed")
+
+        agent.tool_options.apply = boom  # type: ignore[method-assign]
+        agent.attach_session_store(store)
+
     async def test_attach_compact_count_invalid_skipped(self, make_agent, tmp_path):
         from kohakuterrarium.session.store import SessionStore
 

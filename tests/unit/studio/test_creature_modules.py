@@ -14,7 +14,9 @@ class _FakeService:
         self.engine = object()
 
 
-def _patch_adapter_inventory(monkeypatch, plugin_rows=None, native_rows=None):
+def _patch_adapter_inventory(
+    monkeypatch, plugin_rows=None, native_rows=None, tool_rows=None
+):
     monkeypatch.setattr(
         mod.creature_plugins,
         "plugin_inventory",
@@ -25,6 +27,11 @@ def _patch_adapter_inventory(monkeypatch, plugin_rows=None, native_rows=None):
         "native_tool_inventory",
         lambda e, sid, cid: native_rows or [],
     )
+    monkeypatch.setattr(
+        mod.creature_state,
+        "tool_inventory",
+        lambda e, sid, cid: tool_rows or [],
+    )
 
 
 # ── supported_types ─────────────────────────────────────────────
@@ -32,8 +39,7 @@ def _patch_adapter_inventory(monkeypatch, plugin_rows=None, native_rows=None):
 
 class TestSupportedTypes:
     def test_basic(self):
-        # The dispatch table currently registers exactly these two types.
-        assert mod.supported_types() == ["plugin", "native_tool"]
+        assert mod.supported_types() == ["plugin", "native_tool", "tool"]
 
 
 # ── _adapter ────────────────────────────────────────────────────
@@ -64,6 +70,13 @@ class TestListModules:
             native_rows=[
                 {"name": "nt1", "description": "nd", "option_schema": {"k": 1}}
             ],
+            tool_rows=[
+                {
+                    "name": "web_search",
+                    "description": "search",
+                    "values": {"backend": "duckduckgo"},
+                }
+            ],
         )
         svc = _FakeService()
         out = mod.list_modules(svc, "sid", "cid")
@@ -77,6 +90,8 @@ class TestListModules:
         assert by_name["nt1"]["type"] == "native_tool"
         assert by_name["nt1"]["enabled"] is None
         assert by_name["nt1"]["schema"] == {"k": 1}
+        assert by_name["web_search"]["type"] == "tool"
+        assert by_name["web_search"]["options"] == {"backend": "duckduckgo"}
 
     def test_swallows_per_type_errors(self, monkeypatch):
         def raise_runtime(*args, **kwargs):
@@ -85,6 +100,9 @@ class TestListModules:
         monkeypatch.setattr(mod.creature_plugins, "plugin_inventory", raise_runtime)
         monkeypatch.setattr(
             mod.creature_state, "native_tool_inventory", lambda e, sid, cid: []
+        )
+        monkeypatch.setattr(
+            mod.creature_state, "tool_inventory", lambda e, sid, cid: []
         )
         svc = _FakeService()
         # plugin path raises, but native_tool succeeds → returns empty list.
@@ -143,6 +161,22 @@ class TestGetModuleOptions:
                 _FakeService(), "sid", "cid", "native_tool", "missing"
             )
 
+    def test_tool_known(self, monkeypatch):
+        monkeypatch.setattr(
+            mod.creature_state,
+            "tool_inventory",
+            lambda e, sid, cid: [
+                {
+                    "name": "web_search",
+                    "option_schema": {"backend": {"type": "enum"}},
+                    "values": {"backend": "duckduckgo"},
+                }
+            ],
+        )
+        out = mod.get_module_options(_FakeService(), "sid", "cid", "tool", "web_search")
+        assert out["type"] == "tool"
+        assert out["options"] == {"backend": "duckduckgo"}
+
     def test_unknown_type(self):
         with pytest.raises(ValueError):
             mod.get_module_options(_FakeService(), "sid", "cid", "ghost", "p1")
@@ -181,6 +215,25 @@ class TestSetModuleOptions:
         # None values become empty dict before passthrough.
         assert called == [{}]
 
+    def test_tool(self, monkeypatch):
+        called = []
+
+        def fake_set(e, sid, cid, name, values):
+            called.append((name, values))
+            return {"backend": "deepseek"}
+
+        monkeypatch.setattr(mod.creature_state, "set_tool_options", fake_set)
+        out = mod.set_module_options(
+            _FakeService(),
+            "sid",
+            "cid",
+            "tool",
+            "web_search",
+            {"backend": "deepseek"},
+        )
+        assert out == {"backend": "deepseek"}
+        assert called == [("web_search", {"backend": "deepseek"})]
+
 
 # ── toggle_module ───────────────────────────────────────────────
 
@@ -197,3 +250,7 @@ class TestToggleModule:
     async def test_native_tool_unsupported(self):
         with pytest.raises(ValueError, match="does not support toggle"):
             await mod.toggle_module(_FakeService(), "sid", "cid", "native_tool", "nt1")
+
+    async def test_tool_unsupported(self):
+        with pytest.raises(ValueError, match="does not support toggle"):
+            await mod.toggle_module(_FakeService(), "sid", "cid", "tool", "web_search")

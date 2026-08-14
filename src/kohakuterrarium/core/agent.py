@@ -876,6 +876,17 @@ class Agent(
                     error=str(e),
                     exc_info=True,
                 )
+        tool_options = getattr(self, "tool_options", None)
+        if tool_options is not None:
+            try:
+                tool_options.apply()
+            except Exception as e:
+                logger.warning(
+                    "tool option apply skipped",
+                    agent=self.config.name,
+                    error=str(e),
+                    exc_info=True,
+                )
         plugin_options = getattr(self, "plugin_options", None)
         if plugin_options is not None:
             try:

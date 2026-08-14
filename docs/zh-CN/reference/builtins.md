@@ -88,7 +88,9 @@ KohakuTerrarium 随附的所有内置工具、子代理、输入、输出、用�
 
 - 参数：`url`。
 
- **`web_search`**：使用 DuckDuckGo 搜索，返回 Markdown 格式结果。直接执行。
+ **`web_search`**：默认使用 DuckDuckGo，也可选择 DeepSeek Responses
+搜索后端。DeepSeek 需要先执行 `kt config key set deepseek`，再通过
+`/module set web_search backend deepseek` 为当前 Creature 启用。直接执行。
 
 - 参数：`query`、`max_results`（int）、`region`（str）。
 

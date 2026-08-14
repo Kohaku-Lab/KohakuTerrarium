@@ -32,6 +32,9 @@ import pytest
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
+from kohakuterrarium.builtins.tools import web_search
+from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
     AgentConfig,
@@ -49,6 +52,7 @@ from kohakuterrarium.modules.plugin.base import (
     PluginContext as RuntimePluginContext,
 )
 from kohakuterrarium.modules.plugin.manager import PluginManager
+from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import (
     ContextUpdateMode,
     OutputTarget,
@@ -63,6 +67,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.modules.user_command.base import (
     BaseUserCommand,
@@ -125,6 +130,51 @@ class RecordingTool(BaseTool):
                 error="recorder failed: deliberate explosion", exit_code=1
             )
         return ToolResult(output=f"recorder saw: {msg}")
+
+
+class _DeepSeekResponse:
+    status_code = 200
+
+    def json(self):
+        return {
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "action": {"type": "search", "query": "kt"},
+                },
+                {
+                    "type": "message",
+                    "content": [
+                        {
+                            "type": "output_text",
+                            "text": "Grounded answer",
+                            "annotations": [
+                                {
+                                    "type": "url_citation",
+                                    "url": "https://example.com/source",
+                                    "title": "Source",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            ]
+        }
+
+
+class _DeepSeekClient:
+    def __init__(self, capture):
+        self.capture = capture
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return None
+
+    async def post(self, url, **kwargs):
+        self.capture.append((url, kwargs["json"]))
+        return _DeepSeekResponse()
 
 
 class GuardrailPlugin(BasePlugin):
@@ -1444,6 +1494,93 @@ class TestModulesIntegration:
             assert "handled the failure" in last.get_text_content()
         finally:
             await agent.stop()
+
+    async def test_web_search_backend_switch_executes_and_resumes(
+        self, make_agent, monkeypatch, tmp_path
+    ):
+        """Ordinary tool options switch DeepSeek live and persist by session."""
+        capture = []
+        monkeypatch.setattr(web_search, "has_api_key", lambda provider: True)
+        monkeypatch.setattr(web_search, "get_api_key", lambda provider: "ds-secret")
+        monkeypatch.setattr(
+            web_search.httpx,
+            "AsyncClient",
+            lambda **kwargs: _DeepSeekClient(capture),
+        )
+        store = SessionStore(str(tmp_path / "modules.kohakutr"))
+        store.init_meta(
+            session_id="modules",
+            config_type="agent",
+            config_path="test",
+            pwd=str(tmp_path),
+            agents=["modules_agent"],
+        )
+        agent = make_agent(
+            script=[
+                ScriptEntry(
+                    "[/web_search]@@query=kt search\n[web_search/]",
+                    match="search now",
+                ),
+                ScriptEntry("search complete", match="Grounded answer"),
+            ]
+        )
+        tool = WebSearchTool()
+        agent.registry.register_tool(tool)
+        agent.executor.register_tool(tool)
+        agent.attach_session_store(store)
+        command = agent.list_user_commands()["module"]
+
+        changed = await command.execute(
+            "set web_search backend deepseek", agent._user_command_context
+        )
+        assert changed.success
+        assert tool.backend == "deepseek"
+        research = SubAgent(
+            config=RESEARCH_CONFIG,
+            parent_registry=agent.registry,
+            llm=agent.llm,
+            agent_path=tmp_path,
+        )
+        assert research.registry.get_tool("web_search") is tool
+        assert research.registry.get_tool("web_search").backend == "deepseek"
+
+        await agent.start()
+        try:
+            await agent._process_event(create_user_input_event("search now"))
+            assert capture
+            assert capture[0][1]["model"] == "deepseek-v4-flash"
+            assert "ds-secret" not in repr(capture[0][1])
+        finally:
+            await agent.stop()
+
+        search_result = next(
+            event
+            for event in store.get_events("modules_agent")
+            if event["type"] == "tool_result"
+            and event["call_id"].startswith("web_search_")
+        )
+        assert search_result["tool_metadata"]["backend"] == "deepseek"
+        assert search_result["tool_metadata"]["citation_status"] == "verified"
+        assert search_result["tool_metadata"]["annotation_count"] == 1
+        assert search_result["tool_metadata"]["verified_sources"] == [
+            {"title": "Source", "url": "https://example.com/source"}
+        ]
+        assert "ds-secret" not in repr(search_result)
+
+        resumed = make_agent(script=["ok"])
+        resumed_tool = WebSearchTool()
+        resumed.registry.register_tool(resumed_tool)
+        resumed.executor.register_tool(resumed_tool)
+        resumed.attach_session_store(store)
+        assert resumed_tool.backend == "deepseek"
+
+        resumed_command = resumed.list_user_commands()["module"]
+        reset = await resumed_command.execute(
+            "reset web_search", resumed._user_command_context
+        )
+        assert reset.success
+        assert resumed_tool.backend == "duckduckgo"
+        store.close()
 
     async def test_drive_tools_injected_and_execute_through_engine(
         self, llm_box, tmp_path

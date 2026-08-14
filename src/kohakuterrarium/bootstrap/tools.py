@@ -104,6 +104,16 @@ def create_tool(
                     f"Unknown built-in tool: {tool_config.name!r}",
                     tool_name=tool_config.name,
                 )
+            else:
+                try:
+                    tool.validate_runtime_options()
+                except ValueError as exc:
+                    _fail(
+                        strict,
+                        f"Invalid runtime options for tool "
+                        f"{tool_config.name!r}: {exc}",
+                        tool_name=tool_config.name,
+                    )
             return tool
 
         case "trigger":
