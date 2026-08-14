@@ -515,15 +515,20 @@ def _rule_priority(
 ) -> tuple[int, int]:
     """Rank a compaction rule against a selected branch projection.
 
-    Path-carrying rules beat legacy pathless rules, and a deeper match on the
-    selected branch (more shared turns) beats a shallower sibling. Range is
-    ignored here: a rule's own range covers its prefix, and the deepest
-    matching lineage is authoritative for the shared prefix it covers.
+    Rank 2: a path-carrying rule whose ENTIRE path lies on the selected
+    lineage (``path ⊆ selected``) — the summary covers only this branch's own
+    turns, and a deeper path (more turns) is authoritative for the prefix it
+    covers. Rank 1: a legacy pathless rule (fallback baseline). Rank 0: a
+    sibling/incompatible rule whose summary covers turns outside the selected
+    branch — its summary carries sibling-specific content, not just the shared
+    ancestor, so it must never leak into this branch's replay.
     """
     _frm, _to, path, _summary = rule
     if path is None:
+        return (1, 0)
+    if not path.issubset(selected_pairs):
         return (0, 0)
-    return (1, len(path & selected_pairs))
+    return (2, len(path))
 
 
 def replay_conversation(
@@ -572,12 +577,25 @@ def replay_conversation(
     # stack on top of this branch's own summary. Newest wins on an exact tie.
     if replaced_rules:
         selected_pairs = {(turn, branch) for turn, branch in selected.items()}
-        replaced_rules = [
-            max(
-                enumerate(replaced_rules),
-                key=lambda item: (*_rule_priority(item[1], selected_pairs), item[0]),
-            )[1]
+        # Drop sibling/incompatible rules (rank 0) before selecting: their
+        # summaries carry sibling-specific content that must not leak into
+        # this branch's replay.
+        eligible = [
+            r for r in replaced_rules if _rule_priority(r, selected_pairs)[0] > 0
         ]
+        replaced_rules = (
+            [
+                max(
+                    enumerate(eligible),
+                    key=lambda item: (
+                        *_rule_priority(item[1], selected_pairs),
+                        item[0],
+                    ),
+                )[1]
+            ]
+            if eligible
+            else []
+        )
     # Summaries are emitted where the replaced content sat, not at the
     # compact_replace event's own stream position (a compact runs after the
     # live tail it preserves). pending summaries are ordered by replaced_from

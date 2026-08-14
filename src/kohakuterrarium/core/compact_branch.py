@@ -30,11 +30,11 @@ def current_path(agent: Any) -> set[tuple[int, int]]:
                 t, b = int(item[0]), int(item[1])
             except (TypeError, ValueError):
                 continue
-            if t > 0:
+            if t > 0 and b > 0:
                 path.add((t, b))
     ti = getattr(agent, "_turn_index", None)
     bi = getattr(agent, "_branch_id", None)
-    if isinstance(ti, int) and isinstance(bi, int) and ti > 0:
+    if isinstance(ti, int) and isinstance(bi, int) and ti > 0 and bi > 0:
         path.add((ti, bi))
     return path
 

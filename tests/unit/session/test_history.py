@@ -420,12 +420,14 @@ class TestReplayBranching:
                 "event_id": 10,
             },
         ]
-        # branch 1: only the common ancestor turn0-b1 is folded into the
-        # summary (it was compacted on branch 2's path); branch-1-specific
-        # turns stay intact.
+        # branch 1: branch 2's summary carries branch-2-specific content, so
+        # it must NOT leak into branch 1. Branch 1 keeps its full history
+        # (the shared ancestor turn0-b1 included), untouched by branch 2's
+        # compact.
         out1 = replay_conversation(events, branch_view={0: 1, 1: 1, 2: 1})
         assert out1 == [
-            {"role": "assistant", "content": "[S: branch2 compact]"},
+            {"role": "user", "content": "U0"},
+            {"role": "assistant", "content": "R0"},
             {"role": "user", "content": "U1a"},
             {"role": "assistant", "content": "R1a"},
             {"role": "user", "content": "U2a"},
@@ -537,8 +539,11 @@ class TestReplayBranching:
             },
         ]
         out1 = replay_conversation(events, branch_view={1: 1, 2: 1, 3: 1})
+        # branch1 must NOT see branch2's summary (it carries branch-2-specific
+        # turn2 content); branch1 keeps its full history.
         assert out1 == [
-            {"role": "assistant", "content": "[S: branch2]"},
+            {"role": "user", "content": "U1"},
+            {"role": "assistant", "content": "R1"},
             {"role": "user", "content": "U2a"},
             {"role": "assistant", "content": "R2a"},
             {"role": "user", "content": "U3a"},
@@ -984,7 +989,11 @@ class TestPendingSummaryScan:
                 "event_id": 34,
                 "replaced_from_event_id": 15,
                 "replaced_to_event_id": 30,
-                "compact_path": [[t, 2] for t in range(1, 17)],
+                # branch2's own turns only (1..8, 13..16); turns 9..12 belong to
+                # branch3 in the selected view and must not be claimed.
+                "compact_path": [
+                    [t, 2] for t in list(range(1, 9)) + list(range(13, 17))
+                ],
                 "turn_index": 16,
                 "branch_id": 2,
             }

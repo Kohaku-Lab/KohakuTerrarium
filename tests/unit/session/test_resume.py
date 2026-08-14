@@ -911,7 +911,11 @@ class TestBackfillDedupeAndPathResilience:
             },
         ]
         out = backfill_turn_metadata(snapshot, events)
-        assert out[0]["metadata"]["event_id"] == 10
+        # turn/branch coordinates are preserved, but event_id must stay unset:
+        # a user_input's id is not a valid editable user_message target.
+        assert out[0]["metadata"]["turn_index"] == 1
+        assert out[0]["metadata"]["branch_id"] == 1
+        assert "event_id" not in out[0]["metadata"]
 
     def test_backfill_dedupes_duplicate_user_events(self):
         from kohakuterrarium.session.resume_branch import backfill_turn_metadata

@@ -10,6 +10,7 @@ from kohakuterrarium.core.compact_branch import (
     persist_compacted,
 )
 from kohakuterrarium.core.compact_splice import (
+    is_real_user_message,
     prefix_fingerprint,
     select_compact_boundary,
     splice_conversation,
@@ -284,6 +285,17 @@ class CompactManager:
             # Live zone: messages[boundary:]
             compact_messages = messages[1:boundary]
 
+            # The replaced range must reflect the turns this splice actually
+            # kept live (token pressure can move boundary past the window).
+            live_turn_count = self.config.keep_recent_turns
+            if boundary > preferred_boundary:
+                live_turn_count = sum(
+                    1 for m in messages[boundary:] if is_real_user_message(m)
+                )
+                live_turn_count += int(
+                    any(is_real_user_message(m) for m in reversed(messages[1:boundary]))
+                )
+
             if not compact_messages:
                 self._emit_compact_skipped(
                     "nothing_to_compact",
@@ -415,11 +427,11 @@ class CompactManager:
                 metadata = build_compact_metadata(
                     self._agent,
                     events,
-                    # keep_count is a MESSAGE count; compute_replaced_range
-                    # expects the number of live USER TURNS, so pass the
-                    # configured turn window — otherwise the replaced range
-                    # is dropped and compact_complete becomes unreplayable.
-                    self.config.keep_recent_turns,
+                    # keep_count must be the number of live USER TURNS this
+                    # splice actually retained (under token pressure it is
+                    # smaller than the configured window), so the replaced
+                    # range matches what the summary really covered.
+                    live_turn_count,
                     compact_round=self._compact_count,
                     summary=summary,
                     messages_compacted=boundary - 1,

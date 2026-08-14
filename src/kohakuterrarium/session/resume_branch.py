@@ -75,7 +75,11 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
         key = (ti, bi)
         etype = evt.get("type", "")
         meta = {
-            "event_id": evt.get("event_id"),
+            # Only a user_message carries an editable event_id; a legacy
+            # user_input's id is NOT valid for edit targeting
+            # (select_raw_history_prefix rejects non-user_message targets),
+            # so leave it unset when the chosen source is user_input.
+            "event_id": evt.get("event_id") if etype == "user_message" else None,
             "turn_index": ti,
             "branch_id": bi,
         }
@@ -108,12 +112,19 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
         if m.get("role") == "user" and tail_meta:
             meta = dict(m.get("metadata") or {})
             # Position-aligned: every user message consumes one tail slot so
-            # later messages keep their correct turn; an existing metadata is
-            # preserved (never overwritten).
-            if meta.get("turn_index") is None:
-                meta.setdefault("event_id", tail_meta[0]["event_id"])
-                meta.setdefault("turn_index", tail_meta[0]["turn_index"])
-                meta.setdefault("branch_id", tail_meta[0]["branch_id"])
+            # later messages keep their correct turn. Replace the canonical
+            # identity fields whenever turn or branch is not a positive int
+            # (missing, corrupt, or legacy-typed) — a partial/valid-looking
+            # value must not survive and later fail edit targeting.
+            ti = meta.get("turn_index")
+            bi = meta.get("branch_id")
+            if not (isinstance(ti, int) and ti > 0 and isinstance(bi, int) and bi > 0):
+                meta["turn_index"] = tail_meta[0]["turn_index"]
+                meta["branch_id"] = tail_meta[0]["branch_id"]
+                if tail_meta[0].get("event_id") is not None:
+                    meta["event_id"] = tail_meta[0]["event_id"]
+                else:
+                    meta.pop("event_id", None)
                 m["metadata"] = meta
             tail_meta = tail_meta[1:]
         out.append(m)
@@ -167,7 +178,10 @@ def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
     a_ti = getattr(agent, "_turn_index", None)
     a_bi = getattr(agent, "_branch_id", None)
     a_ppath = getattr(agent, "_parent_branch_path", None) or []
-    if not isinstance(a_ti, int) or not isinstance(a_bi, int):
+    # An agent with no live selection (core code can set turn/branch to 0) has
+    # no branch to compare against — treat it as "no mismatch" and trust the
+    # snapshot rather than triggering an unnecessary replay.
+    if not isinstance(a_ti, int) or not isinstance(a_bi, int) or a_ti <= 0 or a_bi <= 0:
         return False
     snapshot_path = _safe_branch_path(branch.get("parent_branch_path")) + [(ti, bi)]
     agent_path = _safe_branch_path(a_ppath) + [(a_ti, a_bi)]
