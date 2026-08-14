@@ -28,7 +28,8 @@ Using dedicated tools gives structured output and enables safety guards.
 | ------- | ------ | ------------------------------------------------------------------------------------------------ |
 | command | string | Shell command to execute (required)                                                              |
 | type    | string | Shell type: bash, zsh, sh, fish, pwsh, powershell (default: bash)                                |
-| timeout | number | Maximum execution time in seconds for this call (default: tool config timeout; `0` = no timeout) |
+| timeout | number | Maximum total call time in seconds, including concurrency-lock waiting (default: tool config timeout; `0` = no timeout) |
+| allow_concurrent | boolean | Skip the unsafe-tool concurrency lock; use only when this call is safe to run concurrently |
 
 ## Shell Type
 
@@ -63,8 +64,9 @@ Shell executable overrides are checked in this order:
 - Commands run in bash on all platforms (Git Bash on Windows) unless `type` selects another shell.
 - Use the `type` parameter to switch shells explicitly.
 - stdout and stderr are combined in the output.
-- Commands have a configurable timeout; pass `timeout` per call to override the tool default.
-- `timeout: 0` disables the execution timeout for long-running commands.
+- Commands have a configurable total timeout; `timeout` includes concurrency-lock waiting and command execution.
+- `timeout: 0` disables the total timeout for long-running commands.
+- Unsafe tool calls wait for the shared concurrency lock by default. Set `allow_concurrent=true` only when the call is safe to run concurrently; this skips that lock at your own risk. This is an executor-level override and applies to any unsafe tool, although this manual documents its Bash use.
 - Large outputs may be truncated to the configured max size.
 
 ## WHEN TO USE
@@ -80,6 +82,6 @@ Returns combined stdout/stderr. Exit code is included in the result metadata.
 
 ## LIMITATIONS
 
-- Commands have timeout (default: 60 seconds; override per call with `timeout`)
+- Commands have a total timeout (default: 60 seconds; override per call with `timeout`), including concurrency-lock waiting
 - Large outputs may be truncated
 - Shell availability varies by platform (bash via git bash on Windows)
