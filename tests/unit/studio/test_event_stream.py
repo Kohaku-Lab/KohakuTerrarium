@@ -31,8 +31,8 @@ class TestGetEventLog:
     def test_creates_log_on_demand(self):
         es_mod._event_logs.clear()
         log = get_event_log("key-1")
-        assert log == []
-        # Subsequent call returns same list.
+        assert list(log) == []
+        # Subsequent call returns same ring.
         assert get_event_log("key-1") is log
 
     def test_independent_logs_per_key(self):
@@ -40,7 +40,7 @@ class TestGetEventLog:
         a = get_event_log("a")
         b = get_event_log("b")
         a.append("x")
-        assert b == []
+        assert list(b) == []
 
 
 # ── StreamOutput sync hooks ────────────────────────────────

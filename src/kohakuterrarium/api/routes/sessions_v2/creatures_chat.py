@@ -177,6 +177,9 @@ async def creature_history(
             "messages": [],
             "events": events,
             "is_processing": False,
+            # Channel events carry no event_id; report the contract field
+            # explicitly so clients can read it unconditionally.
+            "max_event_id": 0,
         }
     cid = await resolve_creature_id(service, creature_id, session_id)
     try:
