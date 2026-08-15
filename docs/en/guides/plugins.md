@@ -88,6 +88,7 @@ Subclass `BasePlugin` and implement any of these hooks. All are async unless not
 | `post_subagent_run(result, **kwargs)` | return result or `None` | Replace sub-agent result |
 | `contribute_commands()` | return `dict[name, BaseCommand]` | Add controller `##command##` handlers |
 | `contribute_termination_check()` | return callable or `None` | Vote on whether the run should stop |
+| `get_tool_visibility(context)` | return `ToolVisibility \| None` | Restrict the per-request native tool catalog (`allowed_tools` / `allowed_subagents`; `None` = unrestricted) |
 
 Fire-and-forget callbacks (no return value, no ability to modify):
 

@@ -6,6 +6,7 @@ into the session store, declarative ``applies_to`` gating works, and
 option set/get round-trips through validation.
 """
 
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,7 @@ from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
     PluginBlockError,
     PluginContext,
+    ToolVisibility,
 )
 from kohakuterrarium.modules.plugin.option_validation import PluginOptionError
 
@@ -369,6 +371,7 @@ class TestBasePluginDefaultHooks:
     def test_contribution_hooks_default_empty(self):
         plugin = BasePlugin()
         assert plugin.get_prompt_content(PluginContext()) is None
+        assert plugin.get_tool_visibility(PluginContext()) is None
         assert plugin.runtime_services(None) == {}
         assert plugin.contribute_commands() == {}
         assert plugin.contribute_termination_check() is None
@@ -378,6 +381,32 @@ class TestBasePluginDefaultHooks:
         # the default user-command contribution is an empty mapping so a
         # plain plugin adds no slash commands.
         assert BasePlugin().contribute_user_commands() == {}
+
+
+class TestToolVisibility:
+    def test_defaults_are_unrestricted(self):
+        visibility = ToolVisibility()
+        assert visibility.allowed_tools is None
+        assert visibility.allowed_subagents is None
+        assert visibility.is_unrestricted() is True
+
+    def test_partial_restriction_is_not_unrestricted(self):
+        visibility = ToolVisibility(allowed_tools=frozenset({"read"}))
+        assert visibility.is_unrestricted() is False
+        assert visibility.allowed_subagents is None
+
+    def test_empty_set_hides_every_member(self):
+        visibility = ToolVisibility(
+            allowed_tools=frozenset(), allowed_subagents=frozenset()
+        )
+        assert visibility.is_unrestricted() is False
+        assert "read" not in visibility.allowed_tools
+        assert "worker" not in visibility.allowed_subagents
+
+    def test_is_frozen(self):
+        visibility = ToolVisibility(allowed_tools=frozenset({"read"}))
+        with pytest.raises(FrozenInstanceError):
+            visibility.allowed_tools = None  # type: ignore[misc]
 
 
 class TestPluginBlockError:

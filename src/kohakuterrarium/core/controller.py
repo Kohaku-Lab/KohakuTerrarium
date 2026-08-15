@@ -37,6 +37,7 @@ from kohakuterrarium.core.tool_output import materialize_image_part
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.message import ContentPart, FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.tools import build_provider_native_tools, build_tool_schemas
+from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.tool.base import ToolInfo
 from kohakuterrarium.parsing import (
     AssistantImageEvent,
@@ -67,6 +68,18 @@ def _merge_text_and_parts(
         merged.append(TextPart(text=text))
     merged.extend(structured_parts)
     return merged
+
+
+def _schema_allowed(
+    name: str, subagent_names: set[str], visibility: ToolVisibility
+) -> bool:
+    """Check one schema name against the applicable visibility category."""
+    allowed = (
+        visibility.allowed_subagents
+        if name in subagent_names
+        else visibility.allowed_tools
+    )
+    return allowed is None or name in allowed
 
 
 @dataclass
@@ -226,15 +239,35 @@ class Controller:
         """Check if using native API tool calling."""
         return self.config.tool_format == "native"
 
+    def _get_tool_visibility(self) -> ToolVisibility | None:
+        """Collect active plugins' per-request tool catalog restrictions."""
+        plugins = getattr(self, "plugins", None)
+        if plugins is None:
+            return None
+        return plugins.collect_tool_visibility()
+
     def _get_native_tool_schemas(self) -> "list[ToolSchema]":
-        """Build native tool schemas from registry."""
-        return build_tool_schemas(self.registry)
+        """Build callable schemas, applying plugin tool-visibility restrictions."""
+        schemas = build_tool_schemas(self.registry)
+        visibility = self._get_tool_visibility()
+        if visibility is None:
+            return schemas
+        subagent_names = set(self.registry.list_subagents())
+        return [
+            schema
+            for schema in schemas
+            if _schema_allowed(schema.name, subagent_names, visibility)
+        ]
 
     def _get_provider_native_tools(self) -> list:
         """Collect tools the active provider should translate into
         wire-format built-in tool specs. See
         :func:`build_provider_native_tools`."""
-        return build_provider_native_tools(self.registry)
+        tools = build_provider_native_tools(self.registry)
+        visibility = self._get_tool_visibility()
+        if visibility is None or visibility.allowed_tools is None:
+            return tools
+        return [tool for tool in tools if tool.tool_name in visibility.allowed_tools]
 
     def _setup_system_prompt(self) -> None:
         """Setup initial system prompt."""

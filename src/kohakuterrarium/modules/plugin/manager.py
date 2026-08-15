@@ -20,6 +20,9 @@ from kohakuterrarium.modules.plugin.dispatch import (
 from kohakuterrarium.modules.plugin.manager_commands import (
     PluginCommandRefreshMixin,
 )
+from kohakuterrarium.modules.plugin.tool_visibility import (
+    ToolVisibilityCollectorMixin,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -41,7 +44,7 @@ def _plugin_applies(plugin: BasePlugin, context: PluginContext | None) -> bool:
         return True
 
 
-class PluginManager(PluginCommandRefreshMixin):
+class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
     """Manages plugin lifecycle, hook wrapping, and callback dispatch."""
 
     def __init__(self) -> None:
