@@ -7,6 +7,7 @@ honour a single False, and collectors aggregate per-plugin output.
 """
 
 import pytest
+from types import SimpleNamespace
 
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
@@ -573,6 +574,51 @@ class TestCollectors:
         mgr = PluginManager()
         mgr.register(_WrongShape())
         assert mgr.collect_tool_visibility() is None
+
+    async def test_collect_tool_visibility_uses_plugin_scoped_context(self):
+        class _StateStore:
+            def __init__(self):
+                self.state: dict[str, object] = {}
+
+        class _StatefulVisibility(BasePlugin):
+            name = "stateful"
+
+            def get_tool_visibility(self, context):
+                if context.get_state("promoted"):
+                    return None
+                return ToolVisibility(allowed_tools=frozenset({"read"}))
+
+            async def on_load(self, context):
+                context.set_state("promoted", True)
+
+        store = _StateStore()
+        host = SimpleNamespace(session_store=store)
+        mgr = PluginManager()
+        mgr.register(_StatefulVisibility())
+        await mgr.load_all(PluginContext(agent_name="a", _host_agent=host))
+        # on_load wrote plugin:stateful:promoted; the visibility hook must
+        # receive a context scoped to the same plugin name.
+        assert mgr.collect_tool_visibility() is None
+
+    def test_collect_tool_visibility_applies_against_current_model(self):
+        class _ModelVisibility(BasePlugin):
+            name = "modeled"
+            applies_to = {"model_patterns": ["^slow/"]}
+
+            def get_tool_visibility(self, context):
+                return ToolVisibility(allowed_tools=frozenset({"read"}))
+
+        host = SimpleNamespace(llm=SimpleNamespace(model="fast/x"))
+        mgr = PluginManager()
+        mgr.register(_ModelVisibility())
+        mgr._load_context = PluginContext(
+            agent_name="a", model="fast/x", _host_agent=host
+        )
+        assert mgr.collect_tool_visibility() is None
+        host.llm.model = "slow/x"
+        assert mgr.collect_tool_visibility() == ToolVisibility(
+            allowed_tools=frozenset({"read"})
+        )
 
 
 # ── Lifecycle: load / unload ───────────────────────────────────────

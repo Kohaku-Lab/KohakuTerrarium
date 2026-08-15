@@ -140,6 +140,15 @@ class SubAgent:
 
         return limited
 
+    def _apply_tool_visibility(self, schemas: Any) -> Any:
+        """Apply plugin tool-visibility restrictions to native schemas."""
+        if self.plugins is None:
+            return schemas
+        visibility = self.plugins.collect_tool_visibility()
+        if visibility is None or visibility.allowed_tools is None:
+            return schemas
+        return [schema for schema in schemas if schema.name in visibility.allowed_tools]
+
     def _build_system_prompt(self) -> str:
         """Build complete system prompt through the shared aggregator."""
         base_prompt = self.config.load_prompt(self.agent_path)
@@ -236,7 +245,9 @@ class SubAgent:
 
         native_tool_schemas = None
         if self._is_native:
-            native_tool_schemas = build_tool_schemas(self.registry)
+            native_tool_schemas = self._apply_tool_visibility(
+                build_tool_schemas(self.registry)
+            )
 
         output_parts: list[str] = []
         tools_used: list[str] = []
