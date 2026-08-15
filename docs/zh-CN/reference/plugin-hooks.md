@@ -44,6 +44,16 @@ tags:
 
 ---
 
+## 工具可见性贡献
+
+插件可以在不修改 registry 的前提下，按请求裁剪暴露给模型的原生工具目录。多个插件的限制按类别取交集。
+
+| Hook | 签名 | 触发时机 | 返回值 |
+|---|---|---|---|
+| `get_tool_visibility` | `def get_tool_visibility(context: PluginContext) -> ToolVisibility \| None` | 每次构建原生请求的工具 schema 与 provider-native 工具前。 | `None` 不限制；返回 `ToolVisibility(allowed_tools=..., allowed_subagents=...)` 只保留指定名称，空 `frozenset` 隐藏整个类别。 |
+
+---
+
 ## 工具 Hook
 
 | Hook | 签名 | 触发时机 | 返回值 |

@@ -4,6 +4,7 @@ Hooks run linearly by priority; callbacks observe lifecycle events without nesti
 """
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
@@ -31,6 +32,22 @@ logger = get_logger(__name__)
 
 class PluginBlockError(Exception):
     """Block a tool or sub-agent call and expose the reason as its result."""
+
+
+@dataclass(frozen=True)
+class ToolVisibility:
+    """Per-request tool catalog restriction contributed by a plugin.
+
+    ``None`` means the category stays unrestricted; an empty ``frozenset``
+    hides every member of that category from the current request.
+    """
+
+    allowed_tools: frozenset[str] | None = None
+    allowed_subagents: frozenset[str] | None = None
+
+    def is_unrestricted(self) -> bool:
+        """Return True when neither tool nor sub-agent names are restricted."""
+        return self.allowed_tools is None and self.allowed_subagents is None
 
 
 class PluginContext:
@@ -272,6 +289,10 @@ class BasePlugin:
 
     def get_prompt_content(self, context: PluginContext) -> str | None:
         """Return optional runtime prompt prose collected in plugin priority order."""
+        return None
+
+    def get_tool_visibility(self, context: PluginContext) -> ToolVisibility | None:
+        """Return per-request tool catalog restrictions, or None for no opinion."""
         return None
 
     def runtime_services(self, context: Any) -> dict[str, Any]:

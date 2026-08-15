@@ -9,6 +9,8 @@ raising.
 
 from kohakuterrarium.core.budget import IterationBudget
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
+from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
@@ -301,6 +303,41 @@ class TestNativeMode:
         # Token usage from last_usage is accumulated across turns.
         assert result.total_tokens == 30  # 15 per turn × 2 turns
         assert result.cached_tokens == 6
+
+    async def test_native_turn_applies_plugin_tool_visibility(self):
+        class _CaptureLLM(_NativeLLM):
+            def __init__(self):
+                super().__init__()
+                self.request_tools: list[list[str]] = []
+
+            async def chat(self, messages, *, stream=True, tools=None, **kwargs):
+                self.request_tools.append([tool.name for tool in (tools or [])])
+                async for chunk in super().chat(
+                    messages, stream=stream, tools=tools, **kwargs
+                ):
+                    yield chunk
+
+        class _Visibility(BasePlugin):
+            name = "vis"
+
+            def get_tool_visibility(self, context):
+                return ToolVisibility(allowed_tools=frozenset({"echo"}))
+
+        mgr = PluginManager()
+        mgr.register(_Visibility())
+        echo = _EchoTool()
+        fail = _FailTool()
+        llm = _CaptureLLM()
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["echo", "failtool"], max_turns=5),
+            _registry(echo, fail),
+            llm,
+            tool_format="native",
+            plugin_manager=mgr,
+        )
+        result = await sa.run("native task")
+        assert result.success is True
+        assert llm.request_tools[0] == ["echo"]
 
     async def test_native_same_name_tool_calls_keep_own_results(self):
         # Regression: several calls to the SAME tool in one turn must each
