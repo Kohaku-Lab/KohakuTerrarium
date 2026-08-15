@@ -17,12 +17,39 @@ def _decode_key(key_bytes: bytes | str) -> str:
     return key_bytes
 
 
-def restore_event_counters(events: KVault, event_seq: dict[str, int]) -> int:
+def restore_event_counters(
+    events: KVault,
+    event_seq: dict[str, int],
+    state: KVault | None = None,
+) -> int:
     """Restore per-agent event sequences and return the largest event ID.
 
-    ``event_seq`` is updated in place from ``{agent}:e{seq}`` keys.
+    ``event_seq`` is updated in place from ``{agent}:e{seq}`` keys. With a
+    ``state`` table the global ``max_event_id`` is read from the
+    append-time-persisted counter; only when that slot is absent (sessions
+    last written by an older version) does the fallback full scan read
+    every event value. Event-seq counters always derive from the key list,
+    which does not require reading values.
     """
-    max_event_id = 0
+    if state is not None:
+        try:
+            persisted = state.get("counters:max_event_id")
+        except Exception as e:
+            logger.warning(
+                "Failed to read persisted event counter",
+                error=str(e),
+                exc_info=True,
+            )
+            persisted = None
+        if isinstance(persisted, int):
+            _restore_event_seq_from_keys(events, event_seq)
+            return persisted
+
+    _restore_event_seq_from_keys(events, event_seq)
+    return _scan_max_event_id(events)
+
+
+def _restore_event_seq_from_keys(events: KVault, event_seq: dict[str, int]) -> None:
     for key_bytes in events.keys(limit=_KV_KEYS_LIMIT):
         key = _decode_key(key_bytes)
         parts = key.rsplit(":e", 1)
@@ -34,6 +61,11 @@ def restore_event_counters(events: KVault, event_seq: dict[str, int]) -> int:
                     event_seq[agent] = seq + 1
             except ValueError:
                 pass
+
+
+def _scan_max_event_id(events: KVault) -> int:
+    max_event_id = 0
+    for key_bytes in events.keys(limit=_KV_KEYS_LIMIT):
         try:
             evt = events[key_bytes]
             if isinstance(evt, dict):
@@ -47,6 +79,14 @@ def restore_event_counters(events: KVault, event_seq: dict[str, int]) -> int:
                 exc_info=True,
             )
     return max_event_id
+
+
+def persist_event_counter(state: KVault, max_event_id: int) -> None:
+    """Persist the global max event id so reopen skips the value scan."""
+    try:
+        state["counters:max_event_id"] = max_event_id
+    except Exception as e:
+        logger.warning("Failed to persist event counter", error=str(e), exc_info=True)
 
 
 def restore_suffix_counters(table: KVault, sep: str, counter: dict[str, int]) -> None:

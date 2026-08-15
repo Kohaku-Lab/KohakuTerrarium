@@ -206,18 +206,25 @@ class SessionOutput(OutputModule):
         self._record("processing_end", {})
 
         # Snapshots are derived caches; use live controller messages when event
-        # replay cannot yet reconstruct the conversation.
+        # replay cannot yet reconstruct the conversation. The full event log is
+        # only replayed when the controller is absent; otherwise a single-key
+        # read supplies ``last_event_id`` (the O(N) full scan here made every
+        # turn cost linear in total session length).
         try:
-            events = self._store.get_events(self._event_key_prefix)
             if self._agent and hasattr(self._agent, "controller"):
                 messages = self._agent.controller.conversation.snapshot_messages()
             else:
+                events = self._store.get_events(self._event_key_prefix)
                 messages = replay_conversation(events, include_metadata=True)
-            last_event_id = 0
-            for evt in events:
-                eid = evt.get("event_id")
-                if isinstance(eid, int) and eid > last_event_id:
-                    last_event_id = eid
+            try:
+                last_event_id = self._store.max_event_id(self._event_key_prefix)
+            except AttributeError:
+                # Duck-typed store without the counter: fall back to a scan.
+                last_event_id = 0
+                for evt in self._store.get_events(self._event_key_prefix):
+                    eid = evt.get("event_id")
+                    if isinstance(eid, int) and eid > last_event_id:
+                        last_event_id = eid
             self._store.save_conversation(self._event_key_prefix, messages)
             try:
                 self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (

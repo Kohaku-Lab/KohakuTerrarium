@@ -1,7 +1,9 @@
 """Translate output events into websocket frames on an asynchronous queue."""
 
 import asyncio
+import os
 import time
+from collections import deque
 from typing import Any
 
 from kohakuterrarium.modules.output.base import OutputModule
@@ -10,11 +12,18 @@ from kohakuterrarium.modules.output.event import OutputEvent
 # The session and creature pair isolates replay history for each attachment target.
 _event_logs: dict[str, list] = {}
 
+# Reconnect replays need recent context, not the entire session. An unbounded
+# list keeps a second full copy of every streamed frame in RAM for the process
+# lifetime; a deque(maxlen=...) ring bounds that copy and keeps append+evict
+# O(1) (list slicing would left-shift the whole buffer per frame).
+# Overridable for lab harnesses.
+_EVENT_LOG_MAX = int(os.environ.get("KT_EVENT_LOG_MAX", "5000"))
 
-def get_event_log(key: str) -> list:
-    """Return the persistent in-memory replay list for an attachment key."""
+
+def get_event_log(key: str) -> deque:
+    """Return the persistent in-memory replay ring for an attachment key."""
     if key not in _event_logs:
-        _event_logs[key] = []
+        _event_logs[key] = deque(maxlen=_EVENT_LOG_MAX)
     return _event_logs[key]
 
 
@@ -58,7 +67,7 @@ class StreamOutput(OutputModule):
         self,
         source: str,
         queue: asyncio.Queue,
-        log: list,
+        log: deque,
         agent: Any | None = None,
     ):
         self._src = source
