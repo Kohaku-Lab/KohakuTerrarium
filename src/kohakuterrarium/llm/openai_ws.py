@@ -10,6 +10,7 @@ from typing import Any, AsyncIterator
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
 from kohakuterrarium.llm.codex_format import fix_tool_call_pairing, to_responses_input
 from kohakuterrarium.llm.openai_sanitize import strip_kt_extras, strip_surrogates
+from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.responses_ws import ResponsesWSSession
 
 # Request knobs consumed by the framework, never sent on the wire.
@@ -81,7 +82,9 @@ async def stream_ws_turn(
     """Run one WebSocket turn, folding results into the provider state."""
     base_event, items = build_ws_request(provider, messages, tools, kwargs)
     collected: list[NativeToolCall] = []
+    reasoning = ResponsesReasoningCollector()
     async for event in session.stream_turn(base_event, items, fix_tool_call_pairing):
+        reasoning.consume(event)
         etype = getattr(event, "type", "")
         if etype == "response.output_text.delta":
             yield strip_surrogates(event.delta)
@@ -107,3 +110,4 @@ async def stream_ws_turn(
                     "cached_tokens": cached,
                 }
     provider._last_tool_calls = collected
+    provider._last_assistant_extra_fields = reasoning.fields()

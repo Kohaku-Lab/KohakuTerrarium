@@ -146,8 +146,7 @@ class TestReasoningCapture:
         p._process_stream_event(
             _Ev(type="response.reasoning_summary_text.delta", delta="summary"), []
         )
-        p._pack_reasoning_extra_fields()
-        assert p._last_assistant_extra_fields == {
+        assert p._reasoning.fields() == {
             "reasoning_content": "think hard",
             "reasoning_summary": "summary",
         }
@@ -160,8 +159,7 @@ class TestReasoningCapture:
         p._process_stream_event(
             _Ev(type="response.reasoning_text.done", text="complete"), []
         )
-        p._pack_reasoning_extra_fields()
-        assert p._last_assistant_extra_fields["reasoning_content"] == "complete"
+        assert p._reasoning.fields()["reasoning_content"] == "complete"
 
     def test_reasoning_output_item_is_captured(self):
         p = self._provider()
@@ -171,8 +169,7 @@ class TestReasoningCapture:
             content=[{"type": "text", "text": "private"}],
         )
         p._process_stream_event(_Ev(type="response.output_item.done", item=item), [])
-        p._pack_reasoning_extra_fields()
-        assert p._last_assistant_extra_fields == {
+        assert p._reasoning.fields() == {
             "reasoning_content": "private",
             "reasoning_summary": "brief",
         }

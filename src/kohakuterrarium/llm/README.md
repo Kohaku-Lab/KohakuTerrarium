@@ -14,6 +14,7 @@ provides typed message structures compatible with the OpenAI API format.
 | `__init__.py`           | Re-exports all provider classes, message types, and tool schema utilities                                                 |
 | `base.py`               | `LLMProvider` protocol, `BaseLLMProvider` ABC, `LLMConfig`, `ChatChunk`, `ChatResponse`, `ToolSchema`, `NativeToolCall`   |
 | `openai.py`             | `OpenAIProvider`: OpenAI/OpenRouter/compatible API provider (+ `openai_helpers.py`, `openai_sanitize.py`, `openai_ws.py`) |
+| `responses_reasoning.py` | Shared Responses-API reasoning-event collector (used by the Codex provider and OpenAI WebSocket path)                |
 | `responses_ws.py`       | `ResponsesWSSession`: persistent Responses-API WebSocket transport with `previous_response_id` incremental continuation (shared by the openai + codex providers; enabled via `extra_body.websocket_mode`) |
 | `anthropic_provider.py` | Native Anthropic Messages API provider using the official SDK (+ `anthropic_format.py`, `anthropic_pairing.py`, `anthropic_cache.py`) |
 | `codex_provider.py`     | `CodexOAuthProvider`: ChatGPT subscription provider (+ `codex_format.py`, `codex_image_gen.py`, `codex_rate_limits.py`)   |

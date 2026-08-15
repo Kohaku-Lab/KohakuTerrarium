@@ -160,6 +160,25 @@ class TestProviderWebsocketMode:
         assert provider._last_usage["prompt_tokens"] == 7
         assert provider._client.chat.completions.kwargs is None
 
+    async def test_ws_turn_captures_reasoning_fields(self):
+        provider = make_provider(extra_body={"websocket_mode": True})
+        provider._client.responses.connection.scripts = [
+            [
+                Ev(type="response.reasoning_text.delta", delta="think "),
+                Ev(type="response.reasoning_text.delta", delta="hard"),
+                Ev(type="response.reasoning_summary_text.delta", delta="summary"),
+                completed(),
+            ]
+        ]
+
+        await self._drive(provider)
+
+        assert provider._last_assistant_extra_fields == {
+            "reasoning_content": "think hard",
+            "reasoning_summary": "summary",
+        }
+        assert provider._last_tool_calls == []
+
     async def test_connect_failure_falls_back_to_chat_completions(self):
         provider = make_provider(extra_body={"websocket_mode": True})
         provider._client.responses.connect_exc = ConnectionError("no upgrade")
