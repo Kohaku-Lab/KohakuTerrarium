@@ -1,4 +1,5 @@
 import { createPinia, setActivePinia } from "pinia"
+import { computed, isReactive } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
@@ -1371,6 +1372,39 @@ describe("chat store — interrupted task handling", () => {
     expect(tool.status).toBe("interrupted")
     expect(tool.result).toBe("User manually interrupted this job.")
     expect(chat.runningJobs.job_1).toBeUndefined()
+  })
+
+  it("tool_done mutates the reactive part the UI renders (index holds the proxy)", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [{ id: "m1", role: "assistant", parts: [] }] }
+    chat.activeTab = "main"
+
+    chat._handleActivity("main", {
+      activity_type: "tool_start",
+      name: "bash",
+      job_id: "job_1",
+      args: { command: "sleep 10" },
+      background: false,
+      id: "tc_1",
+    })
+
+    const rendered = chat.messagesByTab.main.at(-1).parts[0]
+    const indexed = chat._findToolPart("main", chat.messagesByTab.main, "bash", "job_1")
+    expect(indexed).toBe(rendered)
+    expect(isReactive(indexed)).toBe(true)
+
+    const status = computed(() => rendered.status)
+    expect(status.value).toBe("running")
+
+    chat._handleActivity("main", {
+      activity_type: "tool_done",
+      name: "bash",
+      job_id: "job_1",
+      output: "ok",
+    })
+
+    expect(rendered.status).toBe("done")
+    expect(status.value).toBe("done")
   })
 })
 
@@ -5071,6 +5105,57 @@ describe("chat store — concurrent history resyncs apply in order", () => {
 
     expect(await load).toBe(false)
     expect(chat.messagesByTab.main.map((message) => message.content)).toEqual(["live"])
+    getHistorySpy.mockRestore()
+  })
+
+  it("an in-flight load cannot clobber a tool result that landed during the fetch", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    let resolveHistory
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockImplementation(() => new Promise((resolve) => (resolveHistory = resolve)))
+
+    const load = chat._loadHistory("main")
+    // ``_loadHistory`` reaches ``terrariumAPI.getHistory`` through a
+    // dynamic import; one macrotask is enough for the deferred promise
+    // to settle and the mock resolver to be installed.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(resolveHistory).toBeTypeOf("function")
+    chat._handleActivity("main", {
+      activity_type: "tool_start",
+      name: "bash",
+      job_id: "job_1",
+      args: { command: "sleep 10" },
+      background: false,
+      id: "tc_1",
+    })
+    chat._handleActivity("main", {
+      activity_type: "tool_done",
+      name: "bash",
+      job_id: "job_1",
+      output: "ok",
+    })
+    resolveHistory({
+      events: [
+        { type: "processing_start", event_id: 1 },
+        { type: "tool_call", name: "bash", call_id: "job_1", event_id: 2, args: {} },
+        { type: "processing_end", event_id: 3 },
+      ],
+      is_processing: false,
+    })
+
+    expect(await load).toBe(false)
+    const part = chat.messagesByTab.main[0].parts[0]
+    expect(part.status).toBe("done")
+    expect(part.result).toBe("ok")
+    expect(chat.runningJobs.job_1).toBeUndefined()
     getHistorySpy.mockRestore()
   })
 
