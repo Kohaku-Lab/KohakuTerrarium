@@ -2926,6 +2926,12 @@ const _chatStoreOptions = {
       // pass through (legacy / non-per-turn activity).
       if (!this._frameMatchesViewedBranch(source, data)) return
       const msgs = this.messagesByTab[source]
+      // Every remaining activity mutates live chat state. Bump the
+      // mutation generation so an in-flight /history fetch that was
+      // snapshotted before this frame cannot clobber the fresher live
+      // state when it resolves (e.g. a tool_done landing during the
+      // fetch must not be reverted to "running" by the stale replay).
+      this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
 
       if (at === "wire_inbound") {
         // Output-wiring delivery from another creature. The fields
@@ -3097,7 +3103,7 @@ const _chatStoreOptions = {
           startedAt: Date.now(),
         }
         last.parts.push(startedPart)
-        this._indexToolPart(source, startedPart)
+        this._indexToolPart(source, startedPart, msgs)
         // Track all tasks as running jobs (direct tasks are promotable)
         const runKey = jobId || toolId
         const isBg = data.background || false
@@ -3126,7 +3132,7 @@ const _chatStoreOptions = {
             children: [],
           }
           last.parts.push(tc)
-          this._indexToolPart(source, tc)
+          this._indexToolPart(source, tc, msgs)
         }
         tc.status = "done"
         const payload = toolResultPayload(data.result || data.output || data.detail || "", data)
@@ -3159,7 +3165,7 @@ const _chatStoreOptions = {
             children: [],
           }
           last.parts.push(tc)
-          this._indexToolPart(source, tc)
+          this._indexToolPart(source, tc, msgs)
         }
         tc.status = data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
         const payload = toolResultPayload(data.result || data.error || data.detail || "", data)
@@ -4324,9 +4330,23 @@ const _chatStoreOptions = {
       _indexMsgToolsInto(idx, msg)
     },
 
-    _indexToolPart(tab, part) {
+    _indexToolPart(tab, part, msgs = null) {
       if (!tab) return
-      if (part?.type === "tool" && part.jobId) _tabIndexes(this, tab).tools.set(part.jobId, part)
+      if (part?.type !== "tool" || !part.jobId) return
+      // ``part`` is the raw object the caller constructed; the array
+      // push makes Vue create a reactive proxy around it. The job-id
+      // index must hold that proxy — mutating the raw target bypasses
+      // Vue's triggers and leaves computed status icons cached as
+      // "running" even after tool_done/tool_error.
+      if (Array.isArray(msgs) && msgs.length) {
+        const tail = msgs[msgs.length - 1]
+        const parts = tail?.parts
+        const rendered = Array.isArray(parts) ? parts[parts.length - 1] : null
+        if (rendered && (rendered.id === part.id || rendered.jobId === part.jobId)) {
+          part = rendered
+        }
+      }
+      _tabIndexes(this, tab).tools.set(part.jobId, part)
     },
 
     _hasChannelMessage(tab, id) {
