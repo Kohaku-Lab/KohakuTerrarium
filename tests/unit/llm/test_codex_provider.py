@@ -129,6 +129,55 @@ class _Ev:
         self.__dict__.update(kwargs)
 
 
+class TestReasoningCapture:
+    """Codex must retain Responses reasoning text for snapshot persistence."""
+
+    def _provider(self) -> CodexOAuthProvider:
+        return CodexOAuthProvider(model="m", api_key="sk", base_url="https://h/v1")
+
+    def test_reasoning_delta_events_are_packed(self):
+        p = self._provider()
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="think "), []
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="hard"), []
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_summary_text.delta", delta="summary"), []
+        )
+        p._pack_reasoning_extra_fields()
+        assert p._last_assistant_extra_fields == {
+            "reasoning_content": "think hard",
+            "reasoning_summary": "summary",
+        }
+
+    def test_reasoning_done_event_replaces_accumulator(self):
+        p = self._provider()
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="partial"), []
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.done", text="complete"), []
+        )
+        p._pack_reasoning_extra_fields()
+        assert p._last_assistant_extra_fields["reasoning_content"] == "complete"
+
+    def test_reasoning_output_item_is_captured(self):
+        p = self._provider()
+        item = _Ev(
+            type="reasoning",
+            summary=[{"type": "summary_text", "text": "brief"}],
+            content=[{"type": "text", "text": "private"}],
+        )
+        p._process_stream_event(_Ev(type="response.output_item.done", item=item), [])
+        p._pack_reasoning_extra_fields()
+        assert p._last_assistant_extra_fields == {
+            "reasoning_content": "private",
+            "reasoning_summary": "brief",
+        }
+
+
 class _FakeWSConnection:
     def __init__(self):
         self.sent = []

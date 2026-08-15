@@ -69,6 +69,27 @@ async def _capture_rate_limit_headers(response: Any) -> None:
         )
 
 
+def _reasoning_parts_text(parts: Any) -> str:
+    """Join Responses reasoning content/summary parts into plain text."""
+    if parts is None:
+        return ""
+    if isinstance(parts, str):
+        return parts
+    if isinstance(parts, dict):
+        parts = [parts]
+    if not isinstance(parts, list):
+        return ""
+    pieces: list[str] = []
+    for part in parts:
+        if isinstance(part, dict):
+            value = part.get("text") or part.get("content") or ""
+        else:
+            value = getattr(part, "text", None) or getattr(part, "content", None) or ""
+        if isinstance(value, str) and value:
+            pieces.append(value)
+    return "\n".join(pieces)
+
+
 class CodexOAuthProvider(BaseLLMProvider):
     """Stream Codex Responses API output with tools, retries, and token refresh."""
 
@@ -111,6 +132,9 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._last_tool_calls: list[NativeToolCall] = []
         self._last_usage: dict[str, int] = {}
         self._last_assistant_parts: list[Any] = []
+        self._last_assistant_extra_fields: dict[str, Any] = {}
+        self._reasoning_text = ""
+        self._reasoning_summary = ""
         self.prompt_cache_key: str | None = None
 
     async def ensure_authenticated(self) -> None:
@@ -268,6 +292,9 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._last_tool_calls = []
         self._last_usage = {}
         self._last_assistant_parts = []
+        self._last_assistant_extra_fields = {}
+        self._reasoning_text = ""
+        self._reasoning_summary = ""
         await self._ensure_valid_token()
 
         if not self._client:
@@ -354,6 +381,7 @@ class CodexOAuthProvider(BaseLLMProvider):
                         piece = self._process_stream_event(event, collected_tool_calls)
                         if piece is not None:
                             yield piece
+                    self._pack_reasoning_extra_fields()
                     self._last_tool_calls = collected_tool_calls
                     return
                 except ResponsesWSError as exc:
@@ -393,6 +421,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             if piece is not None:
                 yield piece
 
+        self._pack_reasoning_extra_fields()
         self._last_tool_calls = collected_tool_calls
 
     async def _complete_chat(
@@ -445,6 +474,28 @@ class CodexOAuthProvider(BaseLLMProvider):
             return None
         return self._ws_session
 
+    def _pack_reasoning_extra_fields(self) -> None:
+        """Store captured Responses reasoning text for the conversation snapshot."""
+        packed: dict[str, Any] = {}
+        if self._reasoning_text:
+            packed["reasoning_content"] = self._reasoning_text
+        if self._reasoning_summary:
+            packed["reasoning_summary"] = self._reasoning_summary
+        self._last_assistant_extra_fields = packed
+
+    def _capture_reasoning_item(self, item: Any) -> None:
+        """Fold a completed ``reasoning`` output item into provider state."""
+        summary = _reasoning_parts_text(getattr(item, "summary", None))
+        content = _reasoning_parts_text(getattr(item, "content", None))
+        if summary:
+            self._reasoning_summary = "\n".join(
+                part for part in (self._reasoning_summary, summary) if part
+            )
+        if content:
+            self._reasoning_text = "\n".join(
+                part for part in (self._reasoning_text, content) if part
+            )
+
     def _process_stream_event(
         self, event: Any, collected_tool_calls: list[NativeToolCall]
     ) -> str | None:
@@ -457,6 +508,22 @@ class CodexOAuthProvider(BaseLLMProvider):
         match getattr(event, "type", ""):
             case "response.output_text.delta":
                 return strip_surrogates(event.delta)
+            case "response.reasoning_text.delta":
+                piece = getattr(event, "delta", None)
+                if isinstance(piece, str):
+                    self._reasoning_text += piece
+            case "response.reasoning_summary_text.delta":
+                piece = getattr(event, "delta", None)
+                if isinstance(piece, str):
+                    self._reasoning_summary += piece
+            case "response.reasoning_text.done":
+                piece = getattr(event, "text", None)
+                if isinstance(piece, str) and piece:
+                    self._reasoning_text = piece
+            case "response.reasoning_summary_text.done":
+                piece = getattr(event, "text", None)
+                if isinstance(piece, str) and piece:
+                    self._reasoning_summary = piece
             case "response.output_item.done":
                 item = event.item
                 itype = getattr(item, "type", "")
@@ -471,6 +538,8 @@ class CodexOAuthProvider(BaseLLMProvider):
                 elif itype == "image_generation_call":
                     # Image bytes are available before the item status completes.
                     self._handle_image_generation_call(item)
+                elif itype == "reasoning":
+                    self._capture_reasoning_item(item)
             case "response.completed":
                 resp = getattr(event, "response", None)
                 if resp:

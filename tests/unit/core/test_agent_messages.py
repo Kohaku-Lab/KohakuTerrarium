@@ -4,6 +4,8 @@ import asyncio
 
 import pytest
 
+import kohakuterrarium.core.agent_messages as agent_messages_module
+
 from kohakuterrarium.core.agent_messages import AgentMessagesMixin
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.errors import ConflictError
@@ -498,6 +500,30 @@ class TestReloadConversationUnderBranchView:
         agent._parent_branch_path = [(1, 1)]
         with pytest.raises(InvalidBranchViewError):
             agent._reload_conversation_under_branch_view({99: 99})
+
+    async def test_provider_extra_fields_survive_reload(self, agent, monkeypatch):
+        agent._apply_user_input("u1")
+        agent._emit_assistant("a1")
+        monkeypatch.setattr(
+            agent_messages_module,
+            "replay_conversation",
+            lambda events, branch_view=None: [
+                {"role": "user", "content": "u1"},
+                {
+                    "role": "assistant",
+                    "content": "a1",
+                    "reasoning_content": "private thought",
+                    "_kt_anthropic_content": [{"type": "thinking", "thinking": "hmm"}],
+                },
+            ],
+        )
+        agent._reload_conversation_under_branch_view({1: 1})
+        assistant = next(
+            m
+            for m in agent.controller.conversation.get_messages()
+            if m.role == "assistant"
+        )
+        assert assistant.extra_fields["reasoning_content"] == "private thought"
 
     async def test_events_read_failure_no_op(self, agent, monkeypatch):
         def boom(name):

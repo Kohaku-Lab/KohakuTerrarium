@@ -13,6 +13,12 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
+from kohakuterrarium.llm.openai_helpers import (
+    delta_field,
+    delta_field_present,
+    merge_reasoning_detail_stream,
+    pack_reasoning_fields,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -36,6 +42,7 @@ class LiteLLMProvider(BaseLLMProvider):
         super().__init__(effective_config)
         self._api_key = api_key
         self._extra_kwargs = kwargs
+        self._last_assistant_extra_fields: dict[str, Any] = {}
 
     def with_model(self, name: str) -> "LiteLLMProvider":
         if not name or name == self.config.model:
@@ -65,6 +72,12 @@ class LiteLLMProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         params = self._build_params(messages, tools=tools, stream=True, **kwargs)
+        self._last_assistant_extra_fields = {}
+        reasoning_text = ""
+        reasoning_details: list[Any] = []
+        reasoning_extra: dict[str, Any] = {}
+        reasoning_text_seen = False
+        reasoning_details_seen = False
 
         try:
             response = await litellm.acompletion(**params)
@@ -75,6 +88,25 @@ class LiteLLMProvider(BaseLLMProvider):
                 delta = chunk.choices[0].delta if chunk.choices else None
                 if delta is None:
                     continue
+
+                if delta_field_present(delta, "reasoning_content"):
+                    reasoning_text_seen = True
+                rc_piece = delta_field(delta, "reasoning_content")
+                if isinstance(rc_piece, str):
+                    reasoning_text += rc_piece
+                if delta_field_present(delta, "reasoning_details"):
+                    reasoning_details_seen = True
+                rd_piece = delta_field(delta, "reasoning_details")
+                if isinstance(rd_piece, list):
+                    for entry in rd_piece:
+                        if isinstance(entry, dict):
+                            merge_reasoning_detail_stream(reasoning_details, entry)
+                if delta_field_present(delta, "reasoning"):
+                    r_piece = delta_field(delta, "reasoning")
+                    if isinstance(r_piece, str):
+                        reasoning_extra["reasoning"] = (
+                            reasoning_extra.get("reasoning", "") + r_piece
+                        )
 
                 if delta.content:
                     yield delta.content
@@ -92,6 +124,21 @@ class LiteLLMProvider(BaseLLMProvider):
                                 entry["name"] = tc.function.name
                             if tc.function.arguments:
                                 entry["arguments"] += tc.function.arguments
+
+            if (
+                reasoning_text_seen
+                or reasoning_details_seen
+                or reasoning_text
+                or reasoning_details
+                or reasoning_extra
+            ):
+                self._last_assistant_extra_fields = pack_reasoning_fields(
+                    reasoning_text,
+                    reasoning_details,
+                    reasoning_extra,
+                    include_text=reasoning_text_seen,
+                    include_details=reasoning_details_seen,
+                )
 
             self._last_tool_calls = [
                 NativeToolCall(
@@ -113,6 +160,8 @@ class LiteLLMProvider(BaseLLMProvider):
         **kwargs: Any,
     ) -> ChatResponse:
         params = self._build_params(messages, stream=False, **kwargs)
+        self._last_tool_calls = []
+        self._last_assistant_extra_fields = {}
 
         try:
             response = await litellm.acompletion(**params)
@@ -128,6 +177,22 @@ class LiteLLMProvider(BaseLLMProvider):
                     "completion_tokens": response.usage.completion_tokens or 0,
                     "total_tokens": response.usage.total_tokens or 0,
                 }
+            self._last_usage = usage
+
+            extras = {}
+            if delta_field_present(message, "reasoning_content"):
+                rc = delta_field(message, "reasoning_content")
+                if isinstance(rc, str):
+                    extras["reasoning_content"] = rc
+            if delta_field_present(message, "reasoning_details"):
+                rd = delta_field(message, "reasoning_details")
+                if isinstance(rd, list):
+                    extras["reasoning_details"] = rd
+            if delta_field_present(message, "reasoning"):
+                reasoning = delta_field(message, "reasoning")
+                if isinstance(reasoning, str):
+                    extras["reasoning"] = reasoning
+            self._last_assistant_extra_fields = extras
 
             if hasattr(message, "tool_calls") and message.tool_calls:
                 self._last_tool_calls = [

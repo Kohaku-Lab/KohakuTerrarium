@@ -74,7 +74,9 @@ def _create_io_modules(
 def _build_conversation(messages: list[dict]) -> Conversation:
     """Build a conversation from persisted message dictionaries.
 
-    Tool-call identifiers, names, and metadata are retained when present.
+    Tool-call identifiers, names, metadata, and provider-owned extra fields
+    (reasoning_content / reasoning_details / _kt_anthropic_content) are
+    retained when present.
     """
     conv = Conversation()
     for msg in messages:
@@ -93,6 +95,21 @@ def _build_conversation(messages: list[dict]) -> Conversation:
             kwargs["name"] = msg["name"]
         if msg.get("metadata"):
             kwargs["metadata"] = msg["metadata"]
+        extra_fields = {
+            key: value
+            for key, value in msg.items()
+            if key
+            not in {
+                "role",
+                "content",
+                "tool_calls",
+                "tool_call_id",
+                "name",
+                "metadata",
+            }
+        }
+        if extra_fields:
+            kwargs["extra_fields"] = extra_fields
         conv.append(role, content, **kwargs)
     # Preserve a trailing in-flight call while removing stale orphaned fragments.
     conv.prune_orphan_tool_pairs(preserve_pending_tail=True)
