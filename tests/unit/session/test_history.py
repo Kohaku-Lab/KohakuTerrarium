@@ -1643,3 +1643,101 @@ class TestResolveSelectedBranches:
         # Branch 99 doesn't exist — falls back to max.
         sel = resolve_selected_branches(events, index_parent_paths(events), {0: 99})
         assert sel == {0: 2}
+
+
+class TestSelectLiveEventIdsPrefix:
+    """select_live_event_ids builds the prior-selected prefix per event; a
+    parent path constraining only turn 0 must not reject an event whose
+    later-turn ancestor is live."""
+
+    def test_path_constrained_by_early_turn_only(self):
+        events = [
+            {
+                "type": "user_message",
+                "content": "U0",
+                "event_id": 0,
+                "turn_index": 0,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "text_chunk",
+                "content": "R0",
+                "event_id": 1,
+                "turn_index": 0,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            # Turn 1 has two branches; the live one is 2.
+            {
+                "type": "user_message",
+                "content": "U1",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U1b",
+                "event_id": 3,
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1)],
+            },
+            # Turn 2 event descends from turn1-b2; its path only constrains
+            # turns 0 and 1, and both are selected as expected.
+            {
+                "type": "user_message",
+                "content": "U2",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1), (1, 2)],
+            },
+        ]
+        live = select_live_event_ids(events)
+        # Turn1-b1 (event 2) is not the selected branch and drops out;
+        # everything on the live chain stays.
+        assert live == {0, 1, 3, 4}
+
+    def test_event_with_dead_ancestor_dropped(self):
+        # Same shape, but the turn-2 event descends from the DEAD turn1-b1:
+        # its path (1, 1) mismatches the selected turn1-b2 and it must drop.
+        events = [
+            {
+                "type": "user_message",
+                "content": "U0",
+                "event_id": 0,
+                "turn_index": 0,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "type": "user_message",
+                "content": "U1a",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U1b",
+                "event_id": 3,
+                "turn_index": 1,
+                "branch_id": 2,
+                "parent_branch_path": [(0, 1)],
+            },
+            {
+                "type": "user_message",
+                "content": "U2-dead",
+                "event_id": 4,
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(0, 1), (1, 1)],
+            },
+        ]
+        live = select_live_event_ids(events)
+        assert live == {0, 3}
+        assert 4 not in live

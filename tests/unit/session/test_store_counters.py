@@ -4,6 +4,7 @@ from kohakuvault import KVault
 
 from kohakuterrarium.session.store_counters import (
     _decode_key,
+    persist_event_counter,
     restore_event_counters,
     restore_subagent_counters,
     restore_suffix_counters,
@@ -96,6 +97,38 @@ class TestRestoreEventCounters:
             assert restore_event_counters(t, seq) == 200
         finally:
             t.close()
+
+    def test_persisted_counter_skips_value_scan(self, tmp_path):
+        events = _make_table(tmp_path / "ev.kohakutr", "events")
+        state = _make_table(tmp_path / "ev.kohakutr", "state")
+        try:
+            events["alpha:e000000"] = {"event_id": 100}
+            events["alpha:e000001"] = {"event_id": 200}
+            persist_event_counter(state, 200)
+            # Corrupt every event VALUE so the fallback scan would fail or
+            # report 0; the persisted counter must be authoritative.
+            events["alpha:e000000"] = ["corrupt"]
+            events["alpha:e000001"] = None
+            seq: dict[str, int] = {}
+            assert restore_event_counters(events, seq, state=state) == 200
+            # Sequences still derive from keys even on the fast path.
+            assert seq["alpha"] == 2
+        finally:
+            events.close()
+            state.close()
+
+    def test_missing_persisted_counter_falls_back_to_scan(self, tmp_path):
+        events = _make_table(tmp_path / "ev.kohakutr", "events")
+        state = _make_table(tmp_path / "ev.kohakutr", "state")
+        try:
+            events["alpha:e000000"] = {"event_id": 42}
+            seq: dict[str, int] = {}
+            # No persisted slot (older session file): full scan still works.
+            assert restore_event_counters(events, seq, state=state) == 42
+            assert seq["alpha"] == 1
+        finally:
+            events.close()
+            state.close()
 
 
 class TestRestoreSuffixCounters:

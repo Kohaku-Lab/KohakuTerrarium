@@ -130,12 +130,30 @@ async def rewind_creature(
         raise HTTPException(409, str(exc)) from exc
 
 
+def _history_max_event_id(events: list) -> int:
+    out = 0
+    for evt in events:
+        eid = evt.get("event_id") if isinstance(evt, dict) else None
+        if isinstance(eid, int) and eid > out:
+            out = eid
+    return out
+
+
 @router.get("/{session_id}/creatures/{creature_id}/history")
 async def creature_history(
     session_id: str,
     creature_id: str,
+    since_event_id: int | None = None,
     service: TerrariumService = Depends(get_service),
 ):
+    """History payload with an optional event cursor.
+
+    ``since_event_id`` trims ``events`` to those after the cursor so the
+    client can append incrementally instead of re-fetching the whole log
+    after every turn. The full payload remains available (cursor omitted)
+    for the rewind/branch/compact resync path. ``max_event_id`` reports the
+    newest event in the full log so the client can advance its cursor.
+    """
     # Channel tabs share this endpoint through the ``ch:`` prefix.
     if creature_id.startswith("ch:"):
         channel_name = creature_id[3:]
@@ -159,12 +177,49 @@ async def creature_history(
             "messages": [],
             "events": events,
             "is_processing": False,
+            # Channel events carry no event_id; report the contract field
+            # explicitly so clients can read it unconditionally.
+            "max_event_id": 0,
         }
     cid = await resolve_creature_id(service, creature_id, session_id)
     try:
-        return await service.chat_history(cid)
+        payload = await service.chat_history(cid)
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
+    events = payload.get("events") or []
+    max_eid = _history_max_event_id(events)
+    if since_event_id is not None:
+        payload["events"] = [
+            evt
+            for evt in events
+            if isinstance(evt, dict)
+            and isinstance(evt.get("event_id"), int)
+            and evt["event_id"] > since_event_id
+        ]
+        # Incremental payloads omit the conversation snapshot; it is only
+        # valid for the full log and would mislead an appending client.
+        payload.pop("messages", None)
+    payload["max_event_id"] = max_eid
+    return payload
+
+
+@router.get("/{session_id}/creatures/{creature_id}/events/{event_id}")
+async def creature_event(
+    session_id: str,
+    creature_id: str,
+    event_id: int,
+    service: TerrariumService = Depends(get_service),
+):
+    """Lazy single-event fetch: full tool/subagent output on expand.
+
+    History payloads carry bounded ``output_preview`` strings; the client
+    calls this to load the full ``output``/``result`` of one event.
+    """
+    cid = await resolve_creature_id(service, creature_id, session_id)
+    try:
+        return await service.chat_event(cid, event_id)
+    except KeyError as exc:
+        raise HTTPException(404, str(exc)) from exc
 
 
 @router.get("/{session_id}/creatures/{creature_id}/branches")

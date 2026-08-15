@@ -340,8 +340,12 @@ export const terrariumAPI = {
    * Get full history for a creature/root in a terrarium.
    * Returns { messages: [...], events: [...] }
    */
-  async getHistory(id, target) {
-    const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(target)}/history`)
+  async getHistory(id, target, sinceEventId = null) {
+    const params = sinceEventId != null ? { params: { since_event_id: sinceEventId } } : {}
+    const { data } = await api.get(
+      `/sessions/${id}/creatures/${encodeTarget(target)}/history`,
+      params,
+    )
     return data
   },
 

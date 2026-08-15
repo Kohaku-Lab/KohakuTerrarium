@@ -38,6 +38,10 @@ class _FakeService:
         self._regen = regen_returns
         self._edit_returns = edit_returns
         self._history = history_returns or {"messages": []}
+        self._event = {
+            "event": {"event_id": 7, "output": "full"},
+            "creature_id": "alice",
+        }
         self._branches = branches_returns or [{"t": 1}]
         self._raise = raise_on or {}
         self.engine = object()
@@ -96,6 +100,11 @@ class _FakeService:
         if "chat_history" in self._raise:
             raise self._raise["chat_history"]
         return self._history
+
+    async def chat_event(self, cid, event_id):
+        if "chat_event" in self._raise:
+            raise self._raise["chat_event"]
+        return self._event
 
     async def chat_branches(self, cid):
         if "chat_branches" in self._raise:
@@ -269,6 +278,53 @@ class TestHistoryBranches:
         svc = _FakeService(raise_on={"chat_history": KeyError("no")})
         client = _client(svc)
         resp = client.get("/sessions/g/creatures/alice/history")
+        assert resp.status_code == 404
+
+    def test_history_cursor_filters_events(self):
+        svc = _FakeService(
+            history_returns={
+                "messages": [{"role": "user"}],
+                "events": [
+                    {"event_id": 1, "type": "user_input"},
+                    {"event_id": 2, "type": "text"},
+                    {"event_id": 3, "type": "text"},
+                ],
+            }
+        )
+        client = _client(svc)
+        resp = client.get("/sessions/g/creatures/alice/history?since_event_id=1")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert [e["event_id"] for e in body["events"]] == [2, 3]
+        assert body["max_event_id"] == 3
+        # Incremental payloads omit the full-log-only snapshot.
+        assert "messages" not in body
+
+    def test_history_full_payload_reports_max_event_id(self):
+        svc = _FakeService(
+            history_returns={
+                "messages": [],
+                "events": [{"event_id": 4, "type": "text"}],
+            }
+        )
+        client = _client(svc)
+        resp = client.get("/sessions/g/creatures/alice/history")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["max_event_id"] == 4
+        assert [e["event_id"] for e in body["events"]] == [4]
+
+    def test_event_fetch(self):
+        svc = _FakeService()
+        client = _client(svc)
+        resp = client.get("/sessions/g/creatures/alice/events/7")
+        assert resp.status_code == 200
+        assert resp.json()["event"]["output"] == "full"
+
+    def test_event_fetch_missing(self):
+        svc = _FakeService(raise_on={"chat_event": KeyError("event 99 not found")})
+        client = _client(svc)
+        resp = client.get("/sessions/g/creatures/alice/events/99")
         assert resp.status_code == 404
 
     def test_branches(self):
