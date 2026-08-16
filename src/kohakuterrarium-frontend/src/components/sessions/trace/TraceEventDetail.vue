@@ -55,6 +55,17 @@
       </div>
     </div>
 
+    <!-- Ordered reasoning segments -->
+    <div v-if="reasoningSegments.length" class="shrink-0 flex flex-col gap-1">
+      <div class="text-[10px] uppercase tracking-wider text-warm-400">{{ t("sessionViewer.detail.reasoning") }}</div>
+      <div class="flex flex-col gap-2">
+        <details v-for="(segment, i) in reasoningSegments" :key="i" class="rounded border border-iolite/20 bg-iolite/5 p-2">
+          <summary class="text-[11px] text-iolite cursor-pointer select-none">{{ segment.source || "reasoning" }}<span v-if="segment.signature" class="text-warm-400"> · signed</span></summary>
+          <pre class="mt-2 text-[11px] font-mono text-warm-700 dark:text-warm-300 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">{{ reasoningSegmentText(segment) }}</pre>
+        </details>
+      </div>
+    </div>
+
     <!-- Raw JSON (full) -->
     <div class="flex-1 min-h-0 flex flex-col gap-1 overflow-hidden">
       <div class="text-[10px] uppercase tracking-wider text-warm-400 shrink-0">{{ t("sessionViewer.detail.rawJson") }}</div>
@@ -197,6 +208,20 @@ const subagentRef = computed(() => {
   const namespace = e.namespace || (run != null ? `${name}:${run}` : name)
   return { label, namespace }
 })
+
+const reasoningSegments = computed(() => {
+  const segments = props.event?._kt_assistant_segments
+  if (!Array.isArray(segments)) return []
+  return segments.filter((segment) => segment?.type === "reasoning")
+})
+
+function reasoningSegmentText(segment) {
+  if (!segment?.text) return ""
+  return segment.signature
+    ? `${segment.text}
+[signature: ${segment.signature}]`
+    : segment.text
+}
 
 const durationMs = computed(() => {
   const e = props.event

@@ -58,6 +58,35 @@ describe("ChatMessage branch operations", () => {
     setActivePinia(pinia)
   })
 
+  it("renders reasoning segments inline in assistant parts", () => {
+    const store = useChatStore()
+    const message = {
+      id: "a1",
+      role: "assistant",
+      parts: [
+        { type: "reasoning", id: "r1", source: "reasoning_content", text: "think 1" },
+        { type: "text", id: "t1", content: "answer" },
+      ],
+    }
+    store.messagesByTab.main = [message]
+    store.activeTab = "main"
+    const wrapper = mount(ChatMessage, {
+      props: { message, messageIdx: 0, tabId: "main" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          MarkdownRenderer: true,
+          ToolCallBlock: true,
+          ToolCallBatch: true,
+          UIEventBlock: true,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain("Thinking")
+    expect(wrapper.text()).toContain("think 1")
+  })
+
   it("keeps Save & Rerun bound to the message tab after the active tab changes", async () => {
     const store = useChatStore()
     store._instanceId = "instance"

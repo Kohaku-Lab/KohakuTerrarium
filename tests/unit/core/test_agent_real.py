@@ -2572,6 +2572,55 @@ class TestTurnTokenUsageEmission:
             await agent.stop()
 
 
+class TestAssistantReasoningEmission:
+    async def test_reasoning_activity_emitted_before_processing_end(
+        self, make_agent, monkeypatch
+    ):
+        agent = make_agent(script=["resp"])
+        await agent.start()
+        try:
+            agent.controller.llm.last_assistant_extra_fields = {
+                "reasoning_content": "think",
+                "_kt_assistant_segments": [
+                    {
+                        "type": "reasoning",
+                        "source": "reasoning_content",
+                        "text": "think",
+                    },
+                    {"type": "text", "text": "resp"},
+                ],
+            }
+            calls = []
+
+            def capture(activity_type, detail, metadata=None):
+                calls.append((activity_type, detail, metadata))
+
+            monkeypatch.setattr(agent.output_router, "notify_activity", capture)
+            from kohakuterrarium.core.events import TriggerEvent
+
+            evt = TriggerEvent(type="user_input", content="x")
+            await agent._finalize_processing(evt, agent.controller, ["resp"])
+            assert (
+                "assistant_reasoning",
+                "turn 0 assistant reasoning",
+                {
+                    "reasoning_content": "think",
+                    "_kt_assistant_segments": [
+                        {
+                            "type": "reasoning",
+                            "source": "reasoning_content",
+                            "text": "think",
+                        },
+                        {"type": "text", "text": "resp"},
+                    ],
+                    "turn_index": 0,
+                    "branch_id": 0,
+                },
+            ) in calls
+        finally:
+            await agent.stop()
+
+
 # ── _check_termination budget exhausted + force_terminate ───────
 
 

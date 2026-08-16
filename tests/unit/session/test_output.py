@@ -768,6 +768,37 @@ class TestActivityHandlers:
         finally:
             store.close()
 
+    def test_assistant_reasoning_recorded_as_clean_event(self, tmp_path):
+        store, out = _make(tmp_path, _FakeAgent(turn=2, branch=1))
+        try:
+            out.on_activity_with_metadata(
+                "assistant_reasoning",
+                "turn 2 assistant reasoning",
+                {
+                    "reasoning_content": "think",
+                    "_kt_assistant_segments": [
+                        {
+                            "type": "reasoning",
+                            "source": "reasoning_content",
+                            "text": "think",
+                        },
+                        {"type": "text", "text": "answer"},
+                    ],
+                },
+            )
+            store.flush()
+            evt = next(
+                e
+                for e in store.get_events("alice")
+                if e["type"] == "assistant_reasoning"
+            )
+            assert evt["reasoning_content"] == "think"
+            assert evt["_kt_assistant_segments"][0]["text"] == "think"
+            assert evt["turn_index"] == 2
+            assert evt["branch_id"] == 1
+        finally:
+            store.close()
+
     def test_context_cleared(self, tmp_path):
         store, out = _make(tmp_path)
         try:

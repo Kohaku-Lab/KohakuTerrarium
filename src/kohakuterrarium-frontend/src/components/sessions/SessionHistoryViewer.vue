@@ -180,6 +180,9 @@ async function loadTarget(tab) {
   reasoningEntries.value = []
   const data = await sessionAPI.getHistory(sessionName.value, tab)
   for (const [messageIndex, message] of (data.messages || []).entries()) {
+    // New sessions render segments inline through ChatMessage; the
+    // fallback panel only serves old snapshots without ordered segments.
+    if (Array.isArray(message?._kt_assistant_segments)) continue
     for (const entry of extractReasoning(message)) {
       reasoningEntries.value.push({ messageIndex, ...entry })
     }
