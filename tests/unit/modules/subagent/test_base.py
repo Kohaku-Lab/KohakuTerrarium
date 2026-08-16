@@ -460,6 +460,45 @@ class TestSessionStorePersistence:
         assert saved[0]["name"] == "explore"
         assert saved[0]["run"] == 2
 
+    async def test_conversation_preserves_reasoning_extra_fields(self):
+        saved: list[dict] = []
+
+        class _FakeStore:
+            def save_subagent(self, **kwargs):
+                saved.append(kwargs)
+
+        class _ReasoningLLM:
+            model = "reasoning"
+            last_tool_calls: list = []
+            last_usage = {}
+            last_assistant_extra_fields = {
+                "reasoning_content": "think",
+                "_kt_assistant_segments": [
+                    {
+                        "type": "reasoning",
+                        "source": "reasoning_content",
+                        "text": "think",
+                    },
+                    {"type": "text", "text": "found it"},
+                ],
+            }
+
+            async def chat(self, messages, *, stream=True, **kwargs):
+                yield "found it"
+
+        sa = SubAgent(
+            SubAgentConfig(name="explore", max_turns=1),
+            _registry(),
+            _ReasoningLLM(),
+        )
+        sa._session_store = _FakeStore()
+        sa._parent_name = "controller"
+        sa._run_index = 2
+        await sa.run("find the bug")
+        conv_json = saved[0]["conv_json"]
+        assert '"reasoning_content"' in conv_json
+        assert '"_kt_assistant_segments"' in conv_json
+
     async def test_session_store_save_failure_does_not_fail_run(self):
         class _BadStore:
             def save_subagent(self, **kwargs):

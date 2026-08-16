@@ -165,6 +165,35 @@ class TestReasoningCapture:
         )
         assert p._reasoning.fields()["reasoning_content"] == "complete"
 
+    def test_segments_preserve_reasoning_text_tool_order(self):
+        p = self._provider()
+        collected = []
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="think 1"), collected
+        )
+        p._process_stream_event(
+            _Ev(type="response.output_text.delta", delta="answer 1"), collected
+        )
+        p._process_stream_event(
+            _Ev(
+                type="response.output_item.done",
+                item=_Ev(
+                    type="function_call", call_id="call_1", name="t", arguments="{}"
+                ),
+            ),
+            collected,
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="think 2"), collected
+        )
+
+        assert p._reasoning.fields()["_kt_assistant_segments"] == [
+            {"type": "reasoning", "source": "responses_text", "text": "think 1"},
+            {"type": "text", "text": "answer 1"},
+            {"type": "tool_call_ref", "call_id": "call_1"},
+            {"type": "reasoning", "source": "responses_text", "text": "think 2"},
+        ]
+
     def test_reasoning_output_item_is_captured(self):
         p = self._provider()
         item = _Ev(

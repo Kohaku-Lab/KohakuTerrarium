@@ -183,6 +183,35 @@ class TestProviderWebsocketMode:
         }
         assert provider._last_tool_calls == []
 
+    async def test_ws_segments_preserve_reasoning_text_tool_order(self):
+        provider = make_provider(extra_body={"websocket_mode": True})
+        provider._client.responses.connection.scripts = [
+            [
+                Ev(type="response.reasoning_text.delta", delta="think 1"),
+                Ev(type="response.output_text.delta", delta="answer 1"),
+                Ev(
+                    type="response.output_item.done",
+                    item=Ev(
+                        type="function_call",
+                        call_id="call_1",
+                        name="fn",
+                        arguments="{}",
+                    ),
+                ),
+                Ev(type="response.reasoning_text.delta", delta="think 2"),
+                completed(),
+            ]
+        ]
+
+        await self._drive(provider)
+
+        assert provider._last_assistant_extra_fields["_kt_assistant_segments"] == [
+            {"type": "reasoning", "source": "responses_text", "text": "think 1"},
+            {"type": "text", "text": "answer 1"},
+            {"type": "tool_call_ref", "call_id": "call_1"},
+            {"type": "reasoning", "source": "responses_text", "text": "think 2"},
+        ]
+
     async def test_connect_failure_falls_back_to_chat_completions(self):
         provider = make_provider(extra_body={"websocket_mode": True})
         provider._client.responses.connect_exc = ConnectionError("no upgrade")

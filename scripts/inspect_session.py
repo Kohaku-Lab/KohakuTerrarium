@@ -161,6 +161,33 @@ def _reasoning_entries(message: dict) -> list[tuple[str, str]]:
     entries: list[tuple[str, str]] = []
     fields = {**(message.get("extra_fields") or {}), **message}
 
+    segments = fields.get("_kt_assistant_segments")
+    if isinstance(segments, list) and segments:
+        for idx, segment in enumerate(segments):
+            if not isinstance(segment, dict):
+                continue
+            stype = segment.get("type")
+            if stype == "reasoning":
+                text = segment.get("text") or ""
+                signature = segment.get("signature") or ""
+                if signature:
+                    text = f"{text}\n[signature: {signature}]"
+                if text:
+                    label = (
+                        f"segments[{idx}] reasoning:{segment.get('source', 'unknown')}"
+                    )
+                    entries.append((label, text))
+            elif stype == "text":
+                text = segment.get("text") or ""
+                if text:
+                    entries.append((f"segments[{idx}] text", text))
+            elif stype == "tool_call_ref":
+                call_id = segment.get("call_id") or ""
+                if call_id:
+                    entries.append((f"segments[{idx}] tool_call_ref", call_id))
+        if entries:
+            return entries
+
     for key in _REASONING_TEXT_KEYS:
         value = fields.get(key)
         if isinstance(value, str) and value:

@@ -68,5 +68,27 @@ class TestReasoningEntries:
         )
         assert out == [("anthropic:thinking[1]", "hmm\n[signature: sig2]")]
 
+    def test_ordered_segments_preferred_over_flat_fields(self):
+        out = _inspect_session._reasoning_entries(
+            {
+                "role": "assistant",
+                "reasoning_content": "flat",
+                "_kt_assistant_segments": [
+                    {
+                        "type": "reasoning",
+                        "source": "reasoning_content",
+                        "text": "think 1",
+                    },
+                    {"type": "text", "text": "answer 1"},
+                    {"type": "tool_call_ref", "call_id": "call_1"},
+                ],
+            }
+        )
+        assert out == [
+            ("segments[0] reasoning:reasoning_content", "think 1"),
+            ("segments[1] text", "answer 1"),
+            ("segments[2] tool_call_ref", "call_1"),
+        ]
+
     def test_non_assistant_ignored_by_print_path(self):
         assert _inspect_session._reasoning_entries({"role": "user"}) == []
