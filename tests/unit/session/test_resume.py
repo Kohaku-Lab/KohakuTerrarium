@@ -133,6 +133,24 @@ class TestBuildConversation:
         rebuilt = conv.get_messages()
         assert rebuilt[0].metadata == {"source": "test"}
 
+    def test_provider_extra_fields_preserved(self):
+        msgs = [
+            {
+                "role": "assistant",
+                "content": "answer",
+                "reasoning_content": "private thought",
+                "_kt_anthropic_content": [{"type": "thinking", "thinking": "hmm"}],
+            },
+        ]
+        conv = _build_conversation(msgs)
+        rebuilt = conv.get_messages()
+        assert rebuilt[0].extra_fields == {
+            "reasoning_content": "private thought",
+            "_kt_anthropic_content": [{"type": "thinking", "thinking": "hmm"}],
+        }
+        wire = conv.to_messages()
+        assert wire[0]["reasoning_content"] == "private thought"
+
     def test_tool_calls_preserved(self):
         msgs = [
             {

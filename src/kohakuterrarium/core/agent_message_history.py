@@ -253,6 +253,21 @@ def reload_conversation_under_branch_view(
         for key in ("tool_calls", "tool_call_id", "name", "metadata"):
             if message.get(key):
                 extra[key] = message[key]
+        extra_fields = {
+            key: value
+            for key, value in message.items()
+            if key
+            not in {
+                "role",
+                "content",
+                "tool_calls",
+                "tool_call_id",
+                "name",
+                "metadata",
+            }
+        }
+        if extra_fields:
+            extra["extra_fields"] = extra_fields
         conversation.append(role, message.get("content", ""), **extra)
 
     # Rebuilds restore tool outputs elided during live turns; re-apply

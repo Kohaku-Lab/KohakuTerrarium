@@ -231,6 +231,9 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
 
             # Emit token usage after each LLM turn (real-time update)
             self._emit_token_usage(controller)
+            # Publish reasoning after each round, not just the final one:
+            # tool-selection rounds have their own assistant messages.
+            self._emit_assistant_reasoning(controller)
 
             # Check interrupt after LLM turn (before waiting for tools)
             if self._interrupt_requested:
@@ -655,6 +658,32 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             await controller.push_event(feedback_event)
 
         return True
+
+    def _emit_assistant_reasoning(self, controller: Controller) -> None:
+        """Publish the latest LLM round's reasoning to output consumers."""
+        fields = (
+            getattr(getattr(controller, "llm", None), "last_assistant_extra_fields", {})
+            or {}
+        )
+        reasoning_metadata = {}
+        for key in (
+            "reasoning_content",
+            "reasoning_summary",
+            "reasoning_details",
+            "reasoning",
+            "_kt_assistant_segments",
+        ):
+            value = fields.get(key)
+            if value not in (None, "", [], {}):
+                reasoning_metadata[key] = value
+        if reasoning_metadata:
+            reasoning_metadata["turn_index"] = self._turn_index
+            reasoning_metadata["branch_id"] = self._branch_id
+            self.output_router.notify_activity(
+                "assistant_reasoning",
+                f"turn {self._turn_index} assistant reasoning",
+                metadata=reasoning_metadata,
+            )
 
     async def _finalize_processing(
         self,

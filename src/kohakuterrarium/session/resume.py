@@ -9,7 +9,6 @@ from kohakuterrarium.builtins.outputs import create_builtin_output
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.agent_selection import restore_selections
 from kohakuterrarium.core.config_serde import unpack_agent_config
-from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.conversation_elide import (
     elide_stale_tool_results,
     estimate_tokens,
@@ -34,6 +33,9 @@ from kohakuterrarium.session.resume_branch import (
     replayed_messages_for,
     snapshot_has_turn_metadata,
     snapshot_mismatches_branch,
+)
+from kohakuterrarium.session.resume_build import (
+    build_conversation as _build_conversation,
 )
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.logging import get_logger
@@ -69,34 +71,6 @@ def _create_io_modules(
                 "(``cli`` mode must be constructed by the caller and "
                 "passed via ``input_module`` / ``output_module``)."
             )
-
-
-def _build_conversation(messages: list[dict]) -> Conversation:
-    """Build a conversation from persisted message dictionaries.
-
-    Tool-call identifiers, names, and metadata are retained when present.
-    """
-    conv = Conversation()
-    for msg in messages:
-        if not isinstance(msg, dict):
-            # Malformed persisted entry (corrupt snapshot): skip it rather
-            # than crashing on msg.get(...).
-            continue
-        role = msg.get("role", "user")
-        content = msg.get("content", "")
-        kwargs = {}
-        if msg.get("tool_calls"):
-            kwargs["tool_calls"] = msg["tool_calls"]
-        if msg.get("tool_call_id"):
-            kwargs["tool_call_id"] = msg["tool_call_id"]
-        if msg.get("name"):
-            kwargs["name"] = msg["name"]
-        if msg.get("metadata"):
-            kwargs["metadata"] = msg["metadata"]
-        conv.append(role, content, **kwargs)
-    # Preserve a trailing in-flight call while removing stale orphaned fragments.
-    conv.prune_orphan_tool_pairs(preserve_pending_tail=True)
-    return conv
 
 
 def _load_conversation_with_replay_fallback(

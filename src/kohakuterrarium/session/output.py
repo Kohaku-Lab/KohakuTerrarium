@@ -398,6 +398,7 @@ class SessionOutput(OutputModule):
         "turn_token_usage": "_handle_turn_token_usage",
         "plugin_hook_timing": "_handle_plugin_hook_timing",
         "cache_stats": "_handle_cache_stats",
+        "assistant_reasoning": "_handle_assistant_reasoning",
         "scratchpad_write": "_handle_scratchpad_write",
         # Suppress duplicate activity rows for input already persisted by the agent.
         "user_input_injected": "_handle_user_input_injected",
@@ -416,6 +417,23 @@ class SessionOutput(OutputModule):
                 f"activity:{activity_type}",
                 {"name": name, "detail": detail, **metadata},
             )
+
+    def _handle_assistant_reasoning(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        payload = {}
+        for key in (
+            "reasoning_content",
+            "reasoning_summary",
+            "reasoning_details",
+            "reasoning",
+            "_kt_assistant_segments",
+        ):
+            value = metadata.get(key)
+            if value not in (None, "", [], {}):
+                payload[key] = value
+        if payload:
+            self._record("assistant_reasoning", payload)
 
     def _handle_trigger_fired(self, name: str, detail: str, metadata: dict) -> None:
         self._record(

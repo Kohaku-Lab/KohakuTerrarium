@@ -181,6 +181,14 @@
       <template v-for="(group, gi) in renderGroups" :key="groupKey(group, gi)">
         <!-- Pass-through part -->
         <template v-if="group.type === 'part'">
+          <div v-if="group.part.type === 'reasoning'" class="mb-1.5">
+            <details class="rounded-lg border border-iolite/20 dark:border-iolite/25 bg-iolite/5 dark:bg-iolite/10 px-2 py-1">
+              <summary class="text-xs text-iolite dark:text-iolite-light cursor-pointer select-none">
+                Thinking<span v-if="group.part.source" class="ml-1 text-warm-400">· {{ group.part.source }}</span>
+              </summary>
+              <pre class="mt-2 text-xs whitespace-pre-wrap break-words font-mono text-warm-700 dark:text-warm-300 max-h-60 overflow-y-auto">{{ reasoningText(group.part) }}</pre>
+            </details>
+          </div>
           <div v-if="group.part.type === 'text' && group.part.content" class="text-body mb-1">
             <MarkdownRenderer :content="group.part.content" />
           </div>
@@ -358,6 +366,11 @@ const errorFirstLine = computed(() => {
 
 function toggleTool(id) {
   expandedTools[id] = !expandedTools[id]
+}
+
+function reasoningText(part) {
+  if (!part?.text) return ""
+  return part.signature ? `${part.text}\n[signature: ${part.signature}]` : part.text
 }
 
 // Phase B UI event reply: forward to chat store, which sends

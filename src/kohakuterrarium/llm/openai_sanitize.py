@@ -21,6 +21,30 @@ _OAI_PART_ALLOWED_KEYS: dict[str, frozenset[str]] = {
 # Nested image data likewise permits only the documented URL and detail fields.
 _OAI_IMAGE_URL_ALLOWED_KEYS: frozenset[str] = frozenset({"url", "detail"})
 
+# Provider-owned assistant fields that only matter for local persistence and
+# must never reach a Chat Completions-compatible endpoint.
+_INTERNAL_MESSAGE_KEYS = frozenset({"_kt_assistant_segments", "_kt_anthropic_content"})
+
+
+def strip_internal_message_fields(
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Remove message-level internal fields while preserving identity when unchanged."""
+    out: list[dict[str, Any]] = []
+    any_changed = False
+    for msg in messages:
+        if not any(key in msg for key in _INTERNAL_MESSAGE_KEYS):
+            out.append(msg)
+            continue
+        cleaned = {
+            key: value
+            for key, value in msg.items()
+            if key not in _INTERNAL_MESSAGE_KEYS
+        }
+        out.append(cleaned)
+        any_changed = True
+    return out if any_changed else messages
+
 
 def strip_kt_extras(
     messages: list[dict[str, Any]],

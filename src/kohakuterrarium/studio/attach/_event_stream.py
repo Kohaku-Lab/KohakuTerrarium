@@ -328,4 +328,10 @@ _STREAM_METADATA_KEYS = (
     "final_state",
     # File-mutating tools may include a preview for immediate canvas rendering.
     "canvas_preview",
+    # Ordered assistant reasoning segments from the final LLM turn.
+    "reasoning_content",
+    "reasoning_summary",
+    "reasoning_details",
+    "reasoning",
+    "_kt_assistant_segments",
 )

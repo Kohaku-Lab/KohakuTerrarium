@@ -49,6 +49,7 @@ from kohakuterrarium.llm.recovery import (
     backoff_delay,
     classify_openai_error,
 )
+from kohakuterrarium.llm.turn_segments import inject_anthropic_segments
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -315,7 +316,9 @@ class AnthropicProvider(BaseLLMProvider):
         content_blocks = ordered_blocks(blocks)
         self._last_tool_calls = tool_calls_from_blocks(content_blocks)
         if content_blocks:
-            self._last_assistant_extra_fields = {KT_CONTENT_KEY: content_blocks}
+            self._last_assistant_extra_fields = inject_anthropic_segments(
+                {KT_CONTENT_KEY: content_blocks}, content_blocks
+            )
         self._log_token_usage()
         if stop_reason:
             logger.debug("Anthropic stream completed", stop_reason=stop_reason)
@@ -383,7 +386,9 @@ class AnthropicProvider(BaseLLMProvider):
         ]
         self._last_tool_calls = tool_calls_from_blocks(content_blocks)
         if content_blocks:
-            self._last_assistant_extra_fields = {KT_CONTENT_KEY: content_blocks}
+            self._last_assistant_extra_fields = inject_anthropic_segments(
+                {KT_CONTENT_KEY: content_blocks}, content_blocks
+            )
         self._last_usage = usage_to_dict(getattr(response, "usage", None))
         self._log_token_usage()
         text = "".join(

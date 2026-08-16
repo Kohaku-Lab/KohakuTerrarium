@@ -42,6 +42,7 @@ from kohakuterrarium.llm.codex_rate_limits import (
     set_cached,
 )
 from kohakuterrarium.llm.openai_sanitize import strip_surrogates
+from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
     RetryPolicy,
@@ -111,6 +112,8 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._last_tool_calls: list[NativeToolCall] = []
         self._last_usage: dict[str, int] = {}
         self._last_assistant_parts: list[Any] = []
+        self._last_assistant_extra_fields: dict[str, Any] = {}
+        self._reasoning = ResponsesReasoningCollector()
         self.prompt_cache_key: str | None = None
 
     async def ensure_authenticated(self) -> None:
@@ -268,6 +271,8 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._last_tool_calls = []
         self._last_usage = {}
         self._last_assistant_parts = []
+        self._last_assistant_extra_fields = {}
+        self._reasoning = ResponsesReasoningCollector()
         await self._ensure_valid_token()
 
         if not self._client:
@@ -354,6 +359,7 @@ class CodexOAuthProvider(BaseLLMProvider):
                         piece = self._process_stream_event(event, collected_tool_calls)
                         if piece is not None:
                             yield piece
+                    self._last_assistant_extra_fields = self._reasoning.fields()
                     self._last_tool_calls = collected_tool_calls
                     return
                 except ResponsesWSError as exc:
@@ -393,6 +399,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             if piece is not None:
                 yield piece
 
+        self._last_assistant_extra_fields = self._reasoning.fields()
         self._last_tool_calls = collected_tool_calls
 
     async def _complete_chat(
@@ -453,17 +460,22 @@ class CodexOAuthProvider(BaseLLMProvider):
         maybe_capture_stream_rate_limit(
             event, parse_rate_limit_event, UsageSnapshot, set_cached
         )
+        self._reasoning.consume(event)
 
         match getattr(event, "type", ""):
             case "response.output_text.delta":
-                return strip_surrogates(event.delta)
+                piece = strip_surrogates(event.delta)
+                self._reasoning.consume_output_text(piece)
+                return piece
             case "response.output_item.done":
                 item = event.item
                 itype = getattr(item, "type", "")
                 if itype == "function_call":
+                    call_id = getattr(item, "call_id", "")
+                    self._reasoning.consume_function_call(call_id)
                     collected_tool_calls.append(
                         NativeToolCall(
-                            id=getattr(item, "call_id", ""),
+                            id=call_id,
                             name=getattr(item, "name", "") or "",
                             arguments=getattr(item, "arguments", ""),
                         )

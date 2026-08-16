@@ -391,9 +391,14 @@ class SubAgent:
                 "assistant",
                 assistant_content or "",
                 tool_calls=tool_calls_data,
+                extra_fields=getattr(self.llm, "last_assistant_extra_fields", {}) or {},
             )
         else:
-            self.conversation.append("assistant", assistant_content)
+            self.conversation.append(
+                "assistant",
+                assistant_content,
+                extra_fields=getattr(self.llm, "last_assistant_extra_fields", {}) or {},
+            )
 
         self._log_turn_preview(assistant_content)
         self._accumulate_tokens()
@@ -424,7 +429,11 @@ class SubAgent:
             elif isinstance(event, TextEvent):
                 output_parts.append(event.text)
 
-        self.conversation.append("assistant", assistant_content)
+        self.conversation.append(
+            "assistant",
+            assistant_content,
+            extra_fields=getattr(self.llm, "last_assistant_extra_fields", {}) or {},
+        )
         self._log_turn_preview(assistant_content)
         self._accumulate_tokens()
         return tool_calls, output_parts

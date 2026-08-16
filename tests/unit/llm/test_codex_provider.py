@@ -129,6 +129,89 @@ class _Ev:
         self.__dict__.update(kwargs)
 
 
+class TestReasoningCapture:
+    """Codex must retain Responses reasoning text for snapshot persistence."""
+
+    def _provider(self) -> CodexOAuthProvider:
+        return CodexOAuthProvider(model="m", api_key="sk", base_url="https://h/v1")
+
+    def test_reasoning_delta_events_are_packed(self):
+        p = self._provider()
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="think "), []
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="hard"), []
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_summary_text.delta", delta="summary"), []
+        )
+        assert p._reasoning.fields() == {
+            "reasoning_content": "think hard",
+            "reasoning_summary": "summary",
+            "_kt_assistant_segments": [
+                {"type": "reasoning", "source": "responses_text", "text": "think hard"},
+                {"type": "reasoning", "source": "responses_summary", "text": "summary"},
+            ],
+        }
+
+    def test_reasoning_done_event_replaces_accumulator(self):
+        p = self._provider()
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="partial"), []
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.done", text="complete"), []
+        )
+        assert p._reasoning.fields()["reasoning_content"] == "complete"
+
+    def test_segments_preserve_reasoning_text_tool_order(self):
+        p = self._provider()
+        collected = []
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="think 1"), collected
+        )
+        p._process_stream_event(
+            _Ev(type="response.output_text.delta", delta="answer 1"), collected
+        )
+        p._process_stream_event(
+            _Ev(
+                type="response.output_item.done",
+                item=_Ev(
+                    type="function_call", call_id="call_1", name="t", arguments="{}"
+                ),
+            ),
+            collected,
+        )
+        p._process_stream_event(
+            _Ev(type="response.reasoning_text.delta", delta="think 2"), collected
+        )
+
+        assert p._reasoning.fields()["_kt_assistant_segments"] == [
+            {"type": "reasoning", "source": "responses_text", "text": "think 1"},
+            {"type": "text", "text": "answer 1"},
+            {"type": "tool_call_ref", "call_id": "call_1"},
+            {"type": "reasoning", "source": "responses_text", "text": "think 2"},
+        ]
+
+    def test_reasoning_output_item_is_captured(self):
+        p = self._provider()
+        item = _Ev(
+            type="reasoning",
+            summary=[{"type": "summary_text", "text": "brief"}],
+            content=[{"type": "text", "text": "private"}],
+        )
+        p._process_stream_event(_Ev(type="response.output_item.done", item=item), [])
+        assert p._reasoning.fields() == {
+            "reasoning_content": "private",
+            "reasoning_summary": "brief",
+            "_kt_assistant_segments": [
+                {"type": "reasoning", "source": "responses_summary", "text": "brief"},
+                {"type": "reasoning", "source": "responses_text", "text": "private"},
+            ],
+        }
+
+
 class _FakeWSConnection:
     def __init__(self):
         self.sent = []

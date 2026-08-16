@@ -57,6 +57,7 @@ const TYPE_CHIPS = [
   { id: "compact", label: "compact", matches: ["compact_start", "compact_complete", "compact_decision", "compact_replace"] },
   { id: "tokens", label: "tokens", matches: ["token_usage", "turn_token_usage"] },
   { id: "text", label: "text", matches: ["text_chunk", "text"] },
+  { id: "reasoning", label: "reasoning", matches: ["assistant_reasoning"] },
 ]
 
 const agentModel = computed({
