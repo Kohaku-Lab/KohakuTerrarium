@@ -144,23 +144,129 @@ def print_state(store: SessionStore) -> None:
     print()
 
 
-def print_conversations(store: SessionStore) -> None:
-    """Print bounded previews of persisted conversation snapshots."""
+_REASONING_TEXT_KEYS = ("reasoning_content", "reasoning", "reasoning_summary")
+_ANTHROPIC_REASONING_TYPES = {"thinking", "redacted_thinking"}
+_REASONING_PREVIEW_CHARS = 1200
+
+
+def _bounded_text(text: str, limit: int) -> str:
+    """Return ``text`` with a trailing truncation marker when over ``limit``."""
+    if limit <= 0 or len(text) <= limit:
+        return text
+    return f"{text[:limit]}\n... [{len(text) - limit} more chars]"
+
+
+def _reasoning_entries(message: dict) -> list[tuple[str, str]]:
+    """Extract chain-of-thought fields from one raw conversation message."""
+    entries: list[tuple[str, str]] = []
+    fields = {**(message.get("extra_fields") or {}), **message}
+
+    segments = fields.get("_kt_assistant_segments")
+    if isinstance(segments, list) and segments:
+        for idx, segment in enumerate(segments):
+            if not isinstance(segment, dict):
+                continue
+            stype = segment.get("type")
+            if stype == "reasoning":
+                text = segment.get("text") or ""
+                signature = segment.get("signature") or ""
+                if signature:
+                    text = f"{text}\n[signature: {signature}]"
+                if text:
+                    label = (
+                        f"segments[{idx}] reasoning:{segment.get('source', 'unknown')}"
+                    )
+                    entries.append((label, text))
+            elif stype == "text":
+                text = segment.get("text") or ""
+                if text:
+                    entries.append((f"segments[{idx}] text", text))
+            elif stype == "tool_call_ref":
+                call_id = segment.get("call_id") or ""
+                if call_id:
+                    entries.append((f"segments[{idx}] tool_call_ref", call_id))
+        if entries:
+            return entries
+
+    for key in _REASONING_TEXT_KEYS:
+        value = fields.get(key)
+        if isinstance(value, str) and value:
+            entries.append((key, value))
+
+    for idx, block in enumerate(fields.get("reasoning_details") or []):
+        if not isinstance(block, dict):
+            continue
+        text = block.get("text") or block.get("thinking") or block.get("data") or ""
+        signature = block.get("signature") or ""
+        if signature:
+            text = f"{text}\n[signature: {signature}]"
+        if text:
+            label = f"reasoning_details[{idx}]:{block.get('type', 'unknown')}"
+            entries.append((label, text))
+
+    native = fields.get("_kt_anthropic_content")
+    if isinstance(native, list):
+        for idx, block in enumerate(native):
+            if not isinstance(block, dict):
+                continue
+            if block.get("type") not in _ANTHROPIC_REASONING_TYPES:
+                continue
+            text = block.get("thinking") or block.get("data") or ""
+            signature = block.get("signature") or ""
+            if signature:
+                text = f"{text}\n[signature: {signature}]"
+            if text:
+                entries.append((f"anthropic:{block.get('type')}[{idx}]", text))
+
+    return entries
+
+
+def print_conversations(
+    store: SessionStore,
+    *,
+    show_reasoning: bool = False,
+    full_reasoning: bool = False,
+) -> None:
+    """Print bounded previews of persisted conversation snapshots.
+
+    With ``show_reasoning``, assistant messages additionally print their
+    captured chain-of-thought fields. ``full_reasoning`` disables the
+    per-field preview truncation.
+    """
     print("=== Conversation Snapshots ===")
     for key_bytes in sorted(store.conversation.keys()):
         key = key_bytes.decode() if isinstance(key_bytes, bytes) else key_bytes
         messages = store.load_conversation(key)
-        if messages:
-            print(f"  {key}: {len(messages)} messages")
-            for msg in messages[:3]:
-                role = msg.get("role", "?")
-                content = str(msg.get("content", ""))[:60]
-                tc = " [+tool_calls]" if msg.get("tool_calls") else ""
-                print(f"    [{role}]{tc} {content}")
-            if len(messages) > 3:
-                print(f"    ... ({len(messages) - 3} more)")
-        else:
+        if not messages:
             print(f"  {key}: (empty)")
+            continue
+
+        print(f"  {key}: {len(messages)} messages")
+        for msg in messages[:3]:
+            role = msg.get("role", "?")
+            content = str(msg.get("content", ""))[:60]
+            tc = " [+tool_calls]" if msg.get("tool_calls") else ""
+            print(f"    [{role}]{tc} {content}")
+        if len(messages) > 3:
+            print(f"    ... ({len(messages) - 3} more)")
+
+        if show_reasoning:
+            found = False
+            for idx, msg in enumerate(messages):
+                if not isinstance(msg, dict) or msg.get("role") != "assistant":
+                    continue
+                for label, text in _reasoning_entries(msg):
+                    found = True
+                    rendered = (
+                        text
+                        if full_reasoning
+                        else _bounded_text(text, _REASONING_PREVIEW_CHARS)
+                    )
+                    print(f"    [msg {idx}] {label}:")
+                    for line in rendered.splitlines() or [""]:
+                        print(f"        {line}")
+            if not found:
+                print("    (no reasoning fields found in snapshot)")
     print()
 
 
@@ -228,6 +334,16 @@ def main():
     parser.add_argument(
         "--conversations", action="store_true", help="Show conversation snapshots"
     )
+    parser.add_argument(
+        "--reasoning",
+        action="store_true",
+        help="Show chain-of-thought fields from conversation snapshots",
+    )
+    parser.add_argument(
+        "--full-reasoning",
+        action="store_true",
+        help="Print complete reasoning text instead of bounded previews",
+    )
     parser.add_argument("--search", help="Search session content")
     parser.add_argument("--all", action="store_true", help="Show everything")
     args = parser.parse_args()
@@ -262,8 +378,13 @@ def main():
             print_state(store)
             shown = True
 
-        if show_all or args.conversations:
-            print_conversations(store)
+        show_reasoning = args.reasoning or args.full_reasoning
+        if show_all or args.conversations or show_reasoning:
+            print_conversations(
+                store,
+                show_reasoning=show_reasoning or show_all,
+                full_reasoning=args.full_reasoning,
+            )
             shown = True
 
         if args.search:
@@ -275,7 +396,8 @@ def main():
 
         if not shown and not show_all:
             print(
-                "Use --events, --channels, --subagents, --state, --conversations, --search, or --all"
+                "Use --events, --channels, --subagents, --state, --conversations, "
+                "--reasoning, --search, or --all"
             )
 
     finally:

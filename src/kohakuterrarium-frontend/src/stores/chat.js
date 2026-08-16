@@ -64,6 +64,45 @@ function normalizeMessageContent(content) {
   }
 }
 
+function _insertReasoningSegments(message, segments, idPrefix = "reasoning_") {
+  if (!message || !Array.isArray(segments) || !segments.length) return
+  const parts = Array.isArray(message.parts) ? message.parts : []
+  const out = []
+  let cursor = 0
+  let n = 0
+
+  const nextText = (from) => parts.findIndex((part, idx) => idx >= from && part?.type === "text")
+  const nextTool = (from, callId) =>
+    parts.findIndex((part, idx) => idx >= from && part?.type === "tool" && part.jobId === callId)
+
+  for (const segment of segments) {
+    if (!segment || typeof segment !== "object") continue
+    if (segment.type === "reasoning") {
+      const part = {
+        type: "reasoning",
+        id: `${idPrefix}${n++}`,
+        source: segment.source || "reasoning",
+        text: segment.text || "",
+      }
+      if (segment.signature) part.signature = segment.signature
+      out.push(part)
+      continue
+    }
+    const anchor =
+      segment.type === "text"
+        ? nextText(cursor)
+        : segment.type === "tool_call_ref"
+          ? nextTool(cursor, segment.call_id)
+          : -1
+    if (anchor === -1) continue
+    while (cursor < anchor) out.push(parts[cursor++])
+    out.push(parts[cursor++])
+  }
+  while (cursor < parts.length) out.push(parts[cursor++])
+
+  if (out.length) message.parts = out
+}
+
 function contentSignature(content) {
   if (typeof content === "string") return `text:${content}`
   const normalized = normalizeContentParts(content)
@@ -210,14 +249,63 @@ export function _convertHistory(messages) {
         result: toolResults[tc.id] || "",
       }))
       const normalized = normalizeMessageContent(msg.content)
-      result.push({
+      const message = {
         id: "h_" + result.length,
         role: "assistant",
         content: normalized.content,
         contentParts: normalized.contentParts,
         timestamp: "",
         tool_calls: tcs.length ? tcs : undefined,
-      })
+      }
+      if (Array.isArray(msg._kt_assistant_segments) && msg._kt_assistant_segments.length) {
+        const tcById = new Map(tcs.map((tc) => [tc.id, tc]))
+        const parts = []
+        for (const segment of msg._kt_assistant_segments) {
+          if (!segment || typeof segment !== "object") continue
+          if (segment.type === "reasoning") {
+            const part = {
+              type: "reasoning",
+              id: `h_${result.length}_r${parts.length}`,
+              source: segment.source || "reasoning",
+              text: segment.text || "",
+            }
+            if (segment.signature) part.signature = segment.signature
+            parts.push(part)
+          } else if (segment.type === "text" && segment.text) {
+            parts.push({
+              type: "text",
+              id: `h_${result.length}_c${parts.length}`,
+              content: segment.text,
+            })
+          } else if (segment.type === "tool_call_ref" && tcById.has(segment.call_id)) {
+            const tc = tcById.get(segment.call_id)
+            parts.push({
+              type: "tool",
+              id: `h_${result.length}_t${tc.id}`,
+              jobId: tc.id,
+              name: tc.name,
+              kind: tc.kind,
+              args: tc.args,
+              status: tc.status,
+              result: tc.result,
+              tools_used: [],
+              children: [],
+            })
+          }
+        }
+        for (const part of normalized.contentParts || []) {
+          if (part.type === "image_url") {
+            parts.push({
+              type: "image_url",
+              id: `h_${result.length}_img${parts.length}`,
+              image_url: part.image_url,
+              meta: part.meta,
+            })
+          }
+        }
+        message.parts = parts
+      }
+      result.push(message)
     }
   }
   return result
@@ -1104,6 +1192,13 @@ export function _replayEvents(messages, events, branchView = null) {
           revised_prompt: evt.revised_prompt,
         },
       })
+    } else if (t === "assistant_reasoning") {
+      const c = ensureCur()
+      _insertReasoningSegments(
+        c,
+        evt._kt_assistant_segments || [],
+        typeof evt.event_id === "number" ? `h_${evt.event_id}_r` : "h_reasoning_",
+      )
     } else if (t === "token_usage" || t === "processing_complete") {
       // skip
     }
@@ -2837,6 +2932,20 @@ const _chatStoreOptions = {
       // so recover scope from this store's $id and pass it through.
       const statusStore = useStatusStore(scopeOfStoreId(this.$id))
       statusStore.handleActivity(data)
+
+      if (at === "assistant_reasoning") {
+        const tab = source || data.agent_name || this.activeTab
+        const list = this.messagesByTab[tab] || []
+        const target = [...list].reverse().find((message) => message?.role === "assistant")
+        if (target) {
+          _insertReasoningSegments(
+            target,
+            data._kt_assistant_segments || [],
+            `live_${data.id || "reasoning"}_r`,
+          )
+        }
+        return
+      }
 
       if (at === "session_info") {
         // Session id is global regardless of which creature emitted.

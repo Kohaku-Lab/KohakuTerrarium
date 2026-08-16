@@ -42,6 +42,7 @@ const TYPE_TONE = {
   text_chunk: "text-warm-500",
   turn_token_usage: "text-taaffeite",
   token_usage: "text-taaffeite",
+  assistant_reasoning: "text-iolite",
   processing_error: "text-coral",
 }
 
@@ -62,6 +63,7 @@ const ICON_MAP = {
   text_chunk: "i-carbon-text-creation",
   turn_token_usage: "i-carbon-chart-bar",
   token_usage: "i-carbon-chart-bar",
+  assistant_reasoning: "i-carbon-idea",
   processing_error: "i-carbon-warning-alt",
 }
 
@@ -82,6 +84,10 @@ const summary = computed(() => {
   if (fromOutput) return fromOutput
   if (e.tool) return String(e.tool)
   if (e.name) return String(e.name)
+  if (Array.isArray(e._kt_assistant_segments)) {
+    const first = e._kt_assistant_segments.find((s) => s?.type === "reasoning")
+    if (first?.text) return first.text
+  }
   if (e.error) return String(e.error)
   if (e.summary) return String(e.summary)
   return ""

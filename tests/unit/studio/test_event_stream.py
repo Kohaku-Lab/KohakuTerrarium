@@ -118,6 +118,28 @@ class TestStreamOutputSync:
         # Unknown keys are filtered.
         assert "unknown_key" not in msg
 
+    def test_assistant_reasoning_metadata_streams_segments(self, _stream):
+        so, q, _log = _stream
+        so.on_activity_with_metadata(
+            "assistant_reasoning",
+            "turn 2 assistant reasoning",
+            metadata={
+                "reasoning_content": "think",
+                "_kt_assistant_segments": [
+                    {
+                        "type": "reasoning",
+                        "source": "reasoning_content",
+                        "text": "think",
+                    },
+                    {"type": "text", "text": "answer"},
+                ],
+            },
+        )
+        msg = q.get_nowait()
+        assert msg["activity_type"] == "assistant_reasoning"
+        assert msg["reasoning_content"] == "think"
+        assert msg["_kt_assistant_segments"][0]["text"] == "think"
+
     def test_tool_done_streams_preview_not_full_output(self, _stream):
         so, q, _log = _stream
         full = "x" * 200_000

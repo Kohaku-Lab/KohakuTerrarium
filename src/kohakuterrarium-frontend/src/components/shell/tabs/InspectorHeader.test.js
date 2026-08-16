@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 import InspectorHeader from "./InspectorHeader.vue"
 import { useChatStore } from "@/stores/chat"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
+import { useStatusStore } from "@/stores/status"
 
 beforeEach(() => {
   const storage = new Map()
@@ -16,12 +17,12 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
-function mountHeader() {
+function mountHeader(instance = null) {
   return mount(InspectorHeader, {
     props: {
       target: "g1",
       sessionName: "g1",
-      instance: {
+      instance: instance || {
         id: "g1",
         session_id: "g1",
         config_name: "root",
@@ -53,6 +54,21 @@ describe("InspectorHeader — token total source (Bug 1)", () => {
     // single restored creature the chat store knows about).
     expect(text).toContain("450 tok")
     expect(text).not.toContain("150 tok")
+    wrapper.unmount()
+  })
+
+  it("prefers the active tab runtime model over the instance default", () => {
+    const chat = useChatStore("g1")
+    chat.modelByTab["g1"] = {
+      llmName: "openai/gpt-5",
+      model: "gpt-5",
+    }
+    const status = useStatusStore("g1")
+    status.sessionInfo.model = "default-model"
+
+    const wrapper = mountHeader({ id: "g1", model: "default-model" })
+    expect(wrapper.text()).toContain("openai/gpt-5")
+    expect(wrapper.text()).not.toContain("default-model")
     wrapper.unmount()
   })
 

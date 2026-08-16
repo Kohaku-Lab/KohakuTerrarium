@@ -760,6 +760,26 @@ def replay_conversation(
             )
         elif etype == "system_prompt_set":
             messages.append({"role": "system", "content": evt.get("content", "")})
+        elif etype == "assistant_reasoning":
+            target = next(
+                (
+                    message
+                    for message in reversed(messages)
+                    if message.get("role") == "assistant"
+                ),
+                None,
+            )
+            if target is not None:
+                for key in (
+                    "reasoning_content",
+                    "reasoning_summary",
+                    "reasoning_details",
+                    "reasoning",
+                    "_kt_assistant_segments",
+                ):
+                    value = evt.get(key)
+                    if value not in (None, "", [], {}):
+                        target[key] = value
 
     _flush_text()
     return messages

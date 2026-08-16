@@ -1072,6 +1072,7 @@ export default {
   "sessionViewer.detail.content": "Content",
   "sessionViewer.detail.image": "Image",
   "sessionViewer.detail.tokens": "Tokens",
+  "sessionViewer.detail.reasoning": "Reasoning",
   "sessionViewer.detail.rawJson": "Raw JSON",
   "sessionViewer.detail.openSubagent": "Open sub-agent trace",
 

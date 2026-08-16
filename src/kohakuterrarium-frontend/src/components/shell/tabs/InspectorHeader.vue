@@ -66,7 +66,11 @@ const statusColor = computed(
     })[props.instance?.status] ?? "bg-warm-400",
 )
 
-const model = computed(() => status.sessionInfo.llmName || status.sessionInfo.model || props.instance?.model || "")
+const model = computed(() => {
+  const target = props.target || chat.activeTab
+  const perTab = (target && chat.modelByTab[target]) || {}
+  return perTab.llmName || perTab.model || chat.sessionInfo.llmName || chat.sessionInfo.model || status.sessionInfo.llmName || status.sessionInfo.model || props.instance?.model || ""
+})
 
 const contextPercent = computed(() => Math.round(status.tokenUsage.contextPercent || 0))
 

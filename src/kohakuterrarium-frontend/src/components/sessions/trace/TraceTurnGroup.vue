@@ -112,6 +112,7 @@ const TYPE_GROUPS = {
   compact: new Set(["compact_start", "compact_complete", "compact_decision", "compact_replace"]),
   tokens: new Set(["token_usage", "turn_token_usage", "subagent_token_usage"]),
   text: new Set(["text_chunk", "text"]),
+  reasoning: new Set(["assistant_reasoning"]),
 }
 
 function _passesFilter(ev) {

@@ -67,6 +67,37 @@ class TestReplayConversation:
     def test_empty_events(self):
         assert replay_conversation([]) == []
 
+    def test_assistant_reasoning_attaches_to_previous_assistant(self):
+        events = [
+            {"type": "user_message", "content": "q", "event_id": 1},
+            {
+                "type": "text_chunk",
+                "content": "answer",
+                "event_id": 2,
+                "turn_index": 1,
+                "branch_id": 1,
+            },
+            {
+                "type": "assistant_reasoning",
+                "event_id": 3,
+                "turn_index": 1,
+                "branch_id": 1,
+                "reasoning_content": "think",
+                "_kt_assistant_segments": [
+                    {
+                        "type": "reasoning",
+                        "source": "reasoning_content",
+                        "text": "think",
+                    },
+                    {"type": "text", "text": "answer"},
+                ],
+            },
+        ]
+        out = replay_conversation(events)
+        assistant = next(m for m in out if m["role"] == "assistant")
+        assert assistant["reasoning_content"] == "think"
+        assert assistant["_kt_assistant_segments"][0]["text"] == "think"
+
     def test_user_message(self):
         events = [{"type": "user_message", "content": "hi", "event_id": 0}]
         out = replay_conversation(events)
