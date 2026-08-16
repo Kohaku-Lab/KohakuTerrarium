@@ -6,6 +6,8 @@ API; keep their reasoning stream handling in one place.
 
 from typing import Any
 
+from kohakuterrarium.llm.turn_segments import TurnSegmentsBuilder
+
 
 def _parts_text(parts: Any) -> str:
     """Join Responses reasoning content/summary parts into plain text."""
@@ -38,6 +40,7 @@ class ResponsesReasoningCollector:
     def __init__(self) -> None:
         self.text = ""
         self.summary = ""
+        self.segments = TurnSegmentsBuilder()
 
     def consume(self, event: Any) -> None:
         """Fold one Responses stream event into the collector."""
@@ -46,19 +49,39 @@ class ResponsesReasoningCollector:
                 piece = getattr(event, "delta", None)
                 if isinstance(piece, str):
                     self.text += piece
+                    self.segments.append_reasoning(
+                        piece,
+                        source="responses_text",
+                        key=getattr(event, "item_id", None),
+                    )
             case "response.reasoning_summary_text.delta":
                 piece = getattr(event, "delta", None)
                 if isinstance(piece, str):
                     self.summary += piece
+                    self.segments.append_reasoning(
+                        piece,
+                        source="responses_summary",
+                        key=getattr(event, "item_id", None),
+                    )
             case "response.reasoning_text.done":
                 piece = getattr(event, "text", None) or getattr(event, "delta", None)
                 if isinstance(piece, str) and piece:
                     self.text = piece
+                    self.segments.replace_reasoning(
+                        piece,
+                        source="responses_text",
+                        key=getattr(event, "item_id", None),
+                    )
             case "response.reasoning_summary_text.done":
                 piece = getattr(event, "text", None) or getattr(event, "delta", None)
                 if isinstance(piece, str) and piece:
                     self.summary = piece
-            case "response.output_item.added" | "response.output_item.done":
+                    self.segments.replace_reasoning(
+                        piece,
+                        source="responses_summary",
+                        key=getattr(event, "item_id", None),
+                    )
+            case "response.output_item.done":
                 item = getattr(event, "item", None)
                 if getattr(item, "type", "") == "reasoning":
                     self.consume_item(item)
@@ -69,8 +92,24 @@ class ResponsesReasoningCollector:
         content = _parts_text(getattr(item, "content", None))
         if summary:
             self.summary = _join(self.summary, summary)
+            self.segments.append_reasoning(
+                summary, source="responses_summary", key=getattr(item, "id", None)
+            )
         if content:
             self.text = _join(self.text, content)
+            self.segments.append_reasoning(
+                content, source="responses_text", key=getattr(item, "id", None)
+            )
+
+    def consume_output_text(self, piece: str) -> None:
+        """Record visible output text in its arrival position."""
+        if isinstance(piece, str) and piece:
+            self.segments.append_text(piece)
+
+    def consume_function_call(self, call_id: str) -> None:
+        """Record a tool-call reference in its arrival position."""
+        if call_id:
+            self.segments.append_tool_call_ref(call_id)
 
     def fields(self) -> dict[str, Any]:
         """Return non-empty extra fields for conversation persistence."""
@@ -79,4 +118,4 @@ class ResponsesReasoningCollector:
             packed["reasoning_content"] = self.text
         if self.summary:
             packed["reasoning_summary"] = self.summary
-        return packed
+        return self.segments.inject_into(packed)

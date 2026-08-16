@@ -33,9 +33,11 @@ from kohakuterrarium.llm.openai_helpers import (
 )
 from kohakuterrarium.llm.openai_sanitize import (
     log_request_shape,
+    strip_internal_message_fields,
     strip_kt_extras,
     strip_surrogates,
 )
+from kohakuterrarium.llm.turn_segments import TurnSegmentsBuilder
 from kohakuterrarium.llm.openai_ws import stream_ws_turn
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
@@ -233,6 +235,7 @@ class OpenAIProvider(BaseLLMProvider):
     def _prepare_messages(self, messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         """Resolve local images, strip internal fields, and add eligible cache markers."""
         messages = resolve_message_image_urls(messages)
+        messages = strip_internal_message_fields(messages)
         messages = strip_kt_extras(messages)
         messages = normalize_stateful_assistant_fields(messages)
         if not is_anthropic_endpoint(self.base_url, None):
@@ -366,6 +369,7 @@ class OpenAIProvider(BaseLLMProvider):
 
         self._last_usage = {}
         pending_calls: dict[int, dict[str, str]] = {}
+        segments = TurnSegmentsBuilder()
         reasoning_text = ""
         reasoning_details: list[Any] = []
         reasoning_extra: dict[str, Any] = {}
@@ -386,6 +390,7 @@ class OpenAIProvider(BaseLLMProvider):
             if delta.tool_calls:
                 for tc_delta in delta.tool_calls:
                     idx = tc_delta.index
+                    segments.append_tool_call_ref(tc_delta.id or "", idx)
                     if idx not in pending_calls:
                         pending_calls[idx] = {"id": "", "name": "", "arguments": ""}
                     if tc_delta.id:
@@ -405,6 +410,7 @@ class OpenAIProvider(BaseLLMProvider):
                 rc_piece = delta_field(delta, "reasoning_content")
                 if isinstance(rc_piece, str):
                     reasoning_text += rc_piece
+                    segments.append_reasoning(rc_piece, source="reasoning_content")
                 if delta_field_present(delta, "reasoning_details"):
                     reasoning_details_seen = True
                 rd_piece = delta_field(delta, "reasoning_details")
@@ -413,6 +419,12 @@ class OpenAIProvider(BaseLLMProvider):
                     for entry in rd_piece:
                         if isinstance(entry, dict):
                             merge_reasoning_detail_stream(reasoning_details, entry)
+                            segments.append_reasoning(
+                                entry.get("text") or entry.get("thinking") or "",
+                                source="reasoning_details",
+                                key=f"{entry.get('index')}:{entry.get('type')}",
+                                signature=entry.get("signature"),
+                            )
                 # Preserve the plain reasoning field independently of structured details.
                 if delta_field_present(delta, "reasoning"):
                     r_piece = delta_field(delta, "reasoning")
@@ -420,11 +432,15 @@ class OpenAIProvider(BaseLLMProvider):
                         reasoning_extra["reasoning"] = (
                             reasoning_extra.get("reasoning", "") + r_piece
                         )
+                        segments.append_reasoning(r_piece, source="reasoning")
 
             if delta.content:
-                yield strip_surrogates(delta.content)
+                piece = strip_surrogates(delta.content)
+                segments.append_text(piece)
+                yield piece
 
         if pending_calls:
+            segments.finalize_tool_call_refs(pending_calls)
             self._last_tool_calls = [
                 tool_call_from_pending(call)
                 for _, call in sorted(pending_calls.items())
@@ -448,6 +464,9 @@ class OpenAIProvider(BaseLLMProvider):
                 reasoning_extra,
                 include_text=reasoning_text_seen,
                 include_details=reasoning_details_seen,
+            )
+            self._last_assistant_extra_fields = segments.inject_into(
+                self._last_assistant_extra_fields
             )
             logger.debug(
                 "Reasoning fields captured",
@@ -566,6 +585,26 @@ class OpenAIProvider(BaseLLMProvider):
                 extras["reasoning"] = r
             if extras:
                 self._last_assistant_extra_fields = extras
+            segments = TurnSegmentsBuilder()
+            if isinstance(rc, str) and rc:
+                segments.append_reasoning(rc, source="reasoning_content")
+            for entry in rd or []:
+                if isinstance(entry, dict):
+                    segments.append_reasoning(
+                        entry.get("text") or entry.get("thinking") or "",
+                        source="reasoning_details",
+                        key=f"{entry.get('index')}:{entry.get('type')}",
+                        signature=entry.get("signature"),
+                    )
+            if isinstance(r, str) and r:
+                segments.append_reasoning(r, source="reasoning")
+            if message.content:
+                segments.append_text(message.content)
+            for tc in self._last_tool_calls:
+                segments.append_tool_call_ref(tc.id)
+            self._last_assistant_extra_fields = segments.inject_into(
+                self._last_assistant_extra_fields
+            )
 
         if response.usage:
             self._last_usage = extract_usage(response.usage)

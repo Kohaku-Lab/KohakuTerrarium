@@ -87,13 +87,17 @@ async def stream_ws_turn(
         reasoning.consume(event)
         etype = getattr(event, "type", "")
         if etype == "response.output_text.delta":
-            yield strip_surrogates(event.delta)
+            piece = strip_surrogates(event.delta)
+            reasoning.consume_output_text(piece)
+            yield piece
         elif etype == "response.output_item.done":
             item = event.item
             if getattr(item, "type", "") == "function_call":
+                call_id = getattr(item, "call_id", "")
+                reasoning.consume_function_call(call_id)
                 collected.append(
                     NativeToolCall(
-                        id=getattr(item, "call_id", ""),
+                        id=call_id,
                         name=getattr(item, "name", "") or "",
                         arguments=getattr(item, "arguments", ""),
                     )

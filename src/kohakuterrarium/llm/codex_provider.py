@@ -464,14 +464,18 @@ class CodexOAuthProvider(BaseLLMProvider):
 
         match getattr(event, "type", ""):
             case "response.output_text.delta":
-                return strip_surrogates(event.delta)
+                piece = strip_surrogates(event.delta)
+                self._reasoning.consume_output_text(piece)
+                return piece
             case "response.output_item.done":
                 item = event.item
                 itype = getattr(item, "type", "")
                 if itype == "function_call":
+                    call_id = getattr(item, "call_id", "")
+                    self._reasoning.consume_function_call(call_id)
                     collected_tool_calls.append(
                         NativeToolCall(
-                            id=getattr(item, "call_id", ""),
+                            id=call_id,
                             name=getattr(item, "name", "") or "",
                             arguments=getattr(item, "arguments", ""),
                         )

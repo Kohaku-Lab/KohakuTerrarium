@@ -10,6 +10,7 @@ import logging
 
 from kohakuterrarium.llm.openai_sanitize import (
     log_request_shape,
+    strip_internal_message_fields,
     strip_kt_extras,
     strip_surrogates,
 )
@@ -109,6 +110,24 @@ class TestStripKtExtras:
         assert out[0] is clean_msg
         assert out[1] is not dirty_msg
         assert out[1]["content"][0] == {"type": "text", "text": "t"}
+
+
+class TestStripInternalMessageFields:
+    def test_clean_messages_return_identical_object(self):
+        messages = [{"role": "assistant", "content": "hi"}]
+        assert strip_internal_message_fields(messages) is messages
+
+    def test_internal_assistant_fields_stripped(self):
+        messages = [
+            {
+                "role": "assistant",
+                "content": "hi",
+                "_kt_assistant_segments": [{"type": "reasoning", "text": "hmm"}],
+                "_kt_anthropic_content": [{"type": "thinking", "thinking": "hmm"}],
+            }
+        ]
+        out = strip_internal_message_fields(messages)
+        assert out[0] == {"role": "assistant", "content": "hi"}
 
 
 class TestStripSurrogates:

@@ -149,6 +149,10 @@ class TestReasoningCapture:
         assert p._reasoning.fields() == {
             "reasoning_content": "think hard",
             "reasoning_summary": "summary",
+            "_kt_assistant_segments": [
+                {"type": "reasoning", "source": "responses_text", "text": "think hard"},
+                {"type": "reasoning", "source": "responses_summary", "text": "summary"},
+            ],
         }
 
     def test_reasoning_done_event_replaces_accumulator(self):
@@ -172,6 +176,10 @@ class TestReasoningCapture:
         assert p._reasoning.fields() == {
             "reasoning_content": "private",
             "reasoning_summary": "brief",
+            "_kt_assistant_segments": [
+                {"type": "reasoning", "source": "responses_summary", "text": "brief"},
+                {"type": "reasoning", "source": "responses_text", "text": "private"},
+            ],
         }
 
 

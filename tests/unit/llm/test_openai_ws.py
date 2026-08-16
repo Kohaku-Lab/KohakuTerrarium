@@ -176,6 +176,10 @@ class TestProviderWebsocketMode:
         assert provider._last_assistant_extra_fields == {
             "reasoning_content": "think hard",
             "reasoning_summary": "summary",
+            "_kt_assistant_segments": [
+                {"type": "reasoning", "source": "responses_text", "text": "think hard"},
+                {"type": "reasoning", "source": "responses_summary", "text": "summary"},
+            ],
         }
         assert provider._last_tool_calls == []
 

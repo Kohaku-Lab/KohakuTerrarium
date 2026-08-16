@@ -19,6 +19,8 @@ from kohakuterrarium.llm.openai_helpers import (
     merge_reasoning_detail_stream,
     pack_reasoning_fields,
 )
+from kohakuterrarium.llm.openai_sanitize import strip_internal_message_fields
+from kohakuterrarium.llm.turn_segments import TurnSegmentsBuilder
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -73,6 +75,7 @@ class LiteLLMProvider(BaseLLMProvider):
     ) -> AsyncIterator[str]:
         params = self._build_params(messages, tools=tools, stream=True, **kwargs)
         self._last_assistant_extra_fields = {}
+        segments = TurnSegmentsBuilder()
         reasoning_text = ""
         reasoning_details: list[Any] = []
         reasoning_extra: dict[str, Any] = {}
@@ -94,6 +97,7 @@ class LiteLLMProvider(BaseLLMProvider):
                 rc_piece = delta_field(delta, "reasoning_content")
                 if isinstance(rc_piece, str):
                     reasoning_text += rc_piece
+                    segments.append_reasoning(rc_piece, source="reasoning_content")
                 if delta_field_present(delta, "reasoning_details"):
                     reasoning_details_seen = True
                 rd_piece = delta_field(delta, "reasoning_details")
@@ -101,19 +105,28 @@ class LiteLLMProvider(BaseLLMProvider):
                     for entry in rd_piece:
                         if isinstance(entry, dict):
                             merge_reasoning_detail_stream(reasoning_details, entry)
+                            segments.append_reasoning(
+                                entry.get("text") or entry.get("thinking") or "",
+                                source="reasoning_details",
+                                key=f"{entry.get('index')}:{entry.get('type')}",
+                                signature=entry.get("signature"),
+                            )
                 if delta_field_present(delta, "reasoning"):
                     r_piece = delta_field(delta, "reasoning")
                     if isinstance(r_piece, str):
                         reasoning_extra["reasoning"] = (
                             reasoning_extra.get("reasoning", "") + r_piece
                         )
+                        segments.append_reasoning(r_piece, source="reasoning")
 
                 if delta.content:
+                    segments.append_text(delta.content)
                     yield delta.content
 
                 if delta.tool_calls:
                     for tc in delta.tool_calls:
                         idx = tc.index if hasattr(tc, "index") else 0
+                        segments.append_tool_call_ref(tc.id or "", idx)
                         entry = pending_tool_calls.setdefault(
                             idx, {"id": "", "name": "", "arguments": ""}
                         )
@@ -138,6 +151,10 @@ class LiteLLMProvider(BaseLLMProvider):
                     reasoning_extra,
                     include_text=reasoning_text_seen,
                     include_details=reasoning_details_seen,
+                )
+                segments.finalize_tool_call_refs(pending_tool_calls)
+                self._last_assistant_extra_fields = segments.inject_into(
+                    self._last_assistant_extra_fields
                 )
 
             self._last_tool_calls = [
@@ -194,6 +211,24 @@ class LiteLLMProvider(BaseLLMProvider):
                     extras["reasoning"] = reasoning
             self._last_assistant_extra_fields = extras
 
+            segments = TurnSegmentsBuilder()
+            if "reasoning_content" in extras:
+                segments.append_reasoning(
+                    extras["reasoning_content"], source="reasoning_content"
+                )
+            for entry in extras.get("reasoning_details") or []:
+                if isinstance(entry, dict):
+                    segments.append_reasoning(
+                        entry.get("text") or entry.get("thinking") or "",
+                        source="reasoning_details",
+                        key=f"{entry.get('index')}:{entry.get('type')}",
+                        signature=entry.get("signature"),
+                    )
+            if "reasoning" in extras:
+                segments.append_reasoning(extras["reasoning"], source="reasoning")
+            if message.content:
+                segments.append_text(message.content)
+
             if hasattr(message, "tool_calls") and message.tool_calls:
                 self._last_tool_calls = [
                     NativeToolCall(
@@ -203,6 +238,11 @@ class LiteLLMProvider(BaseLLMProvider):
                     )
                     for tc in message.tool_calls
                 ]
+                for tc in self._last_tool_calls:
+                    segments.append_tool_call_ref(tc.id)
+            self._last_assistant_extra_fields = segments.inject_into(
+                self._last_assistant_extra_fields
+            )
 
             return ChatResponse(
                 content=content,
@@ -225,7 +265,7 @@ class LiteLLMProvider(BaseLLMProvider):
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "model": self.config.model,
-            "messages": messages,
+            "messages": strip_internal_message_fields(messages),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "stream": stream,
             "drop_params": True,

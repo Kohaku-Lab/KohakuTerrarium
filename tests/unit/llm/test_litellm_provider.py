@@ -100,7 +100,15 @@ class TestStreamingReasoningCapture:
 
         assert chunks == ["answer"]
         assert provider._last_assistant_extra_fields == {
-            "reasoning_content": "think hard"
+            "reasoning_content": "think hard",
+            "_kt_assistant_segments": [
+                {
+                    "type": "reasoning",
+                    "source": "reasoning_content",
+                    "text": "think hard",
+                },
+                {"type": "text", "text": "answer"},
+            ],
         }
 
     async def test_empty_reasoning_not_packed(self, lpm, monkeypatch):
@@ -137,5 +145,11 @@ class TestCompleteReasoningCapture:
         response = await provider._complete_chat([{"role": "user", "content": "q"}])
 
         assert response.content == "answer"
-        assert provider._last_assistant_extra_fields == {"reasoning_content": "private"}
+        assert provider._last_assistant_extra_fields == {
+            "reasoning_content": "private",
+            "_kt_assistant_segments": [
+                {"type": "reasoning", "source": "reasoning_content", "text": "private"},
+                {"type": "text", "text": "answer"},
+            ],
+        }
         assert provider._last_usage["prompt_tokens"] == 10
