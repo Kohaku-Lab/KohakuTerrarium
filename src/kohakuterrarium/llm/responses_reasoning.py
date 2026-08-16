@@ -41,6 +41,7 @@ class ResponsesReasoningCollector:
         self.text = ""
         self.summary = ""
         self.segments = TurnSegmentsBuilder()
+        self._seen_reasoning_item_ids: set[str] = set()
 
     def consume(self, event: Any) -> None:
         """Fold one Responses stream event into the collector."""
@@ -72,6 +73,9 @@ class ResponsesReasoningCollector:
                         source="responses_text",
                         key=getattr(event, "item_id", None),
                     )
+                    item_id = getattr(event, "item_id", None)
+                    if isinstance(item_id, str) and item_id:
+                        self._seen_reasoning_item_ids.add(item_id)
             case "response.reasoning_summary_text.done":
                 piece = getattr(event, "text", None) or getattr(event, "delta", None)
                 if isinstance(piece, str) and piece:
@@ -81,6 +85,9 @@ class ResponsesReasoningCollector:
                         source="responses_summary",
                         key=getattr(event, "item_id", None),
                     )
+                    item_id = getattr(event, "item_id", None)
+                    if isinstance(item_id, str) and item_id:
+                        self._seen_reasoning_item_ids.add(item_id)
             case "response.output_item.done":
                 item = getattr(event, "item", None)
                 if getattr(item, "type", "") == "reasoning":
@@ -88,6 +95,11 @@ class ResponsesReasoningCollector:
 
     def consume_item(self, item: Any) -> None:
         """Fold a completed ``reasoning`` output item into the collector."""
+        item_id = getattr(item, "id", None)
+        if isinstance(item_id, str) and item_id:
+            if item_id in self._seen_reasoning_item_ids:
+                return
+            self._seen_reasoning_item_ids.add(item_id)
         summary = _parts_text(getattr(item, "summary", None))
         content = _parts_text(getattr(item, "content", None))
         if summary:

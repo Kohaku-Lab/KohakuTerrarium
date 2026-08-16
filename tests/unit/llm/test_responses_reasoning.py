@@ -48,5 +48,45 @@ class TestResponsesReasoningCollector:
             ],
         }
 
+    def test_completed_output_item_is_deduplicated_after_done_events(self):
+        collector = ResponsesReasoningCollector()
+        collector.consume(
+            Ev(
+                type="response.reasoning_text.delta",
+                delta="partial",
+                item_id="reasoning_1",
+            )
+        )
+        collector.consume(
+            Ev(
+                type="response.reasoning_text.done",
+                text="complete",
+                item_id="reasoning_1",
+            )
+        )
+        collector.consume(
+            Ev(
+                type="response.output_item.done",
+                item=Ev(
+                    type="reasoning",
+                    id="reasoning_1",
+                    summary=[{"type": "summary_text", "text": "brief"}],
+                    content=[{"type": "text", "text": "complete"}],
+                ),
+            )
+        )
+
+        assert collector.fields() == {
+            "reasoning_content": "complete",
+            "_kt_assistant_segments": [
+                {
+                    "type": "reasoning",
+                    "source": "responses_text",
+                    "key": "reasoning_1",
+                    "text": "complete",
+                }
+            ],
+        }
+
     def test_empty_collector_returns_empty_fields(self):
         assert ResponsesReasoningCollector().fields() == {}

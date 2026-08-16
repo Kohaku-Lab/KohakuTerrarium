@@ -27,13 +27,13 @@
           </div>
         </div>
 
-        <div v-if="reasoningEntries.length" class="shrink-0 card p-3">
+        <div v-if="activeReasoningEntries.length" class="shrink-0 card p-3">
           <button class="flex items-center gap-2 text-xs font-medium text-iolite dark:text-iolite-light" @click="showReasoning = !showReasoning">
             <span class="i-carbon-chevron-down transition-transform" :class="{ 'rotate-180': showReasoning }" />
-            {{ showReasoning ? "Hide" : "Show" }} chain-of-thought ({{ reasoningEntries.length }})
+            {{ showReasoning ? "Hide" : "Show" }} chain-of-thought ({{ activeReasoningEntries.length }})
           </button>
           <div v-if="showReasoning" class="mt-2 max-h-80 overflow-y-auto flex flex-col gap-2">
-            <details v-for="(entry, i) in reasoningEntries" :key="i" class="rounded-lg border border-warm-200 dark:border-warm-700 p-2">
+            <details v-for="(entry, i) in activeReasoningEntries" :key="i" class="rounded-lg border border-warm-200 dark:border-warm-700 p-2">
               <summary class="text-xs cursor-pointer select-none">[msg {{ entry.messageIndex }}] {{ entry.label }}</summary>
               <pre class="mt-2 text-xs whitespace-pre-wrap font-mono">{{ entry.text }}</pre>
             </details>
@@ -128,8 +128,9 @@ const loading = ref(false)
 const error = ref("")
 const viewerMeta = ref(null)
 const historyTargets = ref([])
-const reasoningEntries = ref([])
+const reasoningEntriesByTab = reactive({})
 const showReasoning = ref(false)
+const activeReasoningEntries = computed(() => reasoningEntriesByTab[chat.activeTab] || [])
 
 const viewerInstance = computed(() => {
   const meta = viewerMeta.value || {}
@@ -148,7 +149,9 @@ function goBack() {
 }
 
 function resetViewer() {
-  reasoningEntries.value = []
+  for (const key of Object.keys(reasoningEntriesByTab)) {
+    delete reasoningEntriesByTab[key]
+  }
   showReasoning.value = false
   chat._cleanup()
   chat._instanceId = `session:${sessionName.value}`
@@ -177,16 +180,17 @@ function ensureTabs(tabs) {
 
 async function loadTarget(tab) {
   if (!tab) return
-  reasoningEntries.value = []
+  const entries = []
   const data = await sessionAPI.getHistory(sessionName.value, tab)
   for (const [messageIndex, message] of (data.messages || []).entries()) {
     // New sessions render segments inline through ChatMessage; the
     // fallback panel only serves old snapshots without ordered segments.
     if (Array.isArray(message?._kt_assistant_segments)) continue
     for (const entry of extractReasoning(message)) {
-      reasoningEntries.value.push({ messageIndex, ...entry })
+      entries.push({ messageIndex, ...entry })
     }
   }
+  reasoningEntriesByTab[tab] = entries
   if (data.events?.length) {
     // Read-only saved history: never populate ``runningJobs`` — a frozen
     // session has no live work, and its unfinished jobs already replay as

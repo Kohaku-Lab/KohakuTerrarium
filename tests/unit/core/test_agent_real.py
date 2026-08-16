@@ -2573,7 +2573,7 @@ class TestTurnTokenUsageEmission:
 
 
 class TestAssistantReasoningEmission:
-    async def test_reasoning_activity_emitted_before_processing_end(
+    async def test_reasoning_activity_emitted_from_latest_round_fields(
         self, make_agent, monkeypatch
     ):
         agent = make_agent(script=["resp"])
@@ -2596,10 +2596,7 @@ class TestAssistantReasoningEmission:
                 calls.append((activity_type, detail, metadata))
 
             monkeypatch.setattr(agent.output_router, "notify_activity", capture)
-            from kohakuterrarium.core.events import TriggerEvent
-
-            evt = TriggerEvent(type="user_input", content="x")
-            await agent._finalize_processing(evt, agent.controller, ["resp"])
+            agent._emit_assistant_reasoning(agent.controller)
             assert (
                 "assistant_reasoning",
                 "turn 0 assistant reasoning",
@@ -2617,6 +2614,59 @@ class TestAssistantReasoningEmission:
                     "branch_id": 0,
                 },
             ) in calls
+        finally:
+            await agent.stop()
+
+    async def test_reasoning_emitted_after_each_controller_round(
+        self, make_agent, monkeypatch
+    ):
+        from kohakuterrarium.core.agent_tools import _TurnResult
+
+        agent = make_agent(script=["resp"])
+        await agent.start()
+        try:
+            rounds = 0
+
+            async def fake_turn(controller):
+                nonlocal rounds
+                rounds += 1
+                if rounds == 1:
+                    controller.llm.last_assistant_extra_fields = {
+                        "reasoning_content": "think A"
+                    }
+                else:
+                    controller.llm.last_assistant_extra_fields = {
+                        "reasoning_content": "think B"
+                    }
+                return _TurnResult(
+                    handles={},
+                    handle_order=[],
+                    text_output=["text"],
+                    native_mode=False,
+                    native_tool_call_ids={},
+                )
+
+            async def fake_feedback(*args, **kwargs):
+                return rounds < 2
+
+            monkeypatch.setattr(agent, "_run_single_turn", fake_turn)
+            monkeypatch.setattr(agent, "_collect_and_push_feedback", fake_feedback)
+            monkeypatch.setattr(agent, "_emit_token_usage", lambda controller: None)
+
+            calls = []
+
+            def capture(activity_type, detail, metadata=None):
+                calls.append((activity_type, detail, metadata))
+
+            monkeypatch.setattr(agent.output_router, "notify_activity", capture)
+            await agent._run_controller_loop(agent.controller, [])
+
+            reasoning = [
+                metadata["reasoning_content"]
+                for _, _, metadata in calls
+                if metadata and metadata.get("reasoning_content")
+            ]
+            assert reasoning == ["think A", "think B"]
         finally:
             await agent.stop()
 
