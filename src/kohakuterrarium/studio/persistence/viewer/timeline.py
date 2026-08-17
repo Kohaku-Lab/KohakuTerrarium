@@ -26,7 +26,9 @@ _NOISE_TYPES = frozenset({"cache_stats"})
 #: Result event types that close a ``tool_call`` span (by ``call_id``).
 _TOOL_RESULT_TYPES = frozenset({"tool_result", "tool_error"})
 #: Result event types that close a ``subagent_call`` span (by ``job_id``).
-_JOB_RESULT_TYPES = frozenset({"subagent_result", "subagent_error", "background_result"})
+_JOB_RESULT_TYPES = frozenset(
+    {"subagent_result", "subagent_error", "background_result"}
+)
 
 
 def _span_from_event(evt: dict) -> dict[str, Any]:

@@ -144,7 +144,9 @@ class TestPairDurations:
             )
             # ts diff is 50s but the authoritative duration says 42s.
             s.append_event(
-                "alice", "subagent_result", {"job_id": "j1", "duration": 42.0, "ts": 150.0}
+                "alice",
+                "subagent_result",
+                {"job_id": "j1", "duration": 42.0, "ts": 150.0},
             )
             s.flush()
             out = build_timeline_payload(s, "sess", agent=None, limit=100)
