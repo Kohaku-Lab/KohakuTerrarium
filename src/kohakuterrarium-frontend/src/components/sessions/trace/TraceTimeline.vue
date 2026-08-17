@@ -63,11 +63,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
-import {
-  TIMELINE_LANES,
-  TIMELINE_MODES,
-  formatTimelineDuration,
-} from "@/components/sessions/trace/traceTimeline"
+import { TIMELINE_LANES, TIMELINE_MODES, formatTimelineDuration } from "@/components/sessions/trace/traceTimeline"
 import { useI18n } from "@/utils/i18n"
 
 const MIN_DRAG_PX = 3
@@ -194,9 +190,7 @@ const visibleBoundaries = computed(() => {
   const d = domain.value
   if (!model || !d) return []
   const dur = domainDuration.value
-  return model.turnBoundaries
-    .filter((b) => b.time > d.start && b.time <= d.end)
-    .map((b) => ({ turn: b.turn, x: ((b.time - d.start) / dur) * 100 }))
+  return model.turnBoundaries.filter((b) => b.time > d.start && b.time <= d.end).map((b) => ({ turn: b.turn, x: ((b.time - d.start) / dur) * 100 }))
 })
 
 // Minimap rasterizes the full domain at fixed low resolution, ignoring
@@ -364,9 +358,7 @@ function spanAtPoint(event) {
   if (!overlapping.length) return null
   const inLane = overlapping.filter((s) => s.lane === lane)
   const candidates = inLane.length ? inLane : overlapping
-  return candidates.reduce((best, s) =>
-    Math.abs((s.start + s.end) / 2 - t2) < Math.abs((best.start + best.end) / 2 - t2) ? s : best,
-  )
+  return candidates.reduce((best, s) => (Math.abs((s.start + s.end) / 2 - t2) < Math.abs((best.start + best.end) / 2 - t2) ? s : best))
 }
 
 function onPointerDown(event) {
@@ -399,10 +391,7 @@ function onPointerMove(event) {
     if (!rect || rect.width <= 0) return
     const delta = (event.clientX - panState.anchorClientX) / rect.width
     const dur = domainDuration.value
-    const nextStart = Math.min(
-      Math.max(panState.anchorStart - delta * dur, props.model.start),
-      props.model.end - dur,
-    )
+    const nextStart = Math.min(Math.max(panState.anchorStart - delta * dur, props.model.start), props.model.end - dur)
     viewport.value = { start: nextStart, end: nextStart + dur }
     return
   }
@@ -457,19 +446,13 @@ function onWheel(event) {
   event.preventDefault()
   const fraction = fractionAt(event)
   const minDuration = props.mode === "sequence" ? Math.min(4, fullDuration.value) : Math.min(20, fullDuration.value)
-  const nextDuration = Math.min(
-    fullDuration.value,
-    Math.max(minDuration, domainDuration.value * Math.exp(event.deltaY * 0.0015)),
-  )
+  const nextDuration = Math.min(fullDuration.value, Math.max(minDuration, domainDuration.value * Math.exp(event.deltaY * 0.0015)))
   if (nextDuration >= fullDuration.value * 0.999) {
     viewport.value = null
     return
   }
   const anchor = timeAt(fraction)
-  const nextStart = Math.min(
-    Math.max(anchor - fraction * nextDuration, model.start),
-    model.end - nextDuration,
-  )
+  const nextStart = Math.min(Math.max(anchor - fraction * nextDuration, model.start), model.end - nextDuration)
   viewport.value = { start: nextStart, end: nextStart + nextDuration }
 }
 

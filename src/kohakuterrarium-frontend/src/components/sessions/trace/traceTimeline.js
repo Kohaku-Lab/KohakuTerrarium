@@ -45,7 +45,12 @@ export function normalizeSpan(raw) {
   const type = String(raw.type || "")
   const turn = Number(raw.turn ?? raw.turn_index ?? raw.spawned_in_turn)
   return {
-    eid: typeof raw.eid === "number" ? raw.eid : typeof raw.event_id === "number" ? raw.event_id : null,
+    eid:
+      typeof raw.eid === "number"
+        ? raw.eid
+        : typeof raw.event_id === "number"
+          ? raw.event_id
+          : null,
     type,
     ts,
     durMs: Number.isFinite(dur) && dur >= 0 ? dur : 0,

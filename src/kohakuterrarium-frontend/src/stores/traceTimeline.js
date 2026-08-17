@@ -40,9 +40,7 @@ const _traceTimelineOptions = {
       this.loading = true
       try {
         const data = await sessionAPI.getTimeline(sessionName, { agent })
-        this.records = (data.spans || [])
-          .map(normalizeSpan)
-          .filter(Boolean)
+        this.records = (data.spans || []).map(normalizeSpan).filter(Boolean)
         this.truncated = Boolean(data.truncated)
         this.agent = data.agent || agent || ""
       } catch (err) {
