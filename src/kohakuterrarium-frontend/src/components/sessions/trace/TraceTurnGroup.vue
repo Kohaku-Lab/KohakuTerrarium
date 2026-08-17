@@ -1,5 +1,5 @@
 <template>
-  <div class="card p-2 flex flex-col gap-1">
+  <div ref="rootEl" class="card p-2 flex flex-col gap-1">
     <!-- Header row -->
     <button class="w-full flex items-center gap-2 text-[12px] text-left py-1 px-1 rounded hover:bg-warm-50 dark:hover:bg-warm-800/50" @click="onToggle">
       <span class="i-carbon-chevron-right transition-transform shrink-0" :class="expanded ? 'rotate-90 text-iolite' : 'text-warm-400'" />
@@ -19,7 +19,7 @@
       <div v-if="stream.loading && !displayedEvents.length" class="text-[12px] text-secondary px-1 py-1">{{ t("sessionViewer.trace.loading") }}</div>
       <div v-else-if="!displayedEvents.length" class="text-[12px] text-secondary px-1 py-1">{{ t("sessionViewer.trace.turn.empty") }}</div>
       <template v-else>
-        <TraceEventRow v-for="(ev, i) in displayedEvents" :key="`${turn.turn_index}-${ev.event_id || i}`" :event="ev" :selected="selectedEventId != null && ev.event_id === selectedEventId" @select="onSelect" />
+        <TraceEventRow v-for="(ev, i) in displayedEvents" :key="`${turn.turn_index}-${ev.event_id || i}`" :event="ev" :selected="selectedEventId != null && ev.event_id === selectedEventId" :dimmed="isOutsideFocus(ev)" @select="onSelect" />
         <button v-if="stream.hasMore" class="text-[11px] text-iolite hover:underline self-start px-1 py-1" :disabled="stream.loading" @click="loadMore">{{ stream.loading ? "…" : t("sessionViewer.trace.turn.loadMore") }}</button>
       </template>
     </div>
@@ -27,9 +27,10 @@
 </template>
 
 <script setup>
-import { computed, onUnmounted, watch } from "vue"
+import { computed, nextTick, onUnmounted, ref, watch } from "vue"
 
 import TraceEventRow from "@/components/sessions/trace/TraceEventRow.vue"
+import { matchesSearch, parseSearchTerms } from "@/components/sessions/trace/traceSearch"
 import { disposeEventStreamStore, useEphemeralEventStreamStore } from "@/stores/eventStream"
 import { useI18n } from "@/utils/i18n"
 
@@ -43,8 +44,11 @@ const props = defineProps({
   filters: { type: Object, default: () => ({}) },
   liveEvents: { type: Array, default: () => [] },
   selectedEventId: { type: Number, default: null },
+  focusEventIds: { type: Set, default: null },
+  jumpEventId: { type: Number, default: null },
 })
-const emit = defineEmits(["toggle", "select-event"])
+const emit = defineEmits(["toggle", "select-event", "matches", "jumped"])
+const rootEl = ref(null)
 const streamScope = `trace:${encodeURIComponent(props.sessionName)}:${encodeURIComponent(props.agent)}:${props.turn.turn_index}`
 const stream = useEphemeralEventStreamStore(streamScope)
 
@@ -56,6 +60,14 @@ function onToggle() {
 
 function onSelect(ev) {
   emit("select-event", ev)
+}
+
+// While a timeline interval is focused, events outside it stay visible
+// but dimmed — the turn chrome keeps its context.
+function isOutsideFocus(ev) {
+  const ids = props.focusEventIds
+  if (!ids || typeof ev?.event_id !== "number") return false
+  return !ids.has(ev.event_id)
 }
 
 const durationS = computed(() => {
@@ -120,6 +132,8 @@ function _passesFilter(ev) {
   if (f.errorsOnly) {
     if (!String(ev.type || "").includes("error")) return false
   }
+  const terms = parseSearchTerms(f.search)
+  if (terms.length && !matchesSearch(ev, terms)) return false
   const chips = f.typeChips || []
   if (chips.length === 0) return true
   for (const c of chips) {
@@ -128,6 +142,56 @@ function _passesFilter(ev) {
   }
   return false
 }
+
+// While a search is active the parent hides turns with zero matching
+// events; report the filtered count so it can decide. Only report once
+// the turn's events have loaded (collapsed turns stay visible).
+const searchActive = computed(() => parseSearchTerms(props.filters?.search).length > 0)
+
+watch(
+  () => (searchActive.value && props.expanded && !stream.loading ? displayedEvents.value.length : null),
+  (count) => {
+    if (count !== null) emit("matches", props.turn.turn_index, count)
+  },
+  { immediate: true },
+)
+
+// Timeline jump target: once the event row is present, scroll it into
+// view and hand the full event object up for highlighting. When the
+// turn's events are paginated and the target isn't loaded yet, page
+// forward automatically (bounded) until it appears.
+let jumpPageBudget = 10
+let jumpLastTarget = null
+
+watch(
+  () => [props.jumpEventId, displayedEvents.value.length, stream.loading, stream.turnIndex, props.expanded],
+  async ([target]) => {
+    if (target !== jumpLastTarget) {
+      jumpLastTarget = target
+      jumpPageBudget = 10
+    }
+    if (target == null || !props.expanded) return
+    // Wait until this turn's events are bound and idle — otherwise a
+    // collapsed turn would "exhaust" before its first load even starts.
+    if (stream.turnIndex !== props.turn.turn_index || stream.loading) return
+    const hit = displayedEvents.value.find((e) => e.event_id === target)
+    if (hit) {
+      await nextTick()
+      const el = rootEl.value?.querySelector(`[data-event-id="${target}"]`)
+      el?.scrollIntoView?.({ behavior: "smooth", block: "center" })
+      emit("jumped", { event: hit })
+      return
+    }
+    if (jumpPageBudget > 0 && stream.hasMore) {
+      jumpPageBudget -= 1
+      stream.loadMore()
+      return
+    }
+    // Exhausted or not in this turn — release the target so it isn't sticky.
+    jumpPageBudget = 10
+    emit("jumped", { event: null })
+  },
+)
 
 function formatTokens(n) {
   const v = Number(n || 0)

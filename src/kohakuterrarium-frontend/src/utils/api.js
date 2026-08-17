@@ -945,6 +945,18 @@ export const sessionAPI = {
   },
 
   /**
+   * Compact per-event timing spans for the trace-tab lane overview.
+   * @param {string} sessionName
+   * @param {{agent?: string, limit?: number}} opts
+   */
+  async getTimeline(sessionName, { agent = null, limit = 20000 } = {}) {
+    const params = { limit }
+    if (agent) params.agent = agent
+    const { data } = await api.get(`/sessions/${sessionName}/timeline`, { params })
+    return data
+  },
+
+  /**
    * Filtered events for one agent, cursor-paginated by ``event_id``.
    * @param {string} sessionName
    * @param {{agent?: string, turnIndex?: number, types?: string|string[], fromTs?: number, toTs?: number, limit?: number, cursor?: number}} opts

@@ -20,6 +20,13 @@
       <button v-for="t2 in TYPE_CHIPS" :key="t2.id" class="px-1.5 py-0.5 rounded text-[11px] border" :class="isTypeActive(t2.id) ? 'border-iolite bg-iolite/10 text-iolite' : 'border-warm-300 dark:border-warm-700 text-warm-500 hover:text-warm-700'" @click="toggleType(t2.id)">{{ t2.label }}</button>
     </div>
 
+    <!-- Search -->
+    <div class="flex items-center gap-1">
+      <div class="i-carbon-search text-warm-400" />
+      <input :value="modelValue.search" type="text" class="w-44 px-1.5 py-0.5 rounded border border-warm-300 dark:border-warm-700 bg-transparent text-[11px] outline-none focus:border-iolite" :placeholder="t('sessionViewer.trace.filters.search')" @input="onSearchInput" />
+      <button v-if="modelValue.search" class="i-carbon-close text-warm-400 hover:text-coral" @click="clearSearch" />
+    </div>
+
     <div class="flex-1" />
 
     <!-- Live attach -->
@@ -89,6 +96,14 @@ function toggleErrorsOnly() {
 
 function toggleLive() {
   emit("update:modelValue", { ...props.modelValue, live: !props.modelValue.live })
+}
+
+function onSearchInput(event) {
+  emit("update:modelValue", { ...props.modelValue, search: event.target.value })
+}
+
+function clearSearch() {
+  emit("update:modelValue", { ...props.modelValue, search: "" })
 }
 
 defineExpose({ TYPE_CHIPS })

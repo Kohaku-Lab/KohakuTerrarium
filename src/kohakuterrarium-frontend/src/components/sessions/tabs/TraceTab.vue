@@ -3,19 +3,34 @@
     <!-- Filters (V3) + Live attach toggle (V4) -->
     <TraceFilters v-model="filters" :agents="agents" :live-status="liveStatus" />
 
-    <!-- Timeline (V3) -->
-    <TraceTimeline v-if="rollup.turns.length" @select-turn="onSelectTurn" />
+    <!-- Timeline (V3): lane overview with drag-to-focus interval -->
+    <TraceTimeline v-if="timelineModel" :model="timelineModel" v-model:mode="timelineMode" v-model:range="timelineRange" :truncated="timeline.truncated" @select-span="onSelectSpan" />
+
+    <!-- Focus chip + fold-all controls -->
+    <div v-if="timelineRange || rollup.turns.length" class="flex items-center gap-2 text-[11px]">
+      <span v-if="timelineRange" class="px-2 py-0.5 rounded-full bg-iolite/15 text-iolite font-mono flex items-center gap-1.5">
+        {{ t("sessionViewer.trace.timeline.focusTurns", { n: displayedTurns.length }) }}
+        <button class="i-carbon-close hover:text-coral" :title="t('sessionViewer.trace.timeline.clearFocus')" @click="timelineRange = null" />
+      </span>
+      <span class="flex-1" />
+      <button class="text-warm-500 hover:text-warm-700 dark:hover:text-warm-300" @click="expandAll">{{ t("sessionViewer.trace.turn.expandAll") }}</button>
+      <button class="text-warm-500 hover:text-warm-700 dark:hover:text-warm-300" @click="collapseAll">{{ t("sessionViewer.trace.turn.collapseAll") }}</button>
+    </div>
 
     <!-- Live "↓ N new" banner (V4) -->
     <button v-if="filters.live && newSinceLastClear > 0 && !atBottom" class="self-end px-3 py-1 rounded-full bg-aquamarine/15 text-aquamarine text-[11px] font-mono shadow-md hover:bg-aquamarine/25" @click="scrollToBottom">{{ t("sessionViewer.trace.live.newBanner", { n: newSinceLastClear }) }}</button>
 
-    <!-- Turn list -->
-    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto flex flex-col gap-1.5" @scroll="onScroll">
+    <!-- Turn list (virtualized) -->
+    <div ref="scrollEl" class="flex-1 min-h-0 overflow-y-auto" @scroll="onScroll">
       <div v-if="rollup.loading && !rollup.turns.length" class="card p-4 text-secondary text-sm">{{ t("sessionViewer.trace.loading") }}</div>
       <div v-else-if="rollup.error" class="card p-4 text-coral text-sm">{{ rollup.error }}</div>
       <div v-else-if="!rollup.turns.length" class="card p-4 text-secondary text-sm">{{ t("sessionViewer.trace.empty") }}</div>
 
-      <TraceTurnGroup v-for="turn in displayedTurns" :key="`${rollup.agent}-${turn.turn_index}`" :turn="turn" :agent="rollup.agent" :session-name="detail.name" :expanded="expandedTurns.has(turn.turn_index)" :filters="filters" :live-events="liveEventsObjects" :selected-event-id="selectedEventId" @toggle="onToggle" @select-event="onSelectEvent" />
+      <div v-else class="relative" :style="{ height: `${totalSize}px` }">
+        <div v-for="vRow in virtualRows" :key="vRow.key" :data-index="vRow.index" :ref="measureRow" class="absolute top-0 left-0 w-full pb-1.5" :style="{ transform: `translateY(${vRow.start}px)` }">
+          <TraceTurnGroup :turn="displayedTurns[vRow.index]" :agent="rollup.agent" :session-name="detail.name" :expanded="expandedTurns.has(displayedTurns[vRow.index].turn_index)" :filters="filters" :live-events="liveEventsObjects" :selected-event-id="selectedEventId" :focus-event-ids="focusEventIds" :jump-event-id="jumpIdFor(displayedTurns[vRow.index].turn_index)" @toggle="onToggle" @select-event="onSelectEvent" @matches="onTurnMatches" @jumped="onJumped" />
+        </div>
+      </div>
     </div>
 
     <!-- Event detail drawer -->
@@ -26,6 +41,7 @@
 </template>
 
 <script setup>
+import { useVirtualizer } from "@tanstack/vue-virtual"
 import { computed, nextTick, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
@@ -33,9 +49,12 @@ import TraceEventDetail from "@/components/sessions/trace/TraceEventDetail.vue"
 import TraceTab_TraceFilters from "@/components/sessions/trace/TraceFilters.vue"
 import TraceTab_TraceTimeline from "@/components/sessions/trace/TraceTimeline.vue"
 import TraceTab_TraceTurnGroup from "@/components/sessions/trace/TraceTurnGroup.vue"
+import { parseSearchTerms } from "@/components/sessions/trace/traceSearch"
+import { deriveTraceTimeline, traceTimelineFocus } from "@/components/sessions/trace/traceTimeline"
 import { useSessionEventStream } from "@/composables/useSessionEventStream"
 import { useEventStreamStore } from "@/stores/eventStream"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
+import { useTraceTimelineStore } from "@/stores/traceTimeline"
 import { useTurnRollupStore } from "@/stores/turnRollup"
 import { useI18n } from "@/utils/i18n"
 
@@ -46,6 +65,7 @@ const TraceTurnGroup = TraceTab_TraceTurnGroup
 const { t } = useI18n()
 const detail = useSessionDetailStore()
 const rollup = useTurnRollupStore()
+const timeline = useTraceTimelineStore()
 const stream = useEventStreamStore()
 const liveStream = useSessionEventStream()
 const route = useRoute()
@@ -56,11 +76,32 @@ const filters = ref({
   errorsOnly: false,
   typeChips: [],
   live: false,
+  search: "",
 })
 
 const expandedTurns = ref(new Set())
 const scrollEl = ref(null)
 const atBottom = ref(true)
+
+// Lane-timeline focus: projection mode + selected interval in its domain.
+const timelineMode = ref("sequence")
+const timelineRange = ref(null)
+
+const timelineModel = computed(() => deriveTraceTimeline(timeline.records, timelineMode.value))
+
+const timelineFocus = computed(() => {
+  if (!timelineRange.value || !timelineModel.value) return null
+  return traceTimelineFocus(timelineModel.value, timelineRange.value)
+})
+
+const focusEventIds = computed(() => timelineFocus.value?.eventIds ?? null)
+
+// Event search (Phase 3): auto-expand turns while a query is active so
+// their events load and can be filtered; groups report match counts.
+// Declared before ``displayedTurns`` — the virtualizer evaluates it
+// eagerly during setup.
+const searchActive = computed(() => parseSearchTerms(filters.value.search).length > 0)
+const zeroMatchTurns = ref(new Set())
 
 // Event-detail panel state.
 const selectedEvent = ref(null)
@@ -100,11 +141,59 @@ const liveEventsObjects = computed(() => liveEvents.value.map((e) => e.event))
 // no error events. Turn rollups don't carry has_error today; we infer
 // from the live events buffer + the rollup row presence in error_turns.
 const displayedTurns = computed(() => {
-  const turns = rollup.turns
-  if (!filters.value.errorsOnly) return turns
-  const errSet = new Set(detail.summary?.error_turns || [])
-  return turns.filter((t2) => errSet.has(t2.turn_index))
+  let turns = rollup.turns
+  if (filters.value.errorsOnly) {
+    const errSet = new Set(detail.summary?.error_turns || [])
+    turns = turns.filter((t2) => errSet.has(t2.turn_index))
+  }
+  const focus = timelineFocus.value
+  if (focus) turns = turns.filter((t2) => focus.turns.has(t2.turn_index))
+  // While searching, turns whose loaded events have zero matches are
+  // hidden (reported by the turn groups via ``matches``).
+  if (searchActive.value && zeroMatchTurns.value.size) {
+    turns = turns.filter((t2) => !zeroMatchTurns.value.has(t2.turn_index))
+  }
+  return turns
 })
+
+// Virtualized turn list: one row per turn, dynamically measured so
+// expanded groups can grow arbitrarily tall.
+const rowVirtualizer = useVirtualizer(
+  computed(() => ({
+    count: displayedTurns.value.length,
+    getScrollElement: () => scrollEl.value,
+    estimateSize: () => 46,
+    getItemKey: (i) => `${rollup.agent}-${displayedTurns.value[i]?.turn_index ?? i}`,
+    overscan: 10,
+  })),
+)
+const virtualRows = computed(() => rowVirtualizer.value.getVirtualItems())
+const totalSize = computed(() => rowVirtualizer.value.getTotalSize())
+const measureRow = (el) => rowVirtualizer.value.measureElement(el)
+
+function onTurnMatches(turnIndex, count) {
+  const next = new Set(zeroMatchTurns.value)
+  if (count === 0) next.add(turnIndex)
+  else next.delete(turnIndex)
+  zeroMatchTurns.value = next
+}
+
+watch(
+  () => filters.value.search,
+  (q) => {
+    // Re-querying must un-hide turns so their groups remount + re-report.
+    zeroMatchTurns.value = new Set()
+    if (parseSearchTerms(q).length) expandAll()
+  },
+)
+
+function expandAll() {
+  expandedTurns.value = new Set(displayedTurns.value.map((t2) => t2.turn_index))
+}
+
+function collapseAll() {
+  expandedTurns.value = new Set()
+}
 
 function onToggle(turnIndex) {
   if (expandedTurns.value.has(turnIndex)) {
@@ -117,12 +206,40 @@ function onToggle(turnIndex) {
 }
 
 function onSelectTurn(turnIndex) {
+  // Selecting a turn outside the focused interval clears the focus, like
+  // the reference trajectory UI — otherwise the target would stay hidden.
+  if (timelineFocus.value && !timelineFocus.value.turns.has(turnIndex)) {
+    timelineRange.value = null
+  }
   expandedTurns.value = new Set([...expandedTurns.value, turnIndex])
   router.replace({ query: { ...route.query, turn: turnIndex } })
   nextTick(() => {
-    const el = document.querySelector(`[data-turn="${turnIndex}"]`)
-    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: "smooth", block: "center" })
+    const index = displayedTurns.value.findIndex((t2) => t2.turn_index === turnIndex)
+    if (index >= 0) rowVirtualizer.value.scrollToIndex(index, { align: "center" })
   })
+}
+
+// Timeline span click: expand the span's turn, then hand the event id to
+// that turn's group ONLY — it scrolls the exact event row into view once
+// loaded (auto-paging through the turn's event pages when needed). The
+// target must not reach other groups: they would exhaust immediately and
+// clear it before the real group finishes loading.
+const jumpTarget = ref(null)
+
+function jumpIdFor(turnIndex) {
+  const t2 = jumpTarget.value
+  return t2 && t2.turn === turnIndex ? t2.eid : null
+}
+
+function onSelectSpan(span) {
+  if (!span || span.turn == null) return
+  jumpTarget.value = typeof span.index === "number" ? { turn: span.turn, eid: span.index } : null
+  onSelectTurn(span.turn)
+}
+
+function onJumped({ event }) {
+  jumpTarget.value = null
+  if (event) selectedEvent.value = event
 }
 
 function onScroll() {
@@ -146,7 +263,10 @@ function scrollToBottom() {
 watch(liveEvents, (arr) => {
   if (!arr.length) return
   const last = arr[arr.length - 1]
-  if (last && last.event) stream.appendLive(last.event)
+  if (last && last.event) {
+    stream.appendLive(last.event)
+    timeline.appendLive(last.event)
+  }
 })
 
 // Drive the rollup loader when name / agent changes. ``detail.reloadKey``
@@ -156,7 +276,9 @@ watch(
   async ([name, agent]) => {
     if (!name) return
     const a = agent || agents.value[0] || null
-    await rollup.load(name, a)
+    timelineRange.value = null
+    zeroMatchTurns.value = new Set()
+    await Promise.all([rollup.load(name, a), timeline.load(name, a)])
   },
   { immediate: true },
 )

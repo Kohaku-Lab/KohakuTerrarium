@@ -1,5 +1,5 @@
 <template>
-  <button class="w-full text-left flex items-start gap-2 text-[12px] py-0.5 px-1 rounded hover:bg-warm-50 dark:hover:bg-warm-800/50 cursor-pointer" :class="selected ? 'bg-iolite/10 ring-1 ring-iolite/30' : ''" @click="onClick">
+  <button class="w-full text-left flex items-start gap-2 text-[12px] py-0.5 px-1 rounded hover:bg-warm-50 dark:hover:bg-warm-800/50 cursor-pointer" :class="[selected ? 'bg-iolite/10 ring-1 ring-iolite/30' : '', dimmed ? 'opacity-40' : '']" :data-event-id="event.event_id" @click="onClick">
     <span class="font-mono text-warm-400 w-16 shrink-0">{{ formatTime(event.ts) }}</span>
     <span class="w-4 shrink-0 mt-0.5" :class="iconClass" />
     <span class="font-mono w-32 shrink-0 truncate" :class="typeClass">{{ event.type }}</span>
@@ -17,6 +17,7 @@ import { extractTextPreview } from "@/utils/multimodal"
 const props = defineProps({
   event: { type: Object, required: true },
   selected: { type: Boolean, default: false },
+  dimmed: { type: Boolean, default: false },
 })
 const emit = defineEmits(["select"])
 
