@@ -37,6 +37,7 @@ from kohakuterrarium.studio.persistence.viewer.events import build_events_payloa
 from kohakuterrarium.studio.persistence.viewer.export import build_export
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.persistence.viewer.summary import build_summary_payload
+from kohakuterrarium.studio.persistence.viewer.timeline import build_timeline_payload
 from kohakuterrarium.studio.persistence.viewer.tree import build_tree_payload
 from kohakuterrarium.studio.persistence.viewer.turns import build_turns_payload
 from kohakuterrarium.studio.sessions import cluster_fold
@@ -380,6 +381,51 @@ def _merge_events(
     }
 
 
+def _merge_timeline(
+    per_member: list[tuple[str, dict[str, Any]]],
+    session_name: str,
+    *,
+    limit: int,
+) -> dict[str, Any]:
+    """Merge cluster timeline spans into one chronological sequence.
+
+    Span IDs are monotonic only within one store, so member identity is part
+    of the dedupe key and the timestamp tie-breaker, mirroring
+    ``_merge_events``. When the combined sequence exceeds ``limit`` the
+    latest spans are kept, matching single-member truncation.
+    """
+    spans: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for member_sid, payload in per_member:
+        for span in payload.get("spans") or []:
+            eid = span.get("eid")
+            key = (member_sid, int(eid) if isinstance(eid, int) else -1)
+            if key in seen:
+                continue
+            seen.add(key)
+            tagged = dict(span)
+            tagged.setdefault("member_sid", member_sid)
+            spans.append(tagged)
+    spans.sort(
+        key=lambda s: (
+            float(s.get("ts") or 0.0),
+            str(s.get("member_sid") or ""),
+            int(s.get("eid") or 0),
+        )
+    )
+    truncated = len(spans) > limit
+    if truncated:
+        spans = spans[-limit:]
+    return {
+        "session_name": session_name,
+        "agent": None,
+        "spans": spans,
+        "count": len(spans),
+        "limit": limit,
+        "truncated": truncated,
+    }
+
+
 @router.get("/{session_name}/tree")
 async def get_session_tree(
     session_name: str,
@@ -511,6 +557,28 @@ async def get_session_diff(
             a_path, b_path, agent=agent, a_store=a_store, b_store=b_store
         )
     return await asyncio.to_thread(build_diff_payload, a_path, b_path, agent=agent)
+
+
+@router.get("/{session_name}/timeline")
+async def get_session_timeline(
+    session_name: str,
+    agent: str | None = None,
+    limit: int = 20000,
+    service: TerrariumService = Depends(get_service),
+) -> dict[str, Any]:
+    """Compact per-event timing spans for the trace-tab lane overview."""
+    members = await _resolve_cluster_or_404(session_name, service)
+    clamped_limit = max(1, min(limit, 50000))
+
+    def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
+        return build_timeline_payload(
+            store, canonical, agent=agent, limit=clamped_limit
+        )
+
+    if len(members) == 1:
+        return await _build_single(service, members[0][0], members[0][1], _build)
+    per_member = await asyncio.to_thread(_run_per_member, members, _build)
+    return _merge_timeline(per_member, session_name, limit=clamped_limit)
 
 
 @router.get("/{session_name}/events")
