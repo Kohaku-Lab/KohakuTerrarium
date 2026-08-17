@@ -154,10 +154,14 @@ export default {
   "sessionViewer.trace.timeline.mode.duration": "时长",
   "sessionViewer.trace.timeline.mode.time": "时间",
   "sessionViewer.trace.timeline.mode.actual": "实际",
-  "sessionViewer.trace.timeline.modeHint.sequence": "顺序：每个事件等宽，按操作先后紧密排列——不看时钟，只看发生了什么、顺序如何。",
-  "sessionViewer.trace.timeline.modeHint.duration": "时长：按真实开始时间 + 实际耗时绘制，压缩事件间的空闲间隙——最适合发现耗时长的步骤。",
-  "sessionViewer.trace.timeline.modeHint.time": "时间：按真实开始时间分布（压缩空闲），但每个事件等宽——看事件在时间上的密度，不被长耗时事件拉伸。",
-  "sessionViewer.trace.timeline.modeHint.actual": "实际：完全真实的时钟时间线，保留所有空闲间隙——看会话在哪里等待、空跑。",
+  "sessionViewer.trace.timeline.modeHint.sequence":
+    "顺序：每个事件等宽，按操作先后紧密排列——不看时钟，只看发生了什么、顺序如何。",
+  "sessionViewer.trace.timeline.modeHint.duration":
+    "时长：按真实开始时间 + 实际耗时绘制，压缩事件间的空闲间隙——最适合发现耗时长的步骤。",
+  "sessionViewer.trace.timeline.modeHint.time":
+    "时间：按真实开始时间分布（压缩空闲），但每个事件等宽——看事件在时间上的密度，不被长耗时事件拉伸。",
+  "sessionViewer.trace.timeline.modeHint.actual":
+    "实际：完全真实的时钟时间线，保留所有空闲间隙——看会话在哪里等待、空跑。",
   "sessionViewer.trace.timeline.lane.input": "输入",
   "sessionViewer.trace.timeline.lane.model": "模型",
   "sessionViewer.trace.timeline.lane.tools": "工具",

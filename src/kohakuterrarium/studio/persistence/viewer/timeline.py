@@ -167,3 +167,48 @@ def build_timeline_payload(
         "limit": limit,
         "truncated": truncated,
     }
+
+
+def merge_timeline_payloads(
+    per_member: list[tuple[str, dict[str, Any]]],
+    session_name: str,
+    *,
+    limit: int,
+) -> dict[str, Any]:
+    """Merge cluster timeline spans into one chronological sequence.
+
+    Span IDs are monotonic only within one store, so member identity is part
+    of the dedupe key and the timestamp tie-breaker, mirroring event merging
+    in the API layer. When the combined sequence exceeds ``limit`` the latest
+    spans are kept, matching single-member truncation.
+    """
+    spans: list[dict[str, Any]] = []
+    seen: set[tuple[str, int]] = set()
+    for member_sid, payload in per_member:
+        for span in payload.get("spans") or []:
+            eid = span.get("eid")
+            key = (member_sid, int(eid) if isinstance(eid, int) else -1)
+            if key in seen:
+                continue
+            seen.add(key)
+            tagged = dict(span)
+            tagged.setdefault("member_sid", member_sid)
+            spans.append(tagged)
+    spans.sort(
+        key=lambda s: (
+            float(s.get("ts") or 0.0),
+            str(s.get("member_sid") or ""),
+            int(s.get("eid") or 0),
+        )
+    )
+    truncated = len(spans) > limit
+    if truncated:
+        spans = spans[-limit:]
+    return {
+        "session_name": session_name,
+        "agent": None,
+        "spans": spans,
+        "count": len(spans),
+        "limit": limit,
+        "truncated": truncated,
+    }
