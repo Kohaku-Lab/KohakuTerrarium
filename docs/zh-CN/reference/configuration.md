@@ -619,6 +619,11 @@ Drive 记录保持按用户隔离。
 version: 3
 default_model: <preset name>
 
+# 可选：按 subagent 最终名称精确匹配的默认模型 selector。
+subagent_models:
+  explore: openrouter/mimo-v2.5-pro
+  worker: codex/gpt-5.5
+
 backends:
   <provider-name>:
     backend_type: openai | anthropic | codex  # transport 实现
@@ -650,6 +655,8 @@ presets:
 旧值 `codex-oauth` 仍然接受并在读取时正规化为 `codex`。
 
 内置 provider 名称 (`codex`、`openai`、`openrouter`、`anthropic`、`gemini`、`mimo`、`kimi-code`、`glm-coding`) 无法删除；它们的 base URL 与 `api_key_env` 是内置默认固定的。每只代理仍可通过 `controller.base_url` / `controller.api_key_env` 覆盖。
+
+`subagent_models` 允许用户不修改上游 creature 包，直接设置各 subagent 的默认模型。键会与最终的 `SubAgentConfig.name` 精确匹配。creature 或 subagent 模块中具体的 `model` 仍然优先；`parent`、`inherit`、`default` 明确表示继承父 LLM。未设置模型、使用 `subagent-default` 或 `subagent_default` 时会优先采用同名配置，未命中则继承父模型。该映射在创建 subagent 时读取，因此修改只影响之后创建的 job。Conversation 与 Inspector Trace 会记录每个新 job 实际绑定的模型，优先显示规范化 profile selector，缺失时回退到 raw model id。
 
 ### 添加自定义 LLM backend provider
 

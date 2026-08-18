@@ -3607,6 +3607,43 @@ class TestDispatchSubAgentEventDirect:
         finally:
             await agent.stop()
 
+    async def test_real_dispatch_start_metadata_uses_resolved_child_provider(
+        self, make_agent, monkeypatch
+    ):
+        from kohakuterrarium.parsing import SubAgentCallEvent
+        from kohakuterrarium.modules.subagent.config import SubAgentConfig
+
+        agent = make_agent()
+        agent.llm.model = "gpt-child-actual"
+        agent.llm._llm_identifier = "openai/child-profile@reasoning=high"
+        agent.subagent_manager.llm = agent.llm
+        agent.subagent_manager._configs["explore"] = SubAgentConfig(
+            name="explore", model="parent"
+        )
+        calls = []
+        original = agent.output_router.notify_activity
+
+        def capture(activity_type, detail, metadata=None):
+            calls.append((activity_type, detail, metadata or {}))
+            return original(activity_type, detail, metadata)
+
+        monkeypatch.setattr(agent.output_router, "notify_activity", capture)
+        await agent.start()
+        try:
+            await agent._dispatch_subagent_event(
+                SubAgentCallEvent(name="explore", args={"task": "inspect"}, raw=""),
+                agent.controller,
+                {},
+                [],
+                {},
+                False,
+            )
+            start = next(call for call in calls if call[0] == "subagent_start")
+            assert start[2]["model"] == "gpt-child-actual"
+            assert start[2]["llm_name"] == "openai/child-profile@reasoning=high"
+        finally:
+            await agent.stop()
+
     async def test_dispatch_vetoed_by_plugin(self, make_agent):
         from kohakuterrarium.modules.plugin.base import (
             BasePlugin,

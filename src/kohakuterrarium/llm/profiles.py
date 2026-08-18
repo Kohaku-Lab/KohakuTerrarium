@@ -35,7 +35,7 @@ from kohakuterrarium.llm.backends import (
     validate_backend_type,
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens
-from kohakuterrarium.llm.preset_store import load_presets
+from kohakuterrarium.llm.preset_store import get_subagent_models, load_presets
 from kohakuterrarium.llm.preset_store import preset_from_data as _preset_from_data
 from kohakuterrarium.llm.preset_store import serialize_user_data as _serialize_user_data
 from kohakuterrarium.llm.presets import ALIASES as ALIASES
@@ -64,7 +64,14 @@ def save_backend(backend: LLMBackend) -> None:
     backends = load_backends()
     presets = load_presets()
     backends[backend.name] = backend
-    _save_yaml(_serialize_user_data(presets, backends, data.get("default_model", "")))
+    _save_yaml(
+        _serialize_user_data(
+            presets,
+            backends,
+            data.get("default_model", ""),
+            get_subagent_models(),
+        )
+    )
 
 
 def delete_backend(name: str) -> bool:
@@ -79,7 +86,14 @@ def delete_backend(name: str) -> bool:
         raise ValueError(f"Provider still in use by one or more presets: {name}")
     backends = load_backends()
     backends.pop(name, None)
-    _save_yaml(_serialize_user_data(presets, backends, data.get("default_model", "")))
+    _save_yaml(
+        _serialize_user_data(
+            presets,
+            backends,
+            data.get("default_model", ""),
+            get_subagent_models(),
+        )
+    )
     save_api_key(name, "")
     return True
 
@@ -181,7 +195,11 @@ def _upgrade_bare_default(bare: str) -> str:
 
 
 def set_default_model(model_name: str) -> None:
-    _save_yaml(_serialize_user_data(load_presets(), load_backends(), model_name))
+    _save_yaml(
+        _serialize_user_data(
+            load_presets(), load_backends(), model_name, get_subagent_models()
+        )
+    )
 
 
 def save_profile(profile: LLMProfile | LLMPreset) -> None:
@@ -215,7 +233,14 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
         raise ValueError(f"Provider not found: {preset.provider}")
     presets = load_presets()
     presets[(preset.provider, preset.name)] = preset
-    _save_yaml(_serialize_user_data(presets, backends, data.get("default_model", "")))
+    _save_yaml(
+        _serialize_user_data(
+            presets,
+            backends,
+            data.get("default_model", ""),
+            get_subagent_models(),
+        )
+    )
 
 
 def delete_profile(name: str, provider: str = "") -> bool:
@@ -233,7 +258,12 @@ def delete_profile(name: str, provider: str = "") -> bool:
             return False
         presets.pop(hits[0])
     _save_yaml(
-        _serialize_user_data(presets, load_backends(), data.get("default_model", ""))
+        _serialize_user_data(
+            presets,
+            load_backends(),
+            data.get("default_model", ""),
+            get_subagent_models(),
+        )
     )
     return True
 

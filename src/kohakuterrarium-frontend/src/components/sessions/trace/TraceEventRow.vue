@@ -84,7 +84,10 @@ const summary = computed(() => {
   const fromOutput = extractTextPreview(e.output, 200)
   if (fromOutput) return fromOutput
   if (e.tool) return String(e.tool)
-  if (e.name) return String(e.name)
+  if (e.name) {
+    const modelIdentity = e.type === "subagent_call" ? e.llm_name || e.model : ""
+    return modelIdentity ? `${e.name} · ${modelIdentity}` : String(e.name)
+  }
   if (Array.isArray(e._kt_assistant_segments)) {
     const first = e._kt_assistant_segments.find((s) => s?.type === "reasoning")
     if (first?.text) return first.text

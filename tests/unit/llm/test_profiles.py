@@ -498,6 +498,29 @@ class TestIsAvailable:
 
 
 class TestBackendCrud:
+    def test_all_yaml_rewrites_preserve_subagent_models_profiles_and_backends(self):
+        from kohakuterrarium.llm.backends import load_yaml_store, save_yaml_store
+
+        mapping = {
+            "explore": "anthropic/worker@reasoning=high",
+            "Reviewer": "raw-review-model",
+        }
+        save_yaml_store({"version": 3, "subagent_models": mapping})
+
+        save_backend(LLMBackend(name="proxy", backend_type="openai"))
+        save_profile(LLMPreset(name="worker", model="m1", provider="proxy"))
+        set_default_model("proxy/worker")
+        save_backend(LLMBackend(name="spare", backend_type="openai"))
+        assert delete_backend("spare") is True
+        save_profile(LLMPreset(name="temporary", model="m2", provider="proxy"))
+        assert delete_profile("temporary", provider="proxy") is True
+
+        stored = load_yaml_store()
+        assert stored["subagent_models"] == mapping
+        assert stored["default_model"] == "proxy/worker"
+        assert stored["backends"]["proxy"]["backend_type"] == "openai"
+        assert stored["presets"]["proxy"]["worker"]["model"] == "m1"
+
     def test_save_then_load_custom_backend(self):
         backend = LLMBackend(
             name="my-proxy",

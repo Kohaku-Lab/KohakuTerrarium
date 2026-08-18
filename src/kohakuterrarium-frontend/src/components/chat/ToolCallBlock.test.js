@@ -47,6 +47,21 @@ const subagentTc = () => ({
   children: [],
 })
 
+describe("ToolCallBlock — sub-agent model identity", () => {
+  it("shows the canonical selector and falls back to the actual model", () => {
+    const canonical = subagentTc()
+    canonical.llm_name = "anthropic/worker@reasoning=high"
+    canonical.model = "claude-actual"
+    expect(mountBlock(canonical).text()).toContain("anthropic/worker@reasoning=high")
+
+    const raw = subagentTc()
+    raw.model = "raw-worker-model"
+    expect(mountBlock(raw).text()).toContain("raw-worker-model")
+
+    expect(mountBlock(subagentTc()).text()).not.toContain("model:")
+  })
+})
+
 describe("ToolCallBlock — sub-agent conversation (UXI-05)", () => {
   it("shows the send box for ANY messageable sub-agent (gated on can_receive, not interactive) and targets by job_id", async () => {
     // ``interactive:false`` but ``can_receive:true`` — the box must still

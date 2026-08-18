@@ -6,6 +6,7 @@ Selectors may name a full profile or a raw model ID on the parent provider.
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.llm.base import LLMProvider
+from kohakuterrarium.llm.preset_store import get_subagent_models
 from kohakuterrarium.llm.profiles import get_profile
 from kohakuterrarium.utils.logging import get_logger
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
@@ -13,9 +14,9 @@ from kohakuterrarium.modules.subagent.config import SubAgentConfig
 logger = get_logger(__name__)
 
 
-# These aliases bypass provider validation because they denote inheritance.
-_INHERIT_PARENT_SENTINELS: frozenset[str] = frozenset(
-    {"subagent-default", "subagent_default", "default", "inherit", "parent"}
+_INHERIT_PARENT_SENTINELS: frozenset[str] = frozenset({"default", "inherit", "parent"})
+_NAMED_DEFAULT_SENTINELS: frozenset[str] = frozenset(
+    {"subagent-default", "subagent_default"}
 )
 
 
@@ -24,8 +25,13 @@ def resolve_subagent_llm(
 ) -> LLMProvider:
     """Resolve a profile selector or apply a same-provider model override."""
     name = (config.model or "").strip()
-    if not name or name.lower() in _INHERIT_PARENT_SENTINELS:
+    lowered = name.lower()
+    if lowered in _INHERIT_PARENT_SENTINELS:
         return parent_llm
+    if not name or lowered in _NAMED_DEFAULT_SENTINELS:
+        name = get_subagent_models().get(config.name, "").strip()
+        if not name:
+            return parent_llm
 
     # Direct lookup avoids warning for valid raw model IDs that are not profiles.
     profile = get_profile(name)
