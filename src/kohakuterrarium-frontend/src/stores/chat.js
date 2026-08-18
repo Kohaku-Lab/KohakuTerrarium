@@ -67,8 +67,9 @@ function normalizeMessageContent(content) {
 function _insertReasoningSegments(message, segments, idPrefix = "reasoning_") {
   if (!message || !Array.isArray(segments) || !segments.length) return
   const parts = Array.isArray(message.parts) ? message.parts : []
+  const start = Number.isInteger(message._reasoningCursor) ? message._reasoningCursor : 0
   const out = []
-  let cursor = 0
+  let cursor = Math.min(Math.max(start, 0), parts.length)
   let n = 0
 
   const nextText = (from) => parts.findIndex((part, idx) => idx >= from && part?.type === "text")
@@ -99,8 +100,15 @@ function _insertReasoningSegments(message, segments, idPrefix = "reasoning_") {
     out.push(parts[cursor++])
   }
   while (cursor < parts.length) out.push(parts[cursor++])
+  if (!out.length) return
 
-  if (out.length) message.parts = out
+  message.parts = [...parts.slice(0, start), ...out]
+  message._reasoningCursor = message.parts.length
+  const tail = message.parts[message.parts.length - 1]
+  if (tail?.type === "text") {
+    tail._roundEnd = true
+    tail._streaming = false
+  }
 }
 
 function contentSignature(content) {
@@ -304,6 +312,7 @@ export function _convertHistory(messages) {
           }
         }
         message.parts = parts
+        message._reasoningCursor = parts.length
       }
       result.push(message)
     }
@@ -583,7 +592,7 @@ export function _replayEvents(messages, events, branchView = null) {
   function appendText(content) {
     const c = ensureCur()
     const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
-    if (tail && tail.type === "text") {
+    if (tail && tail.type === "text" && !tail._roundEnd) {
       tail.content += content
     } else {
       c.parts.push({ type: "text", content, id: stableId("txt_") })
