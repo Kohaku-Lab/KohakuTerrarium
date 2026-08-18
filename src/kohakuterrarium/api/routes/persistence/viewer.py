@@ -37,6 +37,10 @@ from kohakuterrarium.studio.persistence.viewer.events import build_events_payloa
 from kohakuterrarium.studio.persistence.viewer.export import build_export
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.persistence.viewer.summary import build_summary_payload
+from kohakuterrarium.studio.persistence.viewer.timeline import (
+    build_timeline_payload,
+    merge_timeline_payloads,
+)
 from kohakuterrarium.studio.persistence.viewer.tree import build_tree_payload
 from kohakuterrarium.studio.persistence.viewer.turns import build_turns_payload
 from kohakuterrarium.studio.sessions import cluster_fold
@@ -511,6 +515,28 @@ async def get_session_diff(
             a_path, b_path, agent=agent, a_store=a_store, b_store=b_store
         )
     return await asyncio.to_thread(build_diff_payload, a_path, b_path, agent=agent)
+
+
+@router.get("/{session_name}/timeline")
+async def get_session_timeline(
+    session_name: str,
+    agent: str | None = None,
+    limit: int = 20000,
+    service: TerrariumService = Depends(get_service),
+) -> dict[str, Any]:
+    """Compact per-event timing spans for the trace-tab lane overview."""
+    members = await _resolve_cluster_or_404(session_name, service)
+    clamped_limit = max(1, min(limit, 50000))
+
+    def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
+        return build_timeline_payload(
+            store, canonical, agent=agent, limit=clamped_limit
+        )
+
+    if len(members) == 1:
+        return await _build_single(service, members[0][0], members[0][1], _build)
+    per_member = await asyncio.to_thread(_run_per_member, members, _build)
+    return merge_timeline_payloads(per_member, session_name, limit=clamped_limit)
 
 
 @router.get("/{session_name}/events")

@@ -1054,8 +1054,37 @@ export default {
   "sessionViewer.trace.filters.types": "Event types",
   "sessionViewer.trace.filters.errorsOnly": "Errors only",
   "sessionViewer.trace.filters.live": "Live attach",
+  "sessionViewer.trace.filters.search": "Search events…",
   "sessionViewer.trace.timeline.cost": "Cost / turn",
   "sessionViewer.trace.timeline.tokens": "Tokens / turn",
+  "sessionViewer.trace.timeline.mode.sequence": "seq",
+  "sessionViewer.trace.timeline.mode.duration": "duration",
+  "sessionViewer.trace.timeline.mode.time": "time",
+  "sessionViewer.trace.timeline.mode.actual": "actual",
+  "sessionViewer.trace.timeline.modeHint.sequence":
+    "Sequence: every event is one equal-width block in operation order — ignores clock time, best for seeing what happened and in what order.",
+  "sessionViewer.trace.timeline.modeHint.duration":
+    "Duration: real start time + real duration per event, with idle gaps between events compressed away — best for spotting slow steps.",
+  "sessionViewer.trace.timeline.modeHint.time":
+    "Time: real start times with idle gaps compressed, but every event equal width — best for seeing event density over time without long steps stretching the view.",
+  "sessionViewer.trace.timeline.modeHint.actual":
+    "Actual: the true wall-clock timeline, idle gaps kept — best for seeing where the session waited or idled.",
+  "sessionViewer.trace.timeline.lane.input": "Input",
+  "sessionViewer.trace.timeline.lane.model": "Model",
+  "sessionViewer.trace.timeline.lane.tools": "Tools",
+  "sessionViewer.trace.timeline.lane.agents": "Agents",
+  "sessionViewer.trace.timeline.empty": "No timing data",
+  "sessionViewer.trace.timeline.hint":
+    "Drag to focus an interval · wheel to zoom · right-drag to pan · double-click to reset",
+  "sessionViewer.trace.timeline.minimapHint":
+    "Overview of the full session · click or drag to move the zoomed viewport",
+  "sessionViewer.trace.timeline.truncated": "latest only",
+  "sessionViewer.trace.timeline.truncatedHint":
+    "Session has more events than the overview limit — only the most recent are shown.",
+  "sessionViewer.trace.timeline.focusTurns": ({ n }) => `${n} turn${n === 1 ? "" : "s"} in focus`,
+  "sessionViewer.trace.timeline.clearFocus": "Clear interval focus",
+  "sessionViewer.trace.turn.expandAll": "Expand all",
+  "sessionViewer.trace.turn.collapseAll": "Collapse all",
   "sessionViewer.trace.turn.duration": ({ s }) => `${s}s`,
   "sessionViewer.trace.turn.toolCalls": ({ n }) => `${n} tool${n === 1 ? "" : "s"}`,
   "sessionViewer.trace.turn.expand": "Expand turn",

@@ -371,6 +371,58 @@ class TestEvents:
         assert captured["limit"] == 1000
 
 
+# ── timeline ───────────────────────────────────────────────────
+
+
+class TestTimeline:
+    def test_success(self, monkeypatch, _patch_resolve):
+        _patch_resolve()
+        monkeypatch.setattr(
+            viewer_mod,
+            "_run_with_store",
+            lambda path, builder: {"spans": [{"eid": 1}], "count": 1},
+        )
+        client = TestClient(_app())
+        resp = client.get("/sessions/sess/timeline?limit=100")
+        assert resp.status_code == 200
+        assert resp.json() == {"spans": [{"eid": 1}], "count": 1}
+
+    def test_build_closure_clamps_limit(self, monkeypatch, tmp_path):
+        # The timeline ``_build`` closure clamps limit to [1, 50000].
+        path = _real_session(tmp_path)
+        monkeypatch.setattr(viewer_mod, "resolve_session_path_default", lambda n: path)
+        captured = {}
+
+        def _fake_build(store, canonical, **kw):
+            captured.update(kw)
+            return {"spans": []}
+
+        monkeypatch.setattr(viewer_mod, "build_timeline_payload", _fake_build)
+        resp = TestClient(_app()).get("/sessions/alice/timeline?limit=999999")
+        assert resp.status_code == 200
+        assert captured["limit"] == 50000
+
+    def test_real_store_roundtrip(self, monkeypatch, tmp_path):
+        # End-to-end against a real session file: spans are projected.
+        from kohakuterrarium.session.store import SessionStore
+
+        path = tmp_path / "alice.kohakutr"
+        s = SessionStore(str(path))
+        try:
+            s.init_meta("alice", "agent", "/p", "/w", ["alice"])
+            s.append_event("alice", "user_message", {"content": "hi"}, turn_index=1)
+            s.flush()
+        finally:
+            s.close()
+        monkeypatch.setattr(viewer_mod, "resolve_session_path_default", lambda n: path)
+        resp = TestClient(_app()).get("/sessions/alice/timeline")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["count"] == 1
+        assert body["spans"][0]["type"] == "user_message"
+        assert body["truncated"] is False
+
+
 # ── _run_with_store helper ─────────────────────────────────────
 
 
