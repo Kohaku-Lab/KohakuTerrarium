@@ -67,8 +67,9 @@ function normalizeMessageContent(content) {
 function _insertReasoningSegments(message, segments, idPrefix = "reasoning_") {
   if (!message || !Array.isArray(segments) || !segments.length) return
   const parts = Array.isArray(message.parts) ? message.parts : []
+  const start = Number.isInteger(message._reasoningCursor) ? message._reasoningCursor : 0
   const out = []
-  let cursor = 0
+  let cursor = Math.min(Math.max(start, 0), parts.length)
   let n = 0
 
   const nextText = (from) => parts.findIndex((part, idx) => idx >= from && part?.type === "text")
@@ -99,8 +100,15 @@ function _insertReasoningSegments(message, segments, idPrefix = "reasoning_") {
     out.push(parts[cursor++])
   }
   while (cursor < parts.length) out.push(parts[cursor++])
+  if (!out.length) return
 
-  if (out.length) message.parts = out
+  message.parts = [...parts.slice(0, start), ...out]
+  message._reasoningCursor = message.parts.length
+  const tail = message.parts[message.parts.length - 1]
+  if (tail?.type === "text") {
+    tail._roundEnd = true
+    tail._streaming = false
+  }
 }
 
 function contentSignature(content) {
@@ -304,6 +312,7 @@ export function _convertHistory(messages) {
           }
         }
         message.parts = parts
+        message._reasoningCursor = parts.length
       }
       result.push(message)
     }
@@ -580,10 +589,22 @@ export function _replayEvents(messages, events, branchView = null) {
     return cur
   }
 
+  function commitPendingReasoningRound(c) {
+    if (!Number.isInteger(c._pendingReasoningCursor)) return
+    c._reasoningCursor = c._pendingReasoningCursor
+    c._pendingReasoningCursor = undefined
+    const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
+    if (tail?.type === "text") {
+      tail._roundEnd = true
+      tail._streaming = false
+    }
+  }
+
   function appendText(content) {
     const c = ensureCur()
+    commitPendingReasoningRound(c)
     const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
-    if (tail && tail.type === "text") {
+    if (tail && tail.type === "text" && !tail._roundEnd) {
       tail.content += content
     } else {
       c.parts.push({ type: "text", content, id: stableId("txt_") })
@@ -596,6 +617,7 @@ export function _replayEvents(messages, events, branchView = null) {
 
   function addTool(name, kind, args, jobId, startedTs) {
     const c = ensureCur()
+    commitPendingReasoningRound(c)
     const tail = c.parts.length ? c.parts[c.parts.length - 1] : null
     if (tail && tail.type === "text") tail._streaming = false
     // Sub-agents run asynchronously in the background — the assistant
@@ -923,7 +945,9 @@ export function _replayEvents(messages, events, branchView = null) {
           sender,
           timestamp: "",
         })
-      } else if (at === "token_usage" || at === "processing_complete") {
+      } else if (at === "token_usage") {
+        if (cur) cur._pendingReasoningCursor = cur.parts.length
+      } else if (at === "processing_complete") {
         // skip
       } else if (at === "context_cleared") {
         cur = null
@@ -1176,6 +1200,7 @@ export function _replayEvents(messages, events, branchView = null) {
       // sessions (and plain history reloads) show it in place. Mirrors
       // the live `_handleAssistantImage` path so shape + meta match.
       const c = ensureCur()
+      commitPendingReasoningRound(c)
       for (const p of c.parts || []) {
         if (p.type === "text") p._streaming = false
       }
@@ -1199,7 +1224,10 @@ export function _replayEvents(messages, events, branchView = null) {
         evt._kt_assistant_segments || [],
         typeof evt.event_id === "number" ? `h_${evt.event_id}_r` : "h_reasoning_",
       )
-    } else if (t === "token_usage" || t === "processing_complete") {
+      c._pendingReasoningCursor = undefined
+    } else if (t === "token_usage") {
+      if (cur) cur._pendingReasoningCursor = cur.parts.length
+    } else if (t === "processing_complete") {
       // skip
     }
   }
@@ -2943,6 +2971,7 @@ const _chatStoreOptions = {
             data._kt_assistant_segments || [],
             `live_${data.id || "reasoning"}_r`,
           )
+          target._pendingReasoningCursor = undefined
         }
         return
       }
@@ -2996,6 +3025,9 @@ const _chatStoreOptions = {
           cached: prev.cached + (data.cached_tokens || 0),
           lastPrompt: data.prompt_tokens || prev.lastPrompt,
         }
+        const list = this.messagesByTab[source] || []
+        const target = [...list].reverse().find((message) => message?.role === "assistant")
+        if (target?.parts) target._pendingReasoningCursor = target.parts.length
         return
       }
 
@@ -3192,6 +3224,7 @@ const _chatStoreOptions = {
           this.processingByTab[source] = true
         }
         const last = this._ensureAssistantMsg(msgs)
+        this._commitPendingReasoningRound(last)
         if (last.parts.length > 0) {
           const tail = last.parts[last.parts.length - 1]
           if (tail.type === "text") tail._streaming = false
@@ -4742,11 +4775,24 @@ const _chatStoreOptions = {
       return last
     },
 
+    _commitPendingReasoningRound(message) {
+      if (!message || !Array.isArray(message.parts)) return
+      if (!Number.isInteger(message._pendingReasoningCursor)) return
+      message._reasoningCursor = message._pendingReasoningCursor
+      message._pendingReasoningCursor = undefined
+      const tail = message.parts.length ? message.parts[message.parts.length - 1] : null
+      if (tail?.type === "text") {
+        tail._roundEnd = true
+        tail._streaming = false
+      }
+    },
+
     _appendStreamChunk(source, content) {
       const msgs = this.messagesByTab[source]
       if (!msgs) return
       this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
       const last = this._ensureAssistantMsg(msgs)
+      this._commitPendingReasoningRound(last)
       const tail = last.parts.length > 0 ? last.parts[last.parts.length - 1] : null
       if (tail && tail.type === "text" && tail._streaming) {
         tail.content += content
@@ -4766,6 +4812,7 @@ const _chatStoreOptions = {
       const msgs = this.messagesByTab[source]
       if (!msgs) return
       const last = this._ensureAssistantMsg(msgs)
+      this._commitPendingReasoningRound(last)
       for (const p of last.parts || []) {
         if (p.type === "text") p._streaming = false
       }
