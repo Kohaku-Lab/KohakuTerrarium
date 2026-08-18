@@ -84,6 +84,18 @@ def _looks_nested(stored: dict[str, Any]) -> bool:
     return True
 
 
+def get_subagent_models() -> dict[str, str]:
+    """Return exact sub-agent name to model-selector defaults."""
+    stored = _load_yaml().get("subagent_models", {})
+    if not isinstance(stored, dict):
+        return {}
+    return {
+        name: selector
+        for name, selector in stored.items()
+        if isinstance(name, str) and isinstance(selector, str) and selector.strip()
+    }
+
+
 def load_presets() -> dict[tuple[str, str], LLMPreset]:
     """Load nested or legacy presets, with host-resolved worker entries authoritative."""
     data = _load_yaml()
@@ -105,11 +117,14 @@ def serialize_user_data(
     presets: dict[tuple[str, str], LLMPreset],
     backends: dict[str, LLMBackend],
     default_model: str = "",
+    subagent_models: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Serialize user providers and presets in the current nested schema."""
     data: dict[str, Any] = {"version": _SCHEMA_VERSION}
     if default_model:
         data["default_model"] = default_model
+    if subagent_models:
+        data["subagent_models"] = dict(subagent_models)
     user_backends = {
         name: backend.to_dict()
         for name, backend in backends.items()

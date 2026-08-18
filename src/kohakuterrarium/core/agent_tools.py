@@ -371,8 +371,12 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             if hasattr(result, "turns"):
                 if event.context is None:
                     event.context = {}
+                result_metadata = getattr(result, "metadata", {})
                 event.context["subagent_metadata"] = {
-                    "tools_used": getattr(result, "metadata", {}).get("tools_used", []),
+                    "tools_used": result_metadata.get("tools_used", []),
+                    "subagent": result_metadata.get("subagent", ""),
+                    "llm_name": result_metadata.get("llm_name", ""),
+                    "model": result_metadata.get("model", ""),
                     "turns": result.turns,
                     "duration": getattr(result, "duration", 0),
                     "total_tokens": getattr(result, "total_tokens", 0),
@@ -514,7 +518,11 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             "output_preview": preview,
         }
         if is_subagent:
+            result_metadata = getattr(result, "metadata", {})
             metadata["result"] = preview
+            metadata["subagent"] = result_metadata.get("subagent", metric_name)
+            metadata["llm_name"] = result_metadata.get("llm_name", "")
+            metadata["model"] = result_metadata.get("model", "")
             metadata["turns"] = getattr(result, "turns", 0)
             metadata["duration"] = getattr(result, "duration", 0)
             metadata["total_tokens"] = getattr(result, "total_tokens", 0)

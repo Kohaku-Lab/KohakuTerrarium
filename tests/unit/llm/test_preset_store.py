@@ -204,3 +204,8 @@ class TestSerializeUserData:
         loaded = load_presets()
         assert loaded[("openai", "rt")].max_output == 999
         assert loaded[("openai", "rt")].model == "gpt-4o"
+
+    def test_named_subagent_models_are_serialised_without_normalisation(self):
+        mapping = {"researcher": "anthropic/claude-sonnet", "Reviewer": "raw-model"}
+        data = serialize_user_data({}, {}, subagent_models=mapping)
+        assert data["subagent_models"] == mapping

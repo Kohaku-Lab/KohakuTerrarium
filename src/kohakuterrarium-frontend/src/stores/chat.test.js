@@ -1085,6 +1085,74 @@ describe("chat store — interrupted task handling", () => {
     expect(pendingJobs.agent_explore_1).toBeTruthy()
   })
 
+  it("maps persisted subagent model identity to its job part", () => {
+    const events = [
+      { type: "processing_start" },
+      {
+        type: "subagent_call",
+        name: "explore",
+        job_id: "agent_explore_1",
+        task: "find auth",
+        llm_name: "anthropic/worker@reasoning=high",
+        model: "claude-actual",
+      },
+    ]
+
+    const { messages: replayed } = _replayEvents([], events)
+    const tool = replayed[0].parts[0]
+    expect(tool.llm_name).toBe("anthropic/worker@reasoning=high")
+    expect(tool.model).toBe("claude-actual")
+  })
+
+  it("accepts model identity from a replay terminal when the start is missing", () => {
+    const { messages: replayed } = _replayEvents(
+      [],
+      [
+        { type: "processing_start" },
+        {
+          type: "subagent_result",
+          name: "explore",
+          job_id: "agent_explore_orphan",
+          output: "done",
+          llm_name: "openai/worker",
+          model: "gpt-worker",
+        },
+      ],
+    )
+    const tool = replayed[0].parts[0]
+    expect(tool.llm_name).toBe("openai/worker")
+    expect(tool.model).toBe("gpt-worker")
+  })
+
+  it("maps live subagent model identity on start and orphan terminal events", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [{ id: "m1", role: "assistant", parts: [] }] }
+    chat.activeTab = "main"
+
+    chat._handleActivity("main", {
+      activity_type: "subagent_start",
+      name: "explore",
+      job_id: "job_start",
+      llm_name: "anthropic/worker@reasoning=high",
+      model: "claude-actual",
+    })
+    let part = chat._findToolPart("main", chat.messagesByTab.main, "explore", "job_start")
+    expect(part.llm_name).toBe("anthropic/worker@reasoning=high")
+    expect(part.model).toBe("claude-actual")
+
+    chat._handleActivity("main", {
+      activity_type: "subagent_error",
+      name: "reviewer",
+      job_id: "job_orphan",
+      error: "failed",
+      llm_name: "openai/reviewer",
+      model: "gpt-reviewer",
+    })
+    part = chat._findToolPart("main", chat.messagesByTab.main, "reviewer", "job_orphan")
+    expect(part.llm_name).toBe("openai/reviewer")
+    expect(part.model).toBe("gpt-reviewer")
+  })
+
   it("derives replay message/part ids from the originating event_id", () => {
     const events = [
       { type: "user_input", event_id: 1, content: "q1" },

@@ -967,14 +967,21 @@ export function _replayEvents(messages, events, branchView = null) {
           timestamp: "",
         })
       } else if (at === "subagent_start") {
-        addTool(
+        const tool = addTool(
           evt.name,
           "subagent",
           evt.args || { info: evt.detail },
           evt.job_id,
           _evtStartedTs(evt),
         )
+        tool.llm_name = evt.llm_name || ""
+        tool.model = evt.model || ""
       } else if (at === "subagent_done") {
+        const tool =
+          findSubagent(evt.name, evt.job_id) ||
+          addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
+        tool.llm_name = evt.llm_name || tool.llm_name || ""
+        tool.model = evt.model || tool.model || ""
         updateTool(
           evt.name,
           evt.result || evt.detail,
@@ -989,6 +996,11 @@ export function _replayEvents(messages, events, branchView = null) {
           evt.job_id,
         )
       } else if (at === "subagent_error") {
+        const tool =
+          findSubagent(evt.name, evt.job_id) ||
+          addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
+        tool.llm_name = evt.llm_name || tool.llm_name || ""
+        tool.model = evt.model || tool.model || ""
         updateTool(
           evt.name,
           evt.result || evt.error || evt.detail,
@@ -1095,8 +1107,21 @@ export function _replayEvents(messages, events, branchView = null) {
         evt.call_id || evt.job_id,
       )
     } else if (t === "subagent_call") {
-      addTool(evt.name, "subagent", { task: evt.task || "" }, evt.job_id, _evtStartedTs(evt))
+      const tool = addTool(
+        evt.name,
+        "subagent",
+        { task: evt.task || "" },
+        evt.job_id,
+        _evtStartedTs(evt),
+      )
+      tool.llm_name = evt.llm_name || ""
+      tool.model = evt.model || ""
     } else if (t === "subagent_result") {
+      const tool =
+        findSubagent(evt.name, evt.job_id) ||
+        addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
+      tool.llm_name = evt.llm_name || tool.llm_name || ""
+      tool.model = evt.model || tool.model || ""
       updateTool(
         evt.name,
         evt.output || evt.error || "",
@@ -3243,6 +3268,8 @@ const _chatStoreOptions = {
           tools_used: data.tools_used || [],
           children: [],
           startedAt: Date.now(),
+          llm_name: at === "subagent_start" ? data.llm_name || "" : "",
+          model: at === "subagent_start" ? data.model || "" : "",
         }
         last.parts.push(startedPart)
         this._indexToolPart(source, startedPart, msgs)
@@ -3277,6 +3304,10 @@ const _chatStoreOptions = {
           this._indexToolPart(source, tc, msgs)
         }
         tc.status = "done"
+        if (at === "subagent_done") {
+          tc.llm_name = data.llm_name || tc.llm_name || ""
+          tc.model = data.model || tc.model || ""
+        }
         const payload = toolResultPayload(data.result || data.output || data.detail || "", data)
         tc.result = payload.result
         tc.resultParts = payload.resultParts
@@ -3310,6 +3341,10 @@ const _chatStoreOptions = {
           this._indexToolPart(source, tc, msgs)
         }
         tc.status = data.interrupted || data.final_state === "interrupted" ? "interrupted" : "error"
+        if (at === "subagent_error") {
+          tc.llm_name = data.llm_name || tc.llm_name || ""
+          tc.model = data.model || tc.model || ""
+        }
         const payload = toolResultPayload(data.result || data.error || data.detail || "", data)
         tc.result = payload.result
         tc.resultParts = payload.resultParts

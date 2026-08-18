@@ -739,6 +739,11 @@ it while its Drive records stay per-user.
 version: 3
 default_model: <preset name>
 
+# Optional exact sub-agent name → default model selector mapping.
+subagent_models:
+  explore: openrouter/mimo-v2.5-pro
+  worker: codex/gpt-5.5
+
 backends:
   <provider-name>:
     backend_type: openai | anthropic | codex  # transport implementation
@@ -782,6 +787,15 @@ base URLs and `api_key_env` values are fixed via built-in defaults.
 Per-agent overrides via `controller.base_url` / `controller.api_key_env`
 still work.
 
+`subagent_models` supplies user-level defaults without editing packaged creature
+configs. Keys match the final `SubAgentConfig.name` exactly. A concrete `model`
+on the creature or sub-agent module still wins; `parent`, `inherit`, and `default`
+explicitly inherit the parent LLM. An absent model, `subagent-default`, or
+`subagent_default` uses the named entry when present, otherwise it inherits the
+parent. The mapping is read when a sub-agent is created, so edits affect future
+jobs only. Conversation and Inspector Trace rows record the model actually bound
+to each new job, preferring its canonical profile selector and falling back to
+the raw model id.
 
 ### Adding a custom LLM backend provider
 
