@@ -44,7 +44,14 @@ def _span_from_event(evt: dict) -> dict[str, Any]:
         "ts": evt.get("ts"),
         "dur": duration,
         "turn": _event_turn_index(evt),
-        "err": evt.get("type") in ERROR_EVENT_TYPES or _subagent_failed(evt),
+        # Ordinary tool failures keep type ``tool_result`` and encode the
+        # failure in ``error``/``exit_code`` — honour that, not just the
+        # dedicated error event types.
+        "err": (
+            evt.get("type") in ERROR_EVENT_TYPES
+            or _subagent_failed(evt)
+            or bool(evt.get("error"))
+        ),
     }
     label = evt.get("tool") or evt.get("name") or evt.get("tool_name")
     if label:

@@ -46,6 +46,7 @@ const props = defineProps({
   selectedEventId: { type: Number, default: null },
   focusEventIds: { type: Set, default: null },
   jumpEventId: { type: Number, default: null },
+  jumpMember: { type: String, default: null },
 })
 const emit = defineEmits(["toggle", "select-event", "matches", "jumped"])
 const rootEl = ref(null)
@@ -67,7 +68,9 @@ function onSelect(ev) {
 function isOutsideFocus(ev) {
   const ids = props.focusEventIds
   if (!ids || typeof ev?.event_id !== "number") return false
-  return !ids.has(ev.event_id)
+  // Cluster sessions key focus ids as member:eid (ids are member-local).
+  const key = ev.member_sid ? `${ev.member_sid}:${ev.event_id}` : ev.event_id
+  return !ids.has(key)
 }
 
 const durationS = computed(() => {
@@ -144,14 +147,35 @@ function _passesFilter(ev) {
 }
 
 // While a search is active the parent hides turns with zero matching
-// events; report the filtered count so it can decide. Only report once
-// the turn's events have loaded (collapsed turns stay visible).
+// events; report the filtered count so it can decide. Zero is only
+// conclusive once pagination is exhausted — a match may live on a later
+// event page, so page forward (bounded) before reporting it.
 const searchActive = computed(() => parseSearchTerms(props.filters?.search).length > 0)
 
+let searchPageBudget = 10
+let searchLastQuery = null
+
 watch(
-  () => (searchActive.value && props.expanded && !stream.loading ? displayedEvents.value.length : null),
-  (count) => {
-    if (count !== null) emit("matches", props.turn.turn_index, count)
+  () => [searchActive.value, props.filters?.search, props.expanded, stream.loading, stream.turnIndex, displayedEvents.value.length],
+  () => {
+    if (!searchActive.value || !props.expanded) return
+    const query = props.filters?.search || ""
+    if (query !== searchLastQuery) {
+      searchLastQuery = query
+      searchPageBudget = 10
+    }
+    if (stream.turnIndex !== props.turn.turn_index || stream.loading) return
+    const count = displayedEvents.value.length
+    if (count > 0) {
+      emit("matches", props.turn.turn_index, count)
+      return
+    }
+    if (stream.hasMore && searchPageBudget > 0) {
+      searchPageBudget -= 1
+      stream.loadMore()
+      return
+    }
+    emit("matches", props.turn.turn_index, 0)
   },
   { immediate: true },
 )
@@ -174,10 +198,11 @@ watch(
     // Wait until this turn's events are bound and idle — otherwise a
     // collapsed turn would "exhaust" before its first load even starts.
     if (stream.turnIndex !== props.turn.turn_index || stream.loading) return
-    const hit = displayedEvents.value.find((e) => e.event_id === target)
+    const hit = displayedEvents.value.find((e) => e.event_id === target && (!props.jumpMember || e.member_sid === props.jumpMember))
     if (hit) {
       await nextTick()
-      const el = rootEl.value?.querySelector(`[data-event-id="${target}"]`)
+      const rows = rootEl.value?.querySelectorAll(`[data-event-id="${target}"]`) ?? []
+      const el = [...rows].find((r) => !props.jumpMember || r.dataset.memberSid === props.jumpMember) ?? rows[0]
       el?.scrollIntoView?.({ behavior: "smooth", block: "center" })
       emit("jumped", { event: hit })
       return

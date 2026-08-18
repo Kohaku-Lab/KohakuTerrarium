@@ -28,7 +28,7 @@
 
       <div v-else class="relative" :style="{ height: `${totalSize}px` }">
         <div v-for="vRow in virtualRows" :key="vRow.key" :data-index="vRow.index" :ref="measureRow" class="absolute top-0 left-0 w-full pb-1.5" :style="{ transform: `translateY(${vRow.start}px)` }">
-          <TraceTurnGroup :turn="displayedTurns[vRow.index]" :agent="rollup.agent" :session-name="detail.name" :expanded="expandedTurns.has(displayedTurns[vRow.index].turn_index)" :filters="filters" :live-events="liveEventsObjects" :selected-event-id="selectedEventId" :focus-event-ids="focusEventIds" :jump-event-id="jumpIdFor(displayedTurns[vRow.index].turn_index)" @toggle="onToggle" @select-event="onSelectEvent" @matches="onTurnMatches" @jumped="onJumped" />
+          <TraceTurnGroup :turn="displayedTurns[vRow.index]" :agent="rollup.agent" :session-name="detail.name" :expanded="expandedTurns.has(displayedTurns[vRow.index].turn_index)" :filters="filters" :live-events="liveEventsObjects" :selected-event-id="selectedEventId" :focus-event-ids="focusEventIds" :jump-event-id="jumpIdFor(displayedTurns[vRow.index].turn_index)" :jump-member="jumpMemberFor(displayedTurns[vRow.index].turn_index)" @toggle="onToggle" @select-event="onSelectEvent" @matches="onTurnMatches" @jumped="onJumped" />
         </div>
       </div>
     </div>
@@ -231,9 +231,14 @@ function jumpIdFor(turnIndex) {
   return t2 && t2.turn === turnIndex ? t2.eid : null
 }
 
+function jumpMemberFor(turnIndex) {
+  const t2 = jumpTarget.value
+  return t2 && t2.turn === turnIndex ? t2.member : null
+}
+
 function onSelectSpan(span) {
   if (!span || span.turn == null) return
-  jumpTarget.value = typeof span.index === "number" ? { turn: span.turn, eid: span.index } : null
+  jumpTarget.value = typeof span.index === "number" ? { turn: span.turn, eid: span.index, member: span.member ?? null } : null
   onSelectTurn(span.turn)
 }
 

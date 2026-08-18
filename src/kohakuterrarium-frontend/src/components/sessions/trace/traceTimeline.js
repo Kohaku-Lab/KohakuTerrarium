@@ -51,6 +51,9 @@ export function normalizeSpan(raw) {
         : typeof raw.event_id === "number"
           ? raw.event_id
           : null,
+    // Cluster merges tag spans with member_sid; event ids and turn indices
+    // are member-local, so identity must carry the member through.
+    member: raw.member_sid ?? raw.member ?? null,
     type,
     ts,
     durMs: Number.isFinite(dur) && dur >= 0 ? dur : 0,
@@ -96,6 +99,7 @@ export function deriveTraceTimeline(records, mode = "sequence") {
       end: spans.length + 1,
       index: rec.eid,
       turn: rec.turn,
+      member: rec.member,
       type: rec.type,
       label: rec.label,
       lane: rec.lane,
@@ -116,6 +120,7 @@ function deriveTimedTimeline(records, actualDuration, compressIdle) {
       ...range,
       index: rec.eid,
       turn: rec.turn,
+      member: rec.member,
       type: rec.type,
       label: rec.label,
       lane: rec.lane,
@@ -179,7 +184,11 @@ export function traceTimelineFocus(model, range) {
   for (const span of model.spans) {
     if (span.start <= range.end && span.end >= range.start) {
       if (span.turn !== null) turns.add(span.turn)
-      if (span.index !== null) eventIds.add(span.index)
+      // Composite member:eid keys in cluster sessions — event ids are
+      // member-local and would collide across members otherwise.
+      if (span.index !== null) {
+        eventIds.add(span.member ? `${span.member}:${span.index}` : span.index)
+      }
     }
   }
   return { turns, eventIds }
