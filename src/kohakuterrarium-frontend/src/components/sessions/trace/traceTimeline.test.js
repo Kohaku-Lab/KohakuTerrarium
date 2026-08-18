@@ -155,6 +155,15 @@ describe("traceTimelineFocus", () => {
     expect(f.turns.size).toBe(0)
     expect(f.eventIds.size).toBe(0)
   })
+
+  it("keys event ids by member in cluster sessions", () => {
+    const m = deriveTraceTimeline(
+      [rec({ eid: 1, ts: 1000, dur: 100, turn: 1, member_sid: "node-a" })],
+      "actual",
+    )
+    const f = traceTimelineFocus(m, { start: 0, end: 2000000 })
+    expect([...f.eventIds]).toEqual(["node-a:1"])
+  })
 })
 
 describe("formatTimelineDuration", () => {

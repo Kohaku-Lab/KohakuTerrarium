@@ -103,6 +103,26 @@ class TestBuildTimelinePayload:
         finally:
             s.close()
 
+    def test_failed_tool_result_marked_as_error(self, tmp_path):
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            s.append_event("alice", "tool_result", {"tool": "bash", "output": "ok"})
+            s.append_event(
+                "alice",
+                "tool_result",
+                {
+                    "tool": "bash",
+                    "error": "Command exited with code 1",
+                    "exit_code": "1",
+                },
+            )
+            s.flush()
+            out = build_timeline_payload(s, "sess", agent=None, limit=100)
+            assert [sp["err"] for sp in out["spans"]] == [False, True]
+        finally:
+            s.close()
+
 
 class TestPairDurations:
     def test_tool_call_result_pairing(self, tmp_path):
