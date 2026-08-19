@@ -26,18 +26,18 @@
           <div v-for="i in TIMELINE_LANES.length - 1" :key="i" class="absolute inset-x-0 border-t border-warm-200/60 dark:border-warm-700/60 pointer-events-none" :style="{ top: `${i * 18}px` }" />
 
           <!-- Turn boundaries -->
-          <div v-for="b in visibleBoundaries" :key="b.turn" class="absolute top-0 bottom-0 border-l border-dashed border-warm-300 dark:border-warm-600 pointer-events-none" :style="{ left: `${b.x}%` }">
-            <span v-if="showBoundaryLabels" class="absolute top-0 left-0.5 text-[8px] font-mono text-warm-400">#{{ b.turn }}</span>
+          <div v-for="b in visibleBoundaries" :key="b.key" class="absolute top-0 bottom-0 border-l border-dashed border-warm-300 dark:border-warm-600 pointer-events-none" :style="{ left: `${b.x}%` }">
+            <span v-if="showBoundaryLabels" class="absolute top-0 left-0.5 text-[8px] font-mono text-warm-400">#{{ b.label }}</span>
           </div>
 
           <!-- Span buckets -->
           <div v-for="b in buckets" :key="b.key" class="absolute rounded-[1px] hover:opacity-100" :class="bucketClass(b)" :style="bucketStyle(b)" :title="bucketTitle(b)" />
 
           <!-- Hover line moves independently so the span subtree keeps its computed styles. -->
-          <div v-show="hovering && !draft" ref="hoverLineEl" data-testid="timeline-hover-line" class="absolute top-0 bottom-0 left-0 w-px bg-warm-400/60 pointer-events-none will-change-transform" />
+          <div v-show="hovering && !dragStateActive" ref="hoverLineEl" data-testid="timeline-hover-line" class="absolute top-0 bottom-0 left-0 w-px bg-warm-400/60 pointer-events-none will-change-transform" />
 
           <!-- Selection overlay -->
-          <div v-if="selectionFraction" class="absolute top-0 bottom-0 bg-iolite/15 border-x border-iolite/60 pointer-events-none" :class="draft ? 'opacity-70' : ''" :style="{ left: `${selectionFraction.start}%`, width: `${selectionFraction.end - selectionFraction.start}%` }" />
+          <div ref="selectionEl" data-testid="timeline-selection" class="absolute top-0 bottom-0 left-0 w-full origin-left bg-iolite/15 border-x border-iolite/60 pointer-events-none will-change-transform" style="display: none" />
         </template>
       </div>
     </div>
@@ -63,7 +63,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
-import { TIMELINE_LANES, TIMELINE_MODES, formatTimelineDuration } from "@/components/sessions/trace/traceTimeline"
+import { TIMELINE_LANES, TIMELINE_MODES, formatTimelineDuration, rasterizeTimelineSpans, rasterizeTurnBoundaries } from "@/components/sessions/trace/traceTimeline"
 import { useI18n } from "@/utils/i18n"
 
 const MIN_DRAG_PX = 3
@@ -81,17 +81,22 @@ const emit = defineEmits(["update:mode", "update:range", "select-span"])
 
 const trackEl = ref(null)
 const hoverLineEl = ref(null)
+const selectionEl = ref(null)
 const minimapEl = ref(null)
 const trackWidth = ref(0)
 const viewport = ref(null)
-const draft = ref(null)
 const hovering = ref(false)
+const dragStateActive = ref(false)
 const panning = ref(false)
 const minimapDragging = ref(false)
 
 let dragState = null
 let panState = null
 let resizeObserver = null
+let pointerFrame = 0
+let pendingPointer = null
+let wheelFrame = 0
+let pendingWheel = []
 
 onMounted(() => {
   if (!trackEl.value) return
@@ -101,17 +106,21 @@ onMounted(() => {
   resizeObserver.observe(trackEl.value)
   trackWidth.value = trackEl.value.getBoundingClientRect().width
   trackEl.value.addEventListener("wheel", onWheel, { passive: false })
+  updateSelectionPreview(props.range)
 })
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
   trackEl.value?.removeEventListener("wheel", onWheel)
+  if (pointerFrame) cancelAnimationFrame(pointerFrame)
+  if (wheelFrame) cancelAnimationFrame(wheelFrame)
 })
 
 // The range belongs to the current projection's domain; switching the
 // projection would silently reinterpret it, so clear it instead.
 function setMode(m) {
   if (m === props.mode) return
+  cancelPendingWheel()
   emit("update:mode", m)
   emit("update:range", null)
   viewport.value = null
@@ -122,8 +131,11 @@ watch(
   () => props.model,
   (model, prev) => {
     if (!model) {
+      cancelPointerInteraction()
+      cancelPendingWheel()
       viewport.value = null
       hovering.value = false
+      clearSelectionPreview()
       return
     }
     if (viewport.value && (viewport.value.end < model.start || viewport.value.start > model.end)) {
@@ -159,38 +171,14 @@ const buckets = computed(() => {
   const model = props.model
   const d = domain.value
   if (!model || !d) return []
-  const cols = columns.value
-  const dur = domainDuration.value
-  const result = []
-  for (const span of model.spans) {
-    if (span.end < d.start || span.start > d.end) continue
-    const c0 = Math.max(0, Math.min(cols - 1, Math.floor(((span.start - d.start) / dur) * cols)))
-    // Half-open [start, end): a span ending exactly on a column boundary
-    // must not bleed into the next column (zero-width spans stay 1 col).
-    const c1 = Math.max(c0, Math.min(cols - 1, Math.ceil(((span.end - d.start) / dur) * cols) - 1))
-    result.push({
-      key: `${span.lane}:${c0}:${c1}:${span.index}`,
-      lane: span.lane,
-      col: c0,
-      spanCols: c1 - c0 + 1,
-      count: 1,
-      error: span.isError,
-      turns: span.turn !== null ? [span.turn] : [],
-      types: span.type ? [span.type] : [],
-      labels: span.label ? [span.label] : [],
-      minStart: span.start,
-      maxEnd: span.end,
-    })
-  }
-  return result
+  return rasterizeTimelineSpans(model.spans, d, columns.value)
 })
 
 const visibleBoundaries = computed(() => {
   const model = props.model
   const d = domain.value
   if (!model || !d) return []
-  const dur = domainDuration.value
-  return model.turnBoundaries.filter((b) => b.time > d.start && b.time <= d.end).map((b) => ({ turn: b.turn, x: ((b.time - d.start) / dur) * 100 }))
+  return rasterizeTurnBoundaries(model.turnBoundaries, d, columns.value)
 })
 
 // Minimap rasterizes the full domain at fixed low resolution, ignoring
@@ -200,14 +188,7 @@ const MINIMAP_COLUMNS = 240
 const minimapBuckets = computed(() => {
   const model = props.model
   if (!model) return []
-  const dur = Math.max(1, model.end - model.start)
-  const result = []
-  for (const span of model.spans) {
-    const c0 = Math.max(0, Math.min(MINIMAP_COLUMNS - 1, Math.floor(((span.start - model.start) / dur) * MINIMAP_COLUMNS)))
-    const c1 = Math.max(c0, Math.min(MINIMAP_COLUMNS - 1, Math.ceil(((span.end - model.start) / dur) * MINIMAP_COLUMNS) - 1))
-    result.push({ key: `${span.lane}:${c0}:${c1}:${span.index}`, lane: span.lane, col: c0, spanCols: c1 - c0 + 1, error: span.isError })
-  }
-  return result
+  return rasterizeTimelineSpans(model.spans, { start: model.start, end: model.end }, MINIMAP_COLUMNS)
 })
 
 function minimapBucketStyle(b) {
@@ -270,6 +251,36 @@ function onMinimapPointerUp() {
 
 const showBoundaryLabels = computed(() => visibleBoundaries.value.length <= 24)
 
+function updateSelectionPreview(range) {
+  const element = selectionEl.value
+  const d = domain.value
+  if (!element || !range || !d) {
+    clearSelectionPreview()
+    return
+  }
+  const duration = domainDuration.value
+  const start = Math.min(Math.max((Math.min(range.start, range.end) - d.start) / duration, 0), 1)
+  const end = Math.min(Math.max((Math.max(range.start, range.end) - d.start) / duration, 0), 1)
+  element.style.display = ""
+  element.style.opacity = dragStateActive.value ? "0.7" : ""
+  element.style.transform = `translate3d(${start * 100}%, 0, 0) scaleX(${end - start})`
+}
+
+function clearSelectionPreview() {
+  if (!selectionEl.value) return
+  selectionEl.value.style.display = "none"
+  selectionEl.value.style.transform = ""
+  selectionEl.value.style.opacity = ""
+}
+
+watch(
+  () => [props.range, domain.value],
+  ([range]) => {
+    if (!dragState) updateSelectionPreview(range)
+  },
+  { flush: "post", immediate: true },
+)
+
 const LANE_CLASSES = ["bg-sage/70", "bg-iolite/70", "bg-aquamarine/70", "bg-taaffeite/70"]
 
 function bucketClass(b) {
@@ -301,24 +312,15 @@ function bucketTitle(b) {
   if (props.mode === "sequence") {
     parts.push(`${b.count} event${b.count === 1 ? "" : "s"}`)
   } else {
+    parts.push(`${b.count} event${b.count === 1 ? "" : "s"}`)
     parts.push(`${formatClock(b.minStart)} → ${formatClock(b.maxEnd)}`)
-    parts.push(formatTimelineDuration(b.maxEnd - b.minStart))
+    if (b.count === 1) parts.push(formatTimelineDuration(b.maxEnd - b.minStart))
   }
   if (b.labels.length) parts.push(b.labels.slice(0, 5).join(", "))
   else if (b.types.length) parts.push(b.types.slice(0, 5).join(", "))
   if (b.turns.length) parts.push(`turn ${b.turns.slice(0, 5).join(", ")}`)
   return parts.join("\n")
 }
-
-const selectionFraction = computed(() => {
-  const r = draft.value || props.range
-  const d = domain.value
-  if (!r || !d) return null
-  const dur = domainDuration.value
-  const start = Math.min(Math.max(((Math.min(r.start, r.end) - d.start) / dur) * 100, 0), 100)
-  const end = Math.min(Math.max(((Math.max(r.start, r.end) - d.start) / dur) * 100, 0), 100)
-  return { start, end }
-})
 
 const selectionLabel = computed(() => {
   const r = props.range
@@ -371,11 +373,22 @@ function onPointerDown(event) {
   if (event.button !== 0) return
   const t2 = timeAt(fractionAt(event))
   dragState = { anchorTime: t2, anchorClientX: event.clientX }
-  draft.value = { start: t2, end: t2 }
+  dragStateActive.value = true
+  updateSelectionPreview({ start: t2, end: t2 })
   trackEl.value?.setPointerCapture?.(event.pointerId)
 }
 
 function onPointerMove(event) {
+  pendingPointer = { clientX: event.clientX, clientY: event.clientY }
+  if (!pointerFrame) pointerFrame = requestAnimationFrame(flushPointerMove)
+}
+
+function flushPointerMove() {
+  if (pointerFrame) cancelAnimationFrame(pointerFrame)
+  pointerFrame = 0
+  const event = pendingPointer
+  pendingPointer = null
+  if (!event) return
   const rect = trackEl.value?.getBoundingClientRect()
   if (rect && rect.width > 0 && hoverLineEl.value) {
     const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width)
@@ -393,14 +406,18 @@ function onPointerMove(event) {
     return
   }
   const t2 = timeAt(fractionAt(event, rect))
-  draft.value = { start: Math.min(dragState.anchorTime, t2), end: Math.max(dragState.anchorTime, t2) }
+  updateSelectionPreview({ start: dragState.anchorTime, end: t2 })
 }
 
 function onPointerEnd(event) {
   if (panState) {
+    if (pendingPointer) flushPointerMove()
     const moved = panState.moved || Math.abs(event.clientX - panState.anchorClientX) >= MIN_DRAG_PX
+    if (pointerFrame) cancelAnimationFrame(pointerFrame)
+    pointerFrame = 0
     panState = null
     panning.value = false
+    pendingPointer = null
     // Right-click without a drag clears the focus interval.
     if (!moved) emit("update:range", null)
     return
@@ -410,49 +427,89 @@ function onPointerEnd(event) {
   const range = { start: Math.min(dragState.anchorTime, t2), end: Math.max(dragState.anchorTime, t2) }
   const isClick = Math.abs(event.clientX - dragState.anchorClientX) < MIN_DRAG_PX
   dragState = null
-  draft.value = null
+  dragStateActive.value = false
+  pendingPointer = null
   if (isClick) {
     const span = spanAtPoint(event)
     if (span) {
+      clearSelectionPreview()
       emit("update:range", null)
       emit("select-span", span)
       return
     }
     // Click on empty track clears an existing focus.
     if (props.range) emit("update:range", null)
+    clearSelectionPreview()
     return
   }
   if (range.end > range.start) emit("update:range", range)
+  else clearSelectionPreview()
 }
 
-function onPointerCancel() {
+function cancelPointerInteraction() {
+  if (pointerFrame) cancelAnimationFrame(pointerFrame)
+  pointerFrame = 0
+  pendingPointer = null
   dragState = null
   panState = null
-  draft.value = null
+  dragStateActive.value = false
   panning.value = false
 }
 
+function onPointerCancel() {
+  cancelPointerInteraction()
+  updateSelectionPreview(props.range)
+}
+
 function onPointerLeave() {
-  if (!dragState && !panState) hovering.value = false
+  if (dragState || panState) return
+  if (pointerFrame) cancelAnimationFrame(pointerFrame)
+  pointerFrame = 0
+  pendingPointer = null
+  hovering.value = false
 }
 
 function onWheel(event) {
-  const model = props.model
-  if (!model) return
+  if (!props.model) return
   event.preventDefault()
-  const fraction = fractionAt(event)
+  pendingWheel.push({ clientX: event.clientX, deltaY: event.deltaY })
+  if (!wheelFrame) wheelFrame = requestAnimationFrame(flushWheel)
+}
+
+function flushWheel() {
+  if (wheelFrame) cancelAnimationFrame(wheelFrame)
+  wheelFrame = 0
+  const events = pendingWheel
+  pendingWheel = []
+  const model = props.model
+  if (!events.length || !model) return
+  const rect = trackEl.value?.getBoundingClientRect()
+  if (!rect || rect.width <= 0) return
   const minDuration = props.mode === "sequence" ? Math.min(4, fullDuration.value) : Math.min(20, fullDuration.value)
-  const nextDuration = Math.min(fullDuration.value, Math.max(minDuration, domainDuration.value * Math.exp(event.deltaY * 0.0015)))
-  if (nextDuration >= fullDuration.value * 0.999) {
-    viewport.value = null
-    return
+  let current = domain.value
+  for (const event of events) {
+    const fraction = fractionAt(event, rect)
+    const duration = Math.max(1, current.end - current.start)
+    const nextDuration = Math.min(fullDuration.value, Math.max(minDuration, duration * Math.exp(event.deltaY * 0.0015)))
+    if (nextDuration >= fullDuration.value * 0.999) {
+      current = { start: model.start, end: model.end }
+      continue
+    }
+    const anchor = current.start + fraction * duration
+    const nextStart = Math.min(Math.max(anchor - fraction * nextDuration, model.start), model.end - nextDuration)
+    current = { start: nextStart, end: nextStart + nextDuration }
   }
-  const anchor = timeAt(fraction)
-  const nextStart = Math.min(Math.max(anchor - fraction * nextDuration, model.start), model.end - nextDuration)
-  viewport.value = { start: nextStart, end: nextStart + nextDuration }
+  viewport.value = current.start === model.start && current.end === model.end ? null : current
+}
+
+function cancelPendingWheel() {
+  pendingWheel = []
+  if (wheelFrame) cancelAnimationFrame(wheelFrame)
+  wheelFrame = 0
 }
 
 function resetAll() {
+  cancelPendingWheel()
   viewport.value = null
   emit("update:range", null)
 }

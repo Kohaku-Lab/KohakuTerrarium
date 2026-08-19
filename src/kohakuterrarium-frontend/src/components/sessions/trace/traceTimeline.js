@@ -173,6 +173,134 @@ function deriveTimedTimeline(records, actualDuration, compressIdle) {
   }
 }
 
+function projectedColumns(start, end, domain, columns) {
+  const duration = Math.max(1, domain.end - domain.start)
+  const c0 = Math.max(
+    0,
+    Math.min(columns - 1, Math.floor(((start - domain.start) / duration) * columns)),
+  )
+  const c1 = Math.max(
+    c0,
+    Math.min(columns - 1, Math.ceil(((end - domain.start) / duration) * columns) - 1),
+  )
+  return { c0, c1 }
+}
+
+function appendUnique(values, value) {
+  if (value !== null && value !== "") values.add(value)
+}
+
+function sameSet(a, b) {
+  if (a.size !== b.size) return false
+  for (const value of a) if (!b.has(value)) return false
+  return true
+}
+
+function sameBucketContent(a, b) {
+  return (
+    a.count === b.count &&
+    a.error === b.error &&
+    a.minStart === b.minStart &&
+    a.maxEnd === b.maxEnd &&
+    sameSet(a.turns, b.turns) &&
+    sameSet(a.types, b.types) &&
+    sameSet(a.labels, b.labels)
+  )
+}
+
+export function rasterizeTimelineSpans(spans, domain, columns) {
+  if (!domain || columns <= 0) return []
+  const laneCells = new Map()
+  for (const span of spans) {
+    const isPoint = span.start === span.end
+    if (
+      isPoint
+        ? span.start < domain.start || span.start > domain.end
+        : span.end <= domain.start || span.start >= domain.end
+    )
+      continue
+    const { c0, c1 } = projectedColumns(span.start, span.end, domain, columns)
+    let cells = laneCells.get(span.lane)
+    if (!cells) {
+      cells = Array(columns)
+      laneCells.set(span.lane, cells)
+    }
+    for (let column = c0; column <= c1; column += 1) {
+      let cell = cells[column]
+      if (!cell) {
+        cell = {
+          lane: span.lane,
+          col: column,
+          spanCols: 1,
+          count: 0,
+          error: false,
+          turns: new Set(),
+          types: new Set(),
+          labels: new Set(),
+          minStart: span.start,
+          maxEnd: span.end,
+        }
+        cells[column] = cell
+      }
+      cell.count += 1
+      cell.error ||= span.isError
+      appendUnique(cell.turns, span.turn)
+      appendUnique(cell.types, span.type)
+      appendUnique(cell.labels, span.label)
+      cell.minStart = Math.min(cell.minStart, span.start)
+      cell.maxEnd = Math.max(cell.maxEnd, span.end)
+    }
+  }
+
+  const result = []
+  for (const [lane, cells] of laneCells) {
+    let active = null
+    for (const cell of cells) {
+      if (!cell) {
+        active = null
+        continue
+      }
+      if (active && active.col + active.spanCols === cell.col && sameBucketContent(active, cell)) {
+        active.spanCols += 1
+        active.key = `${lane}:${active.col}:${active.col + active.spanCols - 1}`
+        continue
+      }
+      active = { ...cell, key: `${lane}:${cell.col}:${cell.col}` }
+      result.push(active)
+    }
+  }
+  return result.map((bucket) => ({
+    ...bucket,
+    turns: [...bucket.turns],
+    types: [...bucket.types],
+    labels: [...bucket.labels],
+  }))
+}
+
+export function rasterizeTurnBoundaries(boundaries, domain, columns) {
+  if (!domain || columns <= 0) return []
+  const duration = Math.max(1, domain.end - domain.start)
+  const byColumn = new Map()
+  for (const boundary of boundaries) {
+    if (boundary.time <= domain.start || boundary.time > domain.end) continue
+    const column = Math.max(
+      0,
+      Math.min(columns - 1, Math.floor(((boundary.time - domain.start) / duration) * columns)),
+    )
+    const existing = byColumn.get(column)
+    if (existing) existing.lastTurn = boundary.turn
+    else byColumn.set(column, { firstTurn: boundary.turn, lastTurn: boundary.turn })
+  }
+  return [...byColumn.entries()].map(([column, turns]) => ({
+    key: column,
+    x: ((column + 0.5) * 100) / columns,
+    label:
+      turns.firstTurn === turns.lastTurn
+        ? String(turns.firstTurn)
+        : `${turns.firstTurn}–${turns.lastTurn}`,
+  }))
+}
+
 /**
  * Records active at any point inside an inclusive selected interval.
  * @returns {{turns: Set<number>, eventIds: Set<number>}}
