@@ -27,7 +27,7 @@ from kohakuterrarium.modules.tool.function import FunctionTool, tool  # noqa: E4
 from kohakuterrarium.session.reader import SessionReader  # noqa: E402
 from kohakuterrarium.session.store import SessionStore  # noqa: E402
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 
 __all__ = [
     "Activity",
