@@ -230,6 +230,8 @@ class TestCreateFromProfile:
         assert isinstance(provider, OpenAIProvider)
         # max_context from the profile is stamped onto the provider.
         assert provider._profile_max_context == 123456
+        assert provider._llm_identifier == "openai/p"
+        assert provider.config.model == "gpt-4o"
 
     def test_anthropic_backend_builds_anthropic_provider(self, monkeypatch):
         monkeypatch.setattr(llm_mod, "get_api_key", lambda p: "k")

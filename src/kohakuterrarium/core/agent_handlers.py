@@ -46,6 +46,17 @@ _BG_PLACEHOLDER = (
 logger = get_logger(__name__)
 
 
+def _provider_model(provider: object | None) -> str:
+    """Read a provider's effective model across legacy and config-backed shapes."""
+    if provider is None:
+        return ""
+    model = getattr(provider, "model", "") or ""
+    if model:
+        return str(model)
+    config = getattr(provider, "config", None)
+    return str(getattr(config, "model", "") or "")
+
+
 class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMixin):
     """Mixin providing event handling and tool execution for the Agent class.
 
@@ -497,10 +508,19 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
 
         await self._flush_output()
         _, label = _make_job_label(job_id)
+        subagent = self.subagent_manager.get_live_subagent(job_id)
+        provider = getattr(subagent, "llm", None)
         self.output_router.notify_activity(
             "subagent_start",
             f"[{label}] {full_task[:60]}",
-            metadata={"job_id": job_id, "task": full_task, "background": is_bg},
+            metadata={
+                "job_id": job_id,
+                "task": full_task,
+                "background": is_bg,
+                "subagent": parse_event.name,
+                "llm_name": getattr(provider, "_llm_identifier", "") or "",
+                "model": _provider_model(provider),
+            },
         )
 
     def _check_termination(self, round_text: list[str]) -> bool:

@@ -53,13 +53,36 @@ class TestResolveLLM:
         # canonical resolver so the two code paths never diverge.
         assert resolve_llm is resolve_subagent_llm
 
-    def test_empty_model_inherits_parent(self, monkeypatch):
+    def test_empty_model_uses_exact_named_global_selector(self, monkeypatch):
+        parent = _FakeLLM()
+        selected = object()
+        monkeypatch.setattr(
+            model_resolve, "get_subagent_models", lambda: {"x": "openai/worker"}
+        )
+        monkeypatch.setattr(model_resolve, "get_profile", lambda name: object())
+        monkeypatch.setattr(
+            model_resolve, "_create_from_profile", lambda profile: selected
+        )
+        cfg = SubAgentConfig(name="x", model=None)
+        assert resolve_llm(parent, cfg) is selected
+        assert parent.with_model_calls == []
+
+    def test_empty_model_inherits_when_named_global_missing(self, monkeypatch):
         _no_profiles(monkeypatch)
+        monkeypatch.setattr(model_resolve, "get_subagent_models", lambda: {})
         parent = _FakeLLM()
         cfg = SubAgentConfig(name="x", model=None)
         assert resolve_llm(parent, cfg) is parent
-        # No model switch attempted.
         assert parent.with_model_calls == []
+
+    def test_parent_sentinel_never_uses_named_global(self, monkeypatch):
+        _no_profiles(monkeypatch)
+        monkeypatch.setattr(
+            model_resolve, "get_subagent_models", lambda: {"x": "openai/worker"}
+        )
+        parent = _FakeLLM()
+        cfg = SubAgentConfig(name="x", model="parent")
+        assert resolve_llm(parent, cfg) is parent
 
     def test_sentinel_model_inherits_parent(self, monkeypatch):
         _no_profiles(monkeypatch)

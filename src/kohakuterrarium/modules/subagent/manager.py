@@ -252,6 +252,18 @@ class SubAgentManager(InteractiveManagerMixin):
         job_id = await self.spawn(event.name, task, background=True)
         return job_id, is_background
 
+    @staticmethod
+    def _stamp_model_metadata(result: SubAgentResult, subagent: SubAgent) -> None:
+        result.metadata.update(
+            {
+                "subagent": subagent.config.name,
+                "llm_name": getattr(subagent.llm, "_llm_identifier", "") or "",
+                "model": getattr(subagent.llm, "model", "")
+                or getattr(getattr(subagent.llm, "config", None), "model", "")
+                or "",
+            }
+        )
+
     async def _run_subagent(
         self,
         job_id: str,
@@ -280,6 +292,7 @@ class SubAgentManager(InteractiveManagerMixin):
                         error=str(exc),
                         exc_info=True,
                     )
+            self._stamp_model_metadata(result, job.subagent)
             self._results[job_id] = result
 
             if result.interrupted or result.cancelled:
@@ -317,6 +330,7 @@ class SubAgentManager(InteractiveManagerMixin):
                 result = current(error_msg, cancelled=True)
             else:
                 result = SubAgentResult(success=False, error=error_msg, cancelled=True)
+            self._stamp_model_metadata(result, job.subagent)
             self._results[job_id] = result
             self.job_store.update_status(
                 job_id,
@@ -332,6 +346,7 @@ class SubAgentManager(InteractiveManagerMixin):
                 result = current(str(e))
             else:
                 result = SubAgentResult(success=False, error=str(e))
+            self._stamp_model_metadata(result, job.subagent)
             self._results[job_id] = result
             self.job_store.update_status(
                 job_id,

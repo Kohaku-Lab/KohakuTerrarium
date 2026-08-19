@@ -622,7 +622,12 @@ class TestActivityHandlers:
             out.on_activity_with_metadata(
                 "subagent_start",
                 "[explore] task",
-                {"job_id": "j1", "task": "find x"},
+                {
+                    "job_id": "j1",
+                    "task": "find x",
+                    "llm_name": "openai/worker",
+                    "model": "gpt-worker",
+                },
             )
             out.on_activity_with_metadata(
                 "subagent_done",
@@ -631,14 +636,35 @@ class TestActivityHandlers:
             )
             store.flush()
             evts = store.get_events("alice")
-            assert any(e["type"] == "subagent_call" for e in evts)
-            assert any(e["type"] == "subagent_result" for e in evts)
+            call = next(e for e in evts if e["type"] == "subagent_call")
+            assert call["name"] == "explore"
+            assert call["llm_name"] == "openai/worker"
+            assert call["model"] == "gpt-worker"
+            result = next(e for e in evts if e["type"] == "subagent_result")
+            assert result["llm_name"] == "openai/worker"
+            assert result["model"] == "gpt-worker"
             # SubAgent conversation persisted.
             convo = store.load_subagent_conversation("alice", "explore", 0)
             assert convo is not None
             parsed = json.loads(convo)
             assert parsed[0]["role"] == "user"
             assert parsed[1]["content"] == "found"
+        finally:
+            store.close()
+
+    def test_subagent_start_uses_metadata_name_over_job_label(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            out.on_activity_with_metadata(
+                "subagent_start",
+                "[agent_explore[abc12345]] task",
+                {"job_id": "agent_explore_abc12345", "subagent": "explore"},
+            )
+            store.flush()
+            call = next(
+                e for e in store.get_events("alice") if e["type"] == "subagent_call"
+            )
+            assert call["name"] == "explore"
         finally:
             store.close()
 

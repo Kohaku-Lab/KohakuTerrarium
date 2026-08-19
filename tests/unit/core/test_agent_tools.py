@@ -250,11 +250,22 @@ class TestEmitDirectCompletion:
         result.prompt_tokens = 60
         result.completion_tokens = 40
         result.cached_tokens = 20
-        result.metadata = {"tools_used": ["bash"]}
+        result.metadata = {
+            "tools_used": ["bash"],
+            "subagent": "explore",
+            "llm_name": "openai/worker",
+            "model": "gpt-worker",
+        }
         result.get_text_output = lambda: "ok output"
         agent._emit_direct_completion_activity("agent_x", result)
         kinds = [c[0] for c in agent.output_router.activity_calls]
         assert "subagent_done" in kinds
+        meta = next(
+            c[2] for c in agent.output_router.activity_calls if c[0] == "subagent_done"
+        )
+        assert meta["subagent"] == "explore"
+        assert meta["llm_name"] == "openai/worker"
+        assert meta["model"] == "gpt-worker"
 
 
 # ── _emit_interrupted_activity ───────────────────────────────────

@@ -164,6 +164,9 @@ class AgentRuntimeToolsMixin:
                 f"[{label}] {state_label}: {error}",
                 metadata={
                     "job_id": job_id,
+                    "subagent": sa_meta.get("subagent", ""),
+                    "llm_name": sa_meta.get("llm_name", ""),
+                    "model": sa_meta.get("model", ""),
                     "error": error,
                     "interrupted": interrupted,
                     "cancelled": cancelled,
@@ -185,6 +188,9 @@ class AgentRuntimeToolsMixin:
                 f"[{label}] tools: {tools_summary}",
                 metadata={
                     "job_id": job_id,
+                    "subagent": sa_meta.get("subagent", ""),
+                    "llm_name": sa_meta.get("llm_name", ""),
+                    "model": sa_meta.get("model", ""),
                     "tools_used": tools_used,
                     "result": content,
                     "turns": sa_meta.get("turns", 0),
