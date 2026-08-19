@@ -307,6 +307,7 @@ class AgentInitMixin:
             system_prompt=system_prompt,
             include_job_status=True,
             include_tools_list=False,  # The aggregated prompt already contains tools.
+            include_subagent_schema_guidance=self.config.include_tools_in_prompt,
             max_messages=self.config.max_messages,
             ephemeral=self.config.ephemeral,
             known_outputs=getattr(self, "_known_outputs", set()),

@@ -207,9 +207,22 @@ class TestBuildToolSchemas:
         assert schema.name == "explore"
         assert schema.description == "Explores the codebase"
         # sub-agent schema shape: task (required) + run_in_background
-        assert schema.parameters["properties"]["task"]["type"] == "string"
+        task_schema = schema.parameters["properties"]["task"]
+        assert task_schema["type"] == "string"
+        assert "fresh, context-isolated invocation" in task_schema["description"]
+        assert (
+            "cannot resume or inherit conversation history"
+            in task_schema["description"]
+        )
         assert schema.parameters["required"] == ["task"]
         assert "run_in_background" in schema.parameters["properties"]
+
+    def test_subagent_guidance_can_be_omitted_for_prompt_opt_out(self):
+        reg = Registry()
+        reg.register_subagent("explore", _FakeSubAgent())
+        schemas = build_tool_schemas(reg, include_subagent_guidance=False)
+        task_description = schemas[0].parameters["properties"]["task"]["description"]
+        assert task_description == "Task description for the sub-agent"
 
     def test_subagent_without_description_gets_default(self):
         reg = Registry()
