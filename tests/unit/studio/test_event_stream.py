@@ -118,6 +118,23 @@ class TestStreamOutputSync:
         # Unknown keys are filtered.
         assert "unknown_key" not in msg
 
+    def test_subagent_model_identity_is_streamed(self, _stream):
+        so, q, _log = _stream
+        so.on_activity_with_metadata(
+            "subagent_start",
+            "[explore] task",
+            metadata={
+                "job_id": "j1",
+                "subagent": "explore",
+                "llm_name": "openai/worker@reasoning=high",
+                "model": "gpt-worker",
+            },
+        )
+        msg = q.get_nowait()
+        assert msg["name"] == "explore"
+        assert msg["llm_name"] == "openai/worker@reasoning=high"
+        assert msg["model"] == "gpt-worker"
+
     def test_assistant_reasoning_metadata_streams_segments(self, _stream):
         so, q, _log = _stream
         so.on_activity_with_metadata(

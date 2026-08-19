@@ -329,6 +329,9 @@ class TestOnBgComplete:
                     "turns": 3,
                     "duration": 1.5,
                     "total_tokens": 100,
+                    "subagent": "explore",
+                    "llm_name": "openai/worker",
+                    "model": "gpt-worker",
                 }
             },
         )
@@ -339,6 +342,9 @@ class TestOnBgComplete:
             c[2] for c in a.output_router.activity_calls if c[0] == "subagent_done"
         )
         assert meta["turns"] == 3
+        assert meta["subagent"] == "explore"
+        assert meta["llm_name"] == "openai/worker"
+        assert meta["model"] == "gpt-worker"
 
     async def test_error_path(self):
         a = _make_mixin()

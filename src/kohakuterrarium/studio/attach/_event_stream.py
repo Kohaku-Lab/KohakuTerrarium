@@ -163,6 +163,8 @@ class StreamOutput(OutputModule):
         self, activity_type: str, detail: str, metadata: dict
     ) -> None:
         name, info = _parse_detail(detail)
+        if activity_type.startswith("subagent_"):
+            name = metadata.get("subagent") or name
         frame_id = f"{activity_type}_{self._n}"
         msg: dict = {
             "type": "activity",
@@ -304,6 +306,7 @@ _STREAM_METADATA_KEYS = (
     "summary",
     "messages_compacted",
     "session_id",
+    "llm_name",
     "model",
     "agent_name",
     "max_context",

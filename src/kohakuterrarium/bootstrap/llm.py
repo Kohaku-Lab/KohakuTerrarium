@@ -12,7 +12,12 @@ from kohakuterrarium.llm.base import LLMConfig, LLMProvider
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm import api_keys as _api_keys
-from kohakuterrarium.llm.profiles import LLMProfile, get_api_key, resolve_controller_llm
+from kohakuterrarium.llm.profiles import (
+    LLMProfile,
+    get_api_key,
+    profile_to_identifier,
+    resolve_controller_llm,
+)
 from kohakuterrarium.utils.env_interp import interpolate_env_vars
 from kohakuterrarium.utils.logging import get_logger
 
@@ -266,7 +271,9 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
 
 def _apply_backend_native_identity(provider: LLMProvider, profile: LLMProfile) -> None:
-    """Apply backend-native identity and tool capabilities to a provider."""
+    """Apply canonical selector, backend identity, and tool capabilities."""
+    if isinstance(profile, LLMProfile):
+        provider._llm_identifier = profile_to_identifier(profile)
     backend_name = getattr(profile, "backend_provider_name", "")
     if backend_name:
         provider.provider_name = backend_name

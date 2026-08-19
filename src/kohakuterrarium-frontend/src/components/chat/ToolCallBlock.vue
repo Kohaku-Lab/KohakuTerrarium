@@ -6,7 +6,10 @@
       <span class="font-semibold font-mono shrink-0" :class="tc.kind === 'subagent' ? 'text-taaffeite dark:text-taaffeite-light' : 'text-iolite dark:text-iolite-light'">
         {{ tc.kind === "subagent" ? `[sub] ${tc.name}` : tc.name }}
       </span>
-      <span class="text-warm-400 dark:text-warm-500 truncate flex-1 font-mono min-w-0">{{ formatArgs(tc.args) }}</span>
+      <span class="text-warm-400 dark:text-warm-500 truncate flex-1 font-mono min-w-0">
+        {{ formatArgs(tc.args) }}
+        <span v-if="tc.kind === 'subagent' && (tc.llm_name || tc.model)"> · model: {{ tc.llm_name || tc.model }}</span>
+      </span>
       <span v-if="elapsed" class="text-[10px] text-warm-400 font-mono shrink-0">{{ elapsed }}</span>
       <button v-if="canPromote" class="text-[10px] px-1.5 py-0.5 rounded bg-iolite/15 text-iolite hover:bg-iolite/25 shrink-0 font-mono" title="Move to background — agent continues working" aria-label="Move task to background" @click.stop="chat.promoteTask(tc.jobId || tc.id)">→ bg</button>
       <span v-if="tc.result || tc.tools_used?.length || tc.children?.length || tc.status === 'running'" class="i-carbon-chevron-down text-warm-400 transition-transform text-[10px] shrink-0" :class="{ 'rotate-180': expanded }" />

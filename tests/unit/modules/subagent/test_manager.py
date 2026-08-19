@@ -468,6 +468,20 @@ class TestRunSubagentOutcomes:
         assert result.interrupted is True
         assert mgr.get_status(job_id).state is JobState.CANCELLED
 
+    async def test_result_metadata_records_actual_model_identity(self):
+        llm = ScriptedLLM(["done"])
+        llm.model = "gpt-worker"
+        llm._llm_identifier = "openai/worker@reasoning=high"
+        mgr = SubAgentManager(Registry(), llm)
+        mgr.register(SubAgentConfig(name="explore", model="parent"))
+
+        job_id = await mgr.spawn("explore", "task", background=False)
+        result = mgr.get_result(job_id)
+
+        assert result.metadata["subagent"] == "explore"
+        assert result.metadata["llm_name"] == "openai/worker@reasoning=high"
+        assert result.metadata["model"] == "gpt-worker"
+
     async def test_cancel_all_cancels_running_tasks(self):
         import asyncio
 

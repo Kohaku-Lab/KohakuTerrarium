@@ -488,6 +488,7 @@ class SessionOutput(OutputModule):
         )
 
     def _handle_subagent_start(self, name: str, detail: str, metadata: dict) -> None:
+        name = _subagent_name(name, metadata)
         task = metadata.get("task", detail)
         job_id = metadata.get("job_id", "")
         if job_id:
@@ -495,6 +496,8 @@ class SessionOutput(OutputModule):
             self._subagent_tasks[job_id] = {
                 "name": name,
                 "task": task,
+                "llm_name": metadata.get("llm_name", ""),
+                "model": metadata.get("model", ""),
             }
         self._record(
             "subagent_call",
@@ -503,11 +506,14 @@ class SessionOutput(OutputModule):
                 "task": task,
                 "job_id": job_id,
                 "background": bool(metadata.get("background", False)),
+                "llm_name": metadata.get("llm_name", ""),
+                "model": metadata.get("model", ""),
             },
         )
 
     def _handle_subagent_done(self, name: str, detail: str, metadata: dict) -> None:
         job_id = metadata.get("job_id", "")
+        task_record = self._subagent_tasks.get(job_id) or {}
         name = _subagent_name(name, metadata)
         output_text = metadata.get("result", detail)
         self._record(
@@ -519,6 +525,9 @@ class SessionOutput(OutputModule):
                 "tools_used": metadata.get("tools_used", []),
                 "turns": metadata.get("turns", 0),
                 "duration": metadata.get("duration", 0),
+                "llm_name": metadata.get("llm_name", "")
+                or task_record.get("llm_name", ""),
+                "model": metadata.get("model", "") or task_record.get("model", ""),
                 **_token_metadata(metadata),
             },
         )
@@ -541,6 +550,7 @@ class SessionOutput(OutputModule):
 
     def _handle_subagent_error(self, name: str, detail: str, metadata: dict) -> None:
         job_id = metadata.get("job_id", "")
+        task_record = self._subagent_tasks.get(job_id) or {}
         name = _subagent_name(name, metadata)
         output_text = metadata.get("result", detail)
         self._record(
@@ -557,6 +567,9 @@ class SessionOutput(OutputModule):
                 "tools_used": metadata.get("tools_used", []),
                 "turns": metadata.get("turns", 0),
                 "duration": metadata.get("duration", 0),
+                "llm_name": metadata.get("llm_name", "")
+                or task_record.get("llm_name", ""),
+                "model": metadata.get("model", "") or task_record.get("model", ""),
                 **_token_metadata(metadata),
             },
         )
@@ -597,6 +610,10 @@ class SessionOutput(OutputModule):
                     "tools_used": metadata.get("tools_used", []),
                     "success": success,
                     "duration": metadata.get("duration", 0),
+                    "llm_name": metadata.get("llm_name", "")
+                    or (task_record or {}).get("llm_name", ""),
+                    "model": metadata.get("model", "")
+                    or (task_record or {}).get("model", ""),
                     "output_preview": (output_text or "")[:500],
                     "source": "session_output",
                 },
