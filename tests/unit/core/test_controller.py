@@ -21,6 +21,7 @@ from kohakuterrarium.core.events import (
     create_user_input_event,
 )
 from kohakuterrarium.core.job import JobResult
+from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.parsing.events import (
     TextEvent,
@@ -65,8 +66,6 @@ class TestControllerConfig:
         assert c.sanitize_orphan_tool_calls is True
 
     def test_native_schema_respects_subagent_guidance_opt_out(self):
-        from kohakuterrarium.core.registry import Registry
-
         registry = Registry()
         registry.register_subagent(
             "explore", types.SimpleNamespace(description="finds")
