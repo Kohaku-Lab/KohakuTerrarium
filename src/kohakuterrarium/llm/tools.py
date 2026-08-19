@@ -6,6 +6,7 @@ from typing import Any
 
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import ToolSchema
+from kohakuterrarium.modules.subagent_guidance import TASK_SUBAGENT_CONTEXT_GUIDANCE
 
 # Built-in schemas remain centralized so registry dispatch stays provider-agnostic.
 from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
@@ -14,7 +15,11 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
+def build_tool_schemas(
+    registry: Registry,
+    *,
+    include_subagent_guidance: bool = True,
+) -> list[ToolSchema]:
     """Build callable schemas, excluding tools translated natively by providers."""
     schemas: list[ToolSchema] = []
 
@@ -86,7 +91,11 @@ def build_tool_schemas(registry: Registry) -> list[ToolSchema]:
                     "properties": {
                         "task": {
                             "type": "string",
-                            "description": "Task description for the sub-agent",
+                            "description": (
+                                TASK_SUBAGENT_CONTEXT_GUIDANCE
+                                if include_subagent_guidance
+                                else "Task description for the sub-agent"
+                            ),
                         },
                         "run_in_background": {
                             "type": "boolean",

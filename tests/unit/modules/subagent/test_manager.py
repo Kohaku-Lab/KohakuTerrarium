@@ -53,13 +53,19 @@ class TestRegistration:
     def test_subagents_prompt_empty_when_none_registered(self):
         assert _manager().get_subagents_prompt() == ""
 
-    def test_subagents_prompt_native_format_mentions_task_param(self):
+    def test_subagents_prompt_requires_self_contained_task_context(self):
         mgr = _manager(tool_format="native")
         mgr.register(SubAgentConfig(name="explore", description="finds"))
         prompt = mgr.get_subagents_prompt()
-        # Native mode hint references the API ``task`` param.
-        assert "task" in prompt
-        assert "API" in prompt
+        assert "fresh, context-isolated invocation" in prompt
+        assert "cannot resume or inherit conversation history" in prompt
+        assert "complete, self-contained task" in prompt
+        assert (
+            "original goal, current state, work already completed, what remains"
+            in prompt
+        )
+        assert "relevant paths, errors, or findings" in prompt
+        assert "continue the previous task" in prompt
 
     def test_register_warns_on_tools_missing_from_parent_registry(self):
         # A config referencing tools the parent doesn't have still
