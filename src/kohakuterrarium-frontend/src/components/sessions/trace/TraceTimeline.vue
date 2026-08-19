@@ -33,8 +33,8 @@
           <!-- Span buckets -->
           <div v-for="b in buckets" :key="b.key" class="absolute rounded-[1px] hover:opacity-100" :class="bucketClass(b)" :style="bucketStyle(b)" :title="bucketTitle(b)" />
 
-          <!-- Hover line (positioned via CSS var — no re-render on move) -->
-          <div v-show="hovering && !draft" class="absolute top-0 bottom-0 w-px bg-warm-400/60 pointer-events-none" :style="{ left: 'var(--tl-hover-x, -2px)' }" />
+          <!-- Hover line moves independently so the span subtree keeps its computed styles. -->
+          <div v-show="hovering && !draft" ref="hoverLineEl" data-testid="timeline-hover-line" class="absolute top-0 bottom-0 left-0 w-px bg-warm-400/60 pointer-events-none will-change-transform" />
 
           <!-- Selection overlay -->
           <div v-if="selectionFraction" class="absolute top-0 bottom-0 bg-iolite/15 border-x border-iolite/60 pointer-events-none" :class="draft ? 'opacity-70' : ''" :style="{ left: `${selectionFraction.start}%`, width: `${selectionFraction.end - selectionFraction.start}%` }" />
@@ -80,12 +80,11 @@ const props = defineProps({
 const emit = defineEmits(["update:mode", "update:range", "select-span"])
 
 const trackEl = ref(null)
+const hoverLineEl = ref(null)
 const minimapEl = ref(null)
 const trackWidth = ref(0)
 const viewport = ref(null)
 const draft = ref(null)
-// Hover position is a plain CSS custom property on the track element —
-// updating it on pointermove must NOT trigger a Vue re-render.
 const hovering = ref(false)
 const panning = ref(false)
 const minimapDragging = ref(false)
@@ -124,6 +123,7 @@ watch(
   (model, prev) => {
     if (!model) {
       viewport.value = null
+      hovering.value = false
       return
     }
     if (viewport.value && (viewport.value.end < model.start || viewport.value.start > model.end)) {
@@ -328,8 +328,7 @@ const selectionLabel = computed(() => {
   return formatTimelineDuration(width)
 })
 
-function fractionAt(event) {
-  const rect = trackEl.value?.getBoundingClientRect()
+function fractionAt(event, rect = trackEl.value?.getBoundingClientRect()) {
   if (!rect || rect.width <= 0) return 0
   return Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width))
 }
@@ -378,25 +377,22 @@ function onPointerDown(event) {
 
 function onPointerMove(event) {
   const rect = trackEl.value?.getBoundingClientRect()
-  if (rect && rect.width > 0) {
+  if (rect && rect.width > 0 && hoverLineEl.value) {
     const x = Math.min(Math.max(event.clientX - rect.left, 0), rect.width)
-    trackEl.value.style.setProperty("--tl-hover-x", `${x}px`)
+    hoverLineEl.value.style.transform = `translate3d(${x}px, 0, 0)`
     if (!hovering.value) hovering.value = true
   }
-  const fraction = fractionAt(event)
+  if (!panState && !dragState) return
   if (panState) {
     if (Math.abs(event.clientX - panState.anchorClientX) >= MIN_DRAG_PX) panState.moved = true
-    if (!viewport.value || !props.model) return
-    const rect = trackEl.value?.getBoundingClientRect()
-    if (!rect || rect.width <= 0) return
+    if (!viewport.value || !props.model || !rect || rect.width <= 0) return
     const delta = (event.clientX - panState.anchorClientX) / rect.width
     const dur = domainDuration.value
     const nextStart = Math.min(Math.max(panState.anchorStart - delta * dur, props.model.start), props.model.end - dur)
     viewport.value = { start: nextStart, end: nextStart + dur }
     return
   }
-  if (!dragState) return
-  const t2 = timeAt(fraction)
+  const t2 = timeAt(fractionAt(event, rect))
   draft.value = { start: Math.min(dragState.anchorTime, t2), end: Math.max(dragState.anchorTime, t2) }
 }
 
