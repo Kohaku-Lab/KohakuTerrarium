@@ -681,6 +681,19 @@ class TestInitController:
         AgentInitMixin._init_controller(agent)
         assert "SUBAGENT-SECTION-MARKER" in agent._controller_config.system_prompt
 
+    def test_tools_prompt_opt_out_excludes_subagent_instructions(self):
+        agent = self._agent(
+            config=AgentConfig(name="ctrl-agent", include_tools_in_prompt=False),
+            subagent_manager=SimpleNamespace(
+                get_subagents_prompt=lambda: "SUBAGENT-SECTION-MARKER"
+            ),
+        )
+        AgentInitMixin._init_controller(agent)
+        prompt = agent._controller_config.system_prompt
+        assert "SUBAGENT-SECTION-MARKER" not in prompt
+        assert "## Available Functions" not in prompt
+        assert agent._controller_config.include_subagent_schema_guidance is False
+
     def test_create_controller_produces_independent_instance(self):
         agent = self._agent()
         AgentInitMixin._init_controller(agent)

@@ -101,6 +101,7 @@ class ControllerConfig:
     # Compaction can separate native calls from results; providers must not see
     # either half of such an orphaned exchange.
     sanitize_orphan_tool_calls: bool = True
+    include_subagent_schema_guidance: bool = True
 
 
 @dataclass
@@ -248,7 +249,10 @@ class Controller:
 
     def _get_native_tool_schemas(self) -> "list[ToolSchema]":
         """Build callable schemas, applying plugin tool-visibility restrictions."""
-        schemas = build_tool_schemas(self.registry)
+        schemas = build_tool_schemas(
+            self.registry,
+            include_subagent_guidance=self.config.include_subagent_schema_guidance,
+        )
         visibility = self._get_tool_visibility()
         if visibility is None:
             return schemas
