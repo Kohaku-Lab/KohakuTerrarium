@@ -23,12 +23,16 @@ const _traceTimelineOptions = {
     records: [],
     truncated: false,
     loading: false,
+    loadGeneration: 0,
+    loadingGeneration: null,
     error: "",
   }),
 
   actions: {
     async load(sessionName, agent = null) {
       if (!sessionName) return
+      this.loadGeneration += 1
+      const generation = this.loadGeneration
       const isSwitch = sessionName !== this.sessionName || (agent || "") !== this.agent
       this.sessionName = sessionName
       this.agent = agent || ""
@@ -38,17 +42,23 @@ const _traceTimelineOptions = {
         this.error = ""
       }
       this.loading = true
+      this.loadingGeneration = generation
       try {
         const data = await sessionAPI.getTimeline(sessionName, { agent })
+        if (generation !== this.loadGeneration) return
         this.records = (data.spans || []).map(normalizeSpan).filter(Boolean)
         this.truncated = Boolean(data.truncated)
         this.agent = data.agent || agent || ""
       } catch (err) {
+        if (generation !== this.loadGeneration) return
         this.error = `Failed to load timeline: ${err.message || err}`
         this.records = []
         this.truncated = false
       } finally {
-        this.loading = false
+        if (this.loadingGeneration === generation) {
+          this.loading = false
+          this.loadingGeneration = null
+        }
       }
     },
 
@@ -61,10 +71,13 @@ const _traceTimelineOptions = {
     },
 
     clear() {
+      this.loadGeneration += 1
       this.sessionName = ""
       this.agent = ""
       this.records = []
       this.truncated = false
+      this.loading = false
+      this.loadingGeneration = null
       this.error = ""
     },
   },

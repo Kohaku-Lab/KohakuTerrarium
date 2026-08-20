@@ -25,6 +25,8 @@ const _turnRollupOptions = {
     turns: [],
     total: 0,
     loading: false,
+    loadGeneration: 0,
+    loadingGeneration: null,
     error: "",
   }),
 
@@ -55,6 +57,8 @@ const _turnRollupOptions = {
   actions: {
     async load(sessionName, agent = null, { aggregate = false } = {}) {
       if (!sessionName) return
+      this.loadGeneration += 1
+      const generation = this.loadGeneration
       const isSwitch =
         sessionName !== this.sessionName ||
         (agent || "") !== this.agent ||
@@ -68,29 +72,38 @@ const _turnRollupOptions = {
         this.error = ""
       }
       this.loading = true
+      this.loadingGeneration = generation
       try {
         const data = await sessionAPI.getTurns(sessionName, {
           agent,
           limit: 1000,
           aggregate,
         })
+        if (generation !== this.loadGeneration) return
         this.turns = data.turns || []
         this.total = data.total || 0
         this.agent = data.agent || agent || ""
       } catch (err) {
+        if (generation !== this.loadGeneration) return
         this.error = `Failed to load turns: ${err.message || err}`
         this.turns = []
         this.total = 0
       } finally {
-        this.loading = false
+        if (this.loadingGeneration === generation) {
+          this.loading = false
+          this.loadingGeneration = null
+        }
       }
     },
 
     clear() {
+      this.loadGeneration += 1
       this.sessionName = ""
       this.agent = ""
       this.turns = []
       this.total = 0
+      this.loading = false
+      this.loadingGeneration = null
       this.error = ""
     },
   },
