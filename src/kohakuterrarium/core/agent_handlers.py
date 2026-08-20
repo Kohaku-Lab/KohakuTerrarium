@@ -37,10 +37,10 @@ from kohakuterrarium.utils.logging import get_logger
 
 _BG_PLACEHOLDER = (
     "Running in background — task delegated. "
-    "Do NOT do this same task yourself — it is already being done. "
-    "Do NOT use bash echo/sleep to wait — just end your response. "
-    "Work on a DIFFERENT task or STOP your response now. "
-    "Result arrives automatically in the next turn."
+    "No final result is available yet. Do NOT restart, duplicate, poll, or "
+    "sleep to wait for this task. Continue only with work that does not depend "
+    "on its result; otherwise, end your response and wait for the result to be "
+    "delivered."
 )
 
 logger = get_logger(__name__)
@@ -637,8 +637,8 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             else:
                 # Text mode: add feedback text about promoted tasks
                 feedback_parts.append(
-                    "[Tasks promoted to background — results arrive later. "
-                    "Continue with other work.]"
+                    "[Tasks are still running in the background. No final results "
+                    "are available yet. Continue only with independent work.]"
                 )
 
         # Drain mid-turn buffered user_input/trigger events AFTER tool

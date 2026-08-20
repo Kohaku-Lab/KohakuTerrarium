@@ -36,23 +36,30 @@ _DEFAULT_EXECUTION_MODEL_DYNAMIC = """
 ### Background Tasks
 
 Sub-agents run in background by default. Tools can also run in background
-with `run_in_background=true`. Background results arrive automatically in a later turn.
+with `run_in_background=true`.
 
-**Critical rule**: Once you delegate a task to background, do NOT do the same work yourself.
-The work is already being done — doing it again wastes tokens and produces duplicates.
+Starting a background task does not immediately return a result or give you
+another turn to act. You are normally invoked again after the task finishes or
+fails. Before ending your response, start every independent background task you
+already know is needed.
+
+Do not poll, sleep, restart, or duplicate background work. If you know before
+starting that your next step requires the result, use `run_in_background=false`
+and wait for it.
+
+A server, watcher, or daemon may run indefinitely and never produce a completion
+result. If you need to interact with a long-running process afterward, use a
+startup action that can finish while the process keeps running. This gives you a
+result to continue from without waiting for the long-running process to exit.
 
 **Workflow example**:
-1. Dispatch `explore` to investigate the project structure (background)
-2. Dispatch `research` to look up API documentation (background)
-3. **Stop your response and wait** — both are working in parallel
-4. Results arrive automatically → synthesize and continue
-
-**Direct sub-agents** (set `run_in_background=false`):
-Use when you need the result before continuing and the task is short.
+1. Start all independent background investigations in the same response
+2. End your response if no other independent work can be done now
+3. Continue after their results are delivered
 
 **WRONG** (duplicate work):
-1. Dispatch `explore` to investigate the codebase ← background
-2. Start reading the same codebase yourself ← WRONG, same task!
+1. Dispatch `explore` to investigate the codebase in the background
+2. Start the same investigation yourself
 
 IMPORTANT: When calling a function, output ONLY the function call block. Do not output any extra text, markers, or filler characters (like dashes, dots, etc.) before or after the function call. If you need results before continuing, end with the function call and nothing else.
 IMPORTANT: You may ONLY call functions listed in the "Available Functions" section above. Do NOT call functions that are not listed.
@@ -66,17 +73,21 @@ _DEFAULT_EXECUTION_MODEL_STATIC = """
 
 ### Background Tasks
 
-Sub-agents run in background by default. Background results arrive automatically
-in a later turn.
+Sub-agents run in background by default.
 
-**Critical rule**: Once you delegate a task to background, do NOT do the same
-work yourself. The work is already being done.
+Starting a background task does not immediately return a result or give you
+another turn to act. You are normally invoked again after the task finishes or
+fails. Before ending your response, start every independent background task you
+already know is needed.
 
-**Workflow**: dispatch sub-agents → do DIFFERENT direct work or stop and wait →
-results arrive automatically → continue.
+Do not poll, sleep, restart, or duplicate background work. If you know before
+starting that your next step requires the result, set `run_in_background=false`
+and wait for it.
 
-**Direct sub-agents**: Set `run_in_background=false` when you need the result
-before continuing and the task is short.
+A server, watcher, or daemon may run indefinitely and never produce a completion
+result. If you need to interact with a long-running process afterward, use a
+startup action that can finish while the process keeps running. This gives you a
+result to continue from without waiting for the long-running process to exit.
 
 IMPORTANT: When calling a function, output ONLY the function call block. Do not output any extra text, markers, or filler characters before or after. If you need results before continuing, end with the function call and nothing else.
 IMPORTANT: You may ONLY call functions listed in the "Available Functions" section above. Do NOT call functions that are not listed.
@@ -96,16 +107,24 @@ Sub-agents run in background by default. Set `run_in_background=false`
 to wait for a sub-agent's result before continuing (use for short tasks).
 Tools can also run in background with `run_in_background=true`.
 
-When a task runs in background, the result arrives automatically in
-a later turn. You do NOT need to poll or wait.
+Starting a background task does not immediately return a result or give you
+another turn to act. You are normally invoked again after the task finishes or
+fails. Before ending your response, start every independent background task you
+already know is needed.
 
-**Critical**: Once you delegate work to background, do NOT do the same
-work yourself. The task is already being done.
+Do not poll, sleep, restart, or duplicate background work. If you know before
+starting that your next step requires the result, set `run_in_background=false`
+and wait for it.
+
+A server, watcher, or daemon may run indefinitely and never produce a completion
+result. If you need to interact with a long-running process afterward, use a
+startup action that can finish while the process keeps running. This gives you a
+result to continue from without waiting for the long-running process to exit.
 
 **Example workflow**:
-1. Dispatch `explore` sub-agent to investigate module A (background)
-2. Use `read` on a DIFFERENT file (module B) yourself (direct)
-3. Stop — explore result for module A arrives in next turn
+1. Start all independent background investigations in the same response
+2. End your response if no other independent work can be done now
+3. Continue after their results are delivered
 
 You may ONLY call tools listed in the "Available Functions" section above.
 """

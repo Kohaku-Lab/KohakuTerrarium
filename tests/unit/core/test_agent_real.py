@@ -5963,6 +5963,9 @@ class TestMidTurnBatchDrain:
                 if getattr(m, "role", None) == "user"
             )
             assert "Running in background" in all_user
+            assert "No final result is available yet" in all_user
+            assert "another turn to act" not in all_user
+            assert "controller" not in all_user
             assert "hangbg" in all_user
         finally:
             release.set()

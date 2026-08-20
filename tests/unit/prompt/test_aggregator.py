@@ -170,6 +170,14 @@ class TestToolListInvariants:
         out = aggregate_system_prompt("base", reg, skill_mode="static")
         assert "## Function Documentation" in out
 
+    def test_static_bash_doc_explains_long_running_processes(self):
+        reg = _registry_with(_make_tool("bash", "Execute shell commands"))
+        out = aggregate_system_prompt("base", reg, skill_mode="static")
+        assert "## Long-Running Processes" in out
+        assert "server, watcher, or daemon" in out
+        assert "command can finish while the child process keeps running" in out
+        assert "health, port, or log check" in out
+
     def test_tools_placeholder_suppresses_auto_appended_list(self):
         # The literal token ``{{ tools }}`` in the base prompt signals the
         # author placed the inventory themselves -> no auto-appended list.
@@ -226,6 +234,14 @@ class TestFrameworkHintInvariants:
         list_section = out.split("## Available Functions")[1].split("##")[0]
         # The tool list section itself must not contain call-syntax markers.
         assert "[/function_name]" not in list_section
+
+    def test_dynamic_command_hints_do_not_promise_immediate_continuation(self):
+        reg = _registry_with(_make_tool("bash", "Execute shell commands"))
+        out = aggregate_system_prompt("base", reg, tool_format="bracket")
+        commands = out.split("## Commands", 1)[1]
+        assert "does not immediately return a result" in commands
+        assert "another turn to act" in commands
+        assert "controller" not in commands
 
 
 class TestOutputHints:
