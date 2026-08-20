@@ -31,6 +31,9 @@
   --kt-fs-title: 1.125rem; /* card title */
   --kt-fs-h2: 1.25rem;
   --kt-fs-h1: 1.5rem;
+  --kt-chat-code-size: 0.95rem;
+  --kt-chat-code-meta-size: 0.8rem;
+  --kt-chat-code-line-height: 1.55;
 
   /* Light mode surfaces */
   --color-bg: #f7f5f2;
@@ -57,6 +60,30 @@
     --kt-fs-h2: 1.35rem;
     --kt-fs-h1: 1.6rem;
   }
+}
+
+html[data-reading-size="large"] {
+  --kt-reading-root-size: 16px;
+  --el-font-size-extra-small: 0.857rem;
+  --el-font-size-small: 0.929rem;
+  --el-font-size-base: 1rem;
+  --el-font-size-medium: 1.143rem;
+  --el-font-size-large: 1.286rem;
+  --el-component-size-small: 1.714rem;
+  --el-component-size: 2.286rem;
+  --el-component-size-large: 2.857rem;
+}
+
+html[data-reading-size="larger"] {
+  --kt-reading-root-size: 18px;
+  --el-font-size-extra-small: 0.857rem;
+  --el-font-size-small: 0.929rem;
+  --el-font-size-base: 1rem;
+  --el-font-size-medium: 1.143rem;
+  --el-font-size-large: 1.286rem;
+  --el-component-size-small: 1.714rem;
+  --el-component-size: 2.286rem;
+  --el-component-size-large: 2.857rem;
 }
 
 html.dark {
@@ -89,7 +116,7 @@ button {
 
 html {
   font-family: var(--font-sans);
-  font-size: 14px;
+  font-size: var(--kt-reading-root-size, 14px);
   line-height: 1.6;
   color: var(--color-text);
   background: var(--color-bg);

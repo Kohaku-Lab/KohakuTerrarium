@@ -285,6 +285,12 @@ export default {
   "settings.providers.targetNodeHint":
     "Keys + OAuth will be saved to the selected worker's local config (not the host's).",
   "settings.prefs.appearance": "Appearance",
+  "settings.prefs.readingSize": "Reading size",
+  "settings.prefs.readingSizeHint":
+    "Enlarges interface text and the controls needed to keep it readable.",
+  "settings.prefs.readingSize.default": "Default",
+  "settings.prefs.readingSize.large": "Large",
+  "settings.prefs.readingSize.larger": "Larger",
   "settings.prefs.desktopZoom": "Desktop Zoom",
   "settings.prefs.mobileZoom": "Mobile Zoom",
   "settings.keys.storageHint": "API keys are stored in ~/.kohakuterrarium/api_keys.yaml",
