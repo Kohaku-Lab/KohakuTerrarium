@@ -112,7 +112,7 @@
                 <div v-if="!convBlocks.length" class="text-[11px] text-warm-400 italic">{{ t("chat.subagent.empty") }}</div>
               </div>
               <div v-if="canReceive" class="flex items-end gap-2 pt-1 border-t border-taaffeite/15 dark:border-taaffeite/20">
-                <textarea v-model="sendText" rows="1" :placeholder="t('chat.subagent.placeholder')" class="flex-1 min-w-0 resize-none rounded border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-950 px-2 py-1 text-[11px] focus:outline-none focus:border-taaffeite" @keydown.enter.exact.prevent="submitSend" />
+                <textarea v-model="sendText" rows="1" :placeholder="t('chat.subagent.placeholder')" class="flex-1 min-w-0 resize-none rounded border border-warm-200 dark:border-warm-700 bg-warm-50 dark:bg-warm-950 px-2 py-1 text-[11px] text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 focus:outline-none focus:border-taaffeite" @keydown.enter.exact.prevent="submitSend" />
                 <button class="text-[11px] px-2 py-1 rounded bg-taaffeite/20 text-taaffeite-shadow dark:text-taaffeite-light hover:bg-taaffeite/30 disabled:opacity-50 shrink-0" :disabled="sending || !sendText.trim()" @click.stop="submitSend">
                   {{ t("chat.subagent.send") }}
                 </button>

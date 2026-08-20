@@ -82,6 +82,14 @@ describe("ToolCallBlock — sub-agent conversation (UXI-05)", () => {
     expect(getConv).toHaveBeenCalledWith("g1", "root", { jobId: "job_x" })
     const textarea = wrapper.find("textarea")
     expect(textarea.exists()).toBe(true)
+    expect(textarea.classes()).toEqual(
+      expect.arrayContaining([
+        "text-warm-800",
+        "dark:text-warm-200",
+        "placeholder-warm-400",
+        "dark:placeholder-warm-500",
+      ]),
+    )
 
     await textarea.setValue("keep going")
     await wrapper
