@@ -123,6 +123,21 @@ class TestBuildTimelinePayload:
         finally:
             s.close()
 
+    def test_exit_code_only_tool_failure_marked_as_error(self, tmp_path):
+        s = _store(tmp_path)
+        try:
+            s.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            s.append_event(
+                "alice",
+                "tool_result",
+                {"tool": "bash", "output": "bad", "exit_code": 2},
+            )
+            s.flush()
+            out = build_timeline_payload(s, "sess", agent=None, limit=100)
+            assert out["spans"][0]["err"] is True
+        finally:
+            s.close()
+
 
 class TestPairDurations:
     def test_tool_call_result_pairing(self, tmp_path):

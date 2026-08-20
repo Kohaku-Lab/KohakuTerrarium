@@ -9,6 +9,7 @@ from kohakuterrarium.studio.persistence.viewer.rollups import (
     _empty_aggregate,
     _empty_row,
     _event_turn_index,
+    _event_failed,
     _is_subagent_token_event,
     _subagent_failed,
     _subagent_label,
@@ -207,6 +208,25 @@ class TestErrorEventTypes:
         assert "processing_error" in ERROR_EVENT_TYPES
 
 
+class TestEventFailed:
+    def test_tool_result_error(self):
+        assert _event_failed({"type": "tool_result", "error": "boom"})
+
+    def test_nonzero_exit_codes(self):
+        assert _event_failed({"type": "tool_result", "exit_code": 2})
+        assert _event_failed({"type": "tool_result", "exit_code": "1"})
+
+    def test_successful_tool_results(self):
+        assert not _event_failed({"type": "tool_result", "exit_code": 0})
+        assert not _event_failed({"type": "tool_result", "exit_code": None})
+        assert not _event_failed({"type": "tool_result", "error": ""})
+
+    def test_terminal_failure_flags(self):
+        assert _event_failed({"type": "tool_result", "success": False})
+        assert _event_failed({"type": "tool_result", "interrupted": True})
+        assert _event_failed({"type": "tool_result", "final_state": "cancelled"})
+
+
 # ── _empty_aggregate ───────────────────────────────────────────
 
 
@@ -258,6 +278,13 @@ class TestDeriveOwnTurns:
 
     def test_error_event_marks_error(self):
         events = [{"type": "tool_error", "turn_index": 1}]
+        rows = derive_own_turns_from_events(events, "alice")
+        assert rows[0]["has_error"] is True
+
+    def test_failed_tool_result_marks_error(self):
+        events = [
+            {"type": "tool_result", "turn_index": 1, "error": "boom", "exit_code": 1}
+        ]
         rows = derive_own_turns_from_events(events, "alice")
         assert rows[0]["has_error"] is True
 
@@ -405,6 +432,29 @@ class TestRollupsOrDerived:
             assert rows[0]["turn_index"] == 1
             assert rows[0]["tokens_in"] == 100
             assert rows[0]["tokens_out"] == 50
+        finally:
+            s.close()
+
+    def test_stored_usage_keeps_event_derived_error_state(self, tmp_path):
+        s = SessionStore(str(tmp_path / "s.kohakutr"))
+        try:
+            s.save_turn_rollup(
+                "alice",
+                1,
+                {"tokens_in": 100, "tokens_out": 50},
+            )
+            s.append_event(
+                "alice",
+                "tool_result",
+                {"error": "boom", "exit_code": 1},
+                turn_index=1,
+            )
+            s.flush()
+
+            rows = rollups_or_derived(s, "alice")
+
+            assert rows[0]["tokens_in"] == 100
+            assert rows[0]["has_error"] is True
         finally:
             s.close()
 
