@@ -142,13 +142,13 @@ class TestBuildToolSchemas:
         }
         assert schema.parameters["required"] == ["command"]
         # run_in_background always injected
-        assert schema.parameters["properties"]["run_in_background"] == {
-            "type": "boolean",
-            "description": (
-                "If true, run in background. Results delivered later, "
-                "not immediately."
-            ),
-        }
+        background = schema.parameters["properties"]["run_in_background"]
+        assert background["type"] == "boolean"
+        assert "without waiting for it to finish" in background["description"]
+        assert "No result is available immediately" in background["description"]
+        assert "another turn to act" in background["description"]
+        assert "long-running process" not in background["description"]
+        assert "controller" not in background["description"]
 
     def test_builtin_schema_dict_not_mutated(self):
         # docstring: "don't mutate builtin schemas"
@@ -215,7 +215,11 @@ class TestBuildToolSchemas:
             in task_schema["description"]
         )
         assert schema.parameters["required"] == ["task"]
-        assert "run_in_background" in schema.parameters["properties"]
+        background = schema.parameters["properties"]["run_in_background"]
+        assert "without waiting for it to finish" in background["description"]
+        assert "No result is available immediately" in background["description"]
+        assert "another turn to act" in background["description"]
+        assert "controller" not in background["description"]
 
     def test_subagent_guidance_can_be_omitted_for_prompt_opt_out(self):
         reg = Registry()

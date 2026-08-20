@@ -51,11 +51,34 @@ class TestGetFrameworkHint:
         hint = get_framework_hint(HINT_EXECUTION_MODEL_DYNAMIC)
         assert "## Execution Model" in hint
         assert "Background Tasks" in hint
+        assert "does not immediately return a result" in hint
+        assert "another turn to act" in hint
+        assert "server, watcher, or daemon" in hint
+
+    def test_default_static_execution_block(self):
+        hint = get_framework_hint(HINT_EXECUTION_MODEL_STATIC)
+        assert "does not immediately return a result" in hint
+        assert "another turn to act" in hint
+        assert "server, watcher, or daemon" in hint
 
     def test_default_native_execution_block(self):
         hint = get_framework_hint(HINT_EXECUTION_MODEL_NATIVE)
         assert "native function calling" in hint
         assert "## Tool Usage" in hint
+        assert "does not immediately return a result" in hint
+        assert "another turn to act" in hint
+        assert "server, watcher, or daemon" in hint
+
+    def test_execution_hints_avoid_internal_runtime_terms(self):
+        for key in (
+            HINT_EXECUTION_MODEL_DYNAMIC,
+            HINT_EXECUTION_MODEL_STATIC,
+            HINT_EXECUTION_MODEL_NATIVE,
+        ):
+            hint = get_framework_hint(key)
+            assert "controller round" not in hint
+            assert "completion event" not in hint
+            assert "controller re-entry" not in hint
 
     def test_non_canonical_key_returns_none(self):
         assert get_framework_hint("framework.not_a_real_key") is None
