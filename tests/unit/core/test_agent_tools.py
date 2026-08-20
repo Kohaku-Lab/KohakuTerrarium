@@ -211,6 +211,16 @@ class TestEmitDirectCompletion:
         kinds = [c[0] for c in agent.output_router.activity_calls]
         assert "tool_error" in kinds
 
+    def test_nonzero_exit_code_emits_tool_error(self, agent):
+        agent._register_direct_job("bash_x", kind="tool", name="bash")
+        result = JobResult(job_id="bash_x", output="bad", exit_code=2)
+
+        agent._emit_direct_completion_activity("bash_x", result)
+
+        kind, _detail, metadata = agent.output_router.activity_calls[-1]
+        assert kind == "tool_error"
+        assert metadata["exit_code"] == 2
+
     def test_exception_result(self, agent):
         agent._register_direct_job("bash_x", kind="tool", name="bash")
         agent._emit_direct_completion_activity("bash_x", RuntimeError("oops"))

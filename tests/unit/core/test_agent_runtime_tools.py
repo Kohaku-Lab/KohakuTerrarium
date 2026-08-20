@@ -358,6 +358,21 @@ class TestOnBgComplete:
         kinds = [c[0] for c in a.output_router.activity_calls]
         assert "tool_error" in kinds
 
+    async def test_nonzero_exit_code_is_an_error(self):
+        a = _make_mixin()
+        evt = TriggerEvent(
+            type=EventType.TOOL_COMPLETE,
+            job_id="bash_x",
+            content="bad",
+            context={"exit_code": 2},
+        )
+
+        a._on_bg_complete(evt)
+
+        kind, _detail, metadata = a.output_router.activity_calls[0]
+        assert kind == "tool_error"
+        assert metadata["exit_code"] == 2
+
     async def test_interrupted_flag(self):
         a = _make_mixin()
         evt = TriggerEvent(
