@@ -175,6 +175,7 @@ export default {
   "sessionViewer.trace.timeline.clearFocus": "清除区间聚焦",
   "sessionViewer.trace.turn.expandAll": "全部展开",
   "sessionViewer.trace.turn.collapseAll": "全部折叠",
+  "sessionViewer.trace.turn.loadEarlier": "加载更早的 turn",
   "sessionViewer.trace.filters.search": "搜索事件…",
 
   "memoryBuild.titleBuild": ({ name }) => `构建嵌入向量 — ${name}`,
