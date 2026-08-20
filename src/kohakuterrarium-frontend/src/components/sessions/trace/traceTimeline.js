@@ -173,6 +173,145 @@ function deriveTimedTimeline(records, actualDuration, compressIdle) {
   }
 }
 
+function projectedColumns(start, end, domain, columns) {
+  const duration = Math.max(1, domain.end - domain.start)
+  const c0 = Math.max(
+    0,
+    Math.min(columns - 1, Math.floor(((start - domain.start) / duration) * columns)),
+  )
+  const c1 = Math.max(
+    c0,
+    Math.min(columns - 1, Math.ceil(((end - domain.start) / duration) * columns) - 1),
+  )
+  return { c0, c1 }
+}
+
+function appendSummaryValue(values, seen, value) {
+  if (values.length >= 5 || value === null || value === "" || seen.has(value)) return
+  seen.add(value)
+  values.push(value)
+}
+
+export function rasterizeTimelineGeometry(spans, domain, columns) {
+  if (!domain || columns <= 0) return []
+  const laneDiffs = new Map()
+  for (const span of spans) {
+    const isPoint = span.start === span.end
+    if (
+      isPoint
+        ? span.start < domain.start || span.start > domain.end
+        : span.end <= domain.start || span.start >= domain.end
+    )
+      continue
+    const { c0, c1 } = projectedColumns(span.start, span.end, domain, columns)
+    let diffs = laneDiffs.get(span.lane)
+    if (!diffs) {
+      diffs = {
+        count: new Int32Array(columns + 1),
+        errors: new Int32Array(columns + 1),
+      }
+      laneDiffs.set(span.lane, diffs)
+    }
+    diffs.count[c0] += 1
+    diffs.count[c1 + 1] -= 1
+    if (span.isError) {
+      diffs.errors[c0] += 1
+      diffs.errors[c1 + 1] -= 1
+    }
+  }
+
+  const result = []
+  for (const [lane, diffs] of laneDiffs) {
+    let count = 0
+    let errors = 0
+    let active = null
+    for (let column = 0; column < columns; column += 1) {
+      count += diffs.count[column]
+      errors += diffs.errors[column]
+      if (!count) {
+        active = null
+        continue
+      }
+      const error = errors > 0
+      if (active && active.error === error && active.col + active.spanCols === column) {
+        active.spanCols += 1
+        active.key = `${lane}:${active.col}:${column}`
+        continue
+      }
+      active = {
+        key: `${lane}:${column}:${column}`,
+        lane,
+        col: column,
+        spanCols: 1,
+        error,
+      }
+      result.push(active)
+    }
+  }
+  return result
+}
+
+export function summarizeTimelineColumn(spans, domain, columns, lane, column) {
+  if (!domain || columns <= 0 || column < 0 || column >= columns) return null
+  const duration = Math.max(1, domain.end - domain.start)
+  const columnStart = domain.start + (column / columns) * duration
+  const columnEnd = domain.start + ((column + 1) / columns) * duration
+  const turns = []
+  const types = []
+  const labels = []
+  const seenTurns = new Set()
+  const seenTypes = new Set()
+  const seenLabels = new Set()
+  let count = 0
+  let error = false
+  let minStart = Infinity
+  let maxEnd = -Infinity
+
+  for (const span of spans) {
+    if (span.lane !== lane) continue
+    const isPoint = span.start === span.end
+    const overlaps = isPoint
+      ? span.start >= columnStart &&
+        (span.start < columnEnd || (column === columns - 1 && span.start === columnEnd))
+      : span.end > columnStart && span.start < columnEnd
+    if (!overlaps) continue
+    count += 1
+    error ||= span.isError
+    minStart = Math.min(minStart, span.start)
+    maxEnd = Math.max(maxEnd, span.end)
+    appendSummaryValue(turns, seenTurns, span.turn)
+    appendSummaryValue(types, seenTypes, span.type)
+    appendSummaryValue(labels, seenLabels, span.label)
+  }
+
+  if (!count) return null
+  return { count, error, turns, types, labels, minStart, maxEnd }
+}
+
+export function rasterizeTurnBoundaries(boundaries, domain, columns) {
+  if (!domain || columns <= 0) return []
+  const duration = Math.max(1, domain.end - domain.start)
+  const byColumn = new Map()
+  for (const boundary of boundaries) {
+    if (boundary.time <= domain.start || boundary.time > domain.end) continue
+    const column = Math.max(
+      0,
+      Math.min(columns - 1, Math.floor(((boundary.time - domain.start) / duration) * columns)),
+    )
+    const existing = byColumn.get(column)
+    if (existing) existing.lastTurn = boundary.turn
+    else byColumn.set(column, { firstTurn: boundary.turn, lastTurn: boundary.turn })
+  }
+  return [...byColumn.entries()].map(([column, turns]) => ({
+    key: column,
+    x: ((column + 0.5) * 100) / columns,
+    label:
+      turns.firstTurn === turns.lastTurn
+        ? String(turns.firstTurn)
+        : `${turns.firstTurn}–${turns.lastTurn}`,
+  }))
+}
+
 /**
  * Records active at any point inside an inclusive selected interval.
  * @returns {{turns: Set<number>, eventIds: Set<number>}}
