@@ -186,31 +186,15 @@ function projectedColumns(start, end, domain, columns) {
   return { c0, c1 }
 }
 
-function appendUnique(values, value) {
-  if (value !== null && value !== "") values.add(value)
+function appendSummaryValue(values, seen, value) {
+  if (values.length >= 5 || value === null || value === "" || seen.has(value)) return
+  seen.add(value)
+  values.push(value)
 }
 
-function sameSet(a, b) {
-  if (a.size !== b.size) return false
-  for (const value of a) if (!b.has(value)) return false
-  return true
-}
-
-function sameBucketContent(a, b) {
-  return (
-    a.count === b.count &&
-    a.error === b.error &&
-    a.minStart === b.minStart &&
-    a.maxEnd === b.maxEnd &&
-    sameSet(a.turns, b.turns) &&
-    sameSet(a.types, b.types) &&
-    sameSet(a.labels, b.labels)
-  )
-}
-
-export function rasterizeTimelineSpans(spans, domain, columns) {
+export function rasterizeTimelineGeometry(spans, domain, columns) {
   if (!domain || columns <= 0) return []
-  const laneCells = new Map()
+  const laneDiffs = new Map()
   for (const span of spans) {
     const isPoint = span.start === span.end
     if (
@@ -220,61 +204,88 @@ export function rasterizeTimelineSpans(spans, domain, columns) {
     )
       continue
     const { c0, c1 } = projectedColumns(span.start, span.end, domain, columns)
-    let cells = laneCells.get(span.lane)
-    if (!cells) {
-      cells = Array(columns)
-      laneCells.set(span.lane, cells)
-    }
-    for (let column = c0; column <= c1; column += 1) {
-      let cell = cells[column]
-      if (!cell) {
-        cell = {
-          lane: span.lane,
-          col: column,
-          spanCols: 1,
-          count: 0,
-          error: false,
-          turns: new Set(),
-          types: new Set(),
-          labels: new Set(),
-          minStart: span.start,
-          maxEnd: span.end,
-        }
-        cells[column] = cell
+    let diffs = laneDiffs.get(span.lane)
+    if (!diffs) {
+      diffs = {
+        count: new Int32Array(columns + 1),
+        errors: new Int32Array(columns + 1),
       }
-      cell.count += 1
-      cell.error ||= span.isError
-      appendUnique(cell.turns, span.turn)
-      appendUnique(cell.types, span.type)
-      appendUnique(cell.labels, span.label)
-      cell.minStart = Math.min(cell.minStart, span.start)
-      cell.maxEnd = Math.max(cell.maxEnd, span.end)
+      laneDiffs.set(span.lane, diffs)
+    }
+    diffs.count[c0] += 1
+    diffs.count[c1 + 1] -= 1
+    if (span.isError) {
+      diffs.errors[c0] += 1
+      diffs.errors[c1 + 1] -= 1
     }
   }
 
   const result = []
-  for (const [lane, cells] of laneCells) {
+  for (const [lane, diffs] of laneDiffs) {
+    let count = 0
+    let errors = 0
     let active = null
-    for (const cell of cells) {
-      if (!cell) {
+    for (let column = 0; column < columns; column += 1) {
+      count += diffs.count[column]
+      errors += diffs.errors[column]
+      if (!count) {
         active = null
         continue
       }
-      if (active && active.col + active.spanCols === cell.col && sameBucketContent(active, cell)) {
+      const error = errors > 0
+      if (active && active.error === error && active.col + active.spanCols === column) {
         active.spanCols += 1
-        active.key = `${lane}:${active.col}:${active.col + active.spanCols - 1}`
+        active.key = `${lane}:${active.col}:${column}`
         continue
       }
-      active = { ...cell, key: `${lane}:${cell.col}:${cell.col}` }
+      active = {
+        key: `${lane}:${column}:${column}`,
+        lane,
+        col: column,
+        spanCols: 1,
+        error,
+      }
       result.push(active)
     }
   }
-  return result.map((bucket) => ({
-    ...bucket,
-    turns: [...bucket.turns],
-    types: [...bucket.types],
-    labels: [...bucket.labels],
-  }))
+  return result
+}
+
+export function summarizeTimelineColumn(spans, domain, columns, lane, column) {
+  if (!domain || columns <= 0 || column < 0 || column >= columns) return null
+  const duration = Math.max(1, domain.end - domain.start)
+  const columnStart = domain.start + (column / columns) * duration
+  const columnEnd = domain.start + ((column + 1) / columns) * duration
+  const turns = []
+  const types = []
+  const labels = []
+  const seenTurns = new Set()
+  const seenTypes = new Set()
+  const seenLabels = new Set()
+  let count = 0
+  let error = false
+  let minStart = Infinity
+  let maxEnd = -Infinity
+
+  for (const span of spans) {
+    if (span.lane !== lane) continue
+    const isPoint = span.start === span.end
+    const overlaps = isPoint
+      ? span.start >= columnStart &&
+        (span.start < columnEnd || (column === columns - 1 && span.start === columnEnd))
+      : span.end > columnStart && span.start < columnEnd
+    if (!overlaps) continue
+    count += 1
+    error ||= span.isError
+    minStart = Math.min(minStart, span.start)
+    maxEnd = Math.max(maxEnd, span.end)
+    appendSummaryValue(turns, seenTurns, span.turn)
+    appendSummaryValue(types, seenTypes, span.type)
+    appendSummaryValue(labels, seenLabels, span.label)
+  }
+
+  if (!count) return null
+  return { count, error, turns, types, labels, minStart, maxEnd }
 }
 
 export function rasterizeTurnBoundaries(boundaries, domain, columns) {

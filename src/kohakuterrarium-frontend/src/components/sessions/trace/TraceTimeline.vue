@@ -31,7 +31,7 @@
           </div>
 
           <!-- Span buckets -->
-          <div v-for="b in buckets" :key="b.key" class="absolute rounded-[1px] hover:opacity-100" :class="bucketClass(b)" :style="bucketStyle(b)" :title="bucketTitle(b)" />
+          <div v-for="b in buckets" :key="b.key" data-timeline-bucket :data-column="b.col" :data-columns="b.spanCols" :data-lane="b.lane" class="absolute rounded-[1px] hover:opacity-100" :class="bucketClass(b)" :style="bucketStyle(b)" />
 
           <!-- Hover line moves independently so the span subtree keeps its computed styles. -->
           <div v-show="hovering && !dragStateActive" ref="hoverLineEl" data-testid="timeline-hover-line" class="absolute top-0 bottom-0 left-0 w-px bg-warm-400/60 pointer-events-none will-change-transform" />
@@ -63,7 +63,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
-import { TIMELINE_LANES, TIMELINE_MODES, formatTimelineDuration, rasterizeTimelineSpans, rasterizeTurnBoundaries } from "@/components/sessions/trace/traceTimeline"
+import { TIMELINE_LANES, TIMELINE_MODES, formatTimelineDuration, rasterizeTimelineGeometry, rasterizeTurnBoundaries, summarizeTimelineColumn } from "@/components/sessions/trace/traceTimeline"
 import { useI18n } from "@/utils/i18n"
 
 const MIN_DRAG_PX = 3
@@ -171,7 +171,17 @@ const buckets = computed(() => {
   const model = props.model
   const d = domain.value
   if (!model || !d) return []
-  return rasterizeTimelineSpans(model.spans, d, columns.value)
+  return rasterizeTimelineGeometry(model.spans, d, columns.value)
+})
+
+function clearBucketTitles() {
+  trackEl.value?.querySelectorAll("[data-timeline-bucket][title]").forEach((bucket) => {
+    bucket.removeAttribute("title")
+  })
+}
+
+watch([() => props.model, () => props.mode, domain, columns], clearBucketTitles, {
+  flush: "post",
 })
 
 const visibleBoundaries = computed(() => {
@@ -188,7 +198,7 @@ const MINIMAP_COLUMNS = 240
 const minimapBuckets = computed(() => {
   const model = props.model
   if (!model) return []
-  return rasterizeTimelineSpans(model.spans, { start: model.start, end: model.end }, MINIMAP_COLUMNS)
+  return rasterizeTimelineGeometry(model.spans, { start: model.start, end: model.end }, MINIMAP_COLUMNS)
 })
 
 function minimapBucketStyle(b) {
@@ -307,19 +317,34 @@ function formatClock(ms) {
   }
 }
 
-function bucketTitle(b) {
-  const parts = []
-  if (props.mode === "sequence") {
-    parts.push(`${b.count} event${b.count === 1 ? "" : "s"}`)
-  } else {
-    parts.push(`${b.count} event${b.count === 1 ? "" : "s"}`)
-    parts.push(`${formatClock(b.minStart)} → ${formatClock(b.maxEnd)}`)
-    if (b.count === 1) parts.push(formatTimelineDuration(b.maxEnd - b.minStart))
+function bucketTitle(summary) {
+  if (!summary) return ""
+  const parts = [`${summary.count} event${summary.count === 1 ? "" : "s"}`]
+  if (props.mode !== "sequence") {
+    parts.push(`${formatClock(summary.minStart)} → ${formatClock(summary.maxEnd)}`)
+    if (summary.count === 1) {
+      parts.push(formatTimelineDuration(summary.maxEnd - summary.minStart))
+    }
   }
-  if (b.labels.length) parts.push(b.labels.slice(0, 5).join(", "))
-  else if (b.types.length) parts.push(b.types.slice(0, 5).join(", "))
-  if (b.turns.length) parts.push(`turn ${b.turns.slice(0, 5).join(", ")}`)
+  if (summary.labels.length) parts.push(summary.labels.join(", "))
+  else if (summary.types.length) parts.push(summary.types.join(", "))
+  if (summary.turns.length) parts.push(`turn ${summary.turns.join(", ")}`)
   return parts.join("\n")
+}
+
+function updateBucketTooltip(event, rect) {
+  const target = event.target
+  const model = props.model
+  const d = domain.value
+  if (!(target instanceof HTMLElement) || !target.hasAttribute("data-timeline-bucket")) return
+  if (!model || !d || !rect || rect.width <= 0) return
+  const bucketColumn = Number.parseInt(target.dataset.column ?? "", 10)
+  const bucketColumns = Number.parseInt(target.dataset.columns ?? "", 10)
+  const bucketLane = Number.parseInt(target.dataset.lane ?? "", 10)
+  if (![bucketColumn, bucketColumns, bucketLane].every(Number.isFinite)) return
+  const pointerColumn = Math.min(columns.value - 1, Math.floor(fractionAt(event, rect) * columns.value))
+  const column = Math.min(bucketColumn + bucketColumns - 1, Math.max(bucketColumn, pointerColumn))
+  target.title = bucketTitle(summarizeTimelineColumn(model.spans, d, columns.value, bucketLane, column))
 }
 
 const selectionLabel = computed(() => {
@@ -341,8 +366,7 @@ function timeAt(fraction) {
   return d.start + fraction * domainDuration.value
 }
 
-function laneAt(event) {
-  const rect = trackEl.value?.getBoundingClientRect()
+function laneAt(event, rect = trackEl.value?.getBoundingClientRect()) {
   if (!rect || rect.height <= 0) return null
   return Math.max(0, Math.min(TIMELINE_LANES.length - 1, Math.floor((event.clientY - rect.top) / LANE_HEIGHT_PX)))
 }
@@ -379,7 +403,7 @@ function onPointerDown(event) {
 }
 
 function onPointerMove(event) {
-  pendingPointer = { clientX: event.clientX, clientY: event.clientY }
+  pendingPointer = { clientX: event.clientX, clientY: event.clientY, target: event.target }
   if (!pointerFrame) pointerFrame = requestAnimationFrame(flushPointerMove)
 }
 
@@ -395,6 +419,7 @@ function flushPointerMove() {
     hoverLineEl.value.style.transform = `translate3d(${x}px, 0, 0)`
     if (!hovering.value) hovering.value = true
   }
+  updateBucketTooltip(event, rect)
   if (!panState && !dragState) return
   if (panState) {
     if (Math.abs(event.clientX - panState.anchorClientX) >= MIN_DRAG_PX) panState.moved = true
@@ -467,6 +492,7 @@ function onPointerLeave() {
   pointerFrame = 0
   pendingPointer = null
   hovering.value = false
+  clearBucketTitles()
 }
 
 function onWheel(event) {
