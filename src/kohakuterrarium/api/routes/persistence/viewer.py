@@ -321,7 +321,10 @@ def _merge_turns(
             str(r.get("agent") or r.get("member_sid") or ""),
         )
     )
-    total = len(rows)
+    total = sum(
+        int(payload.get("total", len(payload.get("turns") or [])))
+        for _member_sid, payload in per_member
+    )
     page = rows[offset : offset + limit]
     return {
         "session_name": session_name,
@@ -435,6 +438,14 @@ async def get_session_turns(
     # outer merge restores one cross-cluster window.
     fanout_aggregate = aggregate or len(members) > 1
 
+    # Cluster pagination is applied after member rows are merged. Each member
+    # must therefore contribute enough of its prefix to cover the requested
+    # merged window; applying the offset here as well would skip rows twice.
+    member_offset = clamped_offset if len(members) == 1 else 0
+    member_limit = (
+        clamped_limit if len(members) == 1 else clamped_offset + clamped_limit
+    )
+
     def _build(store: SessionStore, canonical: str) -> dict[str, Any]:
         return build_turns_payload(
             store,
@@ -442,8 +453,8 @@ async def get_session_turns(
             agent=agent,
             from_turn=from_turn,
             to_turn=to_turn,
-            limit=clamped_limit,
-            offset=clamped_offset,
+            limit=member_limit,
+            offset=member_offset,
             aggregate=fanout_aggregate,
         )
 

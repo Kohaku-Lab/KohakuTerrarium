@@ -12,10 +12,15 @@
         {{ t("sessionViewer.trace.timeline.focusTurns", { n: displayedTurns.length }) }}
         <button class="i-carbon-close hover:text-coral" :title="t('sessionViewer.trace.timeline.clearFocus')" @click="timelineRange = null" />
       </span>
+      <button v-if="rollup.hasOlder" class="text-iolite hover:underline disabled:opacity-50" :disabled="rollup.loadingOlder" @click="loadOlderTurns">
+        {{ rollup.loadingOlder ? "…" : t("sessionViewer.trace.turn.loadEarlier") }}
+      </button>
       <span class="flex-1" />
       <button class="text-warm-500 hover:text-warm-700 dark:hover:text-warm-300" @click="expandAll">{{ t("sessionViewer.trace.turn.expandAll") }}</button>
       <button class="text-warm-500 hover:text-warm-700 dark:hover:text-warm-300" @click="collapseAll">{{ t("sessionViewer.trace.turn.collapseAll") }}</button>
     </div>
+
+    <div v-if="rollup.pageError" class="text-[11px] text-coral">{{ rollup.pageError }}</div>
 
     <!-- Live "↓ N new" banner (V4) -->
     <button v-if="filters.live && newSinceLastClear > 0 && !atBottom" class="self-end px-3 py-1 rounded-full bg-aquamarine/15 text-aquamarine text-[11px] font-mono shadow-md hover:bg-aquamarine/25" @click="scrollToBottom">{{ t("sessionViewer.trace.live.newBanner", { n: newSinceLastClear }) }}</button>
@@ -213,18 +218,19 @@ function onToggle(turnIndex) {
   expandedTurns.value = new Set(expandedTurns.value)
 }
 
-function onSelectTurn(turnIndex) {
+async function onSelectTurn(turnIndex, { updateRoute = true } = {}) {
+  if (!(await rollup.ensureTurn(turnIndex))) return false
   // Selecting a turn outside the focused interval clears the focus, like
   // the reference trajectory UI — otherwise the target would stay hidden.
   if (timelineFocus.value && !timelineFocus.value.turns.has(turnIndex)) {
     timelineRange.value = null
   }
   expandedTurns.value = new Set([...expandedTurns.value, turnIndex])
-  router.replace({ query: { ...route.query, turn: turnIndex } })
-  nextTick(() => {
-    const index = displayedTurns.value.findIndex((t2) => t2.turn_index === turnIndex)
-    if (index >= 0) rowVirtualizer.value.scrollToIndex(index, { align: "center" })
-  })
+  if (updateRoute) router.replace({ query: { ...route.query, turn: turnIndex } })
+  await nextTick()
+  const index = displayedTurns.value.findIndex((t2) => t2.turn_index === turnIndex)
+  if (index >= 0) rowVirtualizer.value.scrollToIndex(index, { align: "center" })
+  return true
 }
 
 // Timeline span click: expand the span's turn, then hand the event id to
@@ -244,10 +250,10 @@ function jumpMemberFor(turnIndex) {
   return t2 && t2.turn === turnIndex ? t2.member : null
 }
 
-function onSelectSpan(span) {
+async function onSelectSpan(span) {
   if (!span || span.turn == null) return
   jumpTarget.value = typeof span.index === "number" ? { turn: span.turn, eid: span.index, member: span.member ?? null } : null
-  onSelectTurn(span.turn)
+  if (!(await onSelectTurn(span.turn))) jumpTarget.value = null
 }
 
 function onJumped({ event }) {
@@ -269,6 +275,13 @@ function scrollToBottom() {
   if (!el) return
   el.scrollTop = el.scrollHeight
   liveStream.clearNewCounter()
+}
+
+async function loadOlderTurns() {
+  if (await rollup.loadOlder()) {
+    await nextTick()
+    rowVirtualizer.value.measure()
+  }
 }
 
 // Forward live events into the active turn's stream-store so
@@ -321,12 +334,12 @@ watch(
 
 // Deep-link: ``?turn=N`` opens that turn group.
 watch(
-  () => route.query.turn,
-  (q) => {
-    if (q == null) return
+  () => [route.query.turn, rollup.loading, rollup.sessionName, rollup.agent],
+  async ([q, loading]) => {
+    if (q == null || loading) return
     const ti = Number(q)
     if (!Number.isFinite(ti)) return
-    expandedTurns.value = new Set([...expandedTurns.value, ti])
+    await onSelectTurn(ti, { updateRoute: false })
   },
   { immediate: true },
 )

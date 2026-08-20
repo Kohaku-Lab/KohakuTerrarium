@@ -1,0 +1,122 @@
+import { flushPromises, shallowMount } from "@vue/test-utils"
+import { reactive } from "vue"
+import { beforeEach, describe, expect, it, vi } from "vitest"
+
+const state = vi.hoisted(() => ({
+  detail: null,
+  rollup: null,
+  timeline: null,
+  router: { replace: vi.fn() },
+}))
+
+vi.mock("@tanstack/vue-virtual", async () => {
+  const { ref } = await import("vue")
+  return {
+    useVirtualizer: () =>
+      ref({
+        getVirtualItems: () => [],
+        getTotalSize: () => 0,
+        measureElement: vi.fn(),
+        measure: vi.fn(),
+        scrollToIndex: vi.fn(),
+      }),
+  }
+})
+
+vi.mock("vue-router", () => ({
+  useRoute: () => reactive({ query: {} }),
+  useRouter: () => state.router,
+}))
+
+vi.mock("@/stores/sessionDetail", () => ({
+  useSessionDetailStore: () => state.detail,
+}))
+vi.mock("@/stores/turnRollup", () => ({
+  useTurnRollupStore: () => state.rollup,
+}))
+vi.mock("@/stores/traceTimeline", () => ({
+  useTraceTimelineStore: () => state.timeline,
+}))
+vi.mock("@/stores/eventStream", () => ({
+  useEventStreamStore: () => ({ appendLive: vi.fn() }),
+}))
+vi.mock("@/composables/useSessionEventStream", async () => {
+  const { ref } = await import("vue")
+  return {
+    useSessionEventStream: () => ({
+      events: ref([]),
+      newSinceLastClear: ref(0),
+      error: ref(""),
+      subscribed: ref(false),
+      attach: vi.fn(),
+      detach: vi.fn(),
+      clearNewCounter: vi.fn(),
+    }),
+  }
+})
+vi.mock("@/utils/i18n", () => ({
+  useI18n: () => ({ t: (key) => key }),
+}))
+
+import TraceTab from "./TraceTab.vue"
+import TraceTimeline from "@/components/sessions/trace/TraceTimeline.vue"
+
+beforeEach(() => {
+  state.detail = reactive({
+    name: "session-a",
+    agents: ["alice"],
+    reloadKey: 0,
+    summary: { error_turns: [] },
+  })
+  state.rollup = reactive({
+    sessionName: "session-a",
+    agent: "alice",
+    aggregate: false,
+    turns: [{ turn_index: 1001 }],
+    total: 1001,
+    loading: false,
+    loadingOlder: false,
+    hasOlder: true,
+    error: "",
+    pageError: "",
+    load: vi.fn().mockResolvedValue(),
+    loadOlder: vi.fn().mockResolvedValue(true),
+    ensureTurn: vi.fn().mockResolvedValue(true),
+  })
+  state.timeline = reactive({
+    records: [
+      {
+        eid: 42,
+        turn: 5,
+        member: null,
+        type: "tool_result",
+        label: "bash",
+        lane: "tools",
+        err: false,
+        durMs: 1,
+        ts: 1,
+      },
+    ],
+    truncated: false,
+    load: vi.fn().mockResolvedValue(),
+    appendLive: vi.fn(),
+  })
+  state.router.replace.mockReset()
+})
+
+describe("TraceTab long-session navigation", () => {
+  it("resolves a missing turn before routing to a selected timeline span", async () => {
+    const wrapper = shallowMount(TraceTab)
+    await flushPromises()
+
+    wrapper.findComponent(TraceTimeline).vm.$emit("select-span", {
+      turn: 5,
+      index: 42,
+      member: null,
+    })
+    await flushPromises()
+
+    expect(state.rollup.ensureTurn).toHaveBeenCalledWith(5)
+    expect(state.router.replace).toHaveBeenCalledWith({ query: { turn: 5 } })
+  })
+})
