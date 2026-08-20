@@ -105,6 +105,14 @@ class TestScanEvents:
         out = _scan_events_for_summary(events)
         assert sorted(out["error_turns"]) == [1, 2]
 
+    def test_failed_tool_result_counts_as_error(self):
+        events = [
+            {"type": "tool_result", "turn_index": 3, "error": "boom"},
+            {"type": "tool_result", "turn_index": 4, "exit_code": 2},
+        ]
+        out = _scan_events_for_summary(events)
+        assert out["error_turns"] == [3, 4]
+
     def test_tracks_compact_turns(self):
         events = [
             {"type": "compact_complete", "turn_index": 1},

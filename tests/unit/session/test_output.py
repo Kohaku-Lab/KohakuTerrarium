@@ -598,21 +598,44 @@ class TestActivityHandlers:
         finally:
             store.close()
 
+    def test_tool_done_preserves_explicit_exit_code(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            out.on_activity_with_metadata(
+                "tool_done",
+                "[bash] exit=2",
+                {"job_id": "j1", "result": "bad", "exit_code": 2},
+            )
+            store.flush()
+            evt = next(
+                e for e in store.get_events("alice") if e["type"] == "tool_result"
+            )
+            assert evt["exit_code"] == 2
+        finally:
+            store.close()
+
     def test_tool_error(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
                 "tool_error",
                 "[bash] failed",
-                {"job_id": "j1", "error": "boom", "interrupted": True},
+                {
+                    "job_id": "j1",
+                    "error": "boom",
+                    "interrupted": True,
+                    "exit_code": 2,
+                    "output": "bad output",
+                },
             )
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "tool_result"
             )
-            assert evt["exit_code"] == 1
+            assert evt["exit_code"] == 2
             assert evt["interrupted"] is True
             assert evt["error"] == "boom"
+            assert evt["output"] == "bad output"
         finally:
             store.close()
 

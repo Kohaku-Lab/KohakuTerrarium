@@ -461,7 +461,7 @@ class SessionOutput(OutputModule):
             "name": name,
             "call_id": metadata.get("job_id", ""),
             "output": metadata.get("result", metadata.get("output", detail)),
-            "exit_code": 0,
+            "exit_code": metadata.get("exit_code", 0),
         }
         # Persist preview metadata so history reload need not read the file again.
         canvas_preview = metadata.get("canvas_preview")
@@ -478,8 +478,8 @@ class SessionOutput(OutputModule):
             {
                 "name": name,
                 "call_id": metadata.get("job_id", ""),
-                "output": metadata.get("result", detail),
-                "exit_code": 1,
+                "output": metadata.get("result", metadata.get("output", detail)),
+                "exit_code": metadata.get("exit_code", 1),
                 "error": metadata.get("error", detail),
                 "interrupted": bool(metadata.get("interrupted", False)),
                 "cancelled": bool(metadata.get("cancelled", False)),

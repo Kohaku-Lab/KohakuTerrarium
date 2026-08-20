@@ -11,9 +11,8 @@ from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.history import dedupe_adjacent_duplicate_events
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.rollups import (
-    ERROR_EVENT_TYPES,
+    _event_failed,
     _event_turn_index,
-    _subagent_failed,
 )
 
 #: Fields copied onto each span. Everything else (content, output, …) is
@@ -47,11 +46,7 @@ def _span_from_event(evt: dict) -> dict[str, Any]:
         # Ordinary tool failures keep type ``tool_result`` and encode the
         # failure in ``error``/``exit_code`` — honour that, not just the
         # dedicated error event types.
-        "err": (
-            evt.get("type") in ERROR_EVENT_TYPES
-            or _subagent_failed(evt)
-            or bool(evt.get("error"))
-        ),
+        "err": _event_failed(evt),
     }
     label = evt.get("tool") or evt.get("name") or evt.get("tool_name")
     if label:

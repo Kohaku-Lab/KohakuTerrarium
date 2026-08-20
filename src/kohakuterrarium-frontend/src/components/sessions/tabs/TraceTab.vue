@@ -49,6 +49,7 @@ import TraceEventDetail from "@/components/sessions/trace/TraceEventDetail.vue"
 import TraceTab_TraceFilters from "@/components/sessions/trace/TraceFilters.vue"
 import TraceTab_TraceTimeline from "@/components/sessions/trace/TraceTimeline.vue"
 import TraceTab_TraceTurnGroup from "@/components/sessions/trace/TraceTurnGroup.vue"
+import { isTraceErrorEvent } from "@/components/sessions/trace/traceErrors"
 import { parseSearchTerms } from "@/components/sessions/trace/traceSearch"
 import { deriveTraceTimeline, traceTimelineFocus } from "@/components/sessions/trace/traceTimeline"
 import { useSessionEventStream } from "@/composables/useSessionEventStream"
@@ -136,15 +137,22 @@ const liveStatus = computed(() => {
 
 // Convert {key, event} → event objects for the per-turn group rendering.
 const liveEventsObjects = computed(() => liveEvents.value.map((e) => e.event))
+const liveErrorTurns = computed(
+  () =>
+    new Set(
+      liveEventsObjects.value
+        .filter(isTraceErrorEvent)
+        .map((event) => event.turn_index)
+        .filter((turn) => Number.isInteger(turn)),
+    ),
+)
 
-// "Errors only" reflects in turn-level filter too: hide turns that have
-// no error events. Turn rollups don't carry has_error today; we infer
-// from the live events buffer + the rollup row presence in error_turns.
+// "Errors only" reflects in the turn list as well as the timeline.
+// Persisted rollups and current live events both contribute failures.
 const displayedTurns = computed(() => {
   let turns = rollup.turns
   if (filters.value.errorsOnly) {
-    const errSet = new Set(detail.summary?.error_turns || [])
-    turns = turns.filter((t2) => errSet.has(t2.turn_index))
+    turns = turns.filter((t2) => t2.has_error || liveErrorTurns.value.has(t2.turn_index))
   }
   const focus = timelineFocus.value
   if (focus) turns = turns.filter((t2) => focus.turns.has(t2.turn_index))
