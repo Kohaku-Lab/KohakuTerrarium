@@ -4,6 +4,12 @@ export const MIN_UI_ZOOM = 0.6
 export const MAX_UI_ZOOM = 2
 export const DEFAULT_DESKTOP_ZOOM = 1
 export const DEFAULT_MOBILE_ZOOM = 1
+export const DEFAULT_READING_SIZE = "default"
+export const READING_SIZES = [DEFAULT_READING_SIZE, "large", "larger"]
+
+function normalizeReadingSize(value) {
+  return READING_SIZES.includes(value) ? value : DEFAULT_READING_SIZE
+}
 
 function clampZoom(value, fallback) {
   const parsed = Number(value)
@@ -22,6 +28,7 @@ export const useThemeStore = defineStore("theme", {
       getHybridPrefSync("kt-mobile-zoom", DEFAULT_MOBILE_ZOOM),
       DEFAULT_MOBILE_ZOOM,
     ),
+    readingSize: normalizeReadingSize(getHybridPrefSync("kt-reading-size", DEFAULT_READING_SIZE)),
     _isMobile: false,
   }),
 
@@ -60,6 +67,18 @@ export const useThemeStore = defineStore("theme", {
       }
     },
 
+    setReadingSize(value) {
+      this.readingSize = normalizeReadingSize(value)
+      setHybridPref("kt-reading-size", this.readingSize)
+      this.applyReadingSize()
+    },
+
+    applyReadingSize() {
+      const el = document.documentElement
+      if (!el) return
+      el.dataset.readingSize = normalizeReadingSize(this.readingSize)
+    },
+
     applyZoom() {
       // Apply zoom to ``<html>`` (documentElement), NOT ``#app``.  Vue
       // ``<Teleport to="body">`` (rail drawer, host-picker modal) and
@@ -95,13 +114,18 @@ export const useThemeStore = defineStore("theme", {
         getHybridPrefSync("kt-mobile-zoom", DEFAULT_MOBILE_ZOOM),
         DEFAULT_MOBILE_ZOOM,
       )
+      this.readingSize = normalizeReadingSize(
+        getHybridPrefSync("kt-reading-size", DEFAULT_READING_SIZE),
+      )
       setHybridPref("kt-desktop-zoom", this.desktopZoom)
       setHybridPref("kt-mobile-zoom", this.mobileZoom)
+      setHybridPref("kt-reading-size", this.readingSize)
       if (storedTheme !== "system") {
         setHybridPref("theme", this.dark ? "dark" : "light")
       }
       this.apply()
       this.applyZoom()
+      this.applyReadingSize()
     },
   },
 })
