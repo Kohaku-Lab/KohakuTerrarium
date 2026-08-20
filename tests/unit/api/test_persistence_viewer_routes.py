@@ -238,6 +238,33 @@ class TestTurns:
         assert captured["limit"] == 1000
         assert captured["offset"] == 0
 
+    def test_cluster_applies_offset_after_member_merge(self, monkeypatch):
+        async def _members(_session_name, _service):
+            return [("member-a", Path("/a")), ("member-b", Path("/b"))]
+
+        captured = []
+
+        def _fake_build(_store, canonical, **kw):
+            captured.append(kw)
+            rows = [{"turn_index": turn, "agent": canonical} for turn in range(1, 1201)]
+            page = rows[kw["offset"] : kw["offset"] + kw["limit"]]
+            return {"turns": page, "total": len(rows)}
+
+        def _per_member(members, builder):
+            return [(sid, builder(None, sid)) for sid, _path in members]
+
+        monkeypatch.setattr(viewer_mod, "_resolve_cluster_or_404", _members)
+        monkeypatch.setattr(viewer_mod, "build_turns_payload", _fake_build)
+        monkeypatch.setattr(viewer_mod, "_run_per_member", _per_member)
+
+        resp = TestClient(_app()).get("/sessions/cluster/turns?limit=1000&offset=1000")
+
+        assert resp.status_code == 200
+        assert len(resp.json()["turns"]) == 1000
+        assert resp.json()["offset"] == 1000
+        assert all(call["offset"] == 0 for call in captured)
+        assert all(call["limit"] == 2000 for call in captured)
+
 
 # ── export ─────────────────────────────────────────────────────
 

@@ -17,6 +17,40 @@ import { getCurrentInstance } from "vue"
 import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { sessionAPI } from "@/utils/api"
 
+const TURN_PAGE_SIZE = 1000
+
+function _scopeOf(store) {
+  return {
+    sessionName: store.sessionName,
+    agent: store.agent,
+    aggregate: store.aggregate,
+  }
+}
+
+function _scopeIsActive(store, scope) {
+  return (
+    store.sessionName === scope.sessionName &&
+    store.agent === scope.agent &&
+    store.aggregate === scope.aggregate
+  )
+}
+
+function _turnKey(turn) {
+  return `${turn.member_sid || ""}\u0000${turn.agent || ""}\u0000${turn.turn_index}`
+}
+
+function _mergeTurns(...pages) {
+  const turns = new Map()
+  for (const page of pages) {
+    for (const turn of page || []) turns.set(_turnKey(turn), turn)
+  }
+  return [...turns.values()].sort(
+    (a, b) =>
+      Number(a.turn_index || 0) - Number(b.turn_index || 0) ||
+      String(a.agent || a.member_sid || "").localeCompare(String(b.agent || b.member_sid || "")),
+  )
+}
+
 const _turnRollupOptions = {
   state: () => ({
     sessionName: "",
@@ -24,10 +58,13 @@ const _turnRollupOptions = {
     aggregate: false,
     turns: [],
     total: 0,
+    windowOffset: 0,
     loading: false,
+    loadingOlder: false,
     loadGeneration: 0,
     loadingGeneration: null,
     error: "",
+    pageError: "",
   }),
 
   getters: {
@@ -52,6 +89,8 @@ const _turnRollupOptions = {
     },
 
     costAvailable: (state) => state.turns.some((t) => t.cost_usd != null),
+
+    hasOlder: (state) => state.windowOffset > 0,
   },
 
   actions: {
@@ -69,25 +108,46 @@ const _turnRollupOptions = {
       if (isSwitch) {
         this.turns = []
         this.total = 0
-        this.error = ""
+        this.windowOffset = 0
+        this.loadingOlder = false
       }
+      this.error = ""
+      this.pageError = ""
       this.loading = true
       this.loadingGeneration = generation
       try {
-        const data = await sessionAPI.getTurns(sessionName, {
+        const firstPage = await sessionAPI.getTurns(sessionName, {
           agent,
-          limit: 1000,
+          limit: TURN_PAGE_SIZE,
+          offset: 0,
           aggregate,
         })
         if (generation !== this.loadGeneration) return
+
+        let data = firstPage
+        const total = Number(firstPage.total || 0)
+        const latestOffset = Math.max(0, total - TURN_PAGE_SIZE)
+        const resolvedAgent = firstPage.agent || agent || ""
+        if (latestOffset > 0) {
+          data = await sessionAPI.getTurns(sessionName, {
+            agent: resolvedAgent || null,
+            limit: TURN_PAGE_SIZE,
+            offset: latestOffset,
+            aggregate,
+          })
+          if (generation !== this.loadGeneration) return
+        }
+
         this.turns = data.turns || []
-        this.total = data.total || 0
-        this.agent = data.agent || agent || ""
+        this.total = Number(data.total ?? total)
+        this.windowOffset = Number(data.offset ?? latestOffset)
+        this.agent = data.agent || resolvedAgent
       } catch (err) {
         if (generation !== this.loadGeneration) return
         this.error = `Failed to load turns: ${err.message || err}`
         this.turns = []
         this.total = 0
+        this.windowOffset = 0
       } finally {
         if (this.loadingGeneration === generation) {
           this.loading = false
@@ -96,15 +156,79 @@ const _turnRollupOptions = {
       }
     },
 
+    async loadOlder() {
+      if (!this.sessionName || !this.hasOlder || this.loadingOlder) return false
+      const scope = _scopeOf(this)
+      const generation = this.loadGeneration
+      const offset = Math.max(0, this.windowOffset - TURN_PAGE_SIZE)
+      const limit = this.windowOffset - offset
+      this.loadingOlder = true
+      this.pageError = ""
+      try {
+        const data = await sessionAPI.getTurns(scope.sessionName, {
+          agent: scope.agent || null,
+          limit,
+          offset,
+          aggregate: scope.aggregate,
+        })
+        if (generation !== this.loadGeneration || !_scopeIsActive(this, scope)) return false
+        this.turns = _mergeTurns(data.turns, this.turns)
+        this.total = Number(data.total ?? this.total)
+        this.windowOffset = Number(data.offset ?? offset)
+        return true
+      } catch (err) {
+        if (generation === this.loadGeneration && _scopeIsActive(this, scope)) {
+          this.pageError = `Failed to load earlier turns: ${err.message || err}`
+        }
+        return false
+      } finally {
+        if (_scopeIsActive(this, scope)) this.loadingOlder = false
+      }
+    },
+
+    async ensureTurn(turnIndex) {
+      const target = Number(turnIndex)
+      if (!Number.isFinite(target) || !this.sessionName) return false
+      if (this.turns.some((turn) => Number(turn.turn_index) === target)) return true
+
+      const scope = _scopeOf(this)
+      const generation = this.loadGeneration
+      this.pageError = ""
+      try {
+        const data = await sessionAPI.getTurns(scope.sessionName, {
+          agent: scope.agent || null,
+          fromTurn: target,
+          toTurn: target,
+          limit: TURN_PAGE_SIZE,
+          offset: 0,
+          aggregate: scope.aggregate,
+        })
+        if (generation !== this.loadGeneration || !_scopeIsActive(this, scope)) return false
+        const exact = (data.turns || []).filter((turn) => Number(turn.turn_index) === target)
+        if (!exact.length) return false
+        this.turns = _mergeTurns(this.turns, exact)
+        return true
+      } catch (err) {
+        if (generation === this.loadGeneration && _scopeIsActive(this, scope)) {
+          this.pageError = `Failed to load turn ${target}: ${err.message || err}`
+        }
+        return false
+      }
+    },
+
     clear() {
       this.loadGeneration += 1
       this.sessionName = ""
       this.agent = ""
+      this.aggregate = false
       this.turns = []
       this.total = 0
+      this.windowOffset = 0
       this.loading = false
+      this.loadingOlder = false
       this.loadingGeneration = null
       this.error = ""
+      this.pageError = ""
     },
   },
 }
