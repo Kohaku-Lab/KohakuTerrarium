@@ -30,6 +30,7 @@
 import { computed, nextTick, onUnmounted, ref, watch } from "vue"
 
 import TraceEventRow from "@/components/sessions/trace/TraceEventRow.vue"
+import { isTraceErrorEvent } from "@/components/sessions/trace/traceErrors"
 import { matchesSearch, parseSearchTerms } from "@/components/sessions/trace/traceSearch"
 import { disposeEventStreamStore, useEphemeralEventStreamStore } from "@/stores/eventStream"
 import { useI18n } from "@/utils/i18n"
@@ -133,7 +134,7 @@ const TYPE_GROUPS = {
 function _passesFilter(ev) {
   const f = props.filters || {}
   if (f.errorsOnly) {
-    if (!String(ev.type || "").includes("error")) return false
+    if (!isTraceErrorEvent(ev)) return false
   }
   const terms = parseSearchTerms(f.search)
   if (terms.length && !matchesSearch(ev, terms)) return false

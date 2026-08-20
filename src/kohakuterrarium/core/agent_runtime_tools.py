@@ -137,7 +137,15 @@ class AgentRuntimeToolsMixin:
             return
         job_id = getattr(event, "job_id", "")
         is_subagent = job_id.startswith("agent_")
-        error = event.context.get("error") if event.context else None
+        context = event.context or {}
+        error = context.get("error")
+        exit_code = context.get("exit_code")
+        try:
+            failed_exit = exit_code is not None and int(exit_code) != 0
+        except (TypeError, ValueError):
+            failed_exit = False
+        if failed_exit and not error:
+            error = f"Tool exited with code {exit_code}"
         content = render_content_text(event.content)
         _, label = _make_job_label(job_id)
         activity_done, activity_error = (
@@ -168,6 +176,7 @@ class AgentRuntimeToolsMixin:
                     "llm_name": sa_meta.get("llm_name", ""),
                     "model": sa_meta.get("model", ""),
                     "error": error,
+                    "exit_code": exit_code,
                     "interrupted": interrupted,
                     "cancelled": cancelled,
                     "final_state": final_state,
@@ -205,7 +214,11 @@ class AgentRuntimeToolsMixin:
             self.output_router.notify_activity(
                 activity_done,
                 f"[{label}] DONE",
-                metadata={"job_id": job_id, "result": content},
+                metadata={
+                    "job_id": job_id,
+                    "result": content,
+                    "exit_code": exit_code,
+                },
             )
 
         logger.info("Background job completed", job_id=job_id)

@@ -516,7 +516,11 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             # preview stays for UI rendering.
             "output": output,
             "output_preview": preview,
+            "exit_code": exit_code,
         }
+        if not succeeded:
+            metadata["error"] = f"Tool exited with code {exit_code}"
+            metadata["final_state"] = "error"
         if is_subagent:
             result_metadata = getattr(result, "metadata", {})
             metadata["result"] = preview
@@ -541,7 +545,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         if isinstance(session_metadata, dict):
             metadata["tool_metadata"] = dict(session_metadata)
         self.output_router.notify_activity(
-            done_activity,
+            done_activity if succeeded else error_activity,
             f"[{label}] {status}",
             metadata=metadata,
         )

@@ -153,6 +153,29 @@ def _subagent_failed(evt: dict) -> bool:
     )
 
 
+def _event_failed(evt: dict) -> bool:
+    """Return whether one persisted event represents failed work."""
+    if evt.get("type") in ERROR_EVENT_TYPES or _subagent_failed(evt):
+        return True
+    if (
+        evt.get("success") is False
+        or bool(evt.get("error"))
+        or bool(evt.get("interrupted"))
+        or bool(evt.get("cancelled"))
+        or str(evt.get("final_state") or "").lower() in _FAILED_FINAL_STATES
+    ):
+        return True
+    if evt.get("type") != "tool_result":
+        return False
+    exit_code = evt.get("exit_code")
+    if exit_code in (None, ""):
+        return False
+    try:
+        return int(exit_code) != 0
+    except (TypeError, ValueError):
+        return False
+
+
 def _add_usage_bucket(
     buckets: dict[int, dict[str, Any]], turn: int, usage: dict[str, Any]
 ) -> None:
@@ -194,7 +217,7 @@ def derive_own_turns_from_events(events: list[dict], agent: str) -> list[dict]:
                 _add_usage_bucket(token_usage, ti, usage)
         elif etype == "tool_call":
             row["tool_calls"] += 1
-        elif etype in ERROR_EVENT_TYPES or _subagent_failed(evt):
+        elif _event_failed(evt):
             row["has_error"] = True
         elif etype in ("compact_complete", "compact_replace"):
             row["compacted"] = True
@@ -352,20 +375,40 @@ def derive_turns_from_events(events: list[dict], agent: str) -> list[dict]:
     return _merge_subagents(own_rows, sub_rows, agent)
 
 
-def _own_rollups_or_derived(store: SessionStore, agent: str) -> list[dict]:
-    rows = store.list_turn_rollups(agent)
-    if rows:
-        return rows
-    events = dedupe_adjacent_duplicate_events(store.get_events(agent))
-    return derive_own_turns_from_events(events, agent)
+def _merge_own_rollups(stored: list[dict], derived: list[dict]) -> list[dict]:
+    """Keep stored usage while overlaying diagnostics derived from events."""
+    by_turn = {row.get("turn_index"): dict(row) for row in stored}
+    for diagnostic in derived:
+        turn = diagnostic.get("turn_index")
+        row = by_turn.get(turn)
+        if row is None:
+            by_turn[turn] = dict(diagnostic)
+            continue
+        row["tool_calls"] = max(
+            _as_int(row.get("tool_calls")), _as_int(diagnostic.get("tool_calls"))
+        )
+        row["has_error"] = bool(row.get("has_error") or diagnostic.get("has_error"))
+        row["compacted"] = bool(row.get("compacted") or diagnostic.get("compacted"))
+        for field in ("started_at", "ended_at"):
+            if row.get(field) is None and diagnostic.get(field) is not None:
+                row[field] = diagnostic[field]
+    return sorted(by_turn.values(), key=lambda row: _as_int(row.get("turn_index")))
+
+
+def _own_rollups_or_derived(
+    store: SessionStore, agent: str, events: list[dict] | None = None
+) -> list[dict]:
+    if events is None:
+        events = dedupe_adjacent_duplicate_events(store.get_events(agent))
+    derived = derive_own_turns_from_events(events, agent)
+    stored = store.list_turn_rollups(agent)
+    return _merge_own_rollups(stored, derived) if stored else derived
 
 
 def rollups_or_derived(store: SessionStore, agent: str) -> list[dict]:
     """Return full turn rows for ``agent`` including sub-agent tokens."""
     events = dedupe_adjacent_duplicate_events(store.get_events(agent))
-    own_rows = store.list_turn_rollups(agent)
-    if not own_rows:
-        own_rows = derive_own_turns_from_events(events, agent)
+    own_rows = _own_rollups_or_derived(store, agent, events)
     sub_rows = derive_subagent_turns_from_events(events, agent)
     return _merge_subagents(own_rows, sub_rows, agent)
 
@@ -414,7 +457,7 @@ def _empty_aggregate(turn_index: int) -> dict:
 
 def _iter_rollup_contributions(store: SessionStore, name: str, kind: str):
     events = dedupe_adjacent_duplicate_events(store.get_events(name))
-    for row in _own_rollups_or_derived(store, name):
+    for row in _own_rollups_or_derived(store, name, events):
         yield name, kind, row
     for row in derive_subagent_turns_from_events(events, name):
         yield row.get("agent") or name, "subagent", row

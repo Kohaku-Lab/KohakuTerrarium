@@ -10,7 +10,7 @@ from typing import Any
 from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.viewer.rollups import (
-    ERROR_EVENT_TYPES,
+    _event_failed,
     aggregate_turn_rollups,
     graph_total_usage,
     rollups_or_derived,
@@ -116,7 +116,7 @@ def _scan_events_for_summary(events: list[dict]) -> dict[str, Any]:
             ti = e.get("spawned_in_turn")
         if etype == "tool_call":
             tool_calls += 1
-        elif etype in ERROR_EVENT_TYPES or _subagent_failed(e):
+        elif _event_failed(e):
             if isinstance(ti, int) and ti not in seen_error_turns:
                 seen_error_turns.add(ti)
                 errors.append(ti)
