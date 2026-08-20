@@ -73,8 +73,9 @@ def _build_command_hints(tool_format: str) -> str:
         f"- Read docs: `{info_ex}`\n"
         f"- List jobs: `{jobs_ex}`\n"
         f"- Wait for job: `{wait_ex}`\n\n"
-        "Sub-agents run in background by default. Results arrive automatically.\n"
-        "Use wait only if you must block until a specific job finishes."
+        "Starting background work does not immediately return a result or give "
+        "you another turn to act. Results are normally delivered after the work "
+        "finishes. Use wait only if you must block until a specific job finishes."
     )
 
 

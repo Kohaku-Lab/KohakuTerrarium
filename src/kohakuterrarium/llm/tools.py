@@ -63,7 +63,11 @@ def build_tool_schemas(
             props = dict(params.get("properties", {}))
             props["run_in_background"] = {
                 "type": "boolean",
-                "description": "If true, run in background. Results delivered later, not immediately.",
+                "description": (
+                    "If true, run without waiting for it to finish. No result is "
+                    "available immediately, and starting it does not give you "
+                    "another turn to act."
+                ),
             }
             params["properties"] = props
 
@@ -100,9 +104,10 @@ def build_tool_schemas(
                         "run_in_background": {
                             "type": "boolean",
                             "description": (
-                                "If true (default), run in background — result "
-                                "delivered later. If false, block and wait for "
-                                "the sub-agent to finish before continuing."
+                                "If true (default), run without waiting for it to "
+                                "finish. No result is available immediately, and "
+                                "starting it does not give you another turn to act. "
+                                "If false, wait for the result before continuing."
                             ),
                         },
                     },
