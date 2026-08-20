@@ -1090,6 +1090,7 @@ export default {
   "sessionViewer.trace.turn.expand": "Expand turn",
   "sessionViewer.trace.turn.collapse": "Collapse turn",
   "sessionViewer.trace.turn.loadMore": "Load more events",
+  "sessionViewer.trace.turn.loadEarlier": "Load earlier turns",
   "sessionViewer.trace.turn.empty": "No events for this turn.",
   "sessionViewer.trace.live.subscribed": "Live",
   "sessionViewer.trace.live.connecting": "Connecting…",
