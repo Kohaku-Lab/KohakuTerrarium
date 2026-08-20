@@ -76,6 +76,19 @@ Shell executable overrides are checked in this order:
 - Running build/test commands
 - Package management operations
 
+## Long-Running Processes
+
+A server, watcher, or daemon may keep running indefinitely. Do not start one as
+ordinary background work if you expect its completion result to let you continue
+with later requests—the process may never finish.
+
+When later steps need to interact with the process, start it so the startup
+command can finish while the child process keeps running. Detach and redirect the
+process appropriately for the selected shell and platform, and return identifiers
+such as its PID and log path. Continue with follow-up commands in a later turn.
+The startup result alone does not prove that the service is ready; use an explicit
+health, port, or log check before relying on it.
+
 ## Output
 
 Returns combined stdout/stderr. Exit code is included in the result metadata.

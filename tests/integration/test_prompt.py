@@ -290,6 +290,10 @@ class TestPromptIntegration:
             assert "## Calling Functions" in system_prompt
             assert "[/function_name" in system_prompt
             assert "[/info]" in system_prompt
+            assert "does not immediately return a result" in system_prompt
+            assert "another turn to act" in system_prompt
+            assert "server, watcher, or daemon" in system_prompt
+            assert "controller round" not in system_prompt
 
             # 1d. The custom plugin's contribution is present, and placed
             # after the tool list (runtime plugin prose sits between tool
