@@ -108,6 +108,106 @@ describe("TraceTimeline hover", () => {
     wrapper.unmount()
   })
 
+  it("loads bucket tooltip metadata only when the bucket is pointed at", async () => {
+    let tooltipReads = 0
+    const tooltipModel = {
+      ...model,
+      spans: [
+        {
+          ...model.spans[0],
+          get turn() {
+            tooltipReads += 1
+            return 1
+          },
+          get type() {
+            tooltipReads += 1
+            return "tool_call"
+          },
+          get label() {
+            tooltipReads += 1
+            return "bash"
+          },
+        },
+      ],
+    }
+    const wrapper = mount(TraceTimeline, { props: { model: tooltipModel } })
+    const track = wrapper.find('[tabindex="0"]')
+    vi.spyOn(track.element, "getBoundingClientRect").mockReturnValue({
+      left: 10,
+      top: 20,
+      width: 200,
+      height: 72,
+      right: 210,
+      bottom: 92,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    })
+
+    const mountedReads = tooltipReads
+    const bucket = wrapper.find("[data-timeline-bucket]")
+    expect(tooltipReads).toBe(mountedReads)
+
+    bucket.element.dispatchEvent(
+      new MouseEvent("pointermove", { bubbles: true, clientX: 60, clientY: 60 }),
+    )
+    flushFrames()
+    await wrapper.vm.$nextTick()
+
+    expect(tooltipReads).toBeGreaterThan(mountedReads)
+    expect(bucket.attributes("title")).toContain("bash")
+    expect(bucket.attributes("title")).toContain("turn 1")
+
+    await wrapper.setProps({ mode: "time" })
+    expect(bucket.attributes("title")).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it("clamps tooltip lookup to a bucket widened by the minimum render width", async () => {
+    const pointModel = {
+      start: 0,
+      end: 10,
+      spans: [
+        {
+          start: 0,
+          end: 0,
+          index: 0,
+          turn: 1,
+          lane: 0,
+          type: "text",
+          label: "point",
+          isError: false,
+        },
+      ],
+      turnBoundaries: [],
+    }
+    const wrapper = mount(TraceTimeline, { props: { model: pointModel } })
+    const track = wrapper.find('[tabindex="0"]')
+    vi.spyOn(track.element, "getBoundingClientRect").mockReturnValue({
+      left: 10,
+      top: 20,
+      width: 100,
+      height: 72,
+      right: 110,
+      bottom: 92,
+      x: 10,
+      y: 20,
+      toJSON: () => ({}),
+    })
+
+    const bucket = wrapper.find("[data-timeline-bucket]")
+    bucket.element.dispatchEvent(
+      new MouseEvent("pointermove", { bubbles: true, clientX: 11.5, clientY: 29 }),
+    )
+    flushFrames()
+    await wrapper.vm.$nextTick()
+
+    expect(bucket.attributes("title")).toContain("point")
+
+    wrapper.unmount()
+  })
+
   it("keeps the hover line hidden when the model is not rendered", async () => {
     const wrapper = mount(TraceTimeline)
     const track = wrapper.find('[tabindex="0"]')

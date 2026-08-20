@@ -5,8 +5,9 @@ import {
   formatTimelineDuration,
   laneForType,
   normalizeSpan,
-  rasterizeTimelineSpans,
+  rasterizeTimelineGeometry,
   rasterizeTurnBoundaries,
+  summarizeTimelineColumn,
   traceTimelineFocus,
 } from "@/components/sessions/trace/traceTimeline"
 
@@ -132,14 +133,130 @@ describe("deriveTraceTimeline", () => {
   })
 })
 
-describe("rasterizeTimelineSpans", () => {
-  it("merges spans that occupy the same lane and pixel columns", () => {
-    const buckets = rasterizeTimelineSpans(
+describe("rasterizeTimelineGeometry", () => {
+  function referenceGeometry(spans, domain, columns) {
+    const cells = new Map()
+    const duration = domain.end - domain.start
+    for (const span of spans) {
+      let lane = cells.get(span.lane)
+      if (!lane) {
+        lane = Array(columns).fill(0)
+        cells.set(span.lane, lane)
+      }
+      for (let column = 0; column < columns; column += 1) {
+        const start = domain.start + (column / columns) * duration
+        const end = domain.start + ((column + 1) / columns) * duration
+        const point = span.start === span.end
+        const overlaps = point
+          ? span.start >= start &&
+            (span.start < end || (column === columns - 1 && span.start === end))
+          : span.end > start && span.start < end
+        if (overlaps) lane[column] = Math.max(lane[column], span.isError ? 2 : 1)
+      }
+    }
+    const runs = []
+    for (const [lane, states] of cells) {
+      let active = null
+      for (let column = 0; column < states.length; column += 1) {
+        const state = states[column]
+        if (!state) {
+          active = null
+          continue
+        }
+        const error = state === 2
+        if (active && active.error === error && active.col + active.spanCols === column) {
+          active.spanCols += 1
+          active.key = `${lane}:${active.col}:${column}`
+        } else {
+          active = { key: `${lane}:${column}:${column}`, lane, col: column, spanCols: 1, error }
+          runs.push(active)
+        }
+      }
+    }
+    return runs
+  }
+
+  it("matches a per-column geometry reference without carrying semantic metadata", () => {
+    const spans = [
+      { start: 0, end: 4, lane: 1, isError: false },
+      { start: 2, end: 6, lane: 1, isError: true },
+      { start: 5, end: 5, lane: 2, isError: false },
+      { start: 9, end: 10, lane: 3, isError: false },
+    ]
+    const domain = { start: 0, end: 10 }
+
+    expect(rasterizeTimelineGeometry(spans, domain, 10)).toEqual(
+      referenceGeometry(spans, domain, 10),
+    )
+  })
+
+  it("excludes spans that only touch the half-open domain boundary", () => {
+    const buckets = rasterizeTimelineGeometry(
+      [
+        { start: -1, end: 0, lane: 1, isError: true },
+        { start: 10, end: 11, lane: 1, isError: true },
+        { start: 0, end: 1, lane: 1, isError: false },
+      ],
+      { start: 0, end: 10 },
+      10,
+    )
+
+    expect(buckets).toEqual([{ key: "1:0:0", lane: 1, col: 0, spanCols: 1, error: false }])
+  })
+
+  it("keeps zero-width point spans on the domain endpoints", () => {
+    const buckets = rasterizeTimelineGeometry(
+      [
+        { start: 0, end: 0, lane: 1, isError: false },
+        { start: 10, end: 10, lane: 1, isError: false },
+      ],
+      { start: 0, end: 10 },
+      10,
+    )
+
+    expect(buckets.map((bucket) => bucket.col)).toEqual([0, 9])
+  })
+
+  it("never reads tooltip metadata while building geometry", () => {
+    const spans = Array.from({ length: 32 }, () => ({
+      start: 0,
+      end: 10,
+      lane: 1,
+      isError: false,
+      get turn() {
+        throw new Error("geometry read turn")
+      },
+      get type() {
+        throw new Error("geometry read type")
+      },
+      get label() {
+        throw new Error("geometry read label")
+      },
+    }))
+
+    expect(rasterizeTimelineGeometry(spans, { start: 0, end: 10 }, 256)).toEqual([
+      { key: "1:0:255", lane: 1, col: 0, spanCols: 256, error: false },
+    ])
+  })
+
+  it("keeps projected long spans as one multi-column bucket", () => {
+    expect(
+      rasterizeTimelineGeometry(
+        [{ start: 2, end: 7, lane: 1, isError: false }],
+        { start: 0, end: 10 },
+        10,
+      ),
+    ).toEqual([{ key: "1:2:6", lane: 1, col: 2, spanCols: 5, error: false }])
+  })
+})
+
+describe("summarizeTimelineColumn", () => {
+  it("summarizes only spans overlapping the requested lane and column", () => {
+    const summary = summarizeTimelineColumn(
       [
         {
           start: 1,
-          end: 2,
-          index: 1,
+          end: 4,
           turn: 1,
           lane: 2,
           type: "tool_call",
@@ -147,9 +264,8 @@ describe("rasterizeTimelineSpans", () => {
           isError: false,
         },
         {
-          start: 1.1,
-          end: 1.9,
-          index: 2,
+          start: 2,
+          end: 3,
           turn: 2,
           lane: 2,
           type: "tool_result",
@@ -157,10 +273,9 @@ describe("rasterizeTimelineSpans", () => {
           isError: true,
         },
         {
-          start: 1.1,
-          end: 1.9,
-          index: 3,
-          turn: 2,
+          start: 2,
+          end: 3,
+          turn: 3,
           lane: 3,
           type: "subagent_call",
           label: "explore",
@@ -169,140 +284,65 @@ describe("rasterizeTimelineSpans", () => {
       ],
       { start: 0, end: 10 },
       10,
+      2,
+      2,
     )
 
-    expect(buckets).toHaveLength(2)
-    expect(buckets[0]).toMatchObject({
-      key: "2:1:1",
-      lane: 2,
-      col: 1,
-      spanCols: 1,
+    expect(summary).toEqual({
       count: 2,
       error: true,
       turns: [1, 2],
       types: ["tool_call", "tool_result"],
       labels: ["bash", "read"],
       minStart: 1,
-      maxEnd: 2,
+      maxEnd: 4,
     })
-    expect(buckets[1]).toMatchObject({ key: "3:1:1", lane: 3, count: 1 })
   })
 
-  it("excludes spans that only touch the half-open domain boundary", () => {
-    const buckets = rasterizeTimelineSpans(
-      [
-        {
-          start: -1,
-          end: 0,
-          index: 1,
-          turn: 1,
-          lane: 1,
-          type: "text",
-          label: "before",
-          isError: true,
-        },
-        {
-          start: 10,
-          end: 11,
-          index: 2,
-          turn: 2,
-          lane: 1,
-          type: "text",
-          label: "after",
-          isError: true,
-        },
-        {
-          start: 0,
-          end: 1,
-          index: 3,
-          turn: 3,
-          lane: 1,
-          type: "text",
-          label: "inside",
-          isError: false,
-        },
-      ],
-      { start: 0, end: 10 },
-      10,
-    )
+  it("uses half-open columns while keeping point spans on the endpoints", () => {
+    const spans = [
+      { start: -1, end: 0, turn: 1, lane: 1, type: "before", label: "before", isError: true },
+      { start: 0, end: 0, turn: 2, lane: 1, type: "point", label: "first", isError: false },
+      { start: 1, end: 2, turn: 3, lane: 1, type: "inside", label: "inside", isError: false },
+      { start: 10, end: 10, turn: 4, lane: 1, type: "point", label: "last", isError: false },
+      { start: 10, end: 11, turn: 5, lane: 1, type: "after", label: "after", isError: true },
+    ]
+    const domain = { start: 0, end: 10 }
 
-    expect(buckets).toHaveLength(1)
-    expect(buckets[0]).toMatchObject({ count: 1, error: false, labels: ["inside"] })
+    expect(summarizeTimelineColumn(spans, domain, 10, 1, 0)).toMatchObject({
+      count: 1,
+      labels: ["first"],
+      error: false,
+    })
+    expect(summarizeTimelineColumn(spans, domain, 10, 1, 1)).toMatchObject({
+      count: 1,
+      labels: ["inside"],
+      error: false,
+    })
+    expect(summarizeTimelineColumn(spans, domain, 10, 1, 9)).toMatchObject({
+      count: 1,
+      labels: ["last"],
+      error: false,
+    })
   })
 
-  it("keeps zero-width point spans on the domain endpoints", () => {
-    const buckets = rasterizeTimelineSpans(
-      [
-        {
-          start: 0,
-          end: 0,
-          index: 1,
-          turn: 1,
-          lane: 1,
-          type: "text",
-          label: "first",
-          isError: false,
-        },
-        {
-          start: 10,
-          end: 10,
-          index: 2,
-          turn: 2,
-          lane: 1,
-          type: "text",
-          label: "last",
-          isError: false,
-        },
-      ],
-      { start: 0, end: 10 },
-      10,
-    )
-
-    expect(buckets).toHaveLength(2)
-    expect(buckets.map((bucket) => bucket.col)).toEqual([0, 9])
-  })
-
-  it("rasterizes thousands of overlapping spans without quadratic metadata scans", () => {
-    const spans = Array.from({ length: 2000 }, (_, index) => ({
+  it("keeps only the first five unique tooltip values in span order", () => {
+    const spans = Array.from({ length: 8 }, (_, index) => ({
       start: 0,
       end: 10,
-      index,
       turn: index + 1,
       lane: 1,
       type: `type-${index}`,
       label: `label-${index}`,
       isError: false,
     }))
-    const started = performance.now()
 
-    const buckets = rasterizeTimelineSpans(spans, { start: 0, end: 10 }, 400)
-
-    expect(performance.now() - started).toBeLessThan(1000)
-    expect(buckets).toHaveLength(1)
-    expect(buckets[0]).toMatchObject({ count: 2000, spanCols: 400 })
-  })
-
-  it("keeps projected long spans as one multi-column bucket", () => {
-    const buckets = rasterizeTimelineSpans(
-      [
-        {
-          start: 2,
-          end: 7,
-          index: 1,
-          turn: 1,
-          lane: 1,
-          type: "processing_start",
-          label: "",
-          isError: false,
-        },
-      ],
-      { start: 0, end: 10 },
-      10,
-    )
-
-    expect(buckets).toEqual([
-      expect.objectContaining({ key: "1:2:6", col: 2, spanCols: 5, count: 1 }),
-    ])
+    expect(summarizeTimelineColumn(spans, { start: 0, end: 10 }, 10, 1, 4)).toMatchObject({
+      count: 8,
+      turns: [1, 2, 3, 4, 5],
+      types: ["type-0", "type-1", "type-2", "type-3", "type-4"],
+      labels: ["label-0", "label-1", "label-2", "label-3", "label-4"],
+    })
   })
 })
 
