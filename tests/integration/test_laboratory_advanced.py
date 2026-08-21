@@ -29,6 +29,7 @@ Modules targeted (gap-filling):
 
 import asyncio
 import base64
+from pathlib import Path
 
 import pytest
 
@@ -66,6 +67,7 @@ from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
+    ToolConfig,
     ToolResult,
 )
 from kohakuterrarium.parsing import ToolCallEvent
@@ -103,6 +105,28 @@ def _make_agent_cfg(name: str, tmp_path, **overrides) -> AgentConfig:
     for k, v in overrides.items():
         setattr(cfg, k, v)
     return cfg
+
+
+class _BashOutputTool(BaseTool):
+    """Expose a real raw-output file through Bash's executor contract."""
+
+    def __init__(self, raw_path: Path):
+        super().__init__(ToolConfig(max_output=1024))
+        self.raw_path = raw_path
+
+    @property
+    def tool_name(self) -> str:
+        return "bash"
+
+    @property
+    def description(self) -> str:
+        return "Return output captured in a raw Bash file."
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(
+            output="complete bash output",
+            metadata={"raw_output_path": str(self.raw_path)},
+        )
 
 
 # ── Tool fixtures used across workflows ──────────────────────────────
@@ -606,8 +630,6 @@ class TestLaboratoryToolOutputWorkflow:
         assert norm_big.metadata["omitted_text_bytes"] == 150
 
         # normalize_tool_output WITH artifact store → image materialized
-        from pathlib import Path
-
         class _ArtifactStore:
             def __init__(self, root: Path):
                 self.session_id = "sess-1"
@@ -664,6 +686,15 @@ class TestLaboratoryToolOutputWorkflow:
             assert png_b64 not in convo_text, "raw base64 leaked into model context!"
             # The snapshot text result IS visible
             assert "snapshot ready" in convo_text
+
+            raw_path = tmp_path / "complete-bash.log"
+            raw_path.write_text("complete bash output", encoding="utf-8")
+            agent.executor.register_tool(_BashOutputTool(raw_path))
+            job_id = await agent.executor.submit("bash", {}, is_direct=True)
+            bash_result = await agent.executor.wait_for(job_id)
+            assert bash_result.output == "complete bash output"
+            assert raw_path.exists() is False
+            assert "raw_output_path" not in bash_result.metadata
         finally:
             await agent.stop()
 
