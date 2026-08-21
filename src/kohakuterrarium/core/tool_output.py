@@ -8,6 +8,7 @@ import base64
 import re
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.core.constants import TOOL_OUTPUT_PREVIEW_CHARS
@@ -49,6 +50,21 @@ class NormalizedToolOutput:
     @property
     def text(self) -> str:
         return self.stats.text
+
+
+def discard_raw_output_file(metadata: dict[str, Any]) -> None:
+    """Remove a complete raw-output file without changing the tool result."""
+    raw_output_path = metadata.pop("raw_output_path", None)
+    if not raw_output_path:
+        return
+    try:
+        Path(str(raw_output_path)).unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning(
+            "Failed to remove complete raw tool output file",
+            file_path=str(raw_output_path),
+            error=str(e),
+        )
 
 
 def truncate_text_utf8(
