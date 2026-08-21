@@ -1,7 +1,10 @@
 """Guarded file creation and replacement."""
 
 import os
+import secrets
+import stat
 import time
+from pathlib import Path
 from typing import Any
 
 import aiofiles
@@ -63,13 +66,21 @@ class WriteTool(BaseTool):
         if msg:
             return ToolResult(error=msg)
 
+        temp_path: Path | None = None
         try:
             file_path.parent.mkdir(parents=True, exist_ok=True)
 
             exists = file_path.exists()
+            existing_mode = stat.S_IMODE(file_path.stat().st_mode) if exists else None
 
-            async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
+            temp_path = file_path.parent / f".kt-write-{secrets.token_hex(12)}.tmp"
+            async with aiofiles.open(temp_path, "x", encoding="utf-8") as f:
                 await f.write(content)
+
+            if existing_mode is not None:
+                os.chmod(temp_path, existing_mode)
+            os.replace(temp_path, file_path)
+            temp_path = None
 
             action = "Updated" if exists else "Created"
             lines = content.count("\n") + 1 if content else 0
@@ -107,3 +118,15 @@ class WriteTool(BaseTool):
         except Exception as e:
             logger.error("Write failed", error=str(e))
             return ToolResult(error=str(e))
+        finally:
+            if temp_path is not None:
+                try:
+                    temp_path.unlink()
+                except FileNotFoundError:
+                    pass
+                except OSError as e:
+                    logger.warning(
+                        "Failed to remove temporary write file",
+                        file_path=str(temp_path),
+                        error=str(e),
+                    )
