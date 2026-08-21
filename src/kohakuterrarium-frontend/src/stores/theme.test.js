@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 vi.mock("@/utils/api", () => ({
   settingsAPI: {
@@ -8,6 +8,8 @@ vi.mock("@/utils/api", () => ({
   },
 }))
 
+import { settingsAPI } from "@/utils/api"
+import { _resetUIPrefsForTests, ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 import { DEFAULT_READING_SIZE, READING_SIZES, useThemeStore } from "./theme"
 
 const READING_SIZE_KEY = "kt-reading-size"
@@ -24,6 +26,11 @@ function createStorage() {
 
 describe("theme reading size", () => {
   beforeEach(() => {
+    vi.useFakeTimers()
+    _resetUIPrefsForTests()
+    vi.clearAllMocks()
+    settingsAPI.getUIPrefs.mockResolvedValue({ values: {} })
+    settingsAPI.updateUIPrefs.mockImplementation(async (values) => ({ values }))
     Object.defineProperty(globalThis, "localStorage", {
       configurable: true,
       value: createStorage(),
@@ -33,6 +40,10 @@ describe("theme reading size", () => {
     localStorage.clear()
     document.documentElement.removeAttribute("data-reading-size")
     document.documentElement.style.zoom = ""
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
   })
 
   it("defaults to the unchanged interface size and applies it independently from UI zoom", () => {
@@ -64,5 +75,75 @@ describe("theme reading size", () => {
 
     expect(theme.readingSize).toBe(DEFAULT_READING_SIZE)
     expect(document.documentElement.dataset.readingSize).toBe(DEFAULT_READING_SIZE)
+  })
+
+  it("applies a backend reading size that arrives after the boot timeout", async () => {
+    let resolvePrefs
+    settingsAPI.getUIPrefs.mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePrefs = resolve)),
+    )
+
+    const boot = ensureUIPrefsLoaded({ timeoutMs: 2500 })
+    await vi.advanceTimersByTimeAsync(2500)
+    await boot
+
+    const theme = useThemeStore()
+    theme.init()
+    resolvePrefs({ values: { [READING_SIZE_KEY]: "larger" } })
+    await vi.runAllTimersAsync()
+
+    expect(theme.readingSize).toBe("larger")
+    expect(document.documentElement.dataset.readingSize).toBe("larger")
+    expect(localStorage.getItem(READING_SIZE_KEY)).toBe("larger")
+    expect(settingsAPI.updateUIPrefs).not.toHaveBeenCalledWith(
+      expect.objectContaining({ [READING_SIZE_KEY]: DEFAULT_READING_SIZE }),
+    )
+  })
+
+  it("keeps a user reading-size change made while backend preferences load", async () => {
+    let resolvePrefs
+    settingsAPI.getUIPrefs.mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePrefs = resolve)),
+    )
+
+    const boot = ensureUIPrefsLoaded({ timeoutMs: 2500 })
+    await vi.advanceTimersByTimeAsync(2500)
+    await boot
+
+    const theme = useThemeStore()
+    theme.init()
+    theme.setReadingSize("large")
+    resolvePrefs({ values: { [READING_SIZE_KEY]: "larger" } })
+    await vi.runAllTimersAsync()
+
+    expect(theme.readingSize).toBe("large")
+    expect(document.documentElement.dataset.readingSize).toBe("large")
+    expect(localStorage.getItem(READING_SIZE_KEY)).toBe("large")
+    expect(settingsAPI.updateUIPrefs).toHaveBeenCalledWith(
+      expect.objectContaining({ [READING_SIZE_KEY]: "large" }),
+    )
+  })
+
+  it("normalizes an unsupported backend reading size that arrives late", async () => {
+    let resolvePrefs
+    settingsAPI.getUIPrefs.mockImplementationOnce(
+      () => new Promise((resolve) => (resolvePrefs = resolve)),
+    )
+
+    const boot = ensureUIPrefsLoaded({ timeoutMs: 2500 })
+    await vi.advanceTimersByTimeAsync(2500)
+    await boot
+
+    const theme = useThemeStore()
+    theme.init()
+    resolvePrefs({ values: { [READING_SIZE_KEY]: "huge" } })
+    await vi.runAllTimersAsync()
+
+    expect(theme.readingSize).toBe(DEFAULT_READING_SIZE)
+    expect(document.documentElement.dataset.readingSize).toBe(DEFAULT_READING_SIZE)
+    expect(localStorage.getItem(READING_SIZE_KEY)).toBe(DEFAULT_READING_SIZE)
+    expect(settingsAPI.updateUIPrefs).toHaveBeenCalledWith(
+      expect.objectContaining({ [READING_SIZE_KEY]: DEFAULT_READING_SIZE }),
+    )
   })
 })

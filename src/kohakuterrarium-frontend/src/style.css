@@ -175,7 +175,7 @@ body {
   textarea,
   select,
   [contenteditable="true"] {
-    font-size: 16px !important;
+    font-size: max(16px, 1rem) !important;
   }
 
   /* Bump the canonical text-button utilities (defined in uno.config.js)

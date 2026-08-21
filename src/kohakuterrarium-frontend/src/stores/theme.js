@@ -1,4 +1,9 @@
-import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+import {
+  ensureUIPrefsLoaded,
+  getHybridPrefSync,
+  readLocalPref,
+  setHybridPref,
+} from "@/utils/uiPrefs"
 
 export const MIN_UI_ZOOM = 0.6
 export const MAX_UI_ZOOM = 2
@@ -30,6 +35,7 @@ export const useThemeStore = defineStore("theme", {
     ),
     readingSize: normalizeReadingSize(getHybridPrefSync("kt-reading-size", DEFAULT_READING_SIZE)),
     _isMobile: false,
+    _readingSizeChanged: false,
   }),
 
   getters: {
@@ -68,6 +74,7 @@ export const useThemeStore = defineStore("theme", {
     },
 
     setReadingSize(value) {
+      this._readingSizeChanged = true
       this.readingSize = normalizeReadingSize(value)
       setHybridPref("kt-reading-size", this.readingSize)
       this.applyReadingSize()
@@ -114,12 +121,27 @@ export const useThemeStore = defineStore("theme", {
         getHybridPrefSync("kt-mobile-zoom", DEFAULT_MOBILE_ZOOM),
         DEFAULT_MOBILE_ZOOM,
       )
+      const localReadingSize = readLocalPref("kt-reading-size")
       this.readingSize = normalizeReadingSize(
         getHybridPrefSync("kt-reading-size", DEFAULT_READING_SIZE),
       )
+      this._readingSizeChanged = false
       setHybridPref("kt-desktop-zoom", this.desktopZoom)
       setHybridPref("kt-mobile-zoom", this.mobileZoom)
-      setHybridPref("kt-reading-size", this.readingSize)
+      if (localReadingSize != null) {
+        setHybridPref("kt-reading-size", this.readingSize)
+      } else {
+        void ensureUIPrefsLoaded().then(() => {
+          if (this._readingSizeChanged) return
+          const loadedReadingSize = getHybridPrefSync("kt-reading-size", null)
+          if (loadedReadingSize == null) return
+          this.readingSize = normalizeReadingSize(loadedReadingSize)
+          if (this.readingSize !== loadedReadingSize) {
+            setHybridPref("kt-reading-size", this.readingSize)
+          }
+          this.applyReadingSize()
+        })
+      }
       if (storedTheme !== "system") {
         setHybridPref("theme", this.dark ? "dark" : "light")
       }
