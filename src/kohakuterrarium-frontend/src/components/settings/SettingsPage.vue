@@ -414,7 +414,7 @@
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
               <div>
                 <div class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.readingSize") }}</div>
-                <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.readingSizeHint") }}</div>
+                <div class="kt-text-caption text-warm-400 mt-1">{{ t("settings.prefs.readingSizeHint") }}</div>
               </div>
               <el-segmented :model-value="theme.readingSize" :options="readingSizeOptions" size="small" @change="theme.setReadingSize" />
             </div>
