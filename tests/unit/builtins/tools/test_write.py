@@ -5,6 +5,8 @@ import stat
 import time
 from pathlib import Path
 
+import pytest
+
 from kohakuterrarium.builtins.tools import write as write_module
 from kohakuterrarium.builtins.tools.write import WriteTool
 from kohakuterrarium.modules.tool.base import ToolContext
@@ -62,6 +64,9 @@ class TestWriteToolAtomicReplace:
         assert path.read_text(encoding="utf-8") == "original"
         assert list(tmp_path.glob(".kt-write-*.tmp")) == []
 
+    @pytest.mark.skipif(
+        os.name == "nt", reason="Windows does not preserve POSIX permission bits"
+    )
     async def test_existing_permission_mode_is_preserved(self, tmp_path):
         path = tmp_path / "target.txt"
         path.write_text("original", encoding="utf-8")
