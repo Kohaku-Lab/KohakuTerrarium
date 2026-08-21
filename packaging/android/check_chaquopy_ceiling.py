@@ -222,7 +222,6 @@ URL_REF_PACKAGES: frozenset[str] = frozenset(
         "pydantic-core",
         "safetensors",
         "tokenizers",
-        "primp",
         # Recent OpenAI and Anthropic packages require this Rust extension.
         "jiter",
         # jsonschema pulls this Rust extension through referencing.
@@ -245,6 +244,10 @@ DROPPED_PACKAGES: frozenset[str] = frozenset(
         "uvloop",
         "httptools",
         "watchfiles",
+        # ddgs falls back to the framework's pure-httpx DDG scraper on Android;
+        # primp's Rust runtime hard-crashes the Android host process.
+        "ddgs",
+        "primp",
         # hf-xet: HuggingFace LFS transfer accelerator (Rust+PyO3).
         # huggingface_hub pulls it via a ``platform_machine ==
         # 'aarch64' ...`` marker which is ACTIVE on Android.  hf-xet
