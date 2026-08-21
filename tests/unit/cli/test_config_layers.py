@@ -91,6 +91,12 @@ class TestEnvLayer:
         assert cfg["http"]["port"] == 9999
         assert isinstance(cfg["http"]["port"], int)
 
+    def test_heartbeat_interval_always_coerces_to_float(self, monkeypatch):
+        monkeypatch.setenv("KT_HEARTBEAT_INTERVAL", "5")
+        cfg = load_layered_config("client")
+        assert cfg["heartbeat_interval"] == 5.0
+        assert isinstance(cfg["heartbeat_interval"], float)
+
 
 class TestCliLayer:
     def test_cli_overrides_env(self, monkeypatch):
