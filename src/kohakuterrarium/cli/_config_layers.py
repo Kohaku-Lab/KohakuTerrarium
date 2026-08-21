@@ -90,7 +90,7 @@ _ENV_MAP: dict[str, dict[str, tuple[str, ...]]] = {
 }
 
 
-_INT_KEYS = {("http", "port"), ("heartbeat_interval",)}
+_INT_KEYS = {("http", "port")}
 _FLOAT_KEYS = {("heartbeat_interval",)}
 
 
