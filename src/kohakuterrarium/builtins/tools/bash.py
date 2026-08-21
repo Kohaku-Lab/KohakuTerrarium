@@ -145,7 +145,7 @@ def _remove_output_file(path: Path | None) -> None:
         path.unlink(missing_ok=True)
     except OSError as e:
         logger.warning(
-            "Failed to remove cancelled Bash output file",
+            "Failed to remove unused Bash output file",
             file_path=str(path),
             error=str(e),
         )
@@ -488,9 +488,14 @@ class ShellTool(BaseTool):
                 ),
             )
 
-        except FileNotFoundError:
-            return ToolResult(error=f"Shell not found: {resolved_exe or spec_exe}")
-        except PermissionError:
+        except (FileNotFoundError, PermissionError) as e:
+            if output_handle is not None:
+                output_handle.close()
+                output_handle = None
+            _remove_output_file(output_path)
+            output_path = None
+            if isinstance(e, FileNotFoundError):
+                return ToolResult(error=f"Shell not found: {resolved_exe or spec_exe}")
             return ToolResult(error="Permission denied")
         except asyncio.CancelledError:
             if output_handle is not None:

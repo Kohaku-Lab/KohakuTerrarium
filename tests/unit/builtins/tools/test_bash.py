@@ -138,3 +138,34 @@ class TestBashOutputFileLifecycle:
             await task
         assert process_terminated.is_set()
         assert output_path.exists() is False
+
+    @pytest.mark.parametrize(
+        ("spawn_error", "expected_error"),
+        [
+            (FileNotFoundError, "Shell not found: /fake/sh"),
+            (PermissionError, "Permission denied"),
+        ],
+    )
+    async def test_spawn_failure_removes_output_file(
+        self, tmp_path, monkeypatch, spawn_error, expected_error
+    ):
+        output_path = tmp_path / "bash.log"
+
+        async def _create_subprocess(*_args, **_kwargs):
+            raise spawn_error
+
+        def _create_output_file():
+            return output_path, output_path.open("w+b")
+
+        monkeypatch.setattr(
+            bash_module, "_resolve_shell_executable", lambda _shell: "/fake/sh"
+        )
+        monkeypatch.setattr(
+            bash_module.asyncio, "create_subprocess_exec", _create_subprocess
+        )
+        monkeypatch.setattr(bash_module, "_create_output_file", _create_output_file)
+
+        result = await ShellTool()._execute({"command": "echo", "type": "sh"})
+
+        assert result.error == expected_error
+        assert output_path.exists() is False
