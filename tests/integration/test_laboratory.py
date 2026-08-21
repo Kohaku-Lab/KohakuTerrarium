@@ -875,6 +875,7 @@ class TestLaboratoryDeepWorkflows:
                 artifact.exists()
             ), f"write tool didn't create file; chunks={chunks_t2!r}"
             assert artifact.read_text(encoding="utf-8").strip() == ("body-from-tool")
+            assert list(tmp_path.glob(".kt-write-*.tmp")) == []
 
             # Turn 3: continue conversation — exercises conversation
             # state across multiple turns.
