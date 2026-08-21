@@ -138,6 +138,19 @@ def _read_output_file(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
 
+def _remove_output_file(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as e:
+        logger.warning(
+            "Failed to remove cancelled Bash output file",
+            file_path=str(path),
+            error=str(e),
+        )
+
+
 def _get_available_shells() -> list[str]:
     """Return shell types whose executable can be resolved (cached)."""
     global _AVAILABLE_SHELLS
@@ -480,6 +493,11 @@ class ShellTool(BaseTool):
         except PermissionError:
             return ToolResult(error="Permission denied")
         except asyncio.CancelledError:
+            if output_handle is not None:
+                output_handle.close()
+                output_handle = None
+            _remove_output_file(output_path)
+            output_path = None
             logger.info("Command cancelled", shell=shell_type, command=command[:100])
             raise
         except Exception as e:
