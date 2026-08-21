@@ -109,6 +109,31 @@ class _SlowTool(BaseTool):
         return ToolResult(output="done")
 
 
+class _BashFileTool(BaseTool):
+    """Return Bash-shaped output metadata without spawning a subprocess."""
+
+    def __init__(self, path: Path, output: str, *, max_output: int, **result_kwargs):
+        super().__init__(ToolConfig(max_output=max_output))
+        self.path = path
+        self.output = output
+        self.result_kwargs = result_kwargs
+
+    @property
+    def tool_name(self):
+        return "bash"
+
+    @property
+    def description(self):
+        return "bash-shaped test tool"
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(
+            output=self.output,
+            metadata={"raw_output_path": str(self.path)},
+            **self.result_kwargs,
+        )
+
+
 # ── basic submit / wait_for ──────────────────────────────────────
 
 
@@ -549,6 +574,89 @@ class TestOutputNormalisation:
             "Full output saved to /tmp/kohakuterrarium-bash/bash_1.log" in result.output
         )
         assert "use read to view it" in result.output
+
+    async def test_complete_bash_output_file_is_removed(self, tmp_path):
+        raw_path = tmp_path / "bash.log"
+        raw_path.write_text("complete output", encoding="utf-8")
+        ex = Executor()
+        ex.register_tool(
+            _BashFileTool(raw_path, "complete output", max_output=1024, exit_code=0)
+        )
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.output == "complete output"
+        assert result.metadata["truncated"] is False
+        assert "raw_output_path" not in result.metadata
+        assert raw_path.exists() is False
+
+    @pytest.mark.parametrize(
+        ("exit_code", "error"),
+        [
+            (7, "Command exited with code 7"),
+            (-1, "Command timed out after 1s"),
+        ],
+    )
+    async def test_complete_failed_bash_output_file_is_removed(
+        self, tmp_path, exit_code, error
+    ):
+        raw_path = tmp_path / "bash.log"
+        raw_path.write_text("failure output", encoding="utf-8")
+        ex = Executor()
+        ex.register_tool(
+            _BashFileTool(
+                raw_path,
+                "failure output",
+                max_output=1024,
+                exit_code=exit_code,
+                error=error,
+            )
+        )
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.error == error
+        assert result.exit_code == exit_code
+        assert "raw_output_path" not in result.metadata
+        assert raw_path.exists() is False
+
+    async def test_truncated_bash_output_file_is_retained(self, tmp_path):
+        raw_path = tmp_path / "bash.log"
+        full_output = "x" * 100
+        raw_path.write_text(full_output, encoding="utf-8")
+        ex = Executor()
+        ex.register_tool(_BashFileTool(raw_path, full_output, max_output=10))
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.metadata["truncated"] is True
+        assert result.metadata["raw_output_path"] == str(raw_path)
+        assert raw_path.read_text(encoding="utf-8") == full_output
+
+    async def test_bash_cleanup_failure_does_not_change_result(
+        self, tmp_path, monkeypatch
+    ):
+        raw_path = tmp_path / "bash.log"
+        raw_path.write_text("complete output", encoding="utf-8")
+        original_unlink = Path.unlink
+
+        def _fail_raw_unlink(path, *args, **kwargs):
+            if path == raw_path:
+                raise OSError("busy")
+            return original_unlink(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "unlink", _fail_raw_unlink)
+        ex = Executor()
+        ex.register_tool(_BashFileTool(raw_path, "complete output", max_output=1024))
+
+        result = await ex.wait_for(await ex.submit("bash", {}))
+
+        assert result.output == "complete output"
+        assert result.error is None
+        assert result.exit_code is None
+        assert "raw_output_path" not in result.metadata
+        assert raw_path.exists() is True
+        original_unlink(raw_path)
 
 
 # ── pending / running / task accessors ───────────────────────────

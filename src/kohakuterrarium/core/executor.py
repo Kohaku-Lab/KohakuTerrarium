@@ -13,7 +13,10 @@ from kohakuterrarium.core.job import (
     JobType,
     generate_job_id,
 )
-from kohakuterrarium.core.tool_output import normalize_tool_output
+from kohakuterrarium.core.tool_output import (
+    discard_raw_output_file,
+    normalize_tool_output,
+)
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext, ToolResult
 from kohakuterrarium.parsing.events import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -354,6 +357,8 @@ class Executor:
             )
             metadata = dict(result_metadata)
             metadata.update(normalized.metadata)
+            if tool.tool_name == "bash" and not normalized.metadata.get("truncated"):
+                discard_raw_output_file(metadata)
 
             job_result = JobResult(
                 job_id=job_id,
