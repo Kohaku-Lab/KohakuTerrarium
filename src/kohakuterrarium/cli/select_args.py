@@ -37,7 +37,8 @@ def add_run_like_args(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Override LLM profile (e.g., gpt-5.4, gemini, claude-sonnet-4.6)",
     )
-    parser.add_argument(
+    session_group = parser.add_mutually_exclusive_group()
+    session_group.add_argument(
         "--session",
         nargs="?",
         const="__auto__",
@@ -47,7 +48,7 @@ def add_run_like_args(parser: argparse.ArgumentParser) -> None:
             "Use --no-session to disable."
         ),
     )
-    parser.add_argument(
+    session_group.add_argument(
         "--no-session",
         action="store_true",
         help="Disable session persistence",
