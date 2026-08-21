@@ -333,7 +333,7 @@ html.dark .md-content .code-block {
   padding: 0.35em 0.8em;
   background: rgba(255, 255, 255, 0.05);
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  font-size: 0.75em;
+  font-size: var(--kt-chat-code-meta-size);
   color: #a0a0b8;
   font-family: var(--font-mono);
 }
@@ -347,7 +347,7 @@ html.dark .md-content .code-block {
   color: #c0c0d0;
   padding: 0.15em 0.6em;
   border-radius: 4px;
-  font-size: 0.85em;
+  font-size: inherit;
   cursor: pointer;
   font-family: inherit;
   transition:
@@ -369,10 +369,13 @@ html.dark .md-content .code-block {
   padding: 0.8em 1em;
   overflow-x: auto;
   margin: 0;
-  font-size: 0.85em;
+  font-size: var(--kt-chat-code-size);
+  line-height: var(--kt-chat-code-line-height);
   border-radius: 0;
 }
 .md-content .code-block pre.hljs code {
+  font-size: inherit;
+  line-height: inherit;
   background: none;
   padding: 0;
   border-radius: 0;
@@ -386,7 +389,8 @@ html.dark .md-content .code-block {
   border-radius: 8px;
   overflow-x: auto;
   margin: 0.5em 0;
-  font-size: 0.85em;
+  font-size: var(--kt-chat-code-size);
+  line-height: var(--kt-chat-code-line-height);
 }
 html.dark .md-content > pre.hljs {
   background: #0d0d1a;
