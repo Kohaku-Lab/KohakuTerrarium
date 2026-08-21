@@ -411,6 +411,13 @@
                 <el-option v-for="option in localeOptions" :key="option.value" :label="option.label" :value="option.value" />
               </el-select>
             </div>
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
+              <div>
+                <div class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.readingSize") }}</div>
+                <div class="kt-text-caption text-warm-400 mt-1">{{ t("settings.prefs.readingSizeHint") }}</div>
+              </div>
+              <el-segmented :model-value="theme.readingSize" :options="readingSizeOptions" size="small" @change="theme.setReadingSize" />
+            </div>
             <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-2">
               <div>
                 <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.desktopZoom") }}</span>
@@ -463,7 +470,7 @@ import { useDensity } from "@/composables/useDensity"
 import { useAuthStore } from "@/stores/auth"
 import { useClusterStore } from "@/stores/cluster"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
-import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, useThemeStore } from "@/stores/theme"
+import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, MAX_UI_ZOOM, MIN_UI_ZOOM, READING_SIZES, useThemeStore } from "@/stores/theme"
 import { useI18n } from "@/utils/i18n"
 
 const cluster = useClusterStore()
@@ -480,6 +487,13 @@ const localeOptions = computed(() =>
   SUPPORTED_LOCALES.map((value) => ({
     value,
     label: LOCALE_DISPLAY_NAMES[value] || value,
+  })),
+)
+
+const readingSizeOptions = computed(() =>
+  READING_SIZES.map((value) => ({
+    value,
+    label: t(`settings.prefs.readingSize.${value}`),
   })),
 )
 
