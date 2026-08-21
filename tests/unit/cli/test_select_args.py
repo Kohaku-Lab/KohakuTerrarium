@@ -3,6 +3,8 @@
 import argparse
 import sys
 
+import pytest
+
 from kohakuterrarium.cli.select_args import (
     add_resume_like_args,
     add_run_like_args,
@@ -56,6 +58,11 @@ class TestAddRunLikeArgs:
         assert _parser().parse_args(["--session"]).session == "__auto__"
         ns = _parser().parse_args(["--session", "/tmp/x.kohakutr"])
         assert ns.session == "/tmp/x.kohakutr"
+
+    def test_session_and_no_session_are_mutually_exclusive(self):
+        with pytest.raises(SystemExit) as exc_info:
+            _parser().parse_args(["--no-session", "--session", "/tmp/x.kohakutr"])
+        assert exc_info.value.code == 2
 
 
 class TestParseStandaloneArgs:

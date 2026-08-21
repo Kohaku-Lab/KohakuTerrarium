@@ -85,14 +85,15 @@ def _build_parser() -> argparse.ArgumentParser:
             "(custom, package, stdout, plain), off=never, on=always"
         ),
     )
-    run_parser.add_argument(
+    session_group = run_parser.add_mutually_exclusive_group()
+    session_group.add_argument(
         "--session",
         nargs="?",
         const="__auto__",
         default="__auto__",
         help="Session file path (default: auto in ~/.kohakuterrarium/sessions/). Use --no-session to disable.",
     )
-    run_parser.add_argument(
+    session_group.add_argument(
         "--no-session",
         action="store_true",
         help="Disable session persistence",
