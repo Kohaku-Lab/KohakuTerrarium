@@ -256,8 +256,9 @@ min_os_version = "26"
 # targetSdk/compileSdk 35 (Android 15): the Briefcase template references an
 # API-35 attribute, and 35 is the Play Store baseline for new uploads.
 target_os_version = "35"
-# Version code encodes <major><MM><NN><PP>: 1.5.0 → 1_05_00_00.
-version_code = "10500000"
+# Version code encodes <major><minor:02><patch:02><build:03>:
+# 2.1.0 build 0 -> 2_01_00_000.
+version_code = "20100000"
 # arm64-v8a only — covers ~99% of physical devices; x86_64 also tripped a
 # Chaquopy cross-ABI URL-ref resolution quirk.
 android_abis = ["arm64-v8a"]
