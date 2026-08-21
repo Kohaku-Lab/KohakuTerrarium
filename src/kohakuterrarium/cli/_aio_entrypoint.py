@@ -45,7 +45,14 @@ def _resolve_token(config_dir: Path) -> str:
     """
     token_file = os.environ.get("KT_HOST_TOKEN_FILE", "")
     if token_file and Path(token_file).is_file():
-        return Path(token_file).read_text(encoding="utf-8").strip()
+        file_token = Path(token_file).read_text(encoding="utf-8").strip()
+        if file_token:
+            return file_token
+        print(
+            f"[kt-aio] Ignoring empty KT_HOST_TOKEN_FILE: {token_file}",
+            file=sys.stderr,
+            flush=True,
+        )
 
     env_token = os.environ.get("KT_HOST_TOKEN", "")
     if env_token:
