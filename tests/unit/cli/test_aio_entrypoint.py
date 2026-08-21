@@ -19,8 +19,31 @@ class TestResolveToken:
         token_file = tmp_path / "tok"
         token_file.write_text("filetoken\n", encoding="utf-8")
         monkeypatch.setenv("KT_HOST_TOKEN_FILE", str(token_file))
-        monkeypatch.delenv("KT_HOST_TOKEN", raising=False)
+        monkeypatch.setenv("KT_HOST_TOKEN", "envtoken")
         assert aio._resolve_token(tmp_path) == "filetoken"
+
+    def test_empty_token_file_falls_back_to_env(self, tmp_path, monkeypatch, capsys):
+        token_file = tmp_path / "tok"
+        token_file.write_text("", encoding="utf-8")
+        monkeypatch.setenv("KT_HOST_TOKEN_FILE", str(token_file))
+        monkeypatch.setenv("KT_HOST_TOKEN", "envtoken")
+
+        assert aio._resolve_token(tmp_path) == "envtoken"
+        assert "Ignoring empty KT_HOST_TOKEN_FILE" in capsys.readouterr().err
+
+    def test_whitespace_token_file_falls_back_to_generated(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        token_file = tmp_path / "tok"
+        token_file.write_text(" \n\t", encoding="utf-8")
+        monkeypatch.setenv("KT_HOST_TOKEN_FILE", str(token_file))
+        monkeypatch.delenv("KT_HOST_TOKEN", raising=False)
+        monkeypatch.setattr(aio.secrets, "token_hex", lambda _size: "generated")
+
+        assert aio._resolve_token(tmp_path) == "generated"
+        err = capsys.readouterr().err
+        assert "Ignoring empty KT_HOST_TOKEN_FILE" in err
+        assert "generated one" in err
 
     def test_token_from_env_when_file_missing(self, tmp_path, monkeypatch):
         monkeypatch.delenv("KT_HOST_TOKEN_FILE", raising=False)
