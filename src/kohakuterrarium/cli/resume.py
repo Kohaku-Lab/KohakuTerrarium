@@ -62,17 +62,17 @@ def resume_cli(
         return 0
 
     try:
-        return asyncio.run(_run(path, resolved_pwd, llm, io_mode))
+        result = asyncio.run(_run(path, resolved_pwd, llm, io_mode))
     except KeyboardInterrupt:
         print("\nInterrupted")
         return 0
     except Exception as exc:
         print(f"Error: {exc}")
         return 1
-    finally:
-        if path.exists():
-            print("\nSession saved. To resume:")
-            print(f"  kt resume {path.stem}")
+    if result == 0 and path.exists():
+        print("\nSession saved. To resume:")
+        print(f"  kt resume {path.stem}")
+    return result
 
 
 def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None | Literal[False]:
