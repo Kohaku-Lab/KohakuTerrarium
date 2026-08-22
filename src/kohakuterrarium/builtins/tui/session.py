@@ -1,7 +1,7 @@
 """Share Textual UI state between input and output modules."""
 
 import asyncio
-from typing import Any
+from typing import Any, TypeVar
 
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown, Static
@@ -40,6 +40,7 @@ DEFAULT_CULL_KEEP = 50
 DEFAULT_LOAD_BATCH = 30
 # Shared with output history restore so live and resumed chats keep the same window.
 CULL_KEEP = DEFAULT_CULL_KEEP
+_T = TypeVar("_T")
 
 
 class TUISession(TabModelRegistryMixin):
@@ -88,6 +89,7 @@ class TUISession(TabModelRegistryMixin):
         self.command_hint_fallback: dict[str, Any] = {}
         # Buffer mutations until Textual mounts so startup events are not lost.
         self._pending_safe_calls: list[tuple[Any, tuple[Any, ...]]] = []
+        self._pending_modal_defaults: dict[asyncio.Future[Any], Any] = {}
 
     def set_terrarium_tabs(self, tabs: list[str]) -> None:
         """Configure terrarium tabs and reconcile a running application."""
@@ -805,6 +807,7 @@ class TUISession(TabModelRegistryMixin):
 
     def _signal_input_shutdown(self) -> None:
         """Discard pending submissions and wake the runner with shutdown."""
+        self._settle_pending_modals()
         if not self._app:
             return
         while True:
@@ -819,6 +822,26 @@ class TUISession(TabModelRegistryMixin):
             return ""
         return await self._app._input_queue.get()
 
+    def _register_modal(self, default: _T) -> asyncio.Future[_T]:
+        """Track a modal waiter so application shutdown can settle it."""
+        future: asyncio.Future[_T] = asyncio.get_running_loop().create_future()
+        self._pending_modal_defaults[future] = default
+        return future
+
+    def _resolve_modal(self, future: asyncio.Future[_T], value: _T) -> None:
+        """Resolve a modal exactly once and remove its shutdown fallback."""
+        self._pending_modal_defaults.pop(future, None)
+        if not future.done():
+            future.set_result(value)
+
+    def _settle_pending_modals(self) -> None:
+        """Resolve every open modal with its cancellation default."""
+        pending = tuple(self._pending_modal_defaults.items())
+        self._pending_modal_defaults.clear()
+        for future, default in pending:
+            if not future.done():
+                future.set_result(default)
+
     async def show_selection_modal(
         self, title: str, options: list[dict], current: str = ""
     ) -> str | None:
@@ -826,31 +849,35 @@ class TUISession(TabModelRegistryMixin):
         if not self._app or not self._app.is_running:
             return None
 
-        result_future: asyncio.Future[str | None] = asyncio.Future()
+        result_future = self._register_modal(None)
         modal = SelectionModal(title=title, options=options, current=current)
 
         def _on_dismiss(value: str | None) -> None:
-            if not result_future.done():
-                result_future.set_result(value)
+            self._resolve_modal(result_future, value)
 
         # Modal screens must be pushed from Textual's application context.
         self._app.call_later(lambda: self._app.push_screen(modal, callback=_on_dismiss))
-        return await result_future
+        try:
+            return await result_future
+        finally:
+            self._pending_modal_defaults.pop(result_future, None)
 
     async def show_confirm_modal(self, message: str) -> bool:
         """Show a confirmation modal and return its result."""
         if not self._app or not self._app.is_running:
             return False
 
-        result_future: asyncio.Future[bool] = asyncio.Future()
+        result_future = self._register_modal(False)
         modal = ConfirmModal(message)
 
         def _on_dismiss(value: bool) -> None:
-            if not result_future.done():
-                result_future.set_result(value)
+            self._resolve_modal(result_future, value)
 
         self._app.call_later(lambda: self._app.push_screen(modal, callback=_on_dismiss))
-        return await result_future
+        try:
+            return await result_future
+        finally:
+            self._pending_modal_defaults.pop(result_future, None)
 
     async def show_model_picker_modal(self, agent: Any) -> None:
         """Open the model picker for an agent."""
