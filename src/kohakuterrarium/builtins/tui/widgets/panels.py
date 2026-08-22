@@ -76,18 +76,18 @@ class RunningPanel(Static):
         if not self._items:
             return
 
-        idx = 0
-        if len(self._items) == 1:
-            idx = 0
-        else:
-            idx = min(event.y, len(self._ordered_ids) - 1)
-            idx = max(idx, 0)
+        content_offset = event.get_content_offset(self)
+        if content_offset is None:
+            return
+        idx = content_offset.y
+        if idx < 0 or idx >= len(self._ordered_ids):
+            return
 
         job_id = self._ordered_ids[idx]
         label, start, promotable = self._items[job_id]
         elapsed = time.monotonic() - start
 
-        if promotable and elapsed >= self.PROMOTE_THRESHOLD and event.x > 35:
+        if promotable and elapsed >= self.PROMOTE_THRESHOLD and content_offset.x > 35:
             self.post_message(self.PromoteRequested(job_id))
         else:
             self.post_message(self.CancelRequested(job_id, label))
