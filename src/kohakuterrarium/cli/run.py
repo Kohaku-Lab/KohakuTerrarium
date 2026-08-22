@@ -486,12 +486,12 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
 
 def _session_preview(path: Path) -> str:
     """Get a short preview of session metadata."""
+    store = None
     try:
         # Read-only: a plain open+close here used to bump last_active,
         # corrupting the recency ordering the resume picker sorts by.
         store = SessionStore.open_readonly(path)
         meta = store.load_meta()
-        store.close()
         config_type = meta.get("config_type", "?")
         config_path = meta.get("config_path", "")
         name = Path(config_path).name if config_path else "?"
@@ -499,3 +499,13 @@ def _session_preview(path: Path) -> str:
     except Exception as e:
         logger.warning("Failed to read session label", error=str(e), exc_info=True)
         return ""
+    finally:
+        if store is not None:
+            try:
+                store.close()
+            except Exception as e:
+                logger.warning(
+                    "Failed to close session preview store",
+                    error=str(e),
+                    exc_info=True,
+                )
