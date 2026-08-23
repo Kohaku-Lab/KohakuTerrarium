@@ -3,6 +3,7 @@ import time
 from textual.message import Message
 from textual.widgets import Static
 
+from kohakuterrarium.builtins.tui._safe_text import plain
 from kohakuterrarium.builtins.tui.widgets.helpers import _fmt_tokens
 
 
@@ -106,7 +107,7 @@ class RunningPanel(Static):
             else:
                 lines.append(f"○ {label}  ({elapsed:.0f}s)")
         self.border_title = f"Running ({len(self._items)})"
-        self.update("\n".join(lines))
+        self.update(plain("\n".join(lines)))
 
 
 class ScratchpadPanel(Static):
@@ -130,7 +131,7 @@ class ScratchpadPanel(Static):
             self.update("(empty)")
             return
         lines = [f"{k}: {str(v)[:60]}" for k, v in data.items()]
-        self.update("\n".join(lines))
+        self.update(plain("\n".join(lines)))
 
 
 class SessionInfoPanel(Static):
@@ -245,7 +246,7 @@ class SessionInfoPanel(Static):
             lines.append(
                 f"Context: {ctx_used}/{_fmt_tokens(max_ctx)}" f" ({pct}%{compact_pct})"
             )
-        self.update("\n".join(lines))
+        self.update(plain("\n".join(lines)))
 
 
 class TerrariumPanel(Static):
@@ -294,7 +295,7 @@ class TerrariumPanel(Static):
             for ch in self._channels:
                 ctype = ch.get("type", "queue")
                 lines.append(f"  {ch['name']}  ({ctype})")
-        self.update("\n".join(lines) if lines else "(no topology)")
+        self.update(plain("\n".join(lines) if lines else "(no topology)"))
 
 
 class LoadOlderButton(Static):

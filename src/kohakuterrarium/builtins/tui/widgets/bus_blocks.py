@@ -7,6 +7,8 @@ from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Markdown, ProgressBar, Static
 
+from kohakuterrarium.builtins.tui._safe_text import escape_markup, plain
+
 _ACCENT_COLOR_MAP = {
     "primary": "#5A4FCF",  # iolite
     "info": "#0F52BA",  # sapphire
@@ -87,9 +89,9 @@ class CardBlock(Vertical):
 
         header = f"{icon} {title}".strip() if icon else title
         if header:
-            yield Static(header, classes="card-header")
+            yield Static(plain(str(header)), classes="card-header")
         if subtitle:
-            yield Static(subtitle, classes="card-subtitle")
+            yield Static(plain(str(subtitle)), classes="card-subtitle")
         if body:
             yield Markdown(body)
         if fields:
@@ -97,7 +99,12 @@ class CardBlock(Vertical):
             for f in fields:
                 label = f.get("label", "")
                 value = f.get("value", "")
-                field_rows.append(Static(f"[bold]{label}:[/bold] {value}"))
+                field_rows.append(
+                    Static(
+                        f"[bold]{escape_markup(str(label))}:[/bold] "
+                        f"{escape_markup(str(value))}"
+                    )
+                )
             yield Vertical(*field_rows, classes="card-fields")
         interactive = bool(actions) and self._on_action is not None
         if interactive:
@@ -114,7 +121,7 @@ class CardBlock(Vertical):
                 variant = variant_map.get(style, "default")
                 buttons.append(
                     Button(
-                        label,
+                        plain(str(label)),
                         id=f"act-{a.get('id', '')}",
                         variant=variant,
                     )
@@ -136,13 +143,13 @@ class CardBlock(Vertical):
                 colour = colour_map.get(style, "#888888")
                 chips.append(
                     Static(
-                        f"[on {colour}] {label} [/]",
+                        f"[on {colour}] {escape_markup(str(label))} [/]",
                         classes="card-action",
                     )
                 )
             yield Horizontal(*chips, classes="card-actions")
         if footer:
-            yield Static(footer, classes="card-footer")
+            yield Static(plain(str(footer)), classes="card-footer")
 
     def on_mount(self) -> None:
         accent = self._payload.get("accent", "neutral")
@@ -187,7 +194,7 @@ class CardBlock(Vertical):
             for btn in self.query(Button):
                 btn.disabled = True
             line = self.query_one("#card-resolved-line", Static)
-            line.update(f"[#888888]→ {action_id}[/]")
+            line.update(f"[#888888]→ {escape_markup(action_id)}[/]")
         except Exception:
             # Resolution state still prevents duplicate replies if widgets unmount early.
             pass
@@ -226,7 +233,7 @@ class ProgressBlock(Vertical):
         self._indeterminate = indeterminate
 
     def compose(self) -> ComposeResult:
-        yield Static(self._label_text, classes="progress-label")
+        yield Static(plain(self._label_text), classes="progress-label")
         total = None if self._indeterminate or self._max is None else float(self._max)
         bar = ProgressBar(total=total, show_eta=False)
         yield bar
@@ -241,7 +248,7 @@ class ProgressBlock(Vertical):
     ) -> None:
         try:
             if label is not None:
-                self.query_one(".progress-label", Static).update(label)
+                self.query_one(".progress-label", Static).update(plain(label))
                 self._label_text = label
             bar = self.query_one(ProgressBar)
             if indeterminate:
@@ -255,7 +262,7 @@ class ProgressBlock(Vertical):
                 if max_value is not None:
                     bar.update(progress=float(max_value))
                 self.query_one(".progress-label", Static).update(
-                    f"[#4C9989]✓[/] {self._label_text}"
+                    f"[#4C9989]✓[/] {escape_markup(self._label_text)}"
                 )
         except Exception:
             # Updates may arrive before mount or after removal; stored values remain valid.

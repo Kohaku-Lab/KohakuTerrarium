@@ -19,6 +19,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
+from rich.text import Text
 
 from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
 
@@ -314,3 +315,25 @@ class TestPickerIntegration:
         app._picker_handle_text("b")
         app._picker_handle_text("o")
         assert app.agent_overlay.state.filter_text == "bo"
+
+
+@pytest.mark.asyncio
+async def test_consumed_slash_output_is_committed_as_literal_text() -> None:
+    hostile = "[/red] [done] [/etc/passwd] [] [b]x"
+    agent = _FakeAgent()
+
+    async def try_slash(_text):
+        return SimpleNamespace(error=None, output=hostile, consumed=True)
+
+    async def skip_topology(_name, _args):
+        return False
+
+    agent._try_slash_command_text = try_slash
+    app = RichCLIApp(agent)
+    app.dispatch_topology_command = skip_topology
+    committed = []
+    app._commit_text = committed.append
+
+    await app._handle_slash("/literal")
+
+    assert Text.from_markup(committed[0]).plain == hostile

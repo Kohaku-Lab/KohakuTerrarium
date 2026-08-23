@@ -11,6 +11,7 @@ from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Static, TabbedContent, TabPane
 
+from kohakuterrarium.builtins.tui._safe_text import plain
 from kohakuterrarium.builtins.tui.widgets import (
     ChatInput,
     LoadOlderButton,
@@ -159,7 +160,7 @@ class AgentTUI(App):
         try:
             status = self.query_one("#quick-status", Static)
             if event.hint:
-                status.update(event.hint)
+                status.update(plain(event.hint))
             elif not self._is_processing:
                 status.update(IDLE_STATUS)
         except Exception as e:
@@ -405,7 +406,7 @@ class AgentTUI(App):
 
     def _set_status_text(self, text: str) -> None:
         try:
-            self.query_one("#quick-status", Static).update(text)
+            self.query_one("#quick-status", Static).update(plain(text))
         except Exception as e:
             logger.warning("Failed to set status text", error=str(e), exc_info=True)
 

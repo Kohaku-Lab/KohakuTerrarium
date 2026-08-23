@@ -3,6 +3,7 @@ import time
 from textual.containers import Vertical
 from textual.widgets import Collapsible, Static
 
+from kohakuterrarium.builtins.tui._safe_text import escape_markup, plain
 from kohakuterrarium.builtins.tui.widgets.helpers import _summarize_output
 
 
@@ -74,33 +75,26 @@ class ToolBlock(Collapsible):
                 parts.append(f"  {self.args_preview[:50]}")
             if elapsed >= 0.5:
                 parts.append(f"  ({elapsed:.1f}s)")
-            return "".join(parts)
+            return escape_markup("".join(parts))
         elif self.state == "done":
             parts = [f"\u25cf {self.tool_name}"]
             if self.args_preview:
                 parts.append(f"  {self.args_preview[:50]}")
             if self.result_summary:
                 parts.append(f"  ({self.result_summary})")
-            return "".join(parts)
+            return escape_markup("".join(parts))
         elif self.state == "error":
             parts = [f"\u2717 {self.tool_name}"]
             if self.result_summary:
                 parts.append(f"  {self.result_summary[:60]}")
-            return "".join(parts)
-        return f"? {self.tool_name}"
+            return escape_markup("".join(parts))
+        return escape_markup(f"? {self.tool_name}")
 
     def mark_done(self, output: str = "", summary: str = "") -> None:
         self.state = "done"
         self.result_summary = summary or _summarize_output(output)
         if output:
-            try:
-                self._output_widget.update(output[:3000])
-            except Exception as e:
-                _ = e
-                # Raw Content prevents tool output from being parsed as Textual markup.
-                from textual.content import Content
-
-                self._output_widget.update(Content(output[:3000]))
+            self._output_widget.update(plain(output[:3000]))
         self.remove_class("-running")
         self.add_class("-done")
         self.title = self._build_title()
@@ -109,14 +103,7 @@ class ToolBlock(Collapsible):
         self.state = "error"
         self.result_summary = error[:80]
         if error:
-            try:
-                self._output_widget.update(error[:3000])
-            except Exception as e:
-                _ = e
-                # Raw Content prevents tool output from being parsed as Textual markup.
-                from textual.content import Content
-
-                self._output_widget.update(Content(error[:3000]))
+            self._output_widget.update(plain(error[:3000]))
         self.remove_class("-running")
         self.add_class("-error")
         self.title = self._build_title()
@@ -222,19 +209,19 @@ class SubAgentBlock(Collapsible):
                 parts.append(f"  {self.sa_task[:40]}")
             if elapsed >= 0.5:
                 parts.append(f"  ({elapsed:.1f}s)")
-            return "".join(parts)
+            return escape_markup("".join(parts))
         elif self.state == "done":
             parts = [f"\u25cf {self.agent_name}"]
             if self.result_summary:
                 parts.append(f"  ({self.result_summary})")
-            return "".join(parts)
+            return escape_markup("".join(parts))
         elif self.state == "interrupted":
-            return f"\u25cb {self.agent_name}  (interrupted)"
+            return escape_markup(f"\u25cb {self.agent_name}  (interrupted)")
         else:
             parts = [f"\u2717 {self.agent_name}"]
             if self.result_summary:
                 parts.append(f"  {self.result_summary[:50]}")
-            return "".join(parts)
+            return escape_markup("".join(parts))
 
     def add_tool_line(self, tool_name: str, args_preview: str = "") -> str:
         """Add a tool entry and return its update key."""
@@ -243,7 +230,7 @@ class SubAgentBlock(Collapsible):
         text = f"\u25cb {tool_name}"
         if args_preview:
             text += f"  {args_preview[:50]}"
-        line = Static(text, classes="sa-tool-line")
+        line = Static(plain(text), classes="sa-tool-line")
         line._raw_text = text
         self._tool_lines[key] = line
         self._tool_name_keys.setdefault(tool_name, []).append(key)
@@ -282,7 +269,7 @@ class SubAgentBlock(Collapsible):
         old_text = getattr(line, "_raw_text", "")
         new_text = old_text.replace("\u25cb ", "\u25cf " if done else "\u2717 ", 1)
         line._raw_text = new_text
-        line.update(new_text)
+        line.update(plain(new_text))
         cls = "-error" if error else "-done"
         # Preserve state for lines whose widgets have not mounted yet.
         line._deferred_class = cls
@@ -305,7 +292,7 @@ class SubAgentBlock(Collapsible):
             parts.append(f"{duration:.1f}s")
         self.result_summary = "; ".join(parts) if parts else ""
         if output:
-            self._result_widget.update(output[:2000])
+            self._result_widget.update(plain(output[:2000]))
         self.remove_class("-running")
         self.add_class("-done")
         self.title = self._build_title()
@@ -364,7 +351,7 @@ class CompactSummaryBlock(Collapsible):
     BUTTON_CLOSED = "[+]"
 
     def __init__(self, summary: str, done: bool = False, **kwargs):
-        self._body = Static(summary, classes="compact-body")
+        self._body = Static(plain(summary), classes="compact-body")
         if done:
             title = "\u25cf Context auto-compact"
         else:
@@ -374,7 +361,7 @@ class CompactSummaryBlock(Collapsible):
 
     def mark_done(self, summary: str) -> None:
         """Complete the compaction block with its summary."""
-        self._body.update(summary)
+        self._body.update(plain(summary))
         self.title = "\u25cf Context auto-compact"
         self.remove_class("-running")
         self.add_class("-done")

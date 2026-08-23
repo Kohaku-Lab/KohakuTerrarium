@@ -41,6 +41,7 @@ from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.output import ColorDepth
 from prompt_toolkit.styles import Style
 from rich.console import Console
+from rich.markup import escape
 from rich.text import Text
 
 from kohakuterrarium.builtins.cli_rich.app_drive import AppDriveMixin
@@ -681,17 +682,17 @@ class RichCLIApp(AppPickersMixin, AppOutputMixin, AppMultiCreatureMixin, AppDriv
         try:
             result = await target_agent._try_slash_command_text(text)
         except Exception as e:
-            self._commit_text(f"[red]Command error:[/red] {e}")
+            self._commit_text(f"[red]Command error:[/red] {escape(str(e))}")
             return
 
         if result is None:
-            self._commit_text(f"[red]Unknown command:[/red] /{name}")
+            self._commit_text(f"[red]Unknown command:[/red] /{escape(name)}")
             return
 
         if result.error:
-            self._commit_text(f"[red]{result.error}[/red]")
+            self._commit_text(f"[red]{escape(str(result.error))}[/red]")
         elif result.output and result.consumed:
-            self._commit_text(result.output)
+            self._commit_text(escape(str(result.output)))
         elif result.output:
             self._spawn_agent_turn(
                 result.output,

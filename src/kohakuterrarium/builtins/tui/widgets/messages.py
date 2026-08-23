@@ -1,5 +1,7 @@
 from textual.widgets import Collapsible, Static
 
+from kohakuterrarium.builtins.tui._safe_text import escape_markup, plain
+
 
 class UserMessage(Static):
     DEFAULT_CSS = """
@@ -14,7 +16,7 @@ class UserMessage(Static):
     """
 
     def __init__(self, text: str, **kwargs):
-        super().__init__(text, **kwargs)
+        super().__init__(plain(text), **kwargs)
         self.border_title = "You"
 
 
@@ -34,7 +36,7 @@ class QueuedMessage(Static):
     """
 
     def __init__(self, text: str, **kwargs):
-        super().__init__(text, **kwargs)
+        super().__init__(plain(text), **kwargs)
         self.border_title = "Queued"
         self.message_text = text
 
@@ -68,8 +70,8 @@ class SystemNotice(Static):
     """
 
     def __init__(self, text: str, command: str = "", error: bool = False, **kwargs):
-        super().__init__(text, **kwargs)
-        self.border_title = f"/{command}" if command else "system"
+        super().__init__(plain(text), **kwargs)
+        self.border_title = f"/{escape_markup(command)}" if command else "system"
         if error:
             self.add_class("--error")
 
@@ -110,10 +112,10 @@ class TriggerMessage(Collapsible):
 
     def __init__(self, label: str, content: str = "", **kwargs):
         preview = content[:80].replace("\n", " ") if content else ""
-        title = f"\u25cf {label}"
+        title = f"\u25cf {escape_markup(label)}"
         if preview:
-            title += f"  {preview}"
-        self._body = Static(content, classes="trigger-body")
+            title += f"  {escape_markup(preview)}"
+        self._body = Static(plain(content), classes="trigger-body")
         super().__init__(
             self._body,
             title=title,
@@ -139,7 +141,7 @@ class StreamingText(Static):
 
     def append(self, chunk: str) -> None:
         self._chunks.append(chunk)
-        self.update("".join(self._chunks))
+        self.update(plain("".join(self._chunks)))
 
     def get_text(self) -> str:
         return "".join(self._chunks)
