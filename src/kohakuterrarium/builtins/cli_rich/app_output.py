@@ -12,6 +12,7 @@ that file past the 600-line guard. They all share the same shape:
 Split as a mixin so ``app.py`` stays focused on lifecycle + layout.
 """
 
+from rich.markup import escape
 from rich.panel import Panel
 
 
@@ -143,7 +144,7 @@ class AppOutputMixin:
     def on_processing_error(self, error_type: str, error: str) -> None:
         """Surface a processing error as a red notice in scrollback."""
         self._flush_assistant_message()
-        self.committer.text(f"[red]✗ {error_type}:[/red] {error}")
+        self.committer.text(f"[red]✗ {escape(error_type)}:[/red] {escape(error)}")
         self._invalidate()
 
     def on_interrupt_notice(self, detail: str = "") -> None:
@@ -156,9 +157,9 @@ class AppOutputMixin:
         """Commit a background-result delivery notice to scrollback."""
         self._flush_assistant_message()
         noun = "result" if count == 1 else "results"
-        prefix = f"{kind} " if kind and kind != "mixed" else ""
+        prefix = f"{escape(kind)} " if kind and kind != "mixed" else ""
         self.committer.text(
-            f"[cyan]⟲ background {prefix}{noun} delivered: {label}[/cyan]"
+            f"[cyan]⟲ background {prefix}{noun} delivered: {escape(label)}[/cyan]"
         )
         self._invalidate()
 
@@ -172,33 +173,41 @@ class AppOutputMixin:
             "selection": "Selection requested",
         }
         title = title_map.get(event_type, event_type)
-        body_lines = [prompt] if prompt else []
+        body_lines = [escape(str(prompt))] if prompt else []
         if event_type == "confirm":
             options = payload.get("options") or []
             for opt in options:
                 body_lines.append(
-                    f"  • {opt.get('label', opt.get('id', '?'))}"
-                    f" ({opt.get('style', 'secondary')})"
+                    f"  • {escape(str(opt.get('label', opt.get('id', '?'))))}"
+                    f" ({escape(str(opt.get('style', 'secondary')))})"
                 )
             detail = payload.get("detail")
             if detail:
-                body_lines.insert(0, detail + "\n")
+                body_lines.insert(0, escape(str(detail)) + "\n")
         elif event_type == "ask_text":
             placeholder = payload.get("placeholder")
             if placeholder:
-                body_lines.append(f"  hint: {placeholder}")
+                body_lines.append(f"  hint: {escape(str(placeholder))}")
         elif event_type == "selection":
             options = payload.get("options") or []
             for i, opt in enumerate(options, 1):
                 desc = opt.get("description")
-                line = f"  [{i}] {opt.get('label', opt.get('id', '?'))}"
+                selection_index = escape(f"[{i}]")
+                line = (
+                    f"  {selection_index} "
+                    f"{escape(str(opt.get('label', opt.get('id', '?'))))}"
+                )
                 if desc:
-                    line += f"  — {desc}"
+                    line += f"  — {escape(str(desc))}"
                 body_lines.append(line)
         body_lines.append("")
         body_lines.append("[dim](respond via TUI or web frontend)[/dim]")
         self.committer.commit(
-            Panel("\n".join(body_lines), title=title, border_style="cyan")
+            Panel(
+                "\n".join(body_lines),
+                title=escape(str(title)),
+                border_style="cyan",
+            )
         )
         self._invalidate()
 
@@ -214,7 +223,7 @@ class AppOutputMixin:
         max_v = payload.get("max", 0)
         complete = bool(payload.get("complete"))
         if complete:
-            self.committer.text(f"[green]✓ {label}[/green]")
+            self.committer.text(f"[green]✓ {escape(str(label))}[/green]")
         elif update_target:
             pct = ""
             if (
@@ -223,9 +232,9 @@ class AppOutputMixin:
                 and max_v
             ):
                 pct = f" ({int(value * 100 / max_v)}%)"
-            self.committer.text(f"  … {label}{pct}")
+            self.committer.text(f"  … {escape(str(label))}{pct}")
         else:
-            self.committer.text(f"[cyan]▸ {label}[/cyan]")
+            self.committer.text(f"[cyan]▸ {escape(str(label))}[/cyan]")
         self._invalidate()
 
     def on_notification_event(self, payload: dict) -> None:
@@ -238,8 +247,12 @@ class AppOutputMixin:
             "warning": "yellow",
             "error": "red",
         }.get(level, "cyan")
-        prefix = f"[{color}]{title}:[/{color}] " if title else f"[{color}]·[/{color}] "
-        self.committer.text(prefix + text)
+        prefix = (
+            f"[{color}]{escape(str(title))}:[/{color}] "
+            if title
+            else f"[{color}]·[/{color}] "
+        )
+        self.committer.text(prefix + escape(str(text)))
         self._invalidate()
 
     def on_card_event(self, payload: dict) -> None:
@@ -259,30 +272,40 @@ class AppOutputMixin:
         }
         border = accent_map.get(accent, "white")
         header = f"{icon} {title}".strip() if icon else title
+        header = escape(str(header))
         if subtitle:
-            header = f"{header}  [dim]{subtitle}[/dim]"
+            header = f"{header}  [dim]{escape(str(subtitle))}[/dim]"
         body_parts: list[str] = []
         body = payload.get("body")
         if body:
-            body_parts.append(body)
+            body_parts.append(escape(str(body)))
         fields = payload.get("fields") or []
         if fields:
             field_lines = [
-                f"  [bold]{f.get('label', '')}:[/bold] {f.get('value', '')}"
+                f"  [bold]{escape(str(f.get('label', '')))}:[/bold] "
+                f"{escape(str(f.get('value', '')))}"
                 for f in fields
             ]
             body_parts.append("\n".join(field_lines))
         actions = payload.get("actions") or []
         if actions:
-            act_line = "  ".join(
-                f"[{a.get('style', 'secondary')}]\\[{a.get('label', a.get('id', '?'))}][/]"
-                for a in actions
-            )
+            action_colors = {
+                "primary": "cyan",
+                "secondary": "white",
+                "danger": "red",
+                "link": "blue",
+            }
+            action_parts = []
+            for action in actions:
+                action_style = action_colors.get(action.get("style"), "white")
+                action_label = escape(str(action.get("label", action.get("id", "?"))))
+                action_parts.append(f"[{action_style}]\\[{action_label}][/]")
+            act_line = "  ".join(action_parts)
             body_parts.append(act_line)
             body_parts.append("[dim](respond via TUI or web frontend)[/dim]")
         footer = payload.get("footer", "")
         if footer:
-            body_parts.append(f"[dim]{footer}[/dim]")
+            body_parts.append(f"[dim]{escape(str(footer))}[/dim]")
         self.committer.commit(
             Panel("\n\n".join(body_parts), title=header, border_style=border)
         )
