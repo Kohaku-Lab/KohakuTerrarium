@@ -26,7 +26,7 @@
         <!-- Search -->
         <div class="flex items-center gap-2">
           <el-input v-model="searchQuery" size="small" placeholder="Search model or provider…" clearable @keydown.esc="popoverVisible = false" />
-          <el-button size="small" :loading="loading" @click="loadModels">Refresh</el-button>
+          <el-button size="small" :loading="refreshing" @click="refreshInventory">Refresh</el-button>
         </div>
 
         <!-- Three-pane on desktop (provider rail | model list |
@@ -96,9 +96,11 @@ import { ArrowDown } from "@element-plus/icons-vue"
 
 import { useInstanceContext } from "@/components/chrome/instanceContext"
 import { useDensity } from "@/composables/useDensity"
+import { useModelInventory } from "@/composables/useModelInventory"
 import { useChatStore } from "@/stores/chat"
+import { useHostsStore } from "@/stores/hosts"
 import { useInstancesStore } from "@/stores/instances"
-import { agentAPI, terrariumAPI, configAPI } from "@/utils/api"
+import { terrariumAPI } from "@/utils/api"
 import { onLayoutEvent, LAYOUT_EVENTS } from "@/utils/layoutEvents"
 
 const props = defineProps({
@@ -107,10 +109,10 @@ const props = defineProps({
 
 const route = useRoute()
 const chat = useChatStore()
+const hosts = useHostsStore()
 const instances = useInstancesStore()
 
-const models = ref([])
-const loading = ref(false)
+const { models, initialLoading: loading, refreshing, ensureLoaded: loadModels, revalidateIfStale, refresh: refreshModels } = useModelInventory()
 const applying = ref(false)
 const popoverVisible = ref(false)
 const searchQuery = ref("")
@@ -332,17 +334,25 @@ function toggleVariation(group, option) {
   }
 }
 
-async function loadModels() {
-  loading.value = true
-  try {
-    const data = await configAPI.getModels()
-    models.value = Array.isArray(data) ? data : []
+function reconcileDraft() {
+  if (!draftPreset.value) {
     resetDraftFromCurrent()
-  } catch {
-    models.value = []
-  } finally {
-    loading.value = false
+    return
   }
+  const preset = models.value.find((model) => model.name === draftPreset.value && (model.provider || model.login_provider || "") === draftProvider.value)
+  if (!preset) {
+    resetDraftFromCurrent()
+    return
+  }
+  const groups = preset.variation_groups || {}
+  for (const [group, option] of Object.entries(draftSelections)) {
+    if (!groups[group]?.[option]) delete draftSelections[group]
+  }
+}
+
+async function refreshInventory() {
+  await refreshModels()
+  reconcileDraft()
 }
 
 function onPickTarget(target) {
@@ -402,19 +412,26 @@ async function applySelection() {
 }
 
 watch(popoverVisible, (open) => {
-  if (open) {
-    if (models.value.length === 0) loadModels()
-    else resetDraftFromCurrent()
-  }
+  if (!open) return
+  resetDraftFromCurrent()
+  revalidateIfStale().then(() => reconcileDraft())
 })
 
 watch(currentModel, () => {
   if (!popoverVisible.value) resetDraftFromCurrent()
 })
 
+watch(
+  () => hosts.activeHostId,
+  () => {
+    popoverVisible.value = false
+    resetDraftFromCurrent()
+  },
+)
+
 let _cleanup = null
 onMounted(() => {
-  loadModels()
+  loadModels().then(() => reconcileDraft())
   _cleanup = onLayoutEvent(LAYOUT_EVENTS.MODEL_CONFIG_OPEN, () => (popoverVisible.value = true))
 })
 onUnmounted(() => {
