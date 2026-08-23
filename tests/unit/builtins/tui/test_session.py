@@ -1,5 +1,6 @@
 """Tests for shared TUI session state."""
 
+import asyncio
 from collections.abc import Callable
 from typing import Any
 
@@ -44,6 +45,24 @@ class _CommandInput:
 class _Command:
     def __init__(self, *aliases: str) -> None:
         self.aliases = list(aliases)
+
+
+class _ModalApp:
+    is_running = True
+
+    def __init__(self) -> None:
+        self._input_queue: asyncio.Queue[str] = asyncio.Queue()
+        self.dismiss_callbacks: list[Callable[[Any], None]] = []
+
+    def call_later(self, callback: Callable[[], None]) -> bool:
+        callback()
+        return True
+
+    def push_screen(self, _modal: Any, callback: Callable[[Any], None]) -> None:
+        self.dismiss_callbacks.append(callback)
+
+    def exit(self) -> None:
+        self.is_running = False
 
 
 class _CommandAgent:
@@ -126,3 +145,32 @@ async def test_background_tab_culling_keeps_target_history_count() -> None:
         bob_chat = session._app.query_one(f"#chat-{_safe_id('bob')}", VerticalScroll)
         assert len(bob_chat.children) == 2
         assert session._culled_count == {"bob": 2}
+
+
+class TestModalShutdown:
+    async def test_stop_settles_pending_modal_defaults(self) -> None:
+        session = TUISession()
+        app = _ModalApp()
+        session._app = app  # type: ignore[assignment]
+
+        selection = asyncio.create_task(session.show_selection_modal("Pick", []))
+        confirmation = asyncio.create_task(session.show_confirm_modal("Continue?"))
+        await asyncio.sleep(0)
+
+        session.stop()
+
+        assert await asyncio.wait_for(selection, 0.1) is None
+        assert await asyncio.wait_for(confirmation, 0.1) is False
+        assert session._pending_modal_defaults == {}
+
+    async def test_dismiss_result_wins_before_shutdown(self) -> None:
+        session = TUISession()
+        app = _ModalApp()
+        session._app = app  # type: ignore[assignment]
+
+        selection = asyncio.create_task(session.show_selection_modal("Pick", []))
+        await asyncio.sleep(0)
+        app.dismiss_callbacks[0]("chosen")
+
+        assert await selection == "chosen"
+        session.stop()
