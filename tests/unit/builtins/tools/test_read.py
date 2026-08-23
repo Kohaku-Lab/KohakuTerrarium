@@ -1,11 +1,40 @@
 """Unit tests for :mod:`kohakuterrarium.builtins.tools.read`."""
 
+import pytest
+
 from kohakuterrarium.builtins.tools.read import MAX_DEFAULT_LINES, ReadTool
 from kohakuterrarium.modules.tool.base import ToolContext
+from kohakuterrarium.utils.file_guard import PathBoundaryGuard
 
 
 def _ctx(tmp_path):
     return ToolContext(agent_name="agent", session=None, working_dir=tmp_path)
+
+
+def _guarded_ctx(workspace):
+    return ToolContext(
+        agent_name="agent",
+        session=None,
+        working_dir=workspace,
+        path_guard=PathBoundaryGuard(cwd=workspace, mode="block"),
+    )
+
+
+class TestReadPathGuard:
+    @pytest.mark.parametrize("suffix", [".png", ".pdf"])
+    async def test_blocks_multimodal_files_before_type_dispatch(self, tmp_path, suffix):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        outside = tmp_path / f"secret{suffix}"
+        outside.write_bytes(b"not real media")
+
+        result = await ReadTool().execute(
+            {"path": str(outside)}, context=_guarded_ctx(workspace)
+        )
+
+        assert result.success is False
+        assert "Access denied" in result.error
+        assert str(workspace) in result.error
 
 
 class TestReadDefaultLineGuard:
