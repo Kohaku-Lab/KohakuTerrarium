@@ -41,6 +41,8 @@ import asyncio
 from dataclasses import replace as _dc_replace
 from typing import Any
 
+from rich.markup import escape
+
 from kohakuterrarium.builtins.cli_rich.creature_status import (
     CreatureStatus,
     derive_status,
@@ -658,14 +660,14 @@ class AppMultiCreatureMixin:
         try:
             result = await cmd.execute(args, ctx)
         except Exception as e:
-            self._commit_text(f"[red]Command error:[/red] {e}")
+            self._commit_text(f"[red]Command error:[/red] {escape(str(e))}")
             return True
         if result is None:
-            self._commit_text(f"[red]Unknown command:[/red] /{name}")
+            self._commit_text(f"[red]Unknown command:[/red] /{escape(name)}")
         elif result.error:
-            self._commit_text(f"[red]{result.error}[/red]")
+            self._commit_text(f"[red]{escape(str(result.error))}[/red]")
         elif result.output:
-            self._commit_text(result.output)
+            self._commit_text(escape(str(result.output)))
         return True
 
 

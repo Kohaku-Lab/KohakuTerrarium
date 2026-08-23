@@ -21,6 +21,7 @@ import weakref
 from types import SimpleNamespace
 
 import pytest
+from rich.text import Text
 
 from kohakuterrarium.builtins.cli_rich.app import RichCLIApp
 from kohakuterrarium.builtins.cli_rich.multiplex import MultiplexedRichOutput
@@ -279,6 +280,28 @@ class TestEngineAwareCommandDispatch:
         self._assert_trusted_context(
             command.contexts[-1], engine, "solo", creature.agent
         )
+
+    @pytest.mark.asyncio
+    async def test_engine_command_output_is_committed_as_literal_text(self):
+        hostile = "[/red] [done] [/etc/passwd] [] [b]x"
+        creature = _FakeCreature(creature_id="solo", name="solo")
+        engine = _FakeEngine([creature])
+        command = _EngineCommand()
+
+        async def execute(_args, _context):
+            return UserCommandResult(output=hostile)
+
+        command.execute = execute
+        app = RichCLIApp(creature.agent)
+        app.setup_single_creature(engine, "solo")
+        app._command_registry = {command.name: command}
+        committed = []
+        app._commit_text = committed.append
+
+        handled = await app.dispatch_topology_command(command.name, "list")
+
+        assert handled is True
+        assert Text.from_markup(committed[0]).plain == hostile
 
 
 class TestHandleCreatureEventRouting:
