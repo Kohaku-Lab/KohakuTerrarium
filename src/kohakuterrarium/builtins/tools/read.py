@@ -54,6 +54,11 @@ class ReadTool(BaseTool):
 
         file_path = resolve_tool_path(path, context)
 
+        if context and context.path_guard:
+            msg = context.path_guard.check(str(file_path))
+            if msg:
+                return ToolResult(error=msg)
+
         if _is_image_file(file_path):
             return await self._read_image(file_path, path)
 
@@ -68,11 +73,6 @@ class ReadTool(BaseTool):
                 error=f"Binary file detected ({file_path.suffix}). "
                 "Use bash with xxd, file, or other tools to inspect binary files."
             )
-
-        if context and context.path_guard:
-            msg = context.path_guard.check(str(file_path))
-            if msg:
-                return ToolResult(error=msg)
 
         if not file_path.exists():
             return ToolResult(error=f"File not found: {path}")
