@@ -1,5 +1,7 @@
 """CLI API key management — list/set/delete + login passthrough."""
 
+import getpass
+
 from kohakuterrarium.cli.config_prompts import confirm as _confirm
 from kohakuterrarium.studio.identity.api_keys import (
     KEYS_FILE_PATH,
@@ -8,6 +10,15 @@ from kohakuterrarium.studio.identity.api_keys import (
     remove_key,
     set_key,
 )
+
+
+def _prompt_for_key(prompt: str) -> str | None:
+    """Read a secret without echoing it, returning ``None`` when cancelled."""
+    try:
+        return getpass.getpass(prompt).strip()
+    except (EOFError, KeyboardInterrupt):
+        print("\nCancelled")
+        return None
 
 
 def list_cli() -> int:
@@ -25,7 +36,9 @@ def list_cli() -> int:
 
 def set_cli(provider: str, value: str | None) -> int:
     """Store an API key for a configured provider."""
-    key = value or input(f"API key for {provider}: ").strip()
+    key = value or _prompt_for_key(f"API key for {provider}: ")
+    if key is None:
+        return 0
     if not key:
         print("Key is required.")
         return 1
@@ -70,10 +83,8 @@ def login_with_api_key(provider: str, env_var: str) -> int:
         print(f"Environment fallback: {env_var}")
     print()
 
-    try:
-        key = input("API key: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print("\nCancelled")
+    key = _prompt_for_key("API key: ")
+    if key is None:
         return 0
 
     if not key:
