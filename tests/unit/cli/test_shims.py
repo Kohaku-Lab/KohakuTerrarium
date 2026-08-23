@@ -174,6 +174,26 @@ class TestApplyAndUninstall:
         if os.name == "posix":
             assert os.access(kc, os.X_OK)
 
+    def test_apply_leaves_foreign_file_untouched(self, tmp_path):
+        tgt = tmp_path / "local"
+        tgt.mkdir()
+        foreign = tgt / "kt"
+        foreign.write_text("a user's own command\n", encoding="utf-8")
+        plan = shims.build_plan(
+            system="Linux",
+            bundle=True,
+            target_dir=tgt,
+            executable="/A/STUB",
+            path_env="",
+        )
+
+        messages = shims.apply_plan(plan)
+
+        assert foreign.read_text(encoding="utf-8") == "a user's own command\n"
+        assert any(
+            "skip kt:" in message and "not a kohaku" in message for message in messages
+        )
+
     def test_uninstall_leaves_foreign_file(self, tmp_path, monkeypatch):
         tgt = tmp_path / "local"
         tgt.mkdir()
