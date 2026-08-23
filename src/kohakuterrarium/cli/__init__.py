@@ -45,6 +45,7 @@ from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.service import add_service_subparser, service_cli
 from kohakuterrarium.cli.version import format_version_report
 from kohakuterrarium.serving.web import run_desktop_app, run_web_server
+from kohakuterrarium.utils.logging import configure_utf8_stdio
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -620,6 +621,7 @@ COMMANDS: dict[str, callable] = {
 
 def main() -> int:
     """Main CLI entry point."""
+    configure_utf8_stdio(log=False)
     parser = _build_parser()
     args = parser.parse_args()
 
