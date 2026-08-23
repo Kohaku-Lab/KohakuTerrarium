@@ -198,8 +198,14 @@ def apply_plan(plan: ShimPlan) -> list[str]:
         if item.action == "skip":
             messages.append(f"skip {item.name}: {item.reason}")
             continue
-        # Replacement is intentional so reinstalling repairs stale shims.
+        # Replacement is intentional only for shims we own, so reinstalling
+        # repairs stale targets without deleting an unrelated user command.
         if item.dest.is_symlink() or item.dest.exists():
+            if not _is_ours(item.dest):
+                messages.append(
+                    f"skip {item.name}: {item.dest} is not a kohakuterrarium shim"
+                )
+                continue
             try:
                 item.dest.unlink()
             except OSError as exc:
