@@ -73,6 +73,7 @@ public class MainActivity extends Activity {
     private String pendingConnectUri;
     private int connectUriReplayCount = 0;
     private boolean webViewLoaded = false;
+    private volatile boolean destroyed = false;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -102,6 +103,11 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        destroyed = true;
+        mainHandler.removeCallbacksAndMessages(null);
+        if (probeHandler != null) {
+            probeHandler.removeCallbacksAndMessages(null);
+        }
         if (probeThread != null) {
             probeThread.quitSafely();
             probeThread = null;
@@ -111,6 +117,7 @@ public class MainActivity extends Activity {
             webView.destroy();
             webView = null;
         }
+        statusView = null;
         super.onDestroy();
     }
 
@@ -135,6 +142,7 @@ public class MainActivity extends Activity {
             @Override
             public void onPageFinished(WebView view, String url) {
                 super.onPageFinished(view, url);
+                if (destroyed || webView == null) return;
                 webViewLoaded = true;
                 replayConnectUri();
             }
@@ -161,21 +169,34 @@ public class MainActivity extends Activity {
         Runnable check = new Runnable() {
             @Override
             public void run() {
+                if (destroyed) return;
                 int port = readBoundPort();
                 if (port > 0 && probeHost(port)) {
                     final int boundPort = port;
-                    mainHandler.post(() -> loadFrontend(boundPort));
+                    mainHandler.post(() -> {
+                        if (destroyed) return;
+                        loadFrontend(boundPort);
+                    });
                     return;
                 }
                 if (System.currentTimeMillis() > deadline) {
-                    mainHandler.post(() -> statusView.setText(
-                        "Host failed to start within 30s.  Check the log."));
+                    mainHandler.post(() -> {
+                        if (destroyed || statusView == null) return;
+                        statusView.setText(
+                            "Host failed to start within 30s.  Check the log.");
+                    });
                     return;
                 }
-                probeHandler.postDelayed(this, HOST_BOOT_POLL_MS);
+                Handler handler = probeHandler;
+                if (!destroyed && handler != null) {
+                    handler.postDelayed(this, HOST_BOOT_POLL_MS);
+                }
             }
         };
-        probeHandler.postDelayed(check, HOST_BOOT_POLL_MS);
+        Handler handler = probeHandler;
+        if (!destroyed && handler != null) {
+            handler.postDelayed(check, HOST_BOOT_POLL_MS);
+        }
     }
 
     private int readBoundPort() {
@@ -207,6 +228,7 @@ public class MainActivity extends Activity {
     }
 
     private void loadFrontend(int port) {
+        if (destroyed || isDestroyed() || webView == null || statusView == null) return;
         statusView.setVisibility(View.GONE);
         webView.setVisibility(View.VISIBLE);
         webView.loadUrl("http://127.0.0.1:" + port + "/");
@@ -223,7 +245,7 @@ public class MainActivity extends Activity {
     }
 
     private void replayConnectUri() {
-        if (pendingConnectUri == null || webView == null) return;
+        if (destroyed || pendingConnectUri == null || webView == null) return;
         if (!webViewLoaded) return;
         if (connectUriReplayCount >= CONNECT_URI_REPLAY_MAX_TRIES) {
             // Capped retries — Vue side never acked.  Most likely
@@ -264,6 +286,7 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void ackConnectUri() {
             mainHandler.post(() -> {
+                if (destroyed) return;
                 pendingConnectUri = null;
                 Log.i(TAG, "JS acked connect URI; stopping replay");
             });
