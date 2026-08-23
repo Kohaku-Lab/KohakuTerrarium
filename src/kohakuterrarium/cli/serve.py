@@ -172,7 +172,10 @@ def _spawn_server_process(
     else:
         kwargs["start_new_session"] = True
 
-    proc = subprocess.Popen(cmd, **kwargs)
+    try:
+        proc = subprocess.Popen(cmd, **kwargs)
+    finally:
+        log_file.close()
     return proc.pid
 
 
@@ -446,6 +449,7 @@ def serve_restart_cli(args: argparse.Namespace) -> int:
         mode=getattr(args, "mode", "standalone"),
         lab_bind=getattr(args, "lab_bind", ""),
         lab_token=getattr(args, "lab_token", ""),
+        home_dir=getattr(args, "home_dir", ""),
         foreground=getattr(args, "foreground", False),
     )
     return serve_start_cli(start_args)
