@@ -78,3 +78,45 @@ class TestResolveMissingPwd:
 
         assert resume_mod.resume_cli("saved", None, "INFO") == 0
         assert "Resume cancelled." in capsys.readouterr().out
+
+    def test_resume_failure_does_not_report_session_saved(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        path = _make_store(tmp_path, str(tmp_path))
+        monkeypatch.setattr(resume_mod, "configure_utf8_stdio", lambda **_k: None)
+        monkeypatch.setattr(resume_mod, "set_level", lambda *_a, **_k: None)
+        monkeypatch.setattr(resume_mod, "_resolve_session", lambda *_a, **_k: path)
+        monkeypatch.setattr(
+            resume_mod, "announce_migration_if_needed", lambda *_a, **_k: None
+        )
+        monkeypatch.setattr(resume_mod, "_resolve_missing_pwd", lambda *_a: None)
+
+        async def failed_run(*_args, **_kwargs):
+            raise RuntimeError("resume failed")
+
+        monkeypatch.setattr(resume_mod, "_run", failed_run)
+
+        assert resume_mod.resume_cli("saved", None, "INFO") == 1
+        output = capsys.readouterr().out
+        assert "Error: resume failed" in output
+        assert "Session saved" not in output
+
+    def test_resume_success_still_reports_session_saved(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        path = _make_store(tmp_path, str(tmp_path))
+        monkeypatch.setattr(resume_mod, "configure_utf8_stdio", lambda **_k: None)
+        monkeypatch.setattr(resume_mod, "set_level", lambda *_a, **_k: None)
+        monkeypatch.setattr(resume_mod, "_resolve_session", lambda *_a, **_k: path)
+        monkeypatch.setattr(
+            resume_mod, "announce_migration_if_needed", lambda *_a, **_k: None
+        )
+        monkeypatch.setattr(resume_mod, "_resolve_missing_pwd", lambda *_a: None)
+
+        async def successful_run(*_args, **_kwargs):
+            return 0
+
+        monkeypatch.setattr(resume_mod, "_run", successful_run)
+
+        assert resume_mod.resume_cli("saved", None, "INFO") == 0
+        assert "Session saved" in capsys.readouterr().out
