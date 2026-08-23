@@ -51,12 +51,11 @@ class UpdateLock:
             try:
                 self._release(self._fh)
             finally:
+                # Keep the sidecar: unlinking after unlock can delete a path
+                # another process has already opened and locked, allowing a
+                # third process to create and lock a different inode.
                 self._fh.close()
                 self._fh = None
-                try:
-                    self.path.unlink()
-                except OSError:
-                    pass
 
     @staticmethod
     def _acquire(fh: IO[bytes]) -> None:
@@ -64,6 +63,10 @@ class UpdateLock:
             import msvcrt
 
             try:
+                # ``msvcrt.locking`` starts at the current file position.
+                # ``ab+`` opens an existing sidecar at EOF, so always seek to
+                # the shared anchor byte before trying to acquire it.
+                fh.seek(0)
                 msvcrt.locking(fh.fileno(), msvcrt.LK_NBLCK, 1)
             except OSError as e:
                 raise LockBusy(str(e)) from e
