@@ -30,6 +30,7 @@
                 <template v-for="(part, i) in tc.resultParts" :key="i">
                   <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
                   <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
+                  <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
                 </template>
               </div>
             </template>
@@ -130,6 +131,7 @@
               <template v-for="(part, i) in tc.resultParts" :key="i">
                 <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
                 <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
+                <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
               </template>
             </div>
           </template>
@@ -140,6 +142,12 @@
         <div v-if="tc.resultMeta?.truncated" class="px-3 py-1 text-[10px] border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/8 dark:bg-sapphire/10 text-amber-shadow dark:text-amber-light font-mono">
           Output truncated<span v-if="tc.resultMeta.omitted_text_bytes"> · {{ tc.resultMeta.omitted_text_bytes.toLocaleString() }} bytes omitted</span>
         </div>
+        <div v-if="artifactLinks.length" class="px-3 py-1.5 text-[10px] border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/8 dark:bg-sapphire/10 font-mono">
+          <div class="text-warm-400 mb-0.5">{{ t("chat.tool.savedArtifacts") }}</div>
+          <a v-for="artifact in artifactLinks" :key="artifact.relative_path" :href="artifact.url" target="_blank" rel="noopener noreferrer" class="block text-iolite hover:underline truncate" :title="artifact.relative_path">
+            {{ artifact.relative_path }}
+          </a>
+        </div>
       </template>
     </div>
   </div>
@@ -147,8 +155,10 @@
 
 <script setup>
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
 import { useChatStore } from "@/stores/chat"
 import { terrariumAPI } from "@/utils/api"
+import { safeArtifactUrl } from "@/utils/artifacts"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
@@ -160,6 +170,14 @@ const props = defineProps({
 const emit = defineEmits(["toggle"])
 const chat = useChatStore()
 const { t } = useI18n()
+const artifactLinks = computed(() =>
+  (Array.isArray(props.tc.resultMeta?.artifacts) ? props.tc.resultMeta.artifacts : [])
+    .map((artifact) => ({
+      ...artifact,
+      url: safeArtifactUrl(artifact?.url),
+    }))
+    .filter((artifact) => artifact.url && typeof artifact.relative_path === "string"),
+)
 
 // ── Sub-agent inner conversation (UXI-05) ──
 // Read a sub-agent run's transcript by its live job_id (fallback to its

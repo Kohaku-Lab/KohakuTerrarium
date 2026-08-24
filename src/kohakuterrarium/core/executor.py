@@ -339,27 +339,35 @@ class Executor:
                     result = await exec_fn(args, context=context)
             else:
                 result = await exec_fn(args, context=context)
-
             max_output = tool.config.max_output if isinstance(tool, BaseTool) else 0
             artifact_store = getattr(self._agent, "session_store", None)
             result_metadata = (
-                result.metadata if isinstance(result.metadata, dict) else {}
+                dict(result.metadata) if isinstance(result.metadata, dict) else {}
             )
+            image_subdir = result_metadata.pop("_image_artifact_subdir", "tool_outputs")
             normalized = normalize_tool_output(
                 result.output,
                 max_output=max_output,
                 job_id=job_id,
                 tool_name=tool.tool_name,
                 artifact_store=artifact_store,
+                image_subdir=image_subdir,
                 # Bash materializes the full output to a temp file and exposes
                 # its path via this metadata key (see builtins.tools.bash).
                 saved_to=result_metadata.get("raw_output_path"),
             )
             metadata = dict(result_metadata)
             metadata.update(normalized.metadata)
+            artifacts = normalized.metadata.get("artifacts")
+            if isinstance(artifacts, list) and artifacts:
+                session_metadata = dict(metadata.get("session_metadata") or {})
+                prior = session_metadata.get("artifacts")
+                if not isinstance(prior, list):
+                    prior = []
+                session_metadata["artifacts"] = prior + artifacts
+                metadata["session_metadata"] = session_metadata
             if tool.tool_name == "bash" and not normalized.metadata.get("truncated"):
                 discard_raw_output_file(metadata)
-
             job_result = JobResult(
                 job_id=job_id,
                 output=normalized.output,

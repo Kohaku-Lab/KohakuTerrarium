@@ -40,7 +40,7 @@ router = APIRouter()
 
 @router.get("/disk-usage")
 async def get_disk_usage():
-    """Return disk usage for canonical session files and SQLite sidecars.
+    """Return separate session, retained-artifact, and total disk usage.
 
     The filesystem-only directory walk runs on the dedicated persistence
     executor so it cannot occupy the default thread pool shared by unrelated

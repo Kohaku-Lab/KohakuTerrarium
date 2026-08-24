@@ -1123,6 +1123,10 @@ export const settingsAPI = {
     const { data } = await api.get("/settings/codex-status", _nodeQuery(node))
     return data
   },
+  async getGrokStatus(node = "_host") {
+    const { data } = await api.get("/settings/grok-status", _nodeQuery(node))
+    return data
+  },
   async codexLogin(node = "_host") {
     const cfg = { timeout: 300000, ..._nodeQuery(node) }
     const { data } = await api.post("/settings/codex-login", {}, cfg)
@@ -1272,7 +1276,7 @@ export const extensionsAPI = {
 
 /** Process-wide stats surface (Stats tab). */
 export const statsAPI = {
-  /** @returns {Promise<{count, total_bytes, oldest_at, newest_at, session_dir}>} */
+  /** @returns {Promise<{count, session_bytes, artifacts_bytes, total_bytes, oldest_at, newest_at, session_dir}>} */
   async diskUsage() {
     const { data } = await api.get("/sessions/disk-usage")
     return data

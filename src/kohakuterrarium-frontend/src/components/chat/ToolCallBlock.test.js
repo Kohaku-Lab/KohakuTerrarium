@@ -62,6 +62,57 @@ describe("ToolCallBlock — sub-agent model identity", () => {
   })
 })
 
+describe("ToolCallBlock — generated artifacts", () => {
+  it("shows stable relative paths as links", () => {
+    const wrapper = mountBlock({
+      type: "tool",
+      id: "t-artifact",
+      name: "grok_image_gen",
+      kind: "tool",
+      args: {},
+      status: "done",
+      result: "image",
+      resultMeta: {
+        artifacts: [
+          {
+            kind: "image",
+            relative_path: "generated_images/grok_123.jpeg",
+            url: "/api/sessions/s1/artifacts/generated_images/grok_123.jpeg",
+          },
+        ],
+      },
+    })
+
+    const link = wrapper.find('a[href*="generated_images/grok_123.jpeg"]')
+    expect(link.exists()).toBe(true)
+    expect(link.text()).toBe("generated_images/grok_123.jpeg")
+  })
+
+  it("does not render unsafe artifact links", () => {
+    const wrapper = mountBlock({
+      type: "tool",
+      id: "t-unsafe-artifact",
+      name: "grok_image_gen",
+      kind: "tool",
+      args: {},
+      status: "done",
+      result: "image",
+      resultMeta: {
+        artifacts: [
+          {
+            kind: "image",
+            relative_path: "generated_images/unsafe.jpeg",
+            url: "javascript:alert(1)",
+          },
+        ],
+      },
+    })
+
+    expect(wrapper.find("a").exists()).toBe(false)
+    expect(wrapper.text()).not.toContain("generated_images/unsafe.jpeg")
+  })
+})
+
 describe("ToolCallBlock — sub-agent conversation (UXI-05)", () => {
   it("shows the send box for ANY messageable sub-agent (gated on can_receive, not interactive) and targets by job_id", async () => {
     // ``interactive:false`` but ``can_receive:true`` — the box must still

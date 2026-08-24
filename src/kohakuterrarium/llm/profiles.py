@@ -35,6 +35,7 @@ from kohakuterrarium.llm.backends import (
     validate_backend_type,
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.grok_auth import GrokTokens
 from kohakuterrarium.llm.preset_store import get_subagent_models, load_presets
 from kohakuterrarium.llm.preset_store import preset_from_data as _preset_from_data
 from kohakuterrarium.llm.preset_store import serialize_user_data as _serialize_user_data
@@ -503,6 +504,10 @@ def _is_available(provider_name: str) -> bool:
         return CodexTokens.load() is not None
     if provider_name == "codex":
         return CodexTokens.load() is not None
+    if backend and backend.backend_type == "grok-subscription":
+        return GrokTokens.available()
+    if provider_name == "grok-subscription":
+        return GrokTokens.available()
     if backend:
         if get_api_key(provider_name):
             return True

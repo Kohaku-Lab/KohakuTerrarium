@@ -1,6 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.core.executor`."""
 
 import asyncio
+import base64
 import types
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolConfig,
     ToolResult,
 )
+from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.parsing.events import ToolCallEvent
 
 # ── tool fixtures ────────────────────────────────────────────────
@@ -134,6 +136,47 @@ class _BashFileTool(BaseTool):
         )
 
 
+class _GeneratedImageTool(BaseTool):
+    @property
+    def tool_name(self):
+        return "generated_image"
+
+    @property
+    def description(self):
+        return "generated image"
+
+    async def _execute(self, args, **kwargs):
+        encoded = base64.b64encode(b"IMAGE").decode()
+        return ToolResult(
+            output=[ImagePart(url=f"data:image/png;base64,{encoded}")],
+            metadata={
+                "_image_artifact_subdir": "generated_images",
+                "session_metadata": {
+                    "artifacts": [
+                        {
+                            "kind": "file",
+                            "relative_path": "existing.txt",
+                            "url": "/api/sessions/session-1/artifacts/existing.txt",
+                        }
+                    ]
+                },
+            },
+        )
+
+
+class _ArtifactStore:
+    session_id = "session-1"
+
+    def __init__(self, root):
+        self.root = root
+
+    def write_artifact(self, filename, data):
+        path = self.root / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+
 # ── basic submit / wait_for ──────────────────────────────────────
 
 
@@ -176,6 +219,24 @@ class TestSubmitWaitFor:
         assert ex.get_tool("echo") is tool
         assert ex.get_tool("missing") is None
         assert ex.list_tools() == ["echo"]
+
+    async def test_generated_image_subdir_and_reference_metadata(self, tmp_path):
+        ex = Executor()
+        ex._agent = types.SimpleNamespace(session_store=_ArtifactStore(tmp_path))
+        ex.register_tool(_GeneratedImageTool())
+
+        result = await ex.wait_for(await ex.submit("generated_image", {}))
+
+        assert result is not None
+        assert "_image_artifact_subdir" not in result.metadata
+        artifacts = result.metadata["session_metadata"]["artifacts"]
+        assert artifacts[0]["relative_path"] == "existing.txt"
+        artifact = artifacts[1]
+        assert artifact["relative_path"].startswith("generated_images/")
+        assert artifact["url"].startswith(
+            "/api/sessions/session-1/artifacts/generated_images/"
+        )
+        assert list((tmp_path / "generated_images").glob("*.png"))
 
 
 # ── error paths ──────────────────────────────────────────────────

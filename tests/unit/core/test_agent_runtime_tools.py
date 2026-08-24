@@ -12,6 +12,7 @@ from kohakuterrarium.core.agent_runtime_tools import (
 )
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle
 from kohakuterrarium.core.events import EventType, TriggerEvent
+from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.parsing.events import (
     CommandResultEvent,
     SubAgentCallEvent,
@@ -310,12 +311,30 @@ class TestOnBgComplete:
             context={},
         )
         a._on_bg_complete(evt)
-        kinds = [c[0] for c in a.output_router.activity_calls]
-        assert "tool_done" in kinds
+        kind, _detail, metadata = a.output_router.activity_calls[0]
+        assert kind == "tool_done"
+        assert metadata["result"] == "result text"
+        assert metadata["output_preview"] == "result text"
         # No reschedule when notify is on.
         await asyncio.sleep(0.01)
         # _process_event invoked.
         assert a._processed
+
+    async def test_tool_done_renders_multimodal_output_preview(self):
+        a = _make_mixin()
+        artifact_url = "/api/sessions/graph_1/artifacts/generated_images/image.jpeg"
+        evt = TriggerEvent(
+            type=EventType.TOOL_COMPLETE,
+            job_id="grok_image_gen_abc",
+            content=[ImagePart(url=artifact_url, source_name="image.jpeg")],
+            context={},
+        )
+
+        a._on_bg_complete(evt)
+
+        kind, _detail, metadata = a.output_router.activity_calls[0]
+        assert kind == "tool_done"
+        assert artifact_url in metadata["output_preview"]
 
     async def test_subagent_done(self):
         a = _make_mixin()

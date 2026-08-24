@@ -22,6 +22,24 @@ class TestArtifactRoute:
         assert resp.status_code == 200
         assert resp.content == b"PNG-RAW"
 
+    def test_video_supports_mime_and_byte_ranges(self, monkeypatch, tmp_path):
+        video = tmp_path / "clip.mp4"
+        video.write_bytes(b"0123456789")
+        monkeypatch.setattr(
+            art_mod, "_resolve_artifact", lambda session, decoded: video
+        )
+        client = TestClient(_app())
+
+        resp = client.get(
+            "/sessions/sess/artifacts/generated_videos/clip.mp4",
+            headers={"Range": "bytes=2-5"},
+        )
+
+        assert resp.status_code == 206
+        assert resp.content == b"2345"
+        assert resp.headers["content-type"] == "video/mp4"
+        assert resp.headers["content-range"] == "bytes 2-5/10"
+
     def test_404_on_resolution_failure(self, monkeypatch):
         def boom(session, decoded):
             raise HTTPException(404, "artifact not found")
@@ -57,6 +75,23 @@ class TestArtifactRoute:
         assert resp.status_code == 200
         assert captured == ["a b.png"]
 
+    def test_serves_exact_retained_namespace_without_session_file(
+        self, monkeypatch, tmp_path
+    ):
+        artifact = (
+            tmp_path / "graph_demo_deadbeef.artifacts" / "generated_videos" / "clip.mp4"
+        )
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"retained")
+        monkeypatch.setattr(art_mod.persistence_store, "_session_dir", lambda: tmp_path)
+
+        response = TestClient(_app()).get(
+            "/sessions/graph_demo_deadbeef/artifacts/generated_videos/clip.mp4"
+        )
+
+        assert response.status_code == 200
+        assert response.content == b"retained"
+
 
 class TestResolveArtifactHelper:
     def test_uses_session_dir(self, monkeypatch, tmp_path):
@@ -74,7 +109,9 @@ class TestResolveArtifactHelper:
 
         monkeypatch.setattr(art_mod, "resolve_artifacts_dir", fake_dir)
         monkeypatch.setattr(art_mod, "resolve_artifact_file", fake_file)
+        monkeypatch.setattr(art_mod.persistence_store, "_session_dir", lambda: tmp_path)
         out = art_mod._resolve_artifact("sess", "rel.png")
         assert out == tmp_path / "result.bin"
         # Both helpers got called in order.
         assert [c[0] for c in captured] == ["dir", "file"]
+        assert captured[0] == ("dir", "sess", tmp_path)

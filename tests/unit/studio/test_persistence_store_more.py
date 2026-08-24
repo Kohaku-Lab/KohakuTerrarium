@@ -93,6 +93,22 @@ class TestDeleteSessionFiles:
         assert sorted(out) == sorted([a, b])
         assert not a.exists() and not b.exists()
 
+    def test_generated_artifacts_are_retained(self, monkeypatch, tmp_path):
+        session = tmp_path / "x.kohakutr"
+        session.write_bytes(b"session")
+        artifact = tmp_path / "x.artifacts" / "generated_images" / "image.png"
+        artifact.parent.mkdir(parents=True)
+        artifact.write_bytes(b"image")
+        monkeypatch.setattr(
+            store_mod, "all_versions_for_session_default", lambda _name: [session]
+        )
+
+        removed = store_mod.delete_session_files("x")
+
+        assert removed == [session]
+        assert not session.exists()
+        assert artifact.read_bytes() == b"image"
+
 
 # ── session_history_payload ─────────────────────────────────
 
@@ -158,6 +174,7 @@ class TestDiskUsageStatFailures:
         monkeypatch.setattr(Path, "stat", _path_stat)
         out = store_mod.disk_usage()
         # The unreadable file contributed nothing; the good one did.
+        assert out["session_bytes"] == len(b"good-data")
         assert out["total_bytes"] == len(b"good-data")
 
     def test_sidecar_stat_failure_is_skipped(self, tmp_path, monkeypatch):
@@ -177,4 +194,33 @@ class TestDiskUsageStatFailures:
         monkeypatch.setattr(store_mod.os, "stat", _stat)
         out = store_mod.disk_usage()
         # Sidecar bytes excluded (its stat raised), main file counted.
+        assert out["session_bytes"] == len(b"main")
         assert out["total_bytes"] == len(b"main")
+
+    def test_artifact_file_stat_failure_is_skipped(self, tmp_path, monkeypatch):
+        session = tmp_path / "s.kohakutr"
+        session.write_bytes(b"main")
+        artifact_dir = tmp_path / "s.artifacts" / "generated_images"
+        artifact_dir.mkdir(parents=True)
+        bad = artifact_dir / "bad.png"
+        bad.write_bytes(b"bad")
+        good = artifact_dir / "good.png"
+        good.write_bytes(b"good-image")
+        monkeypatch.setattr(store_mod, "_session_dir", lambda: tmp_path)
+        monkeypatch.setattr(
+            store_mod, "pick_canonical_per_session", lambda _dir: [session]
+        )
+        real_stat = os.stat
+
+        def _stat(path, *args, **kwargs):
+            if Path(path) == bad:
+                raise OSError("artifact stat failed")
+            return real_stat(path, *args, **kwargs)
+
+        monkeypatch.setattr(store_mod.os, "stat", _stat)
+
+        out = store_mod.disk_usage()
+
+        assert out["session_bytes"] == len(b"main")
+        assert out["artifacts_bytes"] == len(b"good-image")
+        assert out["total_bytes"] == len(b"main") + len(b"good-image")

@@ -18,6 +18,9 @@ from kohakuterrarium.studio.identity.codex_oauth import (
     login_async as codex_login_async,
 )
 from kohakuterrarium.studio.identity.llm_profiles import list_profiles_payload
+from kohakuterrarium.studio.identity.grok_subscription import (
+    get_status as grok_get_status,
+)
 from kohakuterrarium.studio.identity.mcp_servers import load_servers
 from kohakuterrarium.utils.logging import get_logger
 
@@ -75,6 +78,8 @@ class StudioIdentityAdapter:
                 return await self._op_codex_login()
             case "codex_status":
                 return codex_get_status()
+            case "grok_status":
+                return grok_get_status()
             case "codex_usage":
                 return await codex_get_usage()
             case "codex_reset_consume":

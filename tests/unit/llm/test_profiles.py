@@ -14,6 +14,7 @@ import pytest
 from kohakuterrarium.llm import api_keys as ak
 from kohakuterrarium.llm import presets as presets_mod
 from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.grok_auth import GrokTokens
 from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset
 from kohakuterrarium.llm.profiles import (
     _find_profile_by_model,
@@ -54,6 +55,7 @@ def isolated_llm_store(tmp_path, monkeypatch):
     monkeypatch.setattr(presets_mod, "list_packages", lambda: [])
 
     monkeypatch.setattr(CodexTokens, "load", classmethod(lambda cls, path=None: None))
+    monkeypatch.setattr(GrokTokens, "load_candidates", classmethod(lambda cls: []))
 
     # clear provider env vars so availability checks are deterministic
     for env in ak.PROVIDER_KEY_MAP.values():
@@ -107,6 +109,40 @@ class TestGetProfile:
         assert profile.provider == "codex"
         assert profile.backend_type == "codex"
         assert profile.max_context == 400000
+
+    @pytest.mark.parametrize(
+        ("preset", "model", "max_context"),
+        [
+            ("grok-4.6-subscription", "grok-4.6", 500000),
+            ("grok-4.5-subscription", "grok-4.5", 500000),
+            ("grok-4.3-subscription", "grok-4.3", 1000000),
+            (
+                "grok-4.20-0309-reasoning-subscription",
+                "grok-4.20-0309-reasoning",
+                1000000,
+            ),
+            (
+                "grok-4.20-0309-non-reasoning-subscription",
+                "grok-4.20-0309-non-reasoning",
+                1000000,
+            ),
+            (
+                "grok-4.20-multi-agent-0309-subscription",
+                "grok-4.20-multi-agent-0309",
+                1000000,
+            ),
+            ("grok-build-0.1-subscription", "grok-build-0.1", 256000),
+        ],
+    )
+    def test_grok_subscription_presets_use_dedicated_backend(
+        self, preset, model, max_context
+    ):
+        profile = get_profile(f"grok-subscription/{preset}")
+        assert profile is not None
+        assert profile.model == model
+        assert profile.provider == "grok-subscription"
+        assert profile.backend_type == "grok-subscription"
+        assert profile.max_context == max_context
 
     def test_provider_arg_disambiguates(self):
         profile = get_profile("gpt-5.4", provider="openrouter")
@@ -640,6 +676,9 @@ class TestLoadProfilesAndListAll:
         entries = list_all()
         keys = {(e["provider"], e["name"]) for e in entries}
         assert ("codex", "gpt-5.4") in keys
+        assert ("grok-subscription", "grok-4.6-subscription") in keys
+        assert ("grok-subscription", "grok-4.5-subscription") in keys
+        assert ("grok-subscription", "grok-build-0.1-subscription") in keys
         assert ("anthropic", "claude-opus-4.7") in keys
 
     def test_list_all_marks_user_source(self):

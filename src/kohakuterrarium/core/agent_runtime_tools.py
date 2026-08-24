@@ -217,6 +217,7 @@ class AgentRuntimeToolsMixin:
                 metadata={
                     "job_id": job_id,
                     "result": content,
+                    "output_preview": content[:5000],
                     "exit_code": exit_code,
                 },
             )

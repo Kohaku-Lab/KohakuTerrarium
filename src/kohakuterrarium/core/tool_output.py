@@ -10,6 +10,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from kohakuterrarium.core.constants import TOOL_OUTPUT_PREVIEW_CHARS
 from kohakuterrarium.llm.message import (
@@ -167,6 +168,7 @@ def normalize_tool_output(
     job_id: str = "",
     tool_name: str = "",
     artifact_store: Any = None,
+    image_subdir: str = "tool_outputs",
     preview_chars: int = TOOL_OUTPUT_PREVIEW_CHARS,
     saved_to: str | None = None,
 ) -> NormalizedToolOutput:
@@ -191,17 +193,27 @@ def normalize_tool_output(
     parts: list[ContentPart] = []
     materialized = 0
     elided = 0
+    artifacts: list[dict[str, str]] = []
     for idx, part in enumerate(normalized):
         if isinstance(part, ImagePart):
             replacement = materialize_image_part(
                 part,
                 artifact_store,
-                subdir="tool_outputs",
+                subdir=image_subdir,
                 stem_hint=_artifact_stem(tool_name, job_id, idx, part.source_name),
                 elide_without_store=True,
             )
             if isinstance(replacement, ImagePart) and replacement.url != part.url:
                 materialized += 1
+                relative_path = getattr(replacement, "artifact_relpath", "")
+                if relative_path:
+                    artifacts.append(
+                        {
+                            "kind": "image",
+                            "relative_path": relative_path,
+                            "url": replacement.url,
+                        }
+                    )
             elif isinstance(replacement, TextPart):
                 elided += 1
             parts.append(replacement)
@@ -216,6 +228,7 @@ def normalize_tool_output(
     metadata.update(trunc_meta)
     if materialized:
         metadata["data_urls_materialized"] = materialized
+        metadata["artifacts"] = artifacts
     if elided:
         metadata["data_urls_elided"] = elided
     stats = output_stats(parts, preview_chars=preview_chars)
@@ -270,11 +283,7 @@ def materialize_image_part(
             return TextPart(text=_data_url_placeholder(part, ext, len(b64)))
         return part
 
-    session_id = getattr(artifact_store, "session_id", "") or ""
-    if session_id:
-        served = f"/api/sessions/{session_id}/artifacts/{filename}"
-    else:
-        served = disk_path.as_uri()
+    served = artifact_served_url(artifact_store, filename, disk_path)
 
     new_part = ImagePart(
         url=served,
@@ -282,8 +291,38 @@ def materialize_image_part(
         source_type=part.source_type,
         source_name=part.source_name,
     )
+    setattr(new_part, "artifact_relpath", filename)
     _copy_dynamic_image_attrs(part, new_part)
+    logger.info(
+        "Image artifact persisted",
+        artifact_path=str(disk_path),
+        artifact_url=served,
+    )
     return new_part
+
+
+def artifact_served_url(
+    artifact_store: Any, relative_path: str, disk_path: str | Path
+) -> str:
+    """Build a stable URL from the exact on-disk artifact namespace."""
+    path = Path(disk_path)
+    namespace = ""
+    for parent in path.parents:
+        if parent.name.endswith(".artifacts"):
+            namespace = parent.name.removesuffix(".artifacts")
+            break
+    if not namespace:
+        store_path = getattr(artifact_store, "path", None)
+        if store_path:
+            namespace = Path(store_path).stem
+    if not namespace:
+        namespace = str(getattr(artifact_store, "session_id", "") or "")
+    if namespace:
+        return (
+            f"/api/sessions/{quote(namespace, safe='')}/artifacts/"
+            f"{quote(relative_path, safe='/')}"
+        )
+    return path.as_uri() if path.is_absolute() else str(path)
 
 
 def _truncate_text_parts(
