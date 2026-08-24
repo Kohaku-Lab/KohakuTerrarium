@@ -21,6 +21,7 @@ describe("descriptive hint tooltip contracts", () => {
   it("keeps long hints inside the viewport and permits wrapping", () => {
     const hintRule = styleSource.match(/\.el-popper\.kt-hint-tooltip \{[\s\S]*?\n\}/)?.[0]
 
+    expect(hintRule).toContain("box-sizing: border-box;")
     expect(hintRule).toContain("max-width: min(28rem, calc(100vw - 24px));")
     expect(hintRule).toContain("white-space: normal;")
     expect(hintRule).toContain("overflow-wrap: anywhere;")
