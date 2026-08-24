@@ -22,7 +22,7 @@ of the sandbox plugin, see
 |---|---|---|---|
 | [`sandbox`](#sandbox) | 1 | `pre_tool_execute`, `runtime_services`, `on_load` | Filesystem / network / subprocess capability gating. |
 | [`budget`](#budget) | 5 | `pre_llm_call`, `post_llm_call`, `pre_tool_execute`, `pre_subagent_run`, `get_prompt_content` | Turn / tool-call / walltime budget accounting. |
-| [`compact.auto`](#compactauto) | 30 | `post_llm_call`, `on_load` | Trigger context compaction after high-token LLM calls. |
+| [`compact.auto`](#compactauto) | 30 | `post_llm_call`, `on_load` | Trigger eager context compaction after high-token LLM calls. |
 | [`permgate`](#permgate) | 100 | `pre_tool_execute`, `on_load` | Interactive user approval for tool calls. |
 
 Lower priority runs earlier on `pre_*` hooks. The order above is the
@@ -153,16 +153,16 @@ plugins:
 
 ## `compact.auto`
 
-Trigger background context compaction when LLM token usage crosses a
-configurable threshold.
+Trigger eager background context compaction when LLM token usage crosses the
+threshold configured by the host compact manager.
 Implementation: `src/kohakuterrarium/builtins/plugins/compact/auto.py`.
 
-### Options
+### Configuration
 
-| Option | Type | Default | Purpose |
-|---|---|---|---|
-| `threshold_ratio` | float | 0.7 | Trigger when prompt-token usage exceeds this fraction of the model's context window. |
-| `min_messages` | int | 8 | Minimum message count before compaction is allowed. |
+This plugin has no plugin-specific options. Configure its host manager through
+the [`compact:` block](configuration.md#compact); see the
+[sub-agent guide](../guides/sub-agents.md#auto-compaction-for-sub-agents) for the inline
+sub-agent form.
 
 ### Behaviour
 
@@ -172,6 +172,13 @@ configured threshold. If exceeded, it calls
 compaction asynchronously: the controller keeps running while the
 summariser works, and the swap happens atomically between turns.
 See [non-blocking compaction](../concepts/impl-notes/non-blocking-compaction.md).
+
+On a main agent, disabling `compact.auto` removes this eager hook but retains
+the core deferred check after tool feedback and at turn end. Sub-agents have
+no separate deferred host-loop check, so they require `compact.auto` for
+automatic compaction. In both cases, `compact.enabled: false` disables
+automatic triggers; an explicit `/compact` command remains available on main
+agents.
 
 ### Pack alias
 

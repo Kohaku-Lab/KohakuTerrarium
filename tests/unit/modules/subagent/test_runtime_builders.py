@@ -185,7 +185,12 @@ class TestBuildCompactManager:
     def test_compact_config_builds_and_wires_manager(self):
         cfg = SubAgentConfig(
             name="x",
-            compact={"threshold": 0.8, "target": 0.3, "keep_recent_turns": 6},
+            compact={
+                "enabled": False,
+                "threshold": 0.8,
+                "target": 0.3,
+                "keep_recent_turns": 6,
+            },
         )
         llm = _FakeLLM()
         cm = build_compact_manager(cfg, llm)
@@ -194,6 +199,7 @@ class TestBuildCompactManager:
         assert cm.config.threshold == 0.8
         assert cm.config.target == 0.3
         assert cm.config.keep_recent_turns == 6
+        assert cm.config.enabled is False
         # The manager is wired to this llm and the sub-agent's name.
         assert cm._llm is llm
         assert cm._agent_name == "x"

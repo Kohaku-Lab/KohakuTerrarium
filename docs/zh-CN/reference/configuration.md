@@ -260,7 +260,7 @@ subagents:
 
 | 字段 | 型别 | 默认 | 说明 |
 |---|---|---|---|
-| `enabled` | bool | `true` | 开启压缩。 |
+| `enabled` | bool | `true` | 开启自动压缩；关闭后仍可手动执行 `/compact`。 |
 | `max_tokens` | int | profile 默认 | 目标 token 上限。 |
 | `threshold` | float | `0.8` | 达到 `max_tokens` 多少比例时启动压缩。 |
 | `target` | float | `0.5` | 压缩后的目标比例；预算允许时近期回合仍原样保留。 |

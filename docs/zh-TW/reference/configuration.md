@@ -260,7 +260,7 @@ subagents:
 
 | 欄位 | 型別 | 預設 | 說明 |
 |---|---|---|---|
-| `enabled` | bool | `true` | 開啟壓縮。 |
+| `enabled` | bool | `true` | 開啟自動壓縮；關閉後仍可手動執行 `/compact`。 |
 | `max_tokens` | int | profile 預設 | 目標 token 上限。 |
 | `threshold` | float | `0.8` | 達到 `max_tokens` 多少比例時啟動壓縮。 |
 | `target` | float | `0.5` | 壓縮後的目標比例；預算允許時近期回合仍原樣保留。 |

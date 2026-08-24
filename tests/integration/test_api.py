@@ -999,6 +999,10 @@ class TestApiIntegration:
         # modules — all disabled by default.
         module_names = {m["name"] for m in modules}
         assert {"sandbox", "budget"}.issubset(module_names)
+        compact_auto = next(m for m in modules if m["name"] == "compact.auto")
+        assert "eager" in compact_auto["description"].lower()
+        assert "deferred" in compact_auto["description"].lower()
+        assert "compact.enabled" in compact_auto["description"]
         resp = client.get(f"/api/sessions/{session_id}/creatures/ghost/modules")
         assert resp.status_code == 404
 
