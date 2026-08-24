@@ -6,7 +6,7 @@
       <label class="text-[11px] text-warm-500 font-medium flex items-center gap-1 min-w-0">
         <span class="font-mono truncate">{{ entry.key }}</span>
         <span class="text-warm-400 font-normal text-[10px] shrink-0">({{ entry.spec?.type || "string" }})</span>
-        <el-tooltip v-if="entry.spec?.doc" :content="entry.spec.doc" placement="top" :show-after="300">
+        <el-tooltip v-if="entry.spec?.doc" :content="entry.spec.doc" placement="top" :show-after="300" popper-class="kt-hint-tooltip">
           <span class="i-carbon-information text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 cursor-help text-[12px] shrink-0" />
         </el-tooltip>
       </label>
