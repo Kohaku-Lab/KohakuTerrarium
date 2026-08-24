@@ -418,6 +418,7 @@ class TUISession(TabModelRegistryMixin):
         tool_id: str = "",
         target: str = "",
         agent_id: str = "",
+        args_detail: str = "",
     ) -> ToolBlock | None:
         key = target or "_default"
         sa_dict = self._current_subagents.get(key, {})
@@ -437,7 +438,12 @@ class TUISession(TabModelRegistryMixin):
 
             self._safe_call(_do)
             return None
-        block = ToolBlock(tool_name, args_preview, tool_id)
+        block = ToolBlock(
+            tool_name,
+            args_preview,
+            tool_id,
+            args_detail=args_detail,
+        )
         self._safe_mount(block, target=target)
         return block
 
