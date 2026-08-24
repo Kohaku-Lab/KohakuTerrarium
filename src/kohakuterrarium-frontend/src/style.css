@@ -276,6 +276,21 @@ body {
   }
 }
 
+/* ===== Descriptive hint tooltips ===================================
+ *
+ * Element Plus poppers have no default maximum width.  A moderately
+ * long module or option description therefore grows past the viewport
+ * before Popper can place it, leaving part of the hint unreadable.
+ * Scope the constraint to documentation hints so menus, selects, and
+ * other popper-based controls keep their own sizing behaviour. */
+.el-popper.kt-hint-tooltip {
+  box-sizing: border-box;
+  max-width: min(28rem, calc(100vw - 24px));
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 /* ===== Mobile dialogs / drawers → fullscreen ========================
  *
  * Element Plus dialogs hardcode pixel widths (520-820px) per component.

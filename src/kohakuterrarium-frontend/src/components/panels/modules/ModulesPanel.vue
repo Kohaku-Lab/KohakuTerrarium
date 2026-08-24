@@ -30,7 +30,7 @@
           <div class="i-carbon-arrow-left text-[14px]" />
         </button>
         <span class="font-medium text-warm-700 dark:text-warm-300 text-xs truncate">{{ editTarget?.name }}</span>
-        <el-tooltip v-if="editTargetModule?.description" :content="editTargetModule.description" placement="bottom" :show-after="300">
+        <el-tooltip v-if="editTargetModule?.description" :content="editTargetModule.description" placement="bottom" :show-after="300" popper-class="kt-hint-tooltip">
           <span class="i-carbon-information text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 cursor-help text-[12px]" />
         </el-tooltip>
         <span v-if="editTargetModule?.priority != null" class="text-[10px] text-warm-400 font-mono">p{{ editTargetModule.priority }}</span>
@@ -66,7 +66,7 @@
               <li v-for="m in group.items" :key="keyOf(m)" class="px-3 py-2 flex items-center gap-2 hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors group cursor-pointer" @click="enterEdit(m)">
                 <span v-if="m.enabled !== null" class="w-1.5 h-1.5 rounded-full shrink-0" :class="m.enabled ? 'bg-aquamarine' : 'bg-warm-400'" />
                 <span class="font-medium text-warm-700 dark:text-warm-300 text-xs truncate">{{ m.name }}</span>
-                <el-tooltip v-if="m.description" :content="m.description" placement="top" :show-after="300">
+                <el-tooltip v-if="m.description" :content="m.description" placement="top" :show-after="300" popper-class="kt-hint-tooltip">
                   <span class="i-carbon-information text-warm-400 group-hover:text-warm-600 dark:group-hover:text-warm-300 text-[12px] cursor-help" @click.stop />
                 </el-tooltip>
                 <span v-if="m.priority != null" class="text-[10px] text-warm-400 font-mono">p{{ m.priority }}</span>
