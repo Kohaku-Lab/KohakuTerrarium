@@ -134,6 +134,7 @@
             <template v-for="(part, i) in message.contentParts" :key="i">
               <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" />
               <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
+              <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
               <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
                 <span class="i-carbon-document mr-1 text-aquamarine" />
                 {{ part.file?.name || part.file?.path || "file" }}
@@ -261,6 +262,7 @@
           <template v-for="(part, i) in message.contentParts" :key="i">
             <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" />
             <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
+            <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
             <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
               <span class="i-carbon-document mr-1 text-aquamarine" />
               {{ part.file?.name || part.file?.path || "file" }}
@@ -283,6 +285,7 @@ import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import CommandResultMessage from "@/components/chat/CommandResultMessage.vue"
 import ToolCallBatch from "@/components/chat/ToolCallBatch.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
+import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
 import UIEventBlock from "@/components/chat/UIEventBlock.vue"
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useChatStore } from "@/stores/chat"

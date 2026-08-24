@@ -11,6 +11,7 @@ for a focused single-creature stream.
 """
 
 import asyncio
+import os
 import sys
 from pathlib import Path
 from uuid import uuid4
@@ -25,6 +26,7 @@ from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
 from kohakuterrarium.terrarium.engine_rich_cli import run_engine_with_rich_cli
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -35,6 +37,17 @@ from kohakuterrarium.utils.logging import (
 logger = get_logger(__name__)
 
 _SESSION_DIR = Path.home() / ".kohakuterrarium" / "sessions"
+
+
+def _session_dir() -> Path:
+    """Resolve the CLI session root using the shared configuration rules."""
+    explicit = os.environ.get("KT_SESSION_DIR")
+    if explicit:
+        return Path(explicit).expanduser()
+    docs_default = Path.home() / ".kohakuterrarium" / "sessions"
+    if _SESSION_DIR != docs_default:
+        return _SESSION_DIR
+    return config_dir() / "sessions"
 
 
 def run_agent_cli(
@@ -393,8 +406,9 @@ async def _attach_session_store(
     still needs the recipe type to rebuild topology.
     """
     if session == "__auto__":
-        _SESSION_DIR.mkdir(parents=True, exist_ok=True)
-        session_file = _SESSION_DIR / f"{graph_id}_{uuid4().hex[:8]}.kohakutr"
+        session_root = _session_dir()
+        session_root.mkdir(parents=True, exist_ok=True)
+        session_file = session_root / f"{graph_id}_{uuid4().hex[:8]}.kohakutr"
     else:
         session_file = Path(session)
 
@@ -410,7 +424,7 @@ async def _attach_session_store(
 def _resolve_session(query: str | None, last: bool = False) -> Path | None:
     """Resolve a session query to a file path. Used by ``kt resume``.
 
-    Searches ~/.kohakuterrarium/sessions/ for matching files.
+    Searches the configured session directory for matching files.
     Accepts: full path, filename, name prefix, or None (list/pick).
     """
     if query and Path(query).exists():
@@ -422,11 +436,12 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
                 query = query[: -len(ext)]
                 break
 
-    if not _SESSION_DIR.exists():
+    session_root = _session_dir()
+    if not session_root.exists():
         return None
 
     sessions = sorted(
-        [*_SESSION_DIR.glob("*.kohakutr"), *_SESSION_DIR.glob("*.kt")],
+        [*session_root.glob("*.kohakutr"), *session_root.glob("*.kt")],
         key=lambda p: p.stat().st_mtime,
         reverse=True,
     )
@@ -478,8 +493,8 @@ def _resolve_session(query: str | None, last: bool = False) -> Path | None:
     if p.exists():
         return p
     for ext in (".kohakutr", ".kt"):
-        if (_SESSION_DIR / f"{query}{ext}").exists():
-            return _SESSION_DIR / f"{query}{ext}"
+        if (session_root / f"{query}{ext}").exists():
+            return session_root / f"{query}{ext}"
 
     return None
 

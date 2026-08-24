@@ -17,11 +17,13 @@
       <section class="card p-5">
         <h2 class="text-xs uppercase tracking-wider text-warm-500 mb-3">{{ t("shell.stats.storage") }}</h2>
         <div v-if="diskLoading" class="text-warm-400 italic text-sm">{{ t("shell.stats.loading") }}</div>
-        <div v-else class="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <Metric label="Saved sessions" :value="String(disk.count ?? 0)" />
-          <Metric label="Total on disk" :value="formatBytes(disk.total_bytes ?? 0)" />
-          <Metric label="Oldest" :value="formatRelative(disk.oldest_at)" />
-          <Metric label="Newest" :value="formatRelative(disk.newest_at)" />
+        <div v-else class="grid grid-cols-2 lg:grid-cols-3 gap-4">
+          <Metric :label="t('shell.stats.savedSessions')" :value="String(disk.count ?? 0)" />
+          <Metric :label="t('shell.stats.sessionData')" :value="formatBytes(disk.session_bytes ?? 0)" />
+          <Metric :label="t('shell.stats.generatedMedia')" :value="formatBytes(disk.artifacts_bytes ?? 0)" />
+          <Metric :label="t('shell.stats.totalOnDisk')" :value="formatBytes(disk.total_bytes ?? 0)" />
+          <Metric :label="t('shell.stats.oldest')" :value="formatRelative(disk.oldest_at)" />
+          <Metric :label="t('shell.stats.newest')" :value="formatRelative(disk.newest_at)" />
         </div>
         <div v-if="disk.session_dir" class="text-[10px] font-mono text-warm-400 mt-3 truncate" :title="disk.session_dir">
           {{ disk.session_dir }}

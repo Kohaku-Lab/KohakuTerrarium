@@ -146,6 +146,8 @@ class TestIdentityMcp:
     @pytest.fixture(autouse=True)
     def _redirect(self, tmp_path, monkeypatch):
         monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path))
+        monkeypatch.setenv("GROK_HOME", str(tmp_path / "grok"))
+        monkeypatch.setenv("OPENCODE_AUTH_FILE", str(tmp_path / "opencode.json"))
 
     def test_upsert_then_find_and_list(self):
         s = Studio()
@@ -227,6 +229,7 @@ class TestIdentityLlm:
         names = {b["name"] for b in backends}
         # openai is always a built-in backend.
         assert "openai" in names
+        assert "grok-subscription" in names
         openai = next(b for b in backends if b["name"] == "openai")
         assert openai["built_in"] is True
 

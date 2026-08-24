@@ -251,6 +251,40 @@ class TestNormalizeMultimodal:
             f.startswith("tool_outputs/") and store.written[f] == b"PNG-RAW-BYTES"
             for f in store.written
         )
+        assert n.metadata["artifacts"][0]["relative_path"].startswith("tool_outputs/")
+
+    def test_generated_image_can_use_a_dedicated_subdirectory(self, tmp_path):
+        store = _FakeArtifactStore(tmp_path)
+        n = normalize_tool_output(
+            [ImagePart(url=_png_data_url(b"GENERATED"))],
+            max_output=10_000,
+            artifact_store=store,
+            image_subdir="generated_images",
+            tool_name="grok_image_gen",
+            job_id="job1",
+        )
+
+        artifact = n.metadata["artifacts"][0]
+        assert artifact["kind"] == "image"
+        assert artifact["relative_path"].startswith("generated_images/")
+        assert artifact["url"].startswith(
+            "/api/sessions/sess123/artifacts/generated_images/"
+        )
+
+    def test_artifact_url_uses_exact_retained_directory_namespace(self, tmp_path):
+        store = _FakeArtifactStore(
+            tmp_path / "graph_demo_deadbeef.artifacts", session_id="graph_demo"
+        )
+        normalized = normalize_tool_output(
+            [ImagePart(url=_png_data_url(b"RETAINED"))],
+            max_output=10_000,
+            artifact_store=store,
+            tool_name="grok_image_gen",
+        )
+
+        assert normalized.metadata["artifacts"][0]["url"].startswith(
+            "/api/sessions/graph_demo_deadbeef/artifacts/"
+        )
 
     def test_image_decode_failure_elided(self, tmp_path):
         store = _FakeArtifactStore(tmp_path)

@@ -219,6 +219,9 @@ function toolResultPayload(result, data = {}) {
   if (data.canvas_preview && (!resultMeta || !resultMeta.canvas_preview)) {
     resultMeta = { ...(resultMeta || {}), canvas_preview: data.canvas_preview }
   }
+  if (data.tool_metadata) {
+    resultMeta = { ...(resultMeta || {}), ...data.tool_metadata }
+  }
   const parts = normalizeContentParts(result)
   return {
     result,
@@ -1103,6 +1106,7 @@ export function _replayEvents(messages, events, branchView = null) {
           // Forward it so updateTool's resultMeta picks it up — that's
           // what the canvas store later reads (Feat 1).
           canvas_preview: evt.canvas_preview,
+          tool_metadata: evt.tool_metadata,
         },
         evt.call_id || evt.job_id,
       )

@@ -43,7 +43,14 @@ Compaction changes the live prompt and writes a fast-resume snapshot, but it doe
 ~/.kohakuterrarium/sessions/<name>.kohakutr
 ```
 
-`<name>` is auto-generated from the creature/terrarium name plus a timestamp. Override with `--session <path>` or opt out with `--no-session`.
+`<name>` is auto-generated from the creature/terrarium name plus a timestamp.
+`KT_SESSION_DIR` changes the root for CLI, Studio, and the web API; an explicit
+`--session <path>` wins for that run. Generated media uses predictable sibling
+paths: `generated_images/` for provider-generated images and
+`generated_videos/` for videos. Generic binary tool output remains under
+`tool_outputs/`. Existing artifact paths remain readable and are not migrated.
+Deleting session data does not delete its retained artifacts. Use
+`--no-session` to opt out of session persistence.
 
 ## What persists
 

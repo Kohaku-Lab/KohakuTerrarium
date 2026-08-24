@@ -19,6 +19,7 @@ from kohakuterrarium.builtins.tools.python import PythonTool
 from kohakuterrarium.builtins.tools.edit import EditTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
 from kohakuterrarium.builtins.tools.grep import GrepTool
+from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
 from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
 from kohakuterrarium.builtins.tools.info import InfoTool
 from kohakuterrarium.builtins.tools.json_read import JsonReadTool
@@ -34,6 +35,7 @@ from kohakuterrarium.builtins.tools.show_card import ShowCardTool
 from kohakuterrarium.builtins.tools.skill import SkillTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.builtins.tools.tree import TreeTool
+from kohakuterrarium.builtins.tools.video_gen import VideoGenTool
 from kohakuterrarium.builtins.tools.web_fetch import WebFetchTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.builtins.tools.write import WriteTool
@@ -64,6 +66,7 @@ __all__ = [
     "GlobTool",
     "MultiEditTool",
     "GrepTool",
+    "GrokImageGenTool",
     "NotebookEditTool",
     "NotebookReadTool",
     "ImageGenTool",
@@ -72,6 +75,7 @@ __all__ = [
     "JsonWriteTool",
     "StopTaskTool",
     "TreeTool",
+    "VideoGenTool",
     "WebFetchTool",
     "WebSearchTool",
     # MCP

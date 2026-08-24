@@ -331,6 +331,8 @@ _STREAM_METADATA_KEYS = (
     "final_state",
     # File-mutating tools may include a preview for immediate canvas rendering.
     "canvas_preview",
+    # Bounded, tool-selected metadata such as generated artifact references.
+    "tool_metadata",
     # Ordered assistant reasoning segments from the final LLM turn.
     "reasoning_content",
     "reasoning_summary",

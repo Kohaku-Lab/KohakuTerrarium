@@ -65,15 +65,19 @@ def all_session_files_default() -> list[Path]:
 
 
 def disk_usage() -> dict[str, Any]:
-    """Return canonical session count, timestamps, and on-disk byte usage.
+    """Return session and retained-artifact byte usage separately.
 
-    Byte totals include SQLite ``-wal`` and ``-shm`` sidecars without opening
-    any session database. Timestamps come from canonical session files only.
+    Session bytes include SQLite ``-wal`` and ``-shm`` sidecars without opening
+    any database. Artifact bytes include every direct ``*.artifacts`` directory,
+    including media intentionally retained after its session was deleted.
+    Timestamps come from canonical session files only.
     """
     session_dir = _session_dir()
     if not session_dir.exists():
         return {
             "count": 0,
+            "session_bytes": 0,
+            "artifacts_bytes": 0,
             "total_bytes": 0,
             "oldest_at": None,
             "newest_at": None,
@@ -81,7 +85,7 @@ def disk_usage() -> dict[str, Any]:
         }
 
     canonical = pick_canonical_per_session(session_dir)
-    total = 0
+    session_bytes = 0
     oldest: float | None = None
     newest: float | None = None
     for path in canonical:
@@ -89,7 +93,7 @@ def disk_usage() -> dict[str, Any]:
             st = path.stat()
         except OSError:
             continue
-        total += st.st_size
+        session_bytes += st.st_size
         if oldest is None or st.st_mtime < oldest:
             oldest = st.st_mtime
         if newest is None or st.st_mtime > newest:
@@ -100,17 +104,42 @@ def disk_usage() -> dict[str, Any]:
             if not os.path.exists(sidecar):
                 continue
             try:
-                total += os.stat(sidecar).st_size
+                session_bytes += os.stat(sidecar).st_size
             except OSError:
                 continue
 
+    artifacts_bytes = _artifacts_disk_usage(session_dir)
+
     return {
         "count": len(canonical),
-        "total_bytes": total,
+        "session_bytes": session_bytes,
+        "artifacts_bytes": artifacts_bytes,
+        "total_bytes": session_bytes + artifacts_bytes,
         "oldest_at": oldest,
         "newest_at": newest,
         "session_dir": str(session_dir),
     }
+
+
+def _artifacts_disk_usage(session_dir: Path) -> int:
+    """Sum regular files below direct ``*.artifacts`` session companions."""
+    total = 0
+    for artifacts_dir in session_dir.glob("*.artifacts"):
+        try:
+            is_dir = artifacts_dir.is_dir()
+        except OSError:
+            continue
+        if not is_dir:
+            continue
+        for root, _dirs, files in os.walk(artifacts_dir, followlinks=False):
+            for filename in files:
+                try:
+                    total += os.stat(
+                        Path(root) / filename, follow_symlinks=False
+                    ).st_size
+                except OSError:
+                    continue
+    return total
 
 
 def resolve_session_path_default(session_name: str) -> Path | None:
