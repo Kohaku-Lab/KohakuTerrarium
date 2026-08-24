@@ -924,11 +924,13 @@ class TestCompactManagerInit:
         patched_llm.set_script(["x"])
         agent = make_agent()
         agent.config.compact = {
+            "enabled": False,
             "max_tokens": 10_000,
             "threshold": 0.5,
             "target": 0.3,
             "keep_recent_turns": 4,
             "cooldown_seconds": 5.0,
+            "compact_model": "compact-test-profile",
         }
         await agent.start()
         try:
@@ -939,6 +941,8 @@ class TestCompactManagerInit:
             assert cfg.target == 0.3
             assert cfg.keep_recent_turns == 4
             assert cfg.cooldown_seconds == 5.0
+            assert cfg.enabled is False
+            assert cfg.compact_model == "compact-test-profile"
         finally:
             await agent.stop()
 
