@@ -141,15 +141,14 @@ plugins:
 
 ## `compact.auto`
 
-在 LLM token 用量越过门槛时触发背景 context 压缩。
+在 LLM token 用量越过 compact manager 配置的门槛时，提前触发背景 context 压缩。
 实现：`src/kohakuterrarium/builtins/plugins/compact/auto.py`。
 
-### Options
+### 配置
 
-| Option | 类型 | 预设 | 用途 |
-|--------|------|------|------|
-| `threshold_ratio` | float | 0.7 | 当 prompt token 用量超过模型 context 窗口的这个比例时触发。 |
-| `min_messages` | int | 8 | 在允许压缩之前的最小讯息数。 |
+这个插件没有插件专属 options。请通过 host 的
+[`compact:` 配置块](configuration.md#压缩)配置 manager；SubAgent 的内联
+写法见 [SubAgent 指南](../guides/sub-agents.md#子代理自动压缩)。
 
 ### 行为
 
@@ -158,6 +157,12 @@ plugins:
 步压缩：控制器继续跑，summariser 在背景工作，切换发生在回合之
 间。见
 [非阻塞压缩](../concepts/impl-notes/non-blocking-compaction.md)。
+
+对主 Agent 而言，关闭 `compact.auto` 只会移除这个提前触发 hook；工具结果
+回传后和 turn 结束时的核心延后检查仍然保留。SubAgent 没有独立的延后
+host-loop 检查，因此仍需 `compact.auto` 才能自动压缩。两种情况下，
+`compact.enabled: false` 都会关闭自动触发；主 Agent 上显式执行的
+`/compact` 仍然可用。
 
 ### Pack 别名
 

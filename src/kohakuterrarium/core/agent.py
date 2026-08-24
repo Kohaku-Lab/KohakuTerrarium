@@ -399,9 +399,11 @@ class Agent(
             keep_recent_turns=compact_data.get(
                 "keep_recent_turns", CompactConfig.keep_recent_turns
             ),
+            enabled=compact_data.get("enabled", CompactConfig.enabled),
             cooldown_seconds=compact_data.get(
                 "cooldown_seconds", CompactConfig.cooldown_seconds
             ),
+            compact_model=compact_data.get("compact_model"),
         )
         self.compact_manager = CompactManager(compact_cfg)
         self.compact_manager._controller = self.controller

@@ -20,7 +20,7 @@ tags:
 - **没有 tools**。 只负责响应的专家型Creature（摘要、格式整理、翻译）可以完全不带工具。LLM 本身就已经很有能力。
 - **没有 sub-agents**。 从不委派的短任务Creature很常见。
 - **没有 output**。 只做 side effect 的 Creature 也存在。若一个 Creature唯一的工作是写入外部数据库，它就不需要 sink。
-- **没有 memory / compaction / session**。 `--no-session` 和 `compact.enabled: false` 就能覆盖这类情况。
+- **没有 memory / 自动 compaction / session**。`--no-session` 和 `compact.enabled: false` 就能覆盖这类情况；显式 `/compact` 仍属于用户主动操作。
 
 框架并不偏袒「六模块齐全」这种形状。它只是让你在想用这种形状时，成本很低。
 

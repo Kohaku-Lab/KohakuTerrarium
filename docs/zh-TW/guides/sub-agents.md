@@ -199,7 +199,7 @@ subagents:
       keep_recent_turns: 4
 ```
 
-`compact.auto` 外掛會在 LLM 輪次後檢查用量，並在達到閾值時觸發壓縮。沒有 `compact.auto`（或 `auto-compact` 外掛包）時，單獨的 `compact:` 只會設定管理器，不會自動觸發。
+`compact.auto` 外掛會在 LLM 輪次後檢查用量，並在達到閾值時觸發壓縮。沒有 `compact.auto`（或 `auto-compact` 外掛包）時，單獨的 `compact:` 只會設定管理器，不會自動觸發。這一點與主 Agent 不同：即使關閉提前觸發的 `compact.auto` hook，主 Agent 的 host loop 仍會保留延後的閾值檢查。
 
 ## 快速檢查表
 

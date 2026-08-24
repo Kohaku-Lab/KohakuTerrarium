@@ -219,7 +219,8 @@ subagents:
 The `compact.auto` plugin checks usage after LLM turns and triggers compaction
 when the configured threshold is crossed. Without `compact.auto` (or the
 `auto-compact` pack), a `compact:` block alone configures the manager but does
-not auto-trigger it.
+not auto-trigger it. This differs from a main agent, whose host loop retains a
+deferred threshold check even when its eager `compact.auto` hook is disabled.
 
 ## Quick checklist
 

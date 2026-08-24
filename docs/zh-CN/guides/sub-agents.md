@@ -199,7 +199,7 @@ subagents:
       keep_recent_turns: 4
 ```
 
-`compact.auto` 插件会在 LLM 轮次后检查用量，并在达到阈值时触发压缩。没有 `compact.auto`（或 `auto-compact` 插件包）时，单独的 `compact:` 只会配置管理器，不会自动触发。
+`compact.auto` 插件会在 LLM 轮次后检查用量，并在达到阈值时触发压缩。没有 `compact.auto`（或 `auto-compact` 插件包）时，单独的 `compact:` 只会配置管理器，不会自动触发。这一点与主 Agent 不同：即使关闭提前触发的 `compact.auto` hook，主 Agent 的 host loop 仍会保留延后的阈值检查。
 
 ## 快速检查表
 

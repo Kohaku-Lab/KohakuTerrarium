@@ -328,7 +328,7 @@ setup tool via a `tools` entry with `type: trigger, name: add_schedule`
 
 | Field | Type | Default | Description |
 |---|---|---|---|
-| `enabled` | bool | `true` | Turn compaction on. |
+| `enabled` | bool | `true` | Enable automatic compaction. When false, manual `/compact` remains available. |
 | `max_tokens` | int | profile-default | Target token ceiling. |
 | `threshold` | float | `0.8` | Fraction of `max_tokens` at which compaction starts. |
 | `target` | float | `0.5` | Target fraction after compaction; recent turns remain verbatim when they fit. |

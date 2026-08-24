@@ -10,6 +10,12 @@ class AutoCompactPlugin(BasePlugin):
 
     name = "compact.auto"
     priority = 30
+    description = (
+        "Start eager background compaction after high-token LLM responses; "
+        "main agents retain deferred turn-boundary checks when it is disabled, "
+        "while sub-agents require it for automatic compaction. Set "
+        "compact.enabled=false to disable automatic compaction."
+    )
 
     def __init__(self) -> None:
         super().__init__()

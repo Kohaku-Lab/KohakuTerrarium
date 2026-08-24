@@ -30,8 +30,9 @@ appear together in most creatures, but each is independently optional:
   normal.
 - **No output.** Side-effect-only creatures exist. A creature whose
   only job is to write to an external database does not need a sink.
-- **No memory / compaction / session.** `--no-session` and
-  `compact.enabled: false` cover the case.
+- **No memory / automatic compaction / session.** `--no-session` and
+  `compact.enabled: false` cover the case; an explicit `/compact` remains a
+  user-invoked operation.
 
 The framework does not privilege the full six-module shape. It just
 makes it cheap when you want it.
