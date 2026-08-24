@@ -6,6 +6,16 @@ from textual.widgets import Collapsible, Static
 from kohakuterrarium.builtins.tui._safe_text import escape_markup, plain
 from kohakuterrarium.builtins.tui.widgets.helpers import _summarize_output
 
+_TITLE_ARGS_LIMIT = 50
+
+
+def _compact_args_preview(preview: str) -> str:
+    """Keep a title on one line and mark omitted argument text."""
+    compact = " ".join(preview.split())
+    if len(compact) <= _TITLE_ARGS_LIMIT:
+        return compact
+    return f"{compact[: _TITLE_ARGS_LIMIT - 1]}…"
+
 
 class ToolBlock(Collapsible):
     """Display a tool call and its result in a collapsible block."""
@@ -44,6 +54,12 @@ class ToolBlock(Collapsible):
         height: auto;
         color: $text-muted;
     }
+    .tool-args {
+        height: auto;
+        width: 1fr;
+        color: $text-muted;
+        text-wrap: wrap;
+    }
     """
 
     BUTTON_OPEN = "[-]"
@@ -54,17 +70,29 @@ class ToolBlock(Collapsible):
         tool_name: str,
         args_preview: str = "",
         tool_id: str = "",
+        args_detail: str = "",
         **kwargs,
     ):
         self.tool_name = tool_name
         self.tool_id = tool_id
         self.args_preview = args_preview
+        self.args_detail = args_detail
         self.state = "running"
         self.result_summary = ""
         self.start_time = time.monotonic()
+        self._args_widget = Static(
+            plain(f"Arguments:\n{args_detail}") if args_detail else "",
+            classes="tool-args",
+        )
         self._output_widget = Static("", classes="tool-output")
         title = self._build_title()
-        super().__init__(self._output_widget, title=title, collapsed=True, **kwargs)
+        super().__init__(
+            self._args_widget,
+            self._output_widget,
+            title=title,
+            collapsed=True,
+            **kwargs,
+        )
         self.add_class("-running")
 
     def _build_title(self) -> str:
@@ -72,14 +100,14 @@ class ToolBlock(Collapsible):
             elapsed = time.monotonic() - self.start_time
             parts = [f"\u25cb {self.tool_name}"]
             if self.args_preview:
-                parts.append(f"  {self.args_preview[:50]}")
+                parts.append(f"  {_compact_args_preview(self.args_preview)}")
             if elapsed >= 0.5:
                 parts.append(f"  ({elapsed:.1f}s)")
             return escape_markup("".join(parts))
         elif self.state == "done":
             parts = [f"\u25cf {self.tool_name}"]
             if self.args_preview:
-                parts.append(f"  {self.args_preview[:50]}")
+                parts.append(f"  {_compact_args_preview(self.args_preview)}")
             if self.result_summary:
                 parts.append(f"  ({self.result_summary})")
             return escape_markup("".join(parts))
@@ -229,7 +257,7 @@ class SubAgentBlock(Collapsible):
         self._tool_counter += 1
         text = f"\u25cb {tool_name}"
         if args_preview:
-            text += f"  {args_preview[:50]}"
+            text += f"  {_compact_args_preview(args_preview)}"
         line = Static(plain(text), classes="sa-tool-line")
         line._raw_text = text
         self._tool_lines[key] = line

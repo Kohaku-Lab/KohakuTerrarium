@@ -9,6 +9,10 @@ from textual.widgets import Markdown
 from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
 from kohakuterrarium.builtins.tui.model_info import handle_session_info
 from kohakuterrarium.builtins.tui.session import CULL_KEEP, TUISession
+from kohakuterrarium.builtins.tui.tool_args import (
+    format_args_detail,
+    format_args_preview,
+)
 from kohakuterrarium.builtins.tui.widgets import (
     CompactSummaryBlock,
     LoadOlderButton,
@@ -414,8 +418,14 @@ class TUIOutput(BaseOutputModule):
     ) -> None:
         self._tui.end_streaming(target=self._target)
         self._turn_started = False
-        args_preview = _format_args_preview(name, args) or rest[:60]
-        self._tui.add_tool_block(name, args_preview, job_id, target=t)
+        args_preview = format_args_preview(name, args) or rest[:60]
+        self._tui.add_tool_block(
+            name,
+            args_preview,
+            job_id,
+            target=t,
+            args_detail=format_args_detail(name, args),
+        )
         is_bg = metadata.get("background", False)
         self._tui.update_running(job_id or name, name, promotable=not is_bg)
 
@@ -487,7 +497,7 @@ class TUIOutput(BaseOutputModule):
 
         if sub_activity == "tool_start":
             sub_args = (
-                _format_args_preview(tool_name, metadata.get("args", {}))
+                format_args_preview(tool_name, metadata.get("args", {}))
                 or sub_detail[:60]
             )
             self._tui.add_tool_block(tool_name, sub_args, target=t, agent_id=sa_job_id)
@@ -620,36 +630,6 @@ def _parse_detail(detail: str) -> tuple[str, str]:
         except (ValueError, IndexError):
             pass
     return "unknown", detail
-
-
-def _format_args_preview(tool_name: str, args: dict) -> str:
-    if not args:
-        return ""
-    match tool_name:
-        case "bash":
-            return args.get("command", "")[:60]
-        case "read":
-            return args.get("path", "")[:60]
-        case "write" | "edit":
-            return args.get("file_path", args.get("path", ""))[:60]
-        case "glob":
-            return args.get("pattern", "")[:60]
-        case "grep":
-            p = args.get("pattern", "")
-            path = args.get("path", "")
-            return f'"{p}" {path}'.strip()[:60]
-        case "send_message" | "terrarium_send":
-            return f"-> {args.get('channel', '')}"
-        case "terrarium_observe":
-            return f"<- {args.get('channel', '')}"
-        case "info":
-            return args.get("name", args.get("topic", ""))[:50]
-        case _:
-            for k, v in args.items():
-                if k == "content" or k.startswith("_"):
-                    continue
-                return f"{k}={str(v)[:40]}"
-    return ""
 
 
 def _command_name(metadata: dict) -> str:
@@ -805,12 +785,13 @@ def _build_turn_widgets(
             name = _clean_name(raw_name)
             call_id = data.get("call_id", "")
             args = data.get("args", {})
-            preview = _format_args_preview(name, args)
+            preview = format_args_preview(name, args)
+            detail = format_args_detail(name, args)
 
             if current_subagent:
                 current_subagent.add_tool_line(name, preview)
             else:
-                block = ToolBlock(name, preview, call_id)
+                block = ToolBlock(name, preview, call_id, args_detail=detail)
                 widgets.append(block)
             if call_id:
                 pending_tools[call_id] = name
@@ -921,8 +902,13 @@ def _render_turn_to_tui(tui, turn: dict) -> None:
             name = _clean_name(raw_name)
             call_id = data.get("call_id", "")
             args = data.get("args", {})
-            preview = _format_args_preview(name, args)
-            tui.add_tool_block(name, preview, call_id)
+            preview = format_args_preview(name, args)
+            tui.add_tool_block(
+                name,
+                preview,
+                call_id,
+                args_detail=format_args_detail(name, args),
+            )
             if call_id:
                 pending_tools[call_id] = name
 
