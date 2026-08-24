@@ -213,6 +213,17 @@ class TestTriggerCompact:
         # Compact ran to completion.
         assert mgr._compact_count == 1
 
+    async def test_manual_trigger_remains_available_when_auto_is_disabled(self):
+        conv = _build_conversation(n_user=10)
+        mgr = _build_mgr(conversation=conv, llm=_LLM())
+        mgr.config.enabled = False
+
+        assert mgr.should_compact(prompt_tokens=999_999) is False
+        assert mgr.trigger_compact() is True
+        if mgr._compact_task is not None:
+            await mgr._compact_task
+        assert mgr._compact_count == 1
+
 
 # ── count_keep_messages ─────────────────────────────────────────
 

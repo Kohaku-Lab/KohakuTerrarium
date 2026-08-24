@@ -70,8 +70,8 @@ Flow:
 - **Summaries stack.** The next compaction produces a summary that
   includes the previous summary, so history degrades gracefully rather
   than getting lost.
-- **Opt-out per creature.** `compact.enabled: false` disables it
-  entirely.
+- **Opt-out per creature.** `compact.enabled: false` disables automatic
+  triggers while leaving the explicit `/compact` command available.
 
 ## Where it lives in the code
 

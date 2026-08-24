@@ -20,7 +20,7 @@ tags:
 - **沒有 tools。** 只負責回應的專家型生物（摘要、格式整理、翻譯）可以完全不帶工具。LLM 本身就已經很有能力。
 - **沒有 sub-agents。** 從不委派的短任務生物很常見。
 - **沒有 output。** 只做 side effect 的生物也存在。若一隻生物唯一的工作是寫入外部資料庫，它就不需要 sink。
-- **沒有 memory / compaction / session。** `--no-session` 和 `compact.enabled: false` 就能覆蓋這類情況。
+- **沒有 memory / 自動 compaction / session。** `--no-session` 和 `compact.enabled: false` 就能覆蓋這類情況；明確的 `/compact` 仍屬於使用者主動操作。
 
 框架並不偏袒「六模組齊全」這種形狀。它只是讓你在想用這種形狀時，成本很低。
 
