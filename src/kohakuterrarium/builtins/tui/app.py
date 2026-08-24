@@ -61,6 +61,7 @@ class AgentTUI(App):
 
     .chat-tab-scroll { height: 1fr; padding: 0 1; }
     .cull-header { height: 1; color: $text-muted; text-align: center; padding: 0 1; }
+    MarkdownFence { scrollbar-size-horizontal: 1; }
     """
 
     BINDINGS = [

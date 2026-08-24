@@ -5,6 +5,8 @@ from collections.abc import Callable
 from typing import Any
 
 from textual.containers import VerticalScroll
+from textual.widgets import Label
+from textual.widgets._markdown import MarkdownFence
 
 from kohakuterrarium.builtins.tui.app import _safe_id
 from kohakuterrarium.builtins.tui.session import TUISession
@@ -145,6 +147,30 @@ async def test_background_tab_culling_keeps_target_history_count() -> None:
         bob_chat = session._app.query_one(f"#chat-{_safe_id('bob')}", VerticalScroll)
         assert len(bob_chat.children) == 2
         assert session._culled_count == {"bob": 2}
+
+
+async def test_long_markdown_fence_keeps_content_and_has_visible_scrollbar() -> None:
+    long_path = "/" + "very-long-path-segment/" * 10 + "artifact.png"
+    session = TUISession()
+    await session.start()
+    assert session._app is not None
+
+    async with session._app.run_test(size=(60, 20)) as pilot:
+        session.begin_streaming()
+        session.append_stream(f"```text\n{long_path}\n```")
+        session.end_streaming()
+        await pilot.pause()
+
+        fence = session._app.query_one(MarkdownFence)
+        assert fence.code == long_path
+        assert long_path in fence.query_one("#code-content", Label).render().plain
+        assert fence.max_scroll_x > 0
+        assert fence.styles.scrollbar_size_horizontal == 1
+        assert fence.horizontal_scrollbar.region.height == 1
+
+        fence.scroll_to(x=fence.max_scroll_x, animate=False)
+        await pilot.pause()
+        assert fence.scroll_x == fence.max_scroll_x
 
 
 class TestModalShutdown:
