@@ -443,6 +443,7 @@ class Controller:
         extra_fields = getattr(self.llm, "last_assistant_extra_fields", {}) or {}
         final_content = _merge_text_and_parts(assistant_content, structured_parts)
         append_kwargs: dict = {"extra_fields": extra_fields}
+        pending_native_events: list[ParseEvent] = []
 
         if native_calls:
             tool_calls_data = []
@@ -462,14 +463,25 @@ class Controller:
                 )
                 call_args = {**tc.parsed_arguments(), "_tool_call_id": tc.id}
                 if tc.name in known_subagents:
-                    yield SubAgentCallEvent(
-                        name=tc.name, args=call_args, raw=tc.arguments
+                    pending_native_events.append(
+                        SubAgentCallEvent(
+                            name=tc.name, args=call_args, raw=tc.arguments
+                        )
                     )
                 else:
-                    yield ToolCallEvent(name=tc.name, args=call_args, raw=tc.arguments)
+                    pending_native_events.append(
+                        ToolCallEvent(name=tc.name, args=call_args, raw=tc.arguments)
+                    )
             append_kwargs["tool_calls"] = tool_calls_data
 
+        # Record the provider's complete call announcement before dispatching any
+        # execution event. Background handlers may append a tool placeholder as
+        # soon as the event is yielded, and provider protocols require that result
+        # to follow the assistant message which introduced its tool_call_id.
         self.conversation.append("assistant", final_content, **append_kwargs)
+
+        for event in pending_native_events:
+            yield event
 
     def _collect_structured_assistant_parts(self) -> list[ContentPart]:
         """Materialize structured content captured by the provider.

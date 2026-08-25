@@ -638,6 +638,7 @@ class TestProgStudioJourney:
             # Built-in backends ship with every install.
             assert {b["name"] for b in studio.identity.llm.list_backends()} == {
                 "codex",
+                "grok-subscription",
                 "openai",
                 "openrouter",
                 "anthropic",

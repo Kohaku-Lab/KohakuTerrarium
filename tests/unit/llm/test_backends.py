@@ -70,9 +70,16 @@ class TestLoadBackends:
             backends["glm-coding"].base_url == "https://open.bigmodel.cn/api/anthropic"
         )
         assert backends["codex"].backend_type == "codex"
+        assert backends["grok-subscription"].backend_type == "grok-subscription"
 
     def test_codex_builtin_advertises_image_gen_native_tool(self):
         assert _built_in_providers()["codex"].provider_native_tools == ["image_gen"]
+
+    def test_grok_subscription_does_not_advertise_codex_native_image_tool(self):
+        assert _built_in_providers()["grok-subscription"].provider_native_tools == [
+            "grok_image_gen",
+            "video_gen",
+        ]
 
     def test_user_backend_merged_in(self):
         save_yaml_store(
@@ -133,6 +140,12 @@ class TestLegacyProviderFromData:
 
     def test_codex_backend_type_maps_to_codex(self):
         assert legacy_provider_from_data({"backend_type": "codex"}) == "codex"
+
+    def test_grok_subscription_backend_type_is_preserved(self):
+        assert (
+            legacy_provider_from_data({"backend_type": "grok-subscription"})
+            == "grok-subscription"
+        )
 
     def test_anthropic_inferred_from_base_url(self):
         assert (

@@ -11,6 +11,7 @@ from kohakuterrarium.core.backgroundify import BackgroundifyHandle, PromotionRes
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.event_inbox import EventInbox
 from kohakuterrarium.core.job import JobResult
+from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.parsing import ToolCallEvent
 
 # ── fake agent harness ───────────────────────────────────────────
@@ -177,6 +178,21 @@ class TestEmitDirectCompletion:
         assert meta["output"] == big
         assert meta["output_preview"] == big[:5000]
         assert len(meta["output_preview"]) == 5000
+
+    def test_tool_done_preserves_structured_media_result(self, agent):
+        agent._register_direct_job(
+            "grok_image_gen_x", kind="tool", name="grok_image_gen"
+        )
+        parts = [ImagePart(url="/api/sessions/g/artifacts/generated_images/a.jpeg")]
+        result = JobResult(job_id="grok_image_gen_x", output=parts, exit_code=0)
+
+        agent._emit_direct_completion_activity("grok_image_gen_x", result)
+
+        meta = next(
+            c[2] for c in agent.output_router.activity_calls if c[0] == "tool_done"
+        )
+        assert meta["result"] == [part.to_dict() for part in parts]
+        assert meta["output"] == parts
 
     def test_tool_done_only_forwards_explicit_session_metadata(self, agent):
         agent._register_direct_job("web_search_x", kind="tool", name="web_search")

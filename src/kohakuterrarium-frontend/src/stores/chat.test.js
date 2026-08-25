@@ -4155,6 +4155,73 @@ describe("chat store — canvas_preview WS frame → resultMeta (Feat 1)", () =>
   })
 })
 
+describe("chat store — generated artifact metadata", () => {
+  const artifacts = [
+    {
+      kind: "image",
+      relative_path: "generated_images/grok_1.jpeg",
+      url: "/api/sessions/s1/artifacts/generated_images/grok_1.jpeg",
+    },
+  ]
+
+  it("live tool_done frame surfaces artifact references", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = {
+      main: [
+        {
+          id: "m1",
+          role: "assistant",
+          parts: [
+            {
+              type: "tool",
+              id: "tc_artifact",
+              jobId: "job_artifact_1",
+              name: "grok_image_gen",
+              kind: "tool",
+              args: {},
+              status: "running",
+              result: "",
+              tools_used: [],
+              children: [],
+            },
+          ],
+        },
+      ],
+    }
+    chat.activeTab = "main"
+
+    chat._handleActivity("main", {
+      activity_type: "tool_done",
+      name: "grok_image_gen",
+      job_id: "job_artifact_1",
+      output: "image",
+      tool_metadata: { artifacts },
+    })
+
+    expect(chat.messagesByTab.main[0].parts[0].resultMeta?.artifacts).toEqual(artifacts)
+  })
+
+  it("replay surfaces persisted artifact references", () => {
+    const { messages } = _replayEvents(
+      [],
+      [
+        { type: "processing_start" },
+        { type: "tool_call", name: "video_gen", call_id: "job_1", args: {} },
+        {
+          type: "tool_result",
+          name: "video_gen",
+          call_id: "job_1",
+          output: "video",
+          tool_metadata: { artifacts },
+        },
+        { type: "processing_end" },
+      ],
+    )
+
+    expect(messages[0].parts[0].resultMeta?.artifacts).toEqual(artifacts)
+  })
+})
+
 describe("chat store — branch isolation during streaming", () => {
   // Bug we're guarding against: user clicks Save & Rerun on turn 1.
   // Backend opens branch 2 and starts streaming. User clicks <1/2> to

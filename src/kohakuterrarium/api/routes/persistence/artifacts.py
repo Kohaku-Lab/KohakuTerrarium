@@ -26,7 +26,7 @@ def _resolve_artifact(session_name: str, decoded: str):
     Both operations inspect the filesystem, so grouping them requires only one
     event-loop-to-worker handoff.
     """
-    artifacts = resolve_artifacts_dir(session_name, persistence_store._SESSION_DIR)
+    artifacts = resolve_artifacts_dir(session_name, persistence_store._session_dir())
     return resolve_artifact_file(artifacts, decoded)
 
 

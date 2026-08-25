@@ -49,8 +49,12 @@ tags:
 ~/.kohakuterrarium/sessions/<name>.kohakutr
 ```
 
-`<name>` 由生物/terrarium 名加时间戳自动生成。用 `--session <path>`
-覆盖，或用 `--no-session` 关闭。
+`<name>` 由生物/terrarium 名加时间戳自动生成。`KT_SESSION_DIR` 会统一
+调整 CLI、Studio 和 web API 的根目录；单次运行显式指定的
+`--session <path>` 优先级更高。生成图片统一写入 `generated_images/`，
+生成视频写入 `generated_videos/`，普通工具的二进制输出仍写入
+`tool_outputs/`。历史路径继续可读且不会迁移。删除会话数据不会删除
+保留的 artifacts；用 `--no-session` 可以关闭会话持久化。
 
 ## 持久化哪些东西
 

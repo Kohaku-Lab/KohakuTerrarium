@@ -251,6 +251,12 @@ class OpenAIProvider(BaseLLMProvider):
             return extra
         return {k: v for k, v in extra.items() if k not in knobs}
 
+    def _prompt_cache_request_kwargs(self) -> dict[str, Any]:
+        """Return provider-specific request fields for stable cache routing."""
+        if not self.prompt_cache_key:
+            return {}
+        return {"prompt_cache_key": self.prompt_cache_key}
+
     async def _stream_chat(
         self,
         messages: list[dict[str, Any]],
@@ -358,8 +364,7 @@ class OpenAIProvider(BaseLLMProvider):
             create_kwargs["extra_body"] = merged_extra
 
         # Stable routing allows compatible backends to reuse cached prompt prefixes.
-        if self.prompt_cache_key:
-            create_kwargs["prompt_cache_key"] = self.prompt_cache_key
+        create_kwargs.update(self._prompt_cache_request_kwargs())
 
         log_request_shape(
             "Starting streaming request",
@@ -546,8 +551,7 @@ class OpenAIProvider(BaseLLMProvider):
         if merged_extra:
             create_kwargs["extra_body"] = merged_extra
 
-        if self.prompt_cache_key:
-            create_kwargs["prompt_cache_key"] = self.prompt_cache_key
+        create_kwargs.update(self._prompt_cache_request_kwargs())
 
         log_request_shape(
             "Starting non-streaming request",
