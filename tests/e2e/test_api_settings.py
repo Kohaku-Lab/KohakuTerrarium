@@ -161,6 +161,7 @@ class TestApiSettingsJourney:
         baseline_names = {b["name"] for b in baseline}
         assert baseline_names == {
             "codex",
+            "grok-subscription",
             "openai",
             "openrouter",
             "anthropic",
@@ -169,6 +170,9 @@ class TestApiSettingsJourney:
             "kimi-code",
             "glm-coding",
         }
+        grok = next(b for b in baseline if b["name"] == "grok-subscription")
+        assert grok["backend_type"] == "grok-subscription"
+        assert grok["provider_native_tools"] == ["grok_image_gen", "video_gen"]
         assert "acme" not in baseline_names
 
         # Create a custom backend (frontend: settingsAPI.saveBackend).

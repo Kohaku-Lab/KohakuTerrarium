@@ -1009,9 +1009,12 @@ class TestStudioIntegration:
             # --- identity.llm: backend CRUD -----------------------------
             # The built-in backends ship with every install; no
             # user backends until we add one.
-            baseline_backends = {b["name"] for b in studio.identity.llm.list_backends()}
-            assert baseline_backends == {
+            baseline_backends = {
+                b["name"]: b for b in studio.identity.llm.list_backends()
+            }
+            assert set(baseline_backends) == {
                 "codex",
+                "grok-subscription",
                 "openai",
                 "openrouter",
                 "anthropic",
@@ -1020,6 +1023,12 @@ class TestStudioIntegration:
                 "kimi-code",
                 "glm-coding",
             }
+            grok = baseline_backends["grok-subscription"]
+            assert grok["backend_type"] == "grok-subscription"
+            assert grok["provider_native_tools"] == [
+                "grok_image_gen",
+                "video_gen",
+            ]
             studio.identity.llm.save_backend(
                 "acme",
                 "openai",
