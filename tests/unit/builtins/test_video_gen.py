@@ -43,14 +43,6 @@ class _Store:
         return path
 
 
-class _Conversation:
-    def __init__(self, messages):
-        self.messages = messages
-
-    def to_messages(self):
-        return self.messages
-
-
 def _png_bytes():
     output = io.BytesIO()
     Image.new("RGB", (8, 8), "red").save(output, format="PNG")
@@ -120,30 +112,31 @@ class TestVideoGenTool:
         self, tmp_path
     ):
         encoded = base64.b64encode(_png_bytes()).decode("ascii")
-        conversation = _Conversation(
-            [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "animate this"},
-                        {
-                            "type": "file",
-                            "file": {
-                                "mime": "image/png",
-                                "data_base64": encoded,
-                                "is_inline": True,
-                            },
+        conversation_history = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "animate this"},
+                    {
+                        "type": "file",
+                        "file": {
+                            "mime": "image/png",
+                            "data_base64": encoded,
+                            "is_inline": True,
                         },
-                    ],
-                }
-            ]
-        )
+                    },
+                ],
+            }
+        ]
         client = _Client()
         context = ToolContext(
             agent_name="a",
             session=None,
             working_dir=tmp_path,
-            agent=SimpleNamespace(session_store=None, conversation=conversation),
+            agent=SimpleNamespace(
+                session_store=None,
+                conversation_history=conversation_history,
+            ),
         )
 
         args = {"prompt": "dance", "input_image": "latest"}
@@ -159,28 +152,29 @@ class TestVideoGenTool:
         self, tmp_path
     ):
         encoded = base64.b64encode(_png_bytes()).decode("ascii")
-        conversation = _Conversation(
-            [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "file",
-                            "file": {
-                                "mime": "image/png",
-                                "data_base64": encoded,
-                            },
-                        }
-                    ],
-                }
-            ]
-        )
+        conversation_history = [
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "file",
+                        "file": {
+                            "mime": "image/png",
+                            "data_base64": encoded,
+                        },
+                    }
+                ],
+            }
+        ]
         client = _Client()
         context = ToolContext(
             agent_name="a",
             session=None,
             working_dir=tmp_path,
-            agent=SimpleNamespace(session_store=None, conversation=conversation),
+            agent=SimpleNamespace(
+                session_store=None,
+                conversation_history=conversation_history,
+            ),
         )
         missing = str(Path(tempfile.gettempdir()) / "deleted-upload.png")
 
