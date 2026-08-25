@@ -428,7 +428,7 @@ class TestPatchAndroidRequirements:
         self._seed_pyproject(fake_repo, "kohakuvault>=0.8.5")
         self._seed_requirements(
             gen,
-            "fastapi>=0.115.0\npywebview==6.1\nkohakuvault>=0.8.5\n",
+            "fastapi>=0.115.0\npywebview==6.2.1\nkohakuvault>=0.8.5\n",
         )
         monkeypatch.setattr(postcreate, "REPO_ROOT", fake_repo)
         postcreate.patch_android_requirements(gen)

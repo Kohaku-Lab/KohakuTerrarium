@@ -260,7 +260,7 @@ _ANDROID_DROP_PACKAGES: tuple[str, ...] = (
     # has no Android wheel (Android uses a native WebView via
     # MainActivity.java + a WebView widget).  Briefcase
     # concatenates ``[tool.briefcase.app.kohakuterrarium].requires``
-    # (which contains ``pywebview==6.1`` for the desktop launcher
+    # (which contains ``pywebview==6.2.1`` for the desktop launcher
     # venv) into every platform's requires — see Briefcase docs:
     # "the final set of requirements will be the concatenation of
     # requirements from all levels, starting from least to most
