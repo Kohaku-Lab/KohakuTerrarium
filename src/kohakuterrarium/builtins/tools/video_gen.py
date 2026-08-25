@@ -190,10 +190,10 @@ async def _resolve_input_image(reference: str, context: ToolContext) -> str:
 
 
 def _latest_attached_image(context: ToolContext) -> str | None:
-    conversation = getattr(getattr(context, "agent", None), "conversation", None)
-    if conversation is None or not hasattr(conversation, "to_messages"):
+    messages = getattr(getattr(context, "agent", None), "conversation_history", None)
+    if not isinstance(messages, list):
         return None
-    for message in reversed(conversation.to_messages()):
+    for message in reversed(messages):
         if message.get("role") != "user" or not isinstance(
             message.get("content"), list
         ):
