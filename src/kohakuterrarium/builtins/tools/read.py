@@ -24,6 +24,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 MAX_DEFAULT_LINES = 2000
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
 
 
 @register_builtin("read")
@@ -284,15 +285,12 @@ class ReadTool(BaseTool):
         if not file_path.exists():
             return ToolResult(error=f"File not found: {original_path}")
 
-        max_image_bytes = (
-            20 * 1024 * 1024
-        )  # Keep encoded payloads within provider limits.
         file_size = file_path.stat().st_size
 
-        if file_size > max_image_bytes:
+        if file_size > MAX_IMAGE_BYTES:
             return ToolResult(
                 error=f"Image too large ({file_size // 1024}KB). "
-                f"Max: {max_image_bytes // (1024 * 1024)}MB."
+                f"Max: {MAX_IMAGE_BYTES // (1024 * 1024)}MB."
             )
 
         suffix = file_path.suffix.lower()

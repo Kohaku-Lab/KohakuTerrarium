@@ -118,10 +118,20 @@ class TestGrokVideoClient:
 
     @pytest.mark.asyncio
     async def test_failed_status_is_terminal(self):
-        media = _Media([{"status": "failed"}])
+        media = _Media(
+            [
+                {
+                    "status": "failed",
+                    "error": {
+                        "code": "invalid_argument",
+                        "message": "bad image [WKE=invalid_image]",
+                    },
+                }
+            ]
+        )
         client = GrokVideoClient(media=media)
 
-        with pytest.raises(GrokMediaError, match="failed"):
+        with pytest.raises(GrokMediaError, match="code=invalid_argument:invalid_image"):
             await client.generate({"prompt": "cat"})
 
     @pytest.mark.asyncio

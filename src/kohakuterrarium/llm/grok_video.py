@@ -1,6 +1,7 @@
 """Asynchronous xAI video generation and bounded result download."""
 
 import asyncio
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Awaitable, Callable
@@ -19,6 +20,7 @@ MAX_VIDEO_BYTES = 128 * 1024 * 1024
 DEFAULT_POLL_TIMEOUT = 10 * 60.0
 VIDEO_ASPECT_RATIOS = {"1:1", "16:9", "9:16", "4:3", "3:4", "3:2", "2:3"}
 VIDEO_RESOLUTIONS = {"480p", "720p", "1080p"}
+_VIDEO_ERROR_REASON_RE = re.compile(r"\[WKE=(?P<reason>[A-Za-z0-9_.:-]+)\]")
 
 
 @dataclass(frozen=True)
@@ -128,6 +130,7 @@ class GrokVideoClient:
                 raise GrokMediaError(
                     200,
                     f"video generation ({status})",
+                    code=_video_failure_code(status_response.data),
                     request_id=request_id,
                 )
             if status not in {"pending", "processing", "queued"}:
@@ -206,6 +209,22 @@ def _video_payload(args: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("unsupported video resolution")
         payload["resolution"] = resolution
     return payload
+
+
+def _video_failure_code(data: dict[str, Any]) -> str | None:
+    error = data.get("error")
+    if isinstance(error, dict):
+        code = error.get("code")
+        message = error.get("message")
+    else:
+        code = None
+        message = error
+    safe_code = str(code) if isinstance(code, (str, int)) else ""
+    match = _VIDEO_ERROR_REASON_RE.search(message) if isinstance(message, str) else None
+    reason = match.group("reason") if match else ""
+    if safe_code and reason and reason != safe_code:
+        return f"{safe_code}:{reason}"
+    return safe_code or reason or None
 
 
 __all__ = [
