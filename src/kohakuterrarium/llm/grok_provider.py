@@ -168,7 +168,13 @@ class GrokSubscriptionProvider(OpenAIProvider):
 
 
 def _fingerprint(token: GrokToken) -> str:
-    raw = f"{token.source}\0{token.access_token}".encode()
+    headers = "\0".join(
+        f"{name}={value}" for name, value in sorted(token.extra_headers.items())
+    )
+    raw = (
+        f"{token.source}\0{token.access_token}\0{token.base_url}\0"
+        f"{token.media_base_url}\0{headers}"
+    ).encode()
     return hashlib.sha256(raw).hexdigest()
 
 

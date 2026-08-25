@@ -9,6 +9,46 @@ from kohakuterrarium.llm.grok_media import GrokMediaClient, GrokMediaError
 
 class TestGrokMediaClient:
     @pytest.mark.asyncio
+    async def test_chat_proxy_headers_are_not_sent_to_media_api(self, monkeypatch):
+        token = GrokToken(
+            access_token="secret",
+            source="grok-cli",
+            extra_headers={
+                "X-XAI-Token-Auth": "xai-grok-cli",
+                "x-authenticateresponse": "authenticate-response",
+                "x-grok-client-identifier": "grok-shell",
+                "x-grok-client-mode": "interactive",
+                "x-grok-client-version": "1.0.5",
+            },
+        )
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_media.GrokTokens.load_candidates",
+            lambda: [token],
+        )
+        seen_headers = None
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal seen_headers
+            seen_headers = request.headers
+            return httpx.Response(200, json={"request_id": "req-1"})
+
+        client = GrokMediaClient(transport=httpx.MockTransport(handler))
+
+        await client.request_json(
+            "POST",
+            "videos/generations",
+            payload={"model": "grok-imagine-video-1.5", "prompt": "cat"},
+            operation="video generation",
+        )
+
+        assert seen_headers is not None
+        assert seen_headers["X-XAI-Token-Auth"] == "xai-grok-cli"
+        assert "x-authenticateresponse" not in seen_headers
+        assert "x-grok-client-identifier" not in seen_headers
+        assert "x-grok-client-mode" not in seen_headers
+        assert "x-grok-client-version" not in seen_headers
+
+    @pytest.mark.asyncio
     async def test_auth_rejection_uses_next_source_without_leaking_tokens(
         self, monkeypatch
     ):

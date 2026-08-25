@@ -115,23 +115,6 @@ class TestGetProfile:
         [
             ("grok-4.6-subscription", "grok-4.6", 500000),
             ("grok-4.5-subscription", "grok-4.5", 500000),
-            ("grok-4.3-subscription", "grok-4.3", 1000000),
-            (
-                "grok-4.20-0309-reasoning-subscription",
-                "grok-4.20-0309-reasoning",
-                1000000,
-            ),
-            (
-                "grok-4.20-0309-non-reasoning-subscription",
-                "grok-4.20-0309-non-reasoning",
-                1000000,
-            ),
-            (
-                "grok-4.20-multi-agent-0309-subscription",
-                "grok-4.20-multi-agent-0309",
-                1000000,
-            ),
-            ("grok-build-0.1-subscription", "grok-build-0.1", 256000),
         ],
     )
     def test_grok_subscription_presets_use_dedicated_backend(
@@ -676,9 +659,13 @@ class TestLoadProfilesAndListAll:
         entries = list_all()
         keys = {(e["provider"], e["name"]) for e in entries}
         assert ("codex", "gpt-5.4") in keys
-        assert ("grok-subscription", "grok-4.6-subscription") in keys
-        assert ("grok-subscription", "grok-4.5-subscription") in keys
-        assert ("grok-subscription", "grok-build-0.1-subscription") in keys
+        grok_names = {
+            name for provider, name in keys if provider == "grok-subscription"
+        }
+        assert grok_names == {
+            "grok-4.6-subscription",
+            "grok-4.5-subscription",
+        }
         assert ("anthropic", "claude-opus-4.7") in keys
 
     def test_list_all_marks_user_source(self):

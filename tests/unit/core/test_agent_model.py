@@ -76,6 +76,8 @@ class TestSwitchModel:
 
     def test_swaps_llm_and_emits_session_info(self, monkeypatch):
         new_llm = types.SimpleNamespace(model="gpt-5", _profile_max_context=20000)
+        provider_tool_syncs = []
+        monkeypatch.setattr(am, "sync_provider_tools", provider_tool_syncs.append)
         monkeypatch.setattr(am, "resolve_controller_llm", lambda *a, **k: object())
         monkeypatch.setattr(am, "create_llm_from_profile_name", lambda n: new_llm)
         monkeypatch.setattr(am, "profile_to_identifier", lambda p: "openai/gpt-5")
@@ -95,6 +97,7 @@ class TestSwitchModel:
         # LLM swapped.
         assert a.llm is new_llm
         assert a.controller.llm is new_llm
+        assert provider_tool_syncs == [a]
         assert a._llm_identifier == "openai/gpt-5"
         assert a._llm_selector == "openai/gpt-5"
         # The swap MUST propagate to the sub-agent manager — sub-agents

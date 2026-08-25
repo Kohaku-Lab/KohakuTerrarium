@@ -197,6 +197,25 @@ class TestStreamOutputSync:
         msg = q.get_nowait()
         assert msg["tool_metadata"] == {"artifacts": artifacts}
 
+    def test_tool_done_streams_structured_media_result(self, _stream):
+        so, q, _log = _stream
+        result = [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": "/api/sessions/s1/artifacts/generated_images/x.png"
+                },
+            }
+        ]
+        so.on_activity_with_metadata(
+            "tool_done",
+            "[grok_image_gen] done",
+            metadata={"job_id": "j1", "result": result},
+        )
+
+        msg = q.get_nowait()
+        assert msg["result"] == result
+
     def test_on_assistant_image(self, _stream):
         so, q, _log = _stream
         so.on_assistant_image(

@@ -5,6 +5,7 @@ from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.job_label import make_job_label
 from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.parsing import CommandResultEvent, SubAgentCallEvent, ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
 
@@ -211,15 +212,30 @@ class AgentRuntimeToolsMixin:
                 },
             )
         else:
+            result_metadata = context.get("result_metadata", {})
+            structured_result = (
+                content_parts_to_dicts(event.content)
+                if isinstance(event.content, list)
+                else content
+            )
+            metadata = {
+                "job_id": job_id,
+                "result": structured_result,
+                "output": event.content,
+                "output_preview": content[:5000],
+                "exit_code": exit_code,
+            }
+            session_metadata = (
+                result_metadata.get("session_metadata")
+                if isinstance(result_metadata, dict)
+                else None
+            )
+            if isinstance(session_metadata, dict):
+                metadata["tool_metadata"] = dict(session_metadata)
             self.output_router.notify_activity(
                 activity_done,
                 f"[{label}] DONE",
-                metadata={
-                    "job_id": job_id,
-                    "result": content,
-                    "output_preview": content[:5000],
-                    "exit_code": exit_code,
-                },
+                metadata=metadata,
             )
 
         logger.info("Background job completed", job_id=job_id)

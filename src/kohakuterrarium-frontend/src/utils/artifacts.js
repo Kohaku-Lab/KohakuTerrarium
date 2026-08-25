@@ -12,3 +12,19 @@ export function safeArtifactUrl(value) {
     return ""
   }
 }
+
+/** Keep only image/video parts backed by canonical session artifacts. */
+export function safeMediaParts(parts) {
+  if (!Array.isArray(parts)) return []
+  return parts.flatMap((part) => {
+    if (part?.type === "image_url") {
+      const url = safeArtifactUrl(part.image_url?.url)
+      return url ? [{ ...part, image_url: { ...part.image_url, url } }] : []
+    }
+    if (part?.type === "file" && part.file?.mime?.startsWith("video/")) {
+      const path = safeArtifactUrl(part.file?.path)
+      return path ? [{ ...part, file: { ...part.file, path } }] : []
+    }
+    return []
+  })
+}

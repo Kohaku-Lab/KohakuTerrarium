@@ -11,7 +11,7 @@ from kohakuterrarium.llm.grok_video import (
     GROK_VIDEO_MODEL_SUGGESTIONS,
     GrokVideoClient,
 )
-from kohakuterrarium.llm.message import FilePart
+from kohakuterrarium.llm.message import FilePart, TextPart
 from kohakuterrarium.modules.tool.base import BaseTool, ToolContext, ToolResult
 from kohakuterrarium.utils.logging import get_logger
 
@@ -90,11 +90,12 @@ class VideoGenTool(BaseTool):
         )
         return ToolResult(
             output=[
+                TextPart(text=f"Video saved to: {disk_path}"),
                 FilePart(
                     path=served_path,
                     name=Path(filename).name,
                     mime=result.mime,
-                )
+                ),
             ],
             metadata={
                 "model": result.model,

@@ -20,12 +20,12 @@ beforeEach(() => {
 // markdown-rendered text from raw monospace (tool / system) blocks.
 const MarkdownStub = { props: ["content"], template: `<div class="md">{{ content }}</div>` }
 
-function mountBlock(tc) {
+function mountBlock(tc, expanded = true) {
   const chat = useChatStore()
   chat._instanceGraphId = "g1"
   chat.activeTab = "root"
   const wrapper = mount(ToolCallBlock, {
-    props: { tc, expanded: true },
+    props: { tc, expanded },
     global: { stubs: { MarkdownRenderer: MarkdownStub } },
   })
   return wrapper
@@ -63,6 +63,74 @@ describe("ToolCallBlock — sub-agent model identity", () => {
 })
 
 describe("ToolCallBlock — generated artifacts", () => {
+  it("previews generated images while the tool details stay collapsed", () => {
+    const imageUrl = "/api/sessions/s1/artifacts/generated_images/grok_123.jpeg"
+    const wrapper = mountBlock(
+      {
+        type: "tool",
+        id: "t-image-preview",
+        name: "grok_image_gen",
+        kind: "tool",
+        args: {},
+        status: "done",
+        result: imageUrl,
+        resultParts: [{ type: "image_url", image_url: { url: imageUrl } }],
+      },
+      false,
+    )
+
+    expect(wrapper.find(`img[src="${imageUrl}"]`).exists()).toBe(true)
+  })
+
+  it("previews generated videos while the tool details stay collapsed", () => {
+    const videoUrl = "/api/sessions/s1/artifacts/generated_videos/grok_123.mp4"
+    const wrapper = mountBlock(
+      {
+        type: "tool",
+        id: "t-video-preview",
+        name: "video_gen",
+        kind: "tool",
+        args: {},
+        status: "done",
+        result: videoUrl,
+        resultParts: [
+          {
+            type: "file",
+            file: { path: videoUrl, name: "grok_123.mp4", mime: "video/mp4" },
+          },
+        ],
+      },
+      false,
+    )
+
+    expect(wrapper.find(`video[src="${videoUrl}"]`).exists()).toBe(true)
+  })
+
+  it("does not preview media from non-artifact URLs", () => {
+    const wrapper = mountBlock(
+      {
+        type: "tool",
+        id: "t-unsafe-preview",
+        name: "grok_image_gen",
+        kind: "tool",
+        args: {},
+        status: "done",
+        result: "unsafe",
+        resultParts: [
+          { type: "image_url", image_url: { url: "javascript:alert(1)" } },
+          {
+            type: "file",
+            file: { path: "https://evil.invalid/video.mp4", mime: "video/mp4" },
+          },
+        ],
+      },
+      false,
+    )
+
+    expect(wrapper.find("img").exists()).toBe(false)
+    expect(wrapper.find("video").exists()).toBe(false)
+  })
+
   it("shows stable relative paths as links", () => {
     const wrapper = mountBlock({
       type: "tool",

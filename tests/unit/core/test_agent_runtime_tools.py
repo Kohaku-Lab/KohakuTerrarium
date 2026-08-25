@@ -323,11 +323,18 @@ class TestOnBgComplete:
     async def test_tool_done_renders_multimodal_output_preview(self):
         a = _make_mixin()
         artifact_url = "/api/sessions/graph_1/artifacts/generated_images/image.jpeg"
+        event_parts = [ImagePart(url=artifact_url, source_name="image.jpeg")]
         evt = TriggerEvent(
             type=EventType.TOOL_COMPLETE,
             job_id="grok_image_gen_abc",
-            content=[ImagePart(url=artifact_url, source_name="image.jpeg")],
-            context={},
+            content=event_parts,
+            context={
+                "result_metadata": {
+                    "session_metadata": {
+                        "artifacts": [{"kind": "image", "url": artifact_url}]
+                    }
+                }
+            },
         )
 
         a._on_bg_complete(evt)
@@ -335,6 +342,11 @@ class TestOnBgComplete:
         kind, _detail, metadata = a.output_router.activity_calls[0]
         assert kind == "tool_done"
         assert artifact_url in metadata["output_preview"]
+        assert metadata["result"] == [part.to_dict() for part in event_parts]
+        assert metadata["output"] == event_parts
+        assert metadata["tool_metadata"] == {
+            "artifacts": [{"kind": "image", "url": artifact_url}]
+        }
 
     async def test_subagent_done(self):
         a = _make_mixin()

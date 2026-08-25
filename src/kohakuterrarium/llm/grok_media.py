@@ -164,8 +164,10 @@ class GrokMediaClient:
         headers = {
             "Authorization": f"Bearer {token.access_token}",
             "Content-Type": "application/json",
-            **token.extra_headers,
         }
+        token_auth = token.extra_headers.get("X-XAI-Token-Auth")
+        if token_auth:
+            headers["X-XAI-Token-Auth"] = token_auth
         url = f"{token.media_base_url.rstrip('/')}/{path.lstrip('/')}"
         kwargs = {"json": payload} if payload is not None else {}
         if self._client is not None:
