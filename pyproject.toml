@@ -117,7 +117,7 @@ client = []
 # pywebview shell for desktop bundles. Kept out of core deps so the Android
 # build (native WebView) doesn't try to install it.
 desktop = [
-    "pywebview==6.1",
+    "pywebview==6.2.1",
 ]
 
 discord = [
@@ -205,7 +205,7 @@ startup_module = "kohakuterrarium.__briefcase__"
 # Windows briefcase shell). pywebview = splash UI; zstandard = tarball decomp.
 requires = [
     "packaging>=26.0",
-    "pywebview==6.1",
+    "pywebview==6.2.1",
     "zstandard>=0.22",
 ]
 # proxy_tools (a pywebview dep) is sdist-only on PyPI — pre-built into wheels/ by CI.
