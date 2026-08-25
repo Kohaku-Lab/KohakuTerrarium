@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 import httpx
 
 from kohakuterrarium.errors import LLMNotConfiguredError
-from kohakuterrarium.llm.grok_auth import GrokToken, GrokTokens
+from kohakuterrarium.llm.grok_auth import GROK_CLI_SOURCE, GrokToken, GrokTokens
 
 
 class GrokMediaError(RuntimeError):
@@ -80,20 +80,36 @@ class GrokMediaClient:
         operation: str,
     ) -> GrokMediaResponse:
         """Send one request, falling back only on explicit auth rejection."""
-        candidates = [token] if token is not None else GrokTokens.load_candidates()
-        if not candidates:
+        if token is None or token.source == GROK_CLI_SOURCE:
+            await GrokTokens.ensure_fresh_cli()
+        if token is not None:
+            pending = [_current_cli_token(token)]
+        else:
+            pending = GrokTokens.load_candidates()
+        if not pending:
             raise LLMNotConfiguredError(
                 "No usable Grok subscription login was found for media generation"
             )
 
         last_status: int | None = None
-        for index, candidate in enumerate(candidates):
+        refresh_attempted = False
+        while pending:
+            candidate = pending.pop(0)
             try:
                 response = await self._request(candidate, method, path, payload=payload)
             except httpx.TransportError as exc:
                 raise GrokMediaError(None, operation) from exc
             last_status = response.status_code
-            if response.status_code in {401, 403} and index + 1 < len(candidates):
+            if (
+                response.status_code == 401
+                and candidate.source == GROK_CLI_SOURCE
+                and not refresh_attempted
+            ):
+                refresh_attempted = True
+                refreshed = await GrokTokens.ensure_fresh_cli(force=True)
+                if refreshed is not None:
+                    pending.insert(0, refreshed)
+            if response.status_code in {401, 403} and pending:
                 continue
             if response.status_code >= 400:
                 raise _response_error(response, operation)
@@ -178,6 +194,15 @@ class GrokMediaClient:
             follow_redirects=False,
         ) as client:
             return await client.request(method, url, headers=headers, **kwargs)
+
+
+def _current_cli_token(token: GrokToken) -> GrokToken:
+    if token.source != GROK_CLI_SOURCE:
+        return token
+    for candidate in GrokTokens.load_candidates():
+        if candidate.source == GROK_CLI_SOURCE:
+            return candidate
+    return token
 
 
 def _response_error(response: httpx.Response, operation: str) -> GrokMediaError:

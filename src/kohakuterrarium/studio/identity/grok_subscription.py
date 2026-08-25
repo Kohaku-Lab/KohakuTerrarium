@@ -7,7 +7,7 @@ from kohakuterrarium.llm.grok_auth import GrokTokens
 
 def get_status() -> dict[str, Any]:
     """Return source names and expiry only; never serialize token values."""
-    candidates = GrokTokens.load_candidates()
+    candidates = GrokTokens.load_bootstrap_candidates()
     if not candidates:
         return {"authenticated": False, "source": None, "sources": []}
     first = candidates[0]

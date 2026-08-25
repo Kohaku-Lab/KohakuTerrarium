@@ -1,14 +1,18 @@
 """Load reusable Grok subscription access tokens from local applications.
 
-The owning application remains responsible for refresh and persistence.  KT only
-reads access tokens and never consumes or writes third-party refresh tokens.
+KT never consumes or writes third-party refresh tokens.  When a Grok CLI access
+token is nearly expired, KT asks the owning CLI to refresh its own credential and
+then rereads the access token written by the CLI.
 """
 
+import asyncio
 import json
 import os
 import re
+import shutil
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +25,9 @@ OPENCODE_SOURCE = "opencode"
 XAI_BASE_URL = "https://api.x.ai/v1"
 GROK_CLI_BASE_URL = "https://cli-chat-proxy.grok.com/v1"
 _EXPIRY_SKEW_SECONDS = 30
+_GROK_CLI_REFRESH_WINDOW_SECONDS = 30 * 60
+_GROK_CLI_REFRESH_TIMEOUT_SECONDS = 20.0
+_refresh_tasks: dict[asyncio.AbstractEventLoop, asyncio.Task["GrokToken | None"]] = {}
 _GROK_VERSION_PATTERN = re.compile(
     r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)*(?: \([0-9A-Fa-f]+\))?$"
 )
@@ -58,9 +65,40 @@ class GrokTokens:
         return [token for token in candidates if token and not token.is_expired()]
 
     @classmethod
+    def load_bootstrap_candidates(cls) -> list[GrokToken]:
+        """Return candidates usable to construct a provider before CLI refresh."""
+        candidates = cls.load_candidates()
+        if candidates:
+            return candidates
+        token = _load_grok_cli_token()
+        return [token] if token and _grok_cli_executable() else []
+
+    @classmethod
     def available(cls) -> bool:
-        """Return whether at least one reusable local token is currently valid."""
-        return bool(cls.load_candidates())
+        """Return whether a valid or CLI-refreshable local login exists."""
+        return bool(cls.load_bootstrap_candidates())
+
+    @classmethod
+    async def ensure_fresh_cli(cls, *, force: bool = False) -> GrokToken | None:
+        """Ask Grok CLI to refresh its token when due, sharing concurrent work."""
+        current = _load_grok_cli_token()
+        if current is None:
+            return None
+        if not force and not _needs_cli_refresh(current):
+            return current
+
+        loop = asyncio.get_running_loop()
+        task = _refresh_tasks.get(loop)
+        if task is None or task.done():
+            task = loop.create_task(_refresh_grok_cli(current, force=force))
+            _refresh_tasks[loop] = task
+
+            def clear(done: asyncio.Task[GrokToken | None]) -> None:
+                if _refresh_tasks.get(loop) is done:
+                    _refresh_tasks.pop(loop, None)
+
+            task.add_done_callback(clear)
+        return await asyncio.shield(task)
 
 
 def _grok_home() -> Path:
@@ -95,8 +133,64 @@ def _load_grok_cli_token() -> GrokToken | None:
             base_url=GROK_CLI_BASE_URL,
             extra_headers=_grok_cli_headers(),
         )
-        if not token.is_expired():
-            return token
+        return token
+    return None
+
+
+def _needs_cli_refresh(token: GrokToken, now: float | None = None) -> bool:
+    if token.expires_at is None:
+        return False
+    current = time.time() if now is None else now
+    return token.expires_at <= current + _GROK_CLI_REFRESH_WINDOW_SECONDS
+
+
+async def _refresh_grok_cli(before: GrokToken, *, force: bool) -> GrokToken | None:
+    await _run_grok_models()
+    refreshed = _load_grok_cli_token()
+    if refreshed is None or _needs_cli_refresh(refreshed):
+        return None
+    if force and refreshed.access_token == before.access_token:
+        return None
+    return refreshed
+
+
+async def _run_grok_models() -> bool:
+    """Run a non-generating CLI command; auth-file changes prove refresh."""
+    executable = _grok_cli_executable()
+    if executable is None:
+        return False
+    try:
+        process = await asyncio.create_subprocess_exec(
+            executable,
+            "models",
+            stdin=asyncio.subprocess.DEVNULL,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(
+                process.communicate(), timeout=_GROK_CLI_REFRESH_TIMEOUT_SECONDS
+            )
+        except asyncio.TimeoutError:
+            try:
+                process.kill()
+            except ProcessLookupError:
+                pass
+            await process.communicate()
+            return False
+    except (OSError, asyncio.SubprocessError) as exc:
+        logger.warning("Grok CLI credential refresh failed", error=type(exc).__name__)
+        return False
+    return process.returncode == 0
+
+
+def _grok_cli_executable() -> str | None:
+    executable = shutil.which("grok")
+    if executable:
+        return executable
+    bundled = _grok_home() / "bin" / "grok"
+    if bundled.is_file() and os.access(bundled, os.X_OK):
+        return str(bundled)
     return None
 
 
@@ -189,7 +283,14 @@ def _expiry_value(data: dict[str, Any]) -> float | None:
         try:
             value = float(value)
         except ValueError:
-            return None
+            try:
+                normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+                parsed = datetime.fromisoformat(normalized)
+                if parsed.tzinfo is None:
+                    parsed = parsed.replace(tzinfo=timezone.utc)
+                return parsed.timestamp()
+            except (ValueError, OverflowError):
+                return None
     if not isinstance(value, (int, float)):
         return None
     # OpenCode stores milliseconds while OAuth payloads commonly use seconds.

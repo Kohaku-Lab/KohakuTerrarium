@@ -16,11 +16,26 @@ class _PermissionError(Exception):
     status_code = 403
 
 
+@pytest.fixture(autouse=True)
+def _disable_real_cli_refresh(monkeypatch):
+    async def no_refresh(*, force=False):
+        return None
+
+    monkeypatch.setattr(
+        "kohakuterrarium.llm.grok_provider.GrokTokens.ensure_fresh_cli",
+        no_refresh,
+    )
+
+
 class TestGrokSubscriptionProvider:
     def test_missing_login_does_not_fall_back_to_api_key(self, monkeypatch):
         monkeypatch.setenv("XAI_API_KEY", "must-not-be-used")
         monkeypatch.setattr(
             "kohakuterrarium.llm.grok_provider.GrokTokens.load_candidates",
+            lambda: [],
+        )
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_provider.GrokTokens." "load_bootstrap_candidates",
             lambda: [],
         )
 
@@ -124,6 +139,45 @@ class TestGrokSubscriptionProvider:
         assert chunks == ["ok"]
         assert calls == ["one", "two"]
         assert provider.credential_source == "opencode"
+
+    @pytest.mark.asyncio
+    async def test_rejected_cli_token_refreshes_and_retries_once(self, monkeypatch):
+        original = GrokToken(access_token="old", source="grok-cli")
+        refreshed = GrokToken(access_token="new", source="grok-cli")
+        candidates = [original]
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_provider.GrokTokens.load_candidates",
+            lambda: candidates,
+        )
+        refresh_calls = []
+
+        async def refresh(*, force=False):
+            refresh_calls.append(force)
+            if force:
+                candidates[0] = refreshed
+                return refreshed
+            return original
+
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_provider.GrokTokens.ensure_fresh_cli",
+            refresh,
+        )
+        calls = []
+
+        async def fake_stream(self, messages, *, tools=None, **kwargs):
+            calls.append(self._api_key)
+            if self._api_key == "old":
+                raise _AuthError("rejected")
+            yield "ok"
+
+        monkeypatch.setattr(OpenAIProvider, "_stream_chat", fake_stream)
+        provider = GrokSubscriptionProvider()
+
+        chunks = [chunk async for chunk in provider._stream_chat([])]
+
+        assert chunks == ["ok"]
+        assert calls == ["old", "new"]
+        assert refresh_calls == [False, True]
 
     @pytest.mark.asyncio
     async def test_does_not_fallback_after_output_started(self, monkeypatch):
