@@ -8,7 +8,7 @@ class TestGrokSubscriptionStatus:
     def test_status_contains_sources_but_no_tokens(self, monkeypatch):
         monkeypatch.setattr(
             "kohakuterrarium.studio.identity.grok_subscription."
-            "GrokTokens.load_candidates",
+            "GrokTokens.load_bootstrap_candidates",
             lambda: [
                 GrokToken(
                     access_token="secret-canary",
@@ -32,7 +32,7 @@ class TestGrokSubscriptionStatus:
     def test_missing_status(self, monkeypatch):
         monkeypatch.setattr(
             "kohakuterrarium.studio.identity.grok_subscription."
-            "GrokTokens.load_candidates",
+            "GrokTokens.load_bootstrap_candidates",
             lambda: [],
         )
         assert get_status() == {

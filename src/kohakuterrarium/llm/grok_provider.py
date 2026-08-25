@@ -8,7 +8,7 @@ from openai import AsyncOpenAI
 
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.llm.base import ToolSchema
-from kohakuterrarium.llm.grok_auth import GrokToken, GrokTokens
+from kohakuterrarium.llm.grok_auth import GROK_CLI_SOURCE, GrokToken, GrokTokens
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.utils.logging import get_logger
@@ -33,7 +33,7 @@ class GrokSubscriptionProvider(OpenAIProvider):
         retry_policy: RetryPolicy | dict[str, Any] | None = None,
         extra_body: dict[str, Any] | None = None,
     ) -> None:
-        candidates = GrokTokens.load_candidates()
+        candidates = GrokTokens.load_bootstrap_candidates()
         if not candidates:
             raise _missing_login_error()
         token = candidates[0]
@@ -66,16 +66,19 @@ class GrokSubscriptionProvider(OpenAIProvider):
         **kwargs: Any,
     ) -> AsyncIterator[str]:
         """Try ordered local credentials only before any response is emitted."""
-        candidates = [
+        await GrokTokens.ensure_fresh_cli()
+        pending = [
             token
             for token in GrokTokens.load_candidates()
             if _fingerprint(token) not in self._rejected_fingerprints
         ]
-        if not candidates:
+        if not pending:
             raise _missing_login_error()
 
         last_error: Exception | None = None
-        for index, token in enumerate(candidates):
+        refresh_attempted = False
+        while pending:
+            token = pending.pop(0)
             self._activate(token)
             emitted = False
             try:
@@ -90,7 +93,15 @@ class GrokSubscriptionProvider(OpenAIProvider):
                 if emitted or _status_code(exc) != 401:
                     raise
                 self._rejected_fingerprints.add(_fingerprint(token))
-                if index + 1 >= len(candidates):
+                if token.source == GROK_CLI_SOURCE and not refresh_attempted:
+                    refresh_attempted = True
+                    refreshed = await GrokTokens.ensure_fresh_cli(force=True)
+                    if (
+                        refreshed is not None
+                        and _fingerprint(refreshed) not in self._rejected_fingerprints
+                    ):
+                        pending.insert(0, refreshed)
+                if not pending:
                     raise
                 logger.warning(
                     "Grok credential rejected; trying next local source",

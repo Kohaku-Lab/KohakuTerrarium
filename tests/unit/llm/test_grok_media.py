@@ -7,6 +7,17 @@ from kohakuterrarium.llm.grok_auth import GrokToken
 from kohakuterrarium.llm.grok_media import GrokMediaClient, GrokMediaError
 
 
+@pytest.fixture(autouse=True)
+def _disable_real_cli_refresh(monkeypatch):
+    async def no_refresh(*, force=False):
+        return None
+
+    monkeypatch.setattr(
+        "kohakuterrarium.llm.grok_media.GrokTokens.ensure_fresh_cli",
+        no_refresh,
+    )
+
+
 class TestGrokMediaClient:
     @pytest.mark.asyncio
     async def test_chat_proxy_headers_are_not_sent_to_media_api(self, monkeypatch):
@@ -78,6 +89,47 @@ class TestGrokMediaClient:
             "Bearer first-secret",
             "Bearer second-secret",
         ]
+
+    @pytest.mark.asyncio
+    async def test_auth_rejection_refreshes_cli_and_retries_once(self, monkeypatch):
+        original = GrokToken(access_token="old", source="grok-cli")
+        refreshed = GrokToken(access_token="new", source="grok-cli")
+        candidates = [original]
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_media.GrokTokens.load_candidates",
+            lambda: candidates,
+        )
+        refresh_calls = []
+
+        async def refresh(*, force=False):
+            refresh_calls.append(force)
+            if force:
+                candidates[0] = refreshed
+                return refreshed
+            return original
+
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_media.GrokTokens.ensure_fresh_cli",
+            refresh,
+        )
+        seen = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            authorization = request.headers["Authorization"]
+            seen.append(authorization)
+            if authorization == "Bearer old":
+                return httpx.Response(401, json={"error": "expired"})
+            return httpx.Response(200, json={"id": "req-1"})
+
+        client = GrokMediaClient(transport=httpx.MockTransport(handler))
+
+        response = await client.request_json(
+            "GET", "videos/req-1", token=original, operation="video polling"
+        )
+
+        assert response.token.access_token == "new"
+        assert seen == ["Bearer old", "Bearer new"]
+        assert refresh_calls == [False, True]
 
     @pytest.mark.asyncio
     async def test_error_is_redacted(self, monkeypatch):
