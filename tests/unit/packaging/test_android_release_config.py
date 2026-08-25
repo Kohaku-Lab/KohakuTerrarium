@@ -18,6 +18,23 @@ def _load_module(name: str, path: Path):
 
 
 class TestAndroidReleaseConfig:
+    def test_desktop_pywebview_pins_stay_aligned(self):
+        config = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
+        app_config = config["tool"]["briefcase"]["app"]["kohakuterrarium"]
+
+        desktop_pin = next(
+            requirement
+            for requirement in config["project"]["optional-dependencies"]["desktop"]
+            if requirement.startswith("pywebview")
+        )
+        launcher_pin = next(
+            requirement
+            for requirement in app_config["requires"]
+            if requirement.startswith("pywebview")
+        )
+
+        assert desktop_pin == launcher_pin == "pywebview==6.2.1"
+
     def test_version_code_matches_project_version(self):
         config = tomllib.loads((_REPO_ROOT / "pyproject.toml").read_text())
         major, minor, patch = map(int, config["project"]["version"].split("."))
