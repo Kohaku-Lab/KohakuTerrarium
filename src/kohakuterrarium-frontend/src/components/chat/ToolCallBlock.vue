@@ -15,6 +15,14 @@
       <span v-if="tc.result || tc.tools_used?.length || tc.children?.length || tc.status === 'running'" class="i-carbon-chevron-down text-warm-400 transition-transform text-[10px] shrink-0" :class="{ 'rotate-180': expanded }" />
     </div>
 
+    <!-- Generated media stays visible even when verbose tool details are collapsed. -->
+    <div v-if="tc.kind !== 'subagent' && mediaParts.length" class="flex flex-col gap-2 p-2 border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/4 dark:bg-sapphire/6">
+      <template v-for="(part, i) in mediaParts" :key="i">
+        <img v-if="part.type === 'image_url'" :src="part.image_url.url" class="tool-inline-image" />
+        <VideoFilePreview v-else :file="part.file" />
+      </template>
+    </div>
+
     <!-- Expanded content -->
     <div v-if="expanded" class="border-t min-w-0" :class="tc.kind === 'subagent' ? 'border-taaffeite/15 dark:border-taaffeite/20' : 'border-sapphire/15 dark:border-sapphire/20'">
       <template v-if="tc.kind === 'subagent'">
@@ -30,6 +38,7 @@
                 <template v-for="(part, i) in tc.resultParts" :key="i">
                   <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
                   <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
+                  <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
                 </template>
               </div>
             </template>
@@ -124,12 +133,11 @@
       </template>
       <template v-else>
         <!-- Tool raw output, scrollable accordion -->
-        <div ref="resultEl" class="text-xs font-mono px-3 py-2 text-warm-500 dark:text-warm-400 whitespace-pre-wrap max-h-64 overflow-y-auto overflow-x-hidden bg-sapphire/4 dark:bg-sapphire/6 min-w-0 break-all" @scroll="onResultScroll">
-          <template v-if="tc.resultParts?.length">
+        <div v-if="detailParts.length || !tc.resultParts?.length" ref="resultEl" class="text-xs font-mono px-3 py-2 text-warm-500 dark:text-warm-400 whitespace-pre-wrap max-h-64 overflow-y-auto overflow-x-hidden bg-sapphire/4 dark:bg-sapphire/6 min-w-0 break-all" @scroll="onResultScroll">
+          <template v-if="detailParts.length">
             <div class="flex flex-col gap-2">
-              <template v-for="(part, i) in tc.resultParts" :key="i">
+              <template v-for="(part, i) in detailParts" :key="i">
                 <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
-                <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
               </template>
             </div>
           </template>
@@ -140,6 +148,12 @@
         <div v-if="tc.resultMeta?.truncated" class="px-3 py-1 text-[10px] border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/8 dark:bg-sapphire/10 text-amber-shadow dark:text-amber-light font-mono">
           Output truncated<span v-if="tc.resultMeta.omitted_text_bytes"> · {{ tc.resultMeta.omitted_text_bytes.toLocaleString() }} bytes omitted</span>
         </div>
+        <div v-if="artifactLinks.length" class="px-3 py-1.5 text-[10px] border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/8 dark:bg-sapphire/10 font-mono">
+          <div class="text-warm-400 mb-0.5">{{ t("chat.tool.savedArtifacts") }}</div>
+          <a v-for="artifact in artifactLinks" :key="artifact.relative_path" :href="artifact.url" target="_blank" rel="noopener noreferrer" class="block text-iolite hover:underline truncate" :title="artifact.relative_path">
+            {{ artifact.relative_path }}
+          </a>
+        </div>
       </template>
     </div>
   </div>
@@ -147,8 +161,10 @@
 
 <script setup>
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
 import { useChatStore } from "@/stores/chat"
 import { terrariumAPI } from "@/utils/api"
+import { safeArtifactUrl, safeMediaParts } from "@/utils/artifacts"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
@@ -160,6 +176,16 @@ const props = defineProps({
 const emit = defineEmits(["toggle"])
 const chat = useChatStore()
 const { t } = useI18n()
+const mediaParts = computed(() => safeMediaParts(props.tc.resultParts))
+const detailParts = computed(() => (Array.isArray(props.tc.resultParts) ? props.tc.resultParts : []).filter((part) => part?.type !== "image_url" && !(part?.type === "file" && part.file?.mime?.startsWith("video/"))))
+const artifactLinks = computed(() =>
+  (Array.isArray(props.tc.resultMeta?.artifacts) ? props.tc.resultMeta.artifacts : [])
+    .map((artifact) => ({
+      ...artifact,
+      url: safeArtifactUrl(artifact?.url),
+    }))
+    .filter((artifact) => artifact.url && typeof artifact.relative_path === "string"),
+)
 
 // ── Sub-agent inner conversation (UXI-05) ──
 // Read a sub-agent run's transcript by its live job_id (fallback to its

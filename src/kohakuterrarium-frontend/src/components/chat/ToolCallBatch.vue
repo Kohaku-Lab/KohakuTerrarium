@@ -13,6 +13,13 @@
       <span class="i-carbon-chevron-down text-warm-400 transition-transform text-[10px] shrink-0" :class="{ 'rotate-180': expanded }" />
     </div>
 
+    <div v-if="!expanded && mediaParts.length" class="flex flex-col gap-2 p-2 border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/4 dark:bg-sapphire/6">
+      <template v-for="(part, i) in mediaParts" :key="i">
+        <img v-if="part.type === 'image_url'" :src="part.image_url.url" class="tool-inline-image" />
+        <VideoFilePreview v-else :file="part.file" />
+      </template>
+    </div>
+
     <!-- Expanded list: per-tool ToolCallBlock with its own expand state. -->
     <div v-if="expanded" class="px-2 py-1.5 space-y-1 bg-warm-100 dark:bg-warm-800/80 border-t border-sapphire/15 dark:border-sapphire/20 max-h-72 overflow-y-auto overflow-x-hidden min-w-0">
       <ToolCallBlock v-for="tc in tools" :key="tc.id" :tc="tc" :expanded="!!toolExpanded[tc.id]" @toggle="$emit('tool-toggle', tc.id)" />
@@ -24,6 +31,8 @@
 import { computed } from "vue"
 
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
+import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
+import { safeMediaParts } from "@/utils/artifacts"
 import { summarizeBatch } from "@/utils/chatToolGrouping"
 import { useI18n } from "@/utils/i18n"
 
@@ -38,6 +47,7 @@ const props = defineProps({
 defineEmits(["toggle", "tool-toggle"])
 
 const summary = computed(() => summarizeBatch(props.tools))
+const mediaParts = computed(() => props.tools.flatMap((tool) => safeMediaParts(tool.resultParts)))
 
 // Compact name list e.g. ``read x3, bash x1, edit x1``.  Truncated to
 // the top 4 names; remainder collapses into ``+N more`` so the chip

@@ -635,7 +635,7 @@ auto-attached but can be referenced by name.
 | `<PROVIDER>_API_KEY` | Whatever `api_key_env` each provider references. |
 | `KT_<SHELL>_PATH` | Override a specific shell executable (for example, `KT_BASH_PATH`); takes precedence over `KT_SHELL_PATH`. |
 | `KT_SHELL_PATH` | Generic shell executable override used by the `bash` tool when no per-shell override is set. |
-| `KT_SESSION_DIR` | Override session directory for the web API (default `~/.kohakuterrarium/sessions`). |
+| `KT_SESSION_DIR` | Override the session directory for CLI, Studio, and the web API (default `<KT_CONFIG_DIR>/sessions`). Generated artifacts follow their session into sibling `*.artifacts/` directories. |
 
 ## Exit codes
 

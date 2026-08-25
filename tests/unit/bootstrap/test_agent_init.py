@@ -128,6 +128,25 @@ class TestAutoInjectProviderNativeTools:
         AgentInitMixin._auto_inject_provider_native_tools(fake)
         assert registry.list_tools() == []
 
+    def test_grok_media_tools_are_auto_injected_as_local_tools(self):
+        registry = Registry()
+        fake = SimpleNamespace(
+            registry=registry,
+            llm=_FakeLLM(
+                provider_name="grok-subscription",
+                native_tools=frozenset(["grok_image_gen", "video_gen"]),
+            ),
+            config=AgentConfig(name="a"),
+        )
+
+        AgentInitMixin._auto_inject_provider_native_tools(fake)
+
+        assert set(registry.list_tools()) == {"grok_image_gen", "video_gen"}
+        assert all(
+            not registry.get_tool(name).is_provider_native
+            for name in registry.list_tools()
+        )
+
     def test_disabled_tool_not_injected(self):
         registry = Registry()
         fake = SimpleNamespace(

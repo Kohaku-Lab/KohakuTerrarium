@@ -10,6 +10,7 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
 from kohakuterrarium.llm.base import LLMConfig, LLMProvider
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm import api_keys as _api_keys
 from kohakuterrarium.llm.profiles import (
@@ -194,6 +195,18 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             retry_policy=getattr(profile, "retry_policy", None),
             api_key=codex_key,
             base_url=codex_base_url,
+            extra_body=getattr(profile, "extra_body", None) or None,
+        )
+        provider._profile_max_context = profile.max_context
+        _apply_backend_native_identity(provider, profile)
+        return provider
+
+    if profile.backend_type == "grok-subscription":
+        provider = GrokSubscriptionProvider(
+            model=profile.model,
+            temperature=profile.temperature,
+            max_tokens=profile.max_output or None,
+            retry_policy=getattr(profile, "retry_policy", None),
             extra_body=getattr(profile, "extra_body", None) or None,
         )
         provider._profile_max_context = profile.max_context

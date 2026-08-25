@@ -55,6 +55,8 @@ class TestDiskUsage:
         monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path / "no-such")
         out = store_mod.disk_usage()
         assert out["count"] == 0
+        assert out["session_bytes"] == 0
+        assert out["artifacts_bytes"] == 0
         assert out["total_bytes"] == 0
 
     def test_with_sessions(self, tmp_path, monkeypatch):
@@ -64,7 +66,28 @@ class TestDiskUsage:
         # Exactly one canonical session was written; total_bytes counts
         # the session file plus its sidecars (>= the main file size).
         assert out["count"] == 1
-        assert out["total_bytes"] >= path.stat().st_size > 0
+        assert out["session_bytes"] >= path.stat().st_size > 0
+        assert out["artifacts_bytes"] == 0
+        assert out["total_bytes"] == out["session_bytes"]
+
+    def test_artifacts_are_counted_separately_even_without_a_session(
+        self, tmp_path, monkeypatch
+    ):
+        path = _make_session(tmp_path)
+        media = tmp_path / "alice.artifacts" / "generated_videos" / "clip.mp4"
+        media.parent.mkdir(parents=True)
+        media.write_bytes(b"video-bytes")
+        retained = tmp_path / "deleted.artifacts" / "generated_images" / "image.png"
+        retained.parent.mkdir(parents=True)
+        retained.write_bytes(b"image")
+        monkeypatch.setattr(store_mod, "_SESSION_DIR", tmp_path)
+
+        out = store_mod.disk_usage()
+
+        assert out["count"] == 1
+        assert out["session_bytes"] >= path.stat().st_size
+        assert out["artifacts_bytes"] == len(b"video-bytes") + len(b"image")
+        assert out["total_bytes"] == out["session_bytes"] + out["artifacts_bytes"]
 
 
 # ── resolve_session_path_default / all_versions_for_session_default ─

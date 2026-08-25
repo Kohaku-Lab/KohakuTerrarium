@@ -17,6 +17,7 @@ from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.core.tool_output import render_content_text
+from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode
 from kohakuterrarium.parsing import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -366,6 +367,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
                 content=result.output or "",
                 exit_code=getattr(result, "exit_code", 0),
                 error=result.error if hasattr(result, "error") else None,
+                result_metadata=dict(getattr(result, "metadata", {}) or {}),
                 **extra_context,
             )
             if hasattr(result, "turns"):
@@ -518,6 +520,8 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
             "output_preview": preview,
             "exit_code": exit_code,
         }
+        if not is_subagent and isinstance(output, list):
+            metadata["result"] = content_parts_to_dicts(output)
         if not succeeded:
             metadata["error"] = f"Tool exited with code {exit_code}"
             metadata["final_state"] = "error"

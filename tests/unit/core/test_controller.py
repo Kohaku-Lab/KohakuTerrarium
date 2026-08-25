@@ -1005,11 +1005,28 @@ class TestNativeCompletion:
         await env.controller.push_event(create_user_input_event("go"))
         events: list = []
         async for evt in env.controller.run_once():
+            from kohakuterrarium.parsing import ToolCallEvent as TCE
+
+            if isinstance(evt, TCE):
+                # The provider's assistant call announcement must already be in
+                # history before a background handler can append its tool result.
+                assistant = env.controller.conversation.get_messages()[-1]
+                assert assistant.role == "assistant"
+                assert assistant.tool_calls is not None
+                assert assistant.tool_calls[0]["id"] == "c1"
+                env.controller.conversation.append(
+                    "tool", "done", tool_call_id=evt.args["_tool_call_id"]
+                )
             events.append(evt)
         # Yielded ToolCallEvent for the native call.
         from kohakuterrarium.parsing import ToolCallEvent as TCE
 
         assert any(isinstance(e, TCE) and e.name == "echo" for e in events)
+        wire_messages = env.controller.conversation.to_messages()
+        assert [message["role"] for message in wire_messages[-2:]] == [
+            "assistant",
+            "tool",
+        ]
 
     async def test_native_subagent_call_emitted(self):
         llm = _NativeScriptedLLM(
@@ -1023,10 +1040,46 @@ class TestNativeCompletion:
         await env.controller.push_event(create_user_input_event("go"))
         events: list = []
         async for evt in env.controller.run_once():
+            from kohakuterrarium.parsing import SubAgentCallEvent as SCE
+
+            if isinstance(evt, SCE):
+                assistant = env.controller.conversation.get_messages()[-1]
+                assert assistant.role == "assistant"
+                assert assistant.tool_calls is not None
+                assert assistant.tool_calls[0]["id"] == "c1"
             events.append(evt)
         from kohakuterrarium.parsing import SubAgentCallEvent as SCE
 
         assert any(isinstance(e, SCE) and e.name == "explore" for e in events)
+
+    async def test_all_native_calls_are_announced_before_first_dispatch(self):
+        llm = _NativeScriptedLLM(
+            [
+                (
+                    "Two calls.",
+                    [
+                        _NativeToolCall("c1", "echo", '{"msg": "left"}'),
+                        _NativeToolCall("c2", "echo", '{"msg": "right"}'),
+                    ],
+                ),
+            ]
+        )
+        env = TestAgentBuilder().with_llm(llm).build()
+        env.controller.config.tool_format = "native"
+        env.registry.register_tool(_DummyEchoTool())
+        await env.controller.push_event(create_user_input_event("go"))
+
+        from kohakuterrarium.parsing import ToolCallEvent as TCE
+
+        events = [event async for event in env.controller.run_once()]
+        assistant = env.controller.conversation.get_messages()[-1]
+        assert [call["id"] for call in assistant.tool_calls] == ["c1", "c2"]
+        assert [
+            event.args["_tool_call_id"] for event in events if isinstance(event, TCE)
+        ] == [
+            "c1",
+            "c2",
+        ]
 
     async def test_native_completion_no_tool_calls(self):
         llm = _NativeScriptedLLM([("Just a chat response.", [])])

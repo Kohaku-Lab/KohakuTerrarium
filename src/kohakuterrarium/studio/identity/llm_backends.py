@@ -19,6 +19,7 @@ from kohakuterrarium.llm.profiles import (
 
 _BUILT_IN_BACKEND_NAMES = {
     "codex",
+    "grok-subscription",
     "openai",
     "openrouter",
     "anthropic",
@@ -27,7 +28,7 @@ _BUILT_IN_BACKEND_NAMES = {
     "kimi-code",
     "glm-coding",
 }
-_SUPPORTED_BACKEND_TYPES = {"openai", "codex", "anthropic"}
+_SUPPORTED_BACKEND_TYPES = {"openai", "codex", "anthropic", "grok-subscription"}
 
 
 def list_backends() -> list[dict[str, Any]]:

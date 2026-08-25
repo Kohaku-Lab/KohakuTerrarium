@@ -30,6 +30,7 @@ def _profiles_path() -> Path:
 
 _BUILTIN_PROVIDER_NAMES: set[str] = {
     "codex",
+    "grok-subscription",
     "openai",
     "openrouter",
     "anthropic",
@@ -79,6 +80,12 @@ def _built_in_providers() -> dict[str, LLMBackend]:
             backend_type="codex",
             provider_name="codex",
             provider_native_tools=["image_gen"],
+        ),
+        "grok-subscription": LLMBackend(
+            name="grok-subscription",
+            backend_type="grok-subscription",
+            provider_name="grok-subscription",
+            provider_native_tools=["grok_image_gen", "video_gen"],
         ),
         "openai": LLMBackend(
             name="openai",
@@ -138,6 +145,8 @@ def legacy_provider_from_data(data: dict[str, Any]) -> str:
 
     if backend_type == "codex":
         return "codex"
+    if backend_type == "grok-subscription":
+        return "grok-subscription"
     if "openrouter.ai" in base_url:
         return "openrouter"
     if "generativelanguage.googleapis.com" in base_url:
@@ -221,6 +230,6 @@ def load_backends() -> dict[str, LLMBackend]:
 def validate_backend_type(backend_type: str) -> str:
     """Validate and return a canonical provider transport type."""
     normalized = _normalize_backend_type(backend_type)
-    if normalized not in {"openai", "anthropic", "codex"}:
+    if normalized not in {"openai", "anthropic", "codex", "grok-subscription"}:
         raise ValueError(f"Unsupported backend_type: {backend_type}")
     return normalized
