@@ -7,6 +7,7 @@ from typing import Any
 
 from kohakuterrarium.bootstrap.llm import create_llm_from_profile_name
 from kohakuterrarium.core.agent_selection import persist_model_selection
+from kohakuterrarium.core.provider_tools import sync_provider_tools
 from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
 from kohakuterrarium.utils.logging import get_logger
 
@@ -49,6 +50,7 @@ class AgentModelMixin:
         self._llm_identifier = identifier
         self.llm = new_llm
         self.controller.llm = new_llm
+        sync_provider_tools(self)
         # Fresh provider needs the same emergency-drop sync the boot
         # provider got — without it a drop after a model switch leaves
         # the controller holding the original oversized conversation.

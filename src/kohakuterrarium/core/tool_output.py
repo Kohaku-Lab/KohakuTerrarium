@@ -53,6 +53,25 @@ class NormalizedToolOutput:
         return self.stats.text
 
 
+def merge_tool_metadata(
+    result_metadata: dict[str, Any], normalized_metadata: dict[str, Any]
+) -> dict[str, Any]:
+    """Merge normalized artifacts into the session-facing metadata envelope."""
+    metadata = dict(result_metadata)
+    metadata.update(normalized_metadata)
+    artifacts = normalized_metadata.get("artifacts")
+    if not isinstance(artifacts, list) or not artifacts:
+        return metadata
+
+    session_metadata = dict(metadata.get("session_metadata") or {})
+    prior = session_metadata.get("artifacts")
+    session_metadata["artifacts"] = (
+        prior if isinstance(prior, list) else []
+    ) + artifacts
+    metadata["session_metadata"] = session_metadata
+    return metadata
+
+
 def discard_raw_output_file(metadata: dict[str, Any]) -> None:
     """Remove a complete raw-output file without changing the tool result."""
     raw_output_path = metadata.pop("raw_output_path", None)

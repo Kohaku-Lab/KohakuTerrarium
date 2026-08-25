@@ -6,6 +6,7 @@ reads access tokens and never consumes or writes third-party refresh tokens.
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -20,6 +21,9 @@ OPENCODE_SOURCE = "opencode"
 XAI_BASE_URL = "https://api.x.ai/v1"
 GROK_CLI_BASE_URL = "https://cli-chat-proxy.grok.com/v1"
 _EXPIRY_SKEW_SECONDS = 30
+_GROK_VERSION_PATTERN = re.compile(
+    r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)*(?: \([0-9A-Fa-f]+\))?$"
+)
 
 
 @dataclass(frozen=True)
@@ -59,9 +63,12 @@ class GrokTokens:
         return bool(cls.load_candidates())
 
 
+def _grok_home() -> Path:
+    return Path(os.environ.get("GROK_HOME", "~/.grok")).expanduser()
+
+
 def _grok_auth_path() -> Path:
-    root = Path(os.environ.get("GROK_HOME", "~/.grok")).expanduser()
-    return root / "auth.json"
+    return _grok_home() / "auth.json"
 
 
 def _opencode_auth_path() -> Path:
@@ -86,11 +93,43 @@ def _load_grok_cli_token() -> GrokToken | None:
             source=GROK_CLI_SOURCE,
             expires_at=_expiry_value(entry),
             base_url=GROK_CLI_BASE_URL,
-            extra_headers={"X-XAI-Token-Auth": "xai-grok-cli"},
+            extra_headers=_grok_cli_headers(),
         )
         if not token.is_expired():
             return token
     return None
+
+
+def _grok_cli_headers() -> dict[str, str]:
+    headers = {
+        "X-XAI-Token-Auth": "xai-grok-cli",
+        "x-authenticateresponse": "authenticate-response",
+        "x-grok-client-identifier": "grok-shell",
+        "x-grok-client-mode": "interactive",
+    }
+    version = _read_grok_cli_version()
+    if version:
+        headers["x-grok-client-version"] = version
+    return headers
+
+
+def _read_grok_cli_version() -> str:
+    path = _grok_home() / ".metadata_version"
+    try:
+        version = path.read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return ""
+    except OSError as exc:
+        logger.warning(
+            "Failed to read Grok CLI version metadata",
+            path=str(path),
+            error=type(exc).__name__,
+        )
+        return ""
+    if not _GROK_VERSION_PATTERN.fullmatch(version):
+        logger.warning("Ignoring invalid Grok CLI version metadata", path=str(path))
+        return ""
+    return version
 
 
 def _load_opencode_token() -> GrokToken | None:

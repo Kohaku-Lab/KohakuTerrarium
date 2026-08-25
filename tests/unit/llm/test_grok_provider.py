@@ -29,7 +29,16 @@ class TestGrokSubscriptionProvider:
 
     def test_uses_first_candidate_and_redacted_source(self, monkeypatch):
         token = GrokToken(
-            access_token="secret", source="grok-cli", base_url=GROK_CLI_BASE_URL
+            access_token="secret",
+            source="grok-cli",
+            base_url=GROK_CLI_BASE_URL,
+            extra_headers={
+                "X-XAI-Token-Auth": "xai-grok-cli",
+                "x-authenticateresponse": "authenticate-response",
+                "x-grok-client-identifier": "grok-shell",
+                "x-grok-client-mode": "interactive",
+                "x-grok-client-version": "1.0.5",
+            },
         )
         monkeypatch.setattr(
             "kohakuterrarium.llm.grok_provider.GrokTokens.load_candidates",
@@ -46,6 +55,10 @@ class TestGrokSubscriptionProvider:
         assert provider.base_url == "https://cli-chat-proxy.grok.com/v1"
         assert provider._extra_headers == {
             "X-XAI-Token-Auth": "xai-grok-cli",
+            "x-authenticateresponse": "authenticate-response",
+            "x-grok-client-identifier": "grok-shell",
+            "x-grok-client-mode": "interactive",
+            "x-grok-client-version": "1.0.5",
             "x-grok-model-override": "grok-test",
         }
 
@@ -62,6 +75,30 @@ class TestGrokSubscriptionProvider:
 
         assert kwargs == {"extra_headers": {"x-grok-conv-id": "session-1"}}
         assert "prompt_cache_key" not in kwargs
+
+    def test_reload_applies_changed_cli_request_profile(self, monkeypatch):
+        original = GrokToken(
+            access_token="same-token",
+            source="grok-cli",
+            extra_headers={"x-grok-client-version": "1.0.5"},
+        )
+        updated = GrokToken(
+            access_token="same-token",
+            source="grok-cli",
+            extra_headers={"x-grok-client-version": "1.0.6"},
+        )
+        candidates = [original]
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_provider.GrokTokens.load_candidates",
+            lambda: candidates,
+        )
+        provider = GrokSubscriptionProvider()
+        candidates[0] = updated
+
+        changed = provider.reload_credentials()
+
+        assert changed is True
+        assert provider._extra_headers["x-grok-client-version"] == "1.0.6"
 
     @pytest.mark.asyncio
     async def test_rejected_primary_falls_back_before_output(self, monkeypatch):

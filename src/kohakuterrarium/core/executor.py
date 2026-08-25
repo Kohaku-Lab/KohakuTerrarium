@@ -15,6 +15,7 @@ from kohakuterrarium.core.job import (
 )
 from kohakuterrarium.core.tool_output import (
     discard_raw_output_file,
+    merge_tool_metadata,
     normalize_tool_output,
 )
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext, ToolResult
@@ -62,6 +63,10 @@ class Executor:
         """Register a tool for execution."""
         self._tools[tool.tool_name] = tool
         logger.debug("Registered tool", tool_name=tool.tool_name)
+
+    def unregister_tool(self, tool_name: str) -> bool:
+        """Stop accepting new calls for a tool without cancelling active work."""
+        return self._tools.pop(tool_name, None) is not None
 
     def _emit_tool_wait(self, tool_name: str, wait_ms: float, reason: str) -> None:
         """Emit lock-wait observability without affecting tool execution."""
@@ -356,16 +361,7 @@ class Executor:
                 # its path via this metadata key (see builtins.tools.bash).
                 saved_to=result_metadata.get("raw_output_path"),
             )
-            metadata = dict(result_metadata)
-            metadata.update(normalized.metadata)
-            artifacts = normalized.metadata.get("artifacts")
-            if isinstance(artifacts, list) and artifacts:
-                session_metadata = dict(metadata.get("session_metadata") or {})
-                prior = session_metadata.get("artifacts")
-                if not isinstance(prior, list):
-                    prior = []
-                session_metadata["artifacts"] = prior + artifacts
-                metadata["session_metadata"] = session_metadata
+            metadata = merge_tool_metadata(result_metadata, normalized.metadata)
             if tool.tool_name == "bash" and not normalized.metadata.get("truncated"):
                 discard_raw_output_file(metadata)
             job_result = JobResult(
@@ -398,6 +394,7 @@ class Executor:
                     content=normalized.output if normalized.output else "",
                     exit_code=result.exit_code,
                     error=result.error,
+                    result_metadata=metadata,
                 )
                 if self._on_complete:
                     self._on_complete(event)

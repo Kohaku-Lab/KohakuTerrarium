@@ -747,36 +747,6 @@ PRESETS: dict[str, dict[str, Any]] = {
         "max_context": 500000,
         "max_output": 65536,
     },
-    "grok-4.3-subscription": {
-        "provider": "grok-subscription",
-        "model": "grok-4.3",
-        "max_context": 1000000,
-        "max_output": 65536,
-    },
-    "grok-4.20-0309-reasoning-subscription": {
-        "provider": "grok-subscription",
-        "model": "grok-4.20-0309-reasoning",
-        "max_context": 1000000,
-        "max_output": 65536,
-    },
-    "grok-4.20-0309-non-reasoning-subscription": {
-        "provider": "grok-subscription",
-        "model": "grok-4.20-0309-non-reasoning",
-        "max_context": 1000000,
-        "max_output": 65536,
-    },
-    "grok-4.20-multi-agent-0309-subscription": {
-        "provider": "grok-subscription",
-        "model": "grok-4.20-multi-agent-0309",
-        "max_context": 1000000,
-        "max_output": 65536,
-    },
-    "grok-build-0.1-subscription": {
-        "provider": "grok-subscription",
-        "model": "grok-build-0.1",
-        "max_context": 256000,
-        "max_output": 65536,
-    },
     # ═══════════════════════════════════════════════════════
     #  xAI Grok series (OpenRouter).
     #   - grok-4.5:      the agent-oriented flagship. Reasoning

@@ -48,7 +48,11 @@ class TestVideoGenTool:
         result = await tool.execute({"prompt": "cat"}, context=context)
 
         assert result.success
-        part = result.output[0]
+        location = result.output[0]
+        part = result.output[1]
+        written = list((artifact_root / "generated_videos").glob("*.mp4"))
+        assert len(written) == 1
+        assert location.text == f"Video saved to: {written[0]}"
         assert part.mime == "video/mp4"
         assert part.path.startswith(
             "/api/sessions/session-1_deadbeef/artifacts/generated_videos/"
@@ -58,8 +62,6 @@ class TestVideoGenTool:
         assert artifact["kind"] == "video"
         assert artifact["relative_path"].startswith("generated_videos/")
         assert artifact["url"] == part.path
-        written = list((artifact_root / "generated_videos").glob("*.mp4"))
-        assert len(written) == 1
         assert written[0].read_bytes() == b"mp4"
 
     @pytest.mark.asyncio

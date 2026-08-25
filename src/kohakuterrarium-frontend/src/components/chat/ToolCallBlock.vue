@@ -15,6 +15,14 @@
       <span v-if="tc.result || tc.tools_used?.length || tc.children?.length || tc.status === 'running'" class="i-carbon-chevron-down text-warm-400 transition-transform text-[10px] shrink-0" :class="{ 'rotate-180': expanded }" />
     </div>
 
+    <!-- Generated media stays visible even when verbose tool details are collapsed. -->
+    <div v-if="tc.kind !== 'subagent' && mediaParts.length" class="flex flex-col gap-2 p-2 border-t border-sapphire/15 dark:border-sapphire/20 bg-sapphire/4 dark:bg-sapphire/6">
+      <template v-for="(part, i) in mediaParts" :key="i">
+        <img v-if="part.type === 'image_url'" :src="part.image_url.url" class="tool-inline-image" />
+        <VideoFilePreview v-else :file="part.file" />
+      </template>
+    </div>
+
     <!-- Expanded content -->
     <div v-if="expanded" class="border-t min-w-0" :class="tc.kind === 'subagent' ? 'border-taaffeite/15 dark:border-taaffeite/20' : 'border-sapphire/15 dark:border-sapphire/20'">
       <template v-if="tc.kind === 'subagent'">
@@ -125,13 +133,11 @@
       </template>
       <template v-else>
         <!-- Tool raw output, scrollable accordion -->
-        <div ref="resultEl" class="text-xs font-mono px-3 py-2 text-warm-500 dark:text-warm-400 whitespace-pre-wrap max-h-64 overflow-y-auto overflow-x-hidden bg-sapphire/4 dark:bg-sapphire/6 min-w-0 break-all" @scroll="onResultScroll">
-          <template v-if="tc.resultParts?.length">
+        <div v-if="detailParts.length || !tc.resultParts?.length" ref="resultEl" class="text-xs font-mono px-3 py-2 text-warm-500 dark:text-warm-400 whitespace-pre-wrap max-h-64 overflow-y-auto overflow-x-hidden bg-sapphire/4 dark:bg-sapphire/6 min-w-0 break-all" @scroll="onResultScroll">
+          <template v-if="detailParts.length">
             <div class="flex flex-col gap-2">
-              <template v-for="(part, i) in tc.resultParts" :key="i">
+              <template v-for="(part, i) in detailParts" :key="i">
                 <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
-                <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
-                <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
               </template>
             </div>
           </template>
@@ -158,7 +164,7 @@ import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
 import { useChatStore } from "@/stores/chat"
 import { terrariumAPI } from "@/utils/api"
-import { safeArtifactUrl } from "@/utils/artifacts"
+import { safeArtifactUrl, safeMediaParts } from "@/utils/artifacts"
 import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
@@ -170,6 +176,8 @@ const props = defineProps({
 const emit = defineEmits(["toggle"])
 const chat = useChatStore()
 const { t } = useI18n()
+const mediaParts = computed(() => safeMediaParts(props.tc.resultParts))
+const detailParts = computed(() => (Array.isArray(props.tc.resultParts) ? props.tc.resultParts : []).filter((part) => part?.type !== "image_url" && !(part?.type === "file" && part.file?.mime?.startsWith("video/"))))
 const artifactLinks = computed(() =>
   (Array.isArray(props.tc.resultMeta?.artifacts) ? props.tc.resultMeta.artifacts : [])
     .map((artifact) => ({

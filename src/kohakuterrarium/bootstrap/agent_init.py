@@ -95,6 +95,7 @@ class AgentInitMixin:
     def _init_registry(self) -> None:
         """Register configured tools, remove unsupported native tools, then inject offered ones."""
         self.registry = Registry()
+        self._auto_provider_tools: set[str] = set()
         init_tools(
             self.config,
             self.registry,
@@ -155,6 +156,11 @@ class AgentInitMixin:
                 )
                 continue
             self.registry.register_tool(tool)
+            auto_tools = getattr(self, "_auto_provider_tools", None)
+            if auto_tools is None:
+                auto_tools = set()
+                self._auto_provider_tools = auto_tools
+            auto_tools.add(name)
             logger.info(
                 "provider_native_tool_injected",
                 tool_name=name,

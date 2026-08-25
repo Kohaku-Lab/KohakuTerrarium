@@ -29,6 +29,7 @@ class TestGrokTokens:
             ),
             encoding="utf-8",
         )
+        (grok_home / ".metadata_version").write_text("1.0.5\n", encoding="utf-8")
         opencode = tmp_path / "opencode.json"
         opencode.write_text(
             json.dumps(
@@ -52,11 +53,36 @@ class TestGrokTokens:
             GROK_CLI_SOURCE,
             OPENCODE_SOURCE,
         ]
-        assert candidates[0].extra_headers == {"X-XAI-Token-Auth": "xai-grok-cli"}
+        assert candidates[0].extra_headers == {
+            "X-XAI-Token-Auth": "xai-grok-cli",
+            "x-authenticateresponse": "authenticate-response",
+            "x-grok-client-identifier": "grok-shell",
+            "x-grok-client-mode": "interactive",
+            "x-grok-client-version": "1.0.5",
+        }
         assert candidates[0].base_url == GROK_CLI_BASE_URL
         assert candidates[0].media_base_url == "https://api.x.ai/v1"
         assert "grok-secret-canary" not in repr(candidates[0])
         assert "must-not-be-read" not in repr(candidates)
+
+    def test_invalid_grok_cli_version_is_not_used_as_a_header(
+        self, tmp_path, monkeypatch
+    ):
+        grok_home = tmp_path / "grok"
+        grok_home.mkdir()
+        (grok_home / "auth.json").write_text(
+            json.dumps({"key": "usable"}), encoding="utf-8"
+        )
+        (grok_home / ".metadata_version").write_text(
+            "1.0.5\r\nx-injected: yes", encoding="utf-8"
+        )
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setenv("OPENCODE_AUTH_FILE", str(tmp_path / "missing"))
+
+        candidates = GrokTokens.load_candidates()
+
+        assert len(candidates) == 1
+        assert "x-grok-client-version" not in candidates[0].extra_headers
 
     def test_expired_and_malformed_sources_are_skipped(self, tmp_path, monkeypatch):
         grok_home = tmp_path / "grok"

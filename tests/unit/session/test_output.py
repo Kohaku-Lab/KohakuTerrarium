@@ -598,6 +598,31 @@ class TestActivityHandlers:
         finally:
             store.close()
 
+    def test_tool_done_preserves_structured_media_output(self, tmp_path):
+        store, out = _make(tmp_path)
+        result = [
+            {
+                "type": "file",
+                "file": {
+                    "path": "/api/sessions/s1/artifacts/generated_videos/x.mp4",
+                    "mime": "video/mp4",
+                },
+            }
+        ]
+        try:
+            out.on_activity_with_metadata(
+                "tool_done",
+                "[video_gen] done",
+                {"job_id": "j1", "result": result},
+            )
+            store.flush()
+            evt = next(
+                e for e in store.get_events("alice") if e["type"] == "tool_result"
+            )
+            assert evt["output"] == result
+        finally:
+            store.close()
+
     def test_tool_done_preserves_explicit_exit_code(self, tmp_path):
         store, out = _make(tmp_path)
         try:
