@@ -75,6 +75,53 @@ def _load_webview():
     return webview
 
 
+def _set_windows_app_id() -> None:
+    try:
+        import ctypes
+
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            "KohakuLab.KohakuTerrarium"
+        )
+    except Exception:
+        pass
+
+
+def _set_icon_windows(icon_path: Path) -> None:
+    try:
+        import ctypes
+
+        if not icon_path.exists():
+            return
+        user32 = ctypes.windll.user32
+        hicon = user32.LoadImageW(None, str(icon_path), 1, 0, 0, 0x00000010)
+        if not hicon:
+            return
+        hwnd = user32.FindWindowW(None, "KohakuTerrarium")
+        if hwnd:
+            user32.SendMessageW(hwnd, 0x0080, 0, hicon)
+            user32.SendMessageW(hwnd, 0x0080, 1, hicon)
+    except Exception:
+        pass
+
+
+def _set_icon_macos(icon_path: Path) -> None:
+    try:
+        if not icon_path.exists():
+            return
+        from AppKit import NSApp, NSApplication, NSImage
+        from PyObjCTools import AppHelper
+
+        def apply_icon():
+            app = NSApp() or NSApplication.sharedApplication()
+            image = NSImage.alloc().initWithContentsOfFile_(str(icon_path))
+            if image:
+                app.setApplicationIconImage_(image)
+
+        AppHelper.callAfter(apply_icon)
+    except Exception:
+        pass
+
+
 def _state_path() -> Path:
     handle = tempfile.NamedTemporaryFile(
         prefix="kt-desktop-", suffix=".json", delete=False
@@ -248,6 +295,11 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     configure_utf8_stdio(log=True)
     os.environ["KT_STARTUP_SURFACE"] = "desktop"
     webview = _load_webview()
+    icons_dir = Path(__file__).parent.parent / "app_icons"
+    icon_ico = icons_dir / "window.ico"
+    icon_png = icons_dir / "window.png"
+    if sys.platform == "win32":
+        _set_windows_app_id()
     state_path = _state_path()
     child_ref: list = []
     closed = threading.Event()
@@ -266,6 +318,10 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
 
     def _shown():
         mark_startup("desktop_window_shown", surface="desktop", window="loading")
+        if sys.platform == "win32":
+            _set_icon_windows(icon_ico)
+        elif sys.platform == "darwin":
+            _set_icon_macos(icon_png)
 
     window.events.shown += _shown
 
@@ -298,8 +354,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     elif sys.platform == "win32":
         webview.start()
     else:
-        icon = Path(__file__).parent.parent / "app_icons" / "window.png"
-        webview.start(icon=str(icon) if icon.exists() else None)
+        webview.start(icon=str(icon_png) if icon_png.exists() else None)
 
 
 def main() -> int:

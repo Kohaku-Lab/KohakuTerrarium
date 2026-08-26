@@ -1,4 +1,5 @@
 import json
+import ctypes
 import os
 import subprocess
 import sys
@@ -129,6 +130,72 @@ def test_briefcase_uses_in_process_server(monkeypatch):
         desktop._start_server(port=8001, log_level="ERROR", state_path=Path("state"))
         is in_process
     )
+
+
+def test_windows_desktop_restores_native_app_and_window_icons(monkeypatch):
+    calls = []
+    shell32 = SimpleNamespace(
+        SetCurrentProcessExplicitAppUserModelID=lambda app_id: calls.append(
+            ("app-id", app_id)
+        )
+    )
+    user32 = SimpleNamespace(
+        LoadImageW=lambda *_args: 73,
+        FindWindowW=lambda *_args: 91,
+        SendMessageW=lambda *args: calls.append(("window-icon", *args)),
+    )
+    webview = _Webview([])
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(
+        ctypes,
+        "windll",
+        SimpleNamespace(shell32=shell32, user32=user32),
+        raising=False,
+    )
+    monkeypatch.setattr(desktop, "configure_utf8_stdio", lambda **_kwargs: None)
+    monkeypatch.setattr(desktop.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(desktop, "_load_webview", lambda: webview)
+    monkeypatch.setattr(
+        desktop, "_start_server", lambda **_kwargs: SimpleNamespace(pid=42)
+    )
+    monkeypatch.setattr(
+        desktop,
+        "_wait_for_server",
+        lambda *_args, **_kwargs: {"status": "ready", "port": 8123},
+    )
+    monkeypatch.setattr(desktop, "_stop_server_child", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop.Path, "exists", lambda _self: True)
+
+    desktop.run_desktop_app(port=8001, log_level="ERROR")
+
+    assert ("app-id", "KohakuLab.KohakuTerrarium") in calls
+    assert ("window-icon", 91, 0x0080, 0, 73) in calls
+    assert ("window-icon", 91, 0x0080, 1, 73) in calls
+
+
+def test_macos_desktop_restores_native_dock_icon(monkeypatch):
+    applied = []
+    webview = _Webview([])
+    monkeypatch.setattr(desktop.sys, "platform", "darwin")
+    monkeypatch.setattr(desktop, "configure_utf8_stdio", lambda **_kwargs: None)
+    monkeypatch.setattr(desktop.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(desktop, "_load_webview", lambda: webview)
+    monkeypatch.setattr(
+        desktop, "_start_server", lambda **_kwargs: SimpleNamespace(pid=42)
+    )
+    monkeypatch.setattr(
+        desktop,
+        "_wait_for_server",
+        lambda *_args, **_kwargs: {"status": "ready", "port": 8123},
+    )
+    monkeypatch.setattr(desktop, "_stop_server_child", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        desktop, "_set_icon_macos", lambda _path: applied.append("dock-icon")
+    )
+
+    desktop.run_desktop_app(port=8001, log_level="ERROR")
+
+    assert applied == ["dock-icon"]
 
 
 def test_server_start_overlaps_loading_window_startup(monkeypatch):

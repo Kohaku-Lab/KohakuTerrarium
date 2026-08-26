@@ -282,6 +282,24 @@
     "reason": "Briefcase cannot relaunch its stub with module arguments, so the heavy server graph is imported only after the loading window is visible."
   },
   {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_set_windows_app_id",
+    "target": "ctypes",
+    "reason": "Windows shell integration stays out of the cross-platform lightweight desktop import path until a Windows desktop actually launches."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_set_icon_windows",
+    "target": "ctypes",
+    "reason": "Win32 window icon APIs load only from the Windows shown callback, preserving lightweight startup on other platforms."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_set_icon_macos",
+    "target": "PyObjCTools",
+    "reason": "The Cocoa main-thread dispatcher is available only on macOS and loads when the macOS shown callback restores the Dock icon."
+  },
+  {
     "file": "src/kohakuterrarium/api/app.py",
     "function": "lifespan",
     "target": "kohakuterrarium.laboratory",
