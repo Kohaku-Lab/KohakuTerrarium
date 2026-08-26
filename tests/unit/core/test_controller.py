@@ -479,14 +479,50 @@ class TestFormatEventsForContext:
         assert out[0].text == "describe"
 
     def test_tool_complete_text(self):
-        from kohakuterrarium.core.events import create_tool_complete_event
-
         c = self._ctrl()
         evt = create_tool_complete_event(job_id="bash_x", content="output", exit_code=0)
         out = c._format_events_for_context([evt])
-        # Contains the tool-complete header and the body.
-        assert "Tool bash_x" in out
-        assert "output" in out
+        assert out == "[Tool bash_x completed]\noutput"
+
+    def test_tool_failure_keeps_only_actionable_error(self):
+        c = self._ctrl()
+        evt = create_tool_complete_event(
+            job_id="bash_x",
+            content="partial output",
+            exit_code=2,
+            error=(
+                "\x1b[31mTraceback (most recent call last):\n"
+                '  File "worker.py", line 9, in run\n'
+                "RuntimeError: background-kaboom\x1b[0m"
+            ),
+        )
+        out = c._format_events_for_context([evt])
+        assert out == (
+            "[Tool bash_x failed, exit 2]\n"
+            "Error: RuntimeError: background-kaboom\n"
+            "partial output"
+        )
+        assert "Traceback" not in out
+        assert "worker.py" not in out
+
+    def test_tool_failure_error_is_bounded(self):
+        c = self._ctrl()
+        evt = create_tool_complete_event(job_id="bash_x", content="", error="x" * 600)
+        out = c._format_events_for_context([evt])
+        summary = out.split("Error: ", 1)[1]
+        assert len(summary) == 512
+        assert summary.endswith("…")
+
+    def test_interrupted_tool_is_cancelled_without_redundant_error(self):
+        c = self._ctrl()
+        evt = create_tool_complete_event(
+            job_id="bash_x",
+            content="",
+            error="User manually interrupted this job.",
+            interrupted=True,
+            final_state="interrupted",
+        )
+        assert c._format_events_for_context([evt]) == "[Tool bash_x cancelled]"
 
     def test_subagent_output(self):
         from kohakuterrarium.core.events import EventType

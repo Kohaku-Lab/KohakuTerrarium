@@ -1261,6 +1261,17 @@ class TestCoreIntegration:
                 if j.job_id.startswith("bgboom_")
             )
             assert bgboom_status.state.value == "error"
+            bg_provider_call = agent.llm.call_log[-1]
+            bg_user_message = [
+                message for message in bg_provider_call if message.get("role") == "user"
+            ][-1]
+            assert bg_user_message["content"].endswith(
+                f"[Tool {bgboom_status.job_id} failed]\n" "Error: background-kaboom"
+            )
+            assert (
+                f"[Tool {bgboom_status.job_id} completed]"
+                not in bg_user_message["content"]
+            )
             # ``executor.wait_all`` drains every tracked task and returns
             # the completed JobResults — the bg job's result carries its
             # error string.
