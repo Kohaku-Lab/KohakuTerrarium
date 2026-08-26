@@ -40,7 +40,8 @@
 
     <!-- Event detail drawer -->
     <el-drawer v-model="detailOpen" :title="t('sessionViewer.detail.title')" direction="rtl" size="40%" :modal="false" :destroy-on-close="false">
-      <TraceEventDetail :event="selectedEvent" @open-agent="onOpenSubagent" />
+      <SubagentConversationPanel v-if="conversationRef" :session-id="conversationSessionId" :parent="conversationRef.parent" :job-id="conversationRef.jobId" :name="conversationRef.name" :run="conversationRef.run" :live="detail.live" />
+      <TraceEventDetail v-else :event="selectedEvent" :parent-agent="rollup.agent || filters.agent" @open-conversation="onOpenSubagent" />
     </el-drawer>
   </div>
 </template>
@@ -51,6 +52,7 @@ import { computed, nextTick, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
 import TraceEventDetail from "@/components/sessions/trace/TraceEventDetail.vue"
+import SubagentConversationPanel from "@/components/subagents/SubagentConversationPanel.vue"
 import TraceTab_TraceFilters from "@/components/sessions/trace/TraceFilters.vue"
 import TraceTab_TraceTimeline from "@/components/sessions/trace/TraceTimeline.vue"
 import TraceTab_TraceTurnGroup from "@/components/sessions/trace/TraceTurnGroup.vue"
@@ -111,21 +113,20 @@ const zeroMatchTurns = ref(new Set())
 
 // Event-detail panel state.
 const selectedEvent = ref(null)
+const conversationRef = ref(null)
 const detailOpen = ref(false)
+const conversationSessionId = computed(() => (detail.live ? detail.meta?.session_id || detail.name : detail.name))
 const selectedEventId = computed(() => (selectedEvent.value && typeof selectedEvent.value.event_id === "number" ? selectedEvent.value.event_id : null))
 
 function onSelectEvent(ev) {
   selectedEvent.value = ev
+  conversationRef.value = null
   detailOpen.value = true
 }
 
-function onOpenSubagent(namespace) {
-  if (!namespace) return
-  // Switch the agent filter — this re-fetches turns + events for the
-  // sub-agent's namespace. Close the drawer so the user can see the
-  // new trace; selectedEvent is preserved in case they reopen.
-  filters.value = { ...filters.value, agent: namespace }
-  detailOpen.value = false
+function onOpenSubagent(reference) {
+  if (!reference) return
+  conversationRef.value = reference
 }
 
 const agents = computed(() => detail.agents || [])

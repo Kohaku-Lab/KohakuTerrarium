@@ -1114,7 +1114,7 @@ export default {
   "sessionViewer.detail.tokens": "Tokens",
   "sessionViewer.detail.reasoning": "Reasoning",
   "sessionViewer.detail.rawJson": "Raw JSON",
-  "sessionViewer.detail.openSubagent": "Open sub-agent trace",
+  "sessionViewer.detail.openSubagentConversation": "Open sub-agent conversation",
 
   "sessionViewer.tabs.diff": "Diff",
 

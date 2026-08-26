@@ -14,6 +14,8 @@ from kohakuterrarium.core.job import JobState, JobType
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.subagent.manager import SubAgentManager
+from kohakuterrarium.modules.subagent.result import SubAgentResult
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 
@@ -94,6 +96,34 @@ class TestSpawn:
         status = mgr.get_status(job_id)
         assert status.state is JobState.DONE
         assert status.job_type is JobType.SUBAGENT
+
+    async def test_post_hook_updates_persisted_canonical_metadata(self, tmp_path):
+        class _Plugins:
+            async def run_pre_hooks(self, hook, result, **kwargs):
+                assert hook == "post_subagent_run"
+                return SubAgentResult(
+                    output="rewritten failure",
+                    success=False,
+                    error="rejected",
+                    turns=result.turns,
+                )
+
+        store = SessionStore(str(tmp_path / "hook-result.kohakutr"))
+        store.init_meta("hook", "agent", str(tmp_path), str(tmp_path), ["parent"])
+        mgr = _manager(ScriptedLLM(["original success"]))
+        mgr._session_store = store
+        mgr._parent_name = "parent"
+        mgr._parent_plugins = _Plugins()
+        mgr.register(SubAgentConfig(name="explore", max_turns=1))
+        try:
+            job_id = await mgr.spawn("explore", "task", background=False)
+            result = mgr.get_result(job_id)
+            meta = store.find_subagent_run(job_id, parent="parent")["meta"]
+            assert result.success is False
+            assert meta["success"] is False
+            assert meta["error"] == "rejected"
+        finally:
+            store.close()
 
     async def test_spawn_background_returns_before_completion(self):
         mgr = _manager(ScriptedLLM(["bg result"]))

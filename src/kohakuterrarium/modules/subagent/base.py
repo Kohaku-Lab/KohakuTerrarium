@@ -67,6 +67,7 @@ class SubAgent:
         self._session_store: Any = None
         self._parent_name: str = ""
         self._run_index: int = 0
+        self._job_id: str = ""
 
         # A shared budget coordinates parent and child iteration limits when configured.
         self.iteration_budget: IterationBudget | None = None
@@ -579,6 +580,7 @@ class SubAgent:
                     name=self.config.name,
                     run=self._run_index,
                     meta={
+                        "job_id": self._job_id,
                         "task": (
                             self.conversation.to_messages()[1].get("content", "")
                             if len(self.conversation.to_messages()) > 1

@@ -33,8 +33,8 @@ async def read_subagent_conversation_route(
 ):
     """Return a live or persisted sub-agent conversation.
 
-    A job identifier targets a live task and falls back to its latest persisted
-    run. A name targets a live interactive child or its latest persisted run; a
+    A job identifier targets a live task and falls back to its exact persisted
+    run, or one unambiguous legacy run. A name targets a live interactive child or its latest persisted run; a
     run number selects a specific snapshot. Only live, running instances report
     ``can_receive`` and accept messages.
     """
@@ -47,6 +47,8 @@ async def read_subagent_conversation_route(
         raise HTTPException(404, str(exc))
     except InvalidRequestError as exc:
         raise HTTPException(400, str(exc))
+    except ConflictError as exc:
+        raise HTTPException(409, str(exc))
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 
