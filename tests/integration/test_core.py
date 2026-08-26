@@ -1420,6 +1420,17 @@ class TestCoreIntegration:
             }
             budget_plugin = agent.plugins.get_plugin("budget")
             assert budget_plugin.options["turn_budget"] == {"soft": 2, "hard": 5}
+            for field in ("soft", "hard"):
+                for non_finite in (float("nan"), float("inf"), float("-inf")):
+                    invalid = {"soft": 2, "hard": 5, field: non_finite}
+                    with pytest.raises(ValueError, match="finite"):
+                        agent.plugin_options.set("budget", {"turn_budget": invalid})
+                    assert budget_plugin.options["turn_budget"] == {
+                        "soft": 2,
+                        "hard": 5,
+                    }
+                    assert budget_plugin.budgets.turn.soft == 2
+                    assert budget_plugin.budgets.turn.hard == 5
             # The override was persisted to private session state.
             saved = store.state.get("solo:plugin_options")
             assert saved["budget"]["turn_budget"] == {"soft": 2, "hard": 5}
