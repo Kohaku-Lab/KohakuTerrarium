@@ -62,6 +62,8 @@ PRESETS: dict[str, dict[str, Any]] = {
         # Codex OAuth currently lets the backend choose the actual output cap.
         "max_output": 65536,
         "reasoning_effort": "high",
+        # Spark is text-only; do not inherit Codex's provider-wide image tool.
+        "provider_native_tools": [],
         "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
     },
     "gpt-5.6-sol": {

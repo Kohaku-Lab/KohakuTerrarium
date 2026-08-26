@@ -109,6 +109,12 @@ class TestGetProfile:
         assert profile.provider == "codex"
         assert profile.backend_type == "codex"
         assert profile.max_context == 400000
+        assert profile.backend_native_tools == ["image_gen"]
+
+    def test_spark_opts_out_of_codex_image_generation(self):
+        profile = get_profile("codex/gpt-5.3-codex-spark")
+        assert profile is not None
+        assert profile.backend_native_tools == []
 
     @pytest.mark.parametrize(
         ("preset", "model", "max_context"),
