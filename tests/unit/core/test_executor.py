@@ -866,7 +866,9 @@ class TestCancelledToolWithCallback:
         await ex.cancel(jid)
         await ex.wait_for(jid, timeout=1.0)
         # Callback received the cancellation event.
-        assert called
+        assert len(called) == 1
+        assert called[0].context["cancelled"] is True
+        assert called[0].context["final_state"] == "cancelled"
 
 
 class TestWaitForDeterministicTimeout:

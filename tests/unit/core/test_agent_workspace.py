@@ -77,6 +77,17 @@ class TestSet:
         assert a.session_store.meta["pwd"] == str(new_dir.resolve())
         assert a.session_store.touched == 1
 
+    def test_switch_preserves_live_session_attachment_paths(self, tmp_path):
+        new_dir = tmp_path / "subdir"
+        new_dir.mkdir()
+        attachment = tmp_path.parent / "attachment.txt"
+        a = _fake_agent(tmp_path, mode="block")
+        a._path_guard.allow_session_path(attachment)
+
+        WorkspaceController(a).set(new_dir)
+
+        assert a._path_guard.check(str(attachment)) is None
+
     def test_empty_path_rejected(self, tmp_path):
         a = _fake_agent(tmp_path)
         ws = WorkspaceController(a)

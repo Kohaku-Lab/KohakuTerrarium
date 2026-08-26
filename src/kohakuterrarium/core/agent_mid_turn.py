@@ -11,6 +11,7 @@ import asyncio
 from typing import Any
 
 from kohakuterrarium.core.controller import Controller
+from kohakuterrarium.core.controller_context import format_events_for_context
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.pending_input import pending_id_of
 from kohakuterrarium.llm.message import content_parts_to_dicts
@@ -214,17 +215,10 @@ class AgentMidTurnMixin:
         if evt.type == "user_input":
             return evt.content
         if evt.type == "tool_complete":
-            prefix = f"[Tool {evt.job_id} completed]"
-            if isinstance(evt.content, list):
-                # Multimodal result — keep image/file parts instead of
-                # flattening to text.
-                return [{"type": "text", "text": prefix}] + [
-                    p
-                    for p in content_parts_to_dicts(evt.content)
-                    if isinstance(p, dict)
-                ]
-            text = evt.get_text_content()
-            return f"{prefix}\n{text}" if text else prefix
+            formatted = format_events_for_context([evt])
+            if isinstance(formatted, list):
+                return content_parts_to_dicts(formatted)
+            return formatted
         if evt.type == "subagent_output":
             prefix = f"[Sub-agent {evt.job_id} output]"
             if isinstance(evt.content, list):

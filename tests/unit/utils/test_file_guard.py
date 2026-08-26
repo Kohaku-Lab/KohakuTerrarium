@@ -175,6 +175,25 @@ class TestPathBoundaryGuard:
         assert err2 is not None
         assert "Access denied" in err2
 
+    def test_exact_session_path_bypasses_block_until_revoked(self, tmp_path):
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        attachment = tmp_path / "attachment.txt"
+        attachment.write_text("user supplied")
+        sibling = tmp_path / "sibling.txt"
+        sibling.write_text("not attached")
+        guard = PathBoundaryGuard(workspace, mode="block")
+
+        guard.allow_session_path(attachment)
+
+        assert guard.check(str(attachment)) is None
+        assert guard.check(str(sibling)) is not None
+        assert guard.session_allowed_paths == frozenset({str(attachment.resolve())})
+
+        guard.revoke_session_path(attachment)
+
+        assert guard.check(str(attachment)) is not None
+
     def test_warn_mode_first_blocked_then_allowed_on_retry(self, tmp_path):
         guard = PathBoundaryGuard(tmp_path, mode="warn")
         outside = tmp_path.parent / "y.txt"

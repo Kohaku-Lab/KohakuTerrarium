@@ -5788,13 +5788,19 @@ class TestMidTurnBatchDrain:
             for evt in [
                 TriggerEvent(type="user_input", content="hello"),
                 create_tool_complete_event(job_id="bash_1", content="tool out"),
+                create_tool_complete_event(
+                    job_id="bash_2",
+                    content="partial",
+                    exit_code=3,
+                    error="permission denied",
+                ),
                 TriggerEvent(
                     type="subagent_output", content="sub out", job_id="agent_x"
                 ),
             ]:
                 agent._event_inbox.put(EventEnvelope(evt))
             count = await agent._drain_mid_turn_pending_inputs(agent.controller)
-            assert count == 3
+            assert count == 4
             user_msgs = [
                 m
                 for m in agent.controller.conversation.get_messages()
@@ -5803,6 +5809,10 @@ class TestMidTurnBatchDrain:
             combined = user_msgs[-1].content
             assert "hello" in combined
             assert "[Tool bash_1 completed]\ntool out" in combined
+            assert (
+                "[Tool bash_2 failed, exit 3]\nError: permission denied\npartial"
+                in combined
+            )
             assert "[Sub-agent agent_x output]\nsub out" in combined
             # Only the user-facing entry records a queued-banner frame —
             # tool/sub-agent completions already have their own
