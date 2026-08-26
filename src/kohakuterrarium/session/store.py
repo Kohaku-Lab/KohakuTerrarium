@@ -603,6 +603,55 @@ class SessionStore:
         except KeyError:
             return None
 
+    def list_subagent_runs(
+        self, *, parent: str | None = None, name: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Return persisted sub-agent run metadata in key order."""
+        rows: list[dict[str, Any]] = []
+        for key_bytes in sorted(iter_kv_keys(self.subagents)):
+            key = (
+                key_bytes.decode("utf-8", errors="replace")
+                if isinstance(key_bytes, bytes)
+                else key_bytes
+            )
+            if not key.endswith(":meta"):
+                continue
+            prefix = key[: -len(":meta")]
+            identity = prefix.rsplit(":", 2)
+            if len(identity) != 3:
+                continue
+            entry_parent, entry_name, run_text = identity
+            try:
+                run = int(run_text)
+                meta = self.subagents[key_bytes]
+            except (KeyError, TypeError, ValueError):
+                continue
+            if parent is not None and entry_parent != parent:
+                continue
+            if name is not None and entry_name != name:
+                continue
+            rows.append(
+                {
+                    "parent": entry_parent,
+                    "name": entry_name,
+                    "run": run,
+                    "job_id": meta.get("job_id") if isinstance(meta, dict) else None,
+                    "meta": meta,
+                }
+            )
+        return rows
+
+    def find_subagent_run(
+        self, job_id: str, *, parent: str | None = None
+    ) -> dict[str, Any] | None:
+        """Return the persisted run carrying an exact job identifier."""
+        if not job_id:
+            return None
+        for row in self.list_subagent_runs(parent=parent):
+            if row.get("job_id") == job_id:
+                return row
+        return None
+
     def save_job(self, job_id: str, data: dict) -> None:
         """Save a job execution record."""
         if "ts" not in data:

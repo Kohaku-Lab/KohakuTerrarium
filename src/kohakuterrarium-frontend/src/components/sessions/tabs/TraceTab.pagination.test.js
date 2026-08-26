@@ -59,7 +59,9 @@ vi.mock("@/utils/i18n", () => ({
 }))
 
 import TraceTab from "./TraceTab.vue"
+import TraceEventDetail from "@/components/sessions/trace/TraceEventDetail.vue"
 import TraceTimeline from "@/components/sessions/trace/TraceTimeline.vue"
+import SubagentConversationPanel from "@/components/subagents/SubagentConversationPanel.vue"
 
 beforeEach(() => {
   state.detail = reactive({
@@ -105,6 +107,36 @@ beforeEach(() => {
 })
 
 describe("TraceTab long-session navigation", () => {
+  it("opens a sub-agent conversation without changing the trace agent", async () => {
+    const wrapper = shallowMount(TraceTab, {
+      global: { stubs: { "el-drawer": { template: "<div><slot /></div>" } } },
+    })
+    await flushPromises()
+
+    const filtersBefore = state.rollup.agent
+    const loadCallsBefore = state.rollup.load.mock.calls.length
+    wrapper.findComponent(TraceEventDetail).vm.$emit("open-conversation", {
+      jobId: "agent_explore_11111111",
+      name: "explore",
+      run: 2,
+      parent: "alice",
+    })
+    await flushPromises()
+
+    const panel = wrapper.findComponent(SubagentConversationPanel)
+    expect(panel.exists()).toBe(true)
+    expect(panel.props()).toMatchObject({
+      sessionId: "session-a",
+      parent: "alice",
+      jobId: "agent_explore_11111111",
+      name: "explore",
+      run: 2,
+      live: false,
+    })
+    expect(state.rollup.agent).toBe(filtersBefore)
+    expect(state.rollup.load).toHaveBeenCalledTimes(loadCallsBefore)
+  })
+
   it("resolves a missing turn before routing to a selected timeline span", async () => {
     const wrapper = shallowMount(TraceTab)
     await flushPromises()

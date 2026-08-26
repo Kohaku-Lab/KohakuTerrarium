@@ -6,12 +6,14 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from kohakuterrarium.api.routes.persistence import subagents as subagents_mod
 from kohakuterrarium.api.routes.persistence import viewer as viewer_mod
 
 
 def _app() -> FastAPI:
     app = FastAPI()
     app.include_router(viewer_mod.router, prefix="/sessions")
+    app.include_router(subagents_mod.router, prefix="/sessions")
     return app
 
 
@@ -102,6 +104,122 @@ class TestSummary:
         # The closure passed the normalized stem + the agent query param.
         assert captured["canonical"] == "alice"
         assert captured["agent"] == "alice"
+
+
+# ── persisted sub-agent conversations ───────────────────────────
+
+
+class TestPersistedSubagents:
+    def test_saved_conversation_reads_exact_job(self, monkeypatch, tmp_path):
+        from kohakuterrarium.session.store import SessionStore
+
+        path = tmp_path / "subagents.kohakutr"
+        store = SessionStore(str(path))
+        store.init_meta("subagents", "agent", "/p", "/w", ["parent"])
+        store.save_subagent(
+            "parent",
+            "explore",
+            0,
+            {
+                "job_id": "agent_explore_11111111",
+                "task": "first",
+                "success": True,
+            },
+            conv_json='{"messages":[{"role":"assistant","content":"first answer"}]}',
+        )
+        store.close()
+        monkeypatch.setattr(viewer_mod, "resolve_session_path_default", lambda n: path)
+
+        client = TestClient(_app())
+        response = client.get(
+            "/sessions/subagents/subagents/conversation",
+            params={
+                "parent": "parent",
+                "name": "explore",
+                "job_id": "agent_explore_11111111",
+            },
+        )
+        assert response.status_code == 200
+        assert response.json()["job_id"] == "agent_explore_11111111"
+        assert response.json()["messages"][-1]["content"] == "first answer"
+
+    def test_cluster_legacy_ambiguity_is_not_hidden_by_one_unique_member(
+        self, monkeypatch, tmp_path
+    ):
+        from kohakuterrarium.session.store import SessionStore
+
+        unique_path = tmp_path / "unique.kohakutr"
+        unique = SessionStore(str(unique_path))
+        unique.init_meta("unique", "agent", "/p", "/w", ["parent"])
+        unique.save_subagent(
+            "parent",
+            "explore",
+            0,
+            {"task": "unique legacy"},
+            conv_json='{"messages":[{"role":"assistant","content":"unique"}]}',
+        )
+        unique.close()
+
+        ambiguous_path = tmp_path / "ambiguous.kohakutr"
+        ambiguous = SessionStore(str(ambiguous_path))
+        ambiguous.init_meta("ambiguous", "agent", "/p", "/w", ["parent"])
+        for run in (0, 1):
+            ambiguous.save_subagent(
+                "parent",
+                "explore",
+                run,
+                {"task": f"ambiguous {run}"},
+                conv_json=(
+                    '{"messages":[{"role":"assistant","content":"ambiguous %d"}]}' % run
+                ),
+            )
+        ambiguous.close()
+
+        async def _members(session_name, service):
+            return [("unique", unique_path), ("ambiguous", ambiguous_path)]
+
+        monkeypatch.setattr(subagents_mod, "_resolve_cluster_or_404", _members)
+
+        response = TestClient(_app()).get(
+            "/sessions/cluster/subagents/conversation",
+            params={
+                "parent": "parent",
+                "name": "explore",
+                "job_id": "agent_explore_11111111",
+            },
+        )
+        assert response.status_code == 409
+
+    def test_ambiguous_legacy_conversation_returns_conflict(
+        self, monkeypatch, tmp_path
+    ):
+        from kohakuterrarium.session.store import SessionStore
+
+        path = tmp_path / "legacy-subagents.kohakutr"
+        store = SessionStore(str(path))
+        store.init_meta("legacy", "agent", "/p", "/w", ["parent"])
+        for run in (0, 1):
+            store.save_subagent(
+                "parent",
+                "explore",
+                run,
+                {"task": f"legacy {run}"},
+                conv_json=(
+                    '{"messages":[{"role":"assistant","content":"legacy %d"}]}' % run
+                ),
+            )
+        store.close()
+        monkeypatch.setattr(viewer_mod, "resolve_session_path_default", lambda n: path)
+
+        response = TestClient(_app()).get(
+            "/sessions/legacy/subagents/conversation",
+            params={
+                "parent": "parent",
+                "name": "explore",
+                "job_id": "agent_explore_11111111",
+            },
+        )
+        assert response.status_code == 409
 
 
 # ── live-session resolution (graph_id ≠ on-disk file stem) ──────
