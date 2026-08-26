@@ -46,6 +46,7 @@ from kohakuterrarium.cli.service import add_service_subparser, service_cli
 from kohakuterrarium.cli.version import format_version_report
 from kohakuterrarium.serving.web import run_desktop_app, run_web_server
 from kohakuterrarium.utils.logging import configure_utf8_stdio
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -624,18 +625,22 @@ def main() -> int:
     configure_utf8_stdio(log=False)
     parser = _build_parser()
     args = parser.parse_args()
+    mark_startup("parser_ready", surface="cli")
 
     if args.version:
+        mark_startup("dispatch_selected", surface="cli", command="version")
         print(format_version_report(verbose=args.verbose))
         return 0
 
     # No command given: launch desktop app (used by Briefcase and double-click)
     if not args.command:
+        mark_startup("dispatch_selected", surface="desktop", command="desktop")
         run_desktop_app(log_level="INFO")
         return 0
 
     handler = COMMANDS.get(args.command)
     if handler:
+        mark_startup("dispatch_selected", surface=args.command, command=args.command)
         return handler(args)
 
     parser.print_help()

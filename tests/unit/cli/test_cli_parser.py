@@ -45,3 +45,26 @@ class TestMainStartup:
         assert cli.main() == 0
         assert capsys.readouterr().out == "version\n"
         assert events == [("utf8", {"log": False}), ("parser", {})]
+
+    def test_records_parser_and_dispatch_milestones(self, monkeypatch):
+        milestones = []
+
+        class _Parser:
+            def parse_args(self):
+                return argparse.Namespace(version=True, verbose=False)
+
+        monkeypatch.setattr(cli, "configure_utf8_stdio", lambda **_kwargs: None)
+        monkeypatch.setattr(cli, "_build_parser", lambda: _Parser())
+        monkeypatch.setattr(cli, "format_version_report", lambda **_kwargs: "version")
+        monkeypatch.setattr(
+            cli,
+            "mark_startup",
+            lambda event, **fields: milestones.append((event, fields)),
+            raising=False,
+        )
+
+        assert cli.main() == 0
+        assert milestones == [
+            ("parser_ready", {"surface": "cli"}),
+            ("dispatch_selected", {"surface": "cli", "command": "version"}),
+        ]

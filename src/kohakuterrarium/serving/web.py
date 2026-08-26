@@ -26,6 +26,7 @@ from kohakuterrarium.utils.logging import (
     get_logger,
     set_level,
 )
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
 
@@ -227,6 +228,12 @@ def run_web_server(
         logger.info("boot mode: standalone", host=host, port=port)
 
     creatures_dirs, terrariums_dirs = _resolve_config_dirs()
+    mark_startup(
+        "web_config_dirs_resolved",
+        surface="web",
+        creatures=len(creatures_dirs),
+        terrariums=len(terrariums_dirs),
+    )
 
     app = create_app(
         creatures_dirs=creatures_dirs,
@@ -236,6 +243,7 @@ def run_web_server(
         lab_bind=lab_bind,
         lab_token=lab_token,
     )
+    mark_startup("web_app_created", surface="web")
 
     # Probe forward so direct web serving can tolerate a busy requested port.
     try:
@@ -255,6 +263,7 @@ def run_web_server(
     else:
         print(f"KohakuTerrarium web UI: http://{host}:{port}")
 
+    mark_startup("web_server_run", surface="web", host=host, port=port)
     uvicorn.run(app, host=host, port=port)
 
 
@@ -311,7 +320,11 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     else:
         kwargs["start_new_session"] = True
 
-    subprocess.Popen(cmd, **kwargs)
+    mark_startup("desktop_child_spawn_begin", surface="desktop", port=port)
+    child = subprocess.Popen(cmd, **kwargs)
+    mark_startup(
+        "desktop_child_spawned", surface="desktop", port=port, child_pid=child.pid
+    )
     print(f"KohakuTerrarium desktop app launched (port {port})")
     print(f"  Log: {log_dir / 'app.log'}")
 
@@ -319,6 +332,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
 def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None:
     """Run uvicorn and the native desktop window until the UI closes."""
     configure_utf8_stdio(log=True)
+    os.environ["KT_STARTUP_SURFACE"] = "desktop"
     enable_file_logging()
 
     # A stable application ID lets Windows associate the packaged taskbar icon.
@@ -348,12 +362,19 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         sys.exit(1)
 
     creatures_dirs, terrariums_dirs = _resolve_config_dirs()
+    mark_startup(
+        "desktop_config_dirs_resolved",
+        surface="desktop",
+        creatures=len(creatures_dirs),
+        terrariums=len(terrariums_dirs),
+    )
 
     app = create_app(
         creatures_dirs=creatures_dirs,
         terrariums_dirs=terrariums_dirs,
         static_dir=WEB_DIST_DIR,
     )
+    mark_startup("desktop_app_created", surface="desktop")
 
     # Open webview only after uvicorn reports the actual bound port.
     try:
@@ -367,6 +388,7 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         logger.error("Failed to start uvicorn", error=str(e))
         sys.exit(1)
     logger.info("desktop: uvicorn listening at http://127.0.0.1:%d", port)
+    mark_startup("desktop_server_ready", surface="desktop", port=port)
 
     icons_dir = Path(__file__).parent.parent / "app_icons"
     icon_ico = icons_dir / "window.ico"
@@ -383,6 +405,7 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
         confirm_close=True,
         background_color="#1a1a2e",
     )
+    mark_startup("desktop_window_created", surface="desktop", port=port)
 
     def _set_icon_windows():
         try:
@@ -419,6 +442,7 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
     if sys.platform == "win32":
 
         def _on_shown():
+            mark_startup("desktop_window_shown", surface="desktop", port=port)
             _set_icon_windows()
 
         window.events.shown += _on_shown
@@ -426,6 +450,7 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
     elif sys.platform == "darwin":
 
         def _on_shown():
+            mark_startup("desktop_window_shown", surface="desktop", port=port)
             _set_icon_macos()
 
         window.events.shown += _on_shown

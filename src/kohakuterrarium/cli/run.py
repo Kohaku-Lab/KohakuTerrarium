@@ -33,6 +33,7 @@ from kohakuterrarium.utils.logging import (
     get_logger,
     set_level,
 )
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
 
@@ -192,7 +193,10 @@ async def _run(
     # Resolve node-local Drive settings once; absent or disabled settings keep
     # the engine Drive-free.
     drive_kwargs = _drive_settings.resolve_drive_kwargs()
+    surface = io_mode or "configured"
+    mark_startup("engine_create_begin", surface=surface)
     async with Terrarium(pwd=pwd, **drive_kwargs) as engine:
+        mark_startup("engine_entered", surface=surface)
         store: SessionStore | None = None
         focus_creature_id = ""
 
@@ -226,6 +230,12 @@ async def _run(
             )
             focus_creature_id = creature.creature_id
             graph_id = creature.graph_id
+            mark_startup(
+                "creature_added",
+                surface=surface,
+                creature_id=focus_creature_id,
+                graph_id=graph_id,
+            )
             if session is not None:
                 store = await _attach_session_store(
                     engine,
@@ -246,8 +256,18 @@ async def _run(
 
         try:
             if io_mode == "cli":
+                mark_startup(
+                    "surface_run_begin",
+                    surface="cli",
+                    creature_id=focus_creature_id,
+                )
                 await run_engine_with_rich_cli(engine, focus_creature_id, store)
             elif io_mode == "tui":
+                mark_startup(
+                    "surface_run_begin",
+                    surface="tui",
+                    creature_id=focus_creature_id,
+                )
                 await run_engine_with_tui(engine, focus_creature_id, store)
             else:
                 # Configured I/O owns the lifecycle; keep the event loop alive

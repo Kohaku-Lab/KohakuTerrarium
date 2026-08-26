@@ -121,11 +121,22 @@ class TestRunEngineWithRichCli:
             def __init__(self, app) -> None:
                 pass
 
+        milestones = []
         monkeypatch.setattr(engine_rich_cli.RichCLIApp, "run", _immediate_run)
         monkeypatch.setattr(engine_rich_cli, "RichCLIOutput", _PassthroughOutput)
+        monkeypatch.setattr(
+            engine_rich_cli,
+            "mark_startup",
+            lambda event, **fields: milestones.append((event, fields)),
+            raising=False,
+        )
 
         await run_engine_with_rich_cli(engine, creature.creature_id)
 
+        assert milestones == [
+            ("rich_cli_creature_started", {"surface": "cli", "creature_id": "focus"}),
+            ("rich_cli_run_enter", {"surface": "cli", "creature_id": "focus"}),
+        ]
         assert during_run["input_type"] is RichCLIInput
         assert "clear" in during_run["commands"]
         assert "help" in during_run["commands"]

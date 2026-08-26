@@ -51,6 +51,7 @@ from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
 
@@ -140,6 +141,11 @@ async def run_engine_with_rich_cli(
 
     if not focus_creature.is_running:
         await engine.start(focus_creature)
+    mark_startup(
+        "rich_cli_creature_started",
+        surface="cli",
+        creature_id=focus_creature_id,
+    )
 
     if is_multi:
         # Engine subscription starts after the focus creature is up so
@@ -158,6 +164,7 @@ async def run_engine_with_rich_cli(
         agent._pending_resume_events = None
 
     try:
+        mark_startup("rich_cli_run_enter", surface="cli", creature_id=focus_creature_id)
         await app.run()
     except (KeyboardInterrupt, asyncio.CancelledError):
         pass
