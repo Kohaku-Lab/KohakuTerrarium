@@ -137,6 +137,9 @@ async def _resume_reserved_manifest(
                 parent_creature_id=item.parent_creature_id,
                 _identity_reserved=True,
             )
+            creature.config_name = item.config_name
+            creature.config_ref = item.config_ref
+            creature.source_ref = item.source_ref
             creature.injected_runtime = ()
             created.append(creature)
 

@@ -84,6 +84,7 @@ class TUISession(TabModelRegistryMixin):
         # Target-keyed state keeps sibling creature events from replacing the
         # active tab's model and context details.
         self._model_by_target: dict[str, str] = {}
+        self._identity_by_target: dict[str, tuple[str, str, str, str]] = {}
         self._context_by_target: dict[str, tuple[int, int]] = {}
         self._command_hint_watches: set[tuple[str, int]] = set()
         self.command_hint_fallback: dict[str, Any] = {}
@@ -642,17 +643,28 @@ class TUISession(TabModelRegistryMixin):
         self._safe_call(_do)
 
     def update_session_info(
-        self, session_id: str = "", model: str = "", agent_name: str = ""
+        self,
+        session_id: str = "",
+        model: str = "",
+        agent_name: str = "",
+        config_name: str = "",
+        config_ref: str = "",
     ) -> None:
         # Session information may arrive before the application mounts.
-        self._pending_session_info = (session_id, model, agent_name)
+        self._pending_session_info = (
+            session_id,
+            model,
+            agent_name,
+            config_name,
+            config_ref,
+        )
         if not self._app or not self._app.is_running:
             return
 
         def _do():
             try:
                 self._app.query_one("#session-panel", SessionInfoPanel).set_info(
-                    session_id, model, agent_name
+                    session_id, model, agent_name, config_name, config_ref
                 )
             except Exception as e:
                 logger.warning(

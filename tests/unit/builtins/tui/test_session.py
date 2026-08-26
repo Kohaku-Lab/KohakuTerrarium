@@ -9,6 +9,7 @@ from textual.widgets import Label
 from textual.widgets._markdown import MarkdownFence
 
 from kohakuterrarium.builtins.tui.app import _safe_id
+from kohakuterrarium.builtins.tui.model_info import handle_session_info
 from kohakuterrarium.builtins.tui.session import TUISession
 
 
@@ -100,6 +101,68 @@ def test_set_terrarium_tabs_reconciles_running_app_and_preserves_active() -> Non
 
     assert session._active_target == "root"
     assert app.reconciled[-1] == ["root", "new_worker"]
+
+
+def test_config_identity_follows_active_terrarium_tab() -> None:
+    session = TUISession()
+    session.set_terrarium_tabs(["alice", "bob"])
+    session.set_active_target("alice")
+    alice_output = type("Output", (), {"_default_target": "alice"})()
+    bob_output = type("Output", (), {"_default_target": "bob"})()
+
+    handle_session_info(
+        session,
+        alice_output,
+        {
+            "session_id": "sid",
+            "llm_name": "provider/alice",
+            "agent_name": "alice",
+            "config_name": "alice-config",
+            "config_ref": "creatures/alice.yaml",
+        },
+    )
+    handle_session_info(
+        session,
+        bob_output,
+        {
+            "session_id": "sid",
+            "llm_name": "provider/bob",
+            "agent_name": "bob",
+            "config_name": "bob-config",
+            "config_ref": "creatures/bob.yaml",
+        },
+    )
+    handle_session_info(
+        session,
+        bob_output,
+        {
+            "session_id": "sid",
+            "llm_name": "provider/bob-new",
+            "agent_name": "bob",
+        },
+    )
+    handle_session_info(
+        session,
+        alice_output,
+        {
+            "session_id": "sid",
+            "agent_name": "alice",
+            "config_name": "alice-config",
+        },
+    )
+    assert session._pending_session_info[1] == "provider/alice"
+
+    session.refresh_model_for_tab("alice")
+    assert session._pending_session_info[3:] == (
+        "alice-config",
+        "creatures/alice.yaml",
+    )
+    session.set_active_target("bob")
+    session.refresh_model_for_tab("bob")
+    assert session._pending_session_info[3:] == (
+        "bob-config",
+        "creatures/bob.yaml",
+    )
 
 
 def test_command_hints_follow_active_tab_and_runtime_plugin_changes() -> None:

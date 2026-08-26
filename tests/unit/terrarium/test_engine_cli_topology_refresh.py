@@ -26,9 +26,56 @@ class _Engine:
 class _TUI:
     def __init__(self):
         self.tabs = []
+        self.models = []
+        self.identities = []
 
     def set_terrarium_tabs(self, tabs):
         self.tabs = tabs
+
+    def update_target_model(self, *args):
+        self.models.append(args)
+
+    def update_target_identity(self, *args):
+        self.identities.append(args)
+
+
+async def test_seed_tab_models_includes_config_identity():
+    agent = SimpleNamespace(
+        llm_identifier=lambda: "provider/model",
+        compact_manager=None,
+    )
+    creature = SimpleNamespace(
+        creature_id="worker",
+        name="warm-ember",
+        config_name="swe",
+        config_ref="@kt-biome/creatures/swe",
+        agent=agent,
+    )
+    tui = _TUI()
+
+    engine_cli._seed_tab_models(tui, [creature])
+
+    assert tui.models == [("worker", "provider/model", 0, 0)]
+    assert tui.identities == [
+        (
+            "worker",
+            "",
+            "warm-ember",
+            "swe",
+            "@kt-biome/creatures/swe",
+        )
+    ]
+
+    creature.agent.llm_identifier = lambda: ""
+    tui.models.clear()
+    tui.identities.clear()
+    engine_cli._seed_tab_models(tui, [creature])
+    assert tui.models == []
+    assert tui.identities[0][2:] == (
+        "warm-ember",
+        "swe",
+        "@kt-biome/creatures/swe",
+    )
 
 
 async def test_refresh_follows_focus_creature_after_graph_merge(monkeypatch):
