@@ -11,6 +11,66 @@ if TYPE_CHECKING:
     from kohakuterrarium.terrarium import TerrariumService
 
 
+def creature_detail(info: Any) -> dict[str, Any]:
+    """Build the stable identity row cached for one remote creature."""
+    return {
+        "creature_id": info.creature_id,
+        "name": info.name,
+        "config_name": getattr(info, "config_name", "") or "",
+        "config_ref": getattr(info, "config_ref", None),
+        "is_privileged": info.is_privileged,
+    }
+
+
+def initialize_remote_roster(meta: dict[str, Any], info: Any) -> None:
+    """Seed remote roster metadata for a newly-created session."""
+    meta["creature_ids"] = [info.creature_id]
+    meta["creatures"] = [info.name]
+    meta["creature_details"] = [creature_detail(info)]
+
+
+def append_remote_creature(meta: dict[str, Any], info: Any) -> None:
+    """Append a hot-plugged creature to remote roster metadata."""
+    meta.setdefault("creature_ids", []).append(info.creature_id)
+    meta.setdefault("creatures", []).append(info.name)
+    meta.setdefault("creature_details", []).append(creature_detail(info))
+
+
+def remote_creature_count(meta: dict[str, Any]) -> int:
+    """Return the best available remote roster count for a listing."""
+    details = meta.get("creature_details")
+    if isinstance(details, list) and details:
+        return len(details)
+    ids = meta.get("creature_ids")
+    return len(ids) if isinstance(ids, list) and ids else 1
+
+
+def remove_remote_creature(meta: dict[str, Any], creature_id: str) -> bool:
+    """Remove one creature and retarget primary metadata; return roster liveness."""
+    meta["creature_ids"] = [
+        cid for cid in meta.get("creature_ids", []) if cid != creature_id
+    ]
+    details = [
+        detail
+        for detail in meta.get("creature_details", [])
+        if not isinstance(detail, dict) or detail.get("creature_id") != creature_id
+    ]
+    meta["creature_details"] = details
+    meta["creatures"] = [
+        detail.get("name", "") for detail in details if isinstance(detail, dict)
+    ]
+    if meta.get("creature_id") != creature_id:
+        return bool(details)
+    if not details:
+        return False
+    primary = details[0]
+    meta["creature_id"] = primary.get("creature_id")
+    meta["name"] = primary.get("name", meta.get("name", ""))
+    meta["config_name"] = primary.get("config_name", "")
+    meta["config_ref"] = primary.get("config_ref")
+    return True
+
+
 def update_remote_creature_model_meta(
     meta_registry: dict[str, dict[str, Any]],
     creature_id: str,
