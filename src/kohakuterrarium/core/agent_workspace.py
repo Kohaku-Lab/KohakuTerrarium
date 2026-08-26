@@ -94,6 +94,8 @@ class WorkspaceController:
             agent.config, "pwd_guard", "warn"
         )
         new_guard = PathBoundaryGuard(cwd=resolved, mode=mode)
+        for path in getattr(previous_guard, "session_allowed_paths", ()):
+            new_guard.allow_session_path(path)
         agent._path_guard = new_guard
         executor._path_guard = new_guard
 

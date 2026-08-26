@@ -139,6 +139,22 @@ class PathBoundaryGuard:
         self.mode = mode
         # Paths that have been warned once (allowed on retry)
         self._warned_paths: set[str] = set()
+        # Exact files materialized from user-supplied inline attachments.
+        # The owning controller revokes them when its live session ends.
+        self._session_allowed_paths: set[str] = set()
+
+    def allow_session_path(self, path: str | Path) -> None:
+        """Allow one exact controller-owned attachment path for this session."""
+        self._session_allowed_paths.add(str(Path(path).resolve()))
+
+    def revoke_session_path(self, path: str | Path) -> None:
+        """Remove a previously registered session attachment path."""
+        self._session_allowed_paths.discard(str(Path(path).resolve()))
+
+    @property
+    def session_allowed_paths(self) -> frozenset[str]:
+        """Return the exact live-session paths carried across cwd switches."""
+        return frozenset(self._session_allowed_paths)
 
     def check(self, path: str) -> str | None:
         """Check if a path is within the working directory boundary.
@@ -150,6 +166,9 @@ class PathBoundaryGuard:
 
         resolved = Path(path).resolve()
         cwd = Path(self.cwd)
+
+        if str(resolved) in self._session_allowed_paths:
+            return None
 
         # Check if path is under cwd. Use relative_to rather than
         # ``str.startswith(self.cwd + os.sep)``: at a filesystem root

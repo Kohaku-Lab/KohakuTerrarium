@@ -2,9 +2,10 @@
 
 import asyncio
 import base64
+import hashlib
 import re
 import tempfile
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -167,6 +168,12 @@ class Controller:
         # The parent agent attaches this after construction so generated binary
         # content shares the graph's session lifecycle.
         self.session_store: Any = None
+
+        # Browser uploads arrive as bytes rather than usable local paths. Keep
+        # one controller-owned materialization alive for the active session so
+        # provider retries and later tool calls see the same exact file.
+        self._inline_temp_dir: Any = None
+        self._inline_file_cache: dict[str, str] = {}
 
         # Event queue
         self._event_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
@@ -608,20 +615,47 @@ class Controller:
             )
 
     async def _materialize_inline_file(self, part: FilePart) -> str | None:
-        """Materialize inline browser-uploaded content to a temp file for ReadTool."""
-        suffix = Path(part.name or "upload").suffix
-        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-        try:
-            if part.data_base64 is not None:
-                temp_file.write(base64.b64decode(part.data_base64))
-            elif part.content is not None:
-                temp_file.write(part.content.encode("utf-8"))
-            else:
-                return None
-            temp_file.flush()
-            return temp_file.name
-        finally:
-            temp_file.close()
+        """Materialize and authorize one inline upload for the live session."""
+        if part.data_base64 is not None:
+            raw = base64.b64decode(part.data_base64)
+        elif part.content is not None:
+            raw = part.content.encode("utf-8")
+        else:
+            return None
+
+        name = Path((part.name or "attachment").replace("\\", "/")).name
+        full_safe_name = re.sub(r"[^A-Za-z0-9._-]", "_", name) or "attachment"
+        suffix = Path(full_safe_name).suffix[:20]
+        stem = full_safe_name[: -len(suffix)] if suffix else full_safe_name
+        safe_name = f"{stem[:100]}{suffix}"
+        digest = hashlib.sha256(raw).hexdigest()
+        cache_key = f"{digest}:{full_safe_name}"
+        path = self._inline_file_cache.get(cache_key)
+        if path is None or not Path(path).is_file():
+            if self._inline_temp_dir is None:
+                self._inline_temp_dir = tempfile.TemporaryDirectory(
+                    prefix="kohakuterrarium-attachments-"
+                )
+            target = Path(self._inline_temp_dir.name) / f"{digest[:16]}-{safe_name}"
+            target.write_bytes(raw)
+            path = str(target)
+            self._inline_file_cache[cache_key] = path
+
+        guard = getattr(self.executor, "_path_guard", None) if self.executor else None
+        if guard is not None and hasattr(guard, "allow_session_path"):
+            guard.allow_session_path(path)
+        return path
+
+    def cleanup_inline_files(self) -> None:
+        """Revoke and remove every controller-owned live-session attachment."""
+        guard = getattr(self.executor, "_path_guard", None) if self.executor else None
+        if guard is not None and hasattr(guard, "revoke_session_path"):
+            for path in self._inline_file_cache.values():
+                guard.revoke_session_path(path)
+        self._inline_file_cache.clear()
+        if self._inline_temp_dir is not None:
+            self._inline_temp_dir.cleanup()
+            self._inline_temp_dir = None
 
     async def _resolve_file_part(self, part: FilePart) -> list[ContentPart]:
         """Resolve a custom file part using the internal read tool."""
@@ -642,8 +676,6 @@ class Controller:
             tool = ReadTool()
         if self.executor:
             context = self.executor._build_tool_context()
-            if temp_path:
-                context = replace(context, path_guard=None)
         else:
             return [
                 TextPart(
@@ -651,27 +683,25 @@ class Controller:
                 )
             ]
 
-        try:
-            result = await tool.execute({"path": path}, context=context)
-            if result.error:
-                return [
-                    TextPart(
-                        text=f"[File read failed: {part.name or path}: {result.error}]"
-                    )
-                ]
-            if isinstance(result.output, str):
-                return [TextPart(text=result.output)]
-            return result.output
-        finally:
-            if temp_path:
-                try:
-                    Path(temp_path).unlink(missing_ok=True)
-                except OSError:
-                    logger.warning(
-                        "Failed to clean temp upload",
-                        path=temp_path,
-                        exc_info=True,
-                    )
+        result = await tool.execute({"path": path}, context=context)
+        if result.error:
+            return [
+                TextPart(
+                    text=f"[File read failed: {part.name or path}: {result.error}]"
+                )
+            ]
+        resolved = (
+            [TextPart(text=result.output)]
+            if isinstance(result.output, str)
+            else result.output
+        )
+        if temp_path:
+            label = part.name or Path(temp_path).name
+            return [
+                TextPart(text=f"Attached file: {label}\nPath: {temp_path}"),
+                *resolved,
+            ]
+        return resolved
 
     async def _resolve_message_files(
         self, messages: list[dict[str, Any]]

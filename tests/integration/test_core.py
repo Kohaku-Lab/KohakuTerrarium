@@ -1650,11 +1650,9 @@ class TestCoreIntegration:
             assert agent.controller.conversation.get_image_count() == 1
 
             # --- inline-file user input through inject_input -----------
-            # A ``FilePart`` carrying literal ``content`` (no path, not
-            # flagged ``is_inline``) is resolved by the controller's
-            # ``_resolve_message_files`` straight into a plain text part
-            # — the ``File: <name>\n<content>`` form the provider sees.
-            # The scripted reply is keyed on a substring of that content.
+            # Browser-style text uploads are materialized once for the live
+            # session. The provider sees both their content and the stable
+            # path that later read/write calls can use.
             file_llm = ScriptedLLM(
                 [ScriptEntry("read the attached file", match="inline-file-marker")]
             )
@@ -1666,6 +1664,7 @@ class TestCoreIntegration:
                     FilePart(
                         name="notes.txt",
                         content="inline-file-marker: hello from the file",
+                        is_inline=True,
                     ),
                 ],
                 source="chat",
@@ -1679,11 +1678,22 @@ class TestCoreIntegration:
                 str(m.get("content", "")) for m in file_call_msgs
             )
             assert "inline-file-marker" in joined_file_call
+            assert "Attached file: notes.txt" in joined_file_call
+            text_path = next(
+                part["text"].split("Path: ", 1)[1]
+                for message in file_call_msgs
+                if isinstance(message.get("content"), list)
+                for part in message["content"]
+                if isinstance(part, dict)
+                and part.get("type") == "text"
+                and "Attached file: notes.txt\nPath: " in part.get("text", "")
+            )
+            assert Path(text_path).is_file()
+            assert agent._path_guard.check(text_path) is None
 
             # A browser-style inline image attachment is controller-owned:
-            # it is materialized outside the workspace, read once through
-            # the normal ReadTool validation path, and delivered as an image
-            # without weakening the agent's shared path guard.
+            # it is materialized outside the workspace, retained for the live
+            # session, and delivered through the normal ReadTool validation path.
             png_b64 = (
                 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8"
                 "AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
@@ -1726,6 +1736,17 @@ class TestCoreIntegration:
                 "File read failed" in str(part.get("text", ""))
                 for part in image_call_parts
             )
+            image_path = next(
+                part["text"].split("Path: ", 1)[1]
+                for part in image_call_parts
+                if part.get("type") == "text"
+                and "Attached file: pixel.png\nPath: " in part.get("text", "")
+            )
+            assert Path(image_path).is_file()
+            resolved_again = await agent.controller._resolve_message_files(
+                agent.controller.conversation.to_messages()
+            )
+            assert f"Path: {image_path}" in str(resolved_again)
 
             # --- run_event: correlated custom-event ingress (Phase E) ---
             # ``Agent.run_event`` drives a pre-built TriggerEvent (a Drive
