@@ -56,6 +56,7 @@ class LLMPreset:
     service_tier: str = ""
     extra_body: dict[str, Any] = field(default_factory=dict)
     retry_policy: dict[str, Any] | None = None
+    provider_native_tools: list[str] | None = None
     variation_groups: dict[str, dict[str, dict[str, Any]]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
@@ -76,6 +77,8 @@ class LLMPreset:
             data["extra_body"] = self.extra_body
         if self.retry_policy:
             data["retry_policy"] = self.retry_policy
+        if self.provider_native_tools is not None:
+            data["provider_native_tools"] = list(self.provider_native_tools)
         if self.variation_groups:
             data["variation_groups"] = self.variation_groups
         return data
@@ -83,6 +86,9 @@ class LLMPreset:
     @classmethod
     def from_dict(cls, name: str, data: dict[str, Any]) -> "LLMPreset":
         provider = data.get("provider", "") or data.get("backend", "")
+        native_tools = data.get("provider_native_tools")
+        if native_tools is not None and not isinstance(native_tools, list):
+            native_tools = None
         return cls(
             name=name,
             model=data.get("model", ""),
@@ -94,6 +100,11 @@ class LLMPreset:
             service_tier=data.get("service_tier", ""),
             extra_body=data.get("extra_body", {}),
             retry_policy=data.get("retry_policy"),
+            provider_native_tools=(
+                [str(tool) for tool in native_tools if tool]
+                if native_tools is not None
+                else None
+            ),
             variation_groups=data.get("variation_groups", {}) or {},
         )
 

@@ -114,6 +114,7 @@ def _resolve_preset(
     )
     resolved_preset = LLMPreset.from_dict(preset.name, resolved_dict)
     resolved_preset.provider = preset.provider
+    preset_native_tools = resolved_preset.provider_native_tools
 
     return LLMProfile(
         name=resolved_preset.name,
@@ -131,7 +132,11 @@ def _resolve_preset(
         retry_policy=deepcopy(resolved_preset.retry_policy),
         selected_variations=normalized,
         backend_provider_name=provider.provider_name if provider else "",
-        backend_native_tools=(list(provider.provider_native_tools) if provider else []),
+        backend_native_tools=(
+            list(provider.provider_native_tools)
+            if preset_native_tools is None and provider
+            else list(preset_native_tools or [])
+        ),
     )
 
 
@@ -220,6 +225,11 @@ def save_profile(profile: LLMProfile | LLMPreset) -> None:
             service_tier=profile.service_tier,
             extra_body=profile.extra_body,
             retry_policy=profile.retry_policy,
+            provider_native_tools=(
+                deepcopy(existing_preset.provider_native_tools)
+                if existing_preset
+                else None
+            ),
             variation_groups=(
                 deepcopy(existing_preset.variation_groups) if existing_preset else {}
             ),

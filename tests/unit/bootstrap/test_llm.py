@@ -423,6 +423,21 @@ class TestApplyBackendNativeIdentity:
         # provider_name was empty → not overwritten.
         assert p.provider_name == "default"
 
+    def test_spark_profile_constructs_without_image_generation(self):
+        profile = LLMProfile(
+            name="gpt-5.3-codex-spark",
+            model="gpt-5.3-codex-spark",
+            provider="codex",
+            backend_type="codex",
+            backend_provider_name="codex",
+            backend_native_tools=[],
+        )
+
+        provider = _create_from_profile(profile)
+
+        assert isinstance(provider, CodexOAuthProvider)
+        assert provider.provider_native_tools == frozenset()
+
 
 # ── fake_test backend — provider-resolution path for multi-node tests ─────
 

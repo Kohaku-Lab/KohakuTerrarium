@@ -87,6 +87,7 @@ class TestLLMPreset:
         assert preset.max_output == 65536
         assert preset.temperature is None
         assert preset.reasoning_effort == ""
+        assert preset.provider_native_tools is None
         assert preset.variation_groups == {}
 
     def test_to_dict_minimal(self):
@@ -107,6 +108,7 @@ class TestLLMPreset:
             service_tier="priority",
             extra_body={"reasoning": {"effort": "high"}},
             retry_policy={"max": 3},
+            provider_native_tools=[],
             variation_groups={"r": {"low": {}}},
         )
         d = preset.to_dict()
@@ -116,6 +118,7 @@ class TestLLMPreset:
         assert d["service_tier"] == "priority"
         assert d["extra_body"] == {"reasoning": {"effort": "high"}}
         assert d["retry_policy"] == {"max": 3}
+        assert d["provider_native_tools"] == []
         assert d["variation_groups"] == {"r": {"low": {}}}
 
     def test_to_dict_temperature_zero_is_kept(self):
@@ -153,6 +156,11 @@ class TestLLMPreset:
     def test_from_dict_none_variation_groups_coerced_to_empty(self):
         preset = LLMPreset.from_dict("p", {"model": "m", "variation_groups": None})
         assert preset.variation_groups == {}
+
+    def test_from_dict_preserves_explicit_empty_native_tools(self):
+        preset = LLMPreset.from_dict("p", {"model": "m", "provider_native_tools": []})
+        assert preset.provider_native_tools == []
+        assert preset.to_dict()["provider_native_tools"] == []
 
 
 # ---------------------------------------------------------------------------
