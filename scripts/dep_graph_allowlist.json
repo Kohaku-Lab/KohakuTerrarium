@@ -442,5 +442,47 @@
     "function": "_fetch_crawl4ai",
     "target": "crawl4ai",
     "reason": "Optional extractor is loaded only when the web_fetch tool executes the Crawl4AI backend."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.session.store",
+    "reason": "Session storage is loaded only after an executable path has been resolved and engine startup begins."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.studio.identity",
+    "reason": "Drive settings are loaded only when constructing the runtime engine."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.terrarium.config",
+    "reason": "Recipe parsing is loaded only when terminal runtime startup begins."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.terrarium.engine",
+    "reason": "The engine graph is deferred until after CLI dispatch and runnable resolution."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_apply_cli_topology",
+    "target": "kohakuterrarium.terrarium.channels",
+    "reason": "Channel mutation helpers are loaded only when --add or --channel topology is requested."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_apply_cli_topology",
+    "target": "kohakuterrarium.terrarium.topology",
+    "reason": "Topology mutation helpers are loaded only when --add or --channel is requested."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_session_preview",
+    "target": "kohakuterrarium.session.store",
+    "reason": "Session storage is loaded only when the resume picker reads a preview."
   }
 ]

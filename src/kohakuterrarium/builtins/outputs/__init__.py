@@ -1,5 +1,7 @@
 """Register and expose built-in terminal, null, TTS, and TUI outputs."""
 
+import importlib
+import threading
 from typing import Any
 
 from kohakuterrarium.builtins.outputs.none import NoneOutput
@@ -20,11 +22,14 @@ _BUILTIN_OUTPUTS: dict[str, type] = {
 }
 
 _BUILTIN_OUTPUT_FACTORIES: dict[str, Any] = {}
+_LAZY_OUTPUTS = {"tui": ("kohakuterrarium.builtins.tui.output", "TUIOutput")}
+_OUTPUTS_LOCK = threading.Lock()
 
 
 def register_builtin_output(name: str, cls: type) -> None:
     """Register a builtin output type."""
-    _BUILTIN_OUTPUTS[name] = cls
+    with _OUTPUTS_LOCK:
+        _BUILTIN_OUTPUTS[name] = cls
 
 
 def register_builtin_output_factory(name: str, factory: Any) -> None:
@@ -34,7 +39,13 @@ def register_builtin_output_factory(name: str, factory: Any) -> None:
 
 def get_builtin_output(name: str) -> type | None:
     """Get a builtin output class by name."""
-    return _BUILTIN_OUTPUTS.get(name)
+    cls = _BUILTIN_OUTPUTS.get(name)
+    if cls is None and name in _LAZY_OUTPUTS:
+        module_name, class_name = _LAZY_OUTPUTS[name]
+        resolved = getattr(importlib.import_module(module_name), class_name)
+        with _OUTPUTS_LOCK:
+            cls = _BUILTIN_OUTPUTS.setdefault(name, resolved)
+    return cls
 
 
 def get_builtin_output_factory(name: str) -> Any | None:
@@ -44,12 +55,18 @@ def get_builtin_output_factory(name: str) -> Any | None:
 
 def is_builtin_output(name: str) -> bool:
     """Check if name is a builtin output type."""
-    return name in _BUILTIN_OUTPUTS or name in _BUILTIN_OUTPUT_FACTORIES
+    return (
+        name in _BUILTIN_OUTPUTS
+        or name in _BUILTIN_OUTPUT_FACTORIES
+        or name in _LAZY_OUTPUTS
+    )
 
 
 def list_builtin_outputs() -> list[str]:
     """List all builtin output type names."""
-    return list(set(_BUILTIN_OUTPUTS.keys()) | set(_BUILTIN_OUTPUT_FACTORIES.keys()))
+    return list(
+        set(_BUILTIN_OUTPUTS) | set(_BUILTIN_OUTPUT_FACTORIES) | set(_LAZY_OUTPUTS)
+    )
 
 
 def create_builtin_output(name: str, options: dict[str, Any] | None = None) -> Any:
@@ -61,17 +78,20 @@ def create_builtin_output(name: str, options: dict[str, Any] | None = None) -> A
         factory = _BUILTIN_OUTPUT_FACTORIES[name]
         return factory(options)
 
-    if name in _BUILTIN_OUTPUTS:
-        cls = _BUILTIN_OUTPUTS[name]
+    cls = get_builtin_output(name)
+    if cls is not None:
         return cls(**options)
 
     raise ValueError(f"Unknown builtin output type: {name}")
 
 
-# Delayed import avoids loading the TUI before the registry is initialized.
-from kohakuterrarium.builtins.tui.output import TUIOutput
-
-register_builtin_output("tui", TUIOutput)
+def __getattr__(name: str):
+    if name != "TUIOutput":
+        raise AttributeError(name)
+    module_name, class_name = _LAZY_OUTPUTS["tui"]
+    value = getattr(importlib.import_module(module_name), class_name)
+    globals()[name] = value
+    return value
 
 
 __all__ = [
