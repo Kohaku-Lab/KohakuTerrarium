@@ -194,6 +194,7 @@ class TestPresetsDataIntegrity:
         assert preset["max_context"] == 128000
         assert preset["max_output"] == 65536
         assert preset["reasoning_effort"] == "high"
+        assert preset["provider_native_tools"] == []
         assert set(preset["variation_groups"]["reasoning"]) == {
             "low",
             "medium",
