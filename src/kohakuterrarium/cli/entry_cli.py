@@ -13,12 +13,14 @@ from kohakuterrarium.cli.resume import resume_cli
 from kohakuterrarium.cli.run import resolve_then_run
 from kohakuterrarium.cli.select_args import parse_standalone_args
 from kohakuterrarium.utils.logging import configure_utf8_stdio
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 
 def main() -> int:
     """Run the standalone rich CLI entry point."""
     configure_utf8_stdio(log=True)
     args = parse_standalone_args(prog="kt-cli")
+    mark_startup("parser_ready", surface="cli")
     if args.resume:
         return resume_cli(
             args.query,

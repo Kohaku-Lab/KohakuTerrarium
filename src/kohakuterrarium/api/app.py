@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
@@ -50,6 +51,7 @@ from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
 from kohakuterrarium.terrarium.multi_node_channels import cluster_members_for
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
 
@@ -235,6 +237,10 @@ async def lifespan(app: FastAPI):
     # Only standalone mode has a local agent engine that can consume this prompt.
     if multi_node_service is None:
         get_engine()._runtime_prompt.attach()
+    mark_startup(
+        "api_lifespan_ready",
+        surface=os.environ.get("KT_STARTUP_SURFACE", "web"),
+    )
     try:
         yield
     finally:

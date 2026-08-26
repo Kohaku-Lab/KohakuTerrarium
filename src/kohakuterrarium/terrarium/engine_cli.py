@@ -45,6 +45,7 @@ from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.utils.async_utils import cancel_tasks
 from kohakuterrarium.utils.logging import get_logger, restore_logging, suppress_logging
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
 
@@ -280,6 +281,7 @@ async def run_engine_with_tui(
     for creature in engine.list_creatures():
         if creature.graph_id == graph_id and not creature.is_running:
             await engine.start(creature)
+    mark_startup("tui_creatures_started", surface="tui", creature_id=focus_creature_id)
 
     await tui.start()
     # Wire ESC → interrupt AFTER tui.start() creates the AgentTUI.
@@ -290,8 +292,14 @@ async def run_engine_with_tui(
     if tui._app:
         tui._app.on_interrupt = focus.interrupt
     suppress_logging()
+    mark_startup("tui_run_enter", surface="tui", creature_id=focus_creature_id)
     app_task = asyncio.create_task(tui.run_app())
-    await tui.wait_ready()
+    mounted = await tui.wait_ready()
+    mark_startup(
+        "tui_mounted" if mounted else "tui_mount_timeout",
+        surface="tui",
+        creature_id=focus_creature_id,
+    )
 
     _update_session_info(tui, focus, graph_id, store)
     _seed_tab_models(tui, graph_creatures)
