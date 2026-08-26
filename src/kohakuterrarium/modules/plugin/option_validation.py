@@ -3,6 +3,7 @@
 Plugin and native-tool options intentionally share the same schema conventions.
 """
 
+import math
 from typing import Any
 
 _MAX_STRING_LENGTH = 256
@@ -74,6 +75,8 @@ def _coerce_value(plugin_name: str, key: str, value: Any, spec: dict[str, Any]) 
             coerced_f = float(value)
         except (TypeError, ValueError) as exc:
             raise PluginOptionError(f"{key!r} must be a number") from exc
+        if not math.isfinite(coerced_f):
+            raise PluginOptionError(f"{key!r} must be a finite number")
         _check_bounds(key, coerced_f, spec)
         return coerced_f
     if kind == "bool":

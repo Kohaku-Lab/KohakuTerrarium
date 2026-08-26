@@ -4,6 +4,7 @@ Turn, walltime, and tool-call axes are optional. The plugin owns accounting,
 alarm injection, and tool or sub-agent blocking without host-level budget state.
 """
 
+import math
 import time
 from typing import Any
 
@@ -13,6 +14,7 @@ from kohakuterrarium.modules.plugin.base import (
     PluginBlockError,
     PluginContext,
 )
+from kohakuterrarium.modules.plugin.option_validation import PluginOptionError
 
 
 class BudgetPlugin(BasePlugin):
@@ -74,6 +76,7 @@ class BudgetPlugin(BasePlugin):
             "walltime_budget": opts.get("walltime_budget"),
             "tool_call_budget": opts.get("tool_call_budget"),
         }
+        _validate_budget_options(self.options)
         self._turn_started_at: float | None = None
         self._pending: list[tuple[str, AlarmState]] = []
         self.refresh_options()
@@ -81,6 +84,12 @@ class BudgetPlugin(BasePlugin):
     def refresh_options(self) -> None:
         """Rebuild :attr:`_budgets` from :attr:`options`."""
         self._budgets = _build_budget_set(self.options)
+
+    def set_options(self, values: dict[str, Any]) -> dict[str, Any]:
+        """Reject non-finite nested limits before mutating live options."""
+        candidate = {**self.get_options(), **(values or {})}
+        _validate_budget_options(candidate)
+        return super().set_options(values)
 
     @property
     def budgets(self) -> BudgetSet | None:
@@ -200,6 +209,35 @@ def _axis_from_option(name: str, value: Any) -> BudgetAxis | None:
     if hard <= 0:
         return None
     return BudgetAxis(name=name, soft=soft, hard=hard)
+
+
+def _validate_budget_options(options: dict[str, Any]) -> None:
+    for option_name, axis_name in (
+        ("turn_budget", "turn"),
+        ("walltime_budget", "walltime"),
+        ("tool_call_budget", "tool_call"),
+    ):
+        if option_name in options:
+            _reject_non_finite_axis_values(axis_name, options[option_name])
+
+
+def _reject_non_finite_axis_values(name: str, value: Any) -> None:
+    if isinstance(value, dict):
+        candidates = (
+            ("soft", value.get("soft", 0) or 0),
+            ("hard", value.get("hard", value.get("limit", 0)) or 0),
+        )
+    elif isinstance(value, (list, tuple)) and len(value) >= 2:
+        candidates = (("soft", value[0]), ("hard", value[1]))
+    else:
+        return
+    for field, raw in candidates:
+        try:
+            numeric = float(raw)
+        except (TypeError, ValueError):
+            continue
+        if not math.isfinite(numeric):
+            raise PluginOptionError(f"{name} budget {field} must be a finite number")
 
 
 def _format_axis_bullet(axis: BudgetAxis) -> str:
