@@ -132,7 +132,11 @@ class BudgetPlugin(BasePlugin):
             for axis_name, state in self._pending
         ]
         self._pending.clear()
-        return injected + list(messages)
+        original = list(messages)
+        insert_at = 0
+        while insert_at < len(original) and original[insert_at].get("role") == "system":
+            insert_at += 1
+        return original[:insert_at] + injected + original[insert_at:]
 
     async def post_llm_call(
         self,
