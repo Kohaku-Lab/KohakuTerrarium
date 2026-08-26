@@ -122,6 +122,11 @@ class TestFloat:
         with pytest.raises(PluginOptionError, match="must be a number"):
             validate_plugin_options("p", {"x": "nope"}, self.schema)
 
+    @pytest.mark.parametrize("value", ["nan", "inf", "-inf"])
+    def test_non_finite_rejected(self, value):
+        with pytest.raises(PluginOptionError, match="finite number"):
+            validate_plugin_options("p", {"x": value}, self.schema)
+
 
 # ── bool ────────────────────────────────────────────────────────
 
