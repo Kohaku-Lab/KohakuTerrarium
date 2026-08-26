@@ -124,6 +124,10 @@ class AgentLifecycleMixin:
 
         await self._cancel_executor_tasks()
         await self.subagent_manager.cancel_all()
+        controller = getattr(self, "controller", None)
+        cleanup_inline_files = getattr(controller, "cleanup_inline_files", None)
+        if callable(cleanup_inline_files):
+            cleanup_inline_files()
         await self.trigger_manager.stop_all()
         await self.input.stop()
         if self.compact_manager:

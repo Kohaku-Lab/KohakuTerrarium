@@ -675,6 +675,37 @@ class TestMaterializeInlineFile:
         path = await env.controller._materialize_inline_file(part)
         assert path is None
 
+    async def test_same_upload_reuses_path_until_controller_cleanup(self):
+        from pathlib import Path
+
+        env = TestAgentBuilder().with_llm_script(["x"]).build()
+        part = FilePart(name="notes.txt", content="stable", is_inline=True)
+
+        first = await env.controller._materialize_inline_file(part)
+        second = await env.controller._materialize_inline_file(part)
+
+        assert first == second
+        assert Path(first).is_file()
+
+        env.controller.cleanup_inline_files()
+
+        assert not Path(first).exists()
+
+    async def test_long_upload_name_still_materializes(self):
+        from pathlib import Path
+
+        env = TestAgentBuilder().with_llm_script(["x"]).build()
+        part = FilePart(
+            name=f"{'x' * 255}.txt",
+            content="long name",
+            is_inline=True,
+        )
+
+        path = await env.controller._materialize_inline_file(part)
+
+        assert Path(path).read_text() == "long name"
+        assert len(Path(path).name.encode()) <= 255
+
 
 class TestResolveFilePart:
     async def test_inline_content_returns_text(self):
@@ -714,10 +745,15 @@ class TestResolveFilePart:
         joined = " ".join(getattr(p, "text", "") for p in out)
         assert "File read failed" in joined or "missing" in joined.lower()
 
-    async def test_inline_base64_bypasses_guard_only_for_owned_temp(self, tmp_path):
+    async def test_inline_base64_allows_exact_live_session_copy(self, tmp_path):
         import base64
+        from pathlib import Path
+
+        from kohakuterrarium.builtins.tools.write import WriteTool
+        from kohakuterrarium.utils.file_guard import FileReadState
 
         env = TestAgentBuilder().with_llm_script(["x"]).build()
+        env.executor._file_read_state = FileReadState()
         guard = PathBoundaryGuard(
             env.executor._build_tool_context().working_dir, mode="warn"
         )
@@ -730,8 +766,21 @@ class TestResolveFilePart:
         out = await env.controller._resolve_file_part(part)
         joined = " ".join(getattr(p, "text", "") for p in out)
         assert "hello world" in joined
+        path = joined.split("Path: ", 1)[1].split()[0]
+        assert Path(path).is_file()
+        assert guard.session_allowed_paths == frozenset({str(Path(path).resolve())})
         assert guard._warned_paths == set()
         assert env.executor._build_tool_context().path_guard is guard
+
+        written = await WriteTool().execute(
+            {"path": path, "content": "updated attachment"},
+            context=env.executor._build_tool_context(),
+        )
+        assert written.success
+        reread = await env.controller._resolve_file_part(part)
+        reread_text = " ".join(getattr(p, "text", "") for p in reread)
+        assert "updated attachment" in reread_text
+        assert f"Path: {path}" in reread_text
 
         unrelated = tmp_path / "outside.txt"
         unrelated.write_text("must stay guarded")
@@ -741,6 +790,10 @@ class TestResolveFilePart:
         blocked_text = " ".join(getattr(p, "text", "") for p in blocked)
         assert "outside the working directory" in blocked_text
         assert str(unrelated.resolve()) in guard._warned_paths
+
+        env.controller.cleanup_inline_files()
+        assert not Path(path).exists()
+        assert guard.session_allowed_paths == frozenset()
 
 
 # ── _resolve_message_files multiple files + dispatch ─────────────
