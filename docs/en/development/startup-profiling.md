@@ -196,6 +196,27 @@ Fresh-process import p50 changed from about 4.97 seconds to 292.0 ms for
 2.17 seconds; its remaining cost is dominated by route modules whose runtime
 type dependencies still reach Terrarium and Studio session implementations.
 
+## Terminal runtime import optimization
+
+The fourth optimization pass defers the engine, recipe, Drive settings, session
+store, and ad-hoc topology modules until terminal runtime construction begins.
+It also keeps Textual out of the builtin input/output registries until the TUI
+class or `tui` factory is actually requested.
+
+Fresh-process import p50 changed from about 1130.5 ms to 429.6 ms for
+`kohakuterrarium.cli.run`; the engine import itself changed from about 1112.7 ms
+to 808.7 ms. A Windows source-checkout smoke run with a minimal creature
+produced:
+
+| Terminal milestone | Time from launch |
+| --- | ---: |
+| CLI `parser_ready` | 292.5 ms |
+| CLI `engine_create_begin` | 897.0 ms |
+| CLI `rich_cli_run_enter` | 1743.9 ms |
+| TUI `parser_ready` | 245.7 ms |
+| TUI `engine_create_begin` | 877.4 ms |
+| TUI `tui_mounted` | 1547.8 ms |
+
 ## Measurement limitations
 
 - Desktop `desktop_window_shown` was exercised once before and once after the

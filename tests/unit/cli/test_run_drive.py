@@ -34,7 +34,9 @@ class _CapturingTerrarium:
 
 
 async def _drive_run(monkeypatch):
-    monkeypatch.setattr(run_mod, "Terrarium", _CapturingTerrarium)
+    from kohakuterrarium.terrarium import engine as engine_module
+
+    monkeypatch.setattr(engine_module, "Terrarium", _CapturingTerrarium)
     _CapturingTerrarium.last_kwargs = None
     with pytest.raises(_Abort):
         await run_mod._run(

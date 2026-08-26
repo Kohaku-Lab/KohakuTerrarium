@@ -20,11 +20,70 @@ class TestSessionPreview:
     def test_store_closes_when_metadata_loading_fails(
         self, monkeypatch, tmp_path
     ) -> None:
+        from kohakuterrarium.session import store as store_module
+
         store = _FailingPreviewStore()
-        monkeypatch.setattr(run.SessionStore, "open_readonly", lambda _path: store)
+        monkeypatch.setattr(
+            store_module.SessionStore, "open_readonly", lambda _path: store
+        )
 
         assert run._session_preview(tmp_path / "broken.kohakutr") == ""
         assert store.closed is True
+
+
+class TestCliTopology:
+    @pytest.mark.asyncio
+    async def test_channel_updates_creature_channel_lists(self, monkeypatch):
+        creature = type(
+            "Creature",
+            (),
+            {
+                "name": "focus",
+                "creature_id": "c1",
+                "agent": object(),
+                "listen_channels": [],
+                "send_channels": [],
+            },
+        )()
+        graph = type("Graph", (), {"creature_ids": {"c1"}})()
+        registry = object()
+        environment = type("Environment", (), {"shared_channels": registry})()
+        engine = type(
+            "Engine",
+            (),
+            {
+                "_topology": object(),
+                "_environments": {"g1": environment},
+                "add_channel": lambda self, *_args: _async_none(),
+                "get_graph": lambda self, _graph_id: graph,
+                "get_creature": lambda self, _creature_id: creature,
+            },
+        )()
+
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.channels.inject_channel_trigger",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.topology.set_listen",
+            lambda *_args, **_kwargs: None,
+        )
+        monkeypatch.setattr(
+            "kohakuterrarium.terrarium.topology.set_send",
+            lambda *_args, **_kwargs: None,
+        )
+
+        await run._apply_cli_topology(
+            engine,
+            graph_id="g1",
+            pwd=".",
+            llm=None,
+            extra_creatures=[],
+            extra_channels=["reviews"],
+        )
+
+        assert creature.listen_channels == ["reviews"]
+        assert creature.send_channels == ["reviews"]
 
 
 class TestRunStartupTrace:
@@ -47,14 +106,17 @@ class TestRunStartupTrace:
         async def _run_cli(_engine, creature_id, _store):
             assert creature_id == "focus"
 
-        monkeypatch.setattr(run._drive_settings, "resolve_drive_kwargs", lambda: {})
+        from kohakuterrarium.studio.identity import drive_settings
+        from kohakuterrarium.terrarium import engine as engine_module
+
+        monkeypatch.setattr(drive_settings, "resolve_drive_kwargs", lambda: {})
         monkeypatch.setattr(
             run,
             "register_group_hooks",
             lambda: registrations.append("registered"),
             raising=False,
         )
-        monkeypatch.setattr(run, "Terrarium", lambda **_kwargs: _Engine())
+        monkeypatch.setattr(engine_module, "Terrarium", lambda **_kwargs: _Engine())
         monkeypatch.setattr(run, "_looks_like_recipe", lambda _path: False)
         monkeypatch.setattr(
             run, "_attach_session_store", lambda *_args, **_kwargs: None
