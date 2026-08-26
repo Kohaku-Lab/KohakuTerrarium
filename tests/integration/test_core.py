@@ -1746,7 +1746,14 @@ class TestCoreIntegration:
             resolved_again = await agent.controller._resolve_message_files(
                 agent.controller.conversation.to_messages()
             )
-            assert f"Path: {image_path}" in str(resolved_again)
+            assert any(
+                part.get("type") == "text"
+                and part.get("text") == f"Attached file: pixel.png\nPath: {image_path}"
+                for message in resolved_again
+                if isinstance(message.get("content"), list)
+                for part in message["content"]
+                if isinstance(part, dict)
+            )
 
             # --- run_event: correlated custom-event ingress (Phase E) ---
             # ``Agent.run_event`` drives a pre-built TriggerEvent (a Drive
