@@ -1,13 +1,40 @@
 """Package enumeration helpers."""
 
+from contextlib import contextmanager
+from copy import deepcopy
+from threading import local
+
 from kohakuterrarium.packages.locations import LINK_SUFFIX
 from kohakuterrarium.packages.locations import _packages_dir
 from kohakuterrarium.packages.locations import get_package_root
 from kohakuterrarium.packages.locations import read_link
 from kohakuterrarium.packages.manifest import _load_manifest
 
+_PACKAGE_SNAPSHOT = local()
+
+
+@contextmanager
+def package_snapshot():
+    """Reuse one package enumeration within a bounded construction scope."""
+    if getattr(_PACKAGE_SNAPSHOT, "packages", None) is not None:
+        yield
+        return
+    _PACKAGE_SNAPSHOT.packages = _list_packages_uncached()
+    try:
+        yield
+    finally:
+        del _PACKAGE_SNAPSHOT.packages
+
 
 def list_packages() -> list[dict]:
+    """List installed packages, reusing the active build-scoped snapshot."""
+    snapshot = getattr(_PACKAGE_SNAPSHOT, "packages", None)
+    if snapshot is not None:
+        return deepcopy(snapshot)
+    return _list_packages_uncached()
+
+
+def _list_packages_uncached() -> list[dict]:
     """List all installed packages with their creatures and terrariums."""
     # Honour test monkeypatches against ``locations.PACKAGES_DIR`` by
     # consulting ``_packages_dir()`` rather than the captured constant.

@@ -63,6 +63,47 @@ class _EchoTool(BaseTool):
         return ToolResult(output=str(args.get("msg", "")))
 
 
+@pytest.mark.asyncio
+async def test_agent_build_path_reuses_one_package_snapshot(tmp_path, monkeypatch):
+    from kohakuterrarium.packages import walk
+
+    (tmp_path / "config.yaml").write_text(
+        "name: built\ninput:\n  type: none\noutput:\n  type: stdout\n",
+        encoding="utf-8",
+    )
+    calls = 0
+    original = walk._list_packages_uncached
+
+    def counted():
+        nonlocal calls
+        calls += 1
+        return original()
+
+    monkeypatch.setattr(walk, "_list_packages_uncached", counted)
+
+    await Agent.build(tmp_path, llm=ScriptedLLM(["ok"]))
+
+    assert calls == 1
+
+
+def test_agent_build_reuses_one_package_snapshot(make_agent, monkeypatch):
+    from kohakuterrarium.packages import walk
+
+    calls = 0
+    original = walk._list_packages_uncached
+
+    def counted():
+        nonlocal calls
+        calls += 1
+        return original()
+
+    monkeypatch.setattr(walk, "_list_packages_uncached", counted)
+
+    make_agent()
+
+    assert calls == 1
+
+
 # ── fixtures ─────────────────────────────────────────────────────
 
 
