@@ -323,6 +323,7 @@ LLM 可輸出的內嵌指令，可取代工具呼叫。它們會直接與框架�
 
 ### OpenAI 透過 Codex OAuth
 
+- `gpt-5.3-codex-spark`（ChatGPT Pro 研究預覽；僅文字）
 - `gpt-5.4` (別名：`gpt5`、`gpt54`)
 - `gpt-5.3-codex` (`gpt53`)
 - `gpt-5.1`
@@ -473,6 +474,7 @@ Variation group 讓單一 preset 暴露多組旋鈕而不用重複建立條目�
 
 | Preset | Group | Options |
 |---|---|---|
+| `gpt-5.3-codex-spark` | `reasoning` | `low`、`medium`、`high`、`xhigh` |
 | `gpt-5.4` | `reasoning` | `none`、`low`、`medium`、`high`、`xhigh` |
 | `gpt-5.4` | `speed` | `normal`、`fast` (對映 `service_tier: priority`) |
 | `gpt-5.3-codex` | `reasoning` | `none`、`low`、`medium`、`high`、`xhigh` |
