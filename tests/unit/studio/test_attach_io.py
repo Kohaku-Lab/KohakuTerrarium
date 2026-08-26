@@ -701,7 +701,10 @@ class TestAttachIoLocal:
         svc = LocalTerrariumService(t)
         try:
             for cid in ("alice", "bob"):
-                ag = t.get_creature(cid).agent
+                creature = t.get_creature(cid)
+                creature.config_name = f"{cid}-config"
+                creature.config_ref = f"@pack/creatures/{cid}"
+                ag = creature.agent
                 ag.output_router = SimpleNamespace(
                     add_secondary=lambda x: None,
                     remove_secondary=lambda x: None,
@@ -719,11 +722,14 @@ class TestAttachIoLocal:
             assert set(infos) == {"alice", "bob"}
             # Frames mirror the switch_model metadata shape so the
             # frontend per-tab map gets identical fields either way.
-            for frame in infos.values():
+            for source, frame in infos.items():
                 assert "llm_name" in frame
                 assert "model" in frame
                 assert "max_context" in frame
                 assert "compact_threshold" in frame
+                assert frame["agent_name"] == source
+                assert frame["config_name"] == f"{source}-config"
+                assert frame["config_ref"] == f"@pack/creatures/{source}"
         finally:
             await t.shutdown()
 

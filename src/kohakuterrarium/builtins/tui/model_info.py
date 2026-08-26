@@ -124,7 +124,7 @@ class TabModelRegistryMixin:
         """Update only the session panel's model line."""
         pending = getattr(self, "_pending_session_info", None)
         if pending:
-            self._pending_session_info = (pending[0], model, pending[2])
+            self._pending_session_info = (pending[0], model, *pending[2:])
         if not self._app or not self._app.is_running:
             return
 
@@ -143,6 +143,8 @@ def handle_session_info(tui: Any, output: Any, metadata: dict) -> None:
     # Use the canonical identifier shared with other model displays.
     model = metadata.get("llm_name", "") or metadata.get("model", "")
     agent_name = metadata.get("agent_name", "")
+    config_name = metadata.get("config_name", "")
+    config_ref = metadata.get("config_ref", "")
     max_context = metadata.get("max_context", 0)
     compact_threshold = metadata.get("compact_threshold", 0)
     if getattr(tui, "_terrarium_tabs", None):
@@ -150,6 +152,6 @@ def handle_session_info(tui: Any, output: Any, metadata: dict) -> None:
         target = getattr(output, "_default_target", "") or ""
         tui.update_target_model(target, model, max_context or 0, compact_threshold or 0)
         return
-    tui.update_session_info(session_id, model, agent_name)
+    tui.update_session_info(session_id, model, agent_name, config_name, config_ref)
     if max_context:
         tui.set_context_limits(max_context, compact_threshold)

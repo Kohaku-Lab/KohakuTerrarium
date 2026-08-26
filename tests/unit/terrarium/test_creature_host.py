@@ -37,6 +37,8 @@ class TestBuildCreatureLLMInjection:
         scripted = ScriptedLLM(["hi"])
         creature = build_creature(str(tmp_path), llm=scripted, io="none")
         assert creature.agent.llm is scripted
+        assert creature.config_name == "scripted"
+        assert creature.config_ref == str(tmp_path)
         assert creature.agent.plugins.is_enabled("goal")
         assert (
             sum(
@@ -703,6 +705,7 @@ class TestApplyCreatureName:
             name=agent_name,
             agent=agent,
             config=SimpleNamespace(name=agent_name),
+            config_name=agent_name,
         )
         return creature, session_output
 
@@ -713,10 +716,30 @@ class TestApplyCreatureName:
         apply_creature_name(creature, "warm-ember")
         assert creature.name == "warm-ember"
         assert creature.agent.config.name == "warm-ember"
+        assert creature.config_name == "alice"
         # The live event recorder follows — future events key under the
         # display name the history endpoint resolves.
         assert out._agent_name == "warm-ember"
         assert out._event_key_prefix == "warm-ember"
+
+    def test_runtime_rename_preserves_config_identity(self, tmp_path):
+        from kohakuterrarium.terrarium.creature_host import apply_creature_name
+
+        (tmp_path / "config.yaml").write_text(
+            "name: swe\ninput:\n  type: none\noutput:\n  type: none\n",
+            encoding="utf-8",
+        )
+        creature = build_creature(str(tmp_path), llm=ScriptedLLM(["ok"]), io="headless")
+
+        apply_creature_name(creature, "warm-ember")
+
+        assert creature.name == "warm-ember"
+        assert creature.config_name == "swe"
+        assert creature.config_ref == str(tmp_path)
+        status = creature.get_status()
+        assert status["name"] == "warm-ember"
+        assert status["config_name"] == "swe"
+        assert status["config_ref"] == str(tmp_path)
 
     def test_rename_keeps_custom_attached_prefix(self):
         from kohakuterrarium.terrarium.creature_host import apply_creature_name
