@@ -174,6 +174,28 @@ ready, and about 9.7 seconds earlier than the original 10750.7 ms
 loading shell changes T-visible without claiming that the application is fully
 ready.
 
+## Web application import optimization
+
+The third optimization pass keeps the `serving.web` launcher independent from
+the API application graph and defers runtime-only imports until the selected
+provider, tool, local engine, Laboratory host, metrics endpoint, or uploaded
+file fallback actually needs them. The complete FastAPI route table is still
+registered before Uvicorn starts; this pass does not move startup cost into the
+first HTTP request.
+
+A real Windows source-checkout smoke run produced:
+
+| Web milestone | Before | After |
+| --- | ---: | ---: |
+| `web_config_dirs_resolved` | 4951.6 ms | 311.6 ms |
+| `web_app_created` | 4954.1 ms | 2103.4 ms |
+| `api_lifespan_ready` | 5059.9 ms | 2203.6 ms |
+
+Fresh-process import p50 changed from about 4.97 seconds to 292.0 ms for
+`kohakuterrarium.serving.web`. `kohakuterrarium.api.app` now imports in about
+2.17 seconds; its remaining cost is dominated by route modules whose runtime
+type dependencies still reach Terrarium and Studio session implementations.
+
 ## Measurement limitations
 
 - Desktop `desktop_window_shown` was exercised once before and once after the

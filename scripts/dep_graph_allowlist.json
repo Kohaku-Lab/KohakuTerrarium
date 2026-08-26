@@ -286,5 +286,161 @@
     "function": "_start_in_process_server",
     "target": "kohakuterrarium.serving.desktop_server",
     "reason": "Briefcase cannot relaunch its stub with module arguments, so the heavy server graph is imported only after the loading window is visible."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory",
+    "reason": "Laboratory host runtime is loaded only when lab-host mode is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory._internal.host",
+    "reason": "Laboratory host engine is loaded only for the lab-host lifespan."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory._internal.transport_ws",
+    "reason": "Laboratory WebSocket transport is loaded only for the lab-host lifespan."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory.adapters",
+    "reason": "Laboratory adapters are loaded only for the lab-host lifespan."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.session.sync",
+    "reason": "Session mirroring is specific to lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.studio.sessions.registry",
+    "reason": "Lab-host session metadata lookup is loaded only in lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.terrarium",
+    "reason": "Terrarium host runtimes are loaded only when lab-host mode starts."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.terrarium.drive.config",
+    "reason": "Drive host configuration is loaded only in lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.terrarium.multi_node_channels",
+    "reason": "Cluster membership lookup is loaded only in lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/auth/engine_pool.py",
+    "function": "get_or_create",
+    "target": "kohakuterrarium",
+    "reason": "Per-user Terrarium runtime is loaded only when an engine is first created."
+  },
+  {
+    "file": "src/kohakuterrarium/api/deps.py",
+    "function": "_host_drive_kwargs",
+    "target": "kohakuterrarium.studio.identity",
+    "reason": "Drive settings are loaded only when constructing a standalone engine."
+  },
+  {
+    "file": "src/kohakuterrarium/api/deps.py",
+    "function": "_runtime_types",
+    "target": "kohakuterrarium.studio.sessions.registry",
+    "reason": "Session registry runtime is loaded only when resolving a local service."
+  },
+  {
+    "file": "src/kohakuterrarium/api/deps.py",
+    "function": "_runtime_types",
+    "target": "kohakuterrarium.terrarium",
+    "reason": "Terrarium runtime classes are loaded only when a local service is requested."
+  },
+  {
+    "file": "src/kohakuterrarium/api/routes/metrics.py",
+    "function": "_session_lifecycle",
+    "target": "kohakuterrarium.studio.sessions",
+    "reason": "Session lifecycle is loaded only when the metrics endpoint computes live gauges."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/agent_init.py",
+    "function": "_ensure_skill_tool_registered",
+    "target": "kohakuterrarium.builtins.tools.skill",
+    "reason": "Skill implementation is loaded only when an Agent registers the skill tool."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.codex_provider",
+    "reason": "Provider implementation is loaded only for a selected Codex profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.grok_provider",
+    "reason": "Provider implementation is loaded only for a selected Grok profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.anthropic_provider",
+    "reason": "Provider implementation is loaded only for a selected Anthropic profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.openai",
+    "reason": "Provider implementation is loaded only for an OpenAI-compatible profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_inline",
+    "target": "kohakuterrarium.llm.codex_provider",
+    "reason": "Provider implementation is loaded only for selected inline Codex auth."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_inline",
+    "target": "kohakuterrarium.llm.anthropic_provider",
+    "reason": "Provider implementation is loaded only for selected inline Anthropic auth."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_inline",
+    "target": "kohakuterrarium.llm.openai",
+    "reason": "Provider implementation is loaded only for inline OpenAI-compatible auth."
+  },
+  {
+    "file": "src/kohakuterrarium/core/controller.py",
+    "function": "_resolve_file_part",
+    "target": "kohakuterrarium.builtins.tools.read",
+    "reason": "Read tool implementation is loaded only for inline file-part fallback."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop_server.py",
+    "function": "create_app",
+    "target": "kohakuterrarium.api.app",
+    "reason": "Desktop child defers the complete API route graph until server startup."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "function": "create_app",
+    "target": "kohakuterrarium.api.app",
+    "reason": "Web module import remains lightweight until the server constructs its app."
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
+    "function": "_fetch_crawl4ai",
+    "target": "crawl4ai",
+    "reason": "Optional extractor is loaded only when the web_fetch tool executes the Crawl4AI backend."
   }
 ]

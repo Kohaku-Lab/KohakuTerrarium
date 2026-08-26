@@ -7,11 +7,7 @@ from typing import Any
 
 from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.core.config import AgentConfig
-from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
 from kohakuterrarium.llm.base import LLMConfig, LLMProvider
-from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
-from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
-from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm import api_keys as _api_keys
 from kohakuterrarium.llm.profiles import (
     LLMProfile,
@@ -173,6 +169,8 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         return provider
 
     if profile.backend_type == "codex":
+        from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+
         # A custom base URL requires API-key auth; the default endpoint uses OAuth.
         codex_base_url = _resolved_base_url(profile)
         codex_key: str | None = None
@@ -202,6 +200,8 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         return provider
 
     if profile.backend_type == "grok-subscription":
+        from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
+
         provider = GrokSubscriptionProvider(
             model=profile.model,
             temperature=profile.temperature,
@@ -255,6 +255,8 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
 
     base_url = _resolved_base_url(profile)
     if profile.backend_type == "anthropic":
+        from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
+
         provider = AnthropicProvider(
             api_key=api_key,
             base_url=base_url,
@@ -266,6 +268,8 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             retry_policy=retry_policy,
         )
     else:
+        from kohakuterrarium.llm.openai import OpenAIProvider
+
         provider = OpenAIProvider(
             api_key=api_key,
             base_url=base_url,
@@ -319,6 +323,8 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
         )
 
     if config.auth_mode == "codex-oauth":
+        from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
+
         provider = CodexOAuthProvider(
             model=config.model,
             reasoning_effort=config.reasoning_effort,
@@ -346,6 +352,8 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
         )
 
     if config.auth_mode == "anthropic":
+        from kohakuterrarium.llm.anthropic_provider import AnthropicProvider
+
         return AnthropicProvider(
             api_key=api_key,
             base_url=config.base_url or None,
@@ -356,6 +364,8 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
             service_tier=config.service_tier,
             retry_policy=config.retry_policy,
         )
+
+    from kohakuterrarium.llm.openai import OpenAIProvider
 
     return OpenAIProvider(
         api_key=api_key,

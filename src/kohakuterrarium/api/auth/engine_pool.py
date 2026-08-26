@@ -6,18 +6,22 @@ anonymous key preserves a shared-engine slot. A shared lock serializes construct
 and registry mutation, while slow shutdown work runs after releasing the lock.
 """
 
+from __future__ import annotations
+
 import asyncio
 import threading
 import time
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from kohakuterrarium.terrarium import Terrarium
 
 
 _ANONYMOUS_KEY = "_anon"
@@ -73,6 +77,8 @@ class EnginePool:
 
             session_dir = _user_session_dir(user_id)
             session_dir.mkdir(parents=True, exist_ok=True)
+            from kohakuterrarium import Terrarium
+
             drive_kwargs = self._drive_resolver() if self._drive_resolver else {}
             engine = Terrarium(session_dir=str(session_dir), **drive_kwargs)
             self._engines[key] = engine
