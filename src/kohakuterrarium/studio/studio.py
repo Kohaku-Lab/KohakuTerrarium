@@ -45,6 +45,7 @@ from kohakuterrarium.studio.editors import creatures_crud as _editor_creatures
 from kohakuterrarium.studio.editors import modules_crud as _editor_modules
 from kohakuterrarium.studio.facade_persistence import _PersistenceNS
 from kohakuterrarium.studio.facade_sessions import _SessionsNS
+from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity import (
     api_keys as _identity_keys,
     codex_oauth as _identity_codex,
@@ -82,6 +83,7 @@ class Studio:
         *,
         service: TerrariumService | None = None,
     ) -> None:
+        register_group_hooks()
         # Service injection and engine injection are mutually exclusive because
         # a service already defines which engine and ownership policy it uses.
         # Explicit ``is not None`` checks preserve empty Terrarium instances,

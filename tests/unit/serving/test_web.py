@@ -20,6 +20,79 @@ from kohakuterrarium.serving.web import (
     find_free_port,
 )
 
+# ── startup trace ───────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_api_lifespan_records_ready_boundary(monkeypatch):
+    from kohakuterrarium.api import app as api_app
+
+    milestones = []
+
+    async def _shutdown():
+        return None
+
+    engine = type(
+        "Engine",
+        (),
+        {
+            "_runtime_prompt": type(
+                "Prompt", (), {"attach": lambda self: None, "detach": lambda self: None}
+            )(),
+            "shutdown": staticmethod(_shutdown),
+        },
+    )()
+    monkeypatch.setattr(api_app, "get_aggregator", lambda: None)
+    monkeypatch.setattr(api_app, "ensure_auth_migrated", lambda: None)
+    monkeypatch.setattr(api_app, "get_engine", lambda: engine)
+    monkeypatch.setattr(api_app, "close_session_index", lambda: None)
+    monkeypatch.delenv("KT_STARTUP_SURFACE", raising=False)
+    monkeypatch.setattr(
+        api_app,
+        "mark_startup",
+        lambda event, **fields: milestones.append((event, fields)),
+        raising=False,
+    )
+    app = type(
+        "App",
+        (),
+        {"state": type("State", (), {"lab_mode": "standalone", "engine_pool": None})()},
+    )()
+
+    async with api_app.lifespan(app):
+        assert milestones == [("api_lifespan_ready", {"surface": "web"})]
+
+
+def test_web_server_records_ready_boundary(monkeypatch):
+    milestones = []
+    app = object()
+    monkeypatch.setattr(web_mod, "configure_utf8_stdio", lambda **_kwargs: None)
+    monkeypatch.setattr(web_mod, "set_level", lambda _level: None)
+    monkeypatch.setattr(web_mod, "enable_stderr_logging", lambda _level: None)
+    monkeypatch.setattr(web_mod, "_resolve_config_dirs", lambda: (["c"], ["t"]))
+    monkeypatch.setattr(web_mod, "create_app", lambda **_kwargs: app)
+    monkeypatch.setattr(web_mod, "find_free_port", lambda **_kwargs: 8123)
+    monkeypatch.setattr(web_mod, "_publish_actual_port", lambda *_args: None)
+    monkeypatch.setattr(web_mod.uvicorn, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        web_mod,
+        "mark_startup",
+        lambda event, **fields: milestones.append((event, fields)),
+        raising=False,
+    )
+
+    web_mod.run_web_server(port=8001, dev=True, log_level="ERROR")
+
+    assert milestones == [
+        (
+            "web_config_dirs_resolved",
+            {"surface": "web", "creatures": 1, "terrariums": 1},
+        ),
+        ("web_app_created", {"surface": "web"}),
+        ("web_server_run", {"surface": "web", "host": "127.0.0.1", "port": 8123}),
+    ]
+
+
 # ── desktop logging ─────────────────────────────────────────────
 
 

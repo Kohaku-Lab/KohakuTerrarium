@@ -8,6 +8,24 @@ from kohakuterrarium import studio as studio_pkg
 
 
 class TestStudioInitHooks:
+    def test_import_registers_group_hooks(self):
+        from kohakuterrarium.terrarium import group_hooks
+
+        assert group_hooks._store_attach is not None
+        assert group_hooks._spawnable is not None
+        assert group_hooks._workspace_resolver is not None
+
+    def test_studio_constructor_registers_group_hooks(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "kohakuterrarium.studio.studio.register_group_hooks",
+            lambda: calls.append("registered"),
+        )
+
+        studio_pkg.Studio()
+
+        assert calls == ["registered"]
+
     async def test_store_attach_hook_attaches_a_session_store(
         self, tmp_path, monkeypatch
     ):

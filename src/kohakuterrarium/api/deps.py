@@ -6,8 +6,11 @@ engines. ``get_engine`` exposes only the local or coordination engine and theref
 cannot provide cross-node creature visibility.
 """
 
+from __future__ import annotations
+
 import os
 import sys
+from typing import TYPE_CHECKING, Any
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
@@ -18,20 +21,17 @@ from starlette.requests import HTTPConnection
 from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_user
 from kohakuterrarium.api.auth.engine_pool import EnginePool, _user_session_dir
 from kohakuterrarium.api.auth.models import User
-from kohakuterrarium.studio.identity import drive_settings as _drive_settings
-from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
-from kohakuterrarium.terrarium import (
-    LocalTerrariumService,
-    Terrarium,
-    TerrariumService,
-)
+from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-_service: TerrariumService | None = None
-_engine_legacy: Terrarium | None = None
+if TYPE_CHECKING:
+    from kohakuterrarium.terrarium import Terrarium, TerrariumService
+
+_service: Any = None
+_engine_legacy: Any = None
 # Deduplicate warnings for call sites that request an engine without cross-node visibility.
 _engine_legacy_warned: set[str] = set()
 
@@ -54,7 +54,16 @@ _DEFAULT_SESSION_DIR = str(Path.home() / ".kohakuterrarium" / "sessions")
 
 def _host_drive_kwargs() -> dict:
     """Resolve one immutable host Drive configuration for a new engine."""
-    return _drive_settings.resolve_drive_kwargs()
+    from kohakuterrarium.studio.identity import drive_settings
+
+    return drive_settings.resolve_drive_kwargs()
+
+
+def _runtime_types():
+    from kohakuterrarium.studio.sessions.registry import get_session_meta
+    from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
+
+    return LocalTerrariumService, Terrarium, get_session_meta
 
 
 def set_service(service: TerrariumService | None) -> None:
@@ -77,6 +86,8 @@ def get_service(
     isolation, all requests share the process-wide local service.
     """
     global _service
+    register_group_hooks()
+    LocalTerrariumService, Terrarium, get_session_meta = _runtime_types()
     # Multi-node services own their routing and must not be wrapped as local engines.
     if _service is not None and not isinstance(_service, LocalTerrariumService):
         return _service
@@ -155,6 +166,8 @@ def resolve_request_session_dir(
 def get_service_legacy() -> TerrariumService:
     """Return the process-wide service when no request identity is available."""
     global _service
+    register_group_hooks()
+    LocalTerrariumService, Terrarium, get_session_meta = _runtime_types()
     if _service is None:
         engine = Terrarium(session_dir=_session_dir(), **_host_drive_kwargs())
         _service = LocalTerrariumService(engine)
@@ -169,6 +182,7 @@ def get_engine() -> Terrarium:
     that need creature state must depend on :func:`get_service` instead.
     """
     global _engine_legacy
+    LocalTerrariumService, _, _ = _runtime_types()
     svc = get_service_legacy()
     if isinstance(svc, LocalTerrariumService):
         _engine_legacy = svc.engine

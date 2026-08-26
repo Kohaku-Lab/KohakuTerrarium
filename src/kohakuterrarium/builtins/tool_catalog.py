@@ -16,6 +16,8 @@ Internal code (core, terrarium) should import from here, not from
 transitive dependencies.
 """
 
+import importlib
+import threading
 from typing import TYPE_CHECKING, Callable, TypeVar
 
 from kohakuterrarium.utils.logging import get_logger
@@ -58,6 +60,8 @@ _BUILTIN_TOOLS: dict[str, type["BaseTool"]] = {}
 # modules and trigger their @register_builtin decorators. Each loader is
 # called at most once (on first catalog miss), then removed.
 _DEFERRED_LOADERS: list[Callable[[], None]] = []
+_DEFAULT_TOOLS_LOADED = False
+_DEFAULT_TOOLS_LOCK = threading.Lock()
 
 T = TypeVar("T", bound="BaseTool")
 
@@ -94,8 +98,20 @@ def register_deferred_loader(loader: Callable[[], None]) -> None:
     _DEFERRED_LOADERS.append(loader)
 
 
+def _ensure_default_tools_loaded() -> None:
+    global _DEFAULT_TOOLS_LOADED
+    if _DEFAULT_TOOLS_LOADED:
+        return
+    with _DEFAULT_TOOLS_LOCK:
+        if _DEFAULT_TOOLS_LOADED:
+            return
+        importlib.import_module("kohakuterrarium.builtins.tools")
+        _DEFAULT_TOOLS_LOADED = True
+
+
 def _run_deferred_loaders() -> None:
     """Invoke and clear all deferred loaders."""
+    _ensure_default_tools_loaded()
     if not _DEFERRED_LOADERS:
         return
     # Copy + clear before calling to avoid re-entrance
@@ -122,7 +138,7 @@ def get_builtin_tool(
     if _is_hidden_under_mobile_profile(name):
         return None
     tool_cls = _BUILTIN_TOOLS.get(name)
-    if tool_cls is None and _DEFERRED_LOADERS:
+    if tool_cls is None:
         _run_deferred_loaders()
         tool_cls = _BUILTIN_TOOLS.get(name)
     if tool_cls:
@@ -138,6 +154,7 @@ def list_builtin_tools() -> list[str]:
     aggregator, `kt config tools list`, the frontend's Tools panel)
     see only the catalog that actually works on the device.
     """
+    _run_deferred_loaders()
     if is_mobile_profile() and _MOBILE_HIDDEN_TOOLS:
         return [n for n in _BUILTIN_TOOLS if n not in _MOBILE_HIDDEN_TOOLS]
     return list(_BUILTIN_TOOLS.keys())
@@ -151,6 +168,8 @@ def is_builtin_tool(name: str) -> bool:
     """
     if _is_hidden_under_mobile_profile(name):
         return False
+    if name not in _BUILTIN_TOOLS:
+        _run_deferred_loaders()
     return name in _BUILTIN_TOOLS
 
 
@@ -166,8 +185,7 @@ def list_provider_native_tools() -> list[dict[str, object]]:
     Fires deferred loaders first so terrarium-registered tools (and any
     other lazy additions) show up too.
     """
-    if _DEFERRED_LOADERS:
-        _run_deferred_loaders()
+    _run_deferred_loaders()
     out: list[dict[str, object]] = []
     for name, tool_cls in _BUILTIN_TOOLS.items():
         if not getattr(tool_cls, "is_provider_native", False):

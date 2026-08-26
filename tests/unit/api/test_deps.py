@@ -93,8 +93,11 @@ class TestServiceSingleton:
             def set_runtime_graph_meta_lookup(self, fn):
                 self.lookup_set = True
 
-        monkeypatch.setattr(mod, "Terrarium", fake_terrarium)
-        monkeypatch.setattr(mod, "LocalTerrariumService", _Local)
+        monkeypatch.setattr(
+            mod,
+            "_runtime_types",
+            lambda: (_Local, fake_terrarium, lambda *_args: {}),
+        )
         svc = get_service()
         assert isinstance(svc, _Local)
         assert svc.lookup_set is True

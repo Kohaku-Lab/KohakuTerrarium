@@ -14,6 +14,7 @@ from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
+from kohakuterrarium.packages.walk import package_snapshot
 
 if TYPE_CHECKING:
     from kohakuterrarium.core.agent import Agent
@@ -94,23 +95,24 @@ class AgentConstructMixin:
             input_module = NoneInput()
         if output_module is None and io == "headless":
             output_module = NoneOutput()
-        if not isinstance(config, AgentConfig):
-            config = load_agent_config(config)
-        return cls(
-            config,
-            llm=llm,
-            pwd=pwd,
-            strict=strict,
-            tools=tools,
-            plugins=plugins,
-            subagents=subagents,
-            outputs=outputs,
-            user_commands=user_commands,
-            input_module=input_module,
-            output_module=output_module,
-            session=session,
-            environment=environment,
-        )
+        with package_snapshot():
+            if not isinstance(config, AgentConfig):
+                config = load_agent_config(config)
+            return cls(
+                config,
+                llm=llm,
+                pwd=pwd,
+                strict=strict,
+                tools=tools,
+                plugins=plugins,
+                subagents=subagents,
+                outputs=outputs,
+                user_commands=user_commands,
+                input_module=input_module,
+                output_module=output_module,
+                session=session,
+                environment=environment,
+            )
 
     @classmethod
     def from_path(
@@ -146,16 +148,17 @@ class AgentConstructMixin:
         Returns:
             Configured Agent instance
         """
-        config = load_agent_config(config_path)
-        return cls(
-            config,
-            input_module=input_module,
-            output_module=output_module,
-            session=session,
-            environment=environment,
-            llm=llm,
-            pwd=pwd,
-            strict=strict,
-            tools=tools,
-            plugins=plugins,
-        )
+        with package_snapshot():
+            config = load_agent_config(config_path)
+            return cls(
+                config,
+                input_module=input_module,
+                output_module=output_module,
+                session=session,
+                environment=environment,
+                llm=llm,
+                pwd=pwd,
+                strict=strict,
+                tools=tools,
+                plugins=plugins,
+            )

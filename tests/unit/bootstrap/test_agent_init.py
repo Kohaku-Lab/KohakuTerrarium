@@ -653,7 +653,9 @@ class TestEnsureSkillToolFallback:
         def boom():
             raise RuntimeError("skill tool broken")
 
-        monkeypatch.setattr(ai_mod, "SkillTool", boom)
+        import kohakuterrarium.builtins.tools.skill as skill_mod
+
+        monkeypatch.setattr(skill_mod, "SkillTool", boom)
         registry = Registry()
         fake = SimpleNamespace(registry=registry, executor=None)
         # The exception is caught + logged — no crash, no registration.

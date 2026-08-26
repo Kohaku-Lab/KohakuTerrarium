@@ -4,6 +4,8 @@ Contains terminal, TUI, and no-input implementations only. Audio examples
 (ASR/Whisper) live under ``examples/`` so core imports stay audio-free.
 """
 
+import importlib
+import threading
 from typing import Any
 
 from kohakuterrarium.builtins.inputs.cli import CLIInput, NonBlockingCLIInput
@@ -16,11 +18,14 @@ _BUILTIN_INPUTS: dict[str, type] = {
 }
 
 _BUILTIN_INPUT_FACTORIES: dict[str, Any] = {}
+_LAZY_INPUTS = {"tui": ("kohakuterrarium.builtins.tui.input", "TUIInput")}
+_INPUTS_LOCK = threading.Lock()
 
 
 def register_builtin_input(name: str, cls: type) -> None:
     """Register a builtin input type."""
-    _BUILTIN_INPUTS[name] = cls
+    with _INPUTS_LOCK:
+        _BUILTIN_INPUTS[name] = cls
 
 
 def register_builtin_input_factory(name: str, factory: Any) -> None:
@@ -30,7 +35,13 @@ def register_builtin_input_factory(name: str, factory: Any) -> None:
 
 def get_builtin_input(name: str) -> type | None:
     """Get a builtin input class by name."""
-    return _BUILTIN_INPUTS.get(name)
+    cls = _BUILTIN_INPUTS.get(name)
+    if cls is None and name in _LAZY_INPUTS:
+        module_name, class_name = _LAZY_INPUTS[name]
+        resolved = getattr(importlib.import_module(module_name), class_name)
+        with _INPUTS_LOCK:
+            cls = _BUILTIN_INPUTS.setdefault(name, resolved)
+    return cls
 
 
 def get_builtin_input_factory(name: str) -> Any | None:
@@ -40,12 +51,18 @@ def get_builtin_input_factory(name: str) -> Any | None:
 
 def is_builtin_input(name: str) -> bool:
     """Check if name is a builtin input type."""
-    return name in _BUILTIN_INPUTS or name in _BUILTIN_INPUT_FACTORIES
+    return (
+        name in _BUILTIN_INPUTS
+        or name in _BUILTIN_INPUT_FACTORIES
+        or name in _LAZY_INPUTS
+    )
 
 
 def list_builtin_inputs() -> list[str]:
     """List all builtin input type names."""
-    return list(set(_BUILTIN_INPUTS.keys()) | set(_BUILTIN_INPUT_FACTORIES.keys()))
+    return list(
+        set(_BUILTIN_INPUTS) | set(_BUILTIN_INPUT_FACTORIES) | set(_LAZY_INPUTS)
+    )
 
 
 def create_builtin_input(name: str, options: dict[str, Any] | None = None) -> Any:
@@ -57,17 +74,20 @@ def create_builtin_input(name: str, options: dict[str, Any] | None = None) -> An
         factory = _BUILTIN_INPUT_FACTORIES[name]
         return factory(options)
 
-    if name in _BUILTIN_INPUTS:
-        cls = _BUILTIN_INPUTS[name]
+    cls = get_builtin_input(name)
+    if cls is not None:
         return cls(**options)
 
     raise ValueError(f"Unknown builtin input type: {name}")
 
 
-# Delayed import avoids loading the TUI before the registry is initialized.
-from kohakuterrarium.builtins.tui.input import TUIInput
-
-register_builtin_input("tui", TUIInput)
+def __getattr__(name: str):
+    if name != "TUIInput":
+        raise AttributeError(name)
+    module_name, class_name = _LAZY_INPUTS["tui"]
+    value = getattr(importlib.import_module(module_name), class_name)
+    globals()[name] = value
+    return value
 
 
 __all__ = [

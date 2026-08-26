@@ -5,10 +5,16 @@ builds a real directory layout (plain dirs, ``.link`` pointer files)
 and asserts the enumerated shape reflects what is on disk.
 """
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.packages import locations as loc_mod
-from kohakuterrarium.packages.walk import get_package_modules, list_packages
+from kohakuterrarium.packages.walk import (
+    get_package_modules,
+    list_packages,
+    package_snapshot,
+)
 
 
 @pytest.fixture
@@ -97,6 +103,80 @@ class TestListPackages:
         (pkg_dir / "README.txt").write_text("hi")
         _make_pkg(pkg_dir, "real", "")
         assert [p["name"] for p in list_packages()] == ["real"]
+
+
+class TestPackageSnapshot:
+    def test_reuses_one_walk_and_refreshes_after_scope(self, pkg_dir, monkeypatch):
+        _make_pkg(pkg_dir, "alpha", "version: '1.0'")
+        from kohakuterrarium.packages import walk
+
+        calls = 0
+        original = walk._list_packages_uncached
+
+        def counted():
+            nonlocal calls
+            calls += 1
+            return original()
+
+        monkeypatch.setattr(walk, "_list_packages_uncached", counted)
+
+        with package_snapshot():
+            assert list_packages()[0]["version"] == "1.0"
+            (pkg_dir / "alpha" / "kohaku.yaml").write_text(
+                "name: alpha\nversion: '2.0'"
+            )
+            assert list_packages()[0]["version"] == "1.0"
+
+        assert list_packages()[0]["version"] == "2.0"
+        assert calls == 2
+
+    def test_copy_mutation_does_not_change_later_reads(self, pkg_dir):
+        _make_pkg(pkg_dir, "alpha", "version: '1.0'")
+
+        with package_snapshot():
+            first = list_packages()
+            first[0]["version"] = "changed"
+            first.clear()
+            assert list_packages()[0]["version"] == "1.0"
+
+    @pytest.mark.asyncio
+    async def test_child_task_does_not_inherit_snapshot(self, pkg_dir):
+        _make_pkg(pkg_dir, "alpha", "version: '1.0'")
+        release = asyncio.Event()
+
+        async def read_after_scope():
+            await release.wait()
+            return list_packages()[0]["version"]
+
+        with package_snapshot():
+            task = asyncio.create_task(read_after_scope())
+            (pkg_dir / "alpha" / "kohaku.yaml").write_text(
+                "name: alpha\nversion: '2.0'"
+            )
+
+        release.set()
+        assert await task == "2.0"
+
+    def test_nested_scopes_share_the_outer_snapshot(self, pkg_dir, monkeypatch):
+        _make_pkg(pkg_dir, "alpha", "version: '1.0'")
+        from kohakuterrarium.packages import walk
+
+        calls = 0
+        original = walk._list_packages_uncached
+
+        def counted():
+            nonlocal calls
+            calls += 1
+            return original()
+
+        monkeypatch.setattr(walk, "_list_packages_uncached", counted)
+
+        with package_snapshot():
+            list_packages()
+            with package_snapshot():
+                list_packages()
+
+        assert calls == 1
 
 
 class TestGetPackageModules:

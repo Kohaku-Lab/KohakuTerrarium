@@ -1,0 +1,648 @@
+"""KohakuTerrarium CLI — command dispatch and argument parsing.
+
+Importing this package also imports :mod:`kohakuterrarium.studio` for
+its side effect of registering studio-supplied hooks the terrarium
+group tools call into (session-store auto-attach, name propagation,
+spawnable creature catalog). Without this, ``kt run`` solo mode would
+boot with an empty spawnable list and no persistence on tool-spawned
+workers.
+"""
+
+import argparse
+
+import kohakuterrarium.studio  # noqa: F401 — registers terrarium.group_hooks
+from kohakuterrarium.cli._aliases import (
+    add_client_alias,
+    add_host_alias,
+    dispatch_client_alias,
+    dispatch_host_alias,
+)
+from kohakuterrarium.cli.admin import add_admin_subparser, admin_cli
+from kohakuterrarium.cli.auth import login_cli
+from kohakuterrarium.cli.config import add_config_subparser, config_cli
+from kohakuterrarium.cli.doctor import add_doctor_subparser, dispatch_doctor
+from kohakuterrarium.cli.drive import add_drive_subparser, drive_cli
+from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
+from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
+from kohakuterrarium.cli.lab_client import add_lab_client_subparser, lab_client_cli
+from kohakuterrarium.cli.marketplace import marketplace_cli
+from kohakuterrarium.cli.memory import embedding_cli, search_cli
+from kohakuterrarium.cli.model import model_cli
+from kohakuterrarium.cli.packages import (
+    edit_cli,
+    install_cli,
+    list_cli,
+    show_agent_info_cli,
+    uninstall_cli,
+    update_cli,
+)
+from kohakuterrarium.cli.resume import resume_cli
+from kohakuterrarium.cli.run import resolve_then_run, run_agent_cli
+from kohakuterrarium.cli.select_args import add_run_like_args
+from kohakuterrarium.cli.self_update import add_self_update_subparser, self_update_cli
+from kohakuterrarium.cli.shims import add_shims_subparser, shims_cli
+from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
+from kohakuterrarium.cli.service import add_service_subparser, service_cli
+from kohakuterrarium.cli.version import format_version_report
+from kohakuterrarium.serving.desktop import launch_desktop_app
+from kohakuterrarium.serving.web import run_web_server
+from kohakuterrarium.utils.logging import configure_utf8_stdio
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    """Build and return the CLI argument parser with all subcommands."""
+    parser = argparse.ArgumentParser(
+        prog="kt",
+        description="KohakuTerrarium - Universal Agent Framework",
+    )
+    parser.add_argument(
+        "--version",
+        action="store_true",
+        help="Show KohakuTerrarium version and runtime identity information",
+    )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Show additional details for commands that support verbose output",
+    )
+    subparsers = parser.add_subparsers(dest="command", help="Commands")
+
+    run_parser = subparsers.add_parser("run", help="Run an agent")
+    run_parser.add_argument(
+        "agent_path",
+        help="Path to agent config folder (e.g., agents/swe-agent)",
+    )
+    run_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level",
+    )
+    run_parser.add_argument(
+        "--log-stderr",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help=(
+            "Mirror logs to stderr. auto=on when I/O is not cli/tui "
+            "(custom, package, stdout, plain), off=never, on=always"
+        ),
+    )
+    session_group = run_parser.add_mutually_exclusive_group()
+    session_group.add_argument(
+        "--session",
+        nargs="?",
+        const="__auto__",
+        default="__auto__",
+        help="Session file path (default: auto in ~/.kohakuterrarium/sessions/). Use --no-session to disable.",
+    )
+    session_group.add_argument(
+        "--no-session",
+        action="store_true",
+        help="Disable session persistence",
+    )
+    run_parser.add_argument(
+        "--llm",
+        default=None,
+        help="Override LLM profile (e.g., gpt-5.4, gemini, claude-sonnet-4)",
+    )
+    run_parser.add_argument(
+        "--mode",
+        choices=["cli", "plain", "tui", "none"],
+        default=None,
+        help=(
+            "Input/output mode. ``cli`` = rich inline prompt-toolkit "
+            "Application, ``tui`` = full-screen Textual app, "
+            "``plain`` = dumb stdout/stdin, ``none`` = headless: don't "
+            "mount any user-facing IO shell, let the creature drive "
+            "itself via its configured input/output modules (Discord "
+            "bot, webhook listener, etc.). When omitted, the choice "
+            "is auto-derived from the creature config's ``input.type`` "
+            "— ``cli`` / ``tui`` get the matching shell, anything "
+            "else (custom / package / none) runs headless."
+        ),
+    )
+    run_parser.add_argument(
+        "--add",
+        action="append",
+        default=[],
+        metavar="CONFIG",
+        dest="add_creatures",
+        help=(
+            "Spawn an additional creature into the same graph at startup. "
+            "Accepts a path or ``@pkg/creatures/<name>`` reference. May be "
+            "repeated to assemble an ad-hoc team without writing a recipe. "
+            "Spawned creatures are not privileged."
+        ),
+    )
+    run_parser.add_argument(
+        "--channel",
+        action="append",
+        default=[],
+        metavar="NAME",
+        dest="add_channels",
+        help=(
+            "Create a shared channel and wire every creature in the graph "
+            "as both listener and sender. May be repeated. Combined with "
+            "``--add`` this lets you compose a multi-creature graph from "
+            "the command line, e.g. ``kt run general --add critic "
+            "--channel reviews``."
+        ),
+    )
+
+    # Keep aliases on the shared argument builder so standalone and ``kt``
+    # entry points expose the same options.
+    cli_parser = subparsers.add_parser(
+        "cli",
+        help="Interactive rich CLI (optional creature; picker when omitted)",
+    )
+    add_run_like_args(cli_parser)
+    tui_parser = subparsers.add_parser(
+        "tui",
+        help="Full-screen Textual TUI (optional creature; picker when omitted)",
+    )
+    add_run_like_args(tui_parser)
+
+    add_shims_subparser(subparsers)
+
+    list_parser = subparsers.add_parser("list", help="List available agents")
+    list_parser.add_argument(
+        "--path",
+        default="agents",
+        help="Path to agents directory",
+    )
+
+    info_parser = subparsers.add_parser("info", help="Show agent info")
+    info_parser.add_argument(
+        "agent_path",
+        help="Path to agent config folder",
+    )
+
+    resume_parser = subparsers.add_parser(
+        "resume", help="Resume a session (by name, path, or list recent)"
+    )
+    resume_parser.add_argument(
+        "session",
+        nargs="?",
+        default=None,
+        help="Session name/prefix, full path, or omit to list recent sessions",
+    )
+    resume_parser.add_argument("--pwd", help="Override working directory")
+    resume_parser.add_argument(
+        "--last",
+        action="store_true",
+        help="Resume the most recent session",
+    )
+    resume_parser.add_argument(
+        "--mode",
+        choices=["cli", "plain", "tui"],
+        default=None,
+        help=(
+            "Input/output surface. cli/plain=rich inline CLI, "
+            "tui=full-screen Textual app. Omit for the default "
+            "full-screen TUI."
+        ),
+    )
+    resume_parser.add_argument(
+        "--llm",
+        default=None,
+        help="Override LLM profile (e.g., gpt-5.4, gemini, claude-sonnet-4.6)",
+    )
+    resume_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+    )
+    resume_parser.add_argument(
+        "--log-stderr",
+        choices=["auto", "on", "off"],
+        default="auto",
+        help=(
+            "Mirror logs to stderr. auto=on when I/O is not cli/tui "
+            "(custom, package, stdout, plain), off=never, on=always"
+        ),
+    )
+
+    add_doctor_subparser(subparsers)
+
+    login_parser = subparsers.add_parser("login", help="Authenticate with a provider")
+    login_parser.add_argument(
+        "provider",
+        help="Provider or backend name to authenticate with",
+    )
+
+    install_parser = subparsers.add_parser(
+        "install", help="Install a creature/terrarium package"
+    )
+    install_parser.add_argument(
+        "source",
+        help=(
+            "Marketplace spec (@name, @name@version, @source/name), git URL, "
+            "or local path"
+        ),
+    )
+    install_parser.add_argument(
+        "-e",
+        "--editable",
+        action="store_true",
+        help="Install as editable (symlink, like pip -e)",
+    )
+    install_parser.add_argument("--name", default=None, help="Override package name")
+    install_parser.add_argument(
+        "--no-deps",
+        action="store_true",
+        help="Skip installing the package's declared Python dependencies",
+    )
+
+    uninstall_parser = subparsers.add_parser(
+        "uninstall", help="Remove an installed package"
+    )
+    uninstall_parser.add_argument("name", help="Package name to remove")
+
+    update_parser = subparsers.add_parser(
+        "update", help="Update installed package repositories"
+    )
+    update_parser.add_argument(
+        "target",
+        nargs="?",
+        default=None,
+        help="Package name or @package reference",
+    )
+    update_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Update all installed git-backed packages",
+    )
+
+    edit_parser = subparsers.add_parser(
+        "edit", help="Open a creature/terrarium config in editor"
+    )
+    edit_parser.add_argument(
+        "target",
+        help="@package/creatures/name or @package/terrariums/name",
+    )
+
+    embed_parser = subparsers.add_parser(
+        "embedding", help="Build embeddings for a session (offline indexing)"
+    )
+    embed_parser.add_argument("session", help="Session name/prefix or path")
+    embed_parser.add_argument(
+        "--provider",
+        choices=["auto", "model2vec", "sentence-transformer", "api"],
+        default="auto",
+        help="Embedding provider (default: auto, prefers jina v5 nano)",
+    )
+    embed_parser.add_argument(
+        "--model", default=None, help="Model name (default: provider-dependent)"
+    )
+    embed_parser.add_argument(
+        "--dimensions", type=int, default=None, help="Embedding dimensions (Matryoshka)"
+    )
+
+    search_parser = subparsers.add_parser("search", help="Search a session's memory")
+    search_parser.add_argument("session", help="Session name/prefix or path")
+    search_parser.add_argument("query", help="Search query")
+    search_parser.add_argument(
+        "--mode",
+        choices=["fts", "semantic", "hybrid", "auto"],
+        default="auto",
+        help="Search mode (default: auto)",
+    )
+    search_parser.add_argument("--agent", default=None, help="Filter by agent name")
+    search_parser.add_argument(
+        "-k", type=int, default=10, help="Max results (default: 10)"
+    )
+
+    web_parser = subparsers.add_parser(
+        "web", help="Serve web UI + API (single process)"
+    )
+    web_parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind host (default: 127.0.0.1, use 0.0.0.0 for LAN)",
+    )
+    web_parser.add_argument(
+        "--port",
+        type=int,
+        default=8001,
+        help="Bind port (auto-increments if busy)",
+    )
+    web_parser.add_argument(
+        "--dev",
+        action="store_true",
+        help="API-only mode (run vite dev server separately)",
+    )
+    web_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level",
+    )
+
+    app_parser = subparsers.add_parser(
+        "app", help="Launch native desktop UI (requires pywebview)"
+    )
+    app_parser.add_argument(
+        "--port", type=int, default=8001, help="Internal server port"
+    )
+    app_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="Logging level",
+    )
+
+    model_parser = subparsers.add_parser("model", help="Manage LLM profiles")
+    model_sub = model_parser.add_subparsers(dest="model_command")
+    model_sub.add_parser("list", help="List all profiles and presets")
+    model_default_parser = model_sub.add_parser("default", help="Set default model")
+    model_default_parser.add_argument("name", help="Model/profile name")
+    model_show_parser = model_sub.add_parser("show", help="Show profile details")
+    model_show_parser.add_argument("name", help="Model/profile name")
+
+    ext_parser = subparsers.add_parser(
+        "extension", help="Manage package extension modules"
+    )
+    ext_sub = ext_parser.add_subparsers(dest="extension_command")
+    ext_sub.add_parser("list", help="List all installed extension modules")
+    ext_info_parser = ext_sub.add_parser(
+        "info", help="Show details of a specific package"
+    )
+    ext_info_parser.add_argument("name", help="Package name")
+
+    # Marketplace browsing and installation share the same configured sources.
+    mp_parser = subparsers.add_parser(
+        "marketplace",
+        help="Browse + manage TerrariumMarket sources (kt install @<name> uses these)",
+    )
+    mp_sub = mp_parser.add_subparsers(dest="marketplace_command")
+    mp_sub.add_parser("list", help="List configured marketplace sources")
+    mp_add_parser = mp_sub.add_parser("add", help="Add a marketplace source URL")
+    mp_add_parser.add_argument("url", help="https URL to a registry.yaml")
+    mp_add_parser.add_argument(
+        "--alias", default=None, help="Short name for the source (default: URL)"
+    )
+    mp_remove_parser = mp_sub.add_parser(
+        "remove", help="Remove a marketplace source by URL or alias"
+    )
+    mp_remove_parser.add_argument("target", help="URL or alias of the source")
+    mp_sub.add_parser("reset", help="Restore the built-in default source list")
+    mp_sub.add_parser("refresh", help="Force cache bust + re-fetch every source")
+    mp_search_parser = mp_sub.add_parser(
+        "search", help="Search packages across configured sources"
+    )
+    mp_search_parser.add_argument(
+        "query",
+        nargs="?",
+        default="",
+        help="Substring matched against name + description",
+    )
+    mp_search_parser.add_argument("--tag", default=None, help="Filter by tag")
+    mp_search_parser.add_argument("--author", default=None, help="Filter by author")
+    mp_search_parser.add_argument(
+        "--json", action="store_true", help="Emit machine-readable JSON"
+    )
+    mp_info_parser = mp_sub.add_parser(
+        "info", help="Show full detail for a marketplace entry"
+    )
+    mp_info_parser.add_argument(
+        "spec",
+        help="@name, @name@version, or @source/name (the leading @ is optional)",
+    )
+
+    mcp_parser = subparsers.add_parser("mcp", help="MCP server management")
+    mcp_sub = mcp_parser.add_subparsers(dest="mcp_command")
+    mcp_list_parser = mcp_sub.add_parser(
+        "list", help="List MCP servers from agent config"
+    )
+    mcp_list_parser.add_argument(
+        "--agent", required=True, help="Path to agent config folder"
+    )
+
+    add_drive_subparser(subparsers)
+
+    add_config_subparser(subparsers)
+
+    add_serve_subparser(subparsers)
+
+    add_lab_client_subparser(subparsers)
+
+    # Deployment aliases keep operator commands aligned with service and image names.
+    add_host_alias(subparsers)
+    add_client_alias(subparsers)
+
+    add_service_subparser(subparsers)
+
+    # Administrative commands operate on local state without requiring a server.
+    add_admin_subparser(subparsers)
+
+    add_self_update_subparser(subparsers)
+
+    internal_serve_parser = subparsers.add_parser(
+        "__run-server", help=argparse.SUPPRESS
+    )
+    internal_serve_parser.add_argument("--host", default="127.0.0.1")
+    internal_serve_parser.add_argument("--port", type=int, default=8001)
+    internal_serve_parser.add_argument("--dev", action="store_true")
+    internal_serve_parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+    )
+    internal_serve_parser.add_argument("--state-path", default=None)
+    internal_serve_parser.add_argument(
+        "--mode",
+        choices=["standalone", "lab-host"],
+        default="standalone",
+    )
+    internal_serve_parser.add_argument("--lab-bind", default=None)
+    internal_serve_parser.add_argument("--lab-token", default=None)
+
+    return parser
+
+
+def _dispatch_run(args: argparse.Namespace) -> int:
+    """Handle the 'run' command.
+
+    ``@pkg/...`` agent paths pass through verbatim — the config-loading
+    chokepoint (``load_agent_config`` / ``load_terrarium_config``)
+    resolves package references for every entry point.
+    """
+    agent_path = args.agent_path
+    session = None if args.no_session else args.session
+    extra_creatures = list(getattr(args, "add_creatures", None) or [])
+    return run_agent_cli(
+        agent_path,
+        args.log_level,
+        session=session,
+        io_mode=args.mode,
+        llm=args.llm,
+        log_stderr=args.log_stderr,
+        extra_creatures=extra_creatures,
+        extra_channels=list(getattr(args, "add_channels", None) or []),
+    )
+
+
+def _resolve_then_run_from_args(args: argparse.Namespace, io_mode: str) -> int:
+    """Shared dispatch for the ``kt cli`` / ``kt tui`` subcommand aliases."""
+    session = None if args.no_session else args.session
+    return resolve_then_run(
+        args.agent_path,
+        io_mode=io_mode,
+        log_level=args.log_level,
+        session=session,
+        llm=args.llm,
+        log_stderr=args.log_stderr,
+        extra_creatures=list(getattr(args, "add_creatures", None) or []),
+        extra_channels=list(getattr(args, "add_channels", None) or []),
+    )
+
+
+def _dispatch_cli_mode(args: argparse.Namespace) -> int:
+    """Handle the 'cli' subcommand alias (rich inline mode)."""
+    return _resolve_then_run_from_args(args, "cli")
+
+
+def _dispatch_tui_mode(args: argparse.Namespace) -> int:
+    """Handle the 'tui' subcommand alias (full-screen mode)."""
+    return _resolve_then_run_from_args(args, "tui")
+
+
+def _dispatch_resume(args: argparse.Namespace) -> int:
+    """Handle the 'resume' command."""
+    return resume_cli(
+        args.session,
+        args.pwd,
+        args.log_level,
+        last=args.last,
+        io_mode=args.mode,
+        llm=args.llm,
+        log_stderr=args.log_stderr,
+    )
+
+
+def _dispatch_embedding(args: argparse.Namespace) -> int:
+    """Handle the 'embedding' command."""
+    return embedding_cli(args.session, args.provider, args.model, args.dimensions)
+
+
+def _dispatch_search(args: argparse.Namespace) -> int:
+    """Handle the 'search' command."""
+    return search_cli(args.session, args.query, args.mode, args.agent, args.k)
+
+
+def _dispatch_web(args: argparse.Namespace) -> int:
+    """Handle the 'web' command."""
+    run_web_server(
+        host=args.host,
+        port=args.port,
+        dev=args.dev,
+        log_level=args.log_level,
+    )
+    return 0
+
+
+def _dispatch_app(args: argparse.Namespace) -> int:
+    """Handle the 'app' command."""
+    launch_desktop_app(port=args.port, log_level=args.log_level)
+    return 0
+
+
+def _dispatch_extension(args: argparse.Namespace) -> int:
+    """Handle the 'extension' command group."""
+    sub = getattr(args, "extension_command", None)
+    if sub == "list":
+        return extension_list_cli()
+    elif sub == "info":
+        return extension_info_cli(args.name)
+    else:
+        parser = _build_parser()
+        parser.parse_args(["extension", "--help"])
+        return 0
+
+
+def _dispatch_mcp(args: argparse.Namespace) -> int:
+    """Handle the 'mcp' command group."""
+    sub = getattr(args, "mcp_command", None)
+    if sub == "list":
+        return mcp_list_cli(args.agent)
+    else:
+        parser = _build_parser()
+        parser.parse_args(["mcp", "--help"])
+        return 0
+
+
+COMMANDS: dict[str, callable] = {
+    "run": _dispatch_run,
+    "cli": _dispatch_cli_mode,
+    "tui": _dispatch_tui_mode,
+    "shims": shims_cli,
+    "resume": _dispatch_resume,
+    "doctor": dispatch_doctor,
+    "list": lambda args: list_cli(args.path),
+    "info": lambda args: show_agent_info_cli(args.agent_path),
+    "login": lambda args: login_cli(args.provider),
+    "install": lambda args: install_cli(
+        args.source, args.editable, args.name, args.no_deps
+    ),
+    "uninstall": lambda args: uninstall_cli(args.name),
+    "update": lambda args: update_cli(args.target, args.all),
+    "edit": lambda args: edit_cli(args.target),
+    "embedding": _dispatch_embedding,
+    "search": _dispatch_search,
+    "web": _dispatch_web,
+    "app": _dispatch_app,
+    "model": lambda args: model_cli(args),
+    "drive": drive_cli,
+    "config": lambda args: config_cli(args),
+    "serve": lambda args: serve_cli(args),
+    "__run-server": lambda args: serve_cli(
+        argparse.Namespace(
+            serve_command="__run-server",
+            host=args.host,
+            port=args.port,
+            dev=args.dev,
+            log_level=args.log_level,
+            state_path=args.state_path,
+            mode=getattr(args, "mode", "standalone"),
+            lab_bind=getattr(args, "lab_bind", None),
+            lab_token=getattr(args, "lab_token", None),
+        )
+    ),
+    "lab-client": lab_client_cli,
+    "host": dispatch_host_alias,
+    "client": dispatch_client_alias,
+    "service": service_cli,
+    "self-update": self_update_cli,
+    "extension": _dispatch_extension,
+    "mcp": _dispatch_mcp,
+    "marketplace": marketplace_cli,
+    "admin": admin_cli,
+}
+
+
+def main() -> int:
+    """Main CLI entry point."""
+    configure_utf8_stdio(log=False)
+    parser = _build_parser()
+    args = parser.parse_args()
+    mark_startup("parser_ready", surface="cli")
+
+    if args.version:
+        mark_startup("dispatch_selected", surface="cli", command="version")
+        print(format_version_report(verbose=args.verbose))
+        return 0
+
+    # No command given: launch desktop app (used by Briefcase and double-click)
+    if not args.command:
+        mark_startup("dispatch_selected", surface="desktop", command="desktop")
+        launch_desktop_app(log_level="INFO")
+        return 0
+
+    handler = COMMANDS.get(args.command)
+    if handler:
+        mark_startup("dispatch_selected", surface=args.command, command=args.command)
+        return handler(args)
+
+    parser.print_help()
+    return 0

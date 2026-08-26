@@ -142,5 +142,359 @@
     "function": "_release",
     "target": "msvcrt",
     "reason": "Win32-only msvcrt import inside the `if sys.platform == 'win32'` branch of the cross-platform flock wrapper"
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/user_commands/drives.py",
+    "function": "_drive_call",
+    "target": "kohakuterrarium.studio.sessions",
+    "reason": "Drive persistence is a Studio-only runtime path; deferring it keeps core Agent imports from pulling the full Studio session graph."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "_build_parser",
+    "target": "kohakuterrarium.cli._main",
+    "reason": "The compatibility parser builder is loaded only when callers explicitly request the complete command parser."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "_dispatch_surface",
+    "target": "kohakuterrarium.serving.web",
+    "reason": "Web and desktop serving dependencies are loaded only after the selected surface is known."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "_dispatch_surface",
+    "target": "kohakuterrarium.cli.run",
+    "reason": "Agent and Terrarium runtime dependencies are loaded only for CLI or TUI execution."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "main",
+    "target": "kohakuterrarium.cli._main",
+    "reason": "The full admin/package/session command graph is deferred until a non-fast-path command is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "main",
+    "target": "kohakuterrarium.cli.version",
+    "reason": "Version reporting is isolated so kt --version does not import command runtimes."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry_cli.py",
+    "function": "resume_cli",
+    "target": "kohakuterrarium.cli.resume",
+    "reason": "Standalone CLI resume dependencies are loaded only when --resume is used."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry_cli.py",
+    "function": "resolve_then_run",
+    "target": "kohakuterrarium.cli.run",
+    "reason": "Standalone CLI runtime dependencies are loaded only after argument parsing."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry_tui.py",
+    "function": "resume_cli",
+    "target": "kohakuterrarium.cli.resume",
+    "reason": "Standalone TUI resume dependencies are loaded only when --resume is used."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/entry_tui.py",
+    "function": "resolve_then_run",
+    "target": "kohakuterrarium.cli.run",
+    "reason": "Standalone TUI runtime dependencies are loaded only after argument parsing."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/picker.py",
+    "function": "pick_runnable",
+    "target": "kohakuterrarium.cli.select_cli",
+    "reason": "Prompt-toolkit picker is loaded only for the CLI surface."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/picker.py",
+    "function": "pick_runnable",
+    "target": "kohakuterrarium.cli.select_tui",
+    "reason": "Textual picker is loaded only for the TUI surface."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/resume.py",
+    "function": "run_engine_with_rich_cli",
+    "target": "kohakuterrarium.terrarium.engine_rich_cli",
+    "reason": "Rich terminal UI dependencies are loaded only for resumed CLI sessions."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/resume.py",
+    "function": "run_engine_with_tui",
+    "target": "kohakuterrarium.terrarium.engine_cli",
+    "reason": "Textual dependencies are loaded only for resumed TUI sessions."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.terrarium.engine_rich_cli",
+    "reason": "Rich terminal UI dependencies are loaded only after the CLI surface is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.terrarium.engine_cli",
+    "reason": "Textual dependencies are loaded only after the TUI surface is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/studio/hooks.py",
+    "function": "store_attach_hook",
+    "target": "kohakuterrarium.studio.sessions.lifecycle",
+    "reason": "Studio session persistence loads only when a group tool actually attaches a spawned creature."
+  },
+  {
+    "file": "src/kohakuterrarium/studio/hooks.py",
+    "function": "name_apply_hook",
+    "target": "kohakuterrarium.terrarium.creature_host",
+    "reason": "Creature runtime loads only when a group tool applies a spawned name."
+  },
+  {
+    "file": "src/kohakuterrarium/studio/hooks.py",
+    "function": "spawnable_hook",
+    "target": "kohakuterrarium.studio.catalog.spawnable",
+    "reason": "Catalog scanning loads only when group status requests spawnable creatures."
+  },
+  {
+    "file": "src/kohakuterrarium/studio/hooks.py",
+    "function": "resolve_workspace_hook",
+    "target": "kohakuterrarium.studio.editors.workspace_fs",
+    "reason": "Workspace editor dependencies load only when a group tool requests workspace resolution."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "_dispatch_surface",
+    "target": "kohakuterrarium.serving.desktop",
+    "reason": "Desktop bootstrap stays out of web, terminal, and version paths until the app surface is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "main",
+    "target": "kohakuterrarium.serving.desktop",
+    "reason": "The default native desktop bootstrap is loaded only for the no-argument desktop path."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_start_in_process_server",
+    "target": "kohakuterrarium.serving.desktop_server",
+    "reason": "Briefcase cannot relaunch its stub with module arguments, so the heavy server graph is imported only after the loading window is visible."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_set_windows_app_id",
+    "target": "ctypes",
+    "reason": "Windows shell integration stays out of the cross-platform lightweight desktop import path until a Windows desktop actually launches."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_set_icon_windows",
+    "target": "ctypes",
+    "reason": "Win32 window icon APIs load only from the Windows shown callback, preserving lightweight startup on other platforms."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_set_icon_macos",
+    "target": "PyObjCTools",
+    "reason": "The Cocoa main-thread dispatcher is available only on macOS and loads when the macOS shown callback restores the Dock icon."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory",
+    "reason": "Laboratory host runtime is loaded only when lab-host mode is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory._internal.host",
+    "reason": "Laboratory host engine is loaded only for the lab-host lifespan."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory._internal.transport_ws",
+    "reason": "Laboratory WebSocket transport is loaded only for the lab-host lifespan."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.laboratory.adapters",
+    "reason": "Laboratory adapters are loaded only for the lab-host lifespan."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.session.sync",
+    "reason": "Session mirroring is specific to lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.studio.sessions.registry",
+    "reason": "Lab-host session metadata lookup is loaded only in lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.terrarium",
+    "reason": "Terrarium host runtimes are loaded only when lab-host mode starts."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.terrarium.drive.config",
+    "reason": "Drive host configuration is loaded only in lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/app.py",
+    "function": "lifespan",
+    "target": "kohakuterrarium.terrarium.multi_node_channels",
+    "reason": "Cluster membership lookup is loaded only in lab-host mode."
+  },
+  {
+    "file": "src/kohakuterrarium/api/auth/engine_pool.py",
+    "function": "get_or_create",
+    "target": "kohakuterrarium",
+    "reason": "Per-user Terrarium runtime is loaded only when an engine is first created."
+  },
+  {
+    "file": "src/kohakuterrarium/api/deps.py",
+    "function": "_host_drive_kwargs",
+    "target": "kohakuterrarium.studio.identity",
+    "reason": "Drive settings are loaded only when constructing a standalone engine."
+  },
+  {
+    "file": "src/kohakuterrarium/api/deps.py",
+    "function": "_runtime_types",
+    "target": "kohakuterrarium.studio.sessions.registry",
+    "reason": "Session registry runtime is loaded only when resolving a local service."
+  },
+  {
+    "file": "src/kohakuterrarium/api/deps.py",
+    "function": "_runtime_types",
+    "target": "kohakuterrarium.terrarium",
+    "reason": "Terrarium runtime classes are loaded only when a local service is requested."
+  },
+  {
+    "file": "src/kohakuterrarium/api/routes/metrics.py",
+    "function": "_session_lifecycle",
+    "target": "kohakuterrarium.studio.sessions",
+    "reason": "Session lifecycle is loaded only when the metrics endpoint computes live gauges."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/agent_init.py",
+    "function": "_ensure_skill_tool_registered",
+    "target": "kohakuterrarium.builtins.tools.skill",
+    "reason": "Skill implementation is loaded only when an Agent registers the skill tool."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.codex_provider",
+    "reason": "Provider implementation is loaded only for a selected Codex profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.grok_provider",
+    "reason": "Provider implementation is loaded only for a selected Grok profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.anthropic_provider",
+    "reason": "Provider implementation is loaded only for a selected Anthropic profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.openai",
+    "reason": "Provider implementation is loaded only for an OpenAI-compatible profile."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_inline",
+    "target": "kohakuterrarium.llm.codex_provider",
+    "reason": "Provider implementation is loaded only for selected inline Codex auth."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_inline",
+    "target": "kohakuterrarium.llm.anthropic_provider",
+    "reason": "Provider implementation is loaded only for selected inline Anthropic auth."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_inline",
+    "target": "kohakuterrarium.llm.openai",
+    "reason": "Provider implementation is loaded only for inline OpenAI-compatible auth."
+  },
+  {
+    "file": "src/kohakuterrarium/core/controller.py",
+    "function": "_resolve_file_part",
+    "target": "kohakuterrarium.builtins.tools.read",
+    "reason": "Read tool implementation is loaded only for inline file-part fallback."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop_server.py",
+    "function": "create_app",
+    "target": "kohakuterrarium.api.app",
+    "reason": "Desktop child defers the complete API route graph until server startup."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/web.py",
+    "function": "create_app",
+    "target": "kohakuterrarium.api.app",
+    "reason": "Web module import remains lightweight until the server constructs its app."
+  },
+  {
+    "file": "src/kohakuterrarium/builtins/tools/web_fetch.py",
+    "function": "_fetch_crawl4ai",
+    "target": "crawl4ai",
+    "reason": "Optional extractor is loaded only when the web_fetch tool executes the Crawl4AI backend."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.session.store",
+    "reason": "Session storage is loaded only after an executable path has been resolved and engine startup begins."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.studio.identity",
+    "reason": "Drive settings are loaded only when constructing the runtime engine."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.terrarium.config",
+    "reason": "Recipe parsing is loaded only when terminal runtime startup begins."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_run",
+    "target": "kohakuterrarium.terrarium.engine",
+    "reason": "The engine graph is deferred until after CLI dispatch and runnable resolution."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_apply_cli_topology",
+    "target": "kohakuterrarium.terrarium.channels",
+    "reason": "Channel mutation helpers are loaded only when --add or --channel topology is requested."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_apply_cli_topology",
+    "target": "kohakuterrarium.terrarium.topology",
+    "reason": "Topology mutation helpers are loaded only when --add or --channel is requested."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/run.py",
+    "function": "_session_preview",
+    "target": "kohakuterrarium.session.store",
+    "reason": "Session storage is loaded only when the resume picker reads a preview."
   }
 ]

@@ -39,21 +39,21 @@ class _FakeEngine:
         return self._creatures[cid]
 
 
+def _session_lifecycle(monkeypatch, sessions=None, session_map=None):
+    lifecycle = SimpleNamespace(
+        list_sessions=lambda svc: list(sessions or []),
+        get_session=lambda svc, sid: (session_map or {}).get(sid)
+        or Session(session_id=sid, name=sid),
+    )
+    monkeypatch.setattr(metrics_mod, "_session_lifecycle", lambda: lifecycle)
+    return lifecycle
+
+
 def _client(engine, monkeypatch, *, aggregator=None, sessions=None, session_map=None):
     monkeypatch.setattr(
         metrics_mod, "get_aggregator", lambda: aggregator or _FakeAggregator()
     )
-    monkeypatch.setattr(
-        metrics_mod.sessions_lifecycle,
-        "list_sessions",
-        lambda svc: list(sessions or []),
-    )
-    monkeypatch.setattr(
-        metrics_mod.sessions_lifecycle,
-        "get_session",
-        lambda svc, sid: (session_map or {}).get(sid)
-        or Session(session_id=sid, name=sid),
-    )
+    _session_lifecycle(monkeypatch, sessions, session_map)
     app = FastAPI()
     app.dependency_overrides[get_service] = lambda: engine
     app.include_router(metrics_mod.router, prefix="/metrics")
@@ -125,16 +125,15 @@ class TestMetricsSnapshot:
     def test_get_session_failure_swallowed(self, monkeypatch):
         eng = _FakeEngine()
         # ``get_session`` raises — the gauge computation tolerates it.
-        monkeypatch.setattr(
-            metrics_mod.sessions_lifecycle,
-            "list_sessions",
-            lambda eng: [SessionListing(session_id="g1", name="x", creatures=1)],
+        lifecycle = _session_lifecycle(
+            monkeypatch,
+            [SessionListing(session_id="g1", name="x", creatures=1)],
         )
 
         def boom(svc, sid):
             raise RuntimeError("dead")
 
-        monkeypatch.setattr(metrics_mod.sessions_lifecycle, "get_session", boom)
+        lifecycle.get_session = boom
         monkeypatch.setattr(metrics_mod, "get_aggregator", lambda: _FakeAggregator())
         app = FastAPI()
         app.dependency_overrides[get_service] = lambda: eng
@@ -158,19 +157,16 @@ class TestMetricsSnapshot:
 class TestBuildGauges:
     def test_handles_missing_creature_id(self, monkeypatch):
         eng = _FakeEngine()
-        monkeypatch.setattr(
-            metrics_mod.sessions_lifecycle,
-            "list_sessions",
-            lambda svc: [SessionListing(session_id="g1", name="x", creatures=1)],
-        )
-        monkeypatch.setattr(
-            metrics_mod.sessions_lifecycle,
-            "get_session",
-            lambda svc, sid: Session(
-                session_id=sid,
-                name=sid,
-                creatures=[{"name": "noid-creature"}],  # no creature_id
-            ),
+        _session_lifecycle(
+            monkeypatch,
+            [SessionListing(session_id="g1", name="x", creatures=1)],
+            {
+                "g1": Session(
+                    session_id="g1",
+                    name="g1",
+                    creatures=[{"name": "noid-creature"}],  # no creature_id
+                )
+            },
         )
         gauges = metrics_mod._build_gauges(eng)
         # creature_id missing → no MCP lookup attempted.

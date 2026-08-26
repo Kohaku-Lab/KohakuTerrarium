@@ -5,7 +5,6 @@ import importlib
 from kohakuterrarium.builtins.inputs import (
     CLIInput,
     NonBlockingCLIInput,
-    TUIInput,
     create_builtin_input,
     get_builtin_input,
     is_builtin_input,
@@ -18,7 +17,6 @@ from kohakuterrarium.builtins.outputs import (
     StdoutOutput,
     TTSConfig,
     TTSModule,
-    TUIOutput,
     create_builtin_output,
     get_builtin_output,
     is_builtin_output,
@@ -44,6 +42,8 @@ _TOOL_EXPORTS = {
     "EditTool": "kohakuterrarium.builtins.tools",
     "GlobTool": "kohakuterrarium.builtins.tools",
     "GrepTool": "kohakuterrarium.builtins.tools",
+    "TUIInput": "kohakuterrarium.builtins.tui.input",
+    "TUIOutput": "kohakuterrarium.builtins.tui.output",
 }
 
 __all__ = [
