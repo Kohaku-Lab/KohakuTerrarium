@@ -45,6 +45,7 @@ from kohakuterrarium.llm.message import ContentPart
 from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.plugin.base import PluginContext
+from kohakuterrarium.packages.walk import package_snapshot
 from kohakuterrarium.plugins_context import spawn_child_agent
 from kohakuterrarium.session.agent_attach import attach_to_session as _attach_to_session
 from kohakuterrarium.session.agent_attach import (
@@ -210,34 +211,35 @@ class Agent(
 
         # Initialize components (methods from AgentInitMixin)
         # Order matters: output before controller (need known_outputs for parser)
-        self._init_llm()
-        if hasattr(self.llm, "on_emergency_drop"):
-            self.llm.on_emergency_drop(self._on_provider_emergency_drop)
-        self._init_registry()
-        self._init_executor()
-        # Instance-injected tools (E7) — registered BEFORE the
-        # controller so they land in the initial system prompt.
-        for tool_instance in tools or []:
-            self.registry.register_tool(tool_instance)
-            self.executor.register_tool(tool_instance)
-        self._init_plugins()
-        for plugin_instance in plugins or []:
-            self.plugins.register(plugin_instance)
-        self._init_subagents()
-        for subagent_cfg in subagents or []:
-            self.subagent_manager.register(subagent_cfg)
-        self._init_iteration_budget()
-        self._init_output(output_module)  # Before controller - sets _known_outputs
-        # Instance-injected named outputs join before the parser learns
-        # the known-output set.
-        for output_name, extra_output in (outputs or {}).items():
-            self.output_router.named_outputs[output_name] = extra_output
-            self._known_outputs.add(output_name)
-        self._init_skills()  # Before controller so skill index is in prompt
-        self._init_controller()
-        self._init_input(input_module)
-        self._init_user_commands()
-        self._init_triggers()
+        with package_snapshot():
+            self._init_llm()
+            if hasattr(self.llm, "on_emergency_drop"):
+                self.llm.on_emergency_drop(self._on_provider_emergency_drop)
+            self._init_registry()
+            self._init_executor()
+            # Instance-injected tools (E7) — registered BEFORE the
+            # controller so they land in the initial system prompt.
+            for tool_instance in tools or []:
+                self.registry.register_tool(tool_instance)
+                self.executor.register_tool(tool_instance)
+            self._init_plugins()
+            for plugin_instance in plugins or []:
+                self.plugins.register(plugin_instance)
+            self._init_subagents()
+            for subagent_cfg in subagents or []:
+                self.subagent_manager.register(subagent_cfg)
+            self._init_iteration_budget()
+            self._init_output(output_module)  # Before controller - sets _known_outputs
+            # Instance-injected named outputs join before the parser learns
+            # the known-output set.
+            for output_name, extra_output in (outputs or {}).items():
+                self.output_router.named_outputs[output_name] = extra_output
+                self._known_outputs.add(output_name)
+            self._init_skills()  # Before controller so skill index is in prompt
+            self._init_controller()
+            self._init_input(input_module)
+            self._init_user_commands()
+            self._init_triggers()
 
         logger.info(
             "Agent initialized",
