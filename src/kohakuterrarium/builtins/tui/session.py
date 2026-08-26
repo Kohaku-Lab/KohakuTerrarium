@@ -84,6 +84,7 @@ class TUISession(TabModelRegistryMixin):
         # Target-keyed state keeps sibling creature events from replacing the
         # active tab's model and context details.
         self._model_by_target: dict[str, str] = {}
+        self._identity_by_target: dict[str, tuple[str, str, str, str]] = {}
         self._context_by_target: dict[str, tuple[int, int]] = {}
         self._command_hint_watches: set[tuple[str, int]] = set()
         self.command_hint_fallback: dict[str, Any] = {}

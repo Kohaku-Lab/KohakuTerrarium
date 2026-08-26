@@ -54,7 +54,6 @@ class TestCreatureInfoRoundTrip:
             creature_id="cid",
             name="n",
             config_name="config-n",
-            config_ref="@pack/creatures/config-n",
             graph_id="g",
             is_running=True,
             is_privileged=False,

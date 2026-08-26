@@ -135,8 +135,6 @@ class TerrariumAttachAdapter(WSProxyAdapter):
             "source": creature.name,
             "model": agent.config.model,
             "agent_name": creature.name,
-            "config_name": getattr(creature, "config_name", ""),
-            "config_ref": getattr(creature, "config_ref", None),
             "ts": time.time(),
         }
         return {"setup": session_info}

@@ -192,7 +192,7 @@ async def start_creature(
                 session_id=sid,
                 error=str(exc),
             )
-    session_meta = {
+    meta_for(service)[sid] = {
         "name": info.name,
         "config_path": config_path or "",
         "pwd": pwd or "",
@@ -205,13 +205,9 @@ async def start_creature(
         # Cached model metadata keeps remote status readable during brief outages.
         "model": str(getattr(info, "model", "") or ""),
         "llm_name": str(getattr(info, "llm_name", "") or ""),
-        "config_name": str(getattr(info, "config_name", "") or ""),
-        "config_ref": getattr(info, "config_ref", None),
         "is_privileged": bool(getattr(info, "is_privileged", False)),
         "running": bool(getattr(info, "is_running", True)),
     }
-    remote_meta.initialize_remote_roster(session_meta, info)
-    meta_for(service)[sid] = session_meta
     logger.info(
         "Remote creature session started",
         session_id=sid,
@@ -226,8 +222,6 @@ async def start_creature(
             {
                 "creature_id": info.creature_id,
                 "name": info.name,
-                "config_name": getattr(info, "config_name", "") or "",
-                "config_ref": getattr(info, "config_ref", None),
                 "home_node": on_node,
                 "running": info.is_running,
                 "is_privileged": info.is_privileged,
@@ -446,13 +440,12 @@ def list_sessions(service: "TerrariumService") -> list[SessionListing]:
             # Purge metadata once its owning worker leaves membership.
             meta_registry.pop(sid, None)
             continue
-
         out.append(
             SessionListing(
                 session_id=sid,
                 name=meta.get("name", sid),
                 running=True,
-                creatures=remote_meta.remote_creature_count(meta),
+                creatures=1,
                 node_id=meta.get("on_node", "_host"),
             )
         )
@@ -494,31 +487,6 @@ def get_session(service: "TerrariumService", session_id: str) -> Session:
                 config_path=meta.get("config_path", ""),
                 home_node=home,
             )
-        details = meta.get("creature_details")
-        if isinstance(details, list) and details:
-            return Session(
-                session_id=session_id,
-                name=meta.get("name", session_id),
-                creatures=[
-                    {
-                        **detail,
-                        "home_node": home,
-                        "running": True,
-                    }
-                    for detail in details
-                    if isinstance(detail, dict)
-                ],
-                channels=[],
-                has_root=any(
-                    bool(detail.get("is_privileged"))
-                    for detail in details
-                    if isinstance(detail, dict)
-                ),
-                pwd=meta.get("pwd", ""),
-                created_at=meta.get("created_at", ""),
-                config_path=meta.get("config_path", ""),
-                home_node=home,
-            )
         # Older metadata may lack the worker-side creature identity.
         cid = meta.get("creature_id") or session_id
         return Session(
@@ -528,8 +496,6 @@ def get_session(service: "TerrariumService", session_id: str) -> Session:
                 {
                     "creature_id": cid,
                     "name": meta.get("name", ""),
-                    "config_name": meta.get("config_name", ""),
-                    "config_ref": meta.get("config_ref"),
                     "home_node": home,
                     # Model metadata is cached at spawn and model switches.
                     "model": str(meta.get("model", "") or ""),
@@ -805,7 +771,6 @@ async def add_creature(
         graph_id=session_id,
         on_node=on_node,
     )
-    remote_meta.append_remote_creature(meta, info)
     return info.creature_id
 
 
@@ -855,26 +820,11 @@ def list_creatures(service: "TerrariumService", session_id: str) -> list[dict]:
     meta = meta_for(service).get(session_id)
     if meta is not None and meta.get("on_node"):
         home = meta.get("on_node", "_host") or "_host"
-        details = meta.get("creature_details")
-        if isinstance(details, list) and details:
-            return [
-                {
-                    **detail,
-                    "agent_id": detail.get("creature_id"),
-                    "graph_id": session_id,
-                    "running": True,
-                    "home_node": home,
-                }
-                for detail in details
-                if isinstance(detail, dict)
-            ]
         return [
             {
                 "creature_id": meta.get("creature_id") or session_id,
                 "agent_id": meta.get("creature_id") or session_id,
                 "name": meta.get("name", ""),
-                "config_name": meta.get("config_name", ""),
-                "config_ref": meta.get("config_ref"),
                 "graph_id": session_id,
                 "running": bool(meta.get("running", True)),
                 "home_node": home,
@@ -916,8 +866,6 @@ async def remove_creature(
         await service.remove_creature(creature_id)
     except KeyError:
         return False
-    if not remote_meta.remove_remote_creature(meta, creature_id):
-        meta_for(service).pop(session_id, None)
     return True
 
 

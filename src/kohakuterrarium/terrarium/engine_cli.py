@@ -1,12 +1,8 @@
 """Engine TUI launcher.
 
-Mounts the Textual-based TUI on top of a running :class:`Terrarium`
-engine. ``run_engine_with_tui`` is the single entry point shared
-between ``kt run creature.yaml`` (solo creature), ``kt run
-terrarium.yaml`` (recipe), and ``kt resume``. The TUI is uniform
-across all three — there is no creature-vs-terrarium fork at the
-runtime layer. Solo sessions are graphs with one creature; the same
-tab strip + channel-tab plumbing applies.
+Mounts the Textual TUI on a running :class:`Terrarium`. The shared
+``run_engine_with_tui`` entry point serves solo, recipe, and resumed sessions;
+all are graphs using the same tab and channel plumbing.
 
 The TUI tabs are: focus creature first, then every other creature in
 the graph, then one ``#channel`` tab per shared channel. The TUI
@@ -434,11 +430,17 @@ def _agent_model_identifier(agent: Any) -> str:
 
 
 def _seed_tab_models(tui: TUISession, graph_creatures: Iterable[Any]) -> None:
-    """Seed the TUI's per-tab model registry from live agents so every
-    tab shows ITS creature's model before any session_info event."""
+    """Seed per-tab model and identity state from live creatures."""
     for creature in graph_creatures:
         agent = creature.agent
         model = _agent_model_identifier(agent)
+        tui.update_target_identity(
+            creature.creature_id,
+            "",
+            creature.name,
+            getattr(creature, "config_name", ""),
+            getattr(creature, "config_ref", None) or "",
+        )
         if not model:
             continue
         max_ctx = 0

@@ -1680,7 +1680,7 @@ const _chatStoreOptions = {
      * creature — before this map existed, every display surface read
      * the global object, so switching to another creature's tab kept
      * showing the primary's model.
-     * @type {Object<string, {model: string, llmName: string, maxContext: number, compactThreshold: number}>}
+     * @type {Object<string, {model: string, llmName: string, configName: string, configRef: string, maxContext: number, compactThreshold: number}>}
      */
     modelByTab: {},
     /** Real creature name behind the ``root`` tab alias (recipe
@@ -1872,15 +1872,20 @@ const _chatStoreOptions = {
      * session-level (primary creature) values when the per-tab entry
      * hasn't been populated yet. Numeric fields treat 0 as unknown.
      */
-    activeModelInfo(state) {
+    activeCreatureInfo(state) {
       const tab = state.activeTab
       const info = (tab && state.modelByTab[tab]) || {}
       return {
         model: info.model || state.sessionInfo.model || "",
         llmName: info.llmName || state.sessionInfo.llmName || "",
+        configName: info.configName || state.sessionInfo.configName || "",
+        configRef: info.configRef || state.sessionInfo.configRef || "",
         maxContext: info.maxContext || state.sessionInfo.maxContext || 0,
         compactThreshold: info.compactThreshold || state.sessionInfo.compactThreshold || 0,
       }
+    },
+    activeModelInfo() {
+      return this.activeCreatureInfo
     },
     /**
      * Canonical display form of the ACTIVE tab's model, preferring the
@@ -2027,6 +2032,8 @@ const _chatStoreOptions = {
         const info = {
           model: c.model || "",
           llmName: c.llm_name || c.model || "",
+          configName: c.config_name || "",
+          configRef: c.config_ref || "",
           maxContext: c.max_context || 0,
           compactThreshold: c.compact_threshold || 0,
         }
@@ -3019,6 +3026,8 @@ const _chatStoreOptions = {
         const info = {}
         if (data.model) info.model = data.model
         if (data.llm_name) info.llmName = data.llm_name
+        if (data.config_name) info.configName = data.config_name
+        if (data.config_ref) info.configRef = data.config_ref
         if (data.max_context != null) info.maxContext = data.max_context
         if (data.compact_threshold != null) info.compactThreshold = data.compact_threshold
         const tab = source || data.agent_name || ""
