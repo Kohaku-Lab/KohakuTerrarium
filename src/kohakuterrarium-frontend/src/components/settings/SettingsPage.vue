@@ -874,9 +874,6 @@ async function handleSetDefault(preset) {
     await settingsAPI.setDefaultModel(preset.name)
     ElMessage.success(t("settings.models.defaultSet", { name: preset.name }))
     await loadPresets()
-    // Refresh the editor's bound preset so the badge flips.
-    const refreshed = (presets.value || []).find((p) => p.name === preset.name && p.provider === preset.provider)
-    if (refreshed) editorPreset.value = refreshed
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || t("settings.models.defaultSetFailed"))
   }
