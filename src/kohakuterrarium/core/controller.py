@@ -4,7 +4,7 @@ import asyncio
 import base64
 import re
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, AsyncIterator
 
@@ -642,6 +642,8 @@ class Controller:
             tool = ReadTool()
         if self.executor:
             context = self.executor._build_tool_context()
+            if temp_path:
+                context = replace(context, path_guard=None)
         else:
             return [
                 TextPart(

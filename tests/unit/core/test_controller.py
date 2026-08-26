@@ -22,12 +22,13 @@ from kohakuterrarium.core.events import (
 )
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.core.registry import Registry
-from kohakuterrarium.llm.message import ImagePart
+from kohakuterrarium.llm.message import FilePart, ImagePart
 from kohakuterrarium.parsing.events import (
     TextEvent,
 )
 from kohakuterrarium.testing.agent import TestAgentBuilder
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+from kohakuterrarium.utils.file_guard import PathBoundaryGuard
 
 # ── _merge_text_and_parts ────────────────────────────────────────
 
@@ -713,21 +714,33 @@ class TestResolveFilePart:
         joined = " ".join(getattr(p, "text", "") for p in out)
         assert "File read failed" in joined or "missing" in joined.lower()
 
-    async def test_inline_base64_materialised_to_temp(self):
+    async def test_inline_base64_bypasses_guard_only_for_owned_temp(self, tmp_path):
         import base64
 
-        from kohakuterrarium.llm.message import FilePart
-
         env = TestAgentBuilder().with_llm_script(["x"]).build()
+        guard = PathBoundaryGuard(
+            env.executor._build_tool_context().working_dir, mode="warn"
+        )
+        env.executor._path_guard = guard
         part = FilePart(
             name="x.txt",
             data_base64=base64.b64encode(b"hello world").decode(),
             is_inline=True,
         )
         out = await env.controller._resolve_file_part(part)
-        # The inline file part is materialised then read back through
-        # ReadTool — the resolved output is a non-empty parts list.
-        assert out
+        joined = " ".join(getattr(p, "text", "") for p in out)
+        assert "hello world" in joined
+        assert guard._warned_paths == set()
+        assert env.executor._build_tool_context().path_guard is guard
+
+        unrelated = tmp_path / "outside.txt"
+        unrelated.write_text("must stay guarded")
+        blocked = await env.controller._resolve_file_part(
+            FilePart(name="outside.txt", path=str(unrelated))
+        )
+        blocked_text = " ".join(getattr(p, "text", "") for p in blocked)
+        assert "outside the working directory" in blocked_text
+        assert str(unrelated.resolve()) in guard._warned_paths
 
 
 # ── _resolve_message_files multiple files + dispatch ─────────────

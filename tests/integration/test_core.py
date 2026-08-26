@@ -1680,6 +1680,53 @@ class TestCoreIntegration:
             )
             assert "inline-file-marker" in joined_file_call
 
+            # A browser-style inline image attachment is controller-owned:
+            # it is materialized outside the workspace, read once through
+            # the normal ReadTool validation path, and delivered as an image
+            # without weakening the agent's shared path guard.
+            png_b64 = (
+                "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8"
+                "AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+            )
+            image_file_llm = ScriptedLLM(
+                [ScriptEntry("saw inline png", match="inspect-inline-png")]
+            )
+            agent.llm = image_file_llm
+            agent.controller.llm = image_file_llm
+            await agent.inject_input(
+                [
+                    TextPart(text="inspect-inline-png"),
+                    FilePart(
+                        name="pixel.png",
+                        mime="image/png",
+                        data_base64=png_b64,
+                        is_inline=True,
+                    ),
+                ],
+                source="chat",
+            )
+            assert image_file_llm.call_count == 1
+            assert "saw inline png" in _assistant_text(agent)
+            image_user_message = [
+                message
+                for message in image_file_llm.call_log[-1]
+                if message.get("role") == "user"
+            ][-1]
+            image_call_parts = [
+                part for part in image_user_message["content"] if isinstance(part, dict)
+            ]
+            assert any(
+                part.get("type") == "image_url"
+                and part.get("image_url", {})
+                .get("url", "")
+                .startswith("data:image/png;base64,")
+                for part in image_call_parts
+            ), image_call_parts
+            assert not any(
+                "File read failed" in str(part.get("text", ""))
+                for part in image_call_parts
+            )
+
             # --- run_event: correlated custom-event ingress (Phase E) ---
             # ``Agent.run_event`` drives a pre-built TriggerEvent (a Drive
             # delivery shape) and returns a correlated TurnResult whose
