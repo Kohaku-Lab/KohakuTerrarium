@@ -14,18 +14,12 @@ import asyncio
 import os
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
-import kohakuterrarium.terrarium.channels as _channels
-import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.cli.picker import pick_runnable
 from kohakuterrarium.packages.resolve import resolve_any_path
-from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.identity import drive_settings as _drive_settings
-from kohakuterrarium.terrarium.config import load_terrarium_config
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
-from kohakuterrarium.terrarium.engine_rich_cli import run_engine_with_rich_cli
+from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
@@ -33,8 +27,13 @@ from kohakuterrarium.utils.logging import (
     get_logger,
     set_level,
 )
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
+
+if TYPE_CHECKING:
+    from kohakuterrarium.session.store import SessionStore
+    from kohakuterrarium.terrarium.engine import Terrarium
 
 _SESSION_DIR = Path.home() / ".kohakuterrarium" / "sessions"
 
@@ -186,13 +185,22 @@ async def _run(
     extra_creatures: list[str],
     extra_channels: list[str],
 ) -> int:
+    from kohakuterrarium.session.store import SessionStore
+    from kohakuterrarium.studio.identity import drive_settings
+    from kohakuterrarium.terrarium.config import load_terrarium_config
+    from kohakuterrarium.terrarium.engine import Terrarium
+
+    register_group_hooks()
     pwd = str(Path.cwd())
     is_recipe = _looks_like_recipe(agent_path)
 
     # Resolve node-local Drive settings once; absent or disabled settings keep
     # the engine Drive-free.
-    drive_kwargs = _drive_settings.resolve_drive_kwargs()
+    drive_kwargs = drive_settings.resolve_drive_kwargs()
+    surface = io_mode or "configured"
+    mark_startup("engine_create_begin", surface=surface)
     async with Terrarium(pwd=pwd, **drive_kwargs) as engine:
+        mark_startup("engine_entered", surface=surface)
         store: SessionStore | None = None
         focus_creature_id = ""
 
@@ -226,6 +234,12 @@ async def _run(
             )
             focus_creature_id = creature.creature_id
             graph_id = creature.graph_id
+            mark_startup(
+                "creature_added",
+                surface=surface,
+                creature_id=focus_creature_id,
+                graph_id=graph_id,
+            )
             if session is not None:
                 store = await _attach_session_store(
                     engine,
@@ -246,8 +260,24 @@ async def _run(
 
         try:
             if io_mode == "cli":
+                from kohakuterrarium.terrarium.engine_rich_cli import (
+                    run_engine_with_rich_cli,
+                )
+
+                mark_startup(
+                    "surface_run_begin",
+                    surface="cli",
+                    creature_id=focus_creature_id,
+                )
                 await run_engine_with_rich_cli(engine, focus_creature_id, store)
             elif io_mode == "tui":
+                from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
+
+                mark_startup(
+                    "surface_run_begin",
+                    surface="tui",
+                    creature_id=focus_creature_id,
+                )
                 await run_engine_with_tui(engine, focus_creature_id, store)
             else:
                 # Configured I/O owns the lifecycle; keep the event loop alive
@@ -270,7 +300,7 @@ async def _run(
 
 
 async def _apply_cli_topology(
-    engine: Terrarium,
+    engine: "Terrarium",
     *,
     graph_id: str,
     pwd: str,
@@ -289,6 +319,9 @@ async def _apply_cli_topology(
     """
     if not extra_creatures and not extra_channels:
         return
+    import kohakuterrarium.terrarium.channels as channels
+    import kohakuterrarium.terrarium.topology as topology
+
     for cfg_path in extra_creatures:
         try:
             await engine.add_creature(
@@ -319,13 +352,13 @@ async def _apply_cli_topology(
         graph = engine.get_graph(graph_id)
         for cid in sorted(graph.creature_ids):
             try:
-                _topo.set_listen(engine._topology, cid, ch_name, listening=True)
-                _topo.set_send(engine._topology, cid, ch_name, sending=True)
+                topology.set_listen(engine._topology, cid, ch_name, listening=True)
+                topology.set_send(engine._topology, cid, ch_name, sending=True)
                 creature = engine.get_creature(cid)
                 env = engine._environments.get(graph_id)
                 if env is None:
                     continue
-                _channels.inject_channel_trigger(
+                channels.inject_channel_trigger(
                     creature.agent,
                     subscriber_id=creature.name,
                     channel_name=ch_name,
@@ -366,7 +399,7 @@ def _looks_like_recipe(path: str) -> bool:
     return False
 
 
-def _pick_focus_creature(engine: Terrarium, graph_id: str) -> str:
+def _pick_focus_creature(engine: "Terrarium", graph_id: str) -> str:
     """Return the creature_id the TUI should focus on.
 
     Preference order: the privileged root (recipe-declared), the first
@@ -392,13 +425,13 @@ def _pick_focus_creature(engine: Terrarium, graph_id: str) -> str:
 
 
 async def _attach_session_store(
-    engine: Terrarium,
+    engine: "Terrarium",
     *,
     graph_id: str,
     session: str,
     config_path: str,
     config_type: str,
-) -> SessionStore:
+) -> "SessionStore":
     """Attach a session store to ``graph_id`` and return it.
 
     ``config_type`` is written after attachment because graph shape alone
@@ -505,6 +538,8 @@ def _session_preview(path: Path) -> str:
     try:
         # Read-only: a plain open+close here used to bump last_active,
         # corrupting the recency ordering the resume picker sorts by.
+        from kohakuterrarium.session.store import SessionStore
+
         store = SessionStore.open_readonly(path)
         meta = store.load_meta()
         config_type = meta.get("config_type", "?")

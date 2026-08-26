@@ -29,6 +29,7 @@ from kohakuterrarium.core.environment import Environment
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.core.turn import AgentEventStream, TurnResult
 from kohakuterrarium.llm.profiles import _login_provider_for
+from kohakuterrarium.packages.walk import package_snapshot
 from kohakuterrarium.terrarium.config import CreatureConfig
 from kohakuterrarium.terrarium.creature_ids import _safe_creature_id
 from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
@@ -790,6 +791,34 @@ def build_creature(
     """
     if io not in ("config", "none", "headless"):
         raise ValueError(f"io= must be 'config', 'none', or 'headless' — got {io!r}")
+    with package_snapshot():
+        return _build_creature_from_config(
+            config,
+            creature_id=creature_id,
+            graph_id=graph_id,
+            pwd=pwd,
+            llm=llm,
+            environment=environment,
+            io=io,
+            strict=strict,
+            tools=tools,
+            plugins=plugins,
+        )
+
+
+def _build_creature_from_config(
+    config: CreatureBuildInput,
+    *,
+    creature_id: str | None,
+    graph_id: str,
+    pwd: str | None,
+    llm: Any,
+    environment: Environment | None,
+    io: str,
+    strict: bool,
+    tools: list[Any] | None,
+    plugins: list[Any] | None,
+) -> Creature:
     _io_override = NoneInput() if io in ("none", "headless") else None
     _out_override = NoneOutput() if io == "headless" else None
     if isinstance(config, (str, Path)):

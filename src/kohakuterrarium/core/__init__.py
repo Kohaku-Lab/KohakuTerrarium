@@ -1,93 +1,51 @@
-"""
-Core module: fundamental abstractions and runtime components.
+"""Core agent abstractions and runtime components public facade."""
 
-Exports the main building blocks for constructing and running agents.
-"""
+import importlib
 
-from kohakuterrarium.core.config import (
-    AgentConfig,
-    InputConfig,
-    OutputConfig,
-    ToolConfigItem,
-    TriggerConfig,
-    load_agent_config,
-)
-from kohakuterrarium.core.controller import (
-    Controller,
-    ControllerConfig,
-    ControllerContext,
-)
-from kohakuterrarium.core.conversation import Conversation, ConversationConfig
-from kohakuterrarium.core.environment import Environment
-from kohakuterrarium.core.events import (
-    EventType,
-    TriggerEvent,
-    create_error_event,
-    create_tool_complete_event,
-    create_user_input_event,
-)
-from kohakuterrarium.core.executor import Executor
-from kohakuterrarium.core.job import (
-    JobResult,
-    JobState,
-    JobStatus,
-    JobStore,
-    JobType,
-    generate_job_id,
-)
-from kohakuterrarium.core.loader import (
-    ModuleLoader,
-    ModuleLoadError,
-    load_custom_module,
-)
-from kohakuterrarium.core.registry import Registry
+_EXPORTS = {
+    "Agent": "kohakuterrarium.core.agent",
+    "AgentConfig": "kohakuterrarium.core.config",
+    "Controller": "kohakuterrarium.core.controller",
+    "ControllerConfig": "kohakuterrarium.core.controller",
+    "ControllerContext": "kohakuterrarium.core.controller",
+    "Conversation": "kohakuterrarium.core.conversation",
+    "ConversationConfig": "kohakuterrarium.core.conversation",
+    "Environment": "kohakuterrarium.core.environment",
+    "EventType": "kohakuterrarium.core.events",
+    "Executor": "kohakuterrarium.core.executor",
+    "InputConfig": "kohakuterrarium.core.config",
+    "JobResult": "kohakuterrarium.core.job",
+    "JobState": "kohakuterrarium.core.job",
+    "JobStatus": "kohakuterrarium.core.job",
+    "JobStore": "kohakuterrarium.core.job",
+    "JobType": "kohakuterrarium.core.job",
+    "ModuleLoadError": "kohakuterrarium.core.loader",
+    "ModuleLoader": "kohakuterrarium.core.loader",
+    "OutputConfig": "kohakuterrarium.core.config",
+    "Registry": "kohakuterrarium.core.registry",
+    "ToolConfigItem": "kohakuterrarium.core.config",
+    "TriggerConfig": "kohakuterrarium.core.config",
+    "TriggerEvent": "kohakuterrarium.core.events",
+    "create_error_event": "kohakuterrarium.core.events",
+    "create_tool_complete_event": "kohakuterrarium.core.events",
+    "create_user_input_event": "kohakuterrarium.core.events",
+    "generate_job_id": "kohakuterrarium.core.job",
+    "load_agent_config": "kohakuterrarium.core.config",
+    "load_custom_module": "kohakuterrarium.core.loader",
+    "run_agent": "kohakuterrarium.core.agent",
+}
 
-__all__ = [
-    "Agent",
-    "run_agent",
-    "Environment",
-    "AgentConfig",
-    "InputConfig",
-    "OutputConfig",
-    "ToolConfigItem",
-    "TriggerConfig",
-    "load_agent_config",
-    "TriggerEvent",
-    "EventType",
-    "create_user_input_event",
-    "create_tool_complete_event",
-    "create_error_event",
-    "Conversation",
-    "ConversationConfig",
-    "Controller",
-    "ControllerConfig",
-    "ControllerContext",
-    "Executor",
-    "JobStatus",
-    "JobResult",
-    "JobState",
-    "JobType",
-    "JobStore",
-    "generate_job_id",
-    "Registry",
-    "ModuleLoader",
-    "ModuleLoadError",
-    "load_custom_module",
-]
+__all__ = list(_EXPORTS)
 
 
 def __getattr__(name: str):
-    """Resolve the lazily exported ``Agent`` and ``run_agent`` attributes.
+    module_path = _EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module_path), name)
+    globals()[name] = value
+    return value
 
-    ``builtins.inputs.cli`` imports ``core.events`` via ``core.__init__``;
-    eagerly importing ``core.agent`` here would pull in ``bootstrap.io`` which
-    imports ``builtins.inputs`` while it is still initialising. Module-level
-    ``__getattr__`` is the deliberate exception to the local-import audit.
-    """
-    if name in ("Agent", "run_agent"):
-        from kohakuterrarium.core.agent import Agent, run_agent
 
-        globals()["Agent"] = Agent
-        globals()["run_agent"] = run_agent
-        return Agent if name == "Agent" else run_agent
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORTS))

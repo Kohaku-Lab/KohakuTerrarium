@@ -8,9 +8,8 @@ the caller (``resolve_then_run``) before we get here.
 """
 
 from kohakuterrarium.cli.select import enumerate_runnables
-from kohakuterrarium.cli.select_cli import run_cli_picker
-from kohakuterrarium.cli.select_tui import run_tui_picker
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
 
@@ -22,6 +21,12 @@ def pick_runnable(io_mode: str) -> str | None:
     or ``None`` when the catalog is empty or the user cancelled.
     """
     groups = enumerate_runnables()
+    mark_startup(
+        "picker_catalog_scanned",
+        surface=io_mode,
+        groups=len(groups),
+        entries=sum(len(group.items()) for group in groups),
+    )
     if not groups:
         print(
             "No creatures or terrariums found.\n"
@@ -30,5 +35,9 @@ def pick_runnable(io_mode: str) -> str | None:
         )
         return None
     if io_mode == "tui":
+        from kohakuterrarium.cli.select_tui import run_tui_picker
+
         return run_tui_picker(groups)
+    from kohakuterrarium.cli.select_cli import run_cli_picker
+
     return run_cli_picker(groups)

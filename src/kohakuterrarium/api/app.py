@@ -1,7 +1,10 @@
 """FastAPI application factory."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from functools import partial
 from pathlib import Path
@@ -28,28 +31,15 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationNotFoundError,
     DriveTransitionError,
 )
-from kohakuterrarium.laboratory import HostConfig
 from kohakuterrarium.laboratory._internal.client import (
     RequestAbortedError,
     RequestTimeoutError,
 )
-from kohakuterrarium.laboratory._internal.host import HostEngine
 from kohakuterrarium.laboratory._internal.membership import MembershipEvent
-from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
-from kohakuterrarium.laboratory.adapters import (
-    StudioCatalogAdapter,
-    StudioIdentityAdapter,
-    TerrariumBroadcastAdapter,
-    TerrariumOutputWireAdapter,
-)
 from kohakuterrarium.serving.process_metrics import get_aggregator
-from kohakuterrarium.session.sync import SessionMirrorWriter
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
-from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
-from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
-from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.multi_node_channels import cluster_members_for
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
 
@@ -167,6 +157,21 @@ async def lifespan(app: FastAPI):
     mirror_writer = None
 
     if lab_mode == "lab-host":
+        from kohakuterrarium.laboratory import HostConfig
+        from kohakuterrarium.laboratory._internal.host import HostEngine
+        from kohakuterrarium.laboratory._internal.transport_ws import WebSocketTransport
+        from kohakuterrarium.laboratory.adapters import (
+            StudioCatalogAdapter,
+            StudioIdentityAdapter,
+            TerrariumBroadcastAdapter,
+            TerrariumOutputWireAdapter,
+        )
+        from kohakuterrarium.session.sync import SessionMirrorWriter
+        from kohakuterrarium.studio.sessions.registry import get_session_meta
+        from kohakuterrarium.terrarium import MultiNodeTerrariumService, Terrarium
+        from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+        from kohakuterrarium.terrarium.multi_node_channels import cluster_members_for
+
         # Initialize shared mutable state before request tasks begin, avoiding
         # concurrent first-write handling in the lab-clients route.
         if not hasattr(app.state, "lab_blocklist"):
@@ -235,6 +240,10 @@ async def lifespan(app: FastAPI):
     # Only standalone mode has a local agent engine that can consume this prompt.
     if multi_node_service is None:
         get_engine()._runtime_prompt.attach()
+    mark_startup(
+        "api_lifespan_ready",
+        surface=os.environ.get("KT_STARTUP_SURFACE", "web"),
+    )
     try:
         yield
     finally:

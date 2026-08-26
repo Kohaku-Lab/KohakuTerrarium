@@ -14,7 +14,6 @@ from kohakuterrarium.bootstrap.tools import init_tools
 from kohakuterrarium.bootstrap.triggers import init_triggers
 from kohakuterrarium.builtins.plugin_catalog import resolve_plugin_specs
 from kohakuterrarium.builtins.tool_catalog import get_builtin_tool
-from kohakuterrarium.builtins.tools.skill import SkillTool
 from kohakuterrarium.builtins.user_commands import (
     get_builtin_user_command,
     list_builtin_user_commands,
@@ -406,6 +405,8 @@ class AgentInitMixin:
         tool = get_builtin_tool("skill")
         if tool is None:
             try:
+                from kohakuterrarium.builtins.tools.skill import SkillTool
+
                 tool = SkillTool()
             except Exception as exc:
                 logger.warning(

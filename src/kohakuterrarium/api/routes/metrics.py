@@ -16,10 +16,15 @@ from fastapi import APIRouter, Depends
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.serving.process_metrics import get_aggregator
 from kohakuterrarium.studio._runtime import host_engine_or_none
-from kohakuterrarium.studio.sessions import lifecycle as sessions_lifecycle
 from kohakuterrarium.terrarium.service import TerrariumService
 
 router = APIRouter()
+
+
+def _session_lifecycle():
+    from kohakuterrarium.studio.sessions import lifecycle
+
+    return lifecycle
 
 
 @router.get("/snapshot")
@@ -46,6 +51,7 @@ def _build_gauges(service: TerrariumService) -> dict[str, int]:
     host-local creatures, so the MCP gauge is zero when the service has no host
     engine.
     """
+    sessions_lifecycle = _session_lifecycle()
     sessions = list(sessions_lifecycle.list_sessions(service))
     creatures_running = sum(1 for s in sessions if s.creatures <= 1)
     terrariums_running = sum(1 for s in sessions if s.creatures > 1)

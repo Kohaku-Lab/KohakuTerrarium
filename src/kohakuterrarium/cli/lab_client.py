@@ -44,6 +44,7 @@ from kohakuterrarium.llm.codex_auth import (
     clear_codex_resolver,
     register_codex_resolver,
 )
+from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.utils.logging import (
@@ -197,6 +198,7 @@ async def _run_worker(args: argparse.Namespace) -> None:
     )
     # Drive settings are node-local; invalid or disabled settings resolve to a
     # Drive-disabled engine rather than preventing worker startup.
+    register_group_hooks()
     drive_kwargs = _drive_settings.resolve_drive_kwargs()
     engine = Terrarium(**drive_kwargs)
     # The runtime adapter needs the attacher at construction time so newly

@@ -25,6 +25,28 @@ def _creature(*, name="alice", agent=None, **kw):
 # ── build_creature: llm= instance injection (E5) ───────────────
 
 
+def test_build_creature_reuses_one_package_snapshot(tmp_path, monkeypatch):
+    from kohakuterrarium.packages import walk
+
+    (tmp_path / "config.yaml").write_text(
+        "name: scripted\ninput:\n  type: none\noutput:\n  type: stdout\n",
+        encoding="utf-8",
+    )
+    calls = 0
+    original = walk._list_packages_uncached
+
+    def counted():
+        nonlocal calls
+        calls += 1
+        return original()
+
+    monkeypatch.setattr(walk, "_list_packages_uncached", counted)
+
+    build_creature(str(tmp_path), llm=ScriptedLLM(["hi"]), io="none")
+
+    assert calls == 1
+
+
 class TestBuildCreatureLLMInjection:
     def test_provider_instance_flows_to_agent(self, tmp_path):
         # ``engine.add_creature(path, llm=ScriptedLLM(...))`` must bind

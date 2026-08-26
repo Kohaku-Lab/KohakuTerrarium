@@ -43,6 +43,25 @@ class TestSessionDirResolution:
 
 
 class TestGetOrCreate:
+    def test_imports_terrarium_only_when_creating_engine(self, fresh_dirs, monkeypatch):
+        import kohakuterrarium
+
+        created = []
+
+        class _Terrarium:
+            def __init__(self, **kwargs):
+                created.append(kwargs)
+
+        monkeypatch.setattr(kohakuterrarium, "Terrarium", _Terrarium)
+        pool = EnginePool(max_active=1, idle_timeout_s=0)
+
+        engine = pool.get_or_create(7)
+
+        assert isinstance(engine, _Terrarium)
+        assert created == [
+            {"session_dir": str(fresh_dirs / "users" / "7" / "sessions")}
+        ]
+
     def test_same_user_returns_same_engine(self, fresh_dirs):
         pool = EnginePool(max_active=4, idle_timeout_s=0)
         e1 = pool.get_or_create(1)

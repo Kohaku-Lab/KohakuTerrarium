@@ -1,13 +1,15 @@
 # cli/
 
-`kt` command dispatcher. One handler file per subcommand, with
-`cli/__init__.py:main()` as the single argparse + dispatch entry point.
+`kt` command dispatcher. One handler file per subcommand, with a lightweight
+`cli/__init__.py:main()` for common startup paths and `_main.py` for the full
+argparse command catalog.
 
 ## Files
 
 | File            | Subcommand(s)                                                                                                           |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`    | `main()`: argparse setup, `COMMANDS` dispatch table (+ `_aliases.py`, `_config_layers.py`, `_aio_entrypoint.py`)        |
+| `__init__.py`    | Lightweight `main()` dispatch for version, desktop, web, CLI, and TUI startup paths                                      |
+| `_main.py`       | Full argparse setup and `COMMANDS` dispatch table for the complete command catalog                                      |
 | `run.py`         | `kt run`: launch a creature or recipe through the Terrarium engine (rich CLI / TUI modes)                               |
 | `resume.py`      | `kt resume`: resume an agent or terrarium from a `.kohakutr` session file                                               |
 | `doctor.py`      | `kt doctor`: pre-flight environment + config validation (wraps `kohakuterrarium.validate`)                              |
@@ -32,7 +34,7 @@ The top-level `kt run` entry point invokes `cli/__init__.py:main()` via the
 
 Imported only as the process entry point. Imports nearly everything it
 drives: `terrarium/engine` (+ `engine_cli` / `engine_rich_cli`),
-`serving/web` (web + desktop), `session/resume`, `session/store`, `llm/*`,
+`serving/web`, `serving/desktop`, `session/resume`, `session/store`, `llm/*`,
 `packages/`, `builtins/cli_rich`, `utils/logging`.
 
 Nothing inside the framework imports `cli/`; it is the top of the graph.
@@ -47,8 +49,9 @@ Nothing inside the framework imports `cli/`; it is the top of the graph.
 
 ## Notes
 
-- `web` and `app` commands delegate to `serving/web.py:run_web_server` /
-  `run_desktop_app` (Briefcase and pywebview integration).
+- `web` delegates to `serving/web.py:run_web_server`; `app` and no-argument
+  startup delegate to `serving/desktop.py:launch_desktop_app`, which displays a
+  lightweight pywebview loading shell before the server graph is imported.
 - `__run-server` is a hidden internal subcommand used by `kt serve start`
   to spawn the detached worker process with the right environment.
 - `_dispatch_*` helpers in `__init__.py` exist only to adapt between the
