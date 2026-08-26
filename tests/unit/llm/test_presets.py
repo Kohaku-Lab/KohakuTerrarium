@@ -183,9 +183,30 @@ class TestPresetsDataIntegrity:
 
     def test_codex_presets_use_codex_provider(self):
         # the headline ChatGPT-subscription presets bind to the codex provider
+        assert PRESETS["gpt-5.3-codex-spark"]["provider"] == "codex"
         assert PRESETS["gpt-5.4"]["provider"] == "codex"
         assert PRESETS["gpt-5.5"]["provider"] == "codex"
         assert PRESETS["gpt-5.6-sol"]["provider"] == "codex"
+
+    def test_codex_spark_uses_subscription_catalog_defaults(self):
+        preset = PRESETS["gpt-5.3-codex-spark"]
+        assert preset["model"] == "gpt-5.3-codex-spark"
+        assert preset["max_context"] == 128000
+        assert preset["max_output"] == 65536
+        assert preset["reasoning_effort"] == "high"
+        assert set(preset["variation_groups"]["reasoning"]) == {
+            "low",
+            "medium",
+            "high",
+            "xhigh",
+        }
+        assert "service_tier" not in preset
+        assert "websocket_mode" not in preset.get("extra_body", {})
+
+        all_presets = get_all_presets()
+        assert ("codex", "gpt-5.3-codex-spark") in all_presets
+        assert ("openai", "gpt-5.3-codex-spark") not in all_presets
+        assert ("openrouter", "gpt-5.3-codex-spark") not in all_presets
 
     def test_gpt56_effort_scales_top_out_at_max(self):
         # ``ultra`` is deliberately not exposed on any GPT-5.6 variant:

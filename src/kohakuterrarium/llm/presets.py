@@ -54,6 +54,16 @@ PRESETS: dict[str, dict[str, Any]] = {
     #  fast mode (priority tier). The Codex/GPT lines merged at
     #  5.4 — there is no separate ``-codex`` model anymore.
     # ═══════════════════════════════════════════════════════
+    "gpt-5.3-codex-spark": {
+        "provider": "codex",
+        "model": "gpt-5.3-codex-spark",
+        # Subscription-only research preview metadata from Codex's model catalog.
+        "max_context": 128000,
+        # Codex OAuth currently lets the backend choose the actual output cap.
+        "max_output": 65536,
+        "reasoning_effort": "high",
+        "variation_groups": {"reasoning": _CODEX_REASONING_GROUP},
+    },
     "gpt-5.6-sol": {
         "provider": "codex",
         "model": "gpt-5.6-sol",
