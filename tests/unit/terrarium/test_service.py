@@ -73,12 +73,9 @@ class TestCreatureToInfo:
         try:
             engine_creature = svc.engine.get_creature("alice")
             engine_creature.name = "display-alice"
-            engine_creature.config_name = "alice-config"
-            engine_creature.config_ref = "@pack/creatures/alice"
             info = creature_to_info(engine_creature)
             assert info.name == "display-alice"
-            assert info.config_name == "alice-config"
-            assert info.config_ref == "@pack/creatures/alice"
+            assert info.config_name == "alice"
         finally:
             await svc.shutdown()
 

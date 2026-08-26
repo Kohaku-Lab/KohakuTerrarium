@@ -121,8 +121,8 @@ const activeLabel = computed(() => allTabs.value.find((tab) => tab.id === active
 const selectedModel = ref("")
 const availableModels = ref([])
 
-const configLabel = computed(() => chat.sessionInfo.configName || props.instance?.creature_config_name || props.instance?.creatures?.[0]?.config_name || chat.sessionInfo.agentName || props.instance?.config_name || props.instance?.creatures?.[0]?.name || "--")
-const configRef = computed(() => chat.sessionInfo.configRef || props.instance?.config_ref || props.instance?.creatures?.[0]?.config_ref || "")
+const configLabel = computed(() => chat.activeCreatureInfo.configName || props.instance?.creature_config_name || props.instance?.creatures?.[0]?.config_name || chat.sessionInfo.agentName || props.instance?.config_name || props.instance?.creatures?.[0]?.name || "--")
+const configRef = computed(() => chat.activeCreatureInfo.configRef || props.instance?.config_ref || props.instance?.creatures?.[0]?.config_ref || "")
 const modelLabel = computed(() => chat.modelDisplay || props.instance?.llm_name || props.instance?.model || "--")
 const sessionIdLabel = computed(() => chat.sessionInfo.sessionId || props.instance?.session_id || props.instance?.id || "--")
 

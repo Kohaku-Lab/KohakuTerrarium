@@ -2510,6 +2510,25 @@ describe("chat store — per-creature model info", () => {
     expect(chat.activeModelInfo.maxContext).toBe(200000)
   })
 
+  it("keeps config identity with the active creature tab", () => {
+    const chat = useChatStore()
+    chat.tabs = ["alice", "bob"]
+    chat.activeTab = "alice"
+    chat.sessionInfo.configName = "alice-config"
+    chat.sessionInfo.configRef = "creatures/alice.yaml"
+
+    chat._handleActivity("bob", {
+      activity_type: "session_info",
+      config_name: "bob-config",
+      config_ref: "creatures/bob.yaml",
+    })
+
+    expect(chat.activeCreatureInfo.configName).toBe("alice-config")
+    chat.activeTab = "bob"
+    expect(chat.activeCreatureInfo.configName).toBe("bob-config")
+    expect(chat.activeCreatureInfo.configRef).toBe("creatures/bob.yaml")
+  })
+
   it("session_info from the primary creature updates the global fallback", () => {
     const chat = useChatStore()
     chat.tabs = ["alice", "bob"]

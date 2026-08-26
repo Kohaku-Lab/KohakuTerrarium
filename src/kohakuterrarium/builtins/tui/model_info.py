@@ -21,6 +21,7 @@ class TabModelRegistryMixin:
     _app: Any
     _terrarium_tabs: list[str] | None
     _model_by_target: dict[str, str]
+    _identity_by_target: dict[str, tuple[str, str, str, str]]
     _context_by_target: dict[str, tuple[int, int]]
     _command_hint_watches: set[tuple[str, int]]
     command_hint_fallback: dict[str, Any]
@@ -99,8 +100,26 @@ class TabModelRegistryMixin:
             if max_context:
                 self.set_context_limits(max_context, compact_threshold)
 
+    def update_target_identity(
+        self,
+        target: str,
+        session_id: str,
+        agent_name: str,
+        config_name: str,
+        config_ref: str,
+    ) -> None:
+        """Record the runtime and config identities for one creature tab."""
+        if target:
+            previous = self._identity_by_target.get(target, ("", "", "", ""))
+            self._identity_by_target[target] = (
+                session_id or previous[0],
+                agent_name or previous[1],
+                config_name or previous[2],
+                config_ref or previous[3],
+            )
+
     def refresh_model_for_tab(self, tab: str) -> None:
-        """Render a tab's cached model or resolve and cache it from the live agent."""
+        """Render a tab's cached model, limits, and configuration identity."""
         if not tab or tab.startswith("#"):
             return
         model = self._model_by_target.get(tab, "")
@@ -114,7 +133,13 @@ class TabModelRegistryMixin:
                     model = ""
             if model:
                 self._model_by_target[tab] = model
-        if model:
+        identity = self._identity_by_target.get(tab)
+        if identity:
+            session_id, agent_name, config_name, config_ref = identity
+            self.update_session_info(
+                session_id, model, agent_name, config_name, config_ref
+            )
+        elif model:
             self._set_model_line(model)
         limits = self._context_by_target.get(tab)
         if limits:
@@ -151,6 +176,16 @@ def handle_session_info(tui: Any, output: Any, metadata: dict) -> None:
         # In engine mode, model details are isolated by creature tab.
         target = getattr(output, "_default_target", "") or ""
         tui.update_target_model(target, model, max_context or 0, compact_threshold or 0)
+        tui.update_target_identity(
+            target, session_id, agent_name, config_name, config_ref
+        )
+        if target == tui.get_active_tab():
+            identity = tui._identity_by_target.get(target, ("", "", "", ""))
+            tui.update_session_info(
+                identity[0],
+                model or tui._model_by_target.get(target, ""),
+                *identity[1:],
+            )
         return
     tui.update_session_info(session_id, model, agent_name, config_name, config_ref)
     if max_context:

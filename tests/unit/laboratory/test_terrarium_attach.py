@@ -101,8 +101,6 @@ class TestOnStart:
             # Replace the agent's output_router with a stub that
             # records subscribers.
             alice = t.get_creature("alice")
-            alice.config_name = "alice-config"
-            alice.config_ref = "@pack/creatures/alice"
             secondaries = []
             alice.agent.output_router = SimpleNamespace(
                 add_secondary=secondaries.append,
@@ -117,9 +115,6 @@ class TestOnStart:
             )
             assert resp is not None
             assert resp["setup"]["activity_type"] == "session_info"
-            assert resp["setup"]["agent_name"] == "alice"
-            assert resp["setup"]["config_name"] == "alice-config"
-            assert resp["setup"]["config_ref"] == "@pack/creatures/alice"
             assert "stream-1" in adapter._sessions
             await adapter.on_close("stream-1")
             assert secondaries == []

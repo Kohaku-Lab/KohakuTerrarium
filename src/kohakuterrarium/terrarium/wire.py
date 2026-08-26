@@ -100,7 +100,6 @@ def pack_creature_info(c: CreatureInfo) -> dict[str, Any]:
         "model": c.model,
         "llm_name": c.llm_name,
         "config_name": c.config_name,
-        "config_ref": c.config_ref,
     }
 
 
@@ -122,7 +121,6 @@ def unpack_creature_info(d: dict[str, Any]) -> CreatureInfo:
         llm_name=str(d.get("llm_name", "") or ""),
         # Graph-local name resolution accepts the original config alias too.
         config_name=str(d.get("config_name", "") or ""),
-        config_ref=d.get("config_ref", d.get("source_ref")),
     )
 
 

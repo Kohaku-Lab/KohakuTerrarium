@@ -108,16 +108,6 @@ async def start_remote_terrarium(
         "creature_id": creatures[0].creature_id if creatures else None,
         "creature_ids": [creature.creature_id for creature in creatures],
         "creatures": [creature.name for creature in creatures],
-        "creature_details": [
-            {
-                "creature_id": creature.creature_id,
-                "name": creature.name,
-                "config_name": getattr(creature, "config_name", "") or "",
-                "config_ref": getattr(creature, "config_ref", None),
-                "is_privileged": creature.is_privileged,
-            }
-            for creature in creatures
-        ],
     }
     return Session(
         session_id=graph.graph_id,
@@ -126,8 +116,6 @@ async def start_remote_terrarium(
             {
                 "creature_id": creature.creature_id,
                 "name": creature.name,
-                "config_name": getattr(creature, "config_name", "") or "",
-                "config_ref": getattr(creature, "config_ref", None),
                 "home_node": on_node,
             }
             for creature in creatures

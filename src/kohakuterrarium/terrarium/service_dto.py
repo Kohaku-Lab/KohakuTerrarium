@@ -65,7 +65,6 @@ class CreatureInfo:
     model: str = ""
     llm_name: str = ""
     config_name: str = ""
-    config_ref: str | None = None
 
 
 def _channel_message_to_dict(m: Any) -> dict[str, Any]:
@@ -108,9 +107,7 @@ def creature_to_info(creature: CreatureLike) -> CreatureInfo:
             pass
     llm_name = llm_name or str(model or "")
     config = getattr(creature, "config", None) or getattr(agent, "config", None)
-    config_name = getattr(creature, "config_name", "") or (
-        getattr(config, "name", "") if config is not None else ""
-    )
+    config_name = getattr(config, "name", "") if config is not None else ""
     return CreatureInfo(
         creature_id=creature.creature_id,
         name=creature.name,
@@ -123,8 +120,6 @@ def creature_to_info(creature: CreatureLike) -> CreatureInfo:
         model=str(model or ""),
         llm_name=str(llm_name or ""),
         config_name=str(config_name or ""),
-        config_ref=getattr(creature, "config_ref", None)
-        or getattr(creature, "source_ref", None),
     )
 
 
