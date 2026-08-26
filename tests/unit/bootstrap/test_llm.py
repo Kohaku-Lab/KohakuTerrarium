@@ -120,7 +120,9 @@ class TestCreateLLMProviderProfilePath:
             def __init__(self, **kw):
                 pass
 
-        monkeypatch.setattr(llm_mod, "CodexOAuthProvider", _StubProvider)
+        import kohakuterrarium.llm.codex_provider as codex_provider
+
+        monkeypatch.setattr(codex_provider, "CodexOAuthProvider", _StubProvider)
         cfg = AgentConfig(name="a", model="m")
         out = create_llm_provider(cfg)
         assert isinstance(out, _StubProvider)

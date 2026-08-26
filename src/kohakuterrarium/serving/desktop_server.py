@@ -9,7 +9,6 @@ import tempfile
 import time
 from pathlib import Path
 
-from kohakuterrarium.api.app import create_app
 from kohakuterrarium.serving.web import (
     WEB_DIST_DIR,
     _resolve_config_dirs,
@@ -66,6 +65,12 @@ def _join_server(server, timeout: float = 5.0) -> None:
     thread = getattr(server, "_kt_thread", None)
     if thread is not None:
         thread.join(timeout)
+
+
+def create_app(**kwargs):
+    from kohakuterrarium.api.app import create_app as factory
+
+    return factory(**kwargs)
 
 
 def start_desktop_server(port: int, log_level: str):

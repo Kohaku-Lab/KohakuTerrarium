@@ -15,23 +15,6 @@ MAX_CONTENT_SIZE = 100_000  # Bound fetched pages before adding them to context.
 FETCH_TIMEOUT = 30.0
 USER_AGENT = "Mozilla/5.0 (compatible; KohakuTerrarium/1.0)"
 
-_HAS_CRAWL4AI = False
-_HAS_TRAFILATURA = False
-
-try:
-    import crawl4ai  # noqa: F401
-
-    _HAS_CRAWL4AI = True
-except ImportError:
-    pass
-
-try:
-    import trafilatura  # noqa: F401
-
-    _HAS_TRAFILATURA = True
-except ImportError:
-    pass
-
 
 @register_builtin("web_fetch")
 class WebFetchTool(BaseTool):
@@ -100,11 +83,11 @@ class _SkipBackend(Exception):
 
 async def _fetch_crawl4ai(url: str) -> str:
     """Render with Crawl4AI and prefer trafilatura extraction."""
-    if not _HAS_CRAWL4AI:
-        raise _SkipBackend
-
-    from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
-    from crawl4ai.async_logger import AsyncFileLogger
+    try:
+        from crawl4ai import AsyncWebCrawler, BrowserConfig, CrawlerRunConfig
+        from crawl4ai.async_logger import AsyncFileLogger
+    except ImportError:
+        raise _SkipBackend from None
 
     browser_cfg = BrowserConfig(headless=True, verbose=False)
     run_cfg = CrawlerRunConfig(verbose=False, log_console=False)
@@ -115,18 +98,21 @@ async def _fetch_crawl4ai(url: str) -> str:
         if not result.success:
             raise _SkipBackend
 
-        if _HAS_TRAFILATURA and result.html:
-            import trafilatura
-
-            content = trafilatura.extract(
-                result.html,
-                output_format="markdown",
-                include_links=True,
-                include_images=False,
-                include_tables=True,
-            )
-            if content and content.strip():
-                return content
+        if result.html:
+            try:
+                import trafilatura
+            except ImportError:
+                trafilatura = None
+            if trafilatura is not None:
+                content = trafilatura.extract(
+                    result.html,
+                    output_format="markdown",
+                    include_links=True,
+                    include_images=False,
+                    include_tables=True,
+                )
+                if content and content.strip():
+                    return content
 
         md = result.markdown
         text = str(md) if md else ""
@@ -137,10 +123,10 @@ async def _fetch_crawl4ai(url: str) -> str:
 
 async def _fetch_trafilatura(url: str) -> str:
     """Fetch static HTML and extract its main content with trafilatura."""
-    if not _HAS_TRAFILATURA:
-        raise _SkipBackend
-
-    import trafilatura
+    try:
+        import trafilatura
+    except ImportError:
+        raise _SkipBackend from None
 
     async with httpx.AsyncClient(
         timeout=FETCH_TIMEOUT,

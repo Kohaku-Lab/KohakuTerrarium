@@ -6,6 +6,8 @@ monkeypatched ``_MOBILE_HIDDEN_TOOLS`` so they don't depend on the
 real catalog's content (which can grow / shrink over time).
 """
 
+import threading
+
 import pytest
 
 from kohakuterrarium.builtins import tool_catalog
@@ -32,6 +34,61 @@ def with_fake_tools(monkeypatch):
     monkeypatch.setitem(tool_catalog._BUILTIN_TOOLS, "_test_hidden", _FakeTool)
     yield
     # monkeypatch.setitem cleans up automatically.
+
+
+class TestDeferredBuiltinCatalog:
+    def test_first_builtin_lookup_loads_tool_modules(self):
+        assert tool_catalog.get_builtin_tool("bash") is not None
+        assert tool_catalog.get_builtin_tool("image_gen") is not None
+
+    def test_listing_loads_builtin_names(self):
+        names = tool_catalog.list_builtin_tools()
+        assert "bash" in names
+        assert "web_fetch" in names
+
+    def test_failed_default_import_can_retry(self, monkeypatch):
+        real_import = tool_catalog.importlib.import_module
+        calls = []
+
+        def import_module(name):
+            calls.append(name)
+            if len(calls) == 1:
+                raise ImportError("transient")
+            return real_import(name)
+
+        monkeypatch.setattr(tool_catalog.importlib, "import_module", import_module)
+        monkeypatch.setattr(tool_catalog, "_DEFAULT_TOOLS_LOADED", False)
+
+        with pytest.raises(ImportError, match="transient"):
+            tool_catalog._ensure_default_tools_loaded()
+        tool_catalog._ensure_default_tools_loaded()
+
+        assert len(calls) == 2
+
+    def test_concurrent_default_import_waits_for_completion(self, monkeypatch):
+        entered = threading.Event()
+        release = threading.Event()
+        real_import = tool_catalog.importlib.import_module
+
+        def import_module(name):
+            entered.set()
+            release.wait(timeout=2)
+            return real_import(name)
+
+        monkeypatch.setattr(tool_catalog.importlib, "import_module", import_module)
+        monkeypatch.setattr(tool_catalog, "_DEFAULT_TOOLS_LOADED", False)
+        workers = [
+            threading.Thread(target=tool_catalog._ensure_default_tools_loaded)
+            for _ in range(2)
+        ]
+        workers[0].start()
+        entered.wait(timeout=2)
+        workers[1].start()
+        release.set()
+        for worker in workers:
+            worker.join(timeout=2)
+
+        assert tool_catalog._DEFAULT_TOOLS_LOADED is True
 
 
 class TestNoMobileProfile:

@@ -12,7 +12,6 @@ from typing import TYPE_CHECKING, Any, AsyncIterator
 if TYPE_CHECKING:
     from kohakuterrarium.llm.base import ToolSchema
 
-from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.commands.base import Command, CommandResult
 from kohakuterrarium.commands.read import (
     InfoCommand,
@@ -673,6 +672,8 @@ class Controller:
 
         tool = self.registry.get_tool("read") if self.registry else None
         if tool is None:
+            from kohakuterrarium.builtins.tools.read import ReadTool
+
             tool = ReadTool()
         if self.executor:
             context = self.executor._build_tool_context()

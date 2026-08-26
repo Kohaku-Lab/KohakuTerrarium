@@ -16,7 +16,6 @@ from pathlib import Path
 
 import uvicorn
 
-from kohakuterrarium.api.app import create_app
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.logging import (
@@ -29,6 +28,13 @@ from kohakuterrarium.utils.logging import (
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
 logger = get_logger(__name__)
+
+
+def create_app(**kwargs):
+    from kohakuterrarium.api.app import create_app
+
+    return create_app(**kwargs)
+
 
 # Vite places the packaged frontend beside the Python application modules.
 WEB_DIST_DIR = Path(__file__).resolve().parent.parent / "web_dist"
