@@ -414,12 +414,13 @@ class Executor:
 
             job_result = JobResult(job_id=job_id, error=error_msg)
             self.job_store.store_result(job_result)
-
             if not is_direct:
                 event = create_tool_complete_event(
                     job_id=job_id,
                     content="",
                     error=error_msg,
+                    cancelled=True,
+                    final_state="cancelled",
                 )
                 if self._on_complete:
                     self._on_complete(event)
@@ -477,6 +478,8 @@ class Executor:
             job_id=job_id,
             content="",
             error=error_msg,
+            cancelled=True,
+            final_state="cancelled",
         )
         if self._on_complete:
             self._on_complete(event)
