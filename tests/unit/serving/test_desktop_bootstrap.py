@@ -131,7 +131,7 @@ def test_briefcase_uses_in_process_server(monkeypatch):
     )
 
 
-def test_loading_window_is_shown_before_server_start(monkeypatch):
+def test_server_start_overlaps_loading_window_startup(monkeypatch):
     order = []
     messages = [{"status": "ready", "port": 8123}]
     webview = _Webview(messages)
@@ -152,7 +152,7 @@ def test_loading_window_is_shown_before_server_start(monkeypatch):
 
     desktop.run_desktop_app(port=8001, log_level="ERROR")
 
-    assert order[:2] == ["shown", "server"]
+    assert order[:2] == ["server", "shown"]
     assert webview.window.loaded == ["http://127.0.0.1:8123"]
     assert webview.created[0][1]["html"] == desktop.LOADING_HTML
 

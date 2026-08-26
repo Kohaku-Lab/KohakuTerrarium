@@ -264,23 +264,10 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     )
     mark_startup("desktop_window_created", surface="desktop", window="loading")
 
-    def _start_after_shown():
+    def _shown():
         mark_startup("desktop_window_shown", surface="desktop", window="loading")
-        threading.Thread(
-            target=_run_startup,
-            kwargs={
-                "window": window,
-                "port": port,
-                "log_level": log_level,
-                "state_path": state_path,
-                "child_ref": child_ref,
-                "closed": closed,
-            },
-            daemon=True,
-            name="desktop-server-startup",
-        ).start()
 
-    window.events.shown += _start_after_shown
+    window.events.shown += _shown
 
     def _closed():
         closed.set()
@@ -292,6 +279,19 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
             pass
 
     window.events.closed += _closed
+    threading.Thread(
+        target=_run_startup,
+        kwargs={
+            "window": window,
+            "port": port,
+            "log_level": log_level,
+            "state_path": state_path,
+            "child_ref": child_ref,
+            "closed": closed,
+        },
+        daemon=True,
+        name="desktop-server-startup",
+    ).start()
 
     if sys.platform == "darwin":
         webview.start(gui="cocoa")
