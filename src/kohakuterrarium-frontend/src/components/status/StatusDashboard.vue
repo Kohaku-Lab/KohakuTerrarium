@@ -64,7 +64,7 @@
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">{{ t("common.agent") }}</span>
             <span class="text-warm-600 dark:text-warm-400">
-              {{ chat.sessionInfo.agentName || instance?.config_name || instance?.creatures?.[0]?.name || "--" }}
+              <span :title="chat.activeCreatureInfo.configRef || instance?.config_ref || ''">{{ chat.activeCreatureInfo.configName || instance?.creature_config_name || instance?.creatures?.[0]?.config_name || chat.sessionInfo.agentName || instance?.config_name || instance?.creatures?.[0]?.name || "--" }}</span>
             </span>
           </div>
           <div class="flex items-center gap-2">

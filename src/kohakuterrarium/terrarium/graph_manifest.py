@@ -33,6 +33,8 @@ class ManifestCreature:
     pwd: str
     is_privileged: bool
     parent_creature_id: str | None
+    config_name: str = ""
+    config_ref: str | None = None
 
     def unpack_config(self) -> AgentConfig:
         """Recreate the resolved agent config stored in this record."""
@@ -115,6 +117,13 @@ def _parse_creature(value: object, index: int) -> ManifestCreature:
         name=_string(_required(data, "name"), f"{prefix}.name"),
         config_snapshot=packed,
         source_ref=_optional_string(data.get("source_ref"), f"{prefix}.source_ref"),
+        config_name=_string(
+            data.get("config_name") or packed.get("name") or data.get("name", ""),
+            f"{prefix}.config_name",
+        ),
+        config_ref=_optional_string(
+            data.get("config_ref") or data.get("source_ref"), f"{prefix}.config_ref"
+        ),
         pwd=_string(_required(data, "pwd"), f"{prefix}.pwd"),
         is_privileged=privileged,
         parent_creature_id=_optional_string(
@@ -284,6 +293,8 @@ def manifest_to_dict(manifest: GraphManifest) -> dict[str, Any]:
                     "name": creature.name,
                     "config_snapshot": creature.config_snapshot,
                     "source_ref": creature.source_ref,
+                    "config_name": creature.config_name,
+                    "config_ref": creature.config_ref,
                     "pwd": creature.pwd,
                     "is_privileged": creature.is_privileged,
                     "parent_creature_id": creature.parent_creature_id,
@@ -309,6 +320,8 @@ def manifest_to_dict(manifest: GraphManifest) -> dict[str, Any]:
                 "name": creature.name,
                 "config_snapshot": creature.config_snapshot,
                 "source_ref": creature.source_ref,
+                "config_name": creature.config_name,
+                "config_ref": creature.config_ref,
                 "pwd": creature.pwd,
                 "is_privileged": creature.is_privileged,
                 "parent_creature_id": creature.parent_creature_id,
@@ -334,6 +347,9 @@ def _capture_config(creature: Any) -> dict[str, Any]:
     config = getattr(getattr(creature, "agent", None), "config", None)
     if isinstance(config, AgentConfig):
         snapshot = pack_agent_config(config)
+        stable_name = getattr(creature, "config_name", "")
+        if stable_name:
+            snapshot["name"] = stable_name
         creature.config_snapshot = snapshot
     try:
         unpack_agent_config(snapshot)
@@ -369,12 +385,17 @@ def capture_manifest(
         parent_id = creature.parent_creature_id
         if parent_id not in graph.creature_ids:
             parent_id = None
+        snapshot = _capture_config(creature)
         creatures.append(
             {
                 "creature_id": creature_id,
                 "name": creature.name,
-                "config_snapshot": _capture_config(creature),
+                "config_snapshot": snapshot,
                 "source_ref": getattr(creature, "source_ref", None),
+                "config_name": getattr(creature, "config_name", "")
+                or str(snapshot.get("name", "")),
+                "config_ref": getattr(creature, "config_ref", None)
+                or getattr(creature, "source_ref", None),
                 "pwd": build_pwd,
                 "is_privileged": creature.is_privileged,
                 "parent_creature_id": parent_id,

@@ -60,6 +60,8 @@ def _session_info_frame(creature: Any) -> dict[str, Any]:
         "model": model,
         "llm_name": llm_name,
         "agent_name": creature.name,
+        "config_name": getattr(creature, "config_name", ""),
+        "config_ref": getattr(creature, "config_ref", None),
         "max_context": max_context,
         "compact_threshold": compact_at,
         "ts": time.time(),

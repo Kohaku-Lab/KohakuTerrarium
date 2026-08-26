@@ -1660,12 +1660,14 @@ const _chatStoreOptions = {
     _pendingCommandResultContextsByTab: {},
     _commandResultDispatchSeq: 0,
 
-    /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number, homeNode: string}} Session metadata */
+    /** Primary creature session metadata, including runtime and config identities. */
     sessionInfo: {
       sessionId: "",
       model: "",
       llmName: "",
       agentName: "",
+      configName: "",
+      configRef: "",
       compactThreshold: 0,
       // Lab cluster site that hosts this session ("_host" or
       // worker-id). Set from the session payload at attach time.
@@ -1678,7 +1680,7 @@ const _chatStoreOptions = {
      * creature — before this map existed, every display surface read
      * the global object, so switching to another creature's tab kept
      * showing the primary's model.
-     * @type {Object<string, {model: string, llmName: string, maxContext: number, compactThreshold: number}>}
+     * @type {Object<string, {model: string, llmName: string, configName: string, configRef: string, maxContext: number, compactThreshold: number}>}
      */
     modelByTab: {},
     /** Real creature name behind the ``root`` tab alias (recipe
@@ -1870,15 +1872,20 @@ const _chatStoreOptions = {
      * session-level (primary creature) values when the per-tab entry
      * hasn't been populated yet. Numeric fields treat 0 as unknown.
      */
-    activeModelInfo(state) {
+    activeCreatureInfo(state) {
       const tab = state.activeTab
       const info = (tab && state.modelByTab[tab]) || {}
       return {
         model: info.model || state.sessionInfo.model || "",
         llmName: info.llmName || state.sessionInfo.llmName || "",
+        configName: info.configName || state.sessionInfo.configName || "",
+        configRef: info.configRef || state.sessionInfo.configRef || "",
         maxContext: info.maxContext || state.sessionInfo.maxContext || 0,
         compactThreshold: info.compactThreshold || state.sessionInfo.compactThreshold || 0,
       }
+    },
+    activeModelInfo() {
+      return this.activeCreatureInfo
     },
     /**
      * Canonical display form of the ACTIVE tab's model, preferring the
@@ -2001,7 +2008,9 @@ const _chatStoreOptions = {
         sessionId: instance.session_id || instance.id || "",
         model: instance.model || "",
         llmName: instance.llm_name || instance.model || "",
-        agentName: instance.config_name || instance.creatures?.[0]?.name || "",
+        agentName: instance.creatures?.[0]?.name || "",
+        configName: instance.creature_config_name || instance.creatures?.[0]?.config_name || "",
+        configRef: instance.config_ref || instance.creatures?.[0]?.config_ref || "",
         compactThreshold: instance.compact_threshold || 0,
         maxContext: instance.max_context || 0,
         // Cluster site this session runs on.  Backend payload now
@@ -2023,6 +2032,8 @@ const _chatStoreOptions = {
         const info = {
           model: c.model || "",
           llmName: c.llm_name || c.model || "",
+          configName: c.config_name || "",
+          configRef: c.config_ref || "",
           maxContext: c.max_context || 0,
           compactThreshold: c.compact_threshold || 0,
         }
@@ -3015,6 +3026,8 @@ const _chatStoreOptions = {
         const info = {}
         if (data.model) info.model = data.model
         if (data.llm_name) info.llmName = data.llm_name
+        if (data.config_name) info.configName = data.config_name
+        if (data.config_ref) info.configRef = data.config_ref
         if (data.max_context != null) info.maxContext = data.max_context
         if (data.compact_threshold != null) info.compactThreshold = data.compact_threshold
         const tab = source || data.agent_name || ""
@@ -3032,6 +3045,8 @@ const _chatStoreOptions = {
           if (data.model) this.sessionInfo.model = data.model
           if (data.llm_name) this.sessionInfo.llmName = data.llm_name
           if (data.agent_name) this.sessionInfo.agentName = data.agent_name
+          if (data.config_name) this.sessionInfo.configName = data.config_name
+          if (data.config_ref) this.sessionInfo.configRef = data.config_ref
           if (data.max_context != null) this.sessionInfo.maxContext = data.max_context
           if (data.compact_threshold != null)
             this.sessionInfo.compactThreshold = data.compact_threshold
@@ -5082,6 +5097,8 @@ const _chatStoreOptions = {
         model: "",
         llmName: "",
         agentName: "",
+        configName: "",
+        configRef: "",
         compactThreshold: 0,
         maxContext: 0,
         homeNode: "_host",

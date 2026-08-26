@@ -1,12 +1,8 @@
 """Engine TUI launcher.
 
-Mounts the Textual-based TUI on top of a running :class:`Terrarium`
-engine. ``run_engine_with_tui`` is the single entry point shared
-between ``kt run creature.yaml`` (solo creature), ``kt run
-terrarium.yaml`` (recipe), and ``kt resume``. The TUI is uniform
-across all three — there is no creature-vs-terrarium fork at the
-runtime layer. Solo sessions are graphs with one creature; the same
-tab strip + channel-tab plumbing applies.
+Mounts the Textual TUI on a running :class:`Terrarium`. The shared
+``run_engine_with_tui`` entry point serves solo, recipe, and resumed sessions;
+all are graphs using the same tab and channel plumbing.
 
 The TUI tabs are: focus creature first, then every other creature in
 the graph, then one ``#channel`` tab per shared channel. The TUI
@@ -293,7 +289,7 @@ async def run_engine_with_tui(
     app_task = asyncio.create_task(tui.run_app())
     await tui.wait_ready()
 
-    _update_session_info(tui, focus, graph_id, store)
+    _update_session_info(tui, focus_creature, store)
     _seed_tab_models(tui, graph_creatures)
     _update_terrarium_panel(tui, graph_creatures, env, focus_creature_id)
     wired_channels: set[str] = set()
@@ -434,11 +430,17 @@ def _agent_model_identifier(agent: Any) -> str:
 
 
 def _seed_tab_models(tui: TUISession, graph_creatures: Iterable[Any]) -> None:
-    """Seed the TUI's per-tab model registry from live agents so every
-    tab shows ITS creature's model before any session_info event."""
+    """Seed per-tab model and identity state from live creatures."""
     for creature in graph_creatures:
         agent = creature.agent
         model = _agent_model_identifier(agent)
+        tui.update_target_identity(
+            creature.creature_id,
+            "",
+            creature.name,
+            getattr(creature, "config_name", ""),
+            getattr(creature, "config_ref", None) or "",
+        )
         if not model:
             continue
         max_ctx = 0
@@ -450,9 +452,8 @@ def _seed_tab_models(tui: TUISession, graph_creatures: Iterable[Any]) -> None:
         tui.update_target_model(creature.creature_id, model, max_ctx, compact_at)
 
 
-def _update_session_info(
-    tui: TUISession, focus, graph_id: str, store: SessionStore | None
-) -> None:
+def _update_session_info(tui: TUISession, creature, store: SessionStore | None) -> None:
+    focus = creature.agent
     model = _agent_model_identifier(focus)
     session_id = ""
     if store:
@@ -463,7 +464,13 @@ def _update_session_info(
             logger.warning(
                 "Failed to load session meta for TUI", error=str(e), exc_info=True
             )
-    tui.update_session_info(session_id=session_id, model=model, agent_name=graph_id)
+    tui.update_session_info(
+        session_id=session_id,
+        model=model,
+        agent_name=creature.name,
+        config_name=getattr(creature, "config_name", ""),
+        config_ref=getattr(creature, "config_ref", None) or "",
+    )
     compact_mgr = getattr(focus, "compact_manager", None)
     if compact_mgr:
         max_ctx = compact_mgr.config.max_tokens

@@ -40,6 +40,8 @@ def _creature_row(
         "name": name,
         "config_snapshot": pack_agent_config(AgentConfig(name=name)),
         "source_ref": f"@pkg/{name}",
+        "config_name": f"{name}-config",
+        "config_ref": f"@pkg/{name}",
         "pwd": pwd,
         "is_privileged": False,
         "parent_creature_id": parent_creature_id,
@@ -89,7 +91,7 @@ class _Engine:
 def _runtime_creature(
     creature_id, name, *, pwd, source_ref, privileged=False, parent=None
 ):
-    config = AgentConfig(name=name)
+    config = AgentConfig(name=f"{name}-config")
     agent = SimpleNamespace(config=config)
     return Creature(
         creature_id=creature_id,
@@ -99,6 +101,8 @@ def _runtime_creature(
         config=config,
         config_snapshot=pack_agent_config(config),
         source_ref=source_ref,
+        config_name=config.name,
+        config_ref=source_ref,
         build_pwd=pwd,
         is_privileged=privileged,
         parent_creature_id=parent,
@@ -132,6 +136,8 @@ class TestGraphManifest:
             ["creature_b", "zeta"],
         ]
         assert manifest_to_dict(parse_manifest(payload)) == payload
+        assert payload["creatures"][0]["config_name"] == "alice-config"
+        assert payload["creatures"][0]["config_ref"] == "@pkg/alice"
 
     @pytest.mark.parametrize(
         ("change", "field"),
@@ -253,6 +259,8 @@ class TestGraphManifest:
         assert rows["root"]["is_privileged"] is True
         assert rows["root"]["pwd"] == "/workspace/root"
         assert rows["root"]["source_ref"] == "@pkg/root"
+        assert rows["root"]["config_name"] == "root-config"
+        assert rows["root"]["config_ref"] == "@pkg/root"
         assert rows["child"]["parent_creature_id"] == "creature_root"
 
     def test_capture_syncs_current_agent_config(self):
@@ -275,8 +283,8 @@ class TestGraphManifest:
 
         captured = capture_manifest(engine, "graph_test")
 
-        assert captured.creatures[0].unpack_config().name == "alice"
-        assert creature.config_snapshot["name"] == "alice"
+        assert captured.creatures[0].unpack_config().name == "alice-config"
+        assert creature.config_snapshot["name"] == "alice-config"
 
     @pytest.mark.parametrize("missing", ["config_snapshot", "build_pwd"])
     def test_capture_rejects_unsupported_provenance(self, missing):
