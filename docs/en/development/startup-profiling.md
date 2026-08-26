@@ -125,6 +125,31 @@ The dominant cost remains imports before the first parser milestone. Agent,
 engine, and UI setup add tens of milliseconds for the minimal fixture after
 imports complete.
 
+## First import-graph optimization
+
+The first optimization pass converted the public package facades to lazy
+exports, isolated Studio group-hook registration, and deferred CLI command and
+surface imports until dispatch. On the same machine and five-run methodology:
+
+| Measurement | Before p50 | After p50 | Change |
+| --- | ---: | ---: | ---: |
+| `import kohakuterrarium` | 4953.3 ms | 50.6 ms | -99.0% |
+| `import kohakuterrarium.cli` | 5780.5 ms | 200.1 ms | -96.5% |
+| `python -m kohakuterrarium --version` | 5881.0 ms | 440.2 ms | -92.5% |
+| Web `parser_ready` | 5011.6 ms | 183.7 ms | -96.3% |
+| CLI `parser_ready` | 8008.3 ms | 3212.8 ms | -59.9% |
+| TUI `parser_ready` | 8041.4 ms | 3204.9 ms | -60.1% |
+| Web `api_lifespan_ready` | 5109.2 ms | 5059.9 ms | -1.0% |
+| CLI `rich_cli_run_enter` | 8076.2 ms | 7292.6 ms | -9.7% |
+| TUI `tui_mounted` | 8160.6 ms | 7175.5 ms | -12.1% |
+
+The control result is important: parser latency fell sharply, while the final
+surface boundaries improved much less. The remaining cost moved behind dispatch
+into `serving.web` (about 5.0 seconds to import) and `cli.run` plus engine/UI
+runtime imports (about 4.0 seconds before engine construction). The next pass
+should therefore split those module-level dependency graphs rather than further
+optimizing argparse or the public facade.
+
 ## Measurement limitations
 
 - Desktop `desktop_window_shown` was exercised once on Windows, but remains a

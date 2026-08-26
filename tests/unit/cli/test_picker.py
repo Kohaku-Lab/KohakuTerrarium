@@ -11,8 +11,10 @@ def test_picker_records_catalog_ready(monkeypatch):
             terrariums=(Runnable("b", "b", "terrarium", "local"),),
         )
     ]
+    from kohakuterrarium.cli import select_cli
+
     monkeypatch.setattr(picker, "enumerate_runnables", lambda: groups)
-    monkeypatch.setattr(picker, "run_cli_picker", lambda _groups: "a")
+    monkeypatch.setattr(select_cli, "run_cli_picker", lambda _groups: "a")
     monkeypatch.setattr(
         picker,
         "mark_startup",

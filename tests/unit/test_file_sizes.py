@@ -213,7 +213,7 @@ ALLOWLIST_600 = {
     # always extends this file; the actual handler bodies live in
     # ``cli/<verb>.py``.  Splitting the parser build would scatter
     # subcommands across files for no readability win.
-    "cli/__init__.py",
+    "cli/_main.py",
     # Marketplace resolver — single cohesive surface (source-list mgmt
     # + disk + in-memory cache + ETag-conditional fetch + parse +
     # dedup + framework-compat check + spec parsing + resolve + sync
