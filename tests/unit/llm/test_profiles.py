@@ -658,6 +658,7 @@ class TestLoadProfilesAndListAll:
     def test_list_all_includes_builtin_presets(self):
         entries = list_all()
         keys = {(e["provider"], e["name"]) for e in entries}
+        assert ("codex", "gpt-5.3-codex-spark") in keys
         assert ("codex", "gpt-5.4") in keys
         grok_names = {
             name for provider, name in keys if provider == "grok-subscription"
