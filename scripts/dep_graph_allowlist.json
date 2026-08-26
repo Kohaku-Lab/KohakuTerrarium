@@ -180,12 +180,6 @@
     "reason": "Version reporting is isolated so kt --version does not import command runtimes."
   },
   {
-    "file": "src/kohakuterrarium/cli/__init__.py",
-    "function": "main",
-    "target": "kohakuterrarium.serving.web",
-    "reason": "The default desktop server is loaded only after the no-argument desktop branch is selected."
-  },
-  {
     "file": "src/kohakuterrarium/cli/entry_cli.py",
     "function": "resume_cli",
     "target": "kohakuterrarium.cli.resume",
