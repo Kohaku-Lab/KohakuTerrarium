@@ -75,9 +75,9 @@ def _dispatch_surface(command: str, args: argparse.Namespace) -> int:
             extra_creatures=args.add_creatures,
             extra_channels=args.add_channels,
         )
-    from kohakuterrarium.serving.web import run_desktop_app, run_web_server
-
     if command == "web":
+        from kohakuterrarium.serving.web import run_web_server
+
         run_web_server(
             host=args.host,
             port=args.port,
@@ -85,7 +85,9 @@ def _dispatch_surface(command: str, args: argparse.Namespace) -> int:
             log_level=args.log_level,
         )
     else:
-        run_desktop_app(port=args.port, log_level=args.log_level)
+        from kohakuterrarium.serving.desktop import launch_desktop_app
+
+        launch_desktop_app(port=args.port, log_level=args.log_level)
     return 0
 
 
@@ -100,11 +102,11 @@ def main() -> int:
         print(format_version_report(verbose="--verbose" in argv))
         return 0
     if not argv:
-        from kohakuterrarium.serving.web import run_desktop_app
+        from kohakuterrarium.serving.desktop import launch_desktop_app
 
         mark_startup("parser_ready", surface="desktop")
         mark_startup("dispatch_selected", surface="desktop", command="desktop")
-        run_desktop_app(log_level="INFO")
+        launch_desktop_app(log_level="INFO")
         return 0
     if argv[0] in {"cli", "tui", "web", "app"}:
         command = argv[0]

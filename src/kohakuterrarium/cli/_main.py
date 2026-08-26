@@ -44,7 +44,8 @@ from kohakuterrarium.cli.shims import add_shims_subparser, shims_cli
 from kohakuterrarium.cli.serve import add_serve_subparser, serve_cli
 from kohakuterrarium.cli.service import add_service_subparser, service_cli
 from kohakuterrarium.cli.version import format_version_report
-from kohakuterrarium.serving.web import run_desktop_app, run_web_server
+from kohakuterrarium.serving.desktop import launch_desktop_app
+from kohakuterrarium.serving.web import run_web_server
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
@@ -543,7 +544,7 @@ def _dispatch_web(args: argparse.Namespace) -> int:
 
 def _dispatch_app(args: argparse.Namespace) -> int:
     """Handle the 'app' command."""
-    run_desktop_app(port=args.port, log_level=args.log_level)
+    launch_desktop_app(port=args.port, log_level=args.log_level)
     return 0
 
 
@@ -635,7 +636,7 @@ def main() -> int:
     # No command given: launch desktop app (used by Briefcase and double-click)
     if not args.command:
         mark_startup("dispatch_selected", surface="desktop", command="desktop")
-        run_desktop_app(log_level="INFO")
+        launch_desktop_app(log_level="INFO")
         return 0
 
     handler = COMMANDS.get(args.command)

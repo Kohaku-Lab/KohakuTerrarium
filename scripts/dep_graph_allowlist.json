@@ -268,5 +268,23 @@
     "function": "resolve_workspace_hook",
     "target": "kohakuterrarium.studio.editors.workspace_fs",
     "reason": "Workspace editor dependencies load only when a group tool requests workspace resolution."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "_dispatch_surface",
+    "target": "kohakuterrarium.serving.desktop",
+    "reason": "Desktop bootstrap stays out of web, terminal, and version paths until the app surface is selected."
+  },
+  {
+    "file": "src/kohakuterrarium/cli/__init__.py",
+    "function": "main",
+    "target": "kohakuterrarium.serving.desktop",
+    "reason": "The default native desktop bootstrap is loaded only for the no-argument desktop path."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop.py",
+    "function": "_start_in_process_server",
+    "target": "kohakuterrarium.serving.desktop_server",
+    "reason": "Briefcase cannot relaunch its stub with module arguments, so the heavy server graph is imported only after the loading window is visible."
   }
 ]
