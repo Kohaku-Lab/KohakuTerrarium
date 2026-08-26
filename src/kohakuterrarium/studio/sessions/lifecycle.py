@@ -200,11 +200,24 @@ async def start_creature(
         "on_node": on_node,
         # The host needs the worker identity to reconstruct remote Session handles.
         "creature_id": info.creature_id,
+        "creature_ids": [info.creature_id],
+        "creatures": [info.name],
+        "creature_details": [
+            {
+                "creature_id": info.creature_id,
+                "name": info.name,
+                "config_name": getattr(info, "config_name", "") or "",
+                "config_ref": getattr(info, "config_ref", None),
+                "is_privileged": info.is_privileged,
+            }
+        ],
         "remote_session_path": remote_session_path,
         "conversation_id": conversation_id,
         # Cached model metadata keeps remote status readable during brief outages.
         "model": str(getattr(info, "model", "") or ""),
         "llm_name": str(getattr(info, "llm_name", "") or ""),
+        "config_name": str(getattr(info, "config_name", "") or ""),
+        "config_ref": getattr(info, "config_ref", None),
         "is_privileged": bool(getattr(info, "is_privileged", False)),
         "running": bool(getattr(info, "is_running", True)),
     }
@@ -222,6 +235,8 @@ async def start_creature(
             {
                 "creature_id": info.creature_id,
                 "name": info.name,
+                "config_name": getattr(info, "config_name", "") or "",
+                "config_ref": getattr(info, "config_ref", None),
                 "home_node": on_node,
                 "running": info.is_running,
                 "is_privileged": info.is_privileged,
@@ -440,12 +455,19 @@ def list_sessions(service: "TerrariumService") -> list[SessionListing]:
             # Purge metadata once its owning worker leaves membership.
             meta_registry.pop(sid, None)
             continue
+        details = meta.get("creature_details")
+        ids = meta.get("creature_ids")
+        creature_count = (
+            len(details)
+            if isinstance(details, list) and details
+            else len(ids) if isinstance(ids, list) and ids else 1
+        )
         out.append(
             SessionListing(
                 session_id=sid,
                 name=meta.get("name", sid),
                 running=True,
-                creatures=1,
+                creatures=creature_count,
                 node_id=meta.get("on_node", "_host"),
             )
         )
@@ -487,6 +509,31 @@ def get_session(service: "TerrariumService", session_id: str) -> Session:
                 config_path=meta.get("config_path", ""),
                 home_node=home,
             )
+        details = meta.get("creature_details")
+        if isinstance(details, list) and details:
+            return Session(
+                session_id=session_id,
+                name=meta.get("name", session_id),
+                creatures=[
+                    {
+                        **detail,
+                        "home_node": home,
+                        "running": True,
+                    }
+                    for detail in details
+                    if isinstance(detail, dict)
+                ],
+                channels=[],
+                has_root=any(
+                    bool(detail.get("is_privileged"))
+                    for detail in details
+                    if isinstance(detail, dict)
+                ),
+                pwd=meta.get("pwd", ""),
+                created_at=meta.get("created_at", ""),
+                config_path=meta.get("config_path", ""),
+                home_node=home,
+            )
         # Older metadata may lack the worker-side creature identity.
         cid = meta.get("creature_id") or session_id
         return Session(
@@ -496,6 +543,8 @@ def get_session(service: "TerrariumService", session_id: str) -> Session:
                 {
                     "creature_id": cid,
                     "name": meta.get("name", ""),
+                    "config_name": meta.get("config_name", ""),
+                    "config_ref": meta.get("config_ref"),
                     "home_node": home,
                     # Model metadata is cached at spawn and model switches.
                     "model": str(meta.get("model", "") or ""),
@@ -771,6 +820,16 @@ async def add_creature(
         graph_id=session_id,
         on_node=on_node,
     )
+    detail = {
+        "creature_id": info.creature_id,
+        "name": info.name,
+        "config_name": getattr(info, "config_name", "") or "",
+        "config_ref": getattr(info, "config_ref", None),
+        "is_privileged": info.is_privileged,
+    }
+    meta.setdefault("creature_ids", []).append(info.creature_id)
+    meta.setdefault("creatures", []).append(info.name)
+    meta.setdefault("creature_details", []).append(detail)
     return info.creature_id
 
 
@@ -820,11 +879,26 @@ def list_creatures(service: "TerrariumService", session_id: str) -> list[dict]:
     meta = meta_for(service).get(session_id)
     if meta is not None and meta.get("on_node"):
         home = meta.get("on_node", "_host") or "_host"
+        details = meta.get("creature_details")
+        if isinstance(details, list) and details:
+            return [
+                {
+                    **detail,
+                    "agent_id": detail.get("creature_id"),
+                    "graph_id": session_id,
+                    "running": True,
+                    "home_node": home,
+                }
+                for detail in details
+                if isinstance(detail, dict)
+            ]
         return [
             {
                 "creature_id": meta.get("creature_id") or session_id,
                 "agent_id": meta.get("creature_id") or session_id,
                 "name": meta.get("name", ""),
+                "config_name": meta.get("config_name", ""),
+                "config_ref": meta.get("config_ref"),
                 "graph_id": session_id,
                 "running": bool(meta.get("running", True)),
                 "home_node": home,
@@ -866,6 +940,29 @@ async def remove_creature(
         await service.remove_creature(creature_id)
     except KeyError:
         return False
+    meta["creature_ids"] = [
+        cid for cid in meta.get("creature_ids", []) if cid != creature_id
+    ]
+    meta["creature_details"] = [
+        detail
+        for detail in meta.get("creature_details", [])
+        if not isinstance(detail, dict) or detail.get("creature_id") != creature_id
+    ]
+    meta["creatures"] = [
+        detail.get("name", "")
+        for detail in meta.get("creature_details", [])
+        if isinstance(detail, dict)
+    ]
+    if meta.get("creature_id") == creature_id:
+        remaining = meta.get("creature_details", [])
+        if remaining:
+            primary = remaining[0]
+            meta["creature_id"] = primary.get("creature_id")
+            meta["name"] = primary.get("name", meta.get("name", ""))
+            meta["config_name"] = primary.get("config_name", "")
+            meta["config_ref"] = primary.get("config_ref")
+        else:
+            meta_for(service).pop(session_id, None)
     return True
 
 

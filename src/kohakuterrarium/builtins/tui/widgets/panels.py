@@ -159,13 +159,22 @@ class SessionInfoPanel(Static):
         self._model = ""
         self._session_id = ""
         self._agent_name = ""
+        self._config_name = ""
+        self._config_ref = ""
 
     def set_info(
-        self, session_id: str = "", model: str = "", agent_name: str = ""
+        self,
+        session_id: str = "",
+        model: str = "",
+        agent_name: str = "",
+        config_name: str = "",
+        config_ref: str = "",
     ) -> None:
         self._session_id = session_id
         self._model = model
         self._agent_name = agent_name
+        self._config_name = config_name
+        self._config_ref = config_ref
         self._refresh()
 
     def set_model(self, model: str) -> None:
@@ -215,7 +224,14 @@ class SessionInfoPanel(Static):
         elapsed = time.monotonic() - self._start_time
         mins, secs = int(elapsed // 60), int(elapsed % 60)
         lines = []
-        if self._agent_name:
+        if self._config_name:
+            config = f"Config: {self._config_name}"
+            if self._config_ref:
+                config += f" ({self._config_ref})"
+            lines.append(config)
+        elif self._config_ref:
+            lines.append(f"Config: {self._config_ref}")
+        elif self._agent_name:
             lines.append(f"Agent: {self._agent_name}")
         if self._session_id:
             lines.append(f"ID: {self._session_id[:20]}")

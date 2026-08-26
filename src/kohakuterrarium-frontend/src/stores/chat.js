@@ -1660,12 +1660,14 @@ const _chatStoreOptions = {
     _pendingCommandResultContextsByTab: {},
     _commandResultDispatchSeq: 0,
 
-    /** @type {{sessionId: string, model: string, llmName: string, agentName: string, compactThreshold: number, homeNode: string}} Session metadata */
+    /** Primary creature session metadata, including runtime and config identities. */
     sessionInfo: {
       sessionId: "",
       model: "",
       llmName: "",
       agentName: "",
+      configName: "",
+      configRef: "",
       compactThreshold: 0,
       // Lab cluster site that hosts this session ("_host" or
       // worker-id). Set from the session payload at attach time.
@@ -2001,7 +2003,9 @@ const _chatStoreOptions = {
         sessionId: instance.session_id || instance.id || "",
         model: instance.model || "",
         llmName: instance.llm_name || instance.model || "",
-        agentName: instance.config_name || instance.creatures?.[0]?.name || "",
+        agentName: instance.creatures?.[0]?.name || "",
+        configName: instance.creature_config_name || instance.creatures?.[0]?.config_name || "",
+        configRef: instance.config_ref || instance.creatures?.[0]?.config_ref || "",
         compactThreshold: instance.compact_threshold || 0,
         maxContext: instance.max_context || 0,
         // Cluster site this session runs on.  Backend payload now
@@ -3032,6 +3036,8 @@ const _chatStoreOptions = {
           if (data.model) this.sessionInfo.model = data.model
           if (data.llm_name) this.sessionInfo.llmName = data.llm_name
           if (data.agent_name) this.sessionInfo.agentName = data.agent_name
+          if (data.config_name) this.sessionInfo.configName = data.config_name
+          if (data.config_ref) this.sessionInfo.configRef = data.config_ref
           if (data.max_context != null) this.sessionInfo.maxContext = data.max_context
           if (data.compact_threshold != null)
             this.sessionInfo.compactThreshold = data.compact_threshold
@@ -5082,6 +5088,8 @@ const _chatStoreOptions = {
         model: "",
         llmName: "",
         agentName: "",
+        configName: "",
+        configRef: "",
         compactThreshold: 0,
         maxContext: 0,
         homeNode: "_host",

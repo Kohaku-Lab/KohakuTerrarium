@@ -138,6 +138,8 @@ describe("instances store", () => {
       creatures: [
         {
           name: "root",
+          config_name: "root-config",
+          config_ref: "creatures/root.yaml",
           creature_id: "root_abc",
           model: "model",
           llm_name: "provider/model",
@@ -165,6 +167,14 @@ describe("instances store", () => {
     expect(result.graph_id).toBe("graph_team")
     expect(result.type).toBe("terrarium") // 2+ creatures
     expect(result.creatures.length).toBe(2)
+    expect(result.session_name).toBe("team")
+    expect(result.config_name).toBe("team")
+    expect(result.creature_config_name).toBe("root-config")
+    expect(result.config_ref).toBe("creatures/root.yaml")
+    expect(result.creatures[0]).toMatchObject({
+      config_name: "root-config",
+      config_ref: "creatures/root.yaml",
+    })
     // Primary creature is the root flagged one — drives the model pill.
     expect(result.llm_name).toBe("provider/model")
     expect(store.current.id).toBe("graph_team")

@@ -74,6 +74,8 @@ class Creature:
     config: Any = None
     config_snapshot: dict[str, Any] | None = None
     source_ref: str | None = None
+    config_name: str = ""
+    config_ref: str | None = None
     build_pwd: str = ""
     injected_runtime: tuple[str, ...] = ()
     listen_channels: list[str] = field(default_factory=list)
@@ -610,6 +612,8 @@ class Creature:
             "creature_id": self.creature_id,
             "graph_id": self.graph_id,
             "name": self.name,
+            "config_name": self.config_name,
+            "config_ref": self.config_ref,
             "model": model,
             "llm_name": llm_identifier,
             "provider": provider,
@@ -687,6 +691,8 @@ def _build_provenance(
     return {
         "config_snapshot": config_snapshot,
         "source_ref": source_ref,
+        "config_name": str(getattr(agent.config, "name", "") or ""),
+        "config_ref": source_ref,
         "build_pwd": str(
             getattr(getattr(agent, "executor", None), "_working_dir", None)
             or os.getcwd()

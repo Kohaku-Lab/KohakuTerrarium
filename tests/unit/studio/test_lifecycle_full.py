@@ -122,6 +122,8 @@ class TestStartCreatureLocal:
             meta = lifecycle.meta_for(svc)[sess.session_id]
             assert meta["remote_session_path"] == "C:/sessions/g-remote.kohakutr"
             assert meta["conversation_id"] == "conversation-remote"
+            assert meta["creature_ids"] == ["cid-r"]
+            assert meta["creature_details"][0]["name"] == "bob"
             svc._host.request.assert_awaited_once_with(
                 to_node="worker-1",
                 namespace="terrarium.session",

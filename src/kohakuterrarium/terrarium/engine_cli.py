@@ -293,7 +293,7 @@ async def run_engine_with_tui(
     app_task = asyncio.create_task(tui.run_app())
     await tui.wait_ready()
 
-    _update_session_info(tui, focus, graph_id, store)
+    _update_session_info(tui, focus_creature, store)
     _seed_tab_models(tui, graph_creatures)
     _update_terrarium_panel(tui, graph_creatures, env, focus_creature_id)
     wired_channels: set[str] = set()
@@ -450,9 +450,8 @@ def _seed_tab_models(tui: TUISession, graph_creatures: Iterable[Any]) -> None:
         tui.update_target_model(creature.creature_id, model, max_ctx, compact_at)
 
 
-def _update_session_info(
-    tui: TUISession, focus, graph_id: str, store: SessionStore | None
-) -> None:
+def _update_session_info(tui: TUISession, creature, store: SessionStore | None) -> None:
+    focus = creature.agent
     model = _agent_model_identifier(focus)
     session_id = ""
     if store:
@@ -463,7 +462,13 @@ def _update_session_info(
             logger.warning(
                 "Failed to load session meta for TUI", error=str(e), exc_info=True
             )
-    tui.update_session_info(session_id=session_id, model=model, agent_name=graph_id)
+    tui.update_session_info(
+        session_id=session_id,
+        model=model,
+        agent_name=creature.name,
+        config_name=getattr(creature, "config_name", ""),
+        config_ref=getattr(creature, "config_ref", None) or "",
+    )
     compact_mgr = getattr(focus, "compact_manager", None)
     if compact_mgr:
         max_ctx = compact_mgr.config.max_tokens

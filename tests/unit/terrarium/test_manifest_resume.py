@@ -26,9 +26,11 @@ def _manifest(pwd: str = "."):
         "creatures": [
             {
                 "creature_id": "alice_id",
-                "name": "alice",
-                "config_snapshot": pack_agent_config(AgentConfig(name="alice")),
+                "name": "warm-ember",
+                "config_snapshot": pack_agent_config(AgentConfig(name="alice-config")),
                 "source_ref": "@pack/alice",
+                "config_name": "alice-config",
+                "config_ref": "@pack/alice",
                 "pwd": pwd,
                 "is_privileged": True,
                 "parent_creature_id": None,
@@ -55,6 +57,8 @@ def _restore_creature(config, *, creature_id, name, graph, pwd, **kwargs):
         graph_id=graph,
         config_snapshot=pack_agent_config(config),
         source_ref="@pack/alice",
+        config_name=config.name,
+        config_ref="@pack/alice",
         build_pwd=pwd,
     )
 
@@ -111,6 +115,10 @@ class TestManifestResume:
             assert set(graph.channels) == {"tasks"}
             assert graph.listen_edges["alice_id"] == {"tasks"}
             assert graph.send_edges["alice_id"] == {"tasks"}
+            creature = engine.get_creature("alice_id")
+            assert creature.name == "warm-ember"
+            assert creature.config_name == "alice-config"
+            assert creature.config_ref == "@pack/alice"
         finally:
             await engine.shutdown()
 

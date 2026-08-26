@@ -2457,6 +2457,8 @@ describe("chat store — resetForRouteSwitch", () => {
     expect(chat.sessionInfo.model).toBe("")
     expect(chat.sessionInfo.llmName).toBe("")
     expect(chat.sessionInfo.agentName).toBe("")
+    expect(chat.sessionInfo.configName).toBe("")
+    expect(chat.sessionInfo.configRef).toBe("")
     expect(chat.sessionInfo.compactThreshold).toBe(0)
     expect(chat.sessionInfo.maxContext).toBe(0)
 
@@ -2517,11 +2519,17 @@ describe("chat store — per-creature model info", () => {
       activity_type: "session_info",
       llm_name: "anthropic/claude-fable-5",
       session_id: "s-42",
+      agent_name: "warm-ember",
+      config_name: "swe",
+      config_ref: "@kt-biome/creatures/swe",
     })
 
     expect(chat.modelByTab.alice.llmName).toBe("anthropic/claude-fable-5")
     expect(chat.sessionInfo.llmName).toBe("anthropic/claude-fable-5")
     expect(chat.sessionInfo.sessionId).toBe("s-42")
+    expect(chat.sessionInfo.agentName).toBe("warm-ember")
+    expect(chat.sessionInfo.configName).toBe("swe")
+    expect(chat.sessionInfo.configRef).toBe("@kt-biome/creatures/swe")
     expect(chat.modelDisplay).toBe("anthropic/claude-fable-5")
   })
 

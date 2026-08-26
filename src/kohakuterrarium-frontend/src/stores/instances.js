@@ -165,6 +165,8 @@ function _mapSession(data) {
   const rawCreatures = Array.isArray(data.creatures) ? data.creatures : []
   const creatures = rawCreatures.map((c) => ({
     name: c.name || c.creature_id || "",
+    config_name: c.config_name || "",
+    config_ref: c.config_ref || "",
     creature_id: c.creature_id || c.agent_id || "",
     status: c.running ? "running" : "idle",
     model: c.model || "",
@@ -196,7 +198,11 @@ function _mapSession(data) {
     graph_id: data.session_id,
     session_id: data.session_id,
     type: isMulti ? "terrarium" : "creature",
+    session_name: data.name || "session",
+    // Keep the legacy display field stable; configuration provenance is separate.
     config_name: data.name || primary.name || "session",
+    creature_config_name: primary.config_name || "",
+    config_ref: primary.config_ref || "",
     pwd: data.pwd || "",
     status: "running",
     has_root: !!data.has_root,
