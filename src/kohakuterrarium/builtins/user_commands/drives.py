@@ -13,7 +13,6 @@ from kohakuterrarium.modules.user_command.base import (
     ui_list,
     ui_text,
 )
-from kohakuterrarium.studio.sessions import drives as _drives
 from kohakuterrarium.terrarium.drive.errors import (
     DriveConflictError,
     DriveError,
@@ -30,6 +29,14 @@ _SUBCOMMANDS = frozenset(
     {"list", "show", "create", "pause", "resume", "wake", "cancel", "progress"}
 )
 _TRANSITIONS = {"pause": "paused", "resume": "active", "cancel": "cancelled"}
+
+
+async def _drive_call(name: str, *args, **kwargs):
+    from kohakuterrarium.studio.sessions import drives
+
+    return await getattr(drives, name)(*args, **kwargs)
+
+
 _USAGE = (
     "usage: /drives list [--mine|--assigned|--graph] [--status active,blocked] | "
     "show <id> | create --kind K --title T [--scope graph|creature] | "
@@ -87,7 +94,8 @@ class DrivesCommand(BaseUserCommand):
         flags, _ = _parse_flags(rest)
         graph_id = await _graph_of(ctx, ctx.creature_id)
         assignee = ctx.creature_id if "assigned" in flags else None
-        rows = await _drives.list_records(
+        rows = await _drive_call(
+            "list_records",
             ctx.service,
             graph_id=graph_id,
             actor=ctx.principal,
@@ -114,8 +122,12 @@ class DrivesCommand(BaseUserCommand):
     async def _show(self, drive_id: str, ctx: "_Resolved") -> UserCommandResult:
         if not drive_id:
             return UserCommandResult(error="usage: /drives show <id>")
-        record = await _drives.get_record(
-            ctx.service, drive_id, actor=ctx.principal, is_privileged=ctx.is_operator
+        record = await _drive_call(
+            "get_record",
+            ctx.service,
+            drive_id,
+            actor=ctx.principal,
+            is_privileged=ctx.is_operator,
         )
         if record is None:
             return UserCommandResult(error=f"no such drive: {drive_id}")
@@ -137,7 +149,8 @@ class DrivesCommand(BaseUserCommand):
             body["priority"] = _int_flag(flags["priority"], "priority")
         if "spec-json" in flags:
             body["spec"] = _json_flag(flags["spec-json"], "spec-json")
-        record = await _drives.create_record(
+        record = await _drive_call(
+            "create_record",
             ctx.service,
             graph_id=graph_id,
             actor=ctx.principal,
@@ -155,7 +168,8 @@ class DrivesCommand(BaseUserCommand):
         if not drive_id:
             return UserCommandResult(error=f"usage: /drives {sub} <id> --revision N")
         if sub == "wake":
-            record = await _drives.wake_record(
+            record = await _drive_call(
+                "wake_record",
                 ctx.service,
                 drive_id,
                 actor=ctx.principal,
@@ -164,7 +178,8 @@ class DrivesCommand(BaseUserCommand):
             )
             return _panel("Drive woken", record)
         revision = _require_revision(flags)
-        record = await _drives.transition_record(
+        record = await _drive_call(
+            "transition_record",
             ctx.service,
             drive_id,
             target_status=_TRANSITIONS[sub],
@@ -179,7 +194,8 @@ class DrivesCommand(BaseUserCommand):
         if len(parts) < 2 or not parts[1].strip():
             return UserCommandResult(error="usage: /drives progress <id> <summary>")
         drive_id, summary = parts[0], parts[1].strip()
-        await _drives.report_progress_record(
+        await _drive_call(
+            "report_progress_record",
             ctx.service,
             drive_id,
             summary=summary,

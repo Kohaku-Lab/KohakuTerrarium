@@ -31,6 +31,7 @@ class TestRunStartupTrace:
     @pytest.mark.asyncio
     async def test_records_engine_and_surface_milestones(self, monkeypatch, tmp_path):
         milestones = []
+        registrations = []
         creature = type("Creature", (), {"creature_id": "focus", "graph_id": "graph"})()
 
         class _Engine:
@@ -47,6 +48,12 @@ class TestRunStartupTrace:
             assert creature_id == "focus"
 
         monkeypatch.setattr(run._drive_settings, "resolve_drive_kwargs", lambda: {})
+        monkeypatch.setattr(
+            run,
+            "register_group_hooks",
+            lambda: registrations.append("registered"),
+            raising=False,
+        )
         monkeypatch.setattr(run, "Terrarium", lambda **_kwargs: _Engine())
         monkeypatch.setattr(run, "_looks_like_recipe", lambda _path: False)
         monkeypatch.setattr(
@@ -55,7 +62,9 @@ class TestRunStartupTrace:
         monkeypatch.setattr(
             run, "_apply_cli_topology", lambda *_args, **_kwargs: _async_none()
         )
-        monkeypatch.setattr(run, "run_engine_with_rich_cli", _run_cli)
+        from kohakuterrarium.terrarium import engine_rich_cli
+
+        monkeypatch.setattr(engine_rich_cli, "run_engine_with_rich_cli", _run_cli)
         monkeypatch.setattr(
             run,
             "mark_startup",
@@ -75,6 +84,7 @@ class TestRunStartupTrace:
             )
             == 0
         )
+        assert registrations == ["registered"]
         assert milestones == [
             ("engine_create_begin", {"surface": "cli"}),
             ("engine_entered", {"surface": "cli"}),

@@ -1,103 +1,47 @@
-"""Terrarium - the unified runtime engine.
+"""Terrarium runtime engine and graph topology public facade."""
 
-The :class:`Terrarium` engine is the single per-process runtime. Every
-running creature lives inside it; a solo ``kt run creature.yaml`` is a
-1-creature graph, a recipe is an N-creature graph applied via
-:meth:`Terrarium.apply_recipe`. Topology can change at runtime via
-``add_creature`` / ``connect`` / ``add_channel`` etc., or via the
-``group_*`` tool surface from a privileged creature.
+import importlib
 
-Privilege is set at creature creation time and immutable after — see
-:class:`Creature.is_privileged` and :meth:`Terrarium.assign_root`. The
-legacy ``TerrariumRuntime`` / ``KohakuManager`` / ``terrarium_*`` tool
-stack has been removed; the engine and the ``group_*`` tool surface
-are the only paths.
-"""
+_EXPORTS = {
+    "ChannelConfig": "kohakuterrarium.terrarium.config",
+    "ChannelInfo": "kohakuterrarium.terrarium.topology",
+    "ChannelObserver": "kohakuterrarium.terrarium.observer",
+    "ConnectionResult": "kohakuterrarium.terrarium.engine",
+    "Creature": "kohakuterrarium.terrarium.creature_host",
+    "CreatureConfig": "kohakuterrarium.terrarium.config",
+    "CreatureInfo": "kohakuterrarium.terrarium.service",
+    "DisconnectionResult": "kohakuterrarium.terrarium.engine",
+    "EngineEvent": "kohakuterrarium.terrarium.events",
+    "EventFilter": "kohakuterrarium.terrarium.events",
+    "EventKind": "kohakuterrarium.terrarium.events",
+    "GraphTopology": "kohakuterrarium.terrarium.topology",
+    "LocalTerrariumService": "kohakuterrarium.terrarium.service",
+    "LogEntry": "kohakuterrarium.terrarium.output_log",
+    "MultiNodeTerrariumService": "kohakuterrarium.terrarium.multi_node_service",
+    "ObservedMessage": "kohakuterrarium.terrarium.observer",
+    "OutputLogCapture": "kohakuterrarium.terrarium.output_log",
+    "RemoteTerrariumService": "kohakuterrarium.terrarium.remote_service",
+    "RootAssignment": "kohakuterrarium.terrarium.events",
+    "Terrarium": "kohakuterrarium.terrarium.engine",
+    "TerrariumConfig": "kohakuterrarium.terrarium.config",
+    "TerrariumService": "kohakuterrarium.terrarium.service",
+    "TopologyDelta": "kohakuterrarium.terrarium.topology",
+    "TopologyState": "kohakuterrarium.terrarium.topology",
+    "build_creature": "kohakuterrarium.terrarium.creature_host",
+    "load_terrarium_config": "kohakuterrarium.terrarium.config",
+}
 
-# Importing the tool module guarantees registration regardless of which engine
-# construction path is used.
-import kohakuterrarium.terrarium.tools_group as _tools_group  # noqa: F401
-from kohakuterrarium.terrarium.config import (
-    ChannelConfig,
-    CreatureConfig,
-    TerrariumConfig,
-    load_terrarium_config,
-)
-from kohakuterrarium.terrarium.creature_host import (
-    Creature,
-    build_creature,
-)
-from kohakuterrarium.terrarium.engine import (
-    ConnectionResult,
-    DisconnectionResult,
-    Terrarium,
-)
-from kohakuterrarium.terrarium.events import (
-    EngineEvent,
-    EventFilter,
-    EventKind,
-    RootAssignment,
-)
-from kohakuterrarium.terrarium.observer import ChannelObserver, ObservedMessage
-from kohakuterrarium.terrarium.output_log import LogEntry, OutputLogCapture
-from kohakuterrarium.terrarium.service import (
-    CreatureInfo,
-    LocalTerrariumService,
-    TerrariumService,
-)
-from kohakuterrarium.terrarium.topology import (
-    ChannelInfo,
-    GraphTopology,
-    TopologyDelta,
-    TopologyState,
-)
+__all__ = list(_EXPORTS)
 
 
-# Multi-node services live in their own submodules so callers that
-# never go remote (single-host mode) don't transitively import the
-# laboratory layer.  Re-exported here at module level for convenience
-# of multi-node callers.
 def __getattr__(name: str):
-    if name == "RemoteTerrariumService":
-        from kohakuterrarium.terrarium.remote_service import (
-            RemoteTerrariumService,
-        )
-
-        return RemoteTerrariumService
-    if name == "MultiNodeTerrariumService":
-        from kohakuterrarium.terrarium.multi_node_service import (
-            MultiNodeTerrariumService,
-        )
-
-        return MultiNodeTerrariumService
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    module_path = _EXPORTS.get(name)
+    if module_path is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(importlib.import_module(module_path), name)
+    globals()[name] = value
+    return value
 
 
-__all__ = [
-    "ChannelConfig",
-    "ChannelInfo",
-    "ChannelObserver",
-    "ConnectionResult",
-    "Creature",
-    "CreatureConfig",
-    "CreatureInfo",
-    "DisconnectionResult",
-    "EngineEvent",
-    "EventFilter",
-    "EventKind",
-    "GraphTopology",
-    "LocalTerrariumService",
-    "LogEntry",
-    "MultiNodeTerrariumService",
-    "ObservedMessage",
-    "OutputLogCapture",
-    "RemoteTerrariumService",
-    "RootAssignment",
-    "Terrarium",
-    "TerrariumConfig",
-    "TerrariumService",
-    "TopologyDelta",
-    "TopologyState",
-    "build_creature",
-    "load_terrarium_config",
-]
+def __dir__() -> list[str]:
+    return sorted(set(globals()) | set(_EXPORTS))

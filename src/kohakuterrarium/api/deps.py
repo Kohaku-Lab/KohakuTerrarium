@@ -18,6 +18,7 @@ from starlette.requests import HTTPConnection
 from kohakuterrarium.api.auth.dependencies import get_auth_config, get_optional_user
 from kohakuterrarium.api.auth.engine_pool import EnginePool, _user_session_dir
 from kohakuterrarium.api.auth.models import User
+from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.studio.sessions.lifecycle import get_session_meta
 from kohakuterrarium.terrarium import (
@@ -77,6 +78,7 @@ def get_service(
     isolation, all requests share the process-wide local service.
     """
     global _service
+    register_group_hooks()
     # Multi-node services own their routing and must not be wrapped as local engines.
     if _service is not None and not isinstance(_service, LocalTerrariumService):
         return _service
@@ -155,6 +157,7 @@ def resolve_request_session_dir(
 def get_service_legacy() -> TerrariumService:
     """Return the process-wide service when no request identity is available."""
     global _service
+    register_group_hooks()
     if _service is None:
         engine = Terrarium(session_dir=_session_dir(), **_host_drive_kwargs())
         _service = LocalTerrariumService(engine)

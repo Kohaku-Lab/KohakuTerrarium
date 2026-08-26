@@ -1,13 +1,15 @@
 # cli/
 
-`kt` command dispatcher. One handler file per subcommand, with
-`cli/__init__.py:main()` as the single argparse + dispatch entry point.
+`kt` command dispatcher. One handler file per subcommand, with a lightweight
+`cli/__init__.py:main()` for common startup paths and `_main.py` for the full
+argparse command catalog.
 
 ## Files
 
 | File            | Subcommand(s)                                                                                                           |
 | --------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`    | `main()`: argparse setup, `COMMANDS` dispatch table (+ `_aliases.py`, `_config_layers.py`, `_aio_entrypoint.py`)        |
+| `__init__.py`    | Lightweight `main()` dispatch for version, desktop, web, CLI, and TUI startup paths                                      |
+| `_main.py`       | Full argparse setup and `COMMANDS` dispatch table for the complete command catalog                                      |
 | `run.py`         | `kt run`: launch a creature or recipe through the Terrarium engine (rich CLI / TUI modes)                               |
 | `resume.py`      | `kt resume`: resume an agent or terrarium from a `.kohakutr` session file                                               |
 | `doctor.py`      | `kt doctor`: pre-flight environment + config validation (wraps `kohakuterrarium.validate`)                              |

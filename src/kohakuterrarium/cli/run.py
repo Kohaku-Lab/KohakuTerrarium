@@ -21,11 +21,10 @@ import kohakuterrarium.terrarium.topology as _topo
 from kohakuterrarium.cli.picker import pick_runnable
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
-from kohakuterrarium.terrarium.engine_rich_cli import run_engine_with_rich_cli
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
@@ -187,6 +186,7 @@ async def _run(
     extra_creatures: list[str],
     extra_channels: list[str],
 ) -> int:
+    register_group_hooks()
     pwd = str(Path.cwd())
     is_recipe = _looks_like_recipe(agent_path)
 
@@ -256,6 +256,10 @@ async def _run(
 
         try:
             if io_mode == "cli":
+                from kohakuterrarium.terrarium.engine_rich_cli import (
+                    run_engine_with_rich_cli,
+                )
+
                 mark_startup(
                     "surface_run_begin",
                     surface="cli",
@@ -263,6 +267,8 @@ async def _run(
                 )
                 await run_engine_with_rich_cli(engine, focus_creature_id, store)
             elif io_mode == "tui":
+                from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
+
                 mark_startup(
                     "surface_run_begin",
                     surface="tui",

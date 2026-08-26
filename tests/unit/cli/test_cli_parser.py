@@ -4,7 +4,8 @@ import argparse
 
 import pytest
 
-from kohakuterrarium import cli
+from kohakuterrarium.cli import _build_surface_parser
+from kohakuterrarium.cli import _main as cli
 
 
 class TestRunParser:
@@ -19,6 +20,29 @@ class TestRunParser:
                 ["run", "agent", "--session", "run.kohakutr", "--no-session"]
             )
         assert exc_info.value.code == 2
+
+
+def test_fast_surface_parsers_match_full_parser_contract():
+    parser = cli._build_parser()
+    commands = next(
+        action for action in parser._actions if action.dest == "command"
+    ).choices
+
+    def signature(surface_parser):
+        return [
+            (
+                tuple(action.option_strings),
+                action.dest,
+                action.default,
+                action.required,
+                action.choices,
+                action.nargs,
+            )
+            for action in surface_parser._actions
+        ]
+
+    for command in ("web", "app", "cli", "tui"):
+        assert signature(_build_surface_parser(command)) == signature(commands[command])
 
 
 class TestMainStartup:

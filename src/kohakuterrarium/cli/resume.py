@@ -14,15 +14,28 @@ from typing import Literal
 
 from kohakuterrarium.cli.run import _resolve_session
 from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui
-from kohakuterrarium.terrarium.engine_rich_cli import run_engine_with_rich_cli
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
     set_level,
 )
+
+
+async def run_engine_with_rich_cli(engine, focus, store):
+    from kohakuterrarium.terrarium.engine_rich_cli import (
+        run_engine_with_rich_cli as run,
+    )
+
+    await run(engine, focus, store)
+
+
+async def run_engine_with_tui(engine, focus, store):
+    from kohakuterrarium.terrarium.engine_cli import run_engine_with_tui as run
+
+    await run(engine, focus, store)
 
 
 def resume_cli(
@@ -102,6 +115,7 @@ def _resolve_missing_pwd(path, pwd_override: str | None) -> str | None | Literal
 
 async def _run(path, pwd_override, llm, io_mode: str | None) -> int:
     """Resume the engine and run the selected interactive surface."""
+    register_group_hooks()
     engine = await Terrarium.resume(str(path), pwd=pwd_override, llm=llm)
     async with engine:
         graph_id = next(iter(engine._topology.graphs.keys()), None)
