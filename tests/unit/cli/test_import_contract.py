@@ -50,6 +50,20 @@ def test_version_dispatch_does_not_load_command_runtimes():
     assert not any(name.startswith("textual") for name in loaded)
 
 
+def test_default_desktop_dispatch_does_not_load_web_runtime(monkeypatch):
+    loaded = _loaded_modules(
+        "import json, sys; import kohakuterrarium.serving.desktop as desktop; "
+        "desktop.launch_desktop_app = lambda **kwargs: None; "
+        "from kohakuterrarium import cli; sys.argv = ['kt']; cli.main(); "
+        "print(json.dumps(sorted(sys.modules)))"
+    )
+
+    assert "kohakuterrarium.serving.web" not in loaded
+    assert "kohakuterrarium.api.app" not in loaded
+    assert not any(name.startswith("fastapi") for name in loaded)
+    assert not any(name.startswith("uvicorn") for name in loaded)
+
+
 def test_web_help_does_not_load_terminal_surfaces():
     loaded = _loaded_modules(
         "import contextlib, io, json, sys; from kohakuterrarium import cli; "

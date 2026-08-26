@@ -133,6 +133,7 @@ def start_uvicorn_with_port_fallback(
                         actual_port = sockets[0].getsockname()[1]
                 except Exception:
                     pass
+                server._kt_thread = thread
                 return server, actual_port
             if not thread.is_alive():
                 # A dead startup thread indicates that this candidate never bound.
@@ -290,15 +291,13 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     application stub does not support ``python -m`` execution.
     """
     if _is_briefcase_runtime():
-        # The Briefcase stub is the GUI process and cannot be relaunched with
-        # module arguments, so it must own uvicorn and pywebview directly.
         _run_desktop_app_blocking(port=port, log_level=log_level)
         return
 
     cmd = [
         sys.executable,
         "-m",
-        "kohakuterrarium.serving.web",
+        "kohakuterrarium.serving.desktop",
         "--port",
         str(port),
         "--log-level",

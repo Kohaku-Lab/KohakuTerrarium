@@ -150,11 +150,36 @@ runtime imports (about 4.0 seconds before engine construction). The next pass
 should therefore split those module-level dependency graphs rather than further
 optimizing argparse or the public facade.
 
+## Desktop loading-shell optimization
+
+The second optimization pass moved desktop bootstrap into a lightweight module.
+The launcher now creates and shows an inline native loading shell first, starts
+the heavy FastAPI/Uvicorn server graph after the shown event, and navigates the existing
+window to the verified fallback port when the server reports ready.
+
+A real Windows source-checkout smoke run produced:
+
+| Desktop milestone | Time from parent launch |
+| --- | ---: |
+| Parent parser ready | 206.6 ms |
+| Desktop UI child spawned | 215.8 ms |
+| Loading window created | 464.0 ms |
+| Loading window shown | 1080.5 ms |
+| Server child spawned | 1089.5 ms |
+| Server ready on fallback port 8002 | 6354.2 ms |
+
+The loading window is therefore visible about 5.3 seconds before the backend is
+ready, and about 9.7 seconds earlier than the original 10750.7 ms
+`desktop_window_shown` baseline. Server startup remains the next bottleneck; the
+loading shell changes T-visible without claiming that the application is fully
+ready.
+
 ## Measurement limitations
 
-- Desktop `desktop_window_shown` was exercised once on Windows, but remains a
-  manual GUI measurement. Repeat it on every supported desktop platform and
-  report a distribution before treating it as a budget.
+- Desktop `desktop_window_shown` was exercised once before and once after the
+  loading-shell change on Windows, but remains a manual GUI measurement. Repeat
+  it on every supported desktop platform and report a distribution before
+  treating it as a budget.
 - Browser FCP and Vue mount are not included. They need browser-side Performance
   API marks in a later frontend-specific pass.
 - Cold filesystem-cache and packaged Briefcase measurements remain separate
