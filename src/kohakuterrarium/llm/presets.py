@@ -678,8 +678,8 @@ PRESETS: dict[str, dict[str, Any]] = {
     # ═══════════════════════════════════════════════════════
     #  GLM Coding Plan Direct API (Anthropic-compatible).
     #  GLM's Anthropic-compatible endpoint uses Bearer-token auth.
-    #  GLM-5.2 ids are lowercase; the 1M-context variant is a
-    #  SEPARATE model id with a literal ``[1m]`` suffix.
+    #  GLM-5.2 ids are lowercase. The 1M-context selector changes the
+    #  local context budget, while the API model id remains ``glm-5.2``.
     # ═══════════════════════════════════════════════════════
     "glm-5.2": {
         "provider": "glm-coding",
@@ -690,7 +690,7 @@ PRESETS: dict[str, dict[str, Any]] = {
     },
     "glm-5.2-1m": {
         "provider": "glm-coding",
-        "model": "glm-5.2[1m]",
+        "model": "glm-5.2",
         "max_context": 1000000,
         "max_output": 131072,
         "extra_body": {"auth_as_bearer": True},
