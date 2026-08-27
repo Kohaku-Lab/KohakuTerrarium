@@ -887,6 +887,18 @@ def _inject_synthetic_announcements(
     return result
 
 
+def normalize_tool_call_events(
+    events: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy events and restore missing assistant tool-call announcements.
+
+    Unlike resume normalization, live history replay must not finalize an
+    unfinished background job as interrupted. It only repairs the declaration
+    required to pair persisted tool results with their assistant call.
+    """
+    return _inject_synthetic_announcements([dict(evt) for evt in events])
+
+
 def normalize_resumable_events(
     events: list[dict[str, Any]],
     *,
@@ -966,4 +978,4 @@ def normalize_resumable_events(
         )
 
     full = normalized + synthetic_events
-    return _inject_synthetic_announcements(full)
+    return normalize_tool_call_events(full)

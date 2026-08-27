@@ -6,6 +6,7 @@ from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm.message import dicts_to_messages
 from kohakuterrarium.session.history import (
     compact_path_from_event,
+    normalize_tool_call_events,
     replay_conversation,
 )
 from kohakuterrarium.session.raw_history import (
@@ -115,7 +116,7 @@ def reload_raw_prefix_for_target(
     # pending-summary flush/drop logic assumes one).
     raw_events.sort(key=lambda evt: evt.get("event_id", 0))
     messages = replay_conversation(
-        raw_events,
+        normalize_tool_call_events(raw_events),
         branch_view=prefix.branch_view,
         include_metadata=True,
     )
