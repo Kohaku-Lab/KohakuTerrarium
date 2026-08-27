@@ -21,7 +21,7 @@
         <div class="text-[11px] text-warm-400 uppercase tracking-wider">{{ t("sessionViewer.tree.attached") }}</div>
         <div class="font-mono text-warm-700 dark:text-warm-300 truncate">{{ subagentRef.label }}</div>
       </div>
-      <button class="text-[11px] px-2 py-1 rounded border border-iolite/40 text-iolite hover:bg-iolite/10" @click="$emit('open-conversation', subagentRef)">{{ t("sessionViewer.detail.openSubagentConversation") }}</button>
+      <button :disabled="!subagentRef.ready" data-test="subagent-open-conversation" :title="subagentRef.ready ? '' : t('sessionViewer.detail.conversationPending')" class="text-[11px] px-2 py-1 rounded border border-iolite/40 text-iolite hover:bg-iolite/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent shrink-0" @click="subagentRef.ready && $emit('open-conversation', subagentRef)">{{ t("sessionViewer.detail.openSubagentConversation") }}</button>
     </div>
 
     <!-- Primary content (text-y fields) -->
@@ -88,6 +88,7 @@ const route = useRoute()
 const props = defineProps({
   event: { type: Object, default: null },
   parentAgent: { type: String, default: "" },
+  completedJobIds: { type: Array, default: () => [] },
 })
 defineEmits(["open-conversation"])
 
@@ -194,13 +195,16 @@ const tokens = computed(() => {
 const subagentRef = computed(() => {
   const e = props.event
   if (!e) return null
-  const isTerminal = ["subagent_result", "subagent_error"].includes(String(e.type || ""))
-  if (!isTerminal) return null
+  const type = String(e.type || "")
+  if (!type.startsWith("subagent_")) return null
   const name = e.name || e.subagent_name || ""
-  const run = e.run ?? e.subagent_run ?? null
   if (!name) return null
+  const jobId = e.job_id || ""
+  const isTerminalHere = type === "subagent_result" || type === "subagent_error"
+  const done = isTerminalHere || (Boolean(jobId) && props.completedJobIds.includes(jobId))
+  const run = e.run ?? e.subagent_run ?? null
   const label = run != null ? `${name} (run ${run})` : String(name)
-  return { jobId: e.job_id || "", name, run, parent: props.parentAgent, label }
+  return { jobId, name, run, parent: props.parentAgent, label, ready: Boolean(done) }
 })
 
 const reasoningSegments = computed(() => {

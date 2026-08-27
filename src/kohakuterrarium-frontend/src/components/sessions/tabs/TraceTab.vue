@@ -40,8 +40,10 @@
 
     <!-- Event detail drawer -->
     <el-drawer v-model="detailOpen" :title="t('sessionViewer.detail.title')" direction="rtl" size="40%" :modal="false" :destroy-on-close="false">
-      <SubagentConversationPanel v-if="conversationRef" :session-id="conversationSessionId" :parent="conversationRef.parent" :job-id="conversationRef.jobId" :name="conversationRef.name" :run="conversationRef.run" :live="false" />
-      <TraceEventDetail v-else :event="selectedEvent" :parent-agent="rollup.agent || filters.agent" @open-conversation="onOpenSubagent" />
+      <div class="h-full min-h-0 flex flex-col">
+        <SubagentConversationPanel v-if="conversationRef" :session-id="conversationSessionId" :parent="conversationRef.parent" :job-id="conversationRef.jobId" :name="conversationRef.name" :run="conversationRef.run" :live="false" fill show-back @back="onCloseConversation" />
+        <TraceEventDetail v-else :event="selectedEvent" :parent-agent="rollup.agent || filters.agent" :completed-job-ids="completedJobIds" @open-conversation="onOpenSubagent" />
+      </div>
     </el-drawer>
   </div>
 </template>
@@ -128,6 +130,25 @@ function onOpenSubagent(reference) {
   if (!reference) return
   conversationRef.value = reference
 }
+
+function onCloseConversation() {
+  conversationRef.value = null
+}
+
+// Jobs with a persisted terminal outcome anywhere in the session.
+// Rollup ``subagent_breakdown`` rows are written only once a run
+// finished (managed or synthetic), covering every turn without
+// requiring any turn to be expanded client-side.
+const completedJobIds = computed(() => {
+  const ids = []
+  for (const turn of rollup.turns || []) {
+    for (const row of turn.subagent_breakdown || []) {
+      const jobId = row?.job_id
+      if (jobId && !ids.includes(jobId)) ids.push(jobId)
+    }
+  }
+  return ids
+})
 
 const agents = computed(() => detail.agents || [])
 
