@@ -79,24 +79,7 @@ class TriggerManager:
             )
 
         if getattr(trigger, "resumable", False) and self._session_store:
-            try:
-                self._session_store.save_state(
-                    self._agent_name,
-                    triggers=[
-                        {
-                            "trigger_id": tid,
-                            "type": type(t).__name__,
-                            "module": type(t).__module__,
-                            "data": t.to_resume_dict(),
-                        }
-                        for tid, t in self._triggers.items()
-                        if getattr(t, "resumable", False)
-                    ],
-                )
-            except Exception as e:
-                logger.warning(
-                    "Failed to save trigger state", error=str(e), exc_info=True
-                )
+            self._persist_resumable_triggers()
         else:
             logger.debug(
                 "Trigger registered (not started)",
@@ -105,6 +88,27 @@ class TriggerManager:
             )
 
         return trigger_id
+
+    def _persist_resumable_triggers(self) -> None:
+        """Snapshot every resumable trigger into the session store."""
+        if self._session_store is None:
+            return
+        try:
+            self._session_store.save_state(
+                self._agent_name,
+                triggers=[
+                    {
+                        "trigger_id": tid,
+                        "type": type(t).__name__,
+                        "module": type(t).__module__,
+                        "data": t.to_resume_dict(),
+                    }
+                    for tid, t in self._triggers.items()
+                    if getattr(t, "resumable", False)
+                ],
+            )
+        except Exception as e:
+            logger.warning("Failed to save trigger state", error=str(e), exc_info=True)
 
     async def remove(self, trigger_id: str) -> bool:
         """Stop and remove a trigger, reporting whether it existed."""
@@ -124,9 +128,22 @@ class TriggerManager:
                     "Trigger task cleanup error", error=str(e), exc_info=True
                 )
 
-        await trigger.stop()
+        # Removal was already decided; the stop hook is best-effort so a
+        # failing custom trigger cannot leave memory and the persisted
+        # snapshot out of sync.
+        try:
+            await trigger.stop()
+        except Exception as e:
+            logger.warning(
+                "Trigger stop failed during removal",
+                trigger_id=trigger_id,
+                error=str(e),
+                exc_info=True,
+            )
         self._created_at.pop(trigger_id, None)
         logger.info("Trigger removed", trigger_id=trigger_id)
+        # Rewrite the snapshot so a later resume cannot restore this trigger.
+        self._persist_resumable_triggers()
         return True
 
     def get(self, trigger_id: str) -> TriggerInfo | None:

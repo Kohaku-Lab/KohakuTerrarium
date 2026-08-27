@@ -28,6 +28,7 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.events import create_user_input_event
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.session.attachment_service import get_attach_state
 from kohakuterrarium.session.embedding import BaseEmbedder
 from kohakuterrarium.session.errors import (
@@ -411,17 +412,17 @@ class TestSessionIntegration:
         assert "scribe:subagent:research:0" in loops
         assert loops["scribe:subagent:research:0"]["completion_tokens"] == 5
 
-        # Persist resumable triggers the way the runtime does on stop —
-        # save_state writes the triggers list, load_triggers reads it
-        # back, and resume hands it to the rebuilt agent.
-        store.save_state(
-            "scribe",
-            triggers=[
-                {"trigger_id": "hb", "type": "timer", "prompt": "tick", "interval": 99}
-            ],
-        )
-        assert store.load_triggers("scribe")[0]["trigger_id"] == "hb"
+        # Resumable triggers ride this same store through runtime
+        # mutations. Install two timers through the live agent's public
+        # API and delete one: TriggerManager.remove must converge the
+        # persisted snapshot on disk, or resume resurrects the deleted id.
+        hb_id = await agent.add_trigger(TimerTrigger(interval=3600, prompt="tick"))
+        t2_id = await agent.add_trigger(TimerTrigger(interval=3600, prompt="tock"))
+        installed = {t["trigger_id"] for t in store.load_triggers("scribe")}
+        assert {hb_id, t2_id} <= installed
         assert store.load_triggers("nobody") == []
+        assert await agent.remove_trigger(hb_id) is True
+        assert [t["trigger_id"] for t in store.load_triggers("scribe")] == [t2_id]
         store.close()
 
         # ---- version probe + session-type detection on the closed file ----
@@ -450,6 +451,11 @@ class TestSessionIntegration:
             # Two research runs were saved (run 0 via SessionOutput, run 1
             # explicitly) — the counter restored to the next free index.
             assert reopened.next_subagent_run("scribe", "research") == 2
+            # The trigger deletion converged across processes: a fresh
+            # handle sees only the survivor, never the deleted id.
+            assert [t["trigger_id"] for t in reopened.load_triggers("scribe")] == [
+                t2_id
+            ]
             # Job records round-tripped through the jobs table.
             job = reopened.load_job("job-echo-1")
             assert job["status"] == "completed"
@@ -505,9 +511,10 @@ class TestSessionIntegration:
             assert resumed_store.load_meta()["status"] == "running"
             assert resumed_store.load_meta()["format_version"] == FORMAT_VERSION
             # The saved resumable triggers were staged onto the agent for
-            # the trigger manager to pick up.
+            # the trigger manager to pick up — including the delete: only
+            # the surviving timer is staged, never the removed one.
             staged = getattr(resumed_agent, "_pending_resume_triggers", None)
-            assert staged and staged[0]["trigger_id"] == "hb"
+            assert staged and staged[0]["trigger_id"] == t2_id
         finally:
             await resumed_agent.stop()
             resumed_store.close()
