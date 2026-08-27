@@ -712,9 +712,13 @@ export const sessionAPI = {
     return data
   },
 
-  async listSubagents(session, parent = "") {
+  async listSubagents(session, { parent, jobId, name } = {}) {
+    const params = {}
+    if (parent) params.parent = parent
+    if (jobId) params.job_id = jobId
+    if (name) params.name = name
     const { data } = await api.get(`/sessions/${encodeTarget(session)}/subagents`, {
-      params: parent ? { parent } : {},
+      params,
     })
     return data
   },

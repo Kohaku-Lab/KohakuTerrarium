@@ -1,6 +1,20 @@
 <template>
   <div class="rounded overflow-hidden bg-taaffeite/6 dark:bg-taaffeite/10 border border-taaffeite/20 dark:border-taaffeite/25 flex flex-col gap-2 p-2 min-w-0">
     <div v-if="loading" class="text-[11px] text-warm-400">{{ t("common.loading") }}</div>
+    <div v-else-if="candidates.length" class="flex flex-col gap-2">
+      <div class="text-[11px] text-warm-500">{{ t("chat.subagent.chooseRun") }}</div>
+      <button v-for="candidate in candidates" :key="`${candidate.member_sid || ''}:${candidate.parent}:${candidate.name}:${candidate.run}`" type="button" :data-test="`subagent-run-${candidate.run}`" class="rounded border border-iolite/20 bg-iolite/5 p-2 text-left hover:bg-iolite/10" @click.stop="selectCandidate(candidate)">
+        <div class="flex items-center gap-2 text-[10px] font-mono text-warm-500">
+          <span>{{ candidate.parent }} / {{ candidate.name }} / run {{ candidate.run }}</span>
+          <span v-if="candidate.success === true" class="text-sage">success</span>
+          <span v-else-if="candidate.success === false" class="text-coral">error</span>
+          <span v-if="candidate.source" class="ml-auto">{{ candidate.source }}</span>
+        </div>
+        <div v-if="candidate.task" class="mt-1 text-[11px] text-warm-700 dark:text-warm-300">{{ candidate.task }}</div>
+        <div v-if="candidate.output_preview" class="mt-1 text-[10px] text-warm-500 line-clamp-2">{{ candidate.output_preview }}</div>
+        <div v-if="candidate.ts" class="mt-1 text-[9px] text-warm-400">{{ formatTimestamp(candidate.ts) }}</div>
+      </button>
+    </div>
     <div v-else-if="error" class="text-[11px] text-coral">{{ error }}</div>
     <template v-else>
       <div class="max-h-72 overflow-y-auto flex flex-col gap-2 min-w-0">
@@ -74,6 +88,7 @@ const { t } = useI18n()
 const loading = ref(false)
 const error = ref("")
 const messages = ref([])
+const candidates = ref([])
 const canReceive = ref(false)
 const sendText = ref("")
 const sending = ref(false)
@@ -163,6 +178,41 @@ function identifier() {
   return result
 }
 
+function formatTimestamp(value) {
+  const millis = Number(value) < 10_000_000_000 ? Number(value) * 1000 : Number(value)
+  const date = new Date(millis)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
+async function loadCandidates() {
+  const data = await sessionAPI.listSubagents(props.sessionId, {
+    ...(props.parent ? { parent: props.parent } : {}),
+    ...(props.jobId ? { jobId: props.jobId } : {}),
+    ...(props.name ? { name: props.name } : {}),
+  })
+  const runs = data.runs || []
+  candidates.value = runs.some((candidate) => candidate.member_sid) ? [] : runs
+}
+
+async function selectCandidate(candidate) {
+  loading.value = true
+  error.value = ""
+  try {
+    const data = await sessionAPI.getSubagentConversation(props.sessionId, {
+      parent: candidate.parent,
+      name: candidate.name,
+      run: candidate.run,
+    })
+    messages.value = data.messages || []
+    canReceive.value = false
+    candidates.value = []
+  } catch (err) {
+    error.value = err?.response?.data?.detail || t("chat.subagent.unavailable")
+  } finally {
+    loading.value = false
+  }
+}
+
 async function loadConversation({ silent = false } = {}) {
   if (!props.sessionId || !props.parent) {
     error.value = t("chat.subagent.unavailable")
@@ -170,6 +220,7 @@ async function loadConversation({ silent = false } = {}) {
   }
   if (!silent) loading.value = true
   error.value = ""
+  candidates.value = []
   try {
     const ident = identifier()
     const data = props.live
@@ -182,9 +233,17 @@ async function loadConversation({ silent = false } = {}) {
     canReceive.value = props.live && !!data.can_receive
   } catch (err) {
     if (silent) return
-    error.value = err?.response?.data?.detail || t("chat.subagent.unavailable")
     messages.value = []
     canReceive.value = false
+    if (!props.live && err?.response?.status === 409) {
+      try {
+        await loadCandidates()
+        if (candidates.value.length) return
+      } catch {
+        candidates.value = []
+      }
+    }
+    error.value = err?.response?.data?.detail || t("chat.subagent.unavailable")
   } finally {
     if (!silent) loading.value = false
   }

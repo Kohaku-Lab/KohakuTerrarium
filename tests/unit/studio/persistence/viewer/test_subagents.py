@@ -63,9 +63,7 @@ class TestSubagentViewerPayloads:
         finally:
             store.close()
 
-    def test_job_id_takes_precedence_and_rejects_conflicting_coordinates(
-        self, tmp_path
-    ):
+    def test_job_id_takes_precedence_over_stale_parent_and_coordinates(self, tmp_path):
         store = SessionStore(str(tmp_path / "precedence.kohakutr"))
         try:
             store.init_meta("precedence", "agent", "/p", "/w", ["parent"])
@@ -84,15 +82,55 @@ class TestSubagentViewerPayloads:
                 conv_json='{"messages":[{"role":"assistant","content":"second"}]}',
             )
 
-            with pytest.raises(ConflictError, match="requested sub-agent run"):
+            payload = build_subagent_conversation_payload(
+                store,
+                "precedence",
+                parent="renamed-parent",
+                job_id="agent_explore_11111111",
+                name="stale-name",
+                run=99,
+            )
+            assert payload["parent"] == "parent"
+            assert payload["name"] == "explore"
+            assert payload["run"] == 0
+            assert payload["messages"][-1]["content"] == "first"
+        finally:
+            store.close()
+
+    def test_duplicate_exact_job_ids_are_ambiguous(self, tmp_path):
+        store = SessionStore(str(tmp_path / "duplicate-job.kohakutr"))
+        try:
+            store.init_meta("duplicate-job", "terrarium", "/p", "/w", ["a", "b"])
+            for parent in ("a", "b"):
+                store.save_subagent(
+                    parent,
+                    "explore",
+                    0,
+                    {"job_id": "agent_explore_11111111", "task": parent},
+                    conv_json=(
+                        '{"messages":[{"role":"assistant","content":"%s"}]}' % parent
+                    ),
+                )
+
+            with pytest.raises(
+                ConflictError, match="multiple persisted runs match job_id"
+            ):
                 build_subagent_conversation_payload(
                     store,
-                    "precedence",
-                    parent="parent",
+                    "duplicate-job",
+                    parent="a",
                     job_id="agent_explore_11111111",
                     name="explore",
-                    run=1,
+                    run=None,
                 )
+            listed = build_subagent_runs_payload(
+                store,
+                "duplicate-job",
+                parent=None,
+                name=None,
+                job_id="agent_explore_11111111",
+            )
+            assert {row["parent"] for row in listed["runs"]} == {"a", "b"}
         finally:
             store.close()
 
@@ -126,6 +164,13 @@ class TestSubagentViewerPayloads:
                 {"task": "legacy second"},
                 conv_json='{"messages":[{"role":"assistant","content":"legacy two"}]}',
             )
+            store.save_subagent(
+                "parent",
+                "explore",
+                2,
+                {"job_id": "agent_explore_22222222", "task": "unrelated modern"},
+                conv_json='{"messages":[{"role":"assistant","content":"modern"}]}',
+            )
             with pytest.raises(ConflictError, match="multiple legacy runs"):
                 build_subagent_conversation_payload(
                     store,
@@ -135,6 +180,14 @@ class TestSubagentViewerPayloads:
                     name="explore",
                     run=None,
                 )
+            listed = build_subagent_runs_payload(
+                store,
+                "legacy",
+                parent="parent",
+                name="explore",
+                job_id="agent_explore_11111111",
+            )
+            assert [row["run"] for row in listed["runs"]] == [0, 1]
         finally:
             store.close()
 

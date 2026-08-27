@@ -29,11 +29,20 @@ def build_subagent_runs_payload(
     *,
     parent: str | None,
     name: str | None,
+    job_id: str | None = None,
 ) -> dict[str, Any]:
     """Return persisted sub-agent runs suitable for viewer selection."""
-    runs = [
-        _public_run(row) for row in store.list_subagent_runs(parent=parent, name=name)
-    ]
+    rows = store.list_subagent_runs(
+        parent=None if job_id else parent, name=None if job_id else name
+    )
+    if job_id:
+        exact = [row for row in rows if row.get("job_id") == job_id]
+        rows = exact or [
+            row
+            for row in store.list_subagent_runs(parent=parent, name=name)
+            if not row.get("job_id")
+        ]
+    runs = [_public_run(row) for row in rows]
     return {"session_name": session_name, "runs": runs}
 
 
@@ -53,15 +62,16 @@ def build_subagent_conversation_payload(
     resolution = "explicit_run"
     row: dict[str, Any] | None = None
     if job_id:
-        row = store.find_subagent_run(job_id, parent=parent)
+        exact = [
+            candidate
+            for candidate in store.list_subagent_runs()
+            if candidate.get("job_id") == job_id
+        ]
+        if len(exact) > 1:
+            raise ConflictError(f"multiple persisted runs match job_id {job_id!r}")
+        row = exact[0] if exact else None
         if row is not None:
             resolution = "exact_job_id"
-            if name is not None and row["name"] != name:
-                raise ConflictError(
-                    "job_id does not match the requested sub-agent name"
-                )
-            if run is not None and row["run"] != run:
-                raise ConflictError("job_id does not match the requested sub-agent run")
         elif name:
             candidates = store.list_subagent_runs(parent=parent, name=name)
             legacy = [
@@ -90,19 +100,22 @@ def build_subagent_conversation_payload(
     if row is None:
         raise NotFoundError("sub-agent conversation not found")
 
+    resolved_parent = str(row["parent"])
     resolved_name = str(row["name"])
     resolved_run = int(row["run"])
-    conv_json = store.load_subagent_conversation(parent, resolved_name, resolved_run)
+    conv_json = store.load_subagent_conversation(
+        resolved_parent, resolved_name, resolved_run
+    )
     meta = row.get("meta") if isinstance(row.get("meta"), dict) else None
     if conv_json is None and meta is None:
         raise NotFoundError(
-            f"sub-agent run {parent}:{resolved_name}:{resolved_run} not found"
+            f"sub-agent run {resolved_parent}:{resolved_name}:{resolved_run} not found"
         )
     messages = Conversation.from_json(conv_json).to_messages() if conv_json else []
     return {
         "session_id": store.session_id,
         "session_name": session_name,
-        "parent": parent,
+        "parent": resolved_parent,
         "name": resolved_name,
         "run": resolved_run,
         "job_id": row.get("job_id"),

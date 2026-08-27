@@ -431,6 +431,7 @@ export default {
   "chat.subagent.placeholder": "Message this sub-agent…",
   "chat.subagent.send": "Send",
   "chat.subagent.unavailable": "Conversation not available.",
+  "chat.subagent.chooseRun": "Multiple saved runs match. Choose a conversation:",
   "chat.subagent.sendFailed": "Failed to send message.",
   "chat.processing": "KohakUwUing...",
   "chat.bgResultTool": "background tool result delivered: {label}",

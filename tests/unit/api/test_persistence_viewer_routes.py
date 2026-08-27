@@ -190,6 +190,52 @@ class TestPersistedSubagents:
         )
         assert response.status_code == 409
 
+    def test_cluster_duplicate_exact_conflict_is_not_hidden_by_unique_exact_member(
+        self, monkeypatch, tmp_path
+    ):
+        from kohakuterrarium.session.store import SessionStore
+
+        unique_path = tmp_path / "unique-exact.kohakutr"
+        unique = SessionStore(str(unique_path))
+        unique.init_meta("unique-exact", "agent", "/p", "/w", ["parent"])
+        unique.save_subagent(
+            "parent",
+            "explore",
+            0,
+            {"job_id": "agent_explore_11111111", "task": "unique"},
+            conv_json='{"messages":[{"role":"assistant","content":"unique"}]}',
+        )
+        unique.close()
+
+        duplicate_path = tmp_path / "duplicate-exact.kohakutr"
+        duplicate = SessionStore(str(duplicate_path))
+        duplicate.init_meta("duplicate-exact", "terrarium", "/p", "/w", ["a", "b"])
+        for parent in ("a", "b"):
+            duplicate.save_subagent(
+                parent,
+                "explore",
+                0,
+                {"job_id": "agent_explore_11111111", "task": parent},
+                conv_json=(
+                    '{"messages":[{"role":"assistant","content":"%s"}]}' % parent
+                ),
+            )
+        duplicate.close()
+
+        async def _members(session_name, service):
+            return [("unique", unique_path), ("duplicate", duplicate_path)]
+
+        monkeypatch.setattr(subagents_mod, "_resolve_cluster_or_404", _members)
+        response = TestClient(_app()).get(
+            "/sessions/cluster/subagents/conversation",
+            params={
+                "parent": "parent",
+                "name": "explore",
+                "job_id": "agent_explore_11111111",
+            },
+        )
+        assert response.status_code == 409
+
     def test_ambiguous_legacy_conversation_returns_conflict(
         self, monkeypatch, tmp_path
     ):
