@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "KohakuTerrarium"
-version = "2.1.0"
+version = "2.1.1"
 description = "A universal agent framework for building self-driven AI agents and multi-agent teams"
 authors = [
     { name = "Shih-Ying Yeh (KohakuBlueLeaf)", email = "apolloyeh0123@gmail.com" },
@@ -187,7 +187,7 @@ select = ["F401", "F841"]
 [tool.briefcase]
 project_name = "KohakuTerrarium"
 bundle = "com.kohaku.terrarium"
-version = "2.1.0"
+version = "2.1.1"
 url = "https://github.com/Kohaku-Lab/KohakuTerrarium"
 author = "Shih-Ying Yeh (KohakuBlueLeaf)"
 author_email = "apolloyeh0123@gmail.com"
@@ -258,7 +258,7 @@ min_os_version = "26"
 target_os_version = "35"
 # Version code encodes <major><minor:02><patch:02><build:03>:
 # 2.1.0 build 0 -> 2_01_00_000.
-version_code = "20100000"
+version_code = "20101000"
 # arm64-v8a only — covers ~99% of physical devices; x86_64 also tripped a
 # Chaquopy cross-ABI URL-ref resolution quirk.
 android_abis = ["arm64-v8a"]
