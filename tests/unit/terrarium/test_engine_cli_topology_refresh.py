@@ -2,7 +2,7 @@
 
 from types import SimpleNamespace
 
-from kohakuterrarium.terrarium import engine_cli
+from kohakuterrarium.terrarium import engine_cli_tabs
 
 
 class _Engine:
@@ -53,7 +53,7 @@ async def test_seed_tab_models_includes_config_identity():
     )
     tui = _TUI()
 
-    engine_cli._seed_tab_models(tui, [creature])
+    engine_cli_tabs._seed_tab_models(tui, [creature])
 
     assert tui.models == [("worker", "provider/model", 0, 0)]
     assert tui.identities == [
@@ -69,7 +69,7 @@ async def test_seed_tab_models_includes_config_identity():
     creature.agent.llm_identifier = lambda: ""
     tui.models.clear()
     tui.identities.clear()
-    engine_cli._seed_tab_models(tui, [creature])
+    engine_cli_tabs._seed_tab_models(tui, [creature])
     assert tui.models == []
     assert tui.identities[0][2:] == (
         "warm-ember",
@@ -82,15 +82,15 @@ async def test_refresh_follows_focus_creature_after_graph_merge(monkeypatch):
     engine = _Engine()
     tui = _TUI()
     seen = []
-    monkeypatch.setattr(engine_cli, "_seed_tab_models", lambda *_args: None)
-    monkeypatch.setattr(engine_cli, "_wire_new_channels", lambda *_args: None)
+    monkeypatch.setattr(engine_cli_tabs, "_seed_tab_models", lambda *_args: None)
+    monkeypatch.setattr(engine_cli_tabs, "_wire_new_channels", lambda *_args: None)
     monkeypatch.setattr(
-        engine_cli,
+        engine_cli_tabs,
         "_update_terrarium_panel",
         lambda _tui, _creatures, env, focus: seen.append((env, focus)),
     )
 
-    await engine_cli._refresh_tui_on_topology_change(
+    await engine_cli_tabs._refresh_tui_on_topology_change(
         engine,
         tui,
         "focus",
