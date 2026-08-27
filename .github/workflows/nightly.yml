@@ -206,7 +206,7 @@ jobs:
   # changes AND so a fresh user can install the nightly directly
   # (no "install stable then switch channels" detour).
   build-desktop:
-    needs: [version, nightly_gate, build-release-tree]
+    needs: [version, nightly_gate, build-release-tree, build-wheel]
     if: needs.nightly_gate.outputs.should_build == 'true'
     strategy:
       fail-fast: false
@@ -266,6 +266,22 @@ jobs:
         run: |
           mkdir -p wheels
           pip wheel proxy_tools -w wheels --no-deps
+
+      # The bundle's ``KohakuTerrarium[desktop]`` requirement otherwise
+      # resolves from PyPI, i.e. to the last STABLE release rather than the
+      # nightly being built — and pip has no solution at all whenever the two
+      # disagree on a pinned dep (the pywebview 6.1 -> 6.2.1 bump).
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-dist
+          path: nightly-dist/
+
+      - name: Stage the nightly wheel for briefcase
+        shell: bash
+        run: |
+          find nightly-dist -maxdepth 1 -name "*.whl" -exec cp {} wheels/ \;
+          python scripts/pin_briefcase_local_wheel.py --wheel-dir wheels
+          ls -la wheels/
 
       - name: Create briefcase project
         run: briefcase create
