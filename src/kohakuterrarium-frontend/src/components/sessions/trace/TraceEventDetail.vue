@@ -194,8 +194,8 @@ const tokens = computed(() => {
 const subagentRef = computed(() => {
   const e = props.event
   if (!e) return null
-  const isSub = String(e.type || "").startsWith("subagent_")
-  if (!isSub) return null
+  const isTerminal = ["subagent_result", "subagent_error"].includes(String(e.type || ""))
+  if (!isTerminal) return null
   const name = e.name || e.subagent_name || ""
   const run = e.run ?? e.subagent_run ?? null
   if (!name) return null

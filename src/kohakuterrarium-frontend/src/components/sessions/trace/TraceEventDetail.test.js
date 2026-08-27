@@ -7,6 +7,18 @@ vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: (key) => key }) }))
 import TraceEventDetail from "./TraceEventDetail.vue"
 
 describe("TraceEventDetail sub-agent conversation navigation", () => {
+  it("does not offer an Inspector conversation for a running call event", () => {
+    const wrapper = mount(TraceEventDetail, {
+      props: {
+        parentAgent: "root",
+        event: { type: "subagent_call", job_id: "j1", name: "research" },
+      },
+    })
+    expect(
+      wrapper.findAll("button").some((item) => item.text().includes("openSubagentConversation")),
+    ).toBe(false)
+  })
+
   it("emits the persisted conversation reference with its parent agent", async () => {
     const wrapper = mount(TraceEventDetail, {
       props: {

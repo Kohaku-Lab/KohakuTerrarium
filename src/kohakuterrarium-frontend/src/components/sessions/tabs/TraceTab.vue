@@ -40,7 +40,7 @@
 
     <!-- Event detail drawer -->
     <el-drawer v-model="detailOpen" :title="t('sessionViewer.detail.title')" direction="rtl" size="40%" :modal="false" :destroy-on-close="false">
-      <SubagentConversationPanel v-if="conversationRef" :session-id="conversationSessionId" :parent="conversationRef.parent" :job-id="conversationRef.jobId" :name="conversationRef.name" :run="conversationRef.run" :live="detail.live" />
+      <SubagentConversationPanel v-if="conversationRef" :session-id="conversationSessionId" :parent="conversationRef.parent" :job-id="conversationRef.jobId" :name="conversationRef.name" :run="conversationRef.run" :live="false" />
       <TraceEventDetail v-else :event="selectedEvent" :parent-agent="rollup.agent || filters.agent" @open-conversation="onOpenSubagent" />
     </el-drawer>
   </div>
@@ -115,7 +115,7 @@ const zeroMatchTurns = ref(new Set())
 const selectedEvent = ref(null)
 const conversationRef = ref(null)
 const detailOpen = ref(false)
-const conversationSessionId = computed(() => (detail.live ? detail.meta?.session_id || detail.name : detail.name))
+const conversationSessionId = computed(() => detail.name)
 const selectedEventId = computed(() => (selectedEvent.value && typeof selectedEvent.value.event_id === "number" ? selectedEvent.value.event_id : null))
 
 function onSelectEvent(ev) {

@@ -69,6 +69,8 @@ beforeEach(() => {
     agents: ["alice"],
     reloadKey: 0,
     summary: { error_turns: [] },
+    meta: null,
+    live: false,
   })
   state.rollup = reactive({
     sessionName: "session-a",
@@ -135,6 +137,30 @@ describe("TraceTab long-session navigation", () => {
     })
     expect(state.rollup.agent).toBe(filtersBefore)
     expect(state.rollup.load).toHaveBeenCalledTimes(loadCallsBefore)
+  })
+
+  it("uses the runtime graph scope for a store-backed conversation in a live Inspector", async () => {
+    state.detail.live = true
+    state.detail.meta = { session_id: "creature-123" }
+    state.detail.name = "graph-456"
+    const wrapper = shallowMount(TraceTab, {
+      global: { stubs: { "el-drawer": { template: "<div><slot /></div>" } } },
+    })
+    await flushPromises()
+
+    wrapper.findComponent(TraceEventDetail).vm.$emit("open-conversation", {
+      jobId: "agent_explore_11111111",
+      name: "explore",
+      run: 2,
+      parent: "alice",
+    })
+    await flushPromises()
+
+    expect(wrapper.findComponent(SubagentConversationPanel).props()).toMatchObject({
+      sessionId: "graph-456",
+      parent: "alice",
+      live: false,
+    })
   })
 
   it("resolves a missing turn before routing to a selected timeline span", async () => {

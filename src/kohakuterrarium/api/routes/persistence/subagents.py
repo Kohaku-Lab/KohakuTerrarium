@@ -28,13 +28,16 @@ async def get_session_subagents(
     session_name: str,
     parent: str | None = None,
     name: str | None = None,
+    job_id: str | None = None,
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, Any]:
     """List persisted sub-agent runs in one session or cluster."""
     members = await _resolve_cluster_or_404(session_name, service)
 
     def _build(store, canonical: str) -> dict[str, Any]:
-        return build_subagent_runs_payload(store, canonical, parent=parent, name=name)
+        return build_subagent_runs_payload(
+            store, canonical, parent=parent, name=name, job_id=job_id
+        )
 
     if len(members) == 1:
         return await _build_single(service, members[0][0], members[0][1], _build)
@@ -90,8 +93,18 @@ async def get_session_subagent_conversation(
                 conflicts.append(exc)
             except InvalidRequestError as exc:
                 invalid.append(exc)
-        if any(payload.get("resolution") == "exact_job_id" for _, payload in resolved):
-            return resolved
+        exact = [
+            entry for entry in resolved if entry[1].get("resolution") == "exact_job_id"
+        ]
+        if exact:
+            duplicate_exact = [
+                conflict
+                for conflict in conflicts
+                if "multiple persisted runs match job_id" in str(conflict)
+            ]
+            if duplicate_exact:
+                raise duplicate_exact[0]
+            return exact
         if conflicts:
             raise conflicts[0]
         if resolved:
