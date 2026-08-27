@@ -368,6 +368,81 @@ class TestResumablePersistence:
         assert store.state_calls == []
         await mgr.stop_all()
 
+    async def test_removed_resumable_not_persisted(self, mgr):
+        """Removing a resumable trigger must rewrite the saved snapshot
+        empty; otherwise resume restores a stale snapshot and the deleted
+        trigger comes back to life."""
+        store = _StubStore()
+        mgr._session_store = store
+        mgr._agent_name = "a1"
+        tid = await mgr.add(_ResumableTrigger(), trigger_id="r1")
+        removed = await mgr.remove(tid)
+        assert removed is True
+        last = store.state_calls[-1]
+        assert (
+            last["triggers"] == []
+        ), "deleted trigger must not survive in the persisted snapshot"
+
+    async def test_remove_one_of_two_keeps_survivor_persisted(self, mgr):
+        store = _StubStore()
+        mgr._session_store = store
+        mgr._agent_name = "a1"
+        await mgr.add(_ResumableTrigger(), trigger_id="r1")
+        await mgr.add(_ResumableTrigger(), trigger_id="r2")
+        await mgr.remove("r1")
+        last = store.state_calls[-1]
+        ids = [entry["trigger_id"] for entry in last["triggers"]]
+        assert ids == ["r2"]
+
+    async def test_remove_unknown_id_skips_rewrite(self, mgr):
+        # A failed lookup must not touch the persisted snapshot.
+        store = _StubStore()
+        mgr._session_store = store
+        mgr._agent_name = "a1"
+        tid = await mgr.add(_ResumableTrigger(), trigger_id="r1")
+        writes_before = len(store.state_calls)
+        removed = await mgr.remove("ghost")
+        assert removed is False
+        assert len(store.state_calls) == writes_before
+        await mgr.remove(tid)
+
+    async def test_remove_without_store_no_crash(self, mgr):
+        tid = await mgr.add(_ResumableTrigger(), trigger_id="r1")
+        removed = await mgr.remove(tid)
+        assert removed is True
+
+    async def test_remove_survives_failing_stop_hook(self, mgr):
+        """A trigger whose stop hook raises must still be forgotten from
+        memory AND vanish from the persisted snapshot — removal was
+        already decided, so a half-stopped trigger must not come back
+        to life on resume."""
+        store = _StubStore()
+        mgr._session_store = store
+        mgr._agent_name = "a1"
+
+        class _BrokenStop(_ResumableTrigger):
+            async def _on_stop(self):
+                raise RuntimeError("stop boom")
+
+        tid = await mgr.add(_BrokenStop(), trigger_id="bad")
+        removed = await mgr.remove(tid)
+        assert removed is True
+        assert tid not in mgr._triggers
+        last = store.state_calls[-1]
+        assert last["triggers"] == []
+
+    async def test_stop_all_keeps_persisted_snapshot(self, mgr):
+        """Teardown is not deletion: stopping the agent clears memory but
+        keeps the saved triggers so a later resume restores them."""
+        store = _StubStore()
+        mgr._session_store = store
+        mgr._agent_name = "a1"
+        await mgr.add(_ResumableTrigger(), trigger_id="r1")
+        await mgr.stop_all()
+        assert "r1" not in mgr._triggers
+        ids = [entry["trigger_id"] for entry in store.state_calls[-1]["triggers"]]
+        assert ids == ["r1"]
+
 
 # ── schedule_drift observability ──────────────────────────────────
 
@@ -470,6 +545,22 @@ class TestResumablePersistFailure:
         # Trigger still registered.
         assert "r1" in mgr._triggers
         await mgr.remove("r1")
+
+    async def test_save_state_failure_on_remove_swallowed(self, mgr):
+        """Exception inside save_state during a resumable trigger removal
+        is logged but doesn't break the in-memory removal."""
+        store = _StubStore()
+
+        def boom(*a, **kw):
+            raise RuntimeError("disk")
+
+        store.save_state = boom
+        mgr._session_store = store
+        mgr._agent_name = "a1"
+        await mgr.add(_ResumableTrigger(), trigger_id="r1")
+        ok = await mgr.remove("r1")
+        assert ok is True
+        assert "r1" not in mgr._triggers
 
 
 class TestRemoveCancellationError:
