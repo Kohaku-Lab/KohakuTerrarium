@@ -42,6 +42,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useLocaleStore } from "@/stores/locale"
 import { useThemeStore } from "@/stores/theme"
 import { useTabsStore } from "@/stores/tabs"
+import { installExternalLinkGuard } from "@/utils/externalLinks"
 
 const theme = useThemeStore()
 const locale = useLocaleStore()
@@ -100,6 +101,10 @@ function openSavedSessionHistory(event) {
 if (typeof window !== "undefined") {
   window.addEventListener("kt-open-host-picker", openHostPicker)
   window.addEventListener("kt:open-saved-session-history", openSavedSessionHistory)
+  // Backstop for anchors the markdown renderers don't own: the pywebview
+  // shell has no back button, so a same-window external navigation is a
+  // dead end.
+  const uninstallExternalLinkGuard = installExternalLinkGuard()
   // Auto-open when an Android ``ktconnect://`` deep-link is
   // queued — the modal's own watcher will consume + apply the URI.
   const { pendingUri } = useConnectIntent()
@@ -109,6 +114,7 @@ if (typeof window !== "undefined") {
   onBeforeUnmount(() => {
     window.removeEventListener("kt-open-host-picker", openHostPicker)
     window.removeEventListener("kt:open-saved-session-history", openSavedSessionHistory)
+    uninstallExternalLinkGuard()
   })
 }
 </script>

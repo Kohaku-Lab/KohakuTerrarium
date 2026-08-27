@@ -84,4 +84,37 @@ describe("MarkdownRenderer streaming", () => {
     expect(renderedHtml(wrapper)).toContain("brand new content")
     expect(renderedHtml(wrapper)).not.toContain("streaming")
   })
+
+  // The pywebview shell has no back button, so an external link that
+  // navigates the window in place strands the user with no way home.
+  it("sends external links out to a new tab", () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: {
+        content: "read [the docs](https://example.test/docs) and https://example.test/bare",
+      },
+    })
+
+    const anchors = wrapper.findAll("a")
+    expect(anchors).toHaveLength(2)
+    for (const anchor of anchors) {
+      expect(anchor.attributes("target")).toBe("_blank")
+      expect(anchor.attributes("rel")).toBe("noopener noreferrer")
+    }
+  })
+
+  it("keeps same-origin links navigating inside the app", () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: { content: "open [the session](/sessions/abc)" },
+    })
+
+    const anchor = wrapper.find("a")
+    expect(anchor.attributes("href")).toBe("/sessions/abc")
+    expect(anchor.attributes("target")).toBeUndefined()
+  })
+
+  it("still renders inline math after the link rule is installed", () => {
+    const wrapper = mount(MarkdownRenderer, { props: { content: "$x^2$" } })
+
+    expect(renderedHtml(wrapper)).toContain("katex")
+  })
 })

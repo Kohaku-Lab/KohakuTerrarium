@@ -9,6 +9,7 @@ import MarkdownIt from "markdown-it"
 import markdownItKatex from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
 
+import { applyExternalLinkRule } from "@/utils/externalLinks"
 import { IncrementalMarkdownRenderer } from "@/utils/markdownIncremental"
 
 const props = defineProps({
@@ -49,6 +50,9 @@ const katexPlugin = typeof markdownItKatex === "function" ? markdownItKatex : ma
 if (typeof katexPlugin === "function") {
   md.use(katexPlugin)
 }
+
+// Model-authored links must not navigate the shell away from the app.
+applyExternalLinkRule(md)
 
 function onClick(e) {
   const btn = e.target.closest(".code-copy-btn")
