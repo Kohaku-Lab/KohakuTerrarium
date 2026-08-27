@@ -6,6 +6,7 @@ export default {
   "common.available": "Available",
   "common.cached": "Cached",
   "common.cancel": "Cancel",
+  "common.back": "Back",
   "workspaceResume.title": "Workspace unavailable",
   "workspaceResume.body":
     "The saved workspace is unavailable. Choose an existing folder to replace only this missing workspace group, view the saved history, or cancel without resuming.",
@@ -432,6 +433,7 @@ export default {
   "chat.subagent.send": "Send",
   "chat.subagent.unavailable": "Conversation not available.",
   "chat.subagent.chooseRun": "Multiple saved runs match. Choose a conversation:",
+  "chat.subagent.backToRuns": "Saved runs",
   "chat.subagent.sendFailed": "Failed to send message.",
   "chat.processing": "KohakUwUing...",
   "chat.bgResultTool": "background tool result delivered: {label}",
@@ -1116,6 +1118,7 @@ export default {
   "sessionViewer.detail.reasoning": "Reasoning",
   "sessionViewer.detail.rawJson": "Raw JSON",
   "sessionViewer.detail.openSubagentConversation": "Open sub-agent conversation",
+  "sessionViewer.detail.conversationPending": "Opens once this run finishes",
 
   "sessionViewer.tabs.diff": "Diff",
 

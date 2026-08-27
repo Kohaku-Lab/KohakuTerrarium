@@ -1,9 +1,11 @@
 <template>
-  <div class="rounded overflow-hidden bg-taaffeite/6 dark:bg-taaffeite/10 border border-taaffeite/20 dark:border-taaffeite/25 flex flex-col gap-2 p-2 min-w-0">
-    <div v-if="loading" class="text-[11px] text-warm-400">{{ t("common.loading") }}</div>
-    <div v-else-if="candidates.length" class="flex flex-col gap-2">
+  <div :class="['rounded overflow-hidden bg-taaffeite/6 dark:bg-taaffeite/10 border border-taaffeite/20 dark:border-taaffeite/25 flex flex-col gap-2 p-2 min-w-0', fill ? 'h-full min-h-0' : '']">
+    <div v-if="showBack" class="shrink-0">
+      <button data-test="subagent-back" class="text-[11px] text-warm-500 hover:text-warm-700 dark:hover:text-warm-300" @click="$emit('back')">← {{ t("common.back") }}</button>
+    </div>
+    <div v-if="stage === 'selector' && candidates.length" :class="['flex flex-col gap-2', fill ? 'flex-1 min-h-0 overflow-y-auto' : '']">
       <div class="text-[11px] text-warm-500">{{ t("chat.subagent.chooseRun") }}</div>
-      <button v-for="candidate in candidates" :key="`${candidate.member_sid || ''}:${candidate.parent}:${candidate.name}:${candidate.run}`" type="button" :data-test="`subagent-run-${candidate.run}`" class="rounded border border-iolite/20 bg-iolite/5 p-2 text-left hover:bg-iolite/10" @click.stop="selectCandidate(candidate)">
+      <button v-for="candidate in candidates" :key="`${candidate.member_sid || ''}:${candidate.parent}:${candidate.name}:${candidate.run}`" type="button" :disabled="loading" :data-test="`subagent-run-${candidate.run}`" class="rounded border border-iolite/20 bg-iolite/5 p-2 text-left hover:bg-iolite/10 disabled:opacity-50 disabled:cursor-not-allowed" @click.stop="selectCandidate(candidate)">
         <div class="flex items-center gap-2 text-[10px] font-mono text-warm-500">
           <span>{{ candidate.parent }} / {{ candidate.name }} / run {{ candidate.run }}</span>
           <span v-if="candidate.success === true" class="text-sage">success</span>
@@ -15,9 +17,14 @@
         <div v-if="candidate.ts" class="mt-1 text-[9px] text-warm-400">{{ formatTimestamp(candidate.ts) }}</div>
       </button>
     </div>
+    <div v-else-if="loading && !blocks.length" class="text-[11px] text-warm-400">{{ t("common.loading") }}</div>
+    <div v-else-if="stage === 'selector'" class="text-[11px] text-warm-400 italic">{{ t("chat.subagent.empty") }}</div>
     <div v-else-if="error" class="text-[11px] text-coral">{{ error }}</div>
     <template v-else>
-      <div class="max-h-72 overflow-y-auto flex flex-col gap-2 min-w-0">
+      <div v-if="selectorAvailable" class="shrink-0">
+        <button data-test="subagent-back-to-runs" class="text-[11px] text-iolite hover:underline" @click.stop="backToRuns">← {{ t("chat.subagent.backToRuns") }}</button>
+      </div>
+      <div data-test="subagent-messages" :class="['flex flex-col gap-2 min-w-0', fill ? 'flex-1 min-h-0 overflow-y-auto' : 'max-h-72 overflow-y-auto']">
         <div v-for="(item, i) in blocks" :key="i" class="min-w-0">
           <template v-if="item.kind === 'system'">
             <button class="w-full flex items-center gap-1.5 text-left text-[10px] text-warm-400 hover:text-warm-500" @click.stop="toggleSystem(i)">
@@ -82,7 +89,11 @@ const props = defineProps({
   live: { type: Boolean, default: false },
   status: { type: String, default: "" },
   depth: { type: Number, default: 0 },
+  fill: { type: Boolean, default: false },
+  showBack: { type: Boolean, default: false },
 })
+
+defineEmits(["back"])
 
 const { t } = useI18n()
 const loading = ref(false)
@@ -94,7 +105,25 @@ const sendText = ref("")
 const sending = ref(false)
 const expandedSystem = ref(new Set())
 const expandedTools = ref(new Set())
+const stage = ref("conversation")
+const selectorAvailable = ref(false)
 let timer = null
+// Out-of-order guard: only the newest target/request may mutate state,
+// and nothing may mutate after the panel is destroyed.
+let requestGeneration = 0
+let disposed = false
+
+function backToRuns() {
+  stage.value = "selector"
+  if (!candidates.value.length) {
+    const generation = ++requestGeneration
+    loadCandidates().catch(() => {
+      if (!disposed && generation === requestGeneration) {
+        error.value = t("chat.subagent.unavailable")
+      }
+    })
+  }
+}
 
 function messageText(message) {
   if (typeof message?.content === "string") return message.content
@@ -185,42 +214,56 @@ function formatTimestamp(value) {
 }
 
 async function loadCandidates() {
+  const generation = requestGeneration
   const data = await sessionAPI.listSubagents(props.sessionId, {
     ...(props.parent ? { parent: props.parent } : {}),
     ...(props.jobId ? { jobId: props.jobId } : {}),
     ...(props.name ? { name: props.name } : {}),
   })
+  if (disposed || generation !== requestGeneration) return
   const runs = data.runs || []
   candidates.value = runs.some((candidate) => candidate.member_sid) ? [] : runs
+  if (candidates.value.length) {
+    selectorAvailable.value = true
+    stage.value = "selector"
+  }
 }
 
 async function selectCandidate(candidate) {
+  if (loading.value) return
+  const generation = ++requestGeneration
   loading.value = true
   error.value = ""
+  expandedSystem.value = new Set()
+  expandedTools.value = new Set()
   try {
     const data = await sessionAPI.getSubagentConversation(props.sessionId, {
       parent: candidate.parent,
       name: candidate.name,
       run: candidate.run,
     })
+    if (disposed || generation !== requestGeneration) return
     messages.value = data.messages || []
     canReceive.value = false
-    candidates.value = []
+    stage.value = "conversation"
   } catch (err) {
+    if (disposed || generation !== requestGeneration) return
     error.value = err?.response?.data?.detail || t("chat.subagent.unavailable")
   } finally {
-    loading.value = false
+    if (!disposed && generation === requestGeneration) loading.value = false
   }
 }
 
 async function loadConversation({ silent = false } = {}) {
   if (!props.sessionId || !props.parent) {
-    error.value = t("chat.subagent.unavailable")
+    if (!silent) error.value = t("chat.subagent.unavailable")
     return
   }
+  const generation = requestGeneration
   if (!silent) loading.value = true
   error.value = ""
   candidates.value = []
+  selectorAvailable.value = false
   try {
     const ident = identifier()
     const data = props.live
@@ -229,10 +272,12 @@ async function loadConversation({ silent = false } = {}) {
           parent: props.parent,
           ...ident,
         })
+    if (disposed || generation !== requestGeneration) return
     messages.value = data.messages || []
     canReceive.value = props.live && !!data.can_receive
+    stage.value = "conversation"
   } catch (err) {
-    if (silent) return
+    if (silent || disposed || generation !== requestGeneration) return
     messages.value = []
     canReceive.value = false
     if (!props.live && err?.response?.status === 409) {
@@ -243,9 +288,10 @@ async function loadConversation({ silent = false } = {}) {
         candidates.value = []
       }
     }
+    if (disposed || generation !== requestGeneration) return
     error.value = err?.response?.data?.detail || t("chat.subagent.unavailable")
   } finally {
-    if (!silent) loading.value = false
+    if (!disposed && generation === requestGeneration && !silent) loading.value = false
   }
 }
 
@@ -290,9 +336,28 @@ watch(
   },
 )
 
+watch([() => props.sessionId, () => props.parent, () => props.jobId, () => props.name], () => {
+  stopPolling()
+  requestGeneration += 1
+  messages.value = []
+  candidates.value = []
+  error.value = ""
+  sendText.value = ""
+  selectorAvailable.value = false
+  stage.value = "conversation"
+  expandedSystem.value = new Set()
+  expandedTools.value = new Set()
+  loadConversation().then(() => {
+    if (!disposed) startPolling()
+  })
+})
+
 onMounted(async () => {
   await loadConversation()
-  startPolling()
+  if (!disposed) startPolling()
 })
-onUnmounted(stopPolling)
+onUnmounted(() => {
+  disposed = true
+  stopPolling()
+})
 </script>

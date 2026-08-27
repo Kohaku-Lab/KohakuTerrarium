@@ -7,16 +7,36 @@ vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: (key) => key }) }))
 import TraceEventDetail from "./TraceEventDetail.vue"
 
 describe("TraceEventDetail sub-agent conversation navigation", () => {
-  it("does not offer an Inspector conversation for a running call event", () => {
+  it("renders a disabled conversation entry for an unfinished call event", async () => {
     const wrapper = mount(TraceEventDetail, {
       props: {
         parentAgent: "root",
         event: { type: "subagent_call", job_id: "j1", name: "research" },
       },
     })
-    expect(
-      wrapper.findAll("button").some((item) => item.text().includes("openSubagentConversation")),
-    ).toBe(false)
+    const button = wrapper.find("[data-test='subagent-open-conversation']")
+    expect(button.exists()).toBe(true)
+    expect(button.attributes("disabled")).toBeDefined()
+    expect(button.attributes("title")).toBe("sessionViewer.detail.conversationPending")
+    await button.trigger("click")
+    expect(wrapper.emitted("open-conversation")).toBeUndefined()
+  })
+
+  it("enables the entry for any sub-agent event whose job already finished", async () => {
+    const wrapper = mount(TraceEventDetail, {
+      props: {
+        parentAgent: "root",
+        completedJobIds: ["j1"],
+        event: { type: "subagent_tool", job_id: "j1", name: "research" },
+      },
+    })
+    const button = wrapper.find("[data-test='subagent-open-conversation']")
+    expect(button.attributes("disabled")).toBeUndefined()
+    await button.trigger("click")
+    expect(wrapper.emitted("open-conversation")).toEqual([
+      [expect.objectContaining({ jobId: "j1", name: "research" })],
+    ])
+    expect(wrapper.emitted("open-conversation")[0][0].ready).toBe(true)
   })
 
   it("emits the persisted conversation reference with its parent agent", async () => {

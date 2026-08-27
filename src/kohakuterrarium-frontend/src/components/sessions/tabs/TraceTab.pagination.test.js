@@ -160,7 +160,36 @@ describe("TraceTab long-session navigation", () => {
       sessionId: "graph-456",
       parent: "alice",
       live: false,
+      fill: true,
+      showBack: true,
     })
+
+    wrapper.findComponent(SubagentConversationPanel).vm.$emit("back")
+    await flushPromises()
+
+    expect(wrapper.findComponent(SubagentConversationPanel).exists()).toBe(false)
+    expect(wrapper.findComponent(TraceEventDetail).exists()).toBe(true)
+  })
+
+  it("feeds terminal completion ids from turn rollup breakdowns to the detail pane", async () => {
+    state.rollup.turns = [
+      {
+        turn_index: 1001,
+        subagent_breakdown: [
+          { job_id: "agent_explore_11111111", has_error: false },
+          { job_id: "", has_error: false },
+        ],
+      },
+      { turn_index: 1002 },
+    ]
+    const wrapper = shallowMount(TraceTab, {
+      global: { stubs: { "el-drawer": { template: "<div><slot /></div>" } } },
+    })
+    await flushPromises()
+
+    expect(wrapper.findComponent(TraceEventDetail).props("completedJobIds")).toEqual([
+      "agent_explore_11111111",
+    ])
   })
 
   it("resolves a missing turn before routing to a selected timeline span", async () => {
