@@ -254,7 +254,7 @@ jobs:
 
   # ── Briefcase desktop shell (slim — bundles ONE release-tree as fallback) ─
   build-desktop:
-    needs: [build-release-tree]
+    needs: [build-wheel, build-release-tree]
     strategy:
       fail-fast: false
       matrix:
@@ -308,6 +308,21 @@ jobs:
         run: |
           mkdir -p wheels
           pip wheel proxy_tools -w wheels --no-deps
+
+      # ``KohakuTerrarium[desktop]`` would otherwise resolve from PyPI — which
+      # at this point still serves the PREVIOUS release, since publish-pypi
+      # runs in parallel with this job.
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: wheel-dist/
+
+      - name: Stage the release wheel for briefcase
+        shell: bash
+        run: |
+          find wheel-dist -maxdepth 1 -name "*.whl" -exec cp {} wheels/ \;
+          python scripts/pin_briefcase_local_wheel.py --wheel-dir wheels
+          ls -la wheels/
 
       - name: Create briefcase project
         run: briefcase create
