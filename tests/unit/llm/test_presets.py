@@ -314,10 +314,14 @@ class TestPresetsDataIntegrity:
         assert preset["max_context"] == 262144
         assert preset["max_output"] == 32768
 
-    def test_glm_coding_direct_presets_use_bearer_auth(self):
+    def test_glm_coding_direct_presets_use_supported_model_id_and_bearer_auth(self):
         expected = {
             "glm-5.2": ("glm-5.2", 262144, 131072),
-            "glm-5.2-1m": ("glm-5.2[1m]", 1000000, 131072),
+            "glm-5.2-1m": ("glm-5.2", 1000000, 131072),
+            "glm-5.3": ("glm-5.3", 262144, 131072),
+            "glm-5.3-1m": ("glm-5.3", 1000000, 131072),
+            "glm-5.3-flash": ("glm-5.3-flash", 262144, 131072),
+            "glm-5.3-flash-1m": ("glm-5.3-flash", 1000000, 131072),
         }
         for name, (model, max_context, max_output) in expected.items():
             preset = PRESETS[name]
