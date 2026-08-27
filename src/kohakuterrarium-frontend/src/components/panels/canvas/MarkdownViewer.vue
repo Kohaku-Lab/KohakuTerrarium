@@ -17,6 +17,8 @@
 import { computed, ref } from "vue"
 import MarkdownIt from "markdown-it"
 
+import { applyExternalLinkRule } from "@/utils/externalLinks"
+
 const props = defineProps({
   content: { type: String, default: "" },
 })
@@ -28,6 +30,9 @@ const md = new MarkdownIt({
   linkify: true,
   breaks: true,
 })
+
+// Model-authored links must not navigate the shell away from the app.
+applyExternalLinkRule(md)
 
 const rendered = computed(() => md.render(props.content || ""))
 </script>
