@@ -1320,6 +1320,27 @@ class TestCoreIntegration:
             assert agent._turn_index == 1
             assert agent._branch_id == 1
 
+            # Persist the native-tool event shape produced by a background
+            # completion. The event log records the call and result, while
+            # the assistant announcement is reconstructed for replay.
+            replay_call_id = "bash_history_replay_1"
+            store.append_event(
+                agent.config.name,
+                "tool_call",
+                {"name": "bash", "call_id": replay_call_id, "args": {"cmd": "pwd"}},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+            store.append_event(
+                agent.config.name,
+                "tool_result",
+                {"name": "bash", "call_id": replay_call_id, "output": "/work"},
+                turn_index=1,
+                branch_id=1,
+                parent_branch_path=[],
+            )
+
             # --- regenerate: same user msg, new branch -----------------
             await agent.regenerate_last_response()
             assert "regenerated reply" in _assistant_text(agent)
@@ -1498,6 +1519,17 @@ class TestCoreIntegration:
             )
             assert "first question" in replayed
             assert "original reply" in replayed
+            replay_messages = agent.controller.conversation.get_messages()
+            replay_tool_index = next(
+                i
+                for i, message in enumerate(replay_messages)
+                if message.role == "tool" and message.tool_call_id == replay_call_id
+            )
+            replay_announcement = replay_messages[replay_tool_index - 1]
+            assert replay_announcement.role == "assistant"
+            assert replay_call_id in {
+                call["id"] for call in replay_announcement.tool_calls
+            }
 
     async def test_inject_event_and_unified_trigger_model(self, make_creature):
         """The unified ``TriggerEvent`` model: a non-user-input event

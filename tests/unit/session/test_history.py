@@ -12,6 +12,7 @@ from kohakuterrarium.session.history import (
     collect_user_groups,
     dedupe_adjacent_duplicate_events,
     normalize_resumable_events,
+    normalize_tool_call_events,
     project_branch_metadata,
     replay_conversation,
     resolve_branch_view_strict,
@@ -1103,7 +1104,23 @@ class TestDedupe:
         assert len(out) == 1
 
 
-# ── normalize_resumable_events ────────────────────────────────────
+# ── normalize_tool_call_events / normalize_resumable_events ──────
+
+
+class TestNormalizeToolCallEvents:
+    def test_restores_announcement_without_finalizing_unfinished_call(self):
+        events = [{"type": "tool_call", "call_id": "c1", "name": "bash", "ts": 1.0}]
+
+        out = normalize_tool_call_events(events)
+
+        assert events == [
+            {"type": "tool_call", "call_id": "c1", "name": "bash", "ts": 1.0}
+        ]
+        assert [event["type"] for event in out] == [
+            "tool_call",
+            "assistant_tool_calls",
+        ]
+        assert all(event.get("_synthetic_resume") is not True for event in out)
 
 
 class TestNormalizeResumable:
