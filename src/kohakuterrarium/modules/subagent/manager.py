@@ -197,6 +197,8 @@ class SubAgentManager(InteractiveManagerMixin):
             compact_manager=compact_manager,
         )
 
+        subagent._job_id = job_id
+
         # Preserve the legacy shared-budget contract when configured.
         subagent.iteration_budget = self._resolve_child_budget(config)
         await load_and_wrap_plugins(plugin_manager, subagent, llm, self.agent_path)
@@ -254,6 +256,39 @@ class SubAgentManager(InteractiveManagerMixin):
         job_id = await self.spawn(event.name, task, background=True)
         return job_id, is_background
 
+    def _update_persisted_result(self, job_id: str, result: SubAgentResult) -> None:
+        """Keep canonical persisted metadata aligned with transformed results."""
+        store = self._session_store
+        find_run = (
+            getattr(store, "find_subagent_run", None) if store is not None else None
+        )
+        if not callable(find_run):
+            return
+        row = find_run(job_id, parent=self._parent_name)
+        if row is None:
+            return
+        meta = dict(row.get("meta") or {})
+        meta.update(
+            {
+                "success": result.success,
+                "error": result.error,
+                "interrupted": result.interrupted,
+                "cancelled": result.cancelled,
+                "turns": result.turns,
+                "duration": result.duration,
+                "total_tokens": result.total_tokens,
+                "prompt_tokens": result.prompt_tokens,
+                "completion_tokens": result.completion_tokens,
+                "cached_tokens": result.cached_tokens,
+            }
+        )
+        store.save_subagent(
+            parent=str(row["parent"]),
+            name=str(row["name"]),
+            run=int(row["run"]),
+            meta=meta,
+        )
+
     @staticmethod
     def _stamp_model_metadata(result: SubAgentResult, subagent: SubAgent) -> None:
         result.metadata.update(
@@ -295,6 +330,7 @@ class SubAgentManager(InteractiveManagerMixin):
                         exc_info=True,
                     )
             self._stamp_model_metadata(result, job.subagent)
+            self._update_persisted_result(job_id, result)
             self._results[job_id] = result
 
             if result.interrupted or result.cancelled:

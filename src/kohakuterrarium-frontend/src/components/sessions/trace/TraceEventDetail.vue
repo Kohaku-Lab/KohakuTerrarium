@@ -21,7 +21,7 @@
         <div class="text-[11px] text-warm-400 uppercase tracking-wider">{{ t("sessionViewer.tree.attached") }}</div>
         <div class="font-mono text-warm-700 dark:text-warm-300 truncate">{{ subagentRef.label }}</div>
       </div>
-      <button v-if="subagentRef.namespace" class="text-[11px] px-2 py-1 rounded border border-iolite/40 text-iolite hover:bg-iolite/10" @click="$emit('open-agent', subagentRef.namespace)">{{ t("sessionViewer.detail.openSubagent") }}</button>
+      <button :disabled="!subagentRef.ready" data-test="subagent-open-conversation" :title="subagentRef.ready ? '' : t('sessionViewer.detail.conversationPending')" class="text-[11px] px-2 py-1 rounded border border-iolite/40 text-iolite hover:bg-iolite/10 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:bg-transparent shrink-0" @click="subagentRef.ready && $emit('open-conversation', subagentRef)">{{ t("sessionViewer.detail.openSubagentConversation") }}</button>
     </div>
 
     <!-- Primary content (text-y fields) -->
@@ -87,8 +87,10 @@ const route = useRoute()
 
 const props = defineProps({
   event: { type: Object, default: null },
+  parentAgent: { type: String, default: "" },
+  completedJobIds: { type: Array, default: () => [] },
 })
-defineEmits(["open-agent"])
+defineEmits(["open-conversation"])
 
 const TYPE_TONE = {
   tool_call: "text-warm-700 dark:text-warm-300",
@@ -193,20 +195,16 @@ const tokens = computed(() => {
 const subagentRef = computed(() => {
   const e = props.event
   if (!e) return null
-  const isSub = String(e.type || "").startsWith("subagent_")
-  if (!isSub) return null
-  // Best-effort namespace recovery — backend writes nested-agent
-  // namespaces under ``<host>:<name>:<run>:e<seq>`` in the events
-  // table. We have parts of that here but not always; offer the
-  // navigate button only when we can construct the param.
+  const type = String(e.type || "")
+  if (!type.startsWith("subagent_")) return null
   const name = e.name || e.subagent_name || ""
-  const run = e.run ?? e.subagent_run ?? null
   if (!name) return null
+  const jobId = e.job_id || ""
+  const isTerminalHere = type === "subagent_result" || type === "subagent_error"
+  const done = isTerminalHere || (Boolean(jobId) && props.completedJobIds.includes(jobId))
+  const run = e.run ?? e.subagent_run ?? null
   const label = run != null ? `${name} (run ${run})` : String(name)
-  // Namespace is best-effort; the trace tab agent filter accepts any
-  // string from /tree's attached-agent list.
-  const namespace = e.namespace || (run != null ? `${name}:${run}` : name)
-  return { label, namespace }
+  return { jobId, name, run, parent: props.parentAgent, label, ready: Boolean(done) }
 })
 
 const reasoningSegments = computed(() => {

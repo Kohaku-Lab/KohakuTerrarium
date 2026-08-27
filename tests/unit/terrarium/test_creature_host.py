@@ -721,6 +721,7 @@ class TestApplyCreatureName:
             executor=SimpleNamespace(_agent_name=agent_name),
             trigger_manager=SimpleNamespace(_agent_name=agent_name),
             compact_manager=SimpleNamespace(_agent_name=agent_name),
+            subagent_manager=SimpleNamespace(_parent_name=agent_name),
             _session_output=session_output,
         )
         creature = SimpleNamespace(
@@ -743,6 +744,7 @@ class TestApplyCreatureName:
         # display name the history endpoint resolves.
         assert out._agent_name == "warm-ember"
         assert out._event_key_prefix == "warm-ember"
+        assert creature.agent.subagent_manager._parent_name == "warm-ember"
 
     def test_runtime_rename_preserves_config_identity(self, tmp_path):
         from kohakuterrarium.terrarium.creature_host import apply_creature_name

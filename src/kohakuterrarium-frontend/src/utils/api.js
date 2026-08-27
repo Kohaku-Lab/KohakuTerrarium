@@ -701,6 +701,28 @@ export const filesAPI = {
  *  are kept for the per-creature URL methods.
  */
 export const sessionAPI = {
+  async getSubagentConversation(session, { parent, jobId, name, run } = {}) {
+    const params = { parent }
+    if (jobId) params.job_id = jobId
+    if (name) params.name = name
+    if (run != null) params.run = run
+    const { data } = await api.get(`/sessions/${encodeTarget(session)}/subagents/conversation`, {
+      params,
+    })
+    return data
+  },
+
+  async listSubagents(session, { parent, jobId, name } = {}) {
+    const params = {}
+    if (parent) params.parent = parent
+    if (jobId) params.job_id = jobId
+    if (name) params.name = name
+    const { data } = await api.get(`/sessions/${encodeTarget(session)}/subagents`, {
+      params,
+    })
+    return data
+  },
+
   /** Conversations that are still open, whether live or dormant. */
   async listOpen() {
     const { data } = await api.get("/sessions/open")

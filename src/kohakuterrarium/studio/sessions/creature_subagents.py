@@ -97,10 +97,9 @@ def read_subagent_conversation(
 ) -> dict[str, Any]:
     """Return a sub-agent run's conversation.
 
-    ``job_id`` reads a live task sub-agent, falling back to the LATEST
-    persisted run for the name encoded in the job id when the job is no
-    longer live (e.g. a resumed process, whose ``_jobs`` is empty — the
-    event log carries only the job id, not the run index). ``name`` alone
+    ``job_id`` reads a live task sub-agent, falling back to the exact
+    persisted run carrying that identifier when the job is no longer live.
+    ``name`` alone
     reads a live interactive child, else falls back to the LATEST
     persisted run for that name; ``name`` + ``run`` reads a specific
     persisted snapshot. Raises :class:`NotFoundError` when the referenced
@@ -198,7 +197,7 @@ def _read_persisted(
         session_id,
         name=name,
         run=run,
-        job_id=None,
+        job_id=meta.get("job_id") if isinstance(meta, dict) else None,
         live=False,
         interactive=False,
         can_receive=False,
@@ -213,16 +212,35 @@ def _read_persisted_by_job_id(
     session_id: str,
     job_id: str,
 ) -> dict[str, Any] | None:
-    """Resolve a non-live ``job_id`` to the latest persisted run for the
-    sub-agent name it encodes, or ``None`` when nothing is persisted."""
-    name = _subagent_name_from_job_id(job_id)
+    """Resolve a non-live job exactly, or by one legacy candidate."""
     store = getattr(agent, "session_store", None)
-    if not name or store is None:
+    find_run = getattr(store, "find_subagent_run", None) if store is not None else None
+    if not callable(find_run):
         return None
-    run = _latest_persisted_run(store, _parent_name(agent), name)
-    if run is None:
+    parent = _parent_name(agent)
+    row = find_run(job_id, parent=parent)
+    if row is None:
+        name = _subagent_name_from_job_id(job_id)
+        list_runs = getattr(store, "list_subagent_runs", None)
+        if not name or not callable(list_runs):
+            return None
+        legacy = [
+            candidate
+            for candidate in list_runs(parent=parent, name=name)
+            if not candidate.get("job_id")
+        ]
+        if len(legacy) > 1:
+            raise ConflictError(f"multiple legacy runs match sub-agent {parent}:{name}")
+        row = legacy[0] if legacy else None
+    if row is None:
         return None
-    return _read_persisted(agent, creature_id, session_id, name, run)
+    return _read_persisted(
+        agent,
+        creature_id,
+        session_id,
+        str(row["name"]),
+        int(row["run"]),
+    )
 
 
 async def send_to_subagent(

@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import ToolCallBlock from "./ToolCallBlock.vue"
 import { useChatStore } from "@/stores/chat"
-import { terrariumAPI } from "@/utils/api"
+import { sessionAPI, terrariumAPI } from "@/utils/api"
 
 beforeEach(() => {
   const values = new Map()
@@ -198,7 +198,10 @@ describe("ToolCallBlock — sub-agent conversation (UXI-05)", () => {
     await flushPromises()
 
     // Live block identifies by the job_id it already holds.
-    expect(getConv).toHaveBeenCalledWith("g1", "root", { jobId: "job_x" })
+    expect(getConv).toHaveBeenCalledWith("g1", "root", {
+      jobId: "job_x",
+      name: "explore",
+    })
     const textarea = wrapper.find("textarea")
     expect(textarea.exists()).toBe(true)
     expect(textarea.classes()).toEqual(
@@ -224,6 +227,35 @@ describe("ToolCallBlock — sub-agent conversation (UXI-05)", () => {
 
     getConv.mockRestore()
     send.mockRestore()
+  })
+
+  it("uses the persisted viewer API inside saved session history", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session:saved-session"
+    chat._instanceGraphId = null
+    chat.activeTab = "root"
+    const liveRead = vi.spyOn(terrariumAPI, "getSubagentConversation")
+    const savedRead = vi.spyOn(sessionAPI, "getSubagentConversation").mockResolvedValue({
+      live: false,
+      can_receive: false,
+      messages: [{ role: "assistant", content: "saved answer" }],
+    })
+
+    const wrapper = mountBlock(subagentTc())
+    await convButton(wrapper).trigger("click")
+    await flushPromises()
+
+    expect(liveRead).not.toHaveBeenCalled()
+    expect(savedRead).toHaveBeenCalledWith("saved-session", {
+      parent: "root",
+      jobId: "job_x",
+      name: "explore",
+    })
+    expect(wrapper.text()).toContain("saved answer")
+    expect(wrapper.find("textarea").exists()).toBe(false)
+
+    liveRead.mockRestore()
+    savedRead.mockRestore()
   })
 
   it("polls the open transcript while the run is live and stops once it settles", async () => {
