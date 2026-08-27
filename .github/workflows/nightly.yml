@@ -316,7 +316,11 @@ jobs:
     if: needs.nightly_gate.outputs.should_build == 'true'
     runs-on: ubuntu-latest
     steps:
+      # Full history: the release notes are the commit list since the
+      # previous nightly.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
@@ -351,6 +355,31 @@ jobs:
           echo "--- release-assets/ ---"
           ls -la release-assets/
 
+      # Fetched before the release is cut: its head entry names the commit the
+      # previous nightly shipped, which anchors this build's commit list.
+      - name: Fetch previous nightly manifest
+        shell: bash
+        run: |
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
+            -o previous-nightly.json || echo "no previous manifest"
+
+      - name: Build release notes
+        shell: bash
+        run: |
+          since=""
+          if [ -f previous-nightly.json ]; then
+            since=$(jq -r '.releases[0].commit_sha // empty' previous-nightly.json || true)
+          fi
+          # No previous nightly recorded: fall back to the last stable tag.
+          [ -n "${since}" ] || since="auto"
+          python scripts/release_notes.py \
+            --since "${since}" \
+            --until "${{ needs.version.outputs.commit_sha }}" \
+            --github-repo "${GITHUB_REPOSITORY}" \
+            --intro "Automatic nightly build. Channel: \`nightly\`. Version: \`${{ needs.version.outputs.version }}\`." \
+            --out nightly-notes.md
+          cat nightly-notes.md
+
       - name: Create dated nightly release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -358,29 +387,22 @@ jobs:
         run: |
           tag="${{ needs.version.outputs.tag }}"
           date="${{ needs.version.outputs.date }}"
-          notes="Automatic nightly build. Channel: nightly. Version: ${{ needs.version.outputs.version }}. Commit: ${{ needs.version.outputs.commit_sha }}."
           if ! gh release view "${tag}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release create "${tag}" \
               --title "Nightly ${date}" \
-              --notes "${notes}" \
+              --notes-file nightly-notes.md \
               --prerelease \
               -R "${GITHUB_REPOSITORY}"
           else
             gh release edit "${tag}" \
               --title "Nightly ${date}" \
-              --notes "${notes}" \
+              --notes-file nightly-notes.md \
               --prerelease \
               -R "${GITHUB_REPOSITORY}"
           fi
           for f in release-assets/*; do
             [ -f "$f" ] && gh release upload "${tag}" "$f" --clobber -R "${GITHUB_REPOSITORY}"
           done
-
-      - name: Fetch previous nightly manifest
-        shell: bash
-        run: |
-          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
-            -o previous-nightly.json || echo "no previous manifest"
 
       - name: Build channel manifest
         shell: bash
