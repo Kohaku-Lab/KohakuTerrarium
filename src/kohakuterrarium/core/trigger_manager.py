@@ -116,6 +116,12 @@ class TriggerManager:
         if trigger is None:
             return False
 
+        # Removal was decided above, so converge the persisted snapshot
+        # BEFORE any cancellable await: if the caller is cancelled while
+        # joining the run-loop task or stopping the trigger, memory and
+        # disk must already agree or resume resurrects this trigger.
+        self._persist_resumable_triggers()
+
         task = self._tasks.pop(trigger_id, None)
         if task and not task.done():
             task.cancel()
@@ -129,8 +135,8 @@ class TriggerManager:
                 )
 
         # Removal was already decided; the stop hook is best-effort so a
-        # failing custom trigger cannot leave memory and the persisted
-        # snapshot out of sync.
+        # failing custom trigger cannot leave runtime bookkeeping out of
+        # sync with the (already rewritten) snapshot.
         try:
             await trigger.stop()
         except Exception as e:
@@ -142,8 +148,6 @@ class TriggerManager:
             )
         self._created_at.pop(trigger_id, None)
         logger.info("Trigger removed", trigger_id=trigger_id)
-        # Rewrite the snapshot so a later resume cannot restore this trigger.
-        self._persist_resumable_triggers()
         return True
 
     def get(self, trigger_id: str) -> TriggerInfo | None:

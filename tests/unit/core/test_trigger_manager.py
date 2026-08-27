@@ -443,6 +443,46 @@ class TestResumablePersistence:
         ids = [entry["trigger_id"] for entry in store.state_calls[-1]["triggers"]]
         assert ids == ["r1"]
 
+    async def test_remove_converges_snapshot_when_cancelled_mid_teardown(self, mgr):
+        """External cancellation between the memory pop and the snapshot
+        write must not leave the deleted trigger on disk — removal was
+        decided, so persistence may not depend on teardown completing."""
+
+        class _SlowStop(_StubTrigger):
+            resumable = True
+
+            def __init__(self):
+                super().__init__()
+                self.release = asyncio.Event()
+                self.stop_entered = False
+
+            async def _on_stop(self):
+                self.stop_entered = True
+                await self.release.wait()
+
+            def to_resume_dict(self):
+                return {"saved": True}
+
+        store = _StubStore()
+        mgr._session_store = store
+        mgr._agent_name = "a1"
+        slow = _SlowStop()
+        tid = await mgr.add(slow, trigger_id="slow")
+        remover = asyncio.create_task(mgr.remove(tid))
+        for _ in range(200):
+            if slow.stop_entered:
+                break
+            await asyncio.sleep(0)
+        assert slow.stop_entered
+        remover.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await remover
+        # Deletion was decided -> disk must reflect it even though
+        # teardown never completed.
+        assert tid not in mgr._triggers
+        last = store.state_calls[-1]
+        assert last["triggers"] == []
+
 
 # ── schedule_drift observability ──────────────────────────────────
 
