@@ -594,7 +594,12 @@ class SessionOutput(OutputModule):
         task_record = self._subagent_tasks.pop(job_id, None)
         task_text = task_record.get("task", "") if task_record is not None else ""
         try:
-            # Never replace a full managed conversation with a synthetic stub.
+            find_run = getattr(self._store, "find_subagent_run", None)
+            if (
+                callable(find_run)
+                and find_run(job_id, parent=self._agent_name) is not None
+            ):
+                return
             run = self._store.next_subagent_run(self._agent_name, name)
             convo = [
                 {"role": "user", "content": task_text},
@@ -605,6 +610,7 @@ class SessionOutput(OutputModule):
                 name=name,
                 run=run,
                 meta={
+                    "job_id": job_id,
                     "task": task_text,
                     "turns": metadata.get("turns", 0),
                     "tools_used": metadata.get("tools_used", []),

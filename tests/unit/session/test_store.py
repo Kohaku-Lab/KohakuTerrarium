@@ -458,6 +458,39 @@ class TestSubagents:
         finally:
             s.close()
 
+    def test_lists_runs_and_finds_exact_job_id(self, tmp_path):
+        s = _store(tmp_path)
+        try:
+            s.save_subagent(
+                "p",
+                "explore",
+                0,
+                {"job_id": "agent_explore_11111111", "task": "first"},
+            )
+            s.save_subagent(
+                "p",
+                "explore",
+                1,
+                {"job_id": "agent_explore_22222222", "task": "second"},
+            )
+            s.save_subagent("other", "explore", 0, {"job_id": "other-job"})
+
+            runs = s.list_subagent_runs(parent="p", name="explore")
+            assert [(row["run"], row["job_id"]) for row in runs] == [
+                (0, "agent_explore_11111111"),
+                (1, "agent_explore_22222222"),
+            ]
+            found = s.find_subagent_run("agent_explore_11111111", parent="p")
+            assert found is not None
+            assert found["parent"] == "p"
+            assert found["name"] == "explore"
+            assert found["run"] == 0
+            assert found["job_id"] == "agent_explore_11111111"
+            assert found["meta"]["task"] == "first"
+            assert s.find_subagent_run("missing", parent="p") is None
+        finally:
+            s.close()
+
 
 # ── jobs ──────────────────────────────────────────────────────────
 

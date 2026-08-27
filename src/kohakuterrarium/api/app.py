@@ -90,6 +90,7 @@ from kohakuterrarium.api.routes.persistence import (
 from kohakuterrarium.api.routes.persistence import open_sessions as persistence_open
 from kohakuterrarium.api.routes.persistence import resume as persistence_resume
 from kohakuterrarium.api.routes.persistence import saved as persistence_saved
+from kohakuterrarium.api.routes.persistence import subagents as persistence_subagents
 from kohakuterrarium.api.routes.persistence import viewer as persistence_viewer
 from kohakuterrarium.api.routes.persistence import saved_drives as persistence_drives
 from kohakuterrarium.api.routes import runtime_graph as runtime_graph_route
@@ -552,6 +553,9 @@ def create_app(
     )
     app.include_router(
         persistence_viewer.router, prefix="/api/sessions", tags=["sessions"]
+    )
+    app.include_router(
+        persistence_subagents.router, prefix="/api/sessions", tags=["sessions"]
     )
     app.include_router(
         sessions_memory.router, prefix="/api/sessions", tags=["sessions"]

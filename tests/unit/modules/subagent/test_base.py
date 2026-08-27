@@ -452,6 +452,7 @@ class TestSessionStorePersistence:
         sa._session_store = _FakeStore()
         sa._parent_name = "controller"
         sa._run_index = 2
+        sa._job_id = "agent_explore_12345678"
         result = await sa.run("find the bug")
         assert result.success is True
         # The sub-agent conversation was persisted with the right lineage.
@@ -459,6 +460,7 @@ class TestSessionStorePersistence:
         assert saved[0]["parent"] == "controller"
         assert saved[0]["name"] == "explore"
         assert saved[0]["run"] == 2
+        assert saved[0]["meta"]["job_id"] == "agent_explore_12345678"
 
     async def test_conversation_preserves_reasoning_extra_fields(self):
         saved: list[dict] = []

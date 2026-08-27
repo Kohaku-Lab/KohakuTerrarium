@@ -58,6 +58,17 @@ class _Store:
         self.queried.append(("meta", parent, name, run))
         return self._meta
 
+    def find_subagent_run(self, job_id, *, parent=None):
+        if not isinstance(self._meta, dict) or self._meta.get("job_id") != job_id:
+            return None
+        return {
+            "parent": parent or "controller",
+            "name": "explore",
+            "run": 0,
+            "job_id": job_id,
+            "meta": self._meta,
+        }
+
 
 class _RunStore:
     """Persisted-run store double: ``(parent, name, run) -> (conv_json, meta)``
@@ -74,6 +85,38 @@ class _RunStore:
     def load_subagent_meta(self, parent, name, run):
         entry = self._data.get((parent, name, run))
         return entry[1] if entry else None
+
+    def find_subagent_run(self, job_id, *, parent=None):
+        for (entry_parent, name, run), (_, meta) in self._data.items():
+            if parent is not None and entry_parent != parent:
+                continue
+            if meta.get("job_id") == job_id:
+                return {
+                    "parent": entry_parent,
+                    "name": name,
+                    "run": run,
+                    "job_id": job_id,
+                    "meta": meta,
+                }
+        return None
+
+    def list_subagent_runs(self, *, parent=None, name=None):
+        rows = []
+        for (entry_parent, entry_name, run), (_, meta) in self._data.items():
+            if parent is not None and entry_parent != parent:
+                continue
+            if name is not None and entry_name != name:
+                continue
+            rows.append(
+                {
+                    "parent": entry_parent,
+                    "name": entry_name,
+                    "run": run,
+                    "job_id": meta.get("job_id"),
+                    "meta": meta,
+                }
+            )
+        return rows
 
 
 def _install(monkeypatch, agent):
@@ -134,21 +177,29 @@ class TestReadLiveJob:
 
 
 class TestJobIdPersistedFallback:
-    async def test_dead_job_id_reads_latest_persisted_run(self, monkeypatch):
-        # After resume ``_jobs`` is empty and the FE sends only job_id;
-        # the read must fall back to the LATEST persisted run for the name.
-        latest = Conversation()
-        latest.append("user", "task")
-        latest.append("assistant", "latest run answer")
-        older = Conversation()
-        older.append("assistant", "old run")
+    async def test_dead_job_id_reads_its_exact_persisted_run(self, monkeypatch):
+        first = Conversation()
+        first.append("user", "first task")
+        first.append("assistant", "first run answer")
+        second = Conversation()
+        second.append("user", "second task")
+        second.append("assistant", "second run answer")
         store = _RunStore(
             "controller",
             "explore",
-            {0: (older.to_json(), {"turns": 1}), 1: (latest.to_json(), {"turns": 2})},
+            {
+                0: (
+                    first.to_json(),
+                    {"turns": 1, "job_id": "agent_explore_a1b2c3d4"},
+                ),
+                1: (
+                    second.to_json(),
+                    {"turns": 2, "job_id": "agent_explore_deadbeef"},
+                ),
+            },
         )
         manager = SubAgentManager(Registry(), ScriptedLLM(["x"]))
-        manager._parent_name = "controller"  # _jobs empty
+        manager._parent_name = "controller"
         agent = _Agent(manager, store=store, name="controller")
         service = _install(monkeypatch, agent)
         out = acc.read_subagent_conversation(
@@ -156,9 +207,48 @@ class TestJobIdPersistedFallback:
         )
         assert out["live"] is False
         assert out["interactive"] is False
-        assert out["run"] == 1
+        assert out["run"] == 0
         joined = " ".join(str(m.get("content", "")) for m in out["messages"])
-        assert "latest run answer" in joined
+        assert "first run answer" in joined
+        assert "second run answer" not in joined
+
+    def test_dead_job_id_reads_one_unambiguous_legacy_run(self, monkeypatch):
+        legacy = Conversation()
+        legacy.append("assistant", "legacy answer")
+        store = _RunStore(
+            "controller",
+            "explore",
+            {0: (legacy.to_json(), {"turns": 1})},
+        )
+        manager = SubAgentManager(Registry(), ScriptedLLM(["x"]))
+        manager._parent_name = "controller"
+        service = _install(monkeypatch, _Agent(manager, store=store, name="controller"))
+        out = acc.read_subagent_conversation(
+            service, "g", "cid", job_id="agent_explore_a1b2c3d4"
+        )
+        assert out["run"] == 0
+        assert out["job_id"] is None
+
+    def test_dead_job_id_rejects_ambiguous_legacy_runs(self, monkeypatch):
+        first = Conversation()
+        first.append("assistant", "first legacy answer")
+        second = Conversation()
+        second.append("assistant", "second legacy answer")
+        store = _RunStore(
+            "controller",
+            "explore",
+            {
+                0: (first.to_json(), {"turns": 1}),
+                1: (second.to_json(), {"turns": 2}),
+            },
+        )
+        manager = SubAgentManager(Registry(), ScriptedLLM(["x"]))
+        manager._parent_name = "controller"
+        service = _install(monkeypatch, _Agent(manager, store=store, name="controller"))
+        with pytest.raises(ConflictError, match="multiple legacy runs"):
+            acc.read_subagent_conversation(
+                service, "g", "cid", job_id="agent_explore_a1b2c3d4"
+            )
 
     def test_dead_job_id_with_no_persisted_run_is_not_found(self, monkeypatch):
         store = _RunStore("controller", "explore", {})

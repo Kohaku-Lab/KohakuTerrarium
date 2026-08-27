@@ -697,6 +697,50 @@ class TestActivityHandlers:
             parsed = json.loads(convo)
             assert parsed[0]["role"] == "user"
             assert parsed[1]["content"] == "found"
+            assert store.load_subagent_meta("alice", "explore", 0)["job_id"] == "j1"
+        finally:
+            store.close()
+
+    def test_subagent_done_does_not_duplicate_exact_managed_run(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            store.save_subagent(
+                "alice",
+                "explore",
+                0,
+                {
+                    "job_id": "agent_explore_abc12345",
+                    "task": "find x",
+                    "success": True,
+                },
+                conv_json='{"messages":[{"role":"assistant","content":"full"}]}',
+            )
+            out.on_activity_with_metadata(
+                "subagent_start",
+                "[explore] task",
+                {
+                    "job_id": "agent_explore_abc12345",
+                    "task": "find x",
+                    "subagent": "explore",
+                },
+            )
+            out.on_activity_with_metadata(
+                "subagent_done",
+                "[explore] done",
+                {
+                    "job_id": "agent_explore_abc12345",
+                    "result": "found",
+                    "subagent": "explore",
+                },
+            )
+
+            runs = store.list_subagent_runs(parent="alice", name="explore")
+            assert [(row["run"], row["job_id"]) for row in runs] == [
+                (0, "agent_explore_abc12345")
+            ]
+            assert store.load_subagent_conversation("alice", "explore", 0).endswith(
+                '"full"}]}'
+            )
         finally:
             store.close()
 

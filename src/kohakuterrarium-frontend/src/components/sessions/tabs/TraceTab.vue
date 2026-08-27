@@ -40,7 +40,10 @@
 
     <!-- Event detail drawer -->
     <el-drawer v-model="detailOpen" :title="t('sessionViewer.detail.title')" direction="rtl" size="40%" :modal="false" :destroy-on-close="false">
-      <TraceEventDetail :event="selectedEvent" @open-agent="onOpenSubagent" />
+      <div class="h-full min-h-0 flex flex-col">
+        <SubagentConversationPanel v-if="conversationRef" :session-id="conversationSessionId" :parent="conversationRef.parent" :job-id="conversationRef.jobId" :name="conversationRef.name" :run="conversationRef.run" :live="false" fill show-back @back="onCloseConversation" />
+        <TraceEventDetail v-else :event="selectedEvent" :parent-agent="rollup.agent || filters.agent" :completed-job-ids="completedJobIds" @open-conversation="onOpenSubagent" />
+      </div>
     </el-drawer>
   </div>
 </template>
@@ -51,6 +54,7 @@ import { computed, nextTick, ref, watch } from "vue"
 import { useRoute, useRouter } from "vue-router"
 
 import TraceEventDetail from "@/components/sessions/trace/TraceEventDetail.vue"
+import SubagentConversationPanel from "@/components/subagents/SubagentConversationPanel.vue"
 import TraceTab_TraceFilters from "@/components/sessions/trace/TraceFilters.vue"
 import TraceTab_TraceTimeline from "@/components/sessions/trace/TraceTimeline.vue"
 import TraceTab_TraceTurnGroup from "@/components/sessions/trace/TraceTurnGroup.vue"
@@ -111,22 +115,40 @@ const zeroMatchTurns = ref(new Set())
 
 // Event-detail panel state.
 const selectedEvent = ref(null)
+const conversationRef = ref(null)
 const detailOpen = ref(false)
+const conversationSessionId = computed(() => detail.name)
 const selectedEventId = computed(() => (selectedEvent.value && typeof selectedEvent.value.event_id === "number" ? selectedEvent.value.event_id : null))
 
 function onSelectEvent(ev) {
   selectedEvent.value = ev
+  conversationRef.value = null
   detailOpen.value = true
 }
 
-function onOpenSubagent(namespace) {
-  if (!namespace) return
-  // Switch the agent filter — this re-fetches turns + events for the
-  // sub-agent's namespace. Close the drawer so the user can see the
-  // new trace; selectedEvent is preserved in case they reopen.
-  filters.value = { ...filters.value, agent: namespace }
-  detailOpen.value = false
+function onOpenSubagent(reference) {
+  if (!reference) return
+  conversationRef.value = reference
 }
+
+function onCloseConversation() {
+  conversationRef.value = null
+}
+
+// Jobs with a persisted terminal outcome anywhere in the session.
+// Rollup ``subagent_breakdown`` rows are written only once a run
+// finished (managed or synthetic), covering every turn without
+// requiring any turn to be expanded client-side.
+const completedJobIds = computed(() => {
+  const ids = []
+  for (const turn of rollup.turns || []) {
+    for (const row of turn.subagent_breakdown || []) {
+      const jobId = row?.job_id
+      if (jobId && !ids.includes(jobId)) ids.push(jobId)
+    }
+  }
+  return ids
+})
 
 const agents = computed(() => detail.agents || [])
 

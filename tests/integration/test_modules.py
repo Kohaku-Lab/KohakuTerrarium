@@ -847,7 +847,7 @@ class TestModulesIntegration:
         finally:
             await agent.stop()
 
-    async def test_subagent_dispatch_and_routing(self, make_agent):
+    async def test_subagent_dispatch_and_routing(self, make_agent, tmp_path):
         """subagent protocol — a real :class:`SubAgentConfig` is
         registered on the agent, the controller dispatches it via a
         ``[/...]`` block, the :class:`SubAgentManager` spawns it, the
@@ -878,6 +878,15 @@ class TestModulesIntegration:
         )
         agent.subagent_manager.register(worker_cfg)
         agent.registry.register_subagent("worker", worker_cfg)
+        store = SessionStore(str(tmp_path / "subagent-routing.kohakutr"))
+        store.init_meta(
+            "subagent-routing",
+            "agent",
+            str(tmp_path),
+            str(tmp_path),
+            ["modules_agent"],
+        )
+        agent.attach_session_store(store)
         assert "worker" in agent.subagent_manager.list_subagents()
         # The registered config is retrievable + projects a SubAgentInfo.
         assert agent.subagent_manager.get_config("worker") is worker_cfg
@@ -915,6 +924,15 @@ class TestModulesIntegration:
             last = agent.controller.conversation.get_last_assistant_message()
             assert last is not None
             assert "worker finished" in last.get_text_content()
+            first_job_id = next(iter(agent.subagent_manager._results))
+            persisted = store.list_subagent_runs(parent="modules_agent", name="worker")
+            assert [(row["run"], row["job_id"]) for row in persisted] == [
+                (0, first_job_id)
+            ]
+            assert (
+                store.load_subagent_conversation("modules_agent", "worker", 0)
+                is not None
+            )
 
             # ── Programmatic spawn path (background=False) ──
             # The same SubAgentManager also drives a direct spawn: the
@@ -998,6 +1016,7 @@ class TestModulesIntegration:
             agent.subagent_manager._current_depth = 0
         finally:
             await agent.stop()
+            store.close()
 
     async def test_interactive_subagent_stays_alive(self, make_agent):
         """subagent protocol — an interactive sub-agent (``interactive:
