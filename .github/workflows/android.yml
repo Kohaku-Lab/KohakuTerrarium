@@ -179,8 +179,11 @@ jobs:
         # Always run for tag pushes + manual dispatches.  When the
         # signing secrets are absent the ``Sign release artifacts``
         # step below short-circuits and the unsigned APK / AAB still
-        # land on the release for inspection.
-        if: github.event_name == 'push' || inputs.sign
+        # land on the release for inspection.  ``ref_type`` rather than
+        # ``event_name`` so a workflow_dispatch aimed at a tag (how
+        # auto-patch-release.yml starts this build) behaves like the tag
+        # push it stands in for.
+        if: github.ref_type == 'tag' || inputs.sign
         run: |
           briefcase package android -p apk --adhoc-sign
           briefcase package android -p aab --adhoc-sign
@@ -188,7 +191,7 @@ jobs:
           ls -la dist/ || true
 
       - name: Sign release artifacts
-        if: github.event_name == 'push' || inputs.sign
+        if: github.ref_type == 'tag' || inputs.sign
         env:
           # Four secrets read from the ``release`` environment
           # (see ``environment: release`` on this job above).
@@ -354,7 +357,7 @@ jobs:
           retention-days: 30
 
       - name: Attach to release
-        if: github.event_name == 'push'
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/android/*

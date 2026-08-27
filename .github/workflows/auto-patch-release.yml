@@ -1,0 +1,155 @@
+name: Auto Patch Release
+
+# Cuts an ``x.y.Z+1`` release when the stable channel has fallen behind
+# main: the newest stable release is older than ``min_age_days`` AND more
+# than ``min_nightlies`` nightlies have shipped since it.  Both conditions
+# together mean "there is a real backlog of merged, nightly-exercised work
+# that stable users are not getting".
+#
+# The bump commit is pushed to the default branch and tagged.  A tag pushed
+# with GITHUB_TOKEN does NOT fire ``on: push`` workflows, so ``release.yml``
+# and ``android.yml`` are started explicitly via workflow_dispatch — the one
+# event type GitHub exempts from that anti-recursion rule.
+#
+# Requires the default branch to accept pushes from github-actions[bot]
+# (branch protection must allow it, or the workflow will fail at the push).
+
+on:
+  schedule:
+    # 05:00 UTC: after the 03:00 nightly, so today's nightly is counted.
+    - cron: "0 5 * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Evaluate and report, but do not tag or release"
+        required: false
+        default: false
+        type: boolean
+      min_age_days:
+        description: "Minimum age of the latest stable release, in days"
+        required: false
+        default: "7"
+        type: string
+      min_nightlies:
+        description: "Nightlies since that release must EXCEED this count"
+        required: false
+        default: "2"
+        type: string
+
+concurrency:
+  group: auto-patch-release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  # workflow_dispatch of release.yml / android.yml.
+  actions: write
+
+jobs:
+  auto-patch-release:
+    runs-on: ubuntu-latest
+    steps:
+      # Full history + tags: the commit-count guard below compares HEAD
+      # against the tag the decision script picked.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Collect release history
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release list -R "${GITHUB_REPOSITORY}" --limit 200 \
+            --json tagName,createdAt,publishedAt,isPrerelease,isDraft \
+            > releases.json
+          jq 'length' releases.json
+
+      - name: Evaluate release cadence
+        id: decide
+        shell: bash
+        run: |
+          python scripts/auto_patch_release.py \
+            --releases releases.json \
+            --now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --min-age-days "${{ inputs.min_age_days || '7' }}" \
+            --min-nightlies "${{ inputs.min_nightlies || '2' }}" \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Report decision
+        shell: bash
+        run: |
+          echo "${{ steps.decide.outputs.reason }}" >> "$GITHUB_STEP_SUMMARY"
+
+      # Two things the release listing cannot answer: whether main actually
+      # moved (the nightly count is only a proxy) and whether CI signed off on
+      # what would ship.  A failed pre-flight holds the release rather than
+      # failing the run — "not yet" is the expected daily answer, and a red
+      # scheduled run for it would train everyone to ignore this workflow.
+      - name: Pre-flight the release
+        id: preflight
+        if: steps.decide.outputs.should_release == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          tag="${{ steps.decide.outputs.previous_tag }}"
+          count=$(git rev-list --count "${tag}..HEAD")
+          conclusion=$(gh run list -R "${GITHUB_REPOSITORY}" \
+            --workflow ci.yml --limit 50 \
+            --json headSha,conclusion \
+            --jq "[.[] | select(.headSha == \"${GITHUB_SHA}\")][0].conclusion")
+          echo "${count} commit(s) since ${tag}; ci.yml: ${conclusion:-<no run>}"
+          blocked=""
+          [ "${count}" -gt 0 ] || blocked="no commits since ${tag}"
+          [ "${conclusion}" = "success" ] \
+            || blocked="${blocked:+${blocked}; }ci.yml not green (${conclusion:-no run})"
+          if [ -n "${blocked}" ]; then
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "holding off: ${blocked}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stamp the release version
+        if: steps.preflight.outputs.ok == 'true' && inputs.dry_run != true
+        shell: bash
+        run: |
+          python scripts/bump_version.py "${{ steps.decide.outputs.next_version }}"
+          git diff --stat
+
+      - name: Commit, tag and push
+        if: steps.preflight.outputs.ok == 'true' && inputs.dry_run != true
+        shell: bash
+        run: |
+          version="${{ steps.decide.outputs.next_version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Releasing a pending manual bump leaves nothing to commit: the tree
+          # already carries the target version, so only the tag is new.
+          if git diff --quiet; then
+            echo "version already stamped in the tree; tagging in place"
+          else
+            git commit -am "chore(release): bump version to ${version}"
+          fi
+          git tag "v${version}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git push origin "v${version}"
+
+      - name: Dispatch the release workflows
+        if: steps.preflight.outputs.ok == 'true' && inputs.dry_run != true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          tag="v${{ steps.decide.outputs.next_version }}"
+          gh workflow run release.yml --ref "${tag}" \
+            -f channel=stable -R "${GITHUB_REPOSITORY}"
+          gh workflow run android.yml --ref "${tag}" \
+            -f sign=true -R "${GITHUB_REPOSITORY}"
+          echo "dispatched release.yml + android.yml on ${tag}" \
+            >> "$GITHUB_STEP_SUMMARY"
