@@ -12,6 +12,7 @@ from kohakuterrarium.core.message_locator import (
     user_message_indices_for_turn,
 )
 from kohakuterrarium.session.history import (
+    normalize_tool_call_events,
     replay_conversation,
     resolve_branch_view_strict,
     select_live_event_ids,
@@ -213,7 +214,17 @@ def reload_conversation_under_branch_view(
         return
 
     selected = resolve_branch_view_strict(events, branch_view)
-    messages = replay(events, branch_view=branch_view)
+    live_event_ids = select_live_event_ids(events, branch_view=branch_view)
+    replay_events = [
+        event
+        for event in events
+        if not isinstance(event.get("event_id"), int)
+        or event["event_id"] in live_event_ids
+    ]
+    messages = replay(
+        normalize_tool_call_events(replay_events),
+        branch_view=branch_view,
+    )
     metadata_by_turn = {
         int(event["turn_index"]): {
             "event_id": event.get("event_id"),
