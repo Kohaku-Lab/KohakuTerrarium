@@ -84,6 +84,46 @@ def test_reload_restores_missing_system_prompt_and_canonical_user_metadata():
     assert agent._parent_branch_path == [(1, 1)]
 
 
+def test_reload_restores_native_tool_announcement_before_result():
+    events = [
+        _event(1, "user_message", turn=1, content="run it"),
+        {
+            "event_id": 2,
+            "type": "tool_call",
+            "name": "bash",
+            "call_id": "bash_replay_1",
+            "args": {"cmd": "pwd"},
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        {
+            "event_id": 3,
+            "type": "tool_result",
+            "name": "bash",
+            "call_id": "bash_replay_1",
+            "output": "/work",
+            "turn_index": 1,
+            "branch_id": 1,
+            "parent_branch_path": [],
+        },
+        _event(4, "user_message", turn=2, content="change this", path=[[1, 1]]),
+    ]
+    agent = _agent(events)
+
+    reload_raw_prefix_for_target(
+        agent,
+        UserMessageSelector(event_id=4, turn_index=2, branch_id=1),
+    )
+
+    messages = agent.controller.conversation.get_messages()
+    tool_index = next(i for i, message in enumerate(messages) if message.role == "tool")
+    announcement = messages[tool_index - 1]
+    assert announcement.role == "assistant"
+    assert [call["id"] for call in announcement.tool_calls] == ["bash_replay_1"]
+    assert messages[tool_index].tool_call_id == "bash_replay_1"
+
+
 def test_reload_does_not_duplicate_a_persisted_system_prompt():
     events = [
         _event(1, "system_prompt_set", content="persisted prompt"),

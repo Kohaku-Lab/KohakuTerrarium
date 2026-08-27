@@ -494,6 +494,102 @@ class TestReloadConversationUnderBranchView:
         roles = [m.role for m in msgs]
         assert "user" in roles
 
+    async def test_restores_native_tool_announcement_before_result(self, agent):
+        agent._apply_user_input("run it")
+        agent.session_store.append_event(
+            "alice",
+            "tool_call",
+            {"name": "bash", "call_id": "bash_replay_1", "args": {"cmd": "pwd"}},
+            turn_index=1,
+            branch_id=1,
+        )
+        agent.session_store.append_event(
+            "alice",
+            "tool_result",
+            {"name": "bash", "call_id": "bash_replay_1", "output": "/work"},
+            turn_index=1,
+            branch_id=1,
+        )
+
+        agent._reload_conversation_under_branch_view({1: 1})
+
+        messages = agent.controller.conversation.get_messages()
+        tool_index = next(
+            i for i, message in enumerate(messages) if message.role == "tool"
+        )
+        announcement = messages[tool_index - 1]
+        assert announcement.role == "assistant"
+        assert [call["id"] for call in announcement.tool_calls] == ["bash_replay_1"]
+        assert messages[tool_index].tool_call_id == "bash_replay_1"
+
+    async def test_does_not_restore_tool_announcement_from_sibling_branch(self, agent):
+        agent._apply_user_input("branch one")
+        for event_type, payload in (
+            (
+                "tool_call",
+                {"name": "bash", "call_id": "branch_1_call", "args": {}},
+            ),
+            (
+                "tool_result",
+                {"name": "bash", "call_id": "branch_1_call", "output": "one"},
+            ),
+        ):
+            agent.session_store.append_event(
+                "alice", event_type, payload, turn_index=1, branch_id=1
+            )
+        for event_type, payload in (
+            (
+                "tool_call",
+                {"name": "bash", "call_id": "branch_2_call", "args": {}},
+            ),
+            (
+                "tool_result",
+                {"name": "bash", "call_id": "branch_2_call", "output": "two"},
+            ),
+        ):
+            agent.session_store.append_event(
+                "alice", event_type, payload, turn_index=1, branch_id=2
+            )
+
+        agent._reload_conversation_under_branch_view({1: 1})
+
+        messages = agent.controller.conversation.get_messages()
+        announced_ids = {
+            call["id"]
+            for message in messages
+            if message.role == "assistant"
+            for call in message.tool_calls
+        }
+        result_ids = {
+            message.tool_call_id for message in messages if message.role == "tool"
+        }
+        assert announced_ids == {"branch_1_call"}
+        assert result_ids == {"branch_1_call"}
+
+    async def test_does_not_mark_unfinished_tool_interrupted_during_live_replay(
+        self, agent
+    ):
+        agent._apply_user_input("keep running")
+        agent.session_store.append_event(
+            "alice",
+            "tool_call",
+            {"name": "bash", "call_id": "still_running", "args": {}},
+            turn_index=1,
+            branch_id=1,
+        )
+
+        agent._reload_conversation_under_branch_view({1: 1})
+
+        messages = agent.controller.conversation.get_messages()
+        announced_ids = {
+            call["id"]
+            for message in messages
+            if message.role == "assistant"
+            for call in message.tool_calls
+        }
+        assert announced_ids == {"still_running"}
+        assert all(message.role != "tool" for message in messages)
+
     async def test_no_events_rejects_nonempty_view(self, agent):
         agent._turn_index = 5
         agent._branch_id = 7
