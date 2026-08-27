@@ -449,6 +449,17 @@ jobs:
     needs: [build-wheel, build-release-tree, build-desktop, publish-channel-manifests]
     runs-on: ubuntu-latest
     steps:
+      # Checkout first: the action cleans its destination directory, which
+      # would wipe the downloaded artifacts if it ran after them.  Full
+      # history so the notes can list commits back to the previous release.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
       # Pull only artifacts we actually publish to the release.  The
       # ``Kohaku-Lab~*~*.dockerbuild`` blobs from the docker job are
       # heavy provenance metadata we don't need here.
@@ -476,10 +487,23 @@ jobs:
           find all-artifacts/desktop-* -type f -exec cp {} release/ \;
           ls -la release/
 
+      # A plain commit list beats ``generate_release_notes``: that groups by
+      # pull request, so direct pushes vanish and a branch collapses to one
+      # line regardless of how much landed in it.
+      - name: Build release notes
+        shell: bash
+        run: |
+          python scripts/release_notes.py \
+            --since auto \
+            --until "${GITHUB_REF_NAME}" \
+            --github-repo "${GITHUB_REPOSITORY}" \
+            --out release-notes.md
+          cat release-notes.md
+
       - uses: softprops/action-gh-release@v2
         with:
           files: release/*
-          generate_release_notes: true
+          body_path: release-notes.md
           draft: false
           # PEP 440 pre-release identifiers: alpha (``a``), beta (``b``),
           # release-candidate (``rc``), and dev (``dev``).  The old check
