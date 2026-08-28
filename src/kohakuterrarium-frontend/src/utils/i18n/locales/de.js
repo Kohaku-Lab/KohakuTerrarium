@@ -284,6 +284,26 @@ export default {
   "settings.prefs.inputRequiredBadge": "Eingabe-erforderlich-Markierungen",
   "settings.prefs.inputRequiredBadgeHint":
     "Unterhaltungen markieren, die auf eine Antwort oder Freigabe warten.",
+  "settings.prefs.systemNotifications": "Systembenachrichtigungen",
+  "settings.prefs.systemNotificationsHint":
+    "Zeigt eine Betriebssystembenachrichtigung, wenn die Seite im Hintergrund ist.",
+  "settings.prefs.notifyWaiting": "Bei erforderlicher Eingabe benachrichtigen",
+  "settings.prefs.notifyWaitingHint": "Benachrichtigt bei Fragen und Freigaben.",
+  "settings.prefs.notifyCompletion": "Bei Abschluss benachrichtigen",
+  "settings.prefs.notifyCompletionHint":
+    "Benachrichtigt auch bei gewöhnlich abgeschlossenen Antworten.",
+  "settings.prefs.attentionSound": "Hinweistöne",
+  "settings.prefs.attentionSoundHint": "Spielt nach der Audiofreigabe einen kurzen lokalen Ton.",
+  "settings.prefs.soundWaiting": "Ton bei erforderlicher Eingabe",
+  "settings.prefs.soundWaitingHint": "Spielt den Ton bei Fragen und Freigaben.",
+  "settings.prefs.soundCompletion": "Ton bei Abschluss",
+  "settings.prefs.soundCompletionHint": "Spielt den Ton auch bei gewöhnlichen Abschlüssen.",
+  "settings.prefs.faviconBadge": "Favicon-Status",
+  "settings.prefs.faviconBadgeHint":
+    "Zeigt Eingabebedarf oder ungelesene Anzahl im Browser-Symbol.",
+  "settings.prefs.desktopAttention": "Desktop-Fenster hervorheben",
+  "settings.prefs.desktopAttentionHint": "Markiert das inaktive kt-app-Fenster.",
+
   "settings.prefs.desktopZoom": "Desktop-Zoom",
   "settings.prefs.mobileZoom": "Mobile-Zoom",
   "settings.keys.storageHint":

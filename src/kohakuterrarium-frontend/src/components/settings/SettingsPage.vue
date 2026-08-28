@@ -455,7 +455,7 @@
                   <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
                   <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
                 </div>
-                <el-switch :model-value="attentionPrefs.state[item.key]" @change="attentionPrefs.set(item.key, $event)" />
+                <el-switch :model-value="attentionPrefs.state[item.key]" @change="setAttentionPreference(item.key, $event)" />
               </div>
             </div>
           </div>
@@ -483,6 +483,7 @@ import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
 import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
+import { requestNotificationPermission } from "@/composables/useAttentionEffects"
 import { useDensity } from "@/composables/useDensity"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { useAuthStore } from "@/stores/auth"
@@ -516,6 +517,17 @@ const readingSizeOptions = computed(() =>
   })),
 )
 
+async function setAttentionPreference(key, value) {
+  if (key === "systemNotifications" && value) {
+    const permission = await requestNotificationPermission()
+    if (permission !== "granted") {
+      attentionPrefs.set(key, false)
+      return
+    }
+  }
+  attentionPrefs.set(key, value)
+}
+
 const attentionSettings = [
   {
     key: "dynamicTitle",
@@ -531,6 +543,46 @@ const attentionSettings = [
     key: "inputRequiredBadge",
     label: "settings.prefs.inputRequiredBadge",
     hint: "settings.prefs.inputRequiredBadgeHint",
+  },
+  {
+    key: "systemNotifications",
+    label: "settings.prefs.systemNotifications",
+    hint: "settings.prefs.systemNotificationsHint",
+  },
+  {
+    key: "notifyWaiting",
+    label: "settings.prefs.notifyWaiting",
+    hint: "settings.prefs.notifyWaitingHint",
+  },
+  {
+    key: "notifyCompletion",
+    label: "settings.prefs.notifyCompletion",
+    hint: "settings.prefs.notifyCompletionHint",
+  },
+  {
+    key: "attentionSound",
+    label: "settings.prefs.attentionSound",
+    hint: "settings.prefs.attentionSoundHint",
+  },
+  {
+    key: "soundWaiting",
+    label: "settings.prefs.soundWaiting",
+    hint: "settings.prefs.soundWaitingHint",
+  },
+  {
+    key: "soundCompletion",
+    label: "settings.prefs.soundCompletion",
+    hint: "settings.prefs.soundCompletionHint",
+  },
+  {
+    key: "faviconBadge",
+    label: "settings.prefs.faviconBadge",
+    hint: "settings.prefs.faviconBadgeHint",
+  },
+  {
+    key: "desktopAttention",
+    label: "settings.prefs.desktopAttention",
+    hint: "settings.prefs.desktopAttentionHint",
   },
 ]
 

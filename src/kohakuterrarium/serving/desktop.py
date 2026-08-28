@@ -314,6 +314,9 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
         confirm_close=True,
         background_color="#1a1a2e",
     )
+    from kohakuterrarium.serving.desktop_attention import expose_desktop_attention
+
+    expose_desktop_attention(window)
     mark_startup("desktop_window_created", surface="desktop", window="loading")
 
     def _shown():

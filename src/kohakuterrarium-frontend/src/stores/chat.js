@@ -8,7 +8,7 @@ import {
   createAttentionState,
   markAttentionRead,
   publishAttention,
-  reduceAttention,
+  reduceAttentionEdge,
   removeAttentionScope,
 } from "@/stores/attention"
 import {
@@ -2724,11 +2724,14 @@ const _chatStoreOptions = {
     _onMessage(data) {
       const source = this._tabForSource(data.source || "")
       if (source) {
-        this.attentionByTab[source] = reduceAttention(
+        const scope = scopeOfStoreId(this.$id) || "default"
+        const { state } = reduceAttentionEdge(
           this.attentionByTab[source] || createAttentionState(),
           data,
+          { scope, tab: source },
         )
-        publishAttention(scopeOfStoreId(this.$id) || "default", source, this.attentionByTab[source])
+        this.attentionByTab[source] = state
+        publishAttention(scope, source, state)
       }
 
       if (data.type === "user_input") {
