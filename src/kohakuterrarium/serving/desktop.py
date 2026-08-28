@@ -11,6 +11,8 @@ import threading
 import time
 from pathlib import Path
 
+from kohakuterrarium.serving.desktop_attention import expose_desktop_attention
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
@@ -144,8 +146,7 @@ def launch_desktop_app(port: int = 8001, log_level: str = "INFO"):
         "--log-level",
         log_level,
     ]
-    log_dir = Path.home() / ".kohakuterrarium"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = config_dir()
     log_file = open(log_dir / "app.log", "w", encoding="utf-8")  # noqa: SIM115
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
@@ -181,9 +182,7 @@ def _start_subprocess_server(*, port: int, log_level: str, state_path: Path):
         "--parent-pid",
         str(os.getpid()),
     ]
-    log_file = open(  # noqa: SIM115
-        Path.home() / ".kohakuterrarium" / "app.log", "a", encoding="utf-8"
-    )
+    log_file = open(config_dir() / "app.log", "a", encoding="utf-8")  # noqa: SIM115
     kwargs: dict[str, object] = {
         "stdin": subprocess.DEVNULL,
         "stdout": log_file,
@@ -314,8 +313,6 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
         confirm_close=True,
         background_color="#1a1a2e",
     )
-    from kohakuterrarium.serving.desktop_attention import expose_desktop_attention
-
     expose_desktop_attention(window)
     mark_startup("desktop_window_created", surface="desktop", window="loading")
 

@@ -9,6 +9,7 @@ end-user-facing UI / platform-dependent — they fall under the
 import json
 import socket
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -94,6 +95,22 @@ def test_web_server_records_ready_boundary(monkeypatch):
 
 
 # ── desktop logging ─────────────────────────────────────────────
+
+
+def test_desktop_launcher_log_honors_config_dir(monkeypatch, tmp_path):
+    calls = []
+    child = SimpleNamespace(pid=73)
+    monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(web_mod, "_is_briefcase_runtime", lambda: False)
+    monkeypatch.setattr(
+        web_mod.subprocess,
+        "Popen",
+        lambda cmd, **kwargs: calls.append((cmd, kwargs)) or child,
+    )
+
+    web_mod.run_desktop_app(port=8123, log_level="ERROR")
+
+    assert (tmp_path / "config" / "app.log").exists()
 
 
 def test_desktop_blocking_ensures_file_logging(monkeypatch):
