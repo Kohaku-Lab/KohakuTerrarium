@@ -287,6 +287,16 @@ export default {
   "settings.providers.targetNodeHint":
     "Keys + OAuth will be saved to the selected worker's local config (not the host's).",
   "settings.prefs.appearance": "Appearance",
+  "settings.prefs.attention": "Attention reminders",
+  "settings.prefs.dynamicTitle": "Dynamic window title",
+  "settings.prefs.dynamicTitleHint":
+    "Show pending input and unread completions in the window or browser-tab title.",
+  "settings.prefs.completionBadge": "Completion badges",
+  "settings.prefs.completionBadgeHint":
+    "Mark conversations with completed responses that have not been viewed.",
+  "settings.prefs.inputRequiredBadge": "Input-required badges",
+  "settings.prefs.inputRequiredBadgeHint":
+    "Mark conversations that are waiting for your answer or approval.",
   "settings.prefs.readingSize": "Reading size",
   "settings.prefs.readingSizeHint":
     "Enlarges interface text and the controls needed to keep it readable.",

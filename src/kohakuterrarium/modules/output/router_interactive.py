@@ -49,6 +49,7 @@ class OutputRouterInteractiveMixin:
                 reply = await asyncio.wait_for(future, timeout=effective_timeout)
             return reply
         except asyncio.TimeoutError:
+            self._broadcast_supersede(event.id)
             return UIReply(
                 event_id=event.id,
                 action_id=ACTION_TIMEOUT,

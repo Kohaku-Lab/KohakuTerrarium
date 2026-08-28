@@ -9,6 +9,7 @@ The agent's output router calls into this module:
 
 from typing import Any
 
+from kohakuterrarium.builtins.terminal_attention import set_attention
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -31,6 +32,9 @@ class RichCLIOutput(BaseOutputModule):
         super().__init__()
         self.app = app
         self.reply_router = reply_router
+        overlay = getattr(app, "bus_overlay", None)
+        if overlay is not None:
+            overlay.on_reply = self._on_pending_changed
 
     async def write(self, content: str) -> None:
         if not content or self.app is None:
@@ -114,6 +118,7 @@ class RichCLIOutput(BaseOutputModule):
                 await self.on_resume(event.payload.get("events", []))
             case "ask_text" | "confirm" | "selection":
                 self._open_bus_overlay(event)
+                self._refresh_attention()
             case "progress":
                 self._render_progress(event)
             case "notification":
@@ -124,11 +129,15 @@ class RichCLIOutput(BaseOutputModule):
                 has_replyable_action = any(a.get("style") != "link" for a in actions)
                 if has_replyable_action and event.interactive:
                     self._open_bus_overlay(event)
+                    self._refresh_attention()
                 else:
                     self._render_card(event)
             case "ui_supersede":
+                overlay = getattr(self.app, "bus_overlay", None)
+                if overlay is not None:
+                    overlay.on_supersede(event.payload.get("event_id") or event.id)
+                self._refresh_attention()
                 # Committed scrollback cannot retract superseded panels.
-                pass
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 metadata = event.payload or {}
@@ -140,6 +149,14 @@ class RichCLIOutput(BaseOutputModule):
                         activity_type=event.type,
                         error=str(e),
                     )
+
+    def _on_pending_changed(self, _event: OutputEvent | None, pending: bool) -> None:
+        set_attention("input required" if pending else "ready")
+
+    def _refresh_attention(self) -> None:
+        overlay = getattr(self.app, "bus_overlay", None)
+        pending = bool(getattr(overlay, "pending_event_ids", ()))
+        self._on_pending_changed(None, pending)
 
     def _open_bus_overlay(self, event: OutputEvent) -> None:
         """Queue an interactive event for keyboard input in the live region."""

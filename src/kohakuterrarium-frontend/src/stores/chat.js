@@ -1,8 +1,16 @@
 import { ElMessage } from "element-plus"
 import { getCurrentInstance, markRaw } from "vue"
 
-import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import {
+  attentionSummary,
+  createAttentionState,
+  markAttentionRead,
+  publishAttention,
+  reduceAttention,
+  removeAttentionScope,
+} from "@/stores/attention"
 import {
   adoptLocalCommandResultSelections,
   bindLocalCommandResultContexts,
@@ -1634,6 +1642,7 @@ const _chatStoreOptions = {
     runningJobs: {},
     /** @type {Object<string, number>} Unread message counts per tab */
     unreadCounts: {},
+    attentionByTab: {},
     /**
      * Per-tab raw event log cached from the last ``getHistory`` so
      * branch navigation can re-replay without a network round-trip.
@@ -1916,6 +1925,14 @@ const _chatStoreOptions = {
   },
 
   actions: {
+    markAttentionRead(tabKey) {
+      if (!this.attentionByTab[tabKey]) return
+      this.attentionByTab[tabKey] = markAttentionRead(this.attentionByTab[tabKey])
+      publishAttention(scopeOfStoreId(this.$id) || "default", tabKey, this.attentionByTab[tabKey])
+    },
+    attentionSummary(tabKey) {
+      return attentionSummary(this.attentionByTab[tabKey] || createAttentionState())
+    },
     /**
      * Public resync — re-fetch and rebuild the active tab's history.
      * Idempotent and cheap; safe to call from focus-change listeners,
@@ -1979,6 +1996,8 @@ const _chatStoreOptions = {
       this.subagentUsageByJob = {}
       this.runningJobs = {}
       this.unreadCounts = {}
+      this.attentionByTab = {}
+      removeAttentionScope(scopeOfStoreId(this.$id) || "default")
       this.queuedMessagesByTab = {}
       this.processingByTab = {}
       this._recentUserInputs = {}
@@ -2704,6 +2723,13 @@ const _chatStoreOptions = {
     /** Handle ALL incoming WS messages */
     _onMessage(data) {
       const source = this._tabForSource(data.source || "")
+      if (source) {
+        this.attentionByTab[source] = reduceAttention(
+          this.attentionByTab[source] || createAttentionState(),
+          data,
+        )
+        publishAttention(scopeOfStoreId(this.$id) || "default", source, this.attentionByTab[source])
+      }
 
       if (data.type === "user_input") {
         this._handleUserInput(source, data)
@@ -5071,6 +5097,8 @@ const _chatStoreOptions = {
       this.subagentUsageByJob = {}
       this.runningJobs = {}
       this.unreadCounts = {}
+      this.attentionByTab = {}
+      removeAttentionScope(scopeOfStoreId(this.$id) || "default")
       this.queuedMessagesByTab = {}
       this.processingByTab = {}
       this.eventsByTab = {}
@@ -5543,6 +5571,7 @@ function _factoryFor(scope) {
       // ("default") lives forever — v1 never explicitly disposes.
       registerScopeDisposer(scope, () => {
         try {
+          removeAttentionScope(scope)
           useFn()._cleanup?.()
           useFn().$dispose?.()
         } catch {

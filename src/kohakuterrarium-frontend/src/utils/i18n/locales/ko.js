@@ -265,6 +265,15 @@ export default {
   "settings.tabs.account": "계정",
   "settings.tabs.prefs": "환경설정",
   "settings.prefs.appearance": "외관",
+  "settings.prefs.attention": "알림 표시",
+  "settings.prefs.dynamicTitle": "동적 창 제목",
+  "settings.prefs.dynamicTitleHint":
+    "입력 대기 및 읽지 않은 완료 수를 창 또는 브라우저 탭 제목에 표시합니다.",
+  "settings.prefs.completionBadge": "완료 배지",
+  "settings.prefs.completionBadgeHint":
+    "새 응답이 완료되었지만 아직 확인하지 않은 대화를 표시합니다.",
+  "settings.prefs.inputRequiredBadge": "입력 필요 배지",
+  "settings.prefs.inputRequiredBadgeHint": "답변이나 승인을 기다리는 대화를 표시합니다.",
   "settings.prefs.desktopZoom": "데스크톱 확대/축소",
   "settings.prefs.mobileZoom": "모바일 확대/축소",
   "settings.keys.storageHint": "API 키는 ~/.kohakuterrarium/api_keys.yaml에 저장됩니다",
