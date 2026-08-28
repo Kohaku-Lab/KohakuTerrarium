@@ -274,6 +274,16 @@ export default {
   "settings.tabs.account": "Konto",
   "settings.tabs.prefs": "Voreinstellungen",
   "settings.prefs.appearance": "Darstellung",
+  "settings.prefs.attention": "Aufmerksamkeitshinweise",
+  "settings.prefs.dynamicTitle": "Dynamischer Fenstertitel",
+  "settings.prefs.dynamicTitleHint":
+    "Ausstehende Eingaben und ungelesene Abschlüsse im Fenster- oder Browsertitel anzeigen.",
+  "settings.prefs.completionBadge": "Abschlussmarkierungen",
+  "settings.prefs.completionBadgeHint":
+    "Unterhaltungen mit abgeschlossenen, noch nicht angesehenen Antworten markieren.",
+  "settings.prefs.inputRequiredBadge": "Eingabe-erforderlich-Markierungen",
+  "settings.prefs.inputRequiredBadgeHint":
+    "Unterhaltungen markieren, die auf eine Antwort oder Freigabe warten.",
   "settings.prefs.desktopZoom": "Desktop-Zoom",
   "settings.prefs.mobileZoom": "Mobile-Zoom",
   "settings.keys.storageHint":

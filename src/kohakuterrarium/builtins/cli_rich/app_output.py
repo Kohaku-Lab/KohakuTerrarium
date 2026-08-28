@@ -15,6 +15,8 @@ Split as a mixin so ``app.py`` stays focused on lifecycle + layout.
 from rich.markup import escape
 from rich.panel import Panel
 
+from kohakuterrarium.builtins.terminal_attention import set_attention
+
 
 class AppOutputMixin:
     """Update live and scrollback output from agent events."""
@@ -26,12 +28,18 @@ class AppOutputMixin:
         self._invalidate()
 
     def on_processing_start(self) -> None:
+        # Multi-creature renderers share one terminal; only explicit input requests
+        # are safe to aggregate there without target-keyed title state.
+        if not getattr(self, "multi_creature_enabled", False):
+            set_attention("working")
         # A turn is bounded by one blank line regardless of internal tool commits.
         self._commit_blank_line()
         self.live_region.start_message()
         self._invalidate()
 
     def on_processing_end(self) -> None:
+        if not getattr(self, "multi_creature_enabled", False):
+            set_attention("ready")
         committed = self.live_region.finish_message()
         if committed is not None:
             self._commit_renderable(committed)

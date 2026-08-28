@@ -65,13 +65,16 @@ class TestReplyResolution:
         assert "evt-1" not in router._pending_replies
 
     async def test_timeout_yields_timeout_reply(self):
-        router = OutputRouter(OutputRecorder())
+        spy = _SupersedeSpy()
+        router = OutputRouter(spy)
         event = _interactive_event(timeout_s=0.05)
         reply = await asyncio.wait_for(router.emit_and_wait(event), timeout=2)
         assert reply.action_id == ACTION_TIMEOUT
         assert reply.is_timeout is True
-        # Slot released even on the timeout path.
+        # Slot released even on the timeout path, and renderers are told to
+        # dismiss the prompt so attention state cannot remain stuck forever.
         assert "evt-1" not in router._pending_replies
+        assert spy.superseded == ["evt-1"]
 
     async def test_per_call_timeout_overrides_event_timeout(self):
         router = OutputRouter(OutputRecorder())

@@ -96,6 +96,36 @@ class AgentTUI(App):
         self.on_interrupt: Any = None
         self.on_cancel_job: Any = None
         self.on_promote_job: Any = None
+        self._attention: dict[str, dict[str, Any]] = {}
+
+    def update_attention(self, attention: dict[str, dict[str, Any]]) -> None:
+        """Refresh the title and tab labels from target-keyed attention state."""
+        self._attention = attention
+        pending = any(state.get("pending") for state in attention.values())
+        active = self.get_active_tab_name() if self._terrarium_tabs else "_default"
+        state = attention.get(active, attention.get("_default", {}))
+        if pending:
+            self.title = "KohakuTerrarium - Input required"
+        elif state.get("processing"):
+            self.title = "KohakuTerrarium - Working"
+        elif state.get("completed"):
+            self.title = "KohakuTerrarium - Ready"
+        else:
+            self.title = f"KohakuTerrarium - {self.agent_name}"
+        if not self._terrarium_tabs:
+            return
+        try:
+            tabs = self.query_one("#chat-tabs", TabbedContent)
+            for name in self._terrarium_tabs:
+                target_state = attention.get(name, {})
+                label = (
+                    f"! {name}"
+                    if target_state.get("pending")
+                    else f"● {name}" if target_state.get("completed") else name
+                )
+                tabs.get_tab(f"tab-{_safe_id(name)}").label = label
+        except Exception:
+            pass
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -368,6 +398,10 @@ class AgentTUI(App):
         """Refresh session details for the newly active tab."""
         if not self.tui_session:
             return
+        target = self.get_active_tab_name()
+        clear = getattr(self.tui_session, "clear_attention_completed", None)
+        if callable(clear):
+            clear(target)
         refresh = getattr(self.tui_session, "refresh_model_for_tab", None)
         if callable(refresh):
             refresh(self.get_active_tab_name())

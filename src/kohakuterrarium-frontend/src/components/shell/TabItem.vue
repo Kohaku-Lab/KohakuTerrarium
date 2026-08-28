@@ -6,6 +6,7 @@
     <span v-if="isPinned && !isDashboard" class="i-carbon-pin-filled text-iolite text-xs shrink-0" />
     <span :class="[iconClass, isDashboard ? 'text-iolite' : '']" class="text-sm shrink-0" />
     <span class="truncate max-w-32">{{ label }}</span>
+    <span v-if="badge" class="text-xs font-bold" :title="badge === '!' ? 'pending attention' : 'completed attention'">{{ badge }}</span>
     <button class="i-carbon-renew ml-1 hover-only-action hover:text-iolite" :title="t('shell.tab.refreshTip')" @click.stop="onRefresh" />
     <button v-if="!isDashboard" class="i-carbon-close hover-only-action hover:text-warm-700" :title="t('shell.tab.closeTab')" @click.stop="$emit('close')" />
   </div>
@@ -14,11 +15,13 @@
 </template>
 
 <script setup>
-import { computed, ref } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import TabContextMenu from "@/components/shell/TabContextMenu.vue"
-import { useTabsStore } from "@/stores/tabs"
 import { useSplitDrag } from "@/composables/useSplitDrag"
+import { attentionForScope, subscribeAttention } from "@/stores/attention"
+import { useAttentionPrefs } from "@/stores/attentionPrefs"
+import { useTabsStore } from "@/stores/tabs"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -33,7 +36,26 @@ const props = defineProps({
 const emit = defineEmits(["activate", "close", "drop"])
 
 const tabs = useTabsStore()
+const prefs = useAttentionPrefs()
 const drag = useSplitDrag()
+const attentionTick = ref(0)
+let stopAttention
+
+onMounted(() => {
+  stopAttention = subscribeAttention(() => {
+    attentionTick.value += 1
+  })
+})
+onBeforeUnmount(() => stopAttention?.())
+
+const badge = computed(() => {
+  attentionTick.value
+  if (props.tab.kind !== "attach") return ""
+  const summary = attentionForScope(props.tab.target)
+  if (summary.pending && prefs.state.inputRequiredBadge) return "!"
+  if (summary.completed && prefs.state.completionBadge) return "●"
+  return ""
+})
 const menuOpen = ref(false)
 const menuPos = ref({ x: 0, y: 0 })
 

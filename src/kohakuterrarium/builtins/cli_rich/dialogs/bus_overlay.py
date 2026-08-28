@@ -44,9 +44,34 @@ class BusInteractiveOverlay:
 
         self._option_index: int = 0
         self._multi_selected: set[str] = set()
+        self.pending_event_ids: set[str] = set()
+        self.on_reply: Any = None
+
+    def on_supersede(self, event_id: str | None) -> None:
+        if not event_id:
+            return
+        self.pending_event_ids.discard(event_id)
+        self._queue = [
+            (event, router) for event, router in self._queue if event.id != event_id
+        ]
+        if self._current is not None and self._current.id == event_id:
+            self.close(dismiss_current=False)
+        self._refresh_attention()
+
+    def _refresh_attention(self) -> None:
+        if self.on_reply:
+            try:
+                self.on_reply(None, bool(self.pending_event_ids))
+            except Exception:
+                pass
 
     def open(self, event: OutputEvent, *, router: Any = None) -> None:
         """Queue an event; open if nothing is currently displayed."""
+        if event.id and event.id in self.pending_event_ids:
+            return
+        if event.id:
+            self.pending_event_ids.add(event.id)
+            self._refresh_attention()
         self._queue.append((event, router))
         if not self.visible:
             self._activate_next()
@@ -54,7 +79,8 @@ class BusInteractiveOverlay:
     def close(self, *, dismiss_current: bool = True) -> None:
         """Close the current event, optionally submitting cancellation."""
         if dismiss_current and self._current is not None:
-            self._submit("cancel", values={})
+            if not self._submit("cancel", values={}):
+                return
         self._current = None
         self._current_router = None
         self.visible = False
@@ -136,8 +162,8 @@ class BusInteractiveOverlay:
             return True
         if key == "enter":
             opt = options[self._option_index]
-            self._submit(opt.get("id", "cancel"), values={})
-            self.close(dismiss_current=False)
+            if self._submit(opt.get("id", "cancel"), values={}):
+                self.close(dismiss_current=False)
             return True
         if key == "escape":
             self.close()
@@ -145,8 +171,8 @@ class BusInteractiveOverlay:
         if key.isdigit():
             idx = int(key) - 1
             if 0 <= idx < len(options):
-                self._submit(options[idx].get("id", "cancel"), values={})
-                self.close(dismiss_current=False)
+                if self._submit(options[idx].get("id", "cancel"), values={}):
+                    self.close(dismiss_current=False)
                 return True
         return False
 
@@ -166,8 +192,8 @@ class BusInteractiveOverlay:
                     self._clear_textarea("")
                 except Exception:
                     pass
-            self._submit("submit", values={"text": text})
-            self.close(dismiss_current=False)
+            if self._submit("submit", values={"text": text}):
+                self.close(dismiss_current=False)
             return True
         if key == "escape":
             if self._clear_textarea:
@@ -206,39 +232,54 @@ class BusInteractiveOverlay:
                     for o in options
                     if str(o.get("id", "")) in self._multi_selected
                 ]
-                self._submit("submit", values={"selected": selected})
+                accepted = self._submit("submit", values={"selected": selected})
             else:
                 opt = options[self._option_index]
-                self._submit("submit", values={"selected": str(opt.get("id", ""))})
-            self.close(dismiss_current=False)
+                accepted = self._submit(
+                    "submit",
+                    values={"selected": str(opt.get("id", ""))},
+                )
+            if accepted:
+                self.close(dismiss_current=False)
             return True
         if key == "escape":
             self.close()
             return True
         return False
 
-    def _submit(self, action_id: str, values: dict[str, Any]) -> None:
+    def _submit(self, action_id: str, values: dict[str, Any]) -> bool:
         if self._current is None:
-            return
+            return False
         router = (
             self._current_router
             if self._current_router is not None
             else self._get_router()
         )
         if router is None:
-            return
+            return False
         try:
-            router.submit_reply(
-                UIReply(
-                    event_id=self._current.id or "",
-                    action_id=action_id,
-                    values=values,
-                )
+            reply = UIReply(
+                event_id=self._current.id or "",
+                action_id=action_id,
+                values=values,
             )
+            submit = getattr(router, "submit_reply_with_status", None)
+            if submit:
+                result = submit(reply)
+                accepted = (
+                    bool(result[0]) if isinstance(result, tuple) else bool(result)
+                )
+            else:
+                accepted = router.submit_reply(reply) is not False
+            if accepted and self._current.id:
+                self.pending_event_ids.discard(self._current.id)
+                self._refresh_attention()
+            return accepted
         except Exception as e:
             logger.warning(
                 "BusInteractiveOverlay submit failed", error=str(e), exc_info=True
             )
+            return False
 
     def render(self, width: int) -> str:
         if not self.visible or self._current is None:

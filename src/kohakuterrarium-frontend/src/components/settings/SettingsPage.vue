@@ -436,7 +436,7 @@
                 <button class="text-xs sm:text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setDesktopZoom(DEFAULT_DESKTOP_ZOOM)">{{ t("common.reset") }}</button>
               </div>
             </div>
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-3">
               <div>
                 <span class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.prefs.mobileZoom") }}</span>
                 <span class="text-[11px] text-warm-400 ml-2">{{ Math.round(theme.mobileZoom * 100) }}%</span>
@@ -446,6 +446,16 @@
                 <input type="range" :value="theme.mobileZoom" :min="MIN_UI_ZOOM" :max="MAX_UI_ZOOM" step="0.05" class="w-28 accent-iolite" @input="theme.setMobileZoom(parseFloat($event.target.value))" />
                 <button class="w-10 h-10 sm:w-7 sm:h-7 rounded border border-warm-300 dark:border-warm-600 text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 flex items-center justify-center text-base sm:text-sm" @click="theme.setMobileZoom(theme.mobileZoom + 0.05)">+</button>
                 <button class="text-xs sm:text-[11px] text-warm-400 hover:text-iolite px-1" @click="theme.setMobileZoom(DEFAULT_MOBILE_ZOOM)">{{ t("common.reset") }}</button>
+              </div>
+            </div>
+            <div class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3">
+              <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.attention") }}</div>
+              <div v-for="item in attentionSettings" :key="item.key" class="flex items-center justify-between gap-4">
+                <div>
+                  <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
+                  <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
+                </div>
+                <el-switch :model-value="attentionPrefs.state[item.key]" @change="attentionPrefs.set(item.key, $event)" />
               </div>
             </div>
           </div>
@@ -474,6 +484,7 @@ import SitesPane from "@/components/settings/SitesPane.vue"
 import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
 import { useDensity } from "@/composables/useDensity"
+import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { useAuthStore } from "@/stores/auth"
 import { useClusterStore } from "@/stores/cluster"
 import { LOCALE_DISPLAY_NAMES, SUPPORTED_LOCALES, useLocaleStore } from "@/stores/locale"
@@ -486,6 +497,7 @@ import { configAPI, settingsAPI } from "@/utils/api"
 
 const theme = useThemeStore()
 const localeStore = useLocaleStore()
+const attentionPrefs = useAttentionPrefs()
 const { t } = useI18n()
 const { isCompact } = useDensity()
 const activeTab = ref("providers")
@@ -503,6 +515,24 @@ const readingSizeOptions = computed(() =>
     label: t(`settings.prefs.readingSize.${value}`),
   })),
 )
+
+const attentionSettings = [
+  {
+    key: "dynamicTitle",
+    label: "settings.prefs.dynamicTitle",
+    hint: "settings.prefs.dynamicTitleHint",
+  },
+  {
+    key: "completionBadge",
+    label: "settings.prefs.completionBadge",
+    hint: "settings.prefs.completionBadgeHint",
+  },
+  {
+    key: "inputRequiredBadge",
+    label: "settings.prefs.inputRequiredBadge",
+    hint: "settings.prefs.inputRequiredBadgeHint",
+  },
+]
 
 // ───────── Provider auth state ─────────
 
