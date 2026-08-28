@@ -8,6 +8,7 @@ from textual.widgets import Markdown
 
 from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
 from kohakuterrarium.builtins.tui.model_info import handle_session_info
+from kohakuterrarium.builtins.tui.reply_submit import submit_reply
 from kohakuterrarium.builtins.tui.session import CULL_KEEP, TUISession
 from kohakuterrarium.builtins.tui.tool_args import (
     format_args_detail,
@@ -285,15 +286,7 @@ class TUIOutput(BaseOutputModule):
                 values=result.get("values", {}),
             )
         try:
-            submit = getattr(router, "submit_reply_with_status", None)
-            if callable(submit):
-                result = submit(reply)
-                accepted = (
-                    bool(result[0]) if isinstance(result, tuple) else bool(result)
-                )
-            else:
-                accepted = router.submit_reply(reply) is not False
-            if accepted:
+            if submit_reply(router, reply):
                 self._tui.attention_clear(event.id, self._target)
         except Exception as e:
             logger.exception("submit_reply failed", error=str(e))
@@ -360,20 +353,12 @@ class TUIOutput(BaseOutputModule):
             if router is None or not event_id:
                 return
             try:
-                submit = getattr(router, "submit_reply_with_status", None)
                 reply = UIReply(
                     event_id=event_id,
                     action_id=action_id,
                     values={"action_id": action_id},
                 )
-                if callable(submit):
-                    result = submit(reply)
-                    accepted = (
-                        bool(result[0]) if isinstance(result, tuple) else bool(result)
-                    )
-                else:
-                    accepted = router.submit_reply(reply) is not False
-                if accepted:
+                if submit_reply(router, reply):
                     self._tui.attention_clear(event_id, self._target)
             except Exception as e:
                 logger.exception("card action submit failed", error=str(e))
