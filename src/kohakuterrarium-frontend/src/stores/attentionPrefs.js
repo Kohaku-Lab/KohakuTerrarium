@@ -6,12 +6,28 @@ export const ATTENTION_PREF_KEYS = {
   dynamicTitle: "kt.attention.dynamicTitle",
   completionBadge: "kt.attention.completionBadge",
   inputRequiredBadge: "kt.attention.inputRequiredBadge",
+  systemNotifications: "kt.attention.systemNotifications",
+  notifyWaiting: "kt.attention.notifyWaiting",
+  notifyCompletion: "kt.attention.notifyCompletion",
+  attentionSound: "kt.attention.attentionSound",
+  soundWaiting: "kt.attention.soundWaiting",
+  soundCompletion: "kt.attention.soundCompletion",
+  faviconBadge: "kt.attention.faviconBadge",
+  desktopAttention: "kt.attention.desktopAttention",
 }
 
 export const attentionPrefDefaults = {
   dynamicTitle: true,
   completionBadge: true,
   inputRequiredBadge: true,
+  systemNotifications: false,
+  notifyWaiting: true,
+  notifyCompletion: false,
+  attentionSound: false,
+  soundWaiting: true,
+  soundCompletion: false,
+  faviconBadge: true,
+  desktopAttention: true,
 }
 
 const state = reactive(

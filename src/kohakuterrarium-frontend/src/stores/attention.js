@@ -1,7 +1,9 @@
-const INTERACTIVE_TYPES = new Set(["ask_text", "confirm", "selection", "card"])
+import { computed } from "vue"
 
 const snapshots = new Map()
 const listeners = new Set()
+const edgeListeners = new Set()
+const INTERACTIVE_TYPES = new Set(["ask_text", "confirm", "selection", "card"])
 
 function notifyListeners() {
   for (const listener of listeners) listener()
@@ -17,16 +19,36 @@ export function createAttentionState() {
 }
 
 export function reduceAttention(state, event) {
-  if (!event || event.replay || event.history) return state
-
-  const next = {
-    ...state,
-    seen: new Set(state.seen),
-    pending: new Set(state.pending),
+  if (!event || event.replay) return state
+  if (event.history) {
+    const eventId = event.event_id ?? event.payload?.event_id
+    if (
+      event.interactive === true &&
+      INTERACTIVE_TYPES.has(event.type) &&
+      eventId &&
+      !state.seen.has(eventId)
+    ) {
+      return {
+        ...state,
+        seen: new Set([...state.seen, eventId]),
+        pending: new Set([...state.pending, eventId]),
+      }
+    }
+    if (
+      eventId &&
+      (event.type === "ui_supersede" ||
+        event.type === "timeout" ||
+        (event.type === "ui_reply_ack" && ["accepted", "superseded"].includes(event.status)))
+    ) {
+      const pending = new Set(state.pending)
+      pending.delete(eventId)
+      return { ...state, pending }
+    }
+    return state
   }
-
+  const next = { ...state, seen: new Set(state.seen), pending: new Set(state.pending) }
   if (event.interactive === true && INTERACTIVE_TYPES.has(event.type)) {
-    const eventId = event.event_id
+    const eventId = event.event_id ?? event.payload?.event_id
     if (eventId && !next.seen.has(eventId)) {
       next.seen.add(eventId)
       next.pending.add(eventId)
@@ -54,28 +76,49 @@ export function reduceAttention(state, event) {
     return next
   }
 
-  if (event.type === "ui_reply_ack" || event.type === "ui_supersede" || event.type === "timeout") {
+  if (["ui_reply_ack", "ui_supersede", "timeout"].includes(event.type)) {
     const eventId = event.event_id ?? event.payload?.event_id
     if (eventId) next.pending.delete(eventId)
   }
-
   return next
 }
 
-export function markAttentionRead(state) {
-  return {
-    ...state,
-    completed: 0,
-    seen: new Set(state.seen),
-    pending: new Set(state.pending),
+/** Reduce and report only genuine attention edges. */
+export function reduceAttentionEdge(state, event, target = {}) {
+  const next = reduceAttention(state, event)
+  if (next === state || event?.replay || event?.history) return { state: next, edge: null }
+
+  const eventId = event?.event_id ?? event?.payload?.event_id
+  let kind = null
+  if (next.pending.size > state.pending.size && eventId && !state.pending.has(eventId)) {
+    kind = "waiting-input"
+  } else if (next.completed > state.completed) {
+    kind = "completed"
   }
+
+  const edge = kind
+    ? {
+        scope: target.scope ?? event.scope,
+        tab: target.tab ?? event.tab,
+        kind,
+        ...(eventId ? { eventId } : {}),
+      }
+    : null
+  if (edge?.scope && edge?.tab) {
+    for (const listener of edgeListeners) {
+      try {
+        listener(edge)
+      } catch {
+        // Reminder effects must never prevent attention state from committing.
+      }
+    }
+  }
+  return { state: next, edge }
 }
 
-export function attentionSummary(state) {
-  return {
-    pending: state?.pending?.size ?? 0,
-    completed: state?.completed ?? 0,
-  }
+export function subscribeAttentionEdges(listener) {
+  edgeListeners.add(listener)
+  return () => edgeListeners.delete(listener)
 }
 
 export function publishAttention(scope, tab, state) {
@@ -106,6 +149,13 @@ export function attentionForScope(scope) {
   return { pending, completed }
 }
 
+export function attentionSummary(state) {
+  return {
+    pending: state?.pending?.size ?? 0,
+    completed: state?.completed ?? 0,
+  }
+}
+
 export function totalAttention() {
   let pending = 0
   let completed = 0
@@ -125,4 +175,17 @@ export function subscribeAttention(listener) {
 export function clearAttentionRegistry() {
   snapshots.clear()
   notifyListeners()
+}
+
+export function markAttentionRead(state) {
+  return {
+    ...state,
+    completed: 0,
+    seen: new Set(state.seen),
+    pending: new Set(state.pending),
+  }
+}
+
+export function useAttentionRegistry() {
+  return computed(totalAttention)
 }

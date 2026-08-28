@@ -47,6 +47,10 @@ class _Window:
         self.events = _Events()
         self.loaded = []
         self.html = []
+        self.exposed = []
+
+    def expose(self, *functions):
+        self.exposed.extend(functions)
 
     def load_url(self, url):
         self.loaded.append(url)
@@ -219,6 +223,10 @@ def test_server_start_overlaps_loading_window_startup(monkeypatch):
 
     desktop.run_desktop_app(port=8001, log_level="ERROR")
 
+    assert [function.__name__ for function in webview.window.exposed] == [
+        "get_desktop_capabilities",
+        "request_desktop_attention",
+    ]
     assert order[:2] == ["server", "shown"]
     assert webview.window.loaded == ["http://127.0.0.1:8123"]
     assert webview.created[0][1]["html"] == desktop.LOADING_HTML
