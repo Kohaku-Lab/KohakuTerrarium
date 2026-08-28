@@ -47,7 +47,10 @@ class TestEmitAndWaitValidation:
 
 class TestReplyResolution:
     async def test_submit_reply_resolves_the_awaiter(self):
-        router = OutputRouter(OutputRecorder())
+        primary = _SupersedeSpy()
+        secondary = _SupersedeSpy()
+        router = OutputRouter(primary)
+        router.add_secondary(secondary)
         event = _interactive_event()
 
         async def _reply_soon():
@@ -61,8 +64,11 @@ class TestReplyResolution:
         reply = await asyncio.wait_for(router.emit_and_wait(event), timeout=2)
         assert reply.action_id == "yes"
         assert reply.values == {"k": 1}
-        # The pending slot is released after resolution.
+        # The pending slot is released after resolution, and every attached
+        # renderer is told that the prompt is no longer actionable.
         assert "evt-1" not in router._pending_replies
+        assert primary.superseded == ["evt-1"]
+        assert secondary.superseded == ["evt-1"]
 
     async def test_timeout_yields_timeout_reply(self):
         spy = _SupersedeSpy()
@@ -128,6 +134,67 @@ class TestSubmitReplyStatuses:
         assert "evt-1" in spy.superseded
 
 
+class TestInteractiveClosure:
+    async def test_duplicate_active_event_id_is_rejected(self):
+        router = OutputRouter(OutputRecorder())
+        event = _interactive_event(event_id="duplicate")
+        first = asyncio.create_task(router.emit_and_wait(event))
+        await asyncio.sleep(0)
+
+        with pytest.raises(ValueError, match="already pending"):
+            await router.emit_and_wait(event)
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+    async def test_cancellation_closes_the_prompt_for_all_renderers(self):
+        primary = _SupersedeSpy()
+        secondary = _SupersedeSpy()
+        router = OutputRouter(primary)
+        router.add_secondary(secondary)
+        event = _interactive_event(event_id="evt-cancel")
+
+        task = asyncio.create_task(router.emit_and_wait(event))
+        await asyncio.sleep(0)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert "evt-cancel" not in router._pending_replies
+        assert primary.superseded == ["evt-cancel"]
+        assert secondary.superseded == ["evt-cancel"]
+
+    async def test_timeout_reply_race_broadcasts_only_once(self):
+        primary = _SupersedeSpy()
+        router = OutputRouter(primary)
+        event = _interactive_event(event_id="evt-race")
+        future = asyncio.get_running_loop().create_future()
+        future.cancel()
+        router._pending_replies[event.id] = future
+
+        assert router.submit_reply_with_status(
+            UIReply(event_id=event.id, action_id="late")
+        ) == (
+            False,
+            "superseded",
+        )
+        router._broadcast_interactive_closed(event.id)
+
+        assert primary.superseded == ["evt-race"]
+
+    def test_closed_interaction_tracking_is_bounded(self):
+        router = OutputRouter(_SupersedeSpy())
+
+        for index in range(1100):
+            router._broadcast_interactive_closed(f"evt-{index}")
+
+        assert len(router._closed_interactions) == 1024
+        assert "evt-0" not in router._closed_interactions
+        assert "evt-1099" in router._closed_interactions
+
+
 class TestEmitFailureCleansUp:
     async def test_emit_raising_releases_the_pending_slot(self):
         # Contract: if emit() raises while fanning the interactive event,
@@ -149,4 +216,4 @@ class TestBroadcastSupersede:
         # An output with no on_supersede must not raise — broadcast is
         # purely advisory.
         router = OutputRouter(OutputRecorder())
-        router._broadcast_supersede("evt-x")  # must not raise
+        router._broadcast_interactive_closed("evt-x")  # must not raise

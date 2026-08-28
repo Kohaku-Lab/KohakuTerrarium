@@ -112,6 +112,13 @@ class TUISession(TabModelRegistryMixin):
         state["processing"] = False
         self._refresh_attention()
 
+    def attention_processing_cancel(self, target: str = "") -> None:
+        self._attention_state(target)["processing"] = False
+        self._refresh_attention()
+
+    def attention_has_pending(self, event_id: str | None, target: str = "") -> bool:
+        return bool(event_id and event_id in self._attention_state(target)["pending"])
+
     def attention_pending(self, event_id: str | None, target: str = "") -> None:
         if event_id:
             self._attention_state(target)["pending"].add(event_id)

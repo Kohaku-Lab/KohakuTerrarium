@@ -18,10 +18,14 @@ export function createAttentionState() {
   }
 }
 
+function attentionEventId(event) {
+  return event?.ui_event_id ?? event?.event_id ?? event?.payload?.event_id
+}
+
 export function reduceAttention(state, event) {
   if (!event || event.replay) return state
   if (event.history) {
-    const eventId = event.event_id ?? event.payload?.event_id
+    const eventId = attentionEventId(event)
     if (
       event.interactive === true &&
       INTERACTIVE_TYPES.has(event.type) &&
@@ -48,7 +52,7 @@ export function reduceAttention(state, event) {
   }
   const next = { ...state, seen: new Set(state.seen), pending: new Set(state.pending) }
   if (event.interactive === true && INTERACTIVE_TYPES.has(event.type)) {
-    const eventId = event.event_id ?? event.payload?.event_id
+    const eventId = attentionEventId(event)
     if (eventId && !next.seen.has(eventId)) {
       next.seen.add(eventId)
       next.pending.add(eventId)
@@ -77,7 +81,7 @@ export function reduceAttention(state, event) {
   }
 
   if (["ui_reply_ack", "ui_supersede", "timeout"].includes(event.type)) {
-    const eventId = event.event_id ?? event.payload?.event_id
+    const eventId = attentionEventId(event)
     if (eventId) next.pending.delete(eventId)
   }
   return next
@@ -88,7 +92,7 @@ export function reduceAttentionEdge(state, event, target = {}) {
   const next = reduceAttention(state, event)
   if (next === state || event?.replay || event?.history) return { state: next, edge: null }
 
-  const eventId = event?.event_id ?? event?.payload?.event_id
+  const eventId = attentionEventId(event)
   let kind = null
   if (next.pending.size > state.pending.size && eventId && !state.pending.has(eventId)) {
     kind = "waiting-input"
@@ -119,6 +123,18 @@ export function reduceAttentionEdge(state, event, target = {}) {
 export function subscribeAttentionEdges(listener) {
   edgeListeners.add(listener)
   return () => edgeListeners.delete(listener)
+}
+
+export function restoreAttentionFromHistory(events, current = createAttentionState()) {
+  let rebuilt = createAttentionState()
+  for (const event of events || []) {
+    rebuilt = reduceAttention(rebuilt, { ...event, history: true })
+  }
+  return {
+    ...current,
+    seen: new Set([...current.seen, ...rebuilt.seen]),
+    pending: rebuilt.pending,
+  }
 }
 
 export function publishAttention(scope, tab, state) {
