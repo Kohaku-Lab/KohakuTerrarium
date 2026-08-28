@@ -1169,6 +1169,31 @@ class TestEmitMatch:
         finally:
             store.close()
 
+    async def test_interactive_lifecycle_keeps_stable_ui_event_id(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            await out.emit(
+                OutputEvent(
+                    type="confirm",
+                    id="confirm-1",
+                    interactive=True,
+                    payload={"prompt": "Continue?"},
+                )
+            )
+            out.on_supersede("confirm-1")
+            store.flush()
+
+            events = store.get_events("alice")
+            prompt = next(e for e in events if e["type"] == "confirm")
+            terminal = next(e for e in events if e["type"] == "ui_supersede")
+            assert prompt["ui_event_id"] == "confirm-1"
+            assert prompt["event_id"] != "confirm-1"
+            assert prompt["interactive"] is True
+            assert prompt["payload"] == {"prompt": "Continue?"}
+            assert terminal["ui_event_id"] == "confirm-1"
+        finally:
+            store.close()
+
     async def test_fallback_to_activity(self, tmp_path):
         store, out = _make(tmp_path)
         try:

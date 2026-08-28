@@ -4,6 +4,7 @@ import { createRouter, createWebHistory } from "vue-router"
 import { routes } from "vue-router/auto-routes"
 import App from "./App.vue"
 
+import { initializeAttentionPrefs } from "@/stores/attentionPrefs"
 import { registerBuiltinPanels } from "@/stores/layoutPanels"
 import { ensureUIPrefsLoaded } from "@/utils/uiPrefs"
 
@@ -45,6 +46,7 @@ async function bootstrap() {
   // must never block app mount. The fetch keeps running past the
   // timeout and fills the cache when it lands.
   await ensureUIPrefsLoaded({ timeoutMs: 2500 })
+  initializeAttentionPrefs()
 
   const pinia = createPinia()
   const app = createApp(App)

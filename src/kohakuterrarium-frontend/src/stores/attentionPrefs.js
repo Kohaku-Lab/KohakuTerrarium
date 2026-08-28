@@ -1,6 +1,6 @@
 import { reactive } from "vue"
 
-import { getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
+import { ensureUIPrefsLoaded, getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 
 export const ATTENTION_PREF_KEYS = {
   dynamicTitle: "kt.attention.dynamicTitle",
@@ -30,14 +30,18 @@ export const attentionPrefDefaults = {
   desktopAttention: true,
 }
 
-const state = reactive(
-  Object.fromEntries(
-    Object.entries(ATTENTION_PREF_KEYS).map(([name, key]) => [
-      name,
-      getHybridPrefSync(key, attentionPrefDefaults[name], { json: true }),
-    ]),
-  ),
-)
+const state = reactive({ ...attentionPrefDefaults })
+
+function hydrateAttentionPrefs() {
+  for (const [name, key] of Object.entries(ATTENTION_PREF_KEYS)) {
+    state[name] = !!getHybridPrefSync(key, attentionPrefDefaults[name], { json: true })
+  }
+}
+
+export function initializeAttentionPrefs() {
+  hydrateAttentionPrefs()
+  void ensureUIPrefsLoaded().then(hydrateAttentionPrefs)
+}
 
 export function useAttentionPrefs() {
   function set(name, value) {

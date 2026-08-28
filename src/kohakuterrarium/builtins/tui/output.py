@@ -6,6 +6,7 @@ from typing import Any
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown
 
+from kohakuterrarium.builtins.tui import attention
 from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
 from kohakuterrarium.builtins.tui.model_info import handle_session_info
 from kohakuterrarium.builtins.tui.reply_submit import submit_reply
@@ -74,8 +75,7 @@ class TUIOutput(BaseOutputModule):
     async def _on_stop(self) -> None:
         if self._tui:
             self._tui.end_streaming(target=self._target)
-            self._tui._attention_state(self._target)["processing"] = False
-            self._tui._refresh_attention()
+            attention.processing_cancel(self._tui, self._target)
         logger.debug("TUI output stopped")
 
     # -- Processing lifecycle -----------------------------------------------
@@ -83,12 +83,12 @@ class TUIOutput(BaseOutputModule):
     async def on_processing_start(self) -> None:
         self._turn_started = False
         if self._tui:
-            self._tui.attention_processing_start(self._target)
+            attention.processing_start(self._tui, self._target)
             self._tui.start_thinking()
 
     async def on_processing_end(self) -> None:
         if self._tui:
-            self._tui.attention_processing_end(self._target)
+            attention.processing_end(self._tui, self._target)
             self._tui.end_streaming(target=self._target)
             self._tui.stop_thinking()
             self._tui.set_idle()
@@ -184,10 +184,9 @@ class TUIOutput(BaseOutputModule):
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
-        state = self._tui._attention_state(self._target)
-        if event.id in state["pending"]:
+        if attention.is_pending(self._tui, event.id, self._target):
             return
-        self._tui.attention_pending(event.id, self._target)
+        attention.add_pending(self._tui, event.id, self._target)
         payload = event.payload or {}
 
         def _build_and_push() -> None:
@@ -213,10 +212,9 @@ class TUIOutput(BaseOutputModule):
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
-        state = self._tui._attention_state(self._target)
-        if event.id in state["pending"]:
+        if attention.is_pending(self._tui, event.id, self._target):
             return
-        self._tui.attention_pending(event.id, self._target)
+        attention.add_pending(self._tui, event.id, self._target)
         payload = event.payload or {}
 
         def _build_and_push() -> None:
@@ -242,10 +240,9 @@ class TUIOutput(BaseOutputModule):
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
-        state = self._tui._attention_state(self._target)
-        if event.id in state["pending"]:
+        if attention.is_pending(self._tui, event.id, self._target):
             return
-        self._tui.attention_pending(event.id, self._target)
+        attention.add_pending(self._tui, event.id, self._target)
         payload = event.payload or {}
 
         def _build_and_push() -> None:
@@ -287,7 +284,7 @@ class TUIOutput(BaseOutputModule):
             )
         try:
             if submit_reply(router, reply):
-                self._tui.attention_clear(event.id, self._target)
+                attention.clear(self._tui, event.id, self._target)
         except Exception as e:
             logger.exception("submit_reply failed", error=str(e))
 
@@ -333,7 +330,7 @@ class TUIOutput(BaseOutputModule):
             action.get("style") != "link" for action in actions
         )
         if replyable:
-            self._tui.attention_pending(event.id, self._target)
+            attention.add_pending(self._tui, event.id, self._target)
         on_action = self._make_card_action_callback() if replyable else None
         try:
             self._tui.add_card_block(
@@ -359,7 +356,7 @@ class TUIOutput(BaseOutputModule):
                     values={"action_id": action_id},
                 )
                 if submit_reply(router, reply):
-                    self._tui.attention_clear(event_id, self._target)
+                    attention.clear(self._tui, event_id, self._target)
             except Exception as e:
                 logger.exception("card action submit failed", error=str(e))
 
@@ -368,7 +365,7 @@ class TUIOutput(BaseOutputModule):
     def on_supersede(self, event_id: str | None) -> None:
         if not self._tui:
             return
-        self._tui.attention_clear(event_id, self._target)
+        attention.clear(self._tui, event_id, self._target)
         screen = self._interactive_screens.pop(event_id, None) if event_id else None
         if screen is not None:
             self._tui._safe_call(screen.dismiss, None)

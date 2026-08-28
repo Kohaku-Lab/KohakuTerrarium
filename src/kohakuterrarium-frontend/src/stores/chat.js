@@ -10,6 +10,7 @@ import {
   publishAttention,
   reduceAttentionEdge,
   removeAttentionScope,
+  restoreAttentionFromHistory,
 } from "@/stores/attention"
 import {
   adoptLocalCommandResultSelections,
@@ -537,7 +538,7 @@ function _dedupeAdjacentDuplicateEvents(events) {
   return out
 }
 
-export function _replayEvents(messages, events, branchView = null) {
+export function _replayEvents(messages, events, branchView = null, tab = "") {
   // A terminal event is authoritative: liveness comes from the backend,
   // which withholds a job's terminal (``normalize_resumable_events`` with
   // ``live_job_ids``) for as long as it sees the job running. A job with
@@ -574,6 +575,7 @@ export function _replayEvents(messages, events, branchView = null) {
   // Track job lifecycle: started jobs and completed jobs
   const startedJobs = {} // jobId -> tool part reference
   const completedJobs = new Set() // jobIds that received done/error
+  const interactiveMessages = new Map()
 
   // Positional ids ("h_" + result.length) shift whenever an earlier
   // event is hidden (compact_replace ranges, branch filtering), which
@@ -918,6 +920,38 @@ export function _replayEvents(messages, events, branchView = null) {
         injectedMidTurn: true,
         timestamp: "",
       })
+    } else if (["ask_text", "confirm", "selection", "card"].includes(t)) {
+      const uiEventId = evt.ui_event_id ?? evt.payload?.event_id
+      if (!uiEventId) continue
+      cur = null
+      const message = {
+        id: `ui_${uiEventId}`,
+        role: "ui_event",
+        uiEventType: t,
+        eventId: uiEventId,
+        payload: evt.payload || {},
+        interactive: !!evt.interactive,
+        surface: evt.surface || "chat",
+        tab,
+        timestamp: "",
+        replied: false,
+        superseded: false,
+        timedOut: false,
+        repliedActionId: "",
+        repliedValues: null,
+      }
+      result.push(message)
+      interactiveMessages.set(uiEventId, message)
+    } else if (t === "ui_supersede" || t === "timeout") {
+      const uiEventId = evt.ui_event_id ?? evt.payload?.event_id
+      const target = interactiveMessages.get(uiEventId)
+      if (target && !target.replied) target.superseded = true
+    } else if (t === "ui_reply_ack") {
+      const uiEventId = evt.ui_event_id ?? evt.payload?.event_id
+      const target = interactiveMessages.get(uiEventId)
+      if (target && ["accepted", "superseded"].includes(evt.status)) {
+        target.superseded = true
+      }
     } else if (t === "processing_start") {
       cur = {
         id: stableId("h_"),
@@ -2724,6 +2758,13 @@ const _chatStoreOptions = {
     _onMessage(data) {
       const source = this._tabForSource(data.source || "")
       if (source) {
+        if (
+          ["ask_text", "confirm", "selection", "card", "ui_supersede", "ui_reply_ack"].includes(
+            data.type,
+          )
+        ) {
+          this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
+        }
         const scope = scopeOfStoreId(this.$id) || "default"
         const { state } = reduceAttentionEdge(
           this.attentionByTab[source] || createAttentionState(),
@@ -4436,6 +4477,12 @@ const _chatStoreOptions = {
         if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
         this._restoreTokenUsage(tab, this.eventsByTab[tab])
         this._rebuildMessages(tab, fetchedAt)
+        const scope = scopeOfStoreId(this.$id) || "default"
+        this.attentionByTab[tab] = restoreAttentionFromHistory(
+          this.eventsByTab[tab],
+          this.attentionByTab[tab] || createAttentionState(),
+        )
+        publishAttention(scope, tab, this.attentionByTab[tab])
         // Advance the applied-history watermark so a later out-of-order
         // response carrying an older snapshot is rejected above.
         if (incomingMax != null) this._appliedMaxEventIdByTab[tab] = incomingMax
@@ -4462,7 +4509,7 @@ const _chatStoreOptions = {
       // Canonical history is the liveness authority (see _loadHistory):
       // the backend withholds synthetic terminals for still-live jobs,
       // so a terminal in the cached log means the job is dead.
-      const { messages, pendingJobs } = _replayEvents([], events, branchView)
+      const { messages, pendingJobs } = _replayEvents([], events, branchView, tab)
       const branchSelection = _commandResultBranchSelection(events, branchView)
       adoptLocalCommandResultSelections(
         this._pendingCommandResultContextsByTab[tab],
