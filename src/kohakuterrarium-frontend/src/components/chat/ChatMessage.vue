@@ -184,11 +184,13 @@
         <template v-if="group.type === 'part'">
           <div v-if="group.part.type === 'reasoning'" class="mb-1.5">
             <details class="reasoning-details rounded-lg border border-iolite/20 dark:border-iolite/25 bg-iolite/5 dark:bg-iolite/10 px-2 py-1">
-              <summary class="flex items-center gap-2 text-xs text-iolite dark:text-iolite-light cursor-pointer select-none min-w-0">
-                <span class="shrink-0"
-                  >Thinking<span v-if="group.part.source" class="ml-1 text-warm-400">· {{ group.part.source }}</span></span
-                >
-                <span class="reasoning-preview truncate flex-1 min-w-0 text-warm-600 dark:text-warm-400 font-mono">{{ group.part.text }}</span>
+              <summary class="text-xs text-iolite dark:text-iolite-light cursor-pointer select-none">
+                <span class="reasoning-summary-row inline-flex items-center gap-2 min-w-0 align-middle">
+                  <span class="shrink-0"
+                    >Thinking<span v-if="group.part.source" class="ml-1 text-warm-400">· {{ group.part.source }}</span></span
+                  >
+                  <span class="reasoning-preview truncate flex-1 min-w-0 text-warm-600 dark:text-warm-400 font-mono">{{ group.part.text }}</span>
+                </span>
               </summary>
               <pre class="reasoning-full mt-2 text-xs whitespace-pre-wrap break-words font-mono text-warm-700 dark:text-warm-300 max-h-60 overflow-y-auto">{{ reasoningText(group.part) }}</pre>
             </details>
@@ -573,6 +575,10 @@ function goToNextAssistantBranch() {
 </script>
 
 <style scoped>
+.reasoning-summary-row {
+  max-width: calc(100% - 1rem);
+}
+
 .reasoning-details[open] .reasoning-preview {
   display: none;
 }
