@@ -277,6 +277,7 @@ export default {
   "settings.prefs.notificationPermission.granted": "허용됨",
   "settings.prefs.notificationPermission.denied": "차단됨",
   "settings.prefs.notificationPermission.unsupported": "사용 불가",
+  "settings.prefs.notificationPermission.desktop": "데스크톱 앱",
   "settings.prefs.notificationPermissionHint.default":
     "시스템 알림을 보내려면 브라우저의 명시적 허용이 필요합니다.",
   "settings.prefs.notificationPermissionHint.granted": "브라우저에서 시스템 알림을 허용했습니다.",
@@ -284,6 +285,8 @@ export default {
     "알림이 차단되었습니다. 브라우저 사이트 설정에서 허용하세요.",
   "settings.prefs.notificationPermissionHint.unsupported":
     "이 환경에서는 시스템 알림을 사용할 수 없습니다.",
+  "settings.prefs.notificationPermissionHint.desktop":
+    "kt app에서는 브라우저 시스템 알림을 사용할 수 없습니다. 아래의 데스크톱 창 알림을 사용하세요.",
   "settings.prefs.dynamicTitle": "동적 창 제목",
   "settings.prefs.dynamicTitleHint":
     "입력 대기 및 읽지 않은 완료 수를 창 또는 브라우저 탭 제목에 표시합니다.",

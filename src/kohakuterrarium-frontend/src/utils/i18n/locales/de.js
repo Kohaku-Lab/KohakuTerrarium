@@ -287,6 +287,7 @@ export default {
   "settings.prefs.notificationPermission.granted": "Erlaubt",
   "settings.prefs.notificationPermission.denied": "Blockiert",
   "settings.prefs.notificationPermission.unsupported": "Nicht verfügbar",
+  "settings.prefs.notificationPermission.desktop": "Desktop-App",
   "settings.prefs.notificationPermissionHint.default":
     "Der Browser benötigt deine ausdrückliche Erlaubnis für Systembenachrichtigungen.",
   "settings.prefs.notificationPermissionHint.granted":
@@ -295,6 +296,8 @@ export default {
     "Benachrichtigungen sind blockiert. Erlaube sie in den Website-Einstellungen des Browsers.",
   "settings.prefs.notificationPermissionHint.unsupported":
     "Systembenachrichtigungen sind in dieser Umgebung nicht verfügbar.",
+  "settings.prefs.notificationPermissionHint.desktop":
+    "Browser-Systembenachrichtigungen sind in kt app nicht verfügbar. Verwende unten die Desktop-Fenster-Aufmerksamkeit.",
   "settings.prefs.dynamicTitle": "Dynamischer Fenstertitel",
   "settings.prefs.dynamicTitleHint":
     "Ausstehende Eingaben und ungelesene Abschlüsse im Fenster- oder Browsertitel anzeigen.",

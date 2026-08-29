@@ -273,11 +273,14 @@ export default {
   "settings.prefs.notificationPermission.granted": "已允許",
   "settings.prefs.notificationPermission.denied": "已封鎖",
   "settings.prefs.notificationPermission.unsupported": "不可用",
+  "settings.prefs.notificationPermission.desktop": "桌面應用程式",
   "settings.prefs.notificationPermissionHint.default": "瀏覽器需要你的明確許可才能傳送系統通知。",
   "settings.prefs.notificationPermissionHint.granted": "瀏覽器已允許系統通知。",
   "settings.prefs.notificationPermissionHint.denied":
     "通知已被封鎖，請在瀏覽器的網站設定中重新允許。",
   "settings.prefs.notificationPermissionHint.unsupported": "目前環境不支援系統通知。",
+  "settings.prefs.notificationPermissionHint.desktop":
+    "kt app 內不支援瀏覽器系統通知，請使用下方的桌面視窗提醒。",
   "settings.prefs.dynamicTitle": "動態視窗標題",
   "settings.prefs.dynamicTitleHint": "在視窗或瀏覽器分頁標題顯示待輸入與未讀完成數量。",
   "settings.prefs.completionBadge": "完成未讀標記",

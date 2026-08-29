@@ -301,11 +301,14 @@ export default {
   "settings.prefs.notificationPermission.granted": "已允许",
   "settings.prefs.notificationPermission.denied": "已阻止",
   "settings.prefs.notificationPermission.unsupported": "不可用",
+  "settings.prefs.notificationPermission.desktop": "桌面应用",
   "settings.prefs.notificationPermissionHint.default": "浏览器需要你的明确许可才能发送系统通知。",
   "settings.prefs.notificationPermissionHint.granted": "浏览器已允许系统通知。",
   "settings.prefs.notificationPermissionHint.denied":
     "通知已被阻止，请在浏览器的网站设置中重新允许。",
   "settings.prefs.notificationPermissionHint.unsupported": "当前环境不支持系统通知。",
+  "settings.prefs.notificationPermissionHint.desktop":
+    "kt app 内不支持浏览器系统通知，请使用下方的桌面窗口提醒。",
   "settings.prefs.dynamicTitle": "动态窗口标题",
   "settings.prefs.dynamicTitleHint": "在窗口或浏览器标签标题中显示待输入和未读完成数量。",
   "settings.prefs.completionBadge": "完成未读标记",

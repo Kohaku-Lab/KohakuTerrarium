@@ -281,6 +281,7 @@ export default {
   "settings.prefs.notificationPermission.granted": "許可済み",
   "settings.prefs.notificationPermission.denied": "ブロック済み",
   "settings.prefs.notificationPermission.unsupported": "利用不可",
+  "settings.prefs.notificationPermission.desktop": "デスクトップ版",
   "settings.prefs.notificationPermissionHint.default":
     "システム通知を送るにはブラウザーの明示的な許可が必要です。",
   "settings.prefs.notificationPermissionHint.granted": "ブラウザーはシステム通知を許可しています。",
@@ -288,6 +289,8 @@ export default {
     "通知がブロックされています。ブラウザーのサイト設定で許可してください。",
   "settings.prefs.notificationPermissionHint.unsupported":
     "この環境ではシステム通知を利用できません。",
+  "settings.prefs.notificationPermissionHint.desktop":
+    "kt app 内ではブラウザーのシステム通知を利用できません。下のデスクトップウィンドウ通知を使用してください。",
   "settings.prefs.dynamicTitle": "動的なウィンドウタイトル",
   "settings.prefs.dynamicTitleHint":
     "入力待ちと未読の完了数をウィンドウまたはブラウザータブのタイトルに表示します。",
