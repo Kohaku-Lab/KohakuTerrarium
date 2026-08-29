@@ -64,7 +64,13 @@ describe("ChatMessage branch operations", () => {
       id: "a1",
       role: "assistant",
       parts: [
-        { type: "reasoning", id: "r1", source: "reasoning_content", text: "think 1", signature: "sig" },
+        {
+          type: "reasoning",
+          id: "r1",
+          source: "reasoning_content",
+          text: "think 1",
+          signature: "sig",
+        },
         { type: "text", id: "t1", content: "answer" },
       ],
     }
