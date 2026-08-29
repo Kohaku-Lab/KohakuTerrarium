@@ -270,6 +270,24 @@ export default {
   "settings.tabs.prefs": "設定",
   "settings.prefs.appearance": "外観",
   "settings.prefs.attention": "通知リマインダー",
+  "settings.prefs.attentionHint": "入力が必要なときや応答が完了したときの通知方法を選択します。",
+  "settings.prefs.inAppIndicators": "アプリ内表示",
+  "settings.prefs.inAppIndicatorsHint":
+    "ページタイトル、会話タブ、ブラウザーアイコンに状態を表示します。",
+  "settings.prefs.allowNotifications": "通知を許可",
+  "settings.prefs.notificationEnabledHint": "システム通知が有効です。",
+  "settings.prefs.desktopOnly": "kt app のみ",
+  "settings.prefs.notificationPermission.default": "未許可",
+  "settings.prefs.notificationPermission.granted": "許可済み",
+  "settings.prefs.notificationPermission.denied": "ブロック済み",
+  "settings.prefs.notificationPermission.unsupported": "利用不可",
+  "settings.prefs.notificationPermissionHint.default":
+    "システム通知を送るにはブラウザーの明示的な許可が必要です。",
+  "settings.prefs.notificationPermissionHint.granted": "ブラウザーはシステム通知を許可しています。",
+  "settings.prefs.notificationPermissionHint.denied":
+    "通知がブロックされています。ブラウザーのサイト設定で許可してください。",
+  "settings.prefs.notificationPermissionHint.unsupported":
+    "この環境ではシステム通知を利用できません。",
   "settings.prefs.dynamicTitle": "動的なウィンドウタイトル",
   "settings.prefs.dynamicTitleHint":
     "入力待ちと未読の完了数をウィンドウまたはブラウザータブのタイトルに表示します。",
