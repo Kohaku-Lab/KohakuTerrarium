@@ -64,7 +64,7 @@ describe("ChatMessage branch operations", () => {
       id: "a1",
       role: "assistant",
       parts: [
-        { type: "reasoning", id: "r1", source: "reasoning_content", text: "think 1" },
+        { type: "reasoning", id: "r1", source: "reasoning_content", text: "think 1", signature: "sig" },
         { type: "text", id: "t1", content: "answer" },
       ],
     }
@@ -85,6 +85,12 @@ describe("ChatMessage branch operations", () => {
 
     expect(wrapper.text()).toContain("Thinking")
     expect(wrapper.text()).toContain("think 1")
+    const reasoning = wrapper.get("details")
+    const summary = reasoning.get("summary")
+    expect(summary.classes()).toContain("flex")
+    expect(summary.get(".reasoning-preview").classes()).toContain("truncate")
+    expect(reasoning.get(".reasoning-preview").text()).toBe("think 1")
+    expect(reasoning.get(".reasoning-full").text()).toBe("think 1\n[signature: sig]")
   })
 
   it("keeps Save & Rerun bound to the message tab after the active tab changes", async () => {

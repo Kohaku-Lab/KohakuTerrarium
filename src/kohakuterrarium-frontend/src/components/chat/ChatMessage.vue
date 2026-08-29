@@ -183,11 +183,12 @@
         <!-- Pass-through part -->
         <template v-if="group.type === 'part'">
           <div v-if="group.part.type === 'reasoning'" class="mb-1.5">
-            <details class="rounded-lg border border-iolite/20 dark:border-iolite/25 bg-iolite/5 dark:bg-iolite/10 px-2 py-1">
-              <summary class="text-xs text-iolite dark:text-iolite-light cursor-pointer select-none">
-                Thinking<span v-if="group.part.source" class="ml-1 text-warm-400">· {{ group.part.source }}</span>
+            <details class="reasoning-details rounded-lg border border-iolite/20 dark:border-iolite/25 bg-iolite/5 dark:bg-iolite/10 px-2 py-1">
+              <summary class="flex items-center gap-2 text-xs text-iolite dark:text-iolite-light cursor-pointer select-none min-w-0">
+                <span class="shrink-0">Thinking<span v-if="group.part.source" class="ml-1 text-warm-400">· {{ group.part.source }}</span></span>
+                <span class="reasoning-preview truncate flex-1 min-w-0 text-warm-600 dark:text-warm-400 font-mono">{{ group.part.text }}</span>
               </summary>
-              <pre class="mt-2 text-xs whitespace-pre-wrap break-words font-mono text-warm-700 dark:text-warm-300 max-h-60 overflow-y-auto">{{ reasoningText(group.part) }}</pre>
+              <pre class="reasoning-full mt-2 text-xs whitespace-pre-wrap break-words font-mono text-warm-700 dark:text-warm-300 max-h-60 overflow-y-auto">{{ reasoningText(group.part) }}</pre>
             </details>
           </div>
           <div v-if="group.part.type === 'text' && group.part.content" class="text-body mb-1">
@@ -570,6 +571,10 @@ function goToNextAssistantBranch() {
 </script>
 
 <style scoped>
+.reasoning-details[open] .reasoning-preview {
+  display: none;
+}
+
 .chat-inline-image {
   display: block;
   max-width: min(65%, 42vw);
