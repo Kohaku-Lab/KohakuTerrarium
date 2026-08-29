@@ -5,6 +5,11 @@ import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { navigateToAttention } from "@/utils/attentionNavigation"
 
 const DESKTOP_PROTOCOL = 1
+const AUDIO_UNLOCK_EVENT = "kt:attention-audio-unlock"
+
+export function requestAttentionAudioUnlock() {
+  document.dispatchEvent(new Event(AUDIO_UNLOCK_EVENT))
+}
 
 export async function requestNotificationPermission() {
   if (typeof Notification === "undefined" || !window.isSecureContext) return "unsupported"
@@ -45,12 +50,12 @@ export function useAttentionEffects() {
   }
 
   function unlockAudio() {
-    if (!prefs.state.attentionSound || audioContext) return
+    if (!prefs.state.attentionSound) return
     const AudioContext = window.AudioContext || window.webkitAudioContext
     if (!AudioContext) return
     try {
-      audioContext = new AudioContext()
-      void audioContext.resume?.().catch(() => {})
+      audioContext ||= new AudioContext()
+      if (audioContext.state === "suspended") void audioContext.resume?.().catch(() => {})
     } catch {
       audioContext = null
     }
@@ -151,6 +156,7 @@ export function useAttentionEffects() {
     unsubscribeAttention = subscribeAttention(updateFavicon)
     document.addEventListener("pointerdown", unlockAudio, { passive: true })
     document.addEventListener("keydown", unlockAudio)
+    document.addEventListener(AUDIO_UNLOCK_EVENT, unlockAudio)
     window.addEventListener("pywebviewready", detectDesktopSurface)
     void detectDesktopSurface()
     updateFavicon()
@@ -161,6 +167,7 @@ export function useAttentionEffects() {
     unsubscribeAttention?.()
     document.removeEventListener("pointerdown", unlockAudio)
     document.removeEventListener("keydown", unlockAudio)
+    document.removeEventListener(AUDIO_UNLOCK_EVENT, unlockAudio)
     window.removeEventListener("pywebviewready", detectDesktopSurface)
     favicons.forEach((favicon, index) => {
       const original = originalFavicons[index]

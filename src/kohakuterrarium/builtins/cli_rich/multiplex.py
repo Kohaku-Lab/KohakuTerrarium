@@ -99,6 +99,19 @@ class MultiplexedRichOutput(BaseOutputModule):
         # Synchronous callbacks may arrive from worker threads, where Python 3.12
         # deliberately provides no implicit event loop. Schedule construction of
         # the coroutine back on the loop which owns this sink.
+        self._schedule_dispatch(
+            "activity",
+            {
+                "activity_type": activity_type,
+                "detail": detail,
+                "metadata": dict(metadata) if metadata else {},
+            },
+        )
+
+    def on_supersede(self, event_id: str) -> None:
+        self._schedule_dispatch("supersede", {"event_id": event_id})
+
+    def _schedule_dispatch(self, kind: str, payload: dict[str, Any]) -> None:
         loop = self._owner_loop
         if loop is None:
             try:
@@ -108,17 +121,12 @@ class MultiplexedRichOutput(BaseOutputModule):
                 return
         if loop.is_closed():
             return
-        payload = {
-            "activity_type": activity_type,
-            "detail": detail,
-            "metadata": dict(metadata) if metadata else {},
-        }
 
-        def _schedule_dispatch() -> None:
-            asyncio.create_task(self._dispatch("activity", payload))
+        def _run() -> None:
+            asyncio.create_task(self._dispatch(kind, payload))
 
         try:
-            loop.call_soon_threadsafe(_schedule_dispatch)
+            loop.call_soon_threadsafe(_run)
         except RuntimeError:
             return
 

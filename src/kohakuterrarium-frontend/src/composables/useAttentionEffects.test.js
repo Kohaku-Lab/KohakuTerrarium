@@ -121,6 +121,71 @@ describe("useAttentionEffects", () => {
     wrapper.unmount()
   })
 
+  it("unlocks audio when sound becomes enabled on the same user gesture", async () => {
+    const oscillators = []
+    class FakeAudioContext {
+      constructor() {
+        this.state = "running"
+        this.currentTime = 0
+        this.destination = {}
+      }
+      resume = vi.fn().mockResolvedValue()
+      close = vi.fn().mockResolvedValue()
+      createOscillator() {
+        const oscillator = {
+          frequency: { value: 0 },
+          connect: vi.fn(),
+          start: vi.fn(),
+          stop: vi.fn(),
+        }
+        oscillators.push(oscillator)
+        return oscillator
+      }
+      createGain() {
+        return {
+          gain: {
+            setValueAtTime: vi.fn(),
+            exponentialRampToValueAtTime: vi.fn(),
+          },
+          connect: vi.fn(),
+        }
+      }
+    }
+    window.AudioContext = FakeAudioContext
+    const wrapper = mountEffects()
+
+    prefs.attentionSound = true
+    document.dispatchEvent(new Event("kt:attention-audio-unlock"))
+    await nextTick()
+    edgeState.listener({ scope: "graph-a", tab: "root", kind: "waiting-input" })
+
+    expect(oscillators).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it("retries resuming a suspended audio context on later gestures", async () => {
+    const resume = vi.fn().mockRejectedValueOnce(new Error("blocked")).mockResolvedValue()
+    class FakeAudioContext {
+      constructor() {
+        this.state = "suspended"
+        this.currentTime = 0
+        this.destination = {}
+      }
+      resume = resume
+      close = vi.fn().mockResolvedValue()
+    }
+    window.AudioContext = FakeAudioContext
+    prefs.attentionSound = true
+    const wrapper = mountEffects()
+
+    document.dispatchEvent(new Event("kt:attention-audio-unlock"))
+    await Promise.resolve()
+    document.dispatchEvent(new PointerEvent("pointerdown"))
+
+    expect(resume).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
   it("restores the original favicon when attention clears", async () => {
     const wrapper = mountEffects()
     edgeState.listener({ scope: "graph-a", tab: "root", kind: "waiting-input" })

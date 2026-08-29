@@ -150,6 +150,13 @@ class RichCLIOutput(BaseOutputModule):
                         error=str(e),
                     )
 
+    def on_supersede(self, event_id: str) -> None:
+        overlay = getattr(self.app, "bus_overlay", None)
+        if overlay is not None:
+            overlay.on_supersede(event_id)
+        self._refresh_attention()
+        self.app._invalidate()
+
     def _on_pending_changed(self, _event: OutputEvent | None, pending: bool) -> None:
         set_attention("input required" if pending else "ready")
 

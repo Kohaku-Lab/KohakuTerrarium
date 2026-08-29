@@ -15,11 +15,13 @@ vi.mock("@/utils/api", () => {
   return { configAPI, settingsAPI }
 })
 
-const { requestNotificationPermission } = vi.hoisted(() => ({
+const { requestAttentionAudioUnlock, requestNotificationPermission } = vi.hoisted(() => ({
+  requestAttentionAudioUnlock: vi.fn(),
   requestNotificationPermission: vi.fn(),
 }))
 
 vi.mock("@/composables/useAttentionEffects", () => ({
+  requestAttentionAudioUnlock,
   requestNotificationPermission,
 }))
 
@@ -100,6 +102,17 @@ describe("SettingsPage model presets", () => {
     expect(requestNotificationPermission).toHaveBeenCalledOnce()
     expect(wrapper.vm.attentionPrefs.state.systemNotifications).toBe(true)
     expect(wrapper.vm.notificationPermission).toBe("granted")
+  })
+
+  it("unlocks audio immediately when attention sound is enabled", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    wrapper.vm.setAttentionPreference("attentionSound", true)
+
+    expect(wrapper.vm.attentionPrefs.state.attentionSound).toBe(true)
+    expect(requestAttentionAudioUnlock).toHaveBeenCalledOnce()
   })
 
   it("does not offer browser notification authorization inside the desktop shell", async () => {
