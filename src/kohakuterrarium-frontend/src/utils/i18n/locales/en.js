@@ -300,6 +300,7 @@ export default {
   "settings.prefs.notificationPermission.granted": "Allowed",
   "settings.prefs.notificationPermission.denied": "Blocked",
   "settings.prefs.notificationPermission.unsupported": "Unavailable",
+  "settings.prefs.notificationPermission.desktop": "Desktop shell",
   "settings.prefs.notificationPermissionHint.default":
     "Your browser needs explicit permission before it can send system notifications.",
   "settings.prefs.notificationPermissionHint.granted": "Your browser allows system notifications.",
@@ -307,6 +308,8 @@ export default {
     "Notifications are blocked. Allow them in your browser site settings.",
   "settings.prefs.notificationPermissionHint.unsupported":
     "System notifications are unavailable in this environment.",
+  "settings.prefs.notificationPermissionHint.desktop":
+    "Browser system notifications are not available inside kt app. Use Desktop window attention below.",
   "settings.prefs.dynamicTitle": "Dynamic window title",
   "settings.prefs.dynamicTitleHint":
     "Show pending input and unread completions in the window or browser-tab title.",

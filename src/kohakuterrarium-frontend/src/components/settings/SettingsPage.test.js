@@ -61,6 +61,7 @@ describe("SettingsPage model presets", () => {
     requestNotificationPermission.mockReset()
     requestNotificationPermission.mockResolvedValue("granted")
     vi.stubGlobal("Notification", { permission: "default" })
+    delete window.pywebview
   })
 
   afterEach(() => {
@@ -99,6 +100,48 @@ describe("SettingsPage model presets", () => {
     expect(requestNotificationPermission).toHaveBeenCalledOnce()
     expect(wrapper.vm.attentionPrefs.state.systemNotifications).toBe(true)
     expect(wrapper.vm.notificationPermission).toBe("granted")
+  })
+
+  it("does not offer browser notification authorization inside the desktop shell", async () => {
+    window.pywebview = { api: {} }
+    vi.stubGlobal("Notification", { permission: "denied" })
+    configAPI.getModels.mockResolvedValue([])
+
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    expect(wrapper.vm.desktopSurface).toBe(true)
+    expect(wrapper.vm.notificationPermission).toBe("desktop")
+    expect(wrapper.find("[data-notification-permission-action]").exists()).toBe(false)
+    expect(
+      wrapper.find('[data-attention-group="notifications"]').attributes("data-desktop-surface"),
+    ).toBe("true")
+  })
+
+  it("updates notification capability when pywebview is injected after mount", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+    expect(wrapper.vm.notificationPermission).toBe("default")
+
+    window.pywebview = { api: {} }
+    window.dispatchEvent(new Event("pywebviewready"))
+    await nextTick()
+
+    expect(wrapper.vm.desktopSurface).toBe(true)
+    expect(wrapper.vm.notificationPermission).toBe("desktop")
+    expect(wrapper.find("[data-notification-permission-action]").exists()).toBe(false)
+  })
+
+  it("keeps the desktop attention card content left aligned", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    const desktop = wrapper.find('[data-attention-group="desktop"]')
+    expect(desktop.classes()).toContain("attention-group")
+    expect(desktop.classes()).not.toContain("attention-setting-row")
+    expect(desktop.find(".attention-setting-row").exists()).toBe(true)
   })
 
   it("refreshes the selected preset without reporting a successful default change as failed", async () => {

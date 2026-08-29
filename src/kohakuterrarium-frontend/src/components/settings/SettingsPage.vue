@@ -473,7 +473,7 @@
                 </div>
               </div>
 
-              <div data-attention-group="notifications" class="attention-group">
+              <div data-attention-group="notifications" class="attention-group" :data-desktop-surface="desktopSurface">
                 <div class="flex items-start justify-between gap-4">
                   <div>
                     <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.systemNotifications") }}</div>
@@ -481,7 +481,10 @@
                   </div>
                   <span class="text-[11px] shrink-0" :class="notificationPermissionClass">{{ t(`settings.prefs.notificationPermission.${notificationPermission}`) }}</span>
                 </div>
-                <div v-if="notificationPermission !== 'granted'" class="attention-permission-row">
+                <div v-if="desktopSurface" class="attention-permission-row">
+                  <div class="text-xs text-warm-500 dark:text-warm-400">{{ t("settings.prefs.notificationPermissionHint.desktop") }}</div>
+                </div>
+                <div v-else-if="notificationPermission !== 'granted'" class="attention-permission-row">
                   <div class="text-xs text-warm-500 dark:text-warm-400">{{ t(`settings.prefs.notificationPermissionHint.${notificationPermission}`) }}</div>
                   <el-button v-if="notificationPermission === 'default'" data-notification-permission-action size="small" type="primary" :loading="requestingNotificationPermission" @click="grantNotificationPermission">
                     {{ t("settings.prefs.allowNotifications") }}
@@ -521,15 +524,17 @@
                 </div>
               </div>
 
-              <div data-attention-group="desktop" class="attention-group attention-setting-row" data-attention-setting="desktopAttention">
-                <div>
-                  <div class="flex items-center gap-2">
-                    <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.desktopAttention") }}</div>
-                    <span class="attention-platform-badge">{{ t("settings.prefs.desktopOnly") }}</span>
+              <div data-attention-group="desktop" class="attention-group" data-attention-setting="desktopAttention">
+                <div class="attention-setting-row">
+                  <div>
+                    <div class="flex items-center gap-2">
+                      <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.desktopAttention") }}</div>
+                      <span class="attention-platform-badge">{{ t("settings.prefs.desktopOnly") }}</span>
+                    </div>
+                    <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.desktopAttentionHint") }}</div>
                   </div>
-                  <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.desktopAttentionHint") }}</div>
+                  <el-switch :model-value="attentionPrefs.state.desktopAttention" @change="setAttentionPreference('desktopAttention', $event)" />
                 </div>
-                <el-switch :model-value="attentionPrefs.state.desktopAttention" @change="setAttentionPreference('desktopAttention', $event)" />
               </div>
             </div>
           </div>
@@ -542,7 +547,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, onMounted, watch } from "vue"
+import { computed, reactive, ref, onBeforeUnmount, onMounted, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import AccountSection from "@/components/account/AccountSection.vue"
@@ -577,6 +582,7 @@ const { t } = useI18n()
 const { isCompact } = useDensity()
 const activeTab = ref("providers")
 const requestingNotificationPermission = ref(false)
+const desktopSurface = ref(Boolean(window.pywebview?.api))
 const notificationPermission = ref(getNotificationPermission())
 
 const localeOptions = computed(() =>
@@ -594,6 +600,7 @@ const readingSizeOptions = computed(() =>
 )
 
 function getNotificationPermission() {
+  if (window.pywebview?.api) return "desktop"
   if (typeof Notification === "undefined") return "unsupported"
   if (window.isSecureContext === false) return "unsupported"
   return Notification.permission || "default"
@@ -601,15 +608,17 @@ function getNotificationPermission() {
 
 const inAppIndicatorsEnabled = computed(() => inAppAttentionSettings.some((item) => attentionPrefs.state[item.key]))
 
-const notificationsAvailable = computed(() => notificationPermission.value === "granted" && attentionPrefs.state.systemNotifications)
+const notificationsAvailable = computed(() => !desktopSurface.value && notificationPermission.value === "granted" && attentionPrefs.state.systemNotifications)
 
 const notificationPermissionClass = computed(() => ({
   "text-iolite": notificationPermission.value === "granted",
   "text-amber-shadow dark:text-amber-light": notificationPermission.value === "default",
   "text-coral": ["denied", "unsupported"].includes(notificationPermission.value),
+  "text-warm-400": notificationPermission.value === "desktop",
 }))
 
 async function grantNotificationPermission() {
+  if (desktopSurface.value) return
   requestingNotificationPermission.value = true
   try {
     notificationPermission.value = await requestNotificationPermission()
@@ -1232,12 +1241,24 @@ function formatCapturedAt(epochSeconds) {
 
 // ───────── Lifecycle ─────────
 
+function detectDesktopSurface() {
+  if (!window.pywebview?.api) return
+  desktopSurface.value = true
+  notificationPermission.value = "desktop"
+}
+
 onMounted(async () => {
+  window.addEventListener("pywebviewready", detectDesktopSurface)
+  detectDesktopSurface()
   await loadKeys()
   await loadBackends()
   await loadNativeTools()
   await loadPresets()
   await loadMCP()
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener("pywebviewready", detectDesktopSurface)
 })
 
 watch(activeTab, (tab) => {
