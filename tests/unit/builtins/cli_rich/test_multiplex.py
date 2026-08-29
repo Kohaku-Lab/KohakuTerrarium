@@ -52,6 +52,20 @@ class TestLifecycle:
         assert [c[1] for c in rec.calls] == ["processing_start", "processing_end"]
 
     @pytest.mark.asyncio
+    async def test_supersede_returns_to_owner_loop(self):
+        rec = _Recorder()
+        sink = MultiplexedRichOutput(rec, "alice")
+        await sink.start()
+
+        sink.on_supersede("prompt-1")
+        for _ in range(10):
+            await asyncio.sleep(0)
+            if rec.calls:
+                break
+
+        assert rec.calls == [("alice", "supersede", {"event_id": "prompt-1"})]
+
+    @pytest.mark.asyncio
     async def test_worker_thread_activity_returns_to_owner_loop(self):
         rec = _Recorder()
         sink = MultiplexedRichOutput(rec, "alice")

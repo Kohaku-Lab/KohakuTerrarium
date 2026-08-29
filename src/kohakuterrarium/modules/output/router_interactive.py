@@ -42,11 +42,6 @@ class OutputRouterInteractiveMixin:
 
         try:
             await self.emit(event)
-        except Exception:
-            self._pending_replies.pop(event.id, None)
-            raise
-
-        try:
             if effective_timeout is None:
                 reply = await future
             else:
@@ -61,6 +56,9 @@ class OutputRouterInteractiveMixin:
                 timestamp=time.time(),
             )
         except asyncio.CancelledError:
+            self._broadcast_interactive_closed(event.id)
+            raise
+        except Exception:
             self._broadcast_interactive_closed(event.id)
             raise
         finally:

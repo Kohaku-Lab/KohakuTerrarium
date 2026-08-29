@@ -357,6 +357,8 @@ class AppMultiCreatureMixin:
                 event = payload.get("event")
                 if isinstance(event, OutputEvent):
                     await renderer.emit(event)
+            elif kind == "supersede":
+                renderer.on_supersede(str(payload.get("event_id") or ""))
         finally:
             self.live_region = prev
             if capture_swapped:

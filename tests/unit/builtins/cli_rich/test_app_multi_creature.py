@@ -349,6 +349,25 @@ class TestHandleCreatureEventRouting:
         assert app.committer.captured_for("c1") == []
 
     @pytest.mark.asyncio
+    async def test_supersede_closes_the_source_creature_prompt(self, app_and_engine):
+        app, _, _ = app_and_engine
+        event = OutputEvent(
+            type="confirm",
+            id="confirm-bob",
+            interactive=True,
+            payload={
+                "prompt": "Deploy Bob?",
+                "options": [{"id": "yes", "label": "Yes", "style": "primary"}],
+            },
+        )
+        await app._handle_creature_event("c2", "emit", {"event": event})
+        assert app.bus_overlay.visible is True
+
+        await app._handle_creature_event("c2", "supersede", {"event_id": "confirm-bob"})
+
+        assert app.bus_overlay.visible is False
+
+    @pytest.mark.asyncio
     async def test_interactive_event_reply_returns_to_source_creature(
         self, app_and_engine
     ):

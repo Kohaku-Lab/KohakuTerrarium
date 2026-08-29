@@ -148,6 +148,33 @@ class TestInteractiveClosure:
         with pytest.raises(asyncio.CancelledError):
             await first
 
+    async def test_cancellation_during_emit_closes_and_releases_the_prompt(self):
+        class _BlockingOutput(_SupersedeSpy):
+            def __init__(self):
+                super().__init__()
+                self.started = asyncio.Event()
+
+            async def emit(self, event):
+                self.started.set()
+                await asyncio.Event().wait()
+
+        output = _BlockingOutput()
+        router = OutputRouter(output)
+        task = asyncio.create_task(
+            router.emit_and_wait(_interactive_event(event_id="evt-emit-cancel"))
+        )
+        await output.started.wait()
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert "evt-emit-cancel" not in router._pending_replies
+        assert output.superseded == ["evt-emit-cancel"]
+        assert router.submit_reply_with_status(
+            UIReply(event_id="evt-emit-cancel", action_id="late")
+        ) == (False, "unknown")
+
     async def test_cancellation_closes_the_prompt_for_all_renderers(self):
         primary = _SupersedeSpy()
         secondary = _SupersedeSpy()
@@ -209,6 +236,22 @@ class TestEmitFailureCleansUp:
         with pytest.raises(RuntimeError, match="emit exploded"):
             await router.emit_and_wait(event)
         assert "evt-boom" not in router._pending_replies
+
+    async def test_emit_failure_after_render_broadcasts_prompt_closure(self):
+        primary = _SupersedeSpy()
+
+        class _PartialRouter(OutputRouter):
+            async def emit(self, event):
+                await self.default_output.emit(event)
+                raise RuntimeError("secondary exploded")
+
+        router = _PartialRouter(primary)
+
+        with pytest.raises(RuntimeError, match="secondary exploded"):
+            await router.emit_and_wait(_interactive_event(event_id="evt-partial"))
+
+        assert primary.superseded == ["evt-partial"]
+        assert "evt-partial" not in router._pending_replies
 
 
 class TestBroadcastSupersede:

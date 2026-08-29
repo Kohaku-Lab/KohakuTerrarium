@@ -562,7 +562,7 @@ import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
 import UpdatesPanel from "@/components/settings/UpdatesPanel.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
-import { requestNotificationPermission } from "@/composables/useAttentionEffects"
+import { requestAttentionAudioUnlock, requestNotificationPermission } from "@/composables/useAttentionEffects"
 import { useDensity } from "@/composables/useDensity"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
 import { useAuthStore } from "@/stores/auth"
@@ -630,6 +630,7 @@ async function grantNotificationPermission() {
 
 function setAttentionPreference(key, value) {
   attentionPrefs.set(key, value)
+  if (key === "attentionSound" && value) requestAttentionAudioUnlock()
 }
 
 function setInAppIndicators(value) {
