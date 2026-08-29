@@ -449,13 +449,87 @@
               </div>
             </div>
             <div class="border-t border-warm-200 dark:border-warm-700 pt-3 flex flex-col gap-3">
-              <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.attention") }}</div>
-              <div v-for="item in attentionSettings" :key="item.key" class="flex items-center justify-between gap-4">
-                <div>
-                  <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
-                  <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
+              <div>
+                <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.attention") }}</div>
+                <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.attentionHint") }}</div>
+              </div>
+
+              <div data-attention-group="in-app" class="attention-group">
+                <div class="attention-setting-row">
+                  <div>
+                    <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.inAppIndicators") }}</div>
+                    <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.inAppIndicatorsHint") }}</div>
+                  </div>
+                  <el-switch data-in-app-toggle :model-value="inAppIndicatorsEnabled" @change="setInAppIndicators" />
                 </div>
-                <el-switch :model-value="attentionPrefs.state[item.key]" @change="setAttentionPreference(item.key, $event)" />
+                <div class="attention-group-children" :class="{ 'opacity-45': !inAppIndicatorsEnabled }">
+                  <div v-for="item in inAppAttentionSettings" :key="item.key" class="attention-setting-row" :data-attention-setting="item.key">
+                    <div>
+                      <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
+                      <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
+                    </div>
+                    <el-switch :model-value="attentionPrefs.state[item.key]" :disabled="!inAppIndicatorsEnabled" @change="setAttentionPreference(item.key, $event)" />
+                  </div>
+                </div>
+              </div>
+
+              <div data-attention-group="notifications" class="attention-group">
+                <div class="flex items-start justify-between gap-4">
+                  <div>
+                    <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.systemNotifications") }}</div>
+                    <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.systemNotificationsHint") }}</div>
+                  </div>
+                  <span class="text-[11px] shrink-0" :class="notificationPermissionClass">{{ t(`settings.prefs.notificationPermission.${notificationPermission}`) }}</span>
+                </div>
+                <div v-if="notificationPermission !== 'granted'" class="attention-permission-row">
+                  <div class="text-xs text-warm-500 dark:text-warm-400">{{ t(`settings.prefs.notificationPermissionHint.${notificationPermission}`) }}</div>
+                  <el-button v-if="notificationPermission === 'default'" data-notification-permission-action size="small" type="primary" :loading="requestingNotificationPermission" @click="grantNotificationPermission">
+                    {{ t("settings.prefs.allowNotifications") }}
+                  </el-button>
+                </div>
+                <div v-else class="attention-permission-row">
+                  <div class="text-xs text-warm-500 dark:text-warm-400">{{ t("settings.prefs.notificationEnabledHint") }}</div>
+                  <el-switch :model-value="attentionPrefs.state.systemNotifications" @change="setAttentionPreference('systemNotifications', $event)" />
+                </div>
+                <div class="attention-group-children" :class="{ 'opacity-45': !notificationsAvailable }">
+                  <div v-for="item in notificationAttentionSettings" :key="item.key" class="attention-setting-row" :data-attention-setting="item.key" :disabled="!notificationsAvailable || undefined">
+                    <div>
+                      <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
+                      <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
+                    </div>
+                    <el-switch :model-value="attentionPrefs.state[item.key]" :disabled="!notificationsAvailable" @change="setAttentionPreference(item.key, $event)" />
+                  </div>
+                </div>
+              </div>
+
+              <div data-attention-group="sound" class="attention-group">
+                <div class="attention-setting-row" data-attention-setting="attentionSound">
+                  <div>
+                    <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.attentionSound") }}</div>
+                    <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.attentionSoundHint") }}</div>
+                  </div>
+                  <el-switch :model-value="attentionPrefs.state.attentionSound" @change="setAttentionPreference('attentionSound', $event)" />
+                </div>
+                <div class="attention-group-children" :class="{ 'opacity-45': !attentionPrefs.state.attentionSound }">
+                  <div v-for="item in soundAttentionSettings" :key="item.key" class="attention-setting-row" :data-attention-setting="item.key">
+                    <div>
+                      <div class="text-sm text-warm-600 dark:text-warm-400">{{ t(item.label) }}</div>
+                      <div class="text-[11px] text-warm-400 mt-1">{{ t(item.hint) }}</div>
+                    </div>
+                    <el-switch :model-value="attentionPrefs.state[item.key]" :disabled="!attentionPrefs.state.attentionSound" @change="setAttentionPreference(item.key, $event)" />
+                  </div>
+                </div>
+              </div>
+
+              <div data-attention-group="desktop" class="attention-group attention-setting-row" data-attention-setting="desktopAttention">
+                <div>
+                  <div class="flex items-center gap-2">
+                    <div class="text-sm font-medium text-warm-700 dark:text-warm-300">{{ t("settings.prefs.desktopAttention") }}</div>
+                    <span class="attention-platform-badge">{{ t("settings.prefs.desktopOnly") }}</span>
+                  </div>
+                  <div class="text-[11px] text-warm-400 mt-1">{{ t("settings.prefs.desktopAttentionHint") }}</div>
+                </div>
+                <el-switch :model-value="attentionPrefs.state.desktopAttention" @change="setAttentionPreference('desktopAttention', $event)" />
               </div>
             </div>
           </div>
@@ -502,6 +576,8 @@ const attentionPrefs = useAttentionPrefs()
 const { t } = useI18n()
 const { isCompact } = useDensity()
 const activeTab = ref("providers")
+const requestingNotificationPermission = ref(false)
+const notificationPermission = ref(getNotificationPermission())
 
 const localeOptions = computed(() =>
   SUPPORTED_LOCALES.map((value) => ({
@@ -517,18 +593,41 @@ const readingSizeOptions = computed(() =>
   })),
 )
 
-async function setAttentionPreference(key, value) {
-  if (key === "systemNotifications" && value) {
-    const permission = await requestNotificationPermission()
-    if (permission !== "granted") {
-      attentionPrefs.set(key, false)
-      return
-    }
+function getNotificationPermission() {
+  if (typeof Notification === "undefined") return "unsupported"
+  if (window.isSecureContext === false) return "unsupported"
+  return Notification.permission || "default"
+}
+
+const inAppIndicatorsEnabled = computed(() => inAppAttentionSettings.some((item) => attentionPrefs.state[item.key]))
+
+const notificationsAvailable = computed(() => notificationPermission.value === "granted" && attentionPrefs.state.systemNotifications)
+
+const notificationPermissionClass = computed(() => ({
+  "text-iolite": notificationPermission.value === "granted",
+  "text-amber-shadow dark:text-amber-light": notificationPermission.value === "default",
+  "text-coral": ["denied", "unsupported"].includes(notificationPermission.value),
+}))
+
+async function grantNotificationPermission() {
+  requestingNotificationPermission.value = true
+  try {
+    notificationPermission.value = await requestNotificationPermission()
+    attentionPrefs.set("systemNotifications", notificationPermission.value === "granted")
+  } finally {
+    requestingNotificationPermission.value = false
   }
+}
+
+function setAttentionPreference(key, value) {
   attentionPrefs.set(key, value)
 }
 
-const attentionSettings = [
+function setInAppIndicators(value) {
+  for (const item of inAppAttentionSettings) attentionPrefs.set(item.key, value)
+}
+
+const inAppAttentionSettings = [
   {
     key: "dynamicTitle",
     label: "settings.prefs.dynamicTitle",
@@ -545,10 +644,13 @@ const attentionSettings = [
     hint: "settings.prefs.inputRequiredBadgeHint",
   },
   {
-    key: "systemNotifications",
-    label: "settings.prefs.systemNotifications",
-    hint: "settings.prefs.systemNotificationsHint",
+    key: "faviconBadge",
+    label: "settings.prefs.faviconBadge",
+    hint: "settings.prefs.faviconBadgeHint",
   },
+]
+
+const notificationAttentionSettings = [
   {
     key: "notifyWaiting",
     label: "settings.prefs.notifyWaiting",
@@ -559,11 +661,9 @@ const attentionSettings = [
     label: "settings.prefs.notifyCompletion",
     hint: "settings.prefs.notifyCompletionHint",
   },
-  {
-    key: "attentionSound",
-    label: "settings.prefs.attentionSound",
-    hint: "settings.prefs.attentionSoundHint",
-  },
+]
+
+const soundAttentionSettings = [
   {
     key: "soundWaiting",
     label: "settings.prefs.soundWaiting",
@@ -573,16 +673,6 @@ const attentionSettings = [
     key: "soundCompletion",
     label: "settings.prefs.soundCompletion",
     hint: "settings.prefs.soundCompletionHint",
-  },
-  {
-    key: "faviconBadge",
-    label: "settings.prefs.faviconBadge",
-    hint: "settings.prefs.faviconBadgeHint",
-  },
-  {
-    key: "desktopAttention",
-    label: "settings.prefs.desktopAttention",
-    hint: "settings.prefs.desktopAttentionHint",
   },
 ]
 
@@ -1301,6 +1391,45 @@ function onOpenDrives() {
   text-align: center;
   color: var(--el-text-color-placeholder, #909399);
   padding: 4rem 1rem;
+}
+
+.attention-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid var(--el-border-color-lighter);
+  border-radius: 0.5rem;
+  padding: 0.75rem;
+}
+
+.attention-group-children {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding: 0.75rem 0 0 0.75rem;
+}
+
+.attention-setting-row,
+.attention-permission-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.attention-permission-row {
+  border-top: 1px solid var(--el-border-color-lighter);
+  padding-top: 0.75rem;
+}
+
+.attention-platform-badge {
+  border-radius: 0.25rem;
+  background: var(--el-fill-color-light);
+  color: var(--el-text-color-placeholder);
+  font-size: 0.625rem;
+  line-height: 1rem;
+  padding: 0 0.375rem;
 }
 
 .preset-row {

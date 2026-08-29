@@ -275,6 +275,26 @@ export default {
   "settings.tabs.prefs": "Voreinstellungen",
   "settings.prefs.appearance": "Darstellung",
   "settings.prefs.attention": "Aufmerksamkeitshinweise",
+  "settings.prefs.attentionHint":
+    "Wähle, wie die App bei erforderlicher Eingabe oder abgeschlossenen Antworten erinnert.",
+  "settings.prefs.inAppIndicators": "Hinweise in der App",
+  "settings.prefs.inAppIndicatorsHint":
+    "Status im Seitentitel, in Unterhaltung-Tabs und im Browser-Symbol anzeigen.",
+  "settings.prefs.allowNotifications": "Benachrichtigungen erlauben",
+  "settings.prefs.notificationEnabledHint": "Systembenachrichtigungen sind aktiviert.",
+  "settings.prefs.desktopOnly": "nur kt app",
+  "settings.prefs.notificationPermission.default": "Nicht autorisiert",
+  "settings.prefs.notificationPermission.granted": "Erlaubt",
+  "settings.prefs.notificationPermission.denied": "Blockiert",
+  "settings.prefs.notificationPermission.unsupported": "Nicht verfügbar",
+  "settings.prefs.notificationPermissionHint.default":
+    "Der Browser benötigt deine ausdrückliche Erlaubnis für Systembenachrichtigungen.",
+  "settings.prefs.notificationPermissionHint.granted":
+    "Der Browser erlaubt Systembenachrichtigungen.",
+  "settings.prefs.notificationPermissionHint.denied":
+    "Benachrichtigungen sind blockiert. Erlaube sie in den Website-Einstellungen des Browsers.",
+  "settings.prefs.notificationPermissionHint.unsupported":
+    "Systembenachrichtigungen sind in dieser Umgebung nicht verfügbar.",
   "settings.prefs.dynamicTitle": "Dynamischer Fenstertitel",
   "settings.prefs.dynamicTitleHint":
     "Ausstehende Eingaben und ungelesene Abschlüsse im Fenster- oder Browsertitel anzeigen.",

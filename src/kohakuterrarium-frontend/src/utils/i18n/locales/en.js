@@ -288,6 +288,25 @@ export default {
     "Keys + OAuth will be saved to the selected worker's local config (not the host's).",
   "settings.prefs.appearance": "Appearance",
   "settings.prefs.attention": "Attention reminders",
+  "settings.prefs.attentionHint":
+    "Choose how the app alerts you when input is required or a response completes.",
+  "settings.prefs.inAppIndicators": "In-app indicators",
+  "settings.prefs.inAppIndicatorsHint":
+    "Show status in the page title, conversation tabs, and browser icon.",
+  "settings.prefs.allowNotifications": "Allow notifications",
+  "settings.prefs.notificationEnabledHint": "System notification delivery is enabled.",
+  "settings.prefs.desktopOnly": "kt app only",
+  "settings.prefs.notificationPermission.default": "Not authorized",
+  "settings.prefs.notificationPermission.granted": "Allowed",
+  "settings.prefs.notificationPermission.denied": "Blocked",
+  "settings.prefs.notificationPermission.unsupported": "Unavailable",
+  "settings.prefs.notificationPermissionHint.default":
+    "Your browser needs explicit permission before it can send system notifications.",
+  "settings.prefs.notificationPermissionHint.granted": "Your browser allows system notifications.",
+  "settings.prefs.notificationPermissionHint.denied":
+    "Notifications are blocked. Allow them in your browser site settings.",
+  "settings.prefs.notificationPermissionHint.unsupported":
+    "System notifications are unavailable in this environment.",
   "settings.prefs.dynamicTitle": "Dynamic window title",
   "settings.prefs.dynamicTitleHint":
     "Show pending input and unread completions in the window or browser-tab title.",
