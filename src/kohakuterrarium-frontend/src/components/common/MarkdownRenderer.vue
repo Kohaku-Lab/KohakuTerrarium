@@ -23,13 +23,18 @@ const props = defineProps({
 
 const rootEl = ref(null)
 
+function codeBlockHtml(lang, fenceHtml) {
+  const displayLang = md.utils.escapeHtml(lang || "text")
+  const styledFenceHtml = fenceHtml.replace("<pre>", '<pre class="hljs">')
+  return `<div class="code-block">` + `<div class="code-header">` + `<span class="code-lang">${displayLang}</span>` + `<button class="code-copy-btn" title="Copy">Copy</button>` + `</div>` + styledFenceHtml + `</div>`
+}
+
 const md = new MarkdownIt({
   html: false,
   linkify: true,
   typographer: false,
   breaks: props.breaks,
   highlight(str, lang) {
-    const displayLang = lang || "text"
     const langClass = lang && hljs.getLanguage(lang) ? lang : ""
     let highlighted
     if (langClass) {
@@ -41,10 +46,88 @@ const md = new MarkdownIt({
     } else {
       highlighted = md.utils.escapeHtml(str)
     }
-    // Wrap with header (language label + copy button)
-    return `<div class="code-block">` + `<div class="code-header">` + `<span class="code-lang">${displayLang}</span>` + `<button class="code-copy-btn" data-copy="${md.utils.escapeHtml(str).replace(/"/g, "&quot;")}" title="Copy">Copy</button>` + `</div>` + `<pre class="hljs"><code>${highlighted}</code></pre>` + `</div>`
+    return highlighted
   },
 })
+
+// Keep this scan in lockstep with markdown-it 14.3's rules_block/fence.mjs.
+// It deliberately uses StateBlock's container-relative offsets and indentation;
+// raw source regexes cannot distinguish real closers inside nested containers.
+function fenceHasEndMarker(state, startLine, endLine) {
+  let pos = state.bMarks[startLine] + state.tShift[startLine]
+  let max = state.eMarks[startLine]
+
+  if (state.sCount[startLine] - state.blkIndent >= 4 || pos + 3 > max) return false
+
+  const marker = state.src.charCodeAt(pos)
+  if (marker !== 0x7e && marker !== 0x60) return false
+
+  const markerStart = pos
+  pos = state.skipChars(pos, marker)
+  const markerLength = pos - markerStart
+  if (markerLength < 3) return false
+
+  const params = state.src.slice(pos, max)
+  if (marker === 0x60 && params.indexOf(String.fromCharCode(marker)) >= 0) return false
+
+  let nextLine = startLine
+  for (;;) {
+    nextLine++
+    if (nextLine >= endLine) return false
+
+    pos = state.bMarks[nextLine] + state.tShift[nextLine]
+    const lineStart = pos
+    max = state.eMarks[nextLine]
+
+    if (pos < max && state.sCount[nextLine] < state.blkIndent) return false
+    if (state.src.charCodeAt(pos) !== marker) continue
+    if (state.sCount[nextLine] - state.blkIndent >= 4) continue
+
+    pos = state.skipChars(pos, marker)
+    if (pos - lineStart < markerLength) continue
+
+    pos = state.skipSpaces(pos)
+    if (pos < max) continue
+
+    return true
+  }
+}
+
+const fenceBlockRule = md.block.ruler.__rules__.find((rule) => rule.name === "fence")
+if (!fenceBlockRule) throw new Error("markdown-it fence block rule not found")
+const originalFenceBlock = fenceBlockRule.fn
+const fenceBlockAlt = [...fenceBlockRule.alt]
+md.block.ruler.at(
+  "fence",
+  (state, startLine, endLine, silent) => {
+    const closed = !silent && fenceHasEndMarker(state, startLine, endLine)
+    const tokenCount = state.tokens.length
+    const matched = originalFenceBlock(state, startLine, endLine, silent)
+    if (matched && !silent) {
+      const token = state.tokens[tokenCount]
+      token.meta = { ...token.meta, unclosedFence: !closed }
+    }
+    return matched
+  },
+  { alt: fenceBlockAlt },
+)
+
+const originalFenceRule = md.renderer.rules.fence
+md.renderer.rules.fence = (tokens, idx, options, env, renderer) => {
+  const token = tokens[idx]
+  const lang =
+    md.utils
+      .unescapeAll(token.info || "")
+      .trim()
+      .split(/[ \t]+/, 1)[0] || ""
+  let fenceHtml
+  if (token.meta?.unclosedFence) {
+    fenceHtml = originalFenceRule(tokens, idx, { ...options, highlight: null }, env, renderer)
+  } else {
+    fenceHtml = originalFenceRule(tokens, idx, options, env, renderer)
+  }
+  return codeBlockHtml(lang, fenceHtml)
+}
 
 const katexPlugin = typeof markdownItKatex === "function" ? markdownItKatex : markdownItKatex?.default
 if (typeof katexPlugin === "function") {
@@ -57,10 +140,8 @@ applyExternalLinkRule(md)
 function onClick(e) {
   const btn = e.target.closest(".code-copy-btn")
   if (!btn) return
-  const raw = btn.getAttribute("data-copy") || ""
-  // Decode HTML entities
-  const decoded = new DOMParser().parseFromString(raw, "text/html").body.textContent
-  navigator.clipboard.writeText(decoded || "").then(() => {
+  const code = btn.closest(".code-block")?.querySelector("pre code")
+  navigator.clipboard.writeText(code?.textContent || "").then(() => {
     const orig = btn.textContent
     btn.textContent = "Copied!"
     btn.classList.add("copied")

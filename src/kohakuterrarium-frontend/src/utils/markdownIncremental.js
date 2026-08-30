@@ -23,15 +23,17 @@
  *     CommonMark and are therefore NOT merged.
  *
  * Reference-style link definitions (``[ref]: url``) can be referenced from
- * any later block, so content containing them is not safe to split:
- * ``splitMarkdownBlocks`` returns ``null`` and callers fall back to a
- * full-document render.
+ * any later block. Fence indentation is also container-relative in lists and
+ * blockquotes. Content containing either unsafe case returns ``null`` so
+ * callers fall back to a full-document render.
  */
 
 const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/
 const FENCE_CLOSE_RE = /^ {0,3}(`{3,}|~{3,})[ \t]*$/
 const MATH_DELIM_RE = /^\s*\$\$\s*$/
 const REF_DEF_RE = /^ {0,3}\[[^\]]*\]:/
+const LIST_START_RE = /^ {0,3}(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]+|$)/
+const QUOTE_START_RE = /^ {0,3}>/
 
 function firstLine(block) {
   return block.split("\n", 1)[0] || ""
@@ -58,12 +60,26 @@ function mergeableLists(a, b) {
 
 /**
  * Split preprocessed markdown into independently renderable blocks.
- * Returns ``[]`` for empty input and ``null`` when the content is not
- * safe to split (reference-style link definitions).
+ * Returns ``[]`` for empty input and ``null`` when the content cannot be
+ * proven safe to split.
  */
 export function splitMarkdownBlocks(text) {
   if (!text) return []
   const lines = text.split("\n")
+
+  // Container-relative fence indentation cannot be inferred safely with the
+  // top-level regexes below. Be deliberately conservative: markdown-it gets
+  // the whole document whenever a fence may belong to a list/blockquote, or
+  // when its raw indentation already rules out a top-level fence.
+  let sawListOrQuote = false
+  let sawAnyFenceMarker = false
+  for (const line of lines) {
+    if (LIST_START_RE.test(line) || QUOTE_START_RE.test(line)) sawListOrQuote = true
+    if (/`{3,}|~{3,}/.test(line)) sawAnyFenceMarker = true
+    if (/^(?: {4,}| {0,3}\t)(?:`{3,}|~{3,})/.test(line)) return null
+  }
+  if (sawListOrQuote && sawAnyFenceMarker) return null
+
   const raw = []
   let cur = []
   let fenceChar = null

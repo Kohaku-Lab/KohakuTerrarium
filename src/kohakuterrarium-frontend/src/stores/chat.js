@@ -381,9 +381,10 @@ function _indexParentPaths(events) {
     const ti = evt?.turn_index
     const bi = evt?.branch_id
     const eid = evt?.event_id
+    const hasExplicitPath = Array.isArray(evt?.parent_branch_path)
     const explicit = _coercePath(evt?.parent_branch_path)
     if (typeof eid === "number") {
-      if (explicit.length) {
+      if (hasExplicitPath) {
         paths.set(eid, explicit)
       } else if (typeof ti === "number") {
         const snap = []
@@ -402,9 +403,9 @@ function _indexParentPaths(events) {
   return paths
 }
 
-function _pathMatches(path, selected) {
+function _pathMatches(path, selected, beforeTurn = Infinity) {
   for (const [t, b] of path) {
-    if (selected.has(t) && selected.get(t) !== b) return false
+    if (t < beforeTurn && selected.has(t) && selected.get(t) !== b) return false
   }
   return true
 }
@@ -470,9 +471,7 @@ export function _collectBranchMetadata(events, branchView = null) {
     const eid = evt?.event_id
     if (typeof ti !== "number" || typeof bi !== "number") continue
     const path = typeof eid === "number" ? parentPaths.get(eid) || [] : []
-    const priorSelected = new Map()
-    for (const [t, b] of branchSelection) if (t < ti) priorSelected.set(t, b)
-    if (!_pathMatches(path, priorSelected)) continue
+    if (!_pathMatches(path, branchSelection, ti)) continue
     let bucket = byTurn.get(ti)
     if (!bucket) {
       bucket = { branches: [], latestBranch: 0, eventIdsByBranch: new Map() }
@@ -499,9 +498,7 @@ export function _collectBranchMetadata(events, branchView = null) {
     }
     if (branchSelection.get(ti) !== bi) continue
     const path = parentPaths.get(eid) || []
-    const priorSelected = new Map()
-    for (const [t, b] of branchSelection) if (t < ti) priorSelected.set(t, b)
-    if (!_pathMatches(path, priorSelected)) continue
+    if (!_pathMatches(path, branchSelection, ti)) continue
     liveIds.add(eid)
   }
   return { byTurn, liveIds, branchSelection }
@@ -538,7 +535,19 @@ function _dedupeAdjacentDuplicateEvents(events) {
   return out
 }
 
+export function _prepareReplayEvents(events, branchView = null) {
+  const dedupedEvents = _dedupeAdjacentDuplicateEvents(events)
+  return {
+    events: dedupedEvents,
+    branchMetadata: _collectBranchMetadata(dedupedEvents, branchView),
+  }
+}
+
 export function _replayEvents(messages, events, branchView = null, tab = "") {
+  return _replayPreparedEvents(messages, _prepareReplayEvents(events, branchView), tab)
+}
+
+function _replayPreparedEvents(messages, prepared, tab = "") {
   // A terminal event is authoritative: liveness comes from the backend,
   // which withholds a job's terminal (``normalize_resumable_events`` with
   // ``live_job_ids``) for as long as it sees the job running. A job with
@@ -547,10 +556,17 @@ export function _replayEvents(messages, events, branchView = null, tab = "") {
   // a job that is genuinely dead and renders "interrupted"/"error"/"done"
   // — dead work resumed from a saved session reads as interrupted, never
   // stuck "running" forever (UXI-04).
-  if (!events?.length) return { messages: _convertHistory(messages), pendingJobs: {} }
+  if (!prepared?.events?.length) {
+    return {
+      messages: _convertHistory(messages),
+      pendingJobs: {},
+      events: prepared?.events || [],
+      branchMetadata: prepared?.branchMetadata || null,
+    }
+  }
 
-  events = _dedupeAdjacentDuplicateEvents(events)
-  const { byTurn, liveIds, branchSelection } = _collectBranchMetadata(events, branchView)
+  const events = prepared.events
+  const { byTurn, liveIds, branchSelection } = prepared.branchMetadata
 
   // Pre-pass: compact_replace ranges hide every event whose event_id
   // falls inside the replaced range. Mirrors Python replay_conversation
@@ -1468,7 +1484,13 @@ export function _replayEvents(messages, events, branchView = null, tab = "") {
     }
   }
 
-  return { messages: result, pendingJobs, branchMeta: { byTurn, branchSelection } }
+  return {
+    messages: result,
+    pendingJobs,
+    events,
+    branchMetadata: prepared.branchMetadata,
+    branchMeta: { byTurn, branchSelection },
+  }
 }
 
 function _parseArgs(args) {
@@ -2705,13 +2727,14 @@ const _chatStoreOptions = {
     },
 
     /** Restore token usage from event log (for page refresh) */
-    _restoreTokenUsage(source, events) {
+    _restoreTokenUsage(source, events, alreadyDeduped = false) {
       // Canonical history is authoritative — rebuild this source's total
       // from scratch so a reconnect (which re-runs _loadHistory on the
       // same generation) does not add the persisted token_usage rows a
       // second time and double the count.
       this.tokenUsage[source] = { prompt: 0, completion: 0, total: 0, cached: 0, lastPrompt: 0 }
-      for (const evt of _dedupeAdjacentDuplicateEvents(events)) {
+      const normalizedEvents = alreadyDeduped ? events : _dedupeAdjacentDuplicateEvents(events)
+      for (const evt of normalizedEvents) {
         const isTokenEvt =
           (evt.type === "activity" && evt.activity_type === "token_usage") ||
           evt.type === "token_usage"
@@ -4473,10 +4496,11 @@ const _chatStoreOptions = {
         // wiping ``branchViewByTab`` here was the historical source of
         // "I switched to branch 1 of turn 2, did an unrelated action,
         // and was yanked back to the latest branch."
-        this.eventsByTab[tab] = _dedupeAdjacentDuplicateEvents(data.events)
         if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
-        this._restoreTokenUsage(tab, this.eventsByTab[tab])
-        this._rebuildMessages(tab, fetchedAt)
+        const prepared = _prepareReplayEvents(data.events, this.branchViewByTab[tab])
+        this.eventsByTab[tab] = prepared.events
+        this._restoreTokenUsage(tab, prepared.events, true)
+        this._rebuildMessages(tab, fetchedAt, prepared)
         const scope = scopeOfStoreId(this.$id) || "default"
         this.attentionByTab[tab] = restoreAttentionFromHistory(
           this.eventsByTab[tab],
@@ -4502,15 +4526,18 @@ const _chatStoreOptions = {
      * Rebuild ``messagesByTab[tab]`` from the cached event log,
      * applying the current ``branchViewByTab[tab]`` override.
      */
-    _rebuildMessages(tab, fetchedAt = null) {
+    _rebuildMessages(tab, fetchedAt = null, prepared = null) {
       const events = this.eventsByTab[tab]
       if (!events) return
       const branchView = this.branchViewByTab[tab] || null
       // Canonical history is the liveness authority (see _loadHistory):
       // the backend withholds synthetic terminals for still-live jobs,
       // so a terminal in the cached log means the job is dead.
-      const { messages, pendingJobs } = _replayEvents([], events, branchView, tab)
-      const branchSelection = _commandResultBranchSelection(events, branchView)
+      const replay = prepared
+        ? _replayPreparedEvents([], prepared, tab)
+        : _replayEvents([], events, branchView, tab)
+      const { messages, pendingJobs } = replay
+      const branchSelection = replay.branchMetadata.branchSelection
       adoptLocalCommandResultSelections(
         this._pendingCommandResultContextsByTab[tab],
         this._localCommandResultsByTab[tab],

@@ -1,5 +1,5 @@
 import { createPinia, setActivePinia } from "pinia"
-import { computed, isReactive } from "vue"
+import { computed, isReactive, toRaw } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
@@ -528,6 +528,31 @@ describe("chat store — slash commands", () => {
       "older history",
       "Goals",
     ])
+    getHistory.mockRestore()
+  })
+
+  it("passes one prepared history projection through the real Pinia resync path", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "session_1"
+    chat._instanceGraphId = "graph_1"
+    chat.messagesByTab = { kohaku: [] }
+    const events = [
+      { type: "user_input", content: "hello", event_id: 1, turn_index: 1, branch_id: 1 },
+      { type: "user_input", content: "hello", event_id: 2, turn_index: 1, branch_id: 1 },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistory = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events, messages: [], is_processing: false })
+    const rebuild = vi.spyOn(chat, "_rebuildMessages")
+
+    await expect(chat._resyncHistory("kohaku")).resolves.toBe(true)
+
+    const prepared = rebuild.mock.calls[0][2]
+    expect(prepared.events).toBe(toRaw(chat.eventsByTab.kohaku))
+    expect(prepared.events).toHaveLength(1)
+    expect(prepared.branchMetadata.branchSelection).toEqual(new Map([[1, 1]]))
+    rebuild.mockRestore()
     getHistory.mockRestore()
   })
 
@@ -2337,7 +2362,7 @@ describe("chat store — multimodal edit + branch resync", () => {
 
     // Second poll: branch=2 events landed. Rebuild now safe; pending cleared.
     await expect(chat._resyncHistory("main")).resolves.toBe(true)
-    expect(rebuildSpy).toHaveBeenCalledWith("main", expect.any(Number))
+    expect(rebuildSpy).toHaveBeenCalledWith("main", expect.any(Number), expect.any(Object))
     expect(chat._branchResyncPendingByTab.main).toBeUndefined()
 
     rebuildSpy.mockRestore()
@@ -2397,7 +2422,7 @@ describe("chat store — multimodal edit + branch resync", () => {
     await chat._resyncHistory("main")
 
     expect(chat.branchViewByTab.main).toEqual({ 2: 1 })
-    expect(rebuildSpy).toHaveBeenCalledWith("main", expect.any(Number))
+    expect(rebuildSpy).toHaveBeenCalledWith("main", expect.any(Number), expect.any(Object))
 
     rebuildSpy.mockRestore()
     getHistory.mockRestore()
