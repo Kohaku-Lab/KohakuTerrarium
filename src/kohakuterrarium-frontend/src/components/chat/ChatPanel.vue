@@ -192,6 +192,7 @@ import { inject } from "vue"
 
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
+import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import SiteChip from "@/components/cluster/SiteChip.vue"
@@ -234,6 +235,8 @@ let dragDepth = 0
 const viewGroup = computed(() => (props.groupId ? chat.groups?.[props.groupId] || null : null))
 const viewTabs = computed(() => (viewGroup.value ? viewGroup.value.tabs : chat.tabs))
 const viewActiveTab = computed(() => (viewGroup.value ? viewGroup.value.activeTab : chat.activeTab))
+const viewInstanceId = computed(() => props.instance?.id || chat._instanceId || null)
+const scrollScope = computed(() => ({ instanceId: viewInstanceId.value, tab: viewActiveTab.value }))
 const viewMessages = computed(() => {
   const t = viewActiveTab.value
   return t ? chat.messagesByTab[t] || [] : []
@@ -595,6 +598,15 @@ function scrollToBottom() {
   saveScrollPosition()
 }
 
+const scrollScheduler = createChatScrollScheduler({
+  afterDomCommit: nextTick,
+  requestFrame: (callback) => requestAnimationFrame(callback),
+  cancelFrame: (id) => cancelAnimationFrame(id),
+  shouldScroll: () => isNearBottom.value,
+  scroll: scrollToBottom,
+})
+const scheduleScrollToBottom = (force = false) => scrollScheduler.schedule(force, scrollScope.value)
+
 const messageTailSignature = computed(() => {
   const messages = viewMessages.value
   const last = messages[messages.length - 1]
@@ -611,32 +623,36 @@ const messageTailSignature = computed(() => {
   return `${messages.length}:${last.id}:${last.role}:${contentLen}:${parts}`
 })
 
-watch(messageTailSignature, (nextSig, prevSig) => {
-  if (!prevSig || nextSig === prevSig) return
-  if (forceScrollOnNextMessageUpdate.value || isNearBottom.value) {
-    forceScrollOnNextMessageUpdate.value = false
-    nextTick(scrollToBottom)
-  }
-})
-
 watch(
-  () => viewProcessing.value,
-  (val) => {
-    if (val && isNearBottom.value) {
-      nextTick(scrollToBottom)
-    }
+  () => [scrollScope.value, messageTailSignature.value],
+  ([scope, nextSig], previous) => {
+    const [previousScope, prevSig] = previous || []
+    if (scope !== previousScope || !prevSig || nextSig === prevSig) return
+    const force = forceScrollOnNextMessageUpdate.value
+    forceScrollOnNextMessageUpdate.value = false
+    scheduleScrollToBottom(force)
   },
 )
 
 watch(
-  () => [props.instance?.id, viewActiveTab.value],
-  ([instanceId, tab], previous) => {
-    const [prevInstanceId, prevTab] = previous || []
-    if (prevInstanceId && prevTab) saveScrollPosition(prevInstanceId, prevTab)
+  () => [scrollScope.value, viewProcessing.value],
+  ([scope, val], previous) => {
+    if (scope === previous?.[0] && val) scheduleScrollToBottom()
+  },
+)
+
+watch(
+  scrollScope,
+  (scope, previousScope) => {
+    scrollScheduler.invalidate()
+    if (previousScope?.instanceId && previousScope.tab) {
+      saveScrollPosition(previousScope.instanceId, previousScope.tab)
+    }
     windowStartIndex.value = null
     restoreDraft()
     nextTick(() => {
-      const hadSavedScroll = restoreScrollPosition(instanceId, tab)
+      if (scope !== scrollScope.value) return
+      const hadSavedScroll = restoreScrollPosition(scope.instanceId, scope.tab)
       forceScrollOnNextMessageUpdate.value = !hadSavedScroll
     })
   },
@@ -822,8 +838,8 @@ async function send() {
   isNearBottom.value = true // force scroll after send
   nextTick(() => {
     if (inputEl.value) inputEl.value.style.height = "auto"
-    scrollToBottom()
   })
+  scheduleScrollToBottom(true)
   try {
     const outcome = await outcomePromise
     if (outcome?.handled === "command") {
@@ -850,7 +866,7 @@ async function send() {
         },
         commandTarget.resultContext,
       )
-      if (viewActiveTab.value === commandTarget.tabKey) nextTick(scrollToBottom)
+      if (viewActiveTab.value === commandTarget.tabKey) scheduleScrollToBottom(true)
     } else {
       ElMessage.error(`Command failed: ${err?.message || err}`)
     }
@@ -875,7 +891,7 @@ async function surfaceCommandResult(response, target = null) {
   if (!response) return
   if (target?.inline) {
     chat.addCommandResult(target.tabKey, target.commandText, response, target.resultContext)
-    if (viewActiveTab.value === target.tabKey) nextTick(scrollToBottom)
+    if (viewActiveTab.value === target.tabKey) scheduleScrollToBottom(true)
     return
   }
   if (response.error) {
@@ -954,7 +970,10 @@ function onGlobalKeydown(e) {
   }
 }
 onMounted(() => window.addEventListener("keydown", onGlobalKeydown))
-onUnmounted(() => window.removeEventListener("keydown", onGlobalKeydown))
+onUnmounted(() => {
+  window.removeEventListener("keydown", onGlobalKeydown)
+  scrollScheduler.dispose()
+})
 </script>
 
 <style scoped src="./chat-panel.css"></style>
