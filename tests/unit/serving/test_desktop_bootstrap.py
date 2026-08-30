@@ -47,6 +47,10 @@ class _Window:
         self.events = _Events()
         self.loaded = []
         self.html = []
+        self.exposed = []
+
+    def expose(self, *functions):
+        self.exposed.extend(functions)
 
     def load_url(self, url):
         self.loaded.append(url)
@@ -105,13 +109,34 @@ def test_launcher_detaches_lightweight_desktop_process(monkeypatch, tmp_path):
         "Popen",
         lambda cmd, **kwargs: calls.append((cmd, kwargs)) or child,
     )
-    monkeypatch.setattr(desktop.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "config"))
 
     result = desktop.launch_desktop_app(port=8123, log_level="ERROR")
 
     assert result is child
+    assert (tmp_path / "config" / "app.log").exists()
     assert calls[0][0][:3] == [sys.executable, "-m", "kohakuterrarium.serving.desktop"]
     assert "8123" in calls[0][0]
+
+
+def test_subprocess_server_log_honors_config_dir(monkeypatch, tmp_path):
+    calls = []
+    child = SimpleNamespace(pid=74)
+    monkeypatch.setenv("KT_CONFIG_DIR", str(tmp_path / "config"))
+    monkeypatch.setattr(
+        desktop.subprocess,
+        "Popen",
+        lambda cmd, **kwargs: calls.append((cmd, kwargs)) or child,
+    )
+
+    result = desktop._start_subprocess_server(
+        port=8123,
+        log_level="ERROR",
+        state_path=tmp_path / "state.json",
+    )
+
+    assert result is child
+    assert (tmp_path / "config" / "app.log").exists()
 
 
 def test_briefcase_uses_in_process_server(monkeypatch):
@@ -219,6 +244,10 @@ def test_server_start_overlaps_loading_window_startup(monkeypatch):
 
     desktop.run_desktop_app(port=8001, log_level="ERROR")
 
+    assert [function.__name__ for function in webview.window.exposed] == [
+        "get_desktop_capabilities",
+        "request_desktop_attention",
+    ]
     assert order[:2] == ["server", "shown"]
     assert webview.window.loaded == ["http://127.0.0.1:8123"]
     assert webview.created[0][1]["html"] == desktop.LOADING_HTML

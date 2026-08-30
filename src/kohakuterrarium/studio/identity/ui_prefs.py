@@ -24,6 +24,17 @@ DEFAULTS: dict[str, Any] = {
     "kt.layout.trees": {},
     "kt.layout.instances": {},
     "kt.splitPane": {},
+    "kt.attention.dynamicTitle": True,
+    "kt.attention.completionBadge": True,
+    "kt.attention.inputRequiredBadge": True,
+    "kt.attention.systemNotifications": False,
+    "kt.attention.notifyWaiting": True,
+    "kt.attention.notifyCompletion": False,
+    "kt.attention.attentionSound": False,
+    "kt.attention.soundWaiting": True,
+    "kt.attention.soundCompletion": False,
+    "kt.attention.faviconBadge": True,
+    "kt.attention.desktopAttention": True,
 }
 
 

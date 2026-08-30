@@ -50,6 +50,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
 
         # Interactive reply futures are keyed by the originating event ID.
         self._pending_replies: dict[str, asyncio.Future[UIReply]] = {}
+        self._closed_interactions: dict[str, None] = {}
 
         # Interactive outputs need a back-reference for reply submission.
         for output in (default_output, *self._secondary_outputs):
