@@ -1,9 +1,10 @@
 import { flushPromises, mount } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 import { ElMessageBox } from "element-plus"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import ChatPanel from "./ChatPanel.vue"
+import { createChatScrollScheduler } from "./chatScrollScheduler"
 import { useChatStore } from "@/stores/chat"
 import { terrariumAPI } from "@/utils/api"
 
@@ -17,12 +18,127 @@ beforeEach(() => {
   setActivePinia(createPinia())
 })
 
+afterEach(() => {
+  vi.unstubAllGlobals()
+})
+
+describe("ChatPanel scroll scheduling", () => {
+  function setupScheduler({ nearBottom = true } = {}) {
+    const frames = new Map()
+    let nextFrame = 1
+    const scroll = vi.fn()
+    const scheduler = createChatScrollScheduler({
+      afterDomCommit: (callback) => callback(),
+      requestFrame: (callback) => {
+        const id = nextFrame++
+        frames.set(id, callback)
+        return id
+      },
+      cancelFrame: (id) => frames.delete(id),
+      shouldScroll: () => nearBottom,
+      scroll,
+    })
+    return {
+      frames,
+      scroll,
+      scheduler,
+      runFrame() {
+        const [[id, callback]] = frames
+        frames.delete(id)
+        callback()
+      },
+    }
+  }
+
+  it("coalesces repeated requests into one scroll per frame", () => {
+    const { frames, scroll, scheduler, runFrame } = setupScheduler()
+
+    scheduler.schedule()
+    scheduler.schedule()
+    scheduler.schedule()
+
+    expect(frames.size).toBe(1)
+    runFrame()
+    expect(scroll).toHaveBeenCalledOnce()
+  })
+
+  it("upgrades a pending normal request when a force request arrives", () => {
+    const { scroll, scheduler, runFrame } = setupScheduler({ nearBottom: false })
+
+    scheduler.schedule()
+    scheduler.schedule(true)
+    runFrame()
+
+    expect(scroll).toHaveBeenCalledOnce()
+  })
+
+  it("does not scroll for a normal request after leaving the bottom", () => {
+    const { scroll, scheduler, runFrame } = setupScheduler({ nearBottom: false })
+
+    scheduler.schedule()
+    runFrame()
+
+    expect(scroll).not.toHaveBeenCalled()
+  })
+
+  it("cancels the pending frame when disposed", () => {
+    const { frames, scroll, scheduler } = setupScheduler()
+
+    scheduler.schedule()
+    scheduler.dispose()
+
+    expect(frames.size).toBe(0)
+    expect(scroll).not.toHaveBeenCalled()
+  })
+
+  it("does not run a forced frame after its scope is invalidated", () => {
+    const { frames, scroll, scheduler } = setupScheduler({ nearBottom: false })
+
+    scheduler.schedule(true, "instance:A")
+    scheduler.invalidate()
+
+    expect(frames.size).toBe(0)
+    expect(scroll).not.toHaveBeenCalled()
+  })
+
+  it("does not create a frame from an invalidated DOM commit", () => {
+    const commits = []
+    const frames = new Map()
+    const scheduler = createChatScrollScheduler({
+      afterDomCommit: (callback) => commits.push(callback),
+      requestFrame: (callback) => {
+        frames.set(1, callback)
+        return 1
+      },
+      cancelFrame: (id) => frames.delete(id),
+      shouldScroll: () => true,
+      scroll: vi.fn(),
+    })
+
+    scheduler.schedule(true, "instance:A")
+    scheduler.invalidate()
+    commits[0]()
+
+    expect(frames.size).toBe(0)
+  })
+
+  it("does not merge force state across scopes", () => {
+    const { scroll, scheduler, runFrame } = setupScheduler({ nearBottom: false })
+
+    scheduler.schedule(true, "instance:A")
+    scheduler.schedule(false, "instance:B")
+    runFrame()
+
+    expect(scroll).not.toHaveBeenCalled()
+  })
+})
+
 describe("ChatPanel render window", () => {
-  function mountPanel(chat) {
+  function mountPanel(chat, { groupId = null } = {}) {
     chat._instanceId = "graph_1"
     chat._instanceGraphId = "graph_1"
-    chat.activeTab = "kohaku"
-    chat.tabs = ["kohaku"]
+    if (!chat.activeTab) chat.activeTab = "kohaku"
+    if (!chat.tabs.length) chat.tabs = ["kohaku"]
     chat.commandInventoryByTab = { kohaku: { commands: [], skills: [] } }
     chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
     return mount(ChatPanel, {
@@ -32,6 +148,7 @@ describe("ChatPanel render window", () => {
           graph_id: "graph_1",
           creatures: [{ name: "kohaku", status: "idle" }],
         },
+        groupId,
       },
       global: {
         provide: { chatStore: chat },
@@ -124,6 +241,40 @@ describe("ChatPanel render window", () => {
     expect(renderedIds(wrapper).length).toBe(400)
     expect(renderedIds(wrapper).at(-1)).toBe("m_420")
     expect(renderedIds(wrapper)).not.toContain("m_0")
+  })
+
+  it("does not let a pending frame from the previous tab overwrite the new tab position", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku", "reviewer"]
+    chat.messagesByTab = { kohaku: [], reviewer: [] }
+    const groupId = chat.enableGroups()
+    const wrapper = mountPanel(chat, { groupId })
+    await flushPromises()
+
+    chat.messagesByTab.kohaku.push({ id: "m_1", role: "user", content: "force scroll" })
+    await flushPromises()
+    const pendingFrame = [...frames.values()][0]
+    expect(pendingFrame).toBeTypeOf("function")
+
+    chat.setGroupActiveTab(groupId, "reviewer")
+    await flushPromises()
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    viewport.scrollTop = 73
+
+    pendingFrame()
+    expect(viewport.scrollTop).toBe(73)
+    expect(frames.size).toBe(0)
+    wrapper.unmount()
   })
 })
 

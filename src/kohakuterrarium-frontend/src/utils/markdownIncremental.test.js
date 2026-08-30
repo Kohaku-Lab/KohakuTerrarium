@@ -73,6 +73,31 @@ describe("splitMarkdownBlocks", () => {
     const text = "```\n[not]: a ref\n```\n\npara"
     expect(splitMarkdownBlocks(text)).toEqual(["```\n[not]: a ref\n```", "para"])
   })
+
+  it.each([
+    ["a list-relative close", "- item\n\n  ```javascript\n  const a = 1\n    ```\n\noutside"],
+    ["a blockquote fence", "> ```javascript\n> const a = 1\n> ```\n\noutside"],
+    [
+      "a nested-list fence",
+      "- outer\n  - inner\n\n    ```javascript\n    const a = 1\n      ```\n\noutside",
+    ],
+  ])("falls back for %s", (_name, text) => {
+    expect(splitMarkdownBlocks(text)).toBeNull()
+    assertRenderEquivalence(text)
+  })
+
+  it.each(["\t", " \t", "  \t"])(
+    "falls back when tab-expanded indentation precedes a fence marker (%j)",
+    (indent) => {
+      const text = `${indent}\`\`\`javascript\n${indent}const a = 1\n\n${indent}const b = 2\n${indent}\`\`\``
+      expect(splitMarkdownBlocks(text)).toBeNull()
+      assertRenderEquivalence(text)
+    },
+  )
+
+  it("falls back for a deeply indented fence marker", () => {
+    expect(splitMarkdownBlocks("    ```javascript\n    const a = 1\n    ```")).toBeNull()
+  })
 })
 
 describe("IncrementalMarkdownRenderer equivalence", () => {

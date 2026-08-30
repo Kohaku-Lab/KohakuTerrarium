@@ -171,6 +171,41 @@ describe("chat store — duplicate backend-event compatibility", () => {
   })
 })
 
+describe("chat store — parent branch path compatibility", () => {
+  const parentPathEvents = (parentBranchPath) => {
+    const child = {
+      type: "user_input",
+      content: "child",
+      event_id: 3,
+      turn_index: 2,
+      branch_id: 1,
+    }
+    if (parentBranchPath !== undefined) child.parent_branch_path = parentBranchPath
+    return [
+      { type: "user_input", content: "one", event_id: 1, turn_index: 1, branch_id: 1 },
+      { type: "user_input", content: "two", event_id: 2, turn_index: 1, branch_id: 2 },
+      child,
+    ]
+  }
+
+  it("treats an explicit empty parent path as authoritative", () => {
+    const { messages } = _replayEvents([], parentPathEvents([]), { 1: 1 })
+    expect(
+      messages.filter((message) => message.role === "user").map((message) => message.content),
+    ).toEqual(["one", "child"])
+  })
+
+  it.each([undefined, null])(
+    "derives the legacy parent path when the field is %s",
+    (parentBranchPath) => {
+      const { messages } = _replayEvents([], parentPathEvents(parentBranchPath), { 1: 1 })
+      expect(
+        messages.filter((message) => message.role === "user").map((message) => message.content),
+      ).toEqual(["one"])
+    },
+  )
+})
+
 describe("chat store — branch-switch keeps consistent follow-ups", () => {
   it("default view shows turn 1 branch 2 + follow-up turn 2", () => {
     const { messages } = _replayEvents([], makeEvents())
