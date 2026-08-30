@@ -58,13 +58,20 @@ describe("ChatMessage branch operations", () => {
     setActivePinia(pinia)
   })
 
-  it("renders reasoning segments inline in assistant parts", () => {
+  it("renders a bounded reasoning preview and mounts the full text only while expanded", async () => {
     const store = useChatStore()
+    const longReasoning = "think ".repeat(100)
     const message = {
       id: "a1",
       role: "assistant",
       parts: [
-        { type: "reasoning", id: "r1", source: "reasoning_content", text: "think 1" },
+        {
+          type: "reasoning",
+          id: "r1",
+          source: "reasoning_content",
+          text: longReasoning,
+          signature: "sig",
+        },
         { type: "text", id: "t1", content: "answer" },
       ],
     }
@@ -83,8 +90,105 @@ describe("ChatMessage branch operations", () => {
       },
     })
 
-    expect(wrapper.text()).toContain("Thinking")
-    expect(wrapper.text()).toContain("think 1")
+    const reasoning = wrapper.get("details")
+    const summary = reasoning.get("summary")
+    expect(summary.classes()).not.toContain("flex")
+    expect(summary.get(".reasoning-summary-row").classes()).toContain("inline-flex")
+    expect(summary.get(".reasoning-preview").classes()).toContain("truncate")
+    expect(reasoning.get(".reasoning-preview").text()).toBe(`${longReasoning.slice(0, 240)}…`)
+    expect(reasoning.find(".reasoning-full").exists()).toBe(false)
+
+    reasoning.element.open = true
+    await reasoning.trigger("toggle")
+    expect(reasoning.get(".reasoning-full").text()).toBe(`${longReasoning}\n[signature: sig]`)
+
+    reasoning.element.open = false
+    await reasoning.trigger("toggle")
+    expect(reasoning.find(".reasoning-full").exists()).toBe(false)
+  })
+
+  it("does not mount prototype-named reasoning before expansion", async () => {
+    const store = useChatStore()
+    const message = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "reasoning", id: "constructor", source: "reasoning", text: "private" }],
+    }
+    store.messagesByTab.main = [message]
+    store.activeTab = "main"
+    const wrapper = mount(ChatMessage, {
+      props: { message, messageIdx: 0, tabId: "main" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          MarkdownRenderer: true,
+          ToolCallBlock: true,
+          ToolCallBatch: true,
+          UIEventBlock: true,
+        },
+      },
+    })
+
+    const reasoning = wrapper.get("details")
+    expect(reasoning.find(".reasoning-full").exists()).toBe(false)
+    reasoning.element.open = true
+    await reasoning.trigger("toggle")
+    expect(reasoning.get(".reasoning-full").text()).toBe("private")
+  })
+
+  it("does not split a surrogate pair at the preview boundary", () => {
+    const store = useChatStore()
+    const text = `${"a".repeat(239)}😀tail`
+    const message = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "reasoning", id: "r1", source: "reasoning", text }],
+    }
+    store.messagesByTab.main = [message]
+    store.activeTab = "main"
+    const wrapper = mount(ChatMessage, {
+      props: { message, messageIdx: 0, tabId: "main" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          MarkdownRenderer: true,
+          ToolCallBlock: true,
+          ToolCallBatch: true,
+          UIEventBlock: true,
+        },
+      },
+    })
+
+    expect(wrapper.get(".reasoning-preview").text()).toBe(`${"a".repeat(239)}…`)
+  })
+
+  it("preserves signature-only reasoning when expanded", async () => {
+    const store = useChatStore()
+    const message = {
+      id: "a1",
+      role: "assistant",
+      parts: [{ type: "reasoning", id: "r1", source: "reasoning", text: "", signature: "sig" }],
+    }
+    store.messagesByTab.main = [message]
+    store.activeTab = "main"
+    const wrapper = mount(ChatMessage, {
+      props: { message, messageIdx: 0, tabId: "main" },
+      global: {
+        plugins: [pinia],
+        stubs: {
+          MarkdownRenderer: true,
+          ToolCallBlock: true,
+          ToolCallBatch: true,
+          UIEventBlock: true,
+        },
+      },
+    })
+
+    const reasoning = wrapper.get("details")
+    reasoning.element.open = true
+    await reasoning.trigger("toggle")
+
+    expect(reasoning.get(".reasoning-full").text()).toBe("[signature: sig]")
   })
 
   it("keeps Save & Rerun bound to the message tab after the active tab changes", async () => {
