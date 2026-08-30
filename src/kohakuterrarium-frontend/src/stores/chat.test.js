@@ -4927,6 +4927,160 @@ describe("chat store — queued-message UI freeze regressions", () => {
   })
 })
 
+describe("chat store — history attention race guards", () => {
+  it("does not let an older fetch erase a prompt that arrived live", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+
+    let resolveHistory
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi.spyOn(importActual.terrariumAPI, "getHistory").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve
+        }),
+    )
+
+    const resync = chat._resyncHistory("main")
+    await vi.waitFor(() => expect(resolveHistory).toBeTypeOf("function"))
+    chat._onMessage({
+      type: "ask_text",
+      source: "main",
+      event_id: "live-prompt",
+      interactive: true,
+      surface: "chat",
+      payload: { prompt: "Live" },
+    })
+    resolveHistory({ events: [] })
+
+    await expect(resync).resolves.toBe(false)
+    expect(chat.attentionByTab.main.pending).toEqual(new Set(["live-prompt"]))
+    expect(chat.messagesByTab.main).toEqual(
+      expect.arrayContaining([expect.objectContaining({ eventId: "live-prompt" })]),
+    )
+
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+
+  it("does not let an older fetch resurrect a prompt resolved live", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    chat._onMessage({
+      type: "ask_text",
+      source: "main",
+      event_id: "prompt-1",
+      interactive: true,
+      surface: "chat",
+      payload: { prompt: "Reply" },
+    })
+
+    let resolveHistory
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi.spyOn(importActual.terrariumAPI, "getHistory").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveHistory = resolve
+        }),
+    )
+
+    const resync = chat._resyncHistory("main")
+    await vi.waitFor(() => expect(resolveHistory).toBeTypeOf("function"))
+    chat._onMessage({ type: "ui_supersede", source: "main", event_id: "prompt-1" })
+    resolveHistory({
+      events: [
+        {
+          type: "ask_text",
+          event_id: 1,
+          ui_event_id: "prompt-1",
+          interactive: true,
+          surface: "chat",
+          payload: { prompt: "Reply" },
+        },
+      ],
+    })
+
+    await expect(resync).resolves.toBe(false)
+    expect(chat.attentionByTab.main.pending).toEqual(new Set())
+    expect(chat.messagesByTab.main.find((message) => message.eventId === "prompt-1")).toMatchObject(
+      {
+        superseded: true,
+      },
+    )
+
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+})
+
+describe("chat store — canonical history restores attention", () => {
+  it("restores only unresolved interactive prompts without emitting live effects", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    chat.branchViewByTab = {}
+    chat._onMessage({ type: "processing_start", source: "main" })
+    chat._onMessage({ type: "processing_end", source: "main" })
+
+    const events = [
+      {
+        type: "confirm",
+        event_id: 1,
+        ui_event_id: "resolved",
+        interactive: true,
+        surface: "chat",
+        payload: { prompt: "Resolved?" },
+      },
+      { type: "ui_supersede", event_id: 2, ui_event_id: "resolved" },
+      {
+        type: "ask_text",
+        event_id: 3,
+        ui_event_id: "pending",
+        interactive: true,
+        surface: "chat",
+        payload: { prompt: "Still waiting" },
+      },
+      { type: "processing_start", event_id: 4 },
+      { type: "processing_end", event_id: 5 },
+    ]
+    const importActual = await vi.importActual("@/utils/api")
+    const getHistorySpy = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events })
+
+    await chat._resyncHistory("main")
+
+    expect(chat.attentionSummary("main")).toEqual({ pending: 1, completed: 1 })
+    expect(chat.attentionByTab.main.pending).toEqual(new Set(["pending"]))
+    expect(chat.attentionByTab.main.seen).toEqual(new Set(["resolved", "pending"]))
+    const resolved = chat.messagesByTab.main.find((message) => message.eventId === "resolved")
+    const pending = chat.messagesByTab.main.find((message) => message.eventId === "pending")
+    expect(resolved).toMatchObject({ role: "ui_event", superseded: true })
+    expect(pending).toMatchObject({
+      role: "ui_event",
+      tab: "main",
+      superseded: false,
+      replied: false,
+    })
+
+    chat._clearBranchResyncTimers()
+    getHistorySpy.mockRestore()
+  })
+})
+
 describe("chat store — canonical history reconciles tab-owned running jobs", () => {
   it("_resyncHistory removes a tab-owned job that history shows as terminal", async () => {
     // A terminal WS frame was missed, so runningJobs still lists job_1

@@ -15,6 +15,16 @@ vi.mock("@/utils/api", () => {
   return { configAPI, settingsAPI }
 })
 
+const { requestAttentionAudioUnlock, requestNotificationPermission } = vi.hoisted(() => ({
+  requestAttentionAudioUnlock: vi.fn(),
+  requestNotificationPermission: vi.fn(),
+}))
+
+vi.mock("@/composables/useAttentionEffects", () => ({
+  requestAttentionAudioUnlock,
+  requestNotificationPermission,
+}))
+
 vi.mock("@/utils/i18n", () => ({
   useI18n: () => ({
     t: (key, params) => (params?.name ? `${key}:${params.name}` : key),
@@ -23,6 +33,18 @@ vi.mock("@/utils/i18n", () => ({
 
 import SettingsPage from "./SettingsPage.vue"
 import { configAPI, settingsAPI } from "@/utils/api"
+
+function mountSettingsPage() {
+  return shallowMount(SettingsPage, {
+    global: {
+      plugins: [ElementPlus],
+      stubs: {
+        ElTabs: { template: "<div><slot /></div>" },
+        ElTabPane: { template: "<section><slot /></section>" },
+      },
+    },
+  })
+}
 
 describe("SettingsPage model presets", () => {
   beforeEach(() => {
@@ -38,11 +60,101 @@ describe("SettingsPage model presets", () => {
     settingsAPI.getNativeTools.mockResolvedValue({ tools: [] })
     settingsAPI.listMCP.mockResolvedValue({ servers: [] })
     settingsAPI.setDefaultModel.mockResolvedValue({})
+    requestNotificationPermission.mockReset()
+    requestNotificationPermission.mockResolvedValue("granted")
+    vi.stubGlobal("Notification", { permission: "default" })
+    delete window.pywebview
   })
 
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it("groups attention preferences by channel instead of rendering one flat list", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-attention-group="in-app"]').exists()).toBe(true)
+    expect(wrapper.find('[data-attention-group="notifications"]').exists()).toBe(true)
+    expect(wrapper.find('[data-attention-group="sound"]').exists()).toBe(true)
+    expect(wrapper.find('[data-attention-group="desktop"]').exists()).toBe(true)
+    expect(wrapper.findAll("[data-attention-setting]")).toHaveLength(10)
+    expect(wrapper.find("[data-in-app-toggle]").exists()).toBe(true)
+  })
+
+  it("uses a permission action instead of the system-notification preference switch", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    const permissionButton = wrapper.find("[data-notification-permission-action]")
+    expect(permissionButton.exists()).toBe(true)
+    expect(wrapper.find('[data-attention-setting="systemNotifications"]').exists()).toBe(false)
+    expect(
+      wrapper.find('[data-attention-setting="notifyWaiting"]').attributes("disabled"),
+    ).toBeDefined()
+
+    await permissionButton.trigger("click")
+    await flushPromises()
+
+    expect(requestNotificationPermission).toHaveBeenCalledOnce()
+    expect(wrapper.vm.attentionPrefs.state.systemNotifications).toBe(true)
+    expect(wrapper.vm.notificationPermission).toBe("granted")
+  })
+
+  it("unlocks audio immediately when attention sound is enabled", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    wrapper.vm.setAttentionPreference("attentionSound", true)
+
+    expect(wrapper.vm.attentionPrefs.state.attentionSound).toBe(true)
+    expect(requestAttentionAudioUnlock).toHaveBeenCalledOnce()
+  })
+
+  it("does not offer browser notification authorization inside the desktop shell", async () => {
+    window.pywebview = { api: {} }
+    vi.stubGlobal("Notification", { permission: "denied" })
+    configAPI.getModels.mockResolvedValue([])
+
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    expect(wrapper.vm.desktopSurface).toBe(true)
+    expect(wrapper.vm.notificationPermission).toBe("desktop")
+    expect(wrapper.find("[data-notification-permission-action]").exists()).toBe(false)
+    expect(
+      wrapper.find('[data-attention-group="notifications"]').attributes("data-desktop-surface"),
+    ).toBe("true")
+  })
+
+  it("updates notification capability when pywebview is injected after mount", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+    expect(wrapper.vm.notificationPermission).toBe("default")
+
+    window.pywebview = { api: {} }
+    window.dispatchEvent(new Event("pywebviewready"))
+    await nextTick()
+
+    expect(wrapper.vm.desktopSurface).toBe(true)
+    expect(wrapper.vm.notificationPermission).toBe("desktop")
+    expect(wrapper.find("[data-notification-permission-action]").exists()).toBe(false)
+  })
+
+  it("keeps the desktop attention card content left aligned", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+
+    const desktop = wrapper.find('[data-attention-group="desktop"]')
+    expect(desktop.classes()).toContain("attention-group")
+    expect(desktop.classes()).not.toContain("attention-setting-row")
+    expect(desktop.find(".attention-setting-row").exists()).toBe(true)
   })
 
   it("refreshes the selected preset without reporting a successful default change as failed", async () => {
@@ -52,7 +164,7 @@ describe("SettingsPage model presets", () => {
     const success = vi.spyOn(ElMessage, "success").mockImplementation(() => {})
     const error = vi.spyOn(ElMessage, "error").mockImplementation(() => {})
 
-    const wrapper = shallowMount(SettingsPage, { global: { plugins: [ElementPlus] } })
+    const wrapper = mountSettingsPage()
     await flushPromises()
     wrapper.vm.selectPreset(preset)
 

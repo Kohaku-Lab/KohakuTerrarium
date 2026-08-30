@@ -12,7 +12,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, provide, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, provide, ref, watch, watchEffect } from "vue"
 
 import WorkspaceShell from "@/components/layout/WorkspaceShell.vue"
 import CompactWorkspaceShell from "@/components/shell/CompactWorkspaceShell.vue"
@@ -54,7 +54,7 @@ const layout = useLayoutStore(target.value)
 const tabsStore = useTabsStore()
 const { isCompact } = useDensity()
 
-const isActiveAttachTab = computed(() => tabsStore.activeId === props.tab.id)
+const isActiveAttachTab = computed(() => Object.values(tabsStore.tabGroups).some((group) => group.activeId === props.tab.id))
 
 // Per-scope artifact scanning. App.vue keeps its own (default-scope)
 // detector for the v1 page-routed flow; this one feeds the scoped
@@ -180,7 +180,22 @@ function handleOpenTab(tabKey) {
 
 watch(target, () => loadInstance())
 
+function markVisibleConversationRead() {
+  if (typeof document === "undefined") return
+  if (!isActiveAttachTab.value || document.visibilityState === "hidden" || !document.hasFocus()) return
+  if (chat.activeTab) chat.markAttentionRead(chat.activeTab)
+}
+
+watch([isActiveAttachTab, () => chat.activeTab], markVisibleConversationRead, { immediate: true })
+watchEffect(() => {
+  const active = chat.activeTab
+  const completed = active ? (chat.attentionByTab[active]?.completed ?? 0) : 0
+  if (completed > 0) markVisibleConversationRead()
+})
+
 onMounted(async () => {
+  window.addEventListener("focus", markVisibleConversationRead)
+  document.addEventListener("visibilitychange", markVisibleConversationRead)
   await loadInstance()
   refreshTimer = createVisibilityInterval(() => {
     loadInstance().catch((err) => console.error("Instance refresh failed:", err))
@@ -189,6 +204,8 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  window.removeEventListener("focus", markVisibleConversationRead)
+  document.removeEventListener("visibilitychange", markVisibleConversationRead)
   if (refreshTimer) {
     refreshTimer.stop()
     refreshTimer = null

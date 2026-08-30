@@ -6,8 +6,10 @@ from typing import Any
 from textual.containers import VerticalScroll
 from textual.widgets import Markdown
 
+from kohakuterrarium.builtins.tui import attention
 from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
 from kohakuterrarium.builtins.tui.model_info import handle_session_info
+from kohakuterrarium.builtins.tui.reply_submit import submit_reply
 from kohakuterrarium.builtins.tui.session import CULL_KEEP, TUISession
 from kohakuterrarium.builtins.tui.tool_args import (
     format_args_detail,
@@ -47,6 +49,7 @@ class TUIOutput(BaseOutputModule):
         self._tui = None
         self._turn_started = False
         self._default_target: str = ""
+        self._interactive_screens: dict[str, Any] = {}
 
     @property
     def _target(self) -> str:
@@ -72,6 +75,7 @@ class TUIOutput(BaseOutputModule):
     async def _on_stop(self) -> None:
         if self._tui:
             self._tui.end_streaming(target=self._target)
+            attention.processing_cancel(self._tui, self._target)
         logger.debug("TUI output stopped")
 
     # -- Processing lifecycle -----------------------------------------------
@@ -79,10 +83,12 @@ class TUIOutput(BaseOutputModule):
     async def on_processing_start(self) -> None:
         self._turn_started = False
         if self._tui:
+            attention.processing_start(self._tui, self._target)
             self._tui.start_thinking()
 
     async def on_processing_end(self) -> None:
         if self._tui:
+            attention.processing_end(self._tui, self._target)
             self._tui.end_streaming(target=self._target)
             self._tui.stop_thinking()
             self._tui.set_idle()
@@ -168,9 +174,8 @@ class TUIOutput(BaseOutputModule):
             case "card":
                 self._handle_card_event(event)
             case "ui_supersede":
-                # Superseded prompts remain mounted; the user may already be
-                # interacting with a modal whose safe replacement is undefined.
-                pass
+                event_id = event.id or event.payload.get("event_id")
+                self.on_supersede(event_id)
             case _:
                 detail = event.content if isinstance(event.content, str) else ""
                 self._handle_activity(event.type, detail, event.payload or {})
@@ -179,6 +184,9 @@ class TUIOutput(BaseOutputModule):
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
+        if attention.is_pending(self._tui, event.id, self._target):
+            return
+        attention.add_pending(self._tui, event.id, self._target)
         payload = event.payload or {}
 
         def _build_and_push() -> None:
@@ -190,8 +198,12 @@ class TUIOutput(BaseOutputModule):
             )
 
             def _on_dismissed(result: dict | None) -> None:
+                if event.id:
+                    self._interactive_screens.pop(event.id, None)
                 self._submit_modal_reply(event, result, default_action="cancel")
 
+            if event.id:
+                self._interactive_screens[event.id] = modal
             self._tui._app.push_screen(modal, _on_dismissed)
 
         self._tui._safe_call(_build_and_push)
@@ -200,6 +212,9 @@ class TUIOutput(BaseOutputModule):
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
+        if attention.is_pending(self._tui, event.id, self._target):
+            return
+        attention.add_pending(self._tui, event.id, self._target)
         payload = event.payload or {}
 
         def _build_and_push() -> None:
@@ -211,8 +226,12 @@ class TUIOutput(BaseOutputModule):
             )
 
             def _on_dismissed(result: dict | None) -> None:
+                if event.id:
+                    self._interactive_screens.pop(event.id, None)
                 self._submit_modal_reply(event, result, default_action="cancel")
 
+            if event.id:
+                self._interactive_screens[event.id] = modal
             self._tui._app.push_screen(modal, _on_dismissed)
 
         self._tui._safe_call(_build_and_push)
@@ -221,6 +240,9 @@ class TUIOutput(BaseOutputModule):
         if self._tui is None or self._tui._app is None:
             return
         await self._tui.wait_ready()
+        if attention.is_pending(self._tui, event.id, self._target):
+            return
+        attention.add_pending(self._tui, event.id, self._target)
         payload = event.payload or {}
 
         def _build_and_push() -> None:
@@ -232,8 +254,12 @@ class TUIOutput(BaseOutputModule):
             )
 
             def _on_dismissed(result: dict | None) -> None:
+                if event.id:
+                    self._interactive_screens.pop(event.id, None)
                 self._submit_modal_reply(event, result, default_action="cancel")
 
+            if event.id:
+                self._interactive_screens[event.id] = modal
             self._tui._app.push_screen(modal, _on_dismissed)
 
         self._tui._safe_call(_build_and_push)
@@ -257,7 +283,8 @@ class TUIOutput(BaseOutputModule):
                 values=result.get("values", {}),
             )
         try:
-            router.submit_reply(reply)
+            if submit_reply(router, reply):
+                attention.clear(self._tui, event.id, self._target)
         except Exception as e:
             logger.exception("submit_reply failed", error=str(e))
 
@@ -299,7 +326,12 @@ class TUIOutput(BaseOutputModule):
             return
         payload = event.payload or {}
         actions = payload.get("actions") or []
-        on_action = self._make_card_action_callback() if actions else None
+        replyable = event.interactive and any(
+            action.get("style") != "link" for action in actions
+        )
+        if replyable:
+            attention.add_pending(self._tui, event.id, self._target)
+        on_action = self._make_card_action_callback() if replyable else None
         try:
             self._tui.add_card_block(
                 payload,
@@ -318,17 +350,25 @@ class TUIOutput(BaseOutputModule):
             if router is None or not event_id:
                 return
             try:
-                router.submit_reply(
-                    UIReply(
-                        event_id=event_id,
-                        action_id=action_id,
-                        values={"action_id": action_id},
-                    )
+                reply = UIReply(
+                    event_id=event_id,
+                    action_id=action_id,
+                    values={"action_id": action_id},
                 )
+                if submit_reply(router, reply):
+                    attention.clear(self._tui, event_id, self._target)
             except Exception as e:
                 logger.exception("card action submit failed", error=str(e))
 
         return _on_action
+
+    def on_supersede(self, event_id: str | None) -> None:
+        if not self._tui:
+            return
+        attention.clear(self._tui, event_id, self._target)
+        screen = self._interactive_screens.pop(event_id, None) if event_id else None
+        if screen is not None:
+            self._tui._safe_call(screen.dismiss, None)
 
     def _handle_activity(
         self, activity_type: str, name_detail: str, metadata: dict

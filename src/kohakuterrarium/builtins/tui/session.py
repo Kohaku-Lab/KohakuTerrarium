@@ -91,6 +91,51 @@ class TUISession(TabModelRegistryMixin):
         # Buffer mutations until Textual mounts so startup events are not lost.
         self._pending_safe_calls: list[tuple[Any, tuple[Any, ...]]] = []
         self._pending_modal_defaults: dict[asyncio.Future[Any], Any] = {}
+        self._attention: dict[str, dict[str, Any]] = {}
+
+    def _attention_state(self, target: str = "") -> dict[str, Any]:
+        key = target or "_default"
+        return self._attention.setdefault(
+            key,
+            {"completed": False, "count": 0, "pending": set(), "processing": False},
+        )
+
+    def attention_processing_start(self, target: str = "") -> None:
+        self._attention_state(target)["processing"] = True
+        self._refresh_attention()
+
+    def attention_processing_end(self, target: str = "") -> None:
+        state = self._attention_state(target)
+        if state["processing"]:
+            state["completed"] = True
+            state["count"] += 1
+        state["processing"] = False
+        self._refresh_attention()
+
+    def attention_processing_cancel(self, target: str = "") -> None:
+        self._attention_state(target)["processing"] = False
+        self._refresh_attention()
+
+    def attention_has_pending(self, event_id: str | None, target: str = "") -> bool:
+        return bool(event_id and event_id in self._attention_state(target)["pending"])
+
+    def attention_pending(self, event_id: str | None, target: str = "") -> None:
+        if event_id:
+            self._attention_state(target)["pending"].add(event_id)
+            self._refresh_attention()
+
+    def attention_clear(self, event_id: str | None, target: str = "") -> None:
+        if event_id:
+            self._attention_state(target)["pending"].discard(event_id)
+            self._refresh_attention()
+
+    def _refresh_attention(self) -> None:
+        if self._app:
+            self._safe_call(self._app.update_attention, self._attention)
+
+    def clear_attention_completed(self, target: str) -> None:
+        self._attention_state(target)["completed"] = False
+        self._refresh_attention()
 
     def set_terrarium_tabs(self, tabs: list[str]) -> None:
         """Configure terrarium tabs and reconcile a running application."""

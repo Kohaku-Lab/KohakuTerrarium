@@ -47,7 +47,10 @@ class TestEmitAndWaitValidation:
 
 class TestReplyResolution:
     async def test_submit_reply_resolves_the_awaiter(self):
-        router = OutputRouter(OutputRecorder())
+        primary = _SupersedeSpy()
+        secondary = _SupersedeSpy()
+        router = OutputRouter(primary)
+        router.add_secondary(secondary)
         event = _interactive_event()
 
         async def _reply_soon():
@@ -61,17 +64,23 @@ class TestReplyResolution:
         reply = await asyncio.wait_for(router.emit_and_wait(event), timeout=2)
         assert reply.action_id == "yes"
         assert reply.values == {"k": 1}
-        # The pending slot is released after resolution.
+        # The pending slot is released after resolution, and every attached
+        # renderer is told that the prompt is no longer actionable.
         assert "evt-1" not in router._pending_replies
+        assert primary.superseded == ["evt-1"]
+        assert secondary.superseded == ["evt-1"]
 
     async def test_timeout_yields_timeout_reply(self):
-        router = OutputRouter(OutputRecorder())
+        spy = _SupersedeSpy()
+        router = OutputRouter(spy)
         event = _interactive_event(timeout_s=0.05)
         reply = await asyncio.wait_for(router.emit_and_wait(event), timeout=2)
         assert reply.action_id == ACTION_TIMEOUT
         assert reply.is_timeout is True
-        # Slot released even on the timeout path.
+        # Slot released even on the timeout path, and renderers are told to
+        # dismiss the prompt so attention state cannot remain stuck forever.
         assert "evt-1" not in router._pending_replies
+        assert spy.superseded == ["evt-1"]
 
     async def test_per_call_timeout_overrides_event_timeout(self):
         router = OutputRouter(OutputRecorder())
@@ -125,6 +134,94 @@ class TestSubmitReplyStatuses:
         assert "evt-1" in spy.superseded
 
 
+class TestInteractiveClosure:
+    async def test_duplicate_active_event_id_is_rejected(self):
+        router = OutputRouter(OutputRecorder())
+        event = _interactive_event(event_id="duplicate")
+        first = asyncio.create_task(router.emit_and_wait(event))
+        await asyncio.sleep(0)
+
+        with pytest.raises(ValueError, match="already pending"):
+            await router.emit_and_wait(event)
+
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+    async def test_cancellation_during_emit_closes_and_releases_the_prompt(self):
+        class _BlockingOutput(_SupersedeSpy):
+            def __init__(self):
+                super().__init__()
+                self.started = asyncio.Event()
+
+            async def emit(self, event):
+                self.started.set()
+                await asyncio.Event().wait()
+
+        output = _BlockingOutput()
+        router = OutputRouter(output)
+        task = asyncio.create_task(
+            router.emit_and_wait(_interactive_event(event_id="evt-emit-cancel"))
+        )
+        await output.started.wait()
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert "evt-emit-cancel" not in router._pending_replies
+        assert output.superseded == ["evt-emit-cancel"]
+        assert router.submit_reply_with_status(
+            UIReply(event_id="evt-emit-cancel", action_id="late")
+        ) == (False, "unknown")
+
+    async def test_cancellation_closes_the_prompt_for_all_renderers(self):
+        primary = _SupersedeSpy()
+        secondary = _SupersedeSpy()
+        router = OutputRouter(primary)
+        router.add_secondary(secondary)
+        event = _interactive_event(event_id="evt-cancel")
+
+        task = asyncio.create_task(router.emit_and_wait(event))
+        await asyncio.sleep(0)
+        task.cancel()
+
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert "evt-cancel" not in router._pending_replies
+        assert primary.superseded == ["evt-cancel"]
+        assert secondary.superseded == ["evt-cancel"]
+
+    async def test_timeout_reply_race_broadcasts_only_once(self):
+        primary = _SupersedeSpy()
+        router = OutputRouter(primary)
+        event = _interactive_event(event_id="evt-race")
+        future = asyncio.get_running_loop().create_future()
+        future.cancel()
+        router._pending_replies[event.id] = future
+
+        assert router.submit_reply_with_status(
+            UIReply(event_id=event.id, action_id="late")
+        ) == (
+            False,
+            "superseded",
+        )
+        router._broadcast_interactive_closed(event.id)
+
+        assert primary.superseded == ["evt-race"]
+
+    def test_closed_interaction_tracking_is_bounded(self):
+        router = OutputRouter(_SupersedeSpy())
+
+        for index in range(1100):
+            router._broadcast_interactive_closed(f"evt-{index}")
+
+        assert len(router._closed_interactions) == 1024
+        assert "evt-0" not in router._closed_interactions
+        assert "evt-1099" in router._closed_interactions
+
+
 class TestEmitFailureCleansUp:
     async def test_emit_raising_releases_the_pending_slot(self):
         # Contract: if emit() raises while fanning the interactive event,
@@ -140,10 +237,26 @@ class TestEmitFailureCleansUp:
             await router.emit_and_wait(event)
         assert "evt-boom" not in router._pending_replies
 
+    async def test_emit_failure_after_render_broadcasts_prompt_closure(self):
+        primary = _SupersedeSpy()
+
+        class _PartialRouter(OutputRouter):
+            async def emit(self, event):
+                await self.default_output.emit(event)
+                raise RuntimeError("secondary exploded")
+
+        router = _PartialRouter(primary)
+
+        with pytest.raises(RuntimeError, match="secondary exploded"):
+            await router.emit_and_wait(_interactive_event(event_id="evt-partial"))
+
+        assert primary.superseded == ["evt-partial"]
+        assert "evt-partial" not in router._pending_replies
+
 
 class TestBroadcastSupersede:
     def test_broadcast_skips_outputs_without_hook(self):
         # An output with no on_supersede must not raise — broadcast is
         # purely advisory.
         router = OutputRouter(OutputRecorder())
-        router._broadcast_supersede("evt-x")  # must not raise
+        router._broadcast_interactive_closed("evt-x")  # must not raise

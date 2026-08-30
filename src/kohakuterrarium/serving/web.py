@@ -18,6 +18,7 @@ import uvicorn
 
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
+from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_file_logging,
@@ -310,8 +311,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
         str(log_level),
     ]
 
-    log_dir = Path.home() / ".kohakuterrarium"
-    log_dir.mkdir(parents=True, exist_ok=True)
+    log_dir = config_dir()
     log_file = open(log_dir / "app.log", "w", encoding="utf-8")  # noqa: SIM115
 
     kwargs: dict[str, object] = {

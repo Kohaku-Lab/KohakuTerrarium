@@ -287,6 +287,73 @@ export default {
   "settings.providers.targetNodeHint":
     "Keys + OAuth will be saved to the selected worker's local config (not the host's).",
   "settings.prefs.appearance": "Appearance",
+  "settings.prefs.attention": "Attention reminders",
+  "settings.prefs.attentionHint":
+    "Choose how the app alerts you when input is required or a response completes.",
+  "settings.prefs.inAppIndicators": "In-app indicators",
+  "settings.prefs.inAppIndicatorsHint":
+    "Show status in the page title, conversation tabs, and browser icon.",
+  "settings.prefs.allowNotifications": "Allow notifications",
+  "settings.prefs.notificationEnabledHint": "System notification delivery is enabled.",
+  "settings.prefs.desktopOnly": "kt app only",
+  "settings.prefs.notificationPermission.default": "Not authorized",
+  "settings.prefs.notificationPermission.granted": "Allowed",
+  "settings.prefs.notificationPermission.denied": "Blocked",
+  "settings.prefs.notificationPermission.unsupported": "Unavailable",
+  "settings.prefs.notificationPermission.desktop": "Desktop shell",
+  "settings.prefs.notificationPermissionHint.default":
+    "Your browser needs explicit permission before it can send system notifications.",
+  "settings.prefs.notificationPermissionHint.granted": "Your browser allows system notifications.",
+  "settings.prefs.notificationPermissionHint.denied":
+    "Notifications are blocked. Allow them in your browser site settings.",
+  "settings.prefs.notificationPermissionHint.unsupported":
+    "System notifications are unavailable in this environment.",
+  "settings.prefs.notificationPermissionHint.desktop":
+    "Browser system notifications are not available inside kt app. Use Desktop window attention below.",
+  "settings.prefs.dynamicTitle": "Dynamic window title",
+  "settings.prefs.dynamicTitleHint":
+    "Show pending input and unread completions in the window or browser-tab title.",
+  "settings.prefs.completionBadge": "Completion badges",
+  "settings.prefs.completionBadgeHint":
+    "Mark conversations with completed responses that have not been viewed.",
+  "settings.prefs.inputRequiredBadge": "Input-required badges",
+  "settings.prefs.inputRequiredBadgeHint":
+    "Mark conversations that are waiting for your answer or approval.",
+  "settings.prefs.systemNotifications": "System notifications",
+  "settings.prefs.systemNotificationsHint":
+    "Show an operating-system notification while the page is in the background.",
+  "settings.prefs.notifyWaiting": "Notify when input is required",
+  "settings.prefs.notifyWaitingHint": "Send a system notification for questions and approvals.",
+  "settings.prefs.notifyCompletion": "Notify when a response completes",
+  "settings.prefs.notifyCompletionHint": "Also notify for ordinary completed responses.",
+  "settings.prefs.attentionSound": "Attention sounds",
+  "settings.prefs.attentionSoundHint": "Play a short local tone after browser audio is unlocked.",
+  "settings.prefs.soundWaiting": "Sound for input required",
+  "settings.prefs.soundWaitingHint": "Play the tone for questions and approvals.",
+  "settings.prefs.soundCompletion": "Sound for completed responses",
+  "settings.prefs.soundCompletionHint": "Also play the tone for ordinary completions.",
+  "settings.prefs.faviconBadge": "Favicon status",
+  "settings.prefs.faviconBadgeHint": "Show pending input or unread counts on the browser icon.",
+  "settings.prefs.desktopAttention": "Desktop window attention",
+  "settings.prefs.desktopAttentionHint": "Flash or mark the kt app window when it is inactive.",
+
+  "settings.prefs.systemNotifications": "System notifications",
+  "settings.prefs.systemNotificationsHint":
+    "Show an operating-system notification while the page is in the background.",
+  "settings.prefs.notifyWaiting": "Notify when input is required",
+  "settings.prefs.notifyWaitingHint": "Send a system notification for questions and approvals.",
+  "settings.prefs.notifyCompletion": "Notify when a response completes",
+  "settings.prefs.notifyCompletionHint": "Also notify for ordinary completed responses.",
+  "settings.prefs.attentionSound": "Attention sounds",
+  "settings.prefs.attentionSoundHint": "Play a short local tone after browser audio is unlocked.",
+  "settings.prefs.soundWaiting": "Sound for input required",
+  "settings.prefs.soundWaitingHint": "Play the tone for questions and approvals.",
+  "settings.prefs.soundCompletion": "Sound for completed responses",
+  "settings.prefs.soundCompletionHint": "Also play the tone for ordinary completions.",
+  "settings.prefs.faviconBadge": "Favicon status",
+  "settings.prefs.faviconBadgeHint": "Show pending input or unread counts on the browser icon.",
+  "settings.prefs.desktopAttention": "Desktop window attention",
+  "settings.prefs.desktopAttentionHint": "Flash or mark the kt app window when it is inactive.",
   "settings.prefs.readingSize": "Reading size",
   "settings.prefs.readingSizeHint":
     "Enlarges interface text and the controls needed to keep it readable.",

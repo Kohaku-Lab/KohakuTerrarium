@@ -496,5 +496,23 @@
     "function": "_session_preview",
     "target": "kohakuterrarium.session.store",
     "reason": "Session storage is loaded only when the resume picker reads a preview."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop_attention.py",
+    "function": "_mac_available",
+    "target": "PyObjCTools",
+    "reason": "PyObjCTools is provided by the macOS pywebview backend and must remain platform-lazy so importing desktop support on Windows/Linux does not require PyObjC."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop_attention.py",
+    "function": "_dispatch_macos",
+    "target": "PyObjCTools",
+    "reason": "Cocoa UI dispatch is available only in the macOS pywebview backend; lazy import keeps cross-platform desktop module imports safe."
+  },
+  {
+    "file": "src/kohakuterrarium/serving/desktop_attention.py",
+    "function": "_dispatch_linux",
+    "target": "gi.repository",
+    "reason": "PyGObject/GLib is supplied by the GTK pywebview backend and must remain lazy so non-GTK and non-Linux installs can import desktop support."
   }
 ]

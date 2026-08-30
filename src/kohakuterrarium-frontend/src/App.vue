@@ -35,6 +35,8 @@ import { useAutoTriggers } from "@/composables/useAutoTriggers"
 import { useBuiltinCommands } from "@/composables/useBuiltinCommands"
 import { useConnectIntent } from "@/composables/useConnectIntent"
 import { useDensity } from "@/composables/useDensity"
+import { useDocumentAttention } from "@/composables/useDocumentAttention"
+import { useAttentionEffects } from "@/composables/useAttentionEffects"
 import { useKeyboardShortcuts } from "@/composables/useKeyboardShortcuts"
 import { useAuthStore } from "@/stores/auth"
 import { useHostsStore } from "@/stores/hosts"
@@ -77,6 +79,8 @@ const instances = useInstancesStore()
 instances.fetchAll()
 
 useKeyboardShortcuts()
+useDocumentAttention()
+useAttentionEffects()
 useBuiltinCommands()
 useAutoTriggers()
 useArtifactDetector()
