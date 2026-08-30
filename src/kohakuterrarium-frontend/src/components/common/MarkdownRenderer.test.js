@@ -43,7 +43,7 @@ describe("MarkdownRenderer streaming", () => {
     await vi.advanceTimersByTimeAsync(200)
 
     const after = renderedHtml(wrapper)
-    expect(after).toContain("const b = 2;")
+    expect(wrapper.find("pre.hljs code").text()).toContain("const b = 2;")
     expect(after).toContain("outro")
     // The untouched leading paragraph must survive byte-for-byte across the
     // stream — that stability is what keeps incremental rendering correct.
@@ -67,6 +67,90 @@ describe("MarkdownRenderer streaming", () => {
     expect(block.find(".code-header").exists()).toBe(true)
     expect(block.find("pre.hljs").exists()).toBe(true)
     expect(block.find("pre.hljs code").text()).toContain("const answer = 42")
+    expect(block.find("code").classes()).toContain("language-js")
+  })
+
+  it.each([
+    ["list", "- item\n  ```js\n  const inside = 1\noutside"],
+    ["blockquote", "> ```js\n> const inside = 1\noutside"],
+    ["four-space relative indent", "- item\n     ~~~~js\n     const inside = 1\noutside"],
+  ])("does not let an open fence in a %s consume outside content", (_name, content) => {
+    const wrapper = mount(MarkdownRenderer, { props: { content } })
+
+    expect(wrapper.find("pre.hljs code").text()).toContain("const inside = 1")
+    expect(wrapper.find("pre.hljs code").html()).not.toContain("hljs-")
+    expect(wrapper.find(".md-content > p").text()).toBe("outside")
+  })
+
+  it.each([
+    ["a relative four-space marker", "- item\n\n  ```javascript\n  const inside = 1\n      ```"],
+    ["a nested list marker", "- item\n\n  ```javascript\n  const inside = 1\n  - ```"],
+    ["a marker with an NBSP tail", "```javascript\nconst inside = 1\n```\u00a0"],
+  ])("does not mistake %s for a closing fence", (_name, content) => {
+    const wrapper = mount(MarkdownRenderer, { props: { content } })
+
+    const code = wrapper.find("pre.hljs code")
+    expect(code.html()).not.toContain("hljs-")
+    expect(code.text()).toContain("const inside = 1")
+  })
+
+  it("closes a list fence at its valid relative indent without consuming outside content", () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: {
+        content: "- item\n\n  ```javascript\n  const inside = 1\n    ```\n\noutside",
+      },
+    })
+
+    expect(wrapper.find("pre.hljs code").html()).toContain("hljs-keyword")
+    expect(wrapper.find("pre.hljs code").text()).toContain("const inside = 1")
+    expect(wrapper.find("pre.hljs code").text()).not.toContain("outside")
+    expect(wrapper.find(".md-content > p").text()).toBe("outside")
+  })
+
+  it("preserves a fence inside nested list structure as one code block", () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: { content: "- - ```javascript\n    const inside = 1\n    const nested = 2\n    ```" },
+    })
+
+    expect(wrapper.findAll(".code-block")).toHaveLength(1)
+    expect(wrapper.find("pre.hljs code").text()).toContain("const nested = 2")
+    expect(wrapper.find("pre.hljs code").html()).toContain("hljs-keyword")
+  })
+
+  it("does not infer a close from a top-level opening marker at EOF", () => {
+    const wrapper = mount(MarkdownRenderer, { props: { content: "```" } })
+
+    expect(wrapper.findAll(".code-block")).toHaveLength(1)
+    expect(wrapper.find("pre.hljs code").html()).not.toContain("hljs-")
+  })
+
+  it("keeps an unterminated streaming fence plain, then highlights it when closed", async () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: { content: "~~~javascript\nconst answer = 42 < 100" },
+    })
+
+    expect(wrapper.find("pre.hljs code").text()).toBe("const answer = 42 < 100")
+    expect(wrapper.find("pre.hljs code").html()).not.toContain("hljs-")
+
+    await wrapper.setProps({ content: "~~~javascript\nconst answer = 42 < 100\n~~~" })
+    await vi.advanceTimersByTimeAsync(200)
+
+    expect(wrapper.find("pre.hljs code").html()).toContain("hljs-keyword")
+    expect(wrapper.find("pre.hljs code").text()).toBe("const answer = 42 < 100")
+  })
+
+  it("copies fenced source from code text without duplicating it in data-copy", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    const source = 'const tag = "<button>"\nconsole.log(tag)'
+    const wrapper = mount(MarkdownRenderer, { props: { content: `\`\`\`js\n${source}\n\`\`\`` } })
+    const button = wrapper.find(".code-copy-btn")
+
+    expect(button.attributes("data-copy")).toBeUndefined()
+    expect(renderedHtml(wrapper)).not.toContain("data-copy=")
+    await button.trigger("click")
+
+    expect(writeText).toHaveBeenCalledWith(`${source}\n`)
   })
 
   it("renders empty for empty content", () => {
