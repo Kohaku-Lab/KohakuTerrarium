@@ -975,6 +975,116 @@ class TestBackfillDedupeAndPathResilience:
         # duplicate event 3 is dropped, so event 2's id is attached.
         assert out[1]["metadata"]["event_id"] == 2
 
+    def test_backfill_skips_synthetic_tool_feedback_user_messages(self):
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        snapshot = [
+            {"role": "user", "content": "U1"},
+            {
+                "role": "user",
+                "content": "tool feedback",
+                "metadata": {"kind": "tool_results"},
+            },
+            {"role": "user", "content": "U2"},
+        ]
+        events = [
+            {
+                "event_id": 1,
+                "type": "user_message",
+                "content": "U1",
+                "turn_index": 1,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            },
+            {
+                "event_id": 2,
+                "type": "user_message",
+                "content": "U2",
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            },
+        ]
+
+        out = backfill_turn_metadata(snapshot, events)
+
+        assert out[0]["metadata"] == {
+            "event_id": 1,
+            "turn_index": 1,
+            "branch_id": 1,
+        }
+        assert out[1]["metadata"] == {"kind": "tool_results"}
+        assert out[2]["metadata"] == {
+            "event_id": 2,
+            "turn_index": 2,
+            "branch_id": 1,
+        }
+
+    def test_backfill_skips_multiple_tool_feedback_messages_without_rewriting_them(
+        self,
+    ):
+        from kohakuterrarium.session.resume_branch import backfill_turn_metadata
+
+        feedback = [
+            {
+                "role": "user",
+                "content": f"tool feedback {index}",
+                "metadata": {"kind": "tool_results", "batch": index},
+            }
+            for index in range(2)
+        ]
+        snapshot = [
+            {"role": "user", "content": "U1"},
+            *feedback,
+            {"role": "user", "content": "U2"},
+        ]
+        events = [
+            {
+                "event_id": index,
+                "type": "user_message",
+                "content": f"U{index}",
+                "turn_index": index,
+                "branch_id": 1,
+                "parent_branch_path": [],
+            }
+            for index in (1, 2)
+        ]
+
+        out = backfill_turn_metadata(snapshot, events)
+
+        assert [out[0]["metadata"]["event_id"], out[-1]["metadata"]["event_id"]] == [
+            1,
+            2,
+        ]
+        assert [message["metadata"] for message in out[1:-1]] == [
+            {"kind": "tool_results", "batch": 0},
+            {"kind": "tool_results", "batch": 1},
+        ]
+        assert [message["content"] for message in out] == [
+            "U1",
+            "tool feedback 0",
+            "tool feedback 1",
+            "U2",
+        ]
+
+    def test_tool_feedback_does_not_make_snapshot_metadata_incomplete(self):
+        from kohakuterrarium.session.resume_branch import snapshot_has_turn_metadata
+
+        snapshot = [
+            {
+                "role": "user",
+                "content": "U1",
+                "metadata": {"turn_index": 1, "branch_id": 1},
+            },
+            {
+                "role": "user",
+                "content": "tool feedback",
+                "metadata": {"kind": "tool_results"},
+            },
+        ]
+
+        assert snapshot_has_turn_metadata(snapshot) is True
+
     def test_backfill_metadata_matches_replay_metadata(self):
         # Cross-path consistency guard: backfilled legacy snapshots and
         # replay(include_metadata=True) must attach IDENTICAL user message

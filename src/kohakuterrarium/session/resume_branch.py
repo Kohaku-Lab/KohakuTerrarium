@@ -7,6 +7,7 @@ agent resumes onto, or must be rebuilt from the event log.
 
 from typing import Any
 
+from kohakuterrarium.core.conversation_elide import TOOL_FEEDBACK_KIND
 from kohakuterrarium.session.history import (
     normalize_resumable_events,
     replay_conversation,
@@ -34,6 +35,10 @@ def snapshot_has_turn_metadata(snapshot: list[dict]) -> bool:
         isinstance(m, dict)
         and (
             m.get("role") != "user"
+            or (
+                isinstance(m.get("metadata"), dict)
+                and m["metadata"].get("kind") == TOOL_FEEDBACK_KIND
+            )
             or (
                 isinstance(m.get("metadata"), dict)
                 and isinstance(m["metadata"].get("turn_index"), int)
@@ -97,7 +102,14 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
         pos_by_key[key] = len(meta_by_pos)
         meta_by_pos.append(meta)
     user_messages = [
-        m for m in snapshot if isinstance(m, dict) and m.get("role") == "user"
+        m
+        for m in snapshot
+        if isinstance(m, dict)
+        and m.get("role") == "user"
+        and not (
+            isinstance(m.get("metadata"), dict)
+            and m["metadata"].get("kind") == TOOL_FEEDBACK_KIND
+        )
     ]
     tail_meta = meta_by_pos[-len(user_messages) :] if user_messages else []
     out: list[dict] = []
@@ -109,8 +121,13 @@ def backfill_turn_metadata(snapshot: list[dict], events: list[dict]) -> list[dic
             out.append(msg)
             continue
         m = dict(msg)
-        if m.get("role") == "user" and tail_meta:
-            meta = dict(m.get("metadata") or {})
+        raw_metadata = m.get("metadata")
+        metadata = raw_metadata if isinstance(raw_metadata, dict) else {}
+        is_canonical_user = (
+            m.get("role") == "user" and metadata.get("kind") != TOOL_FEEDBACK_KIND
+        )
+        if is_canonical_user and tail_meta:
+            meta = dict(metadata)
             # Position-aligned: every user message consumes one tail slot so
             # later messages keep their correct turn. Replace the canonical
             # identity fields whenever turn or branch is not a positive int
