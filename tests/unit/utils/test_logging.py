@@ -338,6 +338,58 @@ class TestKTLogger:
         assert captured[1].agent == "a1"
         assert not hasattr(captured[1], "tool_name")
 
+    def test_every_level_method_attributes_the_real_caller(self):
+        # The overrides add frames; findCaller only skips stdlib logging ones,
+        # so filename/lineno/funcName must still land on this test.
+        captured: list[logging.LogRecord] = []
+
+        class _Cap(logging.Handler):
+            def emit(self, record):
+                captured.append(record)
+
+        log = get_logger("kohakuterrarium.kt_test_caller", logging.DEBUG)
+        cap = _Cap(level=logging.DEBUG)
+        log.addHandler(cap)
+
+        log.debug("d", field="x")
+        log.info("i", field="x")
+        log.warning("w", field="x")
+        log.error("e", field="x")
+        log.critical("c", field="x")
+        log.log(logging.INFO, "l", field="x")
+        try:
+            raise ValueError("boom")
+        except ValueError:
+            log.exception("x", field="x")
+
+        assert len(captured) == 7
+        for rec in captured:
+            assert rec.filename == os.path.basename(__file__)
+            assert rec.funcName == "test_every_level_method_attributes_the_real_caller"
+            assert rec.field == "x"
+        assert captured[-1].exc_info is not None
+
+    def test_explicit_stacklevel_still_walks_up(self):
+        # stacklevel=2 must attribute to the caller's caller, not the override.
+        captured: list[logging.LogRecord] = []
+
+        class _Cap(logging.Handler):
+            def emit(self, record):
+                captured.append(record)
+
+        log = get_logger("kohakuterrarium.kt_test_stacklevel", logging.DEBUG)
+        cap = _Cap(level=logging.DEBUG)
+        log.addHandler(cap)
+
+        def _helper():
+            log.info("via helper", stacklevel=2, field="x")
+
+        _helper()
+
+        assert len(captured) == 1
+        assert captured[0].funcName == "test_explicit_stacklevel_still_walks_up"
+        assert captured[0].field == "x"
+
     def test_logger_is_KTLogger_instance(self):
         log = get_logger("kohakuterrarium.kt_test2")
         assert isinstance(log, KTLogger)
