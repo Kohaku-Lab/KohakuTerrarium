@@ -191,13 +191,12 @@ class KTLogger(logging.Logger):
         stacklevel: int = 1,
         **kwargs: Any,
     ) -> None:
-        # Merge kwargs into extra for convenience
-        # This allows: logger.info("message", field1=value1, field2=value2)
-        if kwargs:
-            if extra is None:
-                extra = {}
-            extra.update(kwargs)
-        super()._log(level, msg, args, exc_info, extra, stack_info, stacklevel + 1)
+        # Build a fresh mapping: callers may reuse the dict they passed as extra.
+        merged: dict[str, Any] | None = None
+        if extra is not None or kwargs:
+            merged = dict(extra) if extra else {}
+            merged.update(kwargs)
+        super()._log(level, msg, args, exc_info, merged, stack_info, stacklevel + 1)
 
 
 # Set custom logger class
