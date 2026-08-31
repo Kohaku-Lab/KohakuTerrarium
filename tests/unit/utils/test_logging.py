@@ -299,6 +299,45 @@ class TestKTLogger:
         assert captured[0].custom_field == "x"
         assert captured[0].number == 42
 
+    def test_caller_extra_dict_is_not_mutated(self):
+        # Merging kwargs must not write back into the caller's dict.
+        captured: list[logging.LogRecord] = []
+
+        class _Cap(logging.Handler):
+            def emit(self, record):
+                captured.append(record)
+
+        log = get_logger("kohakuterrarium.kt_test_extra")
+        cap = _Cap(level=logging.DEBUG)
+        log.addHandler(cap)
+
+        caller_extra = {"request_id": "r1"}
+        log.info("hi", extra=caller_extra, trace_id="t1")
+
+        assert caller_extra == {"request_id": "r1"}
+        assert captured[0].request_id == "r1"
+        assert captured[0].trace_id == "t1"
+
+    def test_reused_extra_does_not_leak_fields_across_calls(self):
+        # A base `extra` reused by a caller must not accumulate earlier kwargs.
+        captured: list[logging.LogRecord] = []
+
+        class _Cap(logging.Handler):
+            def emit(self, record):
+                captured.append(record)
+
+        log = get_logger("kohakuterrarium.kt_test_extra_reuse")
+        cap = _Cap(level=logging.DEBUG)
+        log.addHandler(cap)
+
+        base = {"agent": "a1"}
+        log.info("first", extra=base, tool_name="read")
+        log.info("second", extra=base)
+
+        assert len(captured) == 2
+        assert captured[1].agent == "a1"
+        assert not hasattr(captured[1], "tool_name")
+
     def test_logger_is_KTLogger_instance(self):
         log = get_logger("kohakuterrarium.kt_test2")
         assert isinstance(log, KTLogger)
