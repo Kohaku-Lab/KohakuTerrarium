@@ -20,9 +20,10 @@ import os
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.kt_logger import KTLogger
 
 try:
     import ctypes
@@ -175,28 +176,6 @@ class ColoredFormatter(logging.Formatter):
         if self.use_color:
             return f"{COLORS['ERROR']}{result}{COLORS['RESET']}"
         return result
-
-
-class KTLogger(logging.Logger):
-    """Extended logger with extra field support."""
-
-    def _log(
-        self,
-        level: int,
-        msg: object,
-        args: tuple[Any, ...],
-        exc_info: Any = None,
-        extra: dict[str, Any] | None = None,
-        stack_info: bool = False,
-        stacklevel: int = 1,
-        **kwargs: Any,
-    ) -> None:
-        # Build a fresh mapping: callers may reuse the dict they passed as extra.
-        merged: dict[str, Any] | None = None
-        if extra is not None or kwargs:
-            merged = dict(extra) if extra else {}
-            merged.update(kwargs)
-        super()._log(level, msg, args, exc_info, merged, stack_info, stacklevel + 1)
 
 
 # Set custom logger class
@@ -360,7 +339,7 @@ def enable_file_logging() -> None:
     root_logger.addHandler(_handler)
 
 
-def get_logger(name: str, level: int | str = logging.INFO) -> logging.Logger:
+def get_logger(name: str, level: int | str = logging.INFO) -> KTLogger:
     """
     Get a configured logger for a module.
 
@@ -372,7 +351,7 @@ def get_logger(name: str, level: int | str = logging.INFO) -> logging.Logger:
         level: Logging level (default: INFO)
 
     Returns:
-        Configured Logger instance
+        Configured KTLogger instance
     """
     global _handler
 
@@ -401,7 +380,7 @@ def get_logger(name: str, level: int | str = logging.INFO) -> logging.Logger:
         root_logger.setLevel(logging.INFO)
         root_logger.propagate = False
 
-    return logger
+    return cast(KTLogger, logger)
 
 
 def set_level(level: int | str) -> None:
