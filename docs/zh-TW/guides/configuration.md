@@ -91,14 +91,17 @@ tools:
 tools:
   - name: web_search
     backend: duckduckgo
+    codex_model: gpt-5.6-luna
     deepseek_model: deepseek-v4-flash
     fallback: none
 ```
 
-`web_search` 預設使用不需 Key 的 DuckDuckGo。若要啟用 DeepSeek，先執行
-`kt config key set deepseek`，再於 Creature 設定中指定
-`backend: deepseek`，或透過 `/module set web_search backend deepseek`
-切換目前的 Creature。
+`web_search` 預設仍使用不需 Key 的 DuckDuckGo。若要明確使用 Codex
+訂閱託管搜尋，先執行 `kt login codex`，再設定 `backend: codex`，或透過
+`/module set web_search backend codex` 切換；此後端獨立於目前 Creature
+的主模型。若要使用 DeepSeek，先執行 `kt config key set deepseek`，再選擇
+`backend: deepseek`。為明確選擇的 Codex 或 DeepSeek 後端設定
+`fallback: duckduckgo`，可在暫時故障時回退。
 
 本地 custom 模組：
 

@@ -1,17 +1,30 @@
-"""Web search with selectable DuckDuckGo and DeepSeek backends."""
+"""Web search with Codex-subscription, DuckDuckGo, and DeepSeek backends."""
 
-import asyncio
-import html as _html
 import re
 import time
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 
 import httpx
 
 from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.builtins.tools.web_search_duckduckgo import (
+    DDGS,
+    _parse_ddg_html as _parse_ddg_html,
+    _search_ddg,
+    _search_httpx_ddg,
+    _unwrap_ddg_redirect as _unwrap_ddg_redirect,
+)
 from kohakuterrarium.llm.api_keys import get_api_key, has_api_key
+from kohakuterrarium.llm.codex_web_search import (
+    CODEX_SEARCH_MODELS,
+    DEFAULT_CODEX_SEARCH_MODEL,
+    CodexSearchOperationalError,
+    CodexSearchUnavailable,
+    CodexSubscriptionSearchBackend,
+    codex_search_available,
+)
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
 from kohakuterrarium.utils.logging import get_logger
 
@@ -21,18 +34,6 @@ MAX_RESULTS = 10
 DEEPSEEK_RESPONSES_URL = "https://api.deepseek.com/responses"
 DEFAULT_DEEPSEEK_MODEL = "deepseek-v4-flash"
 DEEPSEEK_MODELS = ("deepseek-v4-flash", "deepseek-v4-pro")
-
-
-# Prefer the current optional package, then its legacy predecessor; ``None``
-# selects the HTTP backend on installations without either dependency.
-DDGS: Any = None
-try:
-    from ddgs import DDGS  # type: ignore[no-redef]
-except ImportError:
-    try:
-        from duckduckgo_search import DDGS  # type: ignore[no-redef]
-    except ImportError:
-        pass
 
 
 def _has_ddg() -> bool:
@@ -61,7 +62,7 @@ class SearchResponse:
 
 
 class DuckDuckGoSearchBackend:
-    """Run the existing DDGS-to-HTML fallback chain."""
+    """Use the optional DDGS package, then the HTTP endpoint as fallback."""
 
     async def search(self, query: str, max_results: int, region: str) -> SearchResponse:
         results: list[dict] = []
@@ -75,7 +76,6 @@ class DuckDuckGoSearchBackend:
                     "ddgs search failed, falling back to httpx scraper",
                     error=str(exc),
                 )
-
         if not results:
             try:
                 results = await _search_httpx_ddg(query, max_results, region)
@@ -84,7 +84,6 @@ class DuckDuckGoSearchBackend:
                 raise SearchBackendOperationalError(
                     f"DuckDuckGo search failed: {detail}"
                 ) from exc
-
         if not results:
             return SearchResponse(
                 output="No results found.", metadata={"backend": "duckduckgo"}
@@ -185,6 +184,7 @@ class WebSearchTool(BaseTool):
     def __init__(self, config=None):
         super().__init__(config=config)
         self.backend = "duckduckgo"
+        self.codex_model = DEFAULT_CODEX_SEARCH_MODEL
         self.deepseek_model = DEFAULT_DEEPSEEK_MODEL
         self.fallback = "none"
         self.refresh_runtime_options(dict(self.config.extra))
@@ -195,6 +195,11 @@ class WebSearchTool(BaseTool):
 
     @property
     def description(self) -> str:
+        if self.backend == "codex":
+            return (
+                "Search the web once per question; retry only if incomplete "
+                "or conflicting"
+            )
         return "Search the web and return results with titles, URLs, and snippets"
 
     @property
@@ -207,13 +212,23 @@ class WebSearchTool(BaseTool):
             disabled["deepseek"] = (
                 "DeepSeek API key is not configured. Run: " "kt config key set deepseek"
             )
+        if not codex_search_available():
+            disabled["codex"] = (
+                "Codex subscription is not connected. Run: kt login codex"
+            )
         return {
             "backend": {
                 "type": "enum",
-                "values": ["duckduckgo", "deepseek"],
+                "values": ["duckduckgo", "codex", "deepseek"],
                 "default": "duckduckgo",
                 "disabled_values": disabled,
                 "doc": "Search implementation used by this creature.",
+            },
+            "codex_model": {
+                "type": "enum",
+                "values": list(CODEX_SEARCH_MODELS),
+                "default": DEFAULT_CODEX_SEARCH_MODEL,
+                "doc": "Codex subscription model used for standalone web search.",
             },
             "deepseek_model": {
                 "type": "enum",
@@ -225,12 +240,13 @@ class WebSearchTool(BaseTool):
                 "type": "enum",
                 "values": ["none", "duckduckgo"],
                 "default": "none",
-                "doc": "Fallback for transient DeepSeek failures only.",
+                "doc": "Fallback for transient explicitly selected backend failures.",
             },
         }
 
     def refresh_runtime_options(self, options: dict[str, Any]) -> None:
         self.backend = str(options.get("backend", "duckduckgo"))
+        self.codex_model = str(options.get("codex_model", DEFAULT_CODEX_SEARCH_MODEL))
         self.deepseek_model = str(options.get("deepseek_model", DEFAULT_DEEPSEEK_MODEL))
         self.fallback = str(options.get("fallback", "none"))
 
@@ -243,29 +259,32 @@ class WebSearchTool(BaseTool):
         region = args.get("region", "")
 
         started_at = time.monotonic()
+        selected_backend = self.backend
         try:
-            search_backend = self._backend()
+            search_backend = self._backend(selected_backend)
             response = await search_backend.search(query, max_results, region)
+        except CodexSearchOperationalError as exc:
+            response = await self._fallback_or_error(
+                query, max_results, region, selected_backend, exc
+            )
+            if isinstance(response, ToolResult):
+                return response
+        except CodexSearchUnavailable as exc:
+            return ToolResult(error=str(exc))
         except SearchBackendOperationalError as exc:
-            if self.backend == "deepseek" and self.fallback == "duckduckgo":
-                logger.warning("DeepSeek search failed, using configured fallback")
-                try:
-                    response = await DuckDuckGoSearchBackend().search(
-                        query, max_results, region
-                    )
-                except SearchBackendError as fallback_exc:
-                    return ToolResult(error=str(fallback_exc))
-                response.metadata["fallback_from"] = "deepseek"
-                response.metadata["fallback_reason"] = str(exc)
-            else:
-                return ToolResult(error=str(exc))
+            response = await self._fallback_or_error(
+                query, max_results, region, selected_backend, exc
+            )
+            if isinstance(response, ToolResult):
+                return response
         except SearchBackendError as exc:
             return ToolResult(error=str(exc))
 
+        response.metadata["requested_backend"] = self.backend
         response.metadata["duration_ms"] = round(
             (time.monotonic() - started_at) * 1000.0, 1
         )
-        response.metadata["source_count"] = len(response.sources)
+        response.metadata.setdefault("source_count", len(response.sources))
         response.metadata["session_metadata"] = _search_session_metadata(
             response.metadata
         )
@@ -280,12 +299,41 @@ class WebSearchTool(BaseTool):
             metadata=response.metadata,
         )
 
-    def _backend(self):
-        if self.backend == "duckduckgo":
+    def _backend(self, selected: str | None = None):
+        selected = selected or self.backend
+        if selected == "codex":
+            return CodexSubscriptionSearchBackend(self.codex_model)
+        if selected == "duckduckgo":
             return DuckDuckGoSearchBackend()
-        if self.backend == "deepseek":
+        if selected == "deepseek":
             return DeepSeekSearchBackend(self.deepseek_model)
-        raise SearchBackendUnavailable(f"Unknown web search backend: {self.backend!r}")
+        raise SearchBackendUnavailable(f"Unknown web search backend: {selected!r}")
+
+    async def _fallback_or_error(
+        self,
+        query: str,
+        max_results: int,
+        region: str,
+        selected: str,
+        error: Exception,
+    ) -> SearchResponse | ToolResult:
+        fallback_enabled = self.fallback == "duckduckgo"
+        if not fallback_enabled or selected == "duckduckgo":
+            return ToolResult(error=str(error))
+        logger.warning(
+            "Primary web search failed, using DuckDuckGo fallback",
+            backend=selected,
+            error=str(error),
+        )
+        try:
+            response = await DuckDuckGoSearchBackend().search(
+                query, max_results, region
+            )
+        except SearchBackendError as fallback_exc:
+            return ToolResult(error=str(fallback_exc))
+        response.metadata["fallback_from"] = selected
+        response.metadata["fallback_reason"] = str(error)
+        return response
 
 
 def _render_ddg_results(query: str, results: list[dict]) -> str:
@@ -389,26 +437,30 @@ def _search_session_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
     """Select non-secret search diagnostics for session persistence."""
     keys = (
         "backend",
+        "requested_backend",
         "model",
         "response_status",
         "citation_status",
         "annotation_count",
         "source_count",
+        "verified_source_count",
+        "action_source_count",
         "result_count",
         "fallback_from",
         "fallback_reason",
         "duration_ms",
     )
     result = {key: metadata[key] for key in keys if key in metadata}
-    sources = metadata.get("verified_sources")
-    if isinstance(sources, list):
-        result["verified_sources"] = [
-            {"title": source["title"], "url": source["url"]}
-            for source in sources
-            if isinstance(source, dict)
-            and isinstance(source.get("title"), str)
-            and isinstance(source.get("url"), str)
-        ]
+    for key in ("verified_sources", "consulted_sources"):
+        sources = metadata.get(key)
+        if isinstance(sources, list):
+            result[key] = [
+                {"title": source["title"], "url": source["url"]}
+                for source in sources
+                if isinstance(source, dict)
+                and isinstance(source.get("title"), str)
+                and isinstance(source.get("url"), str)
+            ]
     usage = metadata.get("usage")
     if isinstance(usage, dict):
         result["usage"] = {
@@ -416,6 +468,17 @@ def _search_session_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
             for key, value in usage.items()
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         }
+    actions = metadata.get("actions")
+    if isinstance(actions, list):
+        result["actions"] = [
+            {
+                str(key): value
+                for key, value in action.items()
+                if key in {"type", "query", "queries", "url", "pattern"}
+            }
+            for action in actions[:20]
+            if isinstance(action, dict)
+        ]
     return result
 
 
@@ -501,86 +564,3 @@ def _source_from_annotation(annotation: Any) -> dict[str, str] | None:
         return None
     title = str(source.get("title") or parsed.netloc)
     return {"title": title, "url": url}
-
-
-async def _search_ddg(query: str, max_results: int, region: str) -> list[dict]:
-    """Run the synchronous ``ddgs`` client without blocking the event loop."""
-
-    def _do_search():
-        kwargs: dict[str, Any] = {"max_results": max_results}
-        if region:
-            kwargs["region"] = region
-        with DDGS() as ddgs:
-            return list(ddgs.text(query, **kwargs))
-
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, _do_search)
-
-
-# Title and snippet patterns intentionally tolerate extra attributes and
-# whitespace but remain coupled to DuckDuckGo's HTML result class names.
-_RE_DDG_TITLE = re.compile(
-    r'<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>(.*?)</a>',
-    re.DOTALL,
-)
-_RE_DDG_SNIPPET = re.compile(
-    r'class="result__snippet"[^>]*>(.*?)</a>',
-    re.DOTALL,
-)
-_RE_DDG_HTML_TAG = re.compile(r"<[^>]+>")
-_RE_DDG_REDIRECT = re.compile(r"^//duckduckgo\.com/l/\?(?:.*&)?uddg=([^&]+)")
-
-
-def _strip_html(text: str) -> str:
-    return _html.unescape(_RE_DDG_HTML_TAG.sub("", text)).strip()
-
-
-def _unwrap_ddg_redirect(href: str) -> str:
-    """Extract the target from DuckDuckGo redirect URLs when present."""
-    m = _RE_DDG_REDIRECT.match(href)
-    if m:
-        return unquote(m.group(1))
-    return href
-
-
-def _parse_ddg_html(body: str, max_results: int) -> list[dict]:
-    """Parse HTML results into the same mapping shape as ``ddgs``."""
-    results: list[dict] = []
-    for m in _RE_DDG_TITLE.finditer(body):
-        href = _unwrap_ddg_redirect(_html.unescape(m.group(1)))
-        title = _strip_html(m.group(2))
-        results.append({"href": href, "title": title, "body": ""})
-        if len(results) >= max_results:
-            break
-    snippets = [_strip_html(m.group(1)) for m in _RE_DDG_SNIPPET.finditer(body)]
-    for i, snip in enumerate(snippets[: len(results)]):
-        results[i]["body"] = snip
-    return results
-
-
-async def _search_httpx_ddg(
-    query: str,
-    max_results: int,
-    region: str,
-) -> list[dict]:
-    """Search DuckDuckGo's HTML endpoint without native dependencies."""
-    url = "https://html.duckduckgo.com/html/"
-    headers = {
-        # The HTML endpoint challenges obvious bot user agents.
-        "User-Agent": (
-            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-            "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
-        ),
-        "Accept": "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
-    }
-    payload: dict[str, str] = {"q": query, "b": "", "df": ""}
-    if region:
-        payload["kl"] = region
-
-    async with httpx.AsyncClient(
-        headers=headers, follow_redirects=True, timeout=15.0
-    ) as client:
-        resp = await client.post(url, data=payload)
-        resp.raise_for_status()
-        return _parse_ddg_html(resp.text, max_results)

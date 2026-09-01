@@ -88,9 +88,11 @@ KohakuTerrarium 随附的所有内置工具、子代理、输入、输出、用�
 
 - 参数：`url`。
 
- **`web_search`**：默认使用 DuckDuckGo，也可选择 DeepSeek Responses
-搜索后端。DeepSeek 需要先执行 `kt config key set deepseek`，再通过
-`/module set web_search backend deepseek` 为当前 Creature 启用。直接执行。
+**`web_search`**：默认使用 DuckDuckGo，也可明确选择 Codex 订阅或
+DeepSeek Responses 后端。执行 `kt login codex` 后可设置
+`backend: codex`；此后端与当前 Creature 主模型无关。DeepSeek 需要先执行
+`kt config key set deepseek`，再设置 `backend: deepseek`。两个明确选择的
+Provider 后端均可配置 `fallback: duckduckgo` 处理临时故障。直接执行。
 
 - 参数：`query`、`max_results`（int）、`region`（str）。
 

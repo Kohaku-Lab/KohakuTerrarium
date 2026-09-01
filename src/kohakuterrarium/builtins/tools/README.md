@@ -30,7 +30,7 @@ the public API from `builtins.tool_catalog`.
 | `stop_task.py`                          | `stop_task`: cancel a running background tool, sub-agent, or trigger by id                                        |
 | `search_memory.py`                      | `search_memory`: FTS5 + semantic search over the current session's event log                                      |
 | `web_fetch.py`                          | `web_fetch`: clean-read a URL (crawl4ai → trafilatura → jina → naive fallback)                                    |
-| `web_search.py`                         | `web_search`: DuckDuckGo search (optional `duckduckgo-search` dep)                                                |
+| `web_search.py`                         | `web_search`: DuckDuckGo search with optional Codex subscription and DeepSeek backends                           |
 | `skill.py`                              | `skill`: load a named skill's full documentation                                                                  |
 | `image_gen.py`                          | `image_gen`: provider-backed image generation                                                                     |
 | `canvas_preview.py` / `show_card.py`    | UI surfaces: canvas preview + structured cards                                                                    |
