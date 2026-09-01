@@ -131,9 +131,23 @@ describe("ChatPanel scroll scheduling", () => {
 
     expect(scroll).not.toHaveBeenCalled()
   })
+
+  it("suppresses a pending forced scroll until follow mode resumes", () => {
+    const { frames, scroll, scheduler } = setupScheduler({ nearBottom: true })
+
+    scheduler.schedule(true, "instance:A")
+    scheduler.suppress()
+
+    expect(frames.size).toBe(0)
+    expect(scroll).not.toHaveBeenCalled()
+
+    scheduler.resume()
+    scheduler.schedule(false, "instance:A")
+    expect(frames.size).toBe(1)
+  })
 })
 
-describe("ChatPanel render window", () => {
+describe("ChatPanel long-session performance", () => {
   function mountPanel(chat, { groupId = null } = {}) {
     chat._instanceId = "graph_1"
     chat._instanceGraphId = "graph_1"
@@ -185,8 +199,8 @@ describe("ChatPanel render window", () => {
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(400)
-    expect(renderedIds(wrapper)[0]).toBe("m_50")
+    expect(renderedIds(wrapper).length).toBe(100)
+    expect(renderedIds(wrapper)[0]).toBe("m_350")
     expect(renderedIds(wrapper).at(-1)).toBe("m_449")
     const earlier = wrapper.find("button.self-center")
     expect(earlier.exists()).toBe(true)
@@ -202,9 +216,9 @@ describe("ChatPanel render window", () => {
     await wrapper.find("button.self-center").trigger("click")
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(450)
-    expect(renderedIds(wrapper)[0]).toBe("m_0")
-    expect(wrapper.find("button.self-center").exists()).toBe(false)
+    expect(renderedIds(wrapper).length).toBe(200)
+    expect(renderedIds(wrapper)[0]).toBe("m_250")
+    expect(wrapper.find("button.self-center").text()).toContain("250")
   })
 
   it("shrinkage below an expanded window start falls back to the tail window", async () => {
@@ -213,10 +227,10 @@ describe("ChatPanel render window", () => {
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    // Expand once: explicit window start at index 0.
+    // Expand once: explicit window start at index 250.
     await wrapper.find("button.self-center").trigger("click")
     await flushPromises()
-    expect(renderedIds(wrapper).length).toBe(450)
+    expect(renderedIds(wrapper).length).toBe(200)
 
     // A resync replaces the transcript with a much shorter one.
     seedMessages(chat, 30)
@@ -227,6 +241,13 @@ describe("ChatPanel render window", () => {
     expect(renderedIds(wrapper).length).toBe(30)
     expect(renderedIds(wrapper)[0]).toBe("m_0")
     expect(wrapper.find("button.self-center").exists()).toBe(false)
+
+    seedMessages(chat, 500)
+    await flushPromises()
+
+    expect(renderedIds(wrapper).length).toBe(100)
+    expect(renderedIds(wrapper)[0]).toBe("m_400")
+    expect(renderedIds(wrapper).at(-1)).toBe("m_499")
   })
 
   it("new tail messages stay mounted inside the window while streaming", async () => {
@@ -238,9 +259,225 @@ describe("ChatPanel render window", () => {
     chat.messagesByTab.kohaku.push({ id: "m_420", role: "user", content: "live" })
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(400)
+    expect(renderedIds(wrapper).length).toBe(100)
     expect(renderedIds(wrapper).at(-1)).toBe("m_420")
     expect(renderedIds(wrapper)).not.toContain("m_0")
+  })
+
+  it("does not grow an expanded history window when new tail messages arrive", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper).length).toBe(200)
+
+    for (let index = 450; index < 500; index += 1) {
+      chat.messagesByTab.kohaku.push({
+        id: `m_${index}`,
+        role: index % 2 ? "assistant" : "user",
+        content: `message ${index}`,
+      })
+    }
+    await flushPromises()
+
+    expect(renderedIds(wrapper).length).toBe(200)
+    expect(renderedIds(wrapper).at(-1)).toBe("m_449")
+  })
+
+  it("keeps scroll-to-pending inside a bounded message window", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 1000)
+    chat.messagesByTab.kohaku[10] = {
+      id: "pending_10",
+      role: "ui_event",
+      content: "approval",
+      interactive: true,
+      replied: false,
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    await wrapper.find("textarea").setValue("draft")
+
+    const scrollIntoView = vi.fn()
+    const originalScrollIntoView = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = scrollIntoView
+    await wrapper.find(".text-amber.hover\\:underline").trigger("click")
+    await flushPromises()
+
+    expect(renderedIds(wrapper).length).toBeLessThanOrEqual(100)
+    expect(renderedIds(wrapper)).toContain("pending_10")
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" })
+    Element.prototype.scrollIntoView = originalScrollIntoView
+    wrapper.unmount()
+  })
+
+  it("does not scan branch history before sending a regular message", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 250)
+    const sendFrame = vi.fn()
+    chat._ws = { readyState: WebSocket.OPEN, send: sendFrame }
+    const capture = vi.spyOn(chat, "captureCommandResultContext")
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    await wrapper.find("textarea").setValue("continue")
+    await wrapper.find('button[aria-label="Send message"]').trigger("click")
+    await flushPromises()
+
+    expect(capture).not.toHaveBeenCalled()
+    expect(sendFrame).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it("coalesces native scroll state reads into one animation frame", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 20)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    frames.clear()
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    let heightReads = 0
+    Object.defineProperty(viewport, "scrollHeight", {
+      configurable: true,
+      get() {
+        heightReads += 1
+        return 1000
+      },
+    })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+    viewport.scrollTop = 300
+
+    viewport.dispatchEvent(new Event("scroll"))
+    viewport.dispatchEvent(new Event("scroll"))
+    viewport.dispatchEvent(new Event("scroll"))
+
+    expect(heightReads).toBe(0)
+    expect(frames.size).toBe(1)
+    const [[id, frame]] = frames
+    frames.delete(id)
+    frame()
+    expect(heightReads).toBe(1)
+    wrapper.unmount()
+  })
+
+  it("does not let a pending auto-scroll override a later manual scroll", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 20)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    frames.clear()
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+    viewport.scrollTop = 1000
+    viewport.dispatchEvent(new Event("scroll"))
+    frames.clear()
+
+    chat.messagesByTab.kohaku.push({ id: "m_20", role: "assistant", content: "stream" })
+    await flushPromises()
+    viewport.scrollTop = 300
+    viewport.dispatchEvent(new Event("scroll"))
+
+    expect(frames.size).toBe(0)
+    expect(viewport.scrollTop).toBe(300)
+    wrapper.unmount()
+  })
+
+  it("resumes follow mode after manually returning to the bottom", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 20)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    frames.clear()
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+    viewport.scrollTop = 1000
+    viewport.dispatchEvent(new Event("scroll"))
+    const [[bottomId, bottomFrame]] = frames
+    frames.delete(bottomId)
+    bottomFrame()
+
+    viewport.scrollTop = 300
+    viewport.dispatchEvent(new Event("scroll"))
+    expect(frames.size).toBe(1)
+    const [[upId, upFrame]] = frames
+    frames.delete(upId)
+    upFrame()
+
+    viewport.scrollTop = 800
+    viewport.dispatchEvent(new Event("scroll"))
+    const [[stateId, stateFrame]] = frames
+    frames.delete(stateId)
+    stateFrame()
+    expect(frames.size).toBe(0)
+
+    chat.messagesByTab.kohaku.push({ id: "m_20", role: "assistant", content: "stream" })
+    await flushPromises()
+    expect(frames.size).toBe(1)
+    wrapper.unmount()
+  })
+
+  it("cancels a pending native scroll read when the tab changes", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku", "reviewer"]
+    chat.messagesByTab = { kohaku: [], reviewer: [] }
+    const groupId = chat.enableGroups()
+    const wrapper = mountPanel(chat, { groupId })
+    await flushPromises()
+    frames.clear()
+
+    wrapper.find(".chat-messages-viewport").element.dispatchEvent(new Event("scroll"))
+    expect(frames.size).toBe(1)
+
+    chat.setGroupActiveTab(groupId, "reviewer")
+    await flushPromises()
+
+    expect(frames.size).toBe(0)
+    wrapper.unmount()
   })
 
   it("does not let a pending frame from the previous tab overwrite the new tab position", async () => {
