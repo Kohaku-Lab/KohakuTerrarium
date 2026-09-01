@@ -390,6 +390,28 @@ class TestKTLogger:
         assert captured[0].funcName == "test_explicit_stacklevel_still_walks_up"
         assert captured[0].field == "x"
 
+    def test_percent_style_args_survive_the_override(self):
+        # `args` must reach Logger._log untouched in both stdlib forms:
+        # a positional tuple, and a single mapping for %(name)s formatting.
+        captured: list[logging.LogRecord] = []
+
+        class _Cap(logging.Handler):
+            def emit(self, record):
+                captured.append(record)
+
+        log = get_logger("kohakuterrarium.kt_test_args", logging.DEBUG)
+        cap = _Cap(level=logging.DEBUG)
+        log.addHandler(cap)
+
+        log.info("hello %s, you are %d", "amy", 30, field="x")
+        log.info("hello %(who)s", {"who": "bob"}, field="y")
+
+        assert len(captured) == 2
+        assert captured[0].getMessage() == "hello amy, you are 30"
+        assert captured[0].field == "x"
+        assert captured[1].getMessage() == "hello bob"
+        assert captured[1].field == "y"
+
     def test_logger_is_KTLogger_instance(self):
         log = get_logger("kohakuterrarium.kt_test2")
         assert isinstance(log, KTLogger)

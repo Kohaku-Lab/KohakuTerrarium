@@ -280,7 +280,7 @@ def configure_utf8_stdio(*, log: bool = False) -> None:
             pass
 
     if log:
-        logger = logging.getLogger("kohakuterrarium.startup")
+        logger = cast(KTLogger, logging.getLogger("kohakuterrarium.startup"))
         logger.info(
             "stdio encoding configured",
             stdout_encoding=getattr(sys.stdout, "encoding", None),
