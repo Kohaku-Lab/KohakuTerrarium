@@ -81,7 +81,9 @@
           <button v-if="windowStart > 0" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
             {{ t("chat.showEarlier", { count: windowStart }) }}
           </button>
-          <ChatMessage v-for="(msg, idx) in windowMessages" :key="msg.id" :message="msg" :prev-message="windowStart + idx > 0 ? viewMessages[windowStart + idx - 1] : null" :is-first="windowStart + idx === 0" :message-idx="windowStart + idx" :is-last-assistant="msg.role === 'assistant' && windowStart + idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
+          <div v-for="(msg, idx) in windowMessages" :key="msg.id" :data-message-id="msg.id">
+            <ChatMessage :message="msg" :prev-message="windowStart + idx > 0 ? viewMessages[windowStart + idx - 1] : null" :is-first="windowStart + idx === 0" :message-idx="windowStart + idx" :is-last-assistant="msg.role === 'assistant' && windowStart + idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
+          </div>
           <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
             <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
             <span class="text-sm text-amber/80 kohaku-pulse">{{ kohakuwuingLabel }}</span>
@@ -423,8 +425,9 @@ async function scrollToPending() {
   const target = list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).pop()
   if (!target) return
   const targetIdx = list.indexOf(target)
-  if (targetIdx >= 0 && targetIdx < windowStart.value) {
+  if (targetIdx >= 0 && (targetIdx < windowStart.value || targetIdx >= (windowEndIndex.value ?? list.length))) {
     windowStartIndex.value = targetIdx
+    windowEndIndex.value = Math.min(list.length, targetIdx + RENDER_WINDOW_STEP)
     await nextTick()
   }
   const el = messagesEl.value
@@ -523,8 +526,9 @@ const scrollPositions = new Map()
 // newest RENDER_WINDOW_STEP messages. ``windowStartIndex`` stays null
 // (auto tail) until the user expands upward; once explicit, new
 // messages never shift the top of the rendered slice.
-const RENDER_WINDOW_STEP = 400
+const RENDER_WINDOW_STEP = 100
 const windowStartIndex = ref(null)
+const windowEndIndex = ref(null)
 
 const windowStart = computed(() => {
   const total = viewMessages.value.length
@@ -533,17 +537,19 @@ const windowStart = computed(() => {
   // an explicit start past the end of the list; clamping to total - 1
   // would collapse the view to one message. Fall back to the tail window
   // and let ``loadEarlierMessages`` re-establish an explicit start.
-  if (windowStartIndex.value >= total) {
+  if (windowStartIndex.value >= total || (windowEndIndex.value != null && windowEndIndex.value > total && windowStartIndex.value > Math.max(0, total - RENDER_WINDOW_STEP))) {
     windowStartIndex.value = null
+    windowEndIndex.value = null
     return Math.max(0, total - RENDER_WINDOW_STEP)
   }
   return windowStartIndex.value
 })
-const windowMessages = computed(() => viewMessages.value.slice(windowStart.value))
+const windowMessages = computed(() => viewMessages.value.slice(windowStart.value, windowEndIndex.value ?? undefined))
 
 async function loadEarlierMessages() {
   const el = messagesEl.value
   const prevHeight = el ? el.scrollHeight : 0
+  if (windowEndIndex.value == null) windowEndIndex.value = viewMessages.value.length
   windowStartIndex.value = Math.max(0, windowStart.value - RENDER_WINDOW_STEP)
   await nextTick()
   // Compensate the prepended height so the content the user was
@@ -557,10 +563,12 @@ function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab =
   return `${instanceId}:${tab}${suffix}`
 }
 
+let lastObservedScrollTop = 0
 function updateNearBottom() {
   const el = messagesEl.value
   if (!el) return
   isNearBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 80
+  lastObservedScrollTop = el.scrollTop
 }
 
 function saveScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
@@ -585,14 +593,27 @@ function restoreScrollPosition(instanceId = props.instance?.id || chat._instance
   return true
 }
 
+let scrollStateFrame = null
 function onMessagesScroll() {
-  updateNearBottom()
-  saveScrollPosition()
+  const el = messagesEl.value
+  if (el && el.scrollTop < lastObservedScrollTop) {
+    isNearBottom.value = false
+    scrollScheduler.suppress()
+  }
+  if (el) lastObservedScrollTop = el.scrollTop
+  if (scrollStateFrame !== null) return
+  scrollStateFrame = requestAnimationFrame(() => {
+    scrollStateFrame = null
+    updateNearBottom()
+    if (isNearBottom.value) scrollScheduler.resume()
+    saveScrollPosition()
+  })
 }
 
 function scrollToBottom() {
   const el = messagesEl.value
   if (!el) return
+  scrollScheduler.resume()
   el.scrollTop = el.scrollHeight
   updateNearBottom()
   saveScrollPosition()
@@ -645,10 +666,16 @@ watch(
   scrollScope,
   (scope, previousScope) => {
     scrollScheduler.invalidate()
+    scrollScheduler.resume()
+    if (scrollStateFrame !== null) {
+      cancelAnimationFrame(scrollStateFrame)
+      scrollStateFrame = null
+    }
     if (previousScope?.instanceId && previousScope.tab) {
       saveScrollPosition(previousScope.instanceId, previousScope.tab)
     }
     windowStartIndex.value = null
+    windowEndIndex.value = null
     restoreDraft()
     nextTick(() => {
       if (scope !== scrollScope.value) return
@@ -816,7 +843,7 @@ async function send() {
     return
   }
   const inlineCommand = /^\/goal(?:\s|$)/i.test(sendText)
-  const resultContext = inlineCommand ? chat.registerCommandResultContext(sendTab) : chat.captureCommandResultContext(sendTab)
+  const resultContext = inlineCommand ? chat.registerCommandResultContext(sendTab) : null
   if (contextChanged()) {
     if (inlineCommand) chat.releaseCommandResultContext(sendTab, resultContext)
     clearOwnedSlashTarget()
@@ -835,7 +862,10 @@ async function send() {
   inputText.value = ""
   attachments.value = []
   persistDraft()
+  windowStartIndex.value = null
+  windowEndIndex.value = null
   isNearBottom.value = true // force scroll after send
+  scrollScheduler.resume()
   nextTick(() => {
     if (inputEl.value) inputEl.value.style.height = "auto"
   })
@@ -973,6 +1003,7 @@ onMounted(() => window.addEventListener("keydown", onGlobalKeydown))
 onUnmounted(() => {
   window.removeEventListener("keydown", onGlobalKeydown)
   scrollScheduler.dispose()
+  if (scrollStateFrame !== null) cancelAnimationFrame(scrollStateFrame)
 })
 </script>
 

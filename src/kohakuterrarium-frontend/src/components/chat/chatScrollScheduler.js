@@ -10,6 +10,7 @@ export function createChatScrollScheduler({
   let forcePending = false
   let pendingScope
   let generation = 0
+  let suppressed = false
   let disposed = false
 
   function invalidate() {
@@ -23,8 +24,17 @@ export function createChatScrollScheduler({
     }
   }
 
+  function suppress() {
+    invalidate()
+    suppressed = true
+  }
+
+  function resume() {
+    suppressed = false
+  }
+
   function schedule(force = false, scope) {
-    if (disposed) return
+    if (disposed || suppressed) return
     if ((commitPending || frameId !== null) && pendingScope !== scope) invalidate()
 
     pendingScope = scope
@@ -37,7 +47,7 @@ export function createChatScrollScheduler({
       if (disposed || generation !== scheduledGeneration) return
       commitPending = false
       frameId = requestFrame(() => {
-        if (disposed || generation !== scheduledGeneration) return
+        if (disposed || suppressed || generation !== scheduledGeneration) return
         frameId = null
         const forceScroll = forcePending
         forcePending = false
@@ -52,5 +62,5 @@ export function createChatScrollScheduler({
     invalidate()
   }
 
-  return { schedule, invalidate, dispose }
+  return { schedule, suppress, resume, invalidate, dispose }
 }
