@@ -13,7 +13,7 @@ from kohakuterrarium.modules.plugin.base import BasePlugin, ToolVisibility
 from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.subagent.base import SubAgent
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
-from kohakuterrarium.modules.tool.base import BaseTool, ToolResult
+from kohakuterrarium.modules.tool.base import BaseTool, ToolConfig, ToolResult
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 
@@ -303,6 +303,218 @@ class TestNativeMode:
         # Token usage from last_usage is accumulated across turns.
         assert result.total_tokens == 30  # 15 per turn × 2 turns
         assert result.cached_tokens == 6
+
+    async def test_native_tool_output_honors_configured_byte_cap(self):
+        class _LargeOutputTool(BaseTool):
+            def __init__(self):
+                super().__init__(ToolConfig(max_output=32))
+
+            @property
+            def tool_name(self):
+                return "large"
+
+            @property
+            def description(self):
+                return "return a large result"
+
+            async def _execute(self, args, **kwargs):
+                return ToolResult(output="x" * 100)
+
+        class _LargeOutputLLM(_NativeLLM):
+            async def chat(self, messages, *, stream=True, tools=None, **kwargs):
+                self._turn += 1
+                if self._turn == 1:
+                    self.last_tool_calls = [
+                        _NativeToolCall("call-large", "large", "{}")
+                    ]
+                    yield ""
+                else:
+                    self.last_tool_calls = []
+                    yield "done"
+
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["large"], max_turns=5),
+            _registry(_LargeOutputTool()),
+            _LargeOutputLLM(),
+            tool_format="native",
+        )
+
+        result = await sa.run("get the large output")
+
+        assert result.success is True
+        tool_message = next(
+            message
+            for message in sa.conversation.to_messages()
+            if message.get("role") == "tool"
+        )
+        assert tool_message["content"].startswith("[large]\n" + "x" * 32)
+        assert "tool output truncated to 32 bytes" in tool_message["content"]
+        assert "68 bytes omitted" in tool_message["content"]
+        assert "x" * 100 not in tool_message["content"]
+
+    async def test_text_tool_output_honors_configured_byte_cap(self):
+        class _LargeOutputTool(BaseTool):
+            def __init__(self):
+                super().__init__(ToolConfig(max_output=32))
+
+            @property
+            def tool_name(self):
+                return "large"
+
+            @property
+            def description(self):
+                return "return a large result"
+
+            async def _execute(self, args, **kwargs):
+                return ToolResult(output="x" * 100)
+
+        llm = ScriptedLLM([_bracket_call("large"), "done"])
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["large"], max_turns=5),
+            _registry(_LargeOutputTool()),
+            llm,
+            tool_format="bracket",
+        )
+
+        result = await sa.run("get the large output")
+
+        assert result.success is True
+        user_message = sa.conversation.to_messages()[-2]
+        assert user_message["role"] == "user"
+        assert user_message["content"].startswith("[large]\n" + "x" * 32)
+        assert "tool output truncated to 32 bytes" in user_message["content"]
+        assert "68 bytes omitted" in user_message["content"]
+        assert "x" * 100 not in user_message["content"]
+
+    async def test_bash_raw_output_cleanup_matches_truncation(self, tmp_path):
+        class _BashLikeTool(BaseTool):
+            def __init__(self, output, raw_path, error=None):
+                super().__init__(ToolConfig(max_output=32))
+                self._output = output
+                self._raw_path = raw_path
+                self._error = error
+
+            @property
+            def tool_name(self):
+                return "bash"
+
+            @property
+            def description(self):
+                return "return shell output"
+
+            async def _execute(self, args, **kwargs):
+                return ToolResult(
+                    output=self._output,
+                    error=self._error,
+                    metadata={"raw_output_path": str(self._raw_path)},
+                )
+
+        class _BashOutputLLM(_NativeLLM):
+            async def chat(self, messages, *, stream=True, tools=None, **kwargs):
+                self._turn += 1
+                if self._turn == 1:
+                    self.last_tool_calls = [
+                        _NativeToolCall("call-bash", "bash", '{"command": "x"}')
+                    ]
+                    yield ""
+                else:
+                    self.last_tool_calls = []
+                    yield "done"
+
+        raw_path = tmp_path / "full-output.log"
+        raw_path.write_text("small", encoding="utf-8")
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["bash"], max_turns=5),
+            _registry(_BashLikeTool("small", raw_path)),
+            _BashOutputLLM(),
+            tool_format="native",
+        )
+        result = await sa.run("run a small command")
+        assert result.success is True
+        assert raw_path.exists() is False
+
+        raw_path.write_text("x" * 100, encoding="utf-8")
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["bash"], max_turns=5),
+            _registry(_BashLikeTool("x" * 100, raw_path)),
+            _BashOutputLLM(),
+            tool_format="native",
+        )
+        result = await sa.run("run a large command")
+        assert result.success is True
+        assert raw_path.exists() is True
+        tool_message = next(
+            message
+            for message in sa.conversation.to_messages()
+            if message.get("role") == "tool"
+        )
+        assert f"Full output saved to {raw_path}" in tool_message["content"]
+
+        raw_path.write_text("failed", encoding="utf-8")
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["bash"], max_turns=5),
+            _registry(_BashLikeTool("failed", raw_path, error="boom")),
+            _BashOutputLLM(),
+            tool_format="native",
+        )
+        result = await sa.run("run a failing command")
+        assert result.success is True
+        assert raw_path.exists() is False
+        tool_message = next(
+            message
+            for message in sa.conversation.to_messages()
+            if message.get("role") == "tool"
+        )
+        assert tool_message["content"] == "[bash] Error: boom"
+
+        raw_path.write_text("x" * 100, encoding="utf-8")
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["bash"], max_turns=5),
+            _registry(_BashLikeTool("x" * 100, raw_path, error="boom")),
+            _BashOutputLLM(),
+            tool_format="native",
+        )
+        result = await sa.run("run a large failing command")
+        assert result.success is True
+        assert raw_path.exists() is False
+        tool_message = next(
+            message
+            for message in sa.conversation.to_messages()
+            if message.get("role") == "tool"
+        )
+        assert tool_message["content"] == "[bash] Error: boom"
+
+    async def test_legacy_string_tool_output_honors_configured_byte_cap(self):
+        class _LegacyStringTool(BaseTool):
+            def __init__(self):
+                super().__init__(ToolConfig(max_output=32))
+
+            @property
+            def tool_name(self):
+                return "legacy"
+
+            @property
+            def description(self):
+                return "return a legacy string result"
+
+            async def execute(self, args, context=None):
+                return "x" * 100
+
+        llm = ScriptedLLM([_bracket_call("legacy"), "done"])
+        sa = SubAgent(
+            SubAgentConfig(name="x", tools=["legacy"], max_turns=5),
+            _registry(_LegacyStringTool()),
+            llm,
+            tool_format="bracket",
+        )
+
+        result = await sa.run("get the legacy output")
+
+        assert result.success is True
+        user_message = sa.conversation.to_messages()[-2]
+        assert user_message["content"].startswith("[legacy]\n" + "x" * 32)
+        assert "tool output truncated to 32 bytes" in user_message["content"]
+        assert "x" * 100 not in user_message["content"]
 
     async def test_native_turn_applies_plugin_tool_visibility(self):
         class _CaptureLLM(_NativeLLM):
