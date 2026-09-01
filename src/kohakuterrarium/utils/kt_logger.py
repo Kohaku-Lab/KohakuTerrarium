@@ -23,7 +23,7 @@ class KTLogger(logging.Logger):
         self,
         level: int,
         msg: object,
-        args: tuple[Any, ...],
+        args: tuple[object, ...] | Mapping[str, object],
         exc_info: Any = None,
         extra: Mapping[str, Any] | None = None,
         stack_info: bool = False,
