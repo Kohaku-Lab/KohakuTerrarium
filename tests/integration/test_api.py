@@ -153,13 +153,12 @@ def client(
     (saved-session list / resume / on-disk history) reads and writes
     the same isolated directory the engine saves into.
 
-    NOTE: the identity LLM stores (``llm/api_keys.py``,
-    ``llm/backends.py``, ``studio/identity/mcp_servers.py``,
-    ``ui_prefs.py``, ``editors/skills_state.py``) bind
-    ``Path.home() / ".kohakuterrarium"`` as an import-time constant
-    and honour no env override — so this tier exercises only the
-    *read* side of those routes plus error paths that 4xx before any
-    write.  See the report's ``B-fat2-api`` notes.
+    The identity LLM stores resolve their path fresh through
+    ``utils/config_dir.py::config_dir()`` on every read and write, and
+    ``tests/conftest.py::_default_isolated_config_dir`` pins
+    ``KT_CONFIG_DIR`` at a per-test tmp dir — so identity *writes*
+    (backends / profiles / default-model) are exercised for real here
+    without touching the operator's ``~/.kohakuterrarium``.
     """
     session_dir = tmp_path / "sessions"
     session_dir.mkdir()
@@ -618,8 +617,7 @@ class TestApiIntegration:
         resp = client.delete("/api/settings/backends/does-not-exist")
         assert resp.status_code == 404
         # Deleting a profile / api-key / MCP server that does not exist
-        # likewise 404s — these error branches resolve before any
-        # write touches the (unrelocatable) real config tree.
+        # likewise 404s.
         resp = client.delete("/api/settings/profiles/ghost-provider/ghost-name")
         assert resp.status_code == 404
         resp = client.delete("/api/settings/keys/definitely-not-a-provider")
@@ -633,6 +631,52 @@ class TestApiIntegration:
             json={"name": "x", "model": "m", "provider": "no-such-provider-xyz"},
         )
         assert resp.status_code == 404
+
+        # Identity write round-trip the Settings → Models pane commits:
+        # register a backend, add a profile under it, then click a row to
+        # make it the default.
+        resp = client.post(
+            "/api/settings/backends",
+            json={
+                "name": "acme",
+                "backend_type": "openai",
+                "base_url": "https://acme.example/v1",
+            },
+        )
+        assert resp.status_code == 200
+        resp = client.post(
+            "/api/settings/profiles",
+            json={"name": "acme-fast", "model": "acme-model-1", "provider": "acme"},
+        )
+        assert resp.status_code == 200
+        # The pane sends the row it clicked; a bare name is upgraded to the
+        # canonical provider-qualified identifier before it is persisted.
+        resp = client.post("/api/settings/default-model", json={"name": "acme-fast"})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "set", "default_model": "acme/acme-fast"}
+        resp = client.get("/api/settings/default-model")
+        assert resp.json()["default_model"] == "acme/acme-fast"
+        # The catalog the Models pane renders marks exactly that row.
+        resp = client.get("/api/settings/models")
+        assert resp.status_code == 200
+        assert [(m["provider"], m["name"]) for m in resp.json() if m["is_default"]] == [
+            ("acme", "acme-fast")
+        ]
+        # A bare name carried by several built-in providers is rejected
+        # rather than silently bound to whichever provider sorts first.
+        resp = client.post(
+            "/api/settings/default-model", json={"name": "claude-opus-4.8"}
+        )
+        assert resp.status_code == 400
+        assert "exists under multiple providers" in resp.json()["detail"]
+        resp = client.post(
+            "/api/settings/default-model", json={"name": "no-such-preset"}
+        )
+        assert resp.status_code == 404
+        # Neither rejection disturbed the stored default.
+        resp = client.get("/api/settings/default-model")
+        assert resp.json()["default_model"] == "acme/acme-fast"
+
         # MCP registry read round-trips.
         resp = client.get("/api/settings/mcp")
         assert resp.status_code == 200
