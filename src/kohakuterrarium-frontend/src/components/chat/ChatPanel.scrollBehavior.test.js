@@ -458,7 +458,13 @@ describe("ChatPanel long-session performance", () => {
     frames.clear()
 
     const viewport = wrapper.find(".chat-messages-viewport").element
-    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    // Height tracks the mounted window (200 messages -> 1000px), so the
+    // prepended content of each expansion really grows the scroll area
+    // and the compensation assertions below are meaningful.
+    Object.defineProperty(viewport, "scrollHeight", {
+      configurable: true,
+      get: () => 600 + wrapper.findAll(".chat-message-stub").length * 2,
+    })
     Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
 
     viewport.scrollTop = 800
@@ -487,7 +493,7 @@ describe("ChatPanel long-session performance", () => {
 
     expect(renderedIds(wrapper)).toHaveLength(300)
     expect(renderedIds(wrapper)[0]).toBe("m_700")
-    expect(viewport.scrollTop).toBe(10)
+    expect(viewport.scrollTop).toBe(210)
     expect(idleCallbacks).toHaveLength(1)
 
     idleCallbacks[0]()
@@ -495,6 +501,7 @@ describe("ChatPanel long-session performance", () => {
 
     expect(renderedIds(wrapper)).toHaveLength(400)
     expect(renderedIds(wrapper)[0]).toBe("m_600")
+    expect(viewport.scrollTop).toBe(410)
     expect(idleCallbacks).toHaveLength(1)
     wrapper.unmount()
   })

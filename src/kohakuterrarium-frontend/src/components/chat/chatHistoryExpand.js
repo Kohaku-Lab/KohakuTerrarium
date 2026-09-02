@@ -37,6 +37,7 @@ export function createChatHistoryExpander({
 }) {
   let idleHandle = null
   let expanding = false
+  let disposed = false
 
   async function expandAndCompensate() {
     const context = getContext?.()
@@ -56,22 +57,33 @@ export function createChatHistoryExpander({
     expanding = true
     try {
       await expandAndCompensate()
+    } catch (error) {
+      // Scroll-handler-originated work must never surface as an
+      // unhandled rejection.
+      console.warn("[chat] history expansion failed", error)
     } finally {
       expanding = false
     }
   }
 
   function maybeExpandAtTop(scrollTop) {
-    if (expanding || !canExpand() || scrollTop > CHAT_AUTO_EXPAND_TOP_PX) return false
-    runExpand().then(scheduleIdleExpand)
+    if (disposed || expanding || !canExpand() || scrollTop > CHAT_AUTO_EXPAND_TOP_PX) return false
+    const context = getContext?.()
+    runExpand().then(() => {
+      // A scope switch or disposal during the in-flight expansion
+      // invalidates the continuation: never re-arm the lookahead for a
+      // scope the user did not scroll in.
+      if (disposed || (getContext && getContext() !== context)) return
+      scheduleIdleExpand()
+    })
     return true
   }
 
   function scheduleIdleExpand() {
-    if (idleHandle !== null || expanding || !canExpand()) return
+    if (disposed || idleHandle !== null || expanding || !canExpand()) return
     idleHandle = scheduleIdle(() => {
       idleHandle = null
-      if (!canExpand()) return
+      if (disposed || !canExpand()) return
       runExpand()
     })
   }
@@ -83,6 +95,7 @@ export function createChatHistoryExpander({
   }
 
   function dispose() {
+    disposed = true
     cancelIdleExpand()
   }
 
