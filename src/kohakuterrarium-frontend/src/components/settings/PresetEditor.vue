@@ -15,11 +15,11 @@
       </div>
       <el-button v-if="isBuiltin" size="small" type="primary" @click="$emit('clone')">Clone</el-button>
       <el-button v-if="isEditing && !isBuiltin" size="small" @click="$emit('cancel')">Close</el-button>
-      <el-button v-if="isEditing && !preset?.is_default" size="small" type="success" plain :title="t('settings.models.setDefaultHint')" @click="$emit('set-default', preset)">
+      <el-button v-if="isSavedPreset && !preset?.is_default" size="small" type="success" plain :title="t('settings.models.setDefaultHint')" @click="$emit('set-default', preset)">
         <span class="i-carbon-checkmark-filled mr-1" />
         {{ t("settings.models.setAsDefault") }}
       </el-button>
-      <el-tag v-if="isEditing && preset?.is_default" type="success" size="small">{{ t("settings.models.isDefault") }}</el-tag>
+      <el-tag v-if="isSavedPreset && preset?.is_default" type="success" size="small">{{ t("settings.models.isDefault") }}</el-tag>
     </div>
 
     <!-- Core section -->
@@ -193,6 +193,8 @@ const form = reactive({
 
 const isBuiltin = computed(() => props.mode === "view")
 const isEditing = computed(() => props.mode === "edit")
+// Built-in presets ("view") are read-only but can still become the default.
+const isSavedPreset = computed(() => props.mode !== "new")
 
 const headerTitle = computed(() => {
   if (!props.preset) return "New preset"

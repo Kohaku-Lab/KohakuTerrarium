@@ -1052,9 +1052,11 @@ async function handleSavePreset(payload) {
 
 async function handleSetDefault(preset) {
   if (!preset || !preset.name) return
+  // Send "provider/name": a bare name can exist under several providers.
+  const identifier = preset.provider ? presetKey(preset) : preset.name
   try {
-    await settingsAPI.setDefaultModel(preset.name)
-    ElMessage.success(t("settings.models.defaultSet", { name: preset.name }))
+    const result = await settingsAPI.setDefaultModel(identifier)
+    ElMessage.success(t("settings.models.defaultSet", { name: result?.default_model || identifier }))
     await loadPresets()
   } catch (err) {
     ElMessage.error(err.response?.data?.detail || t("settings.models.defaultSetFailed"))
