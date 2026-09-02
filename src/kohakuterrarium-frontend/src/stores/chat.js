@@ -1981,6 +1981,10 @@ const _chatStoreOptions = {
   },
 
   actions: {
+    _setEvents(tab, events) {
+      if (!tab) return
+      this.eventsByTab[tab] = markRaw(Array.isArray(events) ? events : [])
+    },
     markAttentionRead(tabKey) {
       if (!this.attentionByTab[tabKey]) return
       this.attentionByTab[tabKey] = markAttentionRead(this.attentionByTab[tabKey])
@@ -3674,7 +3678,10 @@ const _chatStoreOptions = {
       // fetch fails there is no later overwrite to retire them.
       const events = this.eventsByTab[tab]
       if (events?.some((ev) => ev?._optimistic)) {
-        this.eventsByTab[tab] = events.filter((ev) => !ev?._optimistic)
+        this._setEvents(
+          tab,
+          events.filter((ev) => !ev?._optimistic),
+        )
       }
       this.processingByTab[tab] = false
       delete this._branchResyncPendingByTab[tab]
@@ -3822,7 +3829,7 @@ const _chatStoreOptions = {
         parent_branch_path: parentPath,
         _optimistic: true,
       }
-      this.eventsByTab[tab] = [...events, userInput, userMessage, processingStart]
+      this._setEvents(tab, [...events, userInput, userMessage, processingStart])
       this._historyMutationSeqByTab[tab] = (this._historyMutationSeqByTab[tab] || 0) + 1
       return true
     },
@@ -3856,16 +3863,19 @@ const _chatStoreOptions = {
       const predictedTurn = operation?.turnIndex
       const predictedBranch = operation?.predictedBranch
       if (typeof predictedTurn === "number" && typeof predictedBranch === "number") {
-        this.eventsByTab[tab] = (this.eventsByTab[tab] || []).map((event) => {
-          if (
-            event?._optimistic &&
-            event.turn_index === predictedTurn &&
-            event.branch_id === predictedBranch
-          ) {
-            return { ...event, turn_index: turnIndex, branch_id: branchId }
-          }
-          return event
-        })
+        this._setEvents(
+          tab,
+          (this.eventsByTab[tab] || []).map((event) => {
+            if (
+              event?._optimistic &&
+              event.turn_index === predictedTurn &&
+              event.branch_id === predictedBranch
+            ) {
+              return { ...event, turn_index: turnIndex, branch_id: branchId }
+            }
+            return event
+          }),
+        )
         if (this.branchViewByTab[tab]?.[predictedTurn] === predictedBranch) {
           const nextView = { ...(this.branchViewByTab[tab] || {}) }
           delete nextView[predictedTurn]
@@ -4060,7 +4070,7 @@ const _chatStoreOptions = {
           delete this._branchResyncPendingByTab[tab]
           if (optimisticApplied && tab) {
             if (previousEvents == null) delete this.eventsByTab[tab]
-            else this.eventsByTab[tab] = previousEvents
+            else this._setEvents(tab, previousEvents)
             if (previousBranchView != null) this.branchViewByTab[tab] = previousBranchView
             else delete this.branchViewByTab[tab]
             if (previousStreaming != null) this._streamingBranchByTab[tab] = previousStreaming
@@ -4262,7 +4272,7 @@ const _chatStoreOptions = {
           if (optimisticApplied && tab) {
             if (previousEvents !== undefined) {
               if (previousEvents == null) delete this.eventsByTab[tab]
-              else this.eventsByTab[tab] = previousEvents
+              else this._setEvents(tab, previousEvents)
             }
             if (previousBranchView != null) {
               this.branchViewByTab[tab] = previousBranchView
@@ -4498,7 +4508,7 @@ const _chatStoreOptions = {
         // and was yanked back to the latest branch."
         if (!this.branchViewByTab[tab]) this.branchViewByTab[tab] = {}
         const prepared = _prepareReplayEvents(data.events, this.branchViewByTab[tab])
-        this.eventsByTab[tab] = prepared.events
+        this._setEvents(tab, prepared.events)
         this._restoreTokenUsage(tab, prepared.events, true)
         this._rebuildMessages(tab, fetchedAt, prepared)
         const scope = scopeOfStoreId(this.$id) || "default"
@@ -5010,7 +5020,8 @@ const _chatStoreOptions = {
       if (
         msg?.role === "user" &&
         typeof msg?.eventId === "string" &&
-        msg.eventId.startsWith("c_")
+        msg.eventId.startsWith("c_") &&
+        this._pendingCommandResultContextsByTab[tabKey]?.length
       ) {
         const pending = this._pendingCommandResultContextsByTab[tabKey] || []
         const currentSelection = _commandResultBranchSelection(

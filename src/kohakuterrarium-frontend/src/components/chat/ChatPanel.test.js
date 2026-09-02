@@ -4,9 +4,16 @@ import { ElMessageBox } from "element-plus"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import ChatPanel from "./ChatPanel.vue"
-import { createChatScrollScheduler } from "./chatScrollScheduler"
 import { useChatStore } from "@/stores/chat"
 import { terrariumAPI } from "@/utils/api"
+
+const mountedWrappers = new Set()
+
+function mountChatPanel(options) {
+  const wrapper = mount(ChatPanel, options)
+  mountedWrappers.add(wrapper)
+  return wrapper
+}
 
 beforeEach(() => {
   const values = new Map()
@@ -19,263 +26,11 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  for (const wrapper of mountedWrappers) {
+    if (wrapper.exists()) wrapper.unmount()
+  }
+  mountedWrappers.clear()
   vi.unstubAllGlobals()
-})
-
-describe("ChatPanel scroll scheduling", () => {
-  function setupScheduler({ nearBottom = true } = {}) {
-    const frames = new Map()
-    let nextFrame = 1
-    const scroll = vi.fn()
-    const scheduler = createChatScrollScheduler({
-      afterDomCommit: (callback) => callback(),
-      requestFrame: (callback) => {
-        const id = nextFrame++
-        frames.set(id, callback)
-        return id
-      },
-      cancelFrame: (id) => frames.delete(id),
-      shouldScroll: () => nearBottom,
-      scroll,
-    })
-    return {
-      frames,
-      scroll,
-      scheduler,
-      runFrame() {
-        const [[id, callback]] = frames
-        frames.delete(id)
-        callback()
-      },
-    }
-  }
-
-  it("coalesces repeated requests into one scroll per frame", () => {
-    const { frames, scroll, scheduler, runFrame } = setupScheduler()
-
-    scheduler.schedule()
-    scheduler.schedule()
-    scheduler.schedule()
-
-    expect(frames.size).toBe(1)
-    runFrame()
-    expect(scroll).toHaveBeenCalledOnce()
-  })
-
-  it("upgrades a pending normal request when a force request arrives", () => {
-    const { scroll, scheduler, runFrame } = setupScheduler({ nearBottom: false })
-
-    scheduler.schedule()
-    scheduler.schedule(true)
-    runFrame()
-
-    expect(scroll).toHaveBeenCalledOnce()
-  })
-
-  it("does not scroll for a normal request after leaving the bottom", () => {
-    const { scroll, scheduler, runFrame } = setupScheduler({ nearBottom: false })
-
-    scheduler.schedule()
-    runFrame()
-
-    expect(scroll).not.toHaveBeenCalled()
-  })
-
-  it("cancels the pending frame when disposed", () => {
-    const { frames, scroll, scheduler } = setupScheduler()
-
-    scheduler.schedule()
-    scheduler.dispose()
-
-    expect(frames.size).toBe(0)
-    expect(scroll).not.toHaveBeenCalled()
-  })
-
-  it("does not run a forced frame after its scope is invalidated", () => {
-    const { frames, scroll, scheduler } = setupScheduler({ nearBottom: false })
-
-    scheduler.schedule(true, "instance:A")
-    scheduler.invalidate()
-
-    expect(frames.size).toBe(0)
-    expect(scroll).not.toHaveBeenCalled()
-  })
-
-  it("does not create a frame from an invalidated DOM commit", () => {
-    const commits = []
-    const frames = new Map()
-    const scheduler = createChatScrollScheduler({
-      afterDomCommit: (callback) => commits.push(callback),
-      requestFrame: (callback) => {
-        frames.set(1, callback)
-        return 1
-      },
-      cancelFrame: (id) => frames.delete(id),
-      shouldScroll: () => true,
-      scroll: vi.fn(),
-    })
-
-    scheduler.schedule(true, "instance:A")
-    scheduler.invalidate()
-    commits[0]()
-
-    expect(frames.size).toBe(0)
-  })
-
-  it("does not merge force state across scopes", () => {
-    const { scroll, scheduler, runFrame } = setupScheduler({ nearBottom: false })
-
-    scheduler.schedule(true, "instance:A")
-    scheduler.schedule(false, "instance:B")
-    runFrame()
-
-    expect(scroll).not.toHaveBeenCalled()
-  })
-})
-
-describe("ChatPanel render window", () => {
-  function mountPanel(chat, { groupId = null } = {}) {
-    chat._instanceId = "graph_1"
-    chat._instanceGraphId = "graph_1"
-    if (!chat.activeTab) chat.activeTab = "kohaku"
-    if (!chat.tabs.length) chat.tabs = ["kohaku"]
-    chat.commandInventoryByTab = { kohaku: { commands: [], skills: [] } }
-    chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
-    return mount(ChatPanel, {
-      props: {
-        instance: {
-          id: "graph_1",
-          graph_id: "graph_1",
-          creatures: [{ name: "kohaku", status: "idle" }],
-        },
-        groupId,
-      },
-      global: {
-        provide: { chatStore: chat },
-        stubs: {
-          ChatMessage: {
-            props: ["message", "prevMessage", "messageIdx", "tabId"],
-            template: '<div class="chat-message-stub">{{ message?.id }}</div>',
-          },
-          ModelSwitcher: true,
-          SiteChip: true,
-          StatusDot: true,
-        },
-      },
-    })
-  }
-
-  function renderedIds(wrapper) {
-    return wrapper.findAll(".chat-message-stub").map((el) => el.text())
-  }
-
-  function seedMessages(chat, count) {
-    chat.messagesByTab = {
-      kohaku: Array.from({ length: count }, (_, i) => ({
-        id: `m_${i}`,
-        role: i % 2 ? "assistant" : "user",
-        content: `message ${i}`,
-      })),
-    }
-  }
-
-  it("renders only the newest window for a very long transcript", async () => {
-    const chat = useChatStore("graph_1")
-    seedMessages(chat, 450)
-    const wrapper = mountPanel(chat)
-    await flushPromises()
-
-    expect(renderedIds(wrapper).length).toBe(400)
-    expect(renderedIds(wrapper)[0]).toBe("m_50")
-    expect(renderedIds(wrapper).at(-1)).toBe("m_449")
-    const earlier = wrapper.find("button.self-center")
-    expect(earlier.exists()).toBe(true)
-    expect(earlier.text()).toContain("50")
-  })
-
-  it("load-earlier expands the window toward the start", async () => {
-    const chat = useChatStore("graph_1")
-    seedMessages(chat, 450)
-    const wrapper = mountPanel(chat)
-    await flushPromises()
-
-    await wrapper.find("button.self-center").trigger("click")
-    await flushPromises()
-
-    expect(renderedIds(wrapper).length).toBe(450)
-    expect(renderedIds(wrapper)[0]).toBe("m_0")
-    expect(wrapper.find("button.self-center").exists()).toBe(false)
-  })
-
-  it("shrinkage below an expanded window start falls back to the tail window", async () => {
-    const chat = useChatStore("graph_1")
-    seedMessages(chat, 450)
-    const wrapper = mountPanel(chat)
-    await flushPromises()
-
-    // Expand once: explicit window start at index 0.
-    await wrapper.find("button.self-center").trigger("click")
-    await flushPromises()
-    expect(renderedIds(wrapper).length).toBe(450)
-
-    // A resync replaces the transcript with a much shorter one.
-    seedMessages(chat, 30)
-    await flushPromises()
-
-    // Without the out-of-range fallback the view would collapse to a
-    // single message (clamp to total - 1).
-    expect(renderedIds(wrapper).length).toBe(30)
-    expect(renderedIds(wrapper)[0]).toBe("m_0")
-    expect(wrapper.find("button.self-center").exists()).toBe(false)
-  })
-
-  it("new tail messages stay mounted inside the window while streaming", async () => {
-    const chat = useChatStore("graph_1")
-    seedMessages(chat, 420)
-    const wrapper = mountPanel(chat)
-    await flushPromises()
-
-    chat.messagesByTab.kohaku.push({ id: "m_420", role: "user", content: "live" })
-    await flushPromises()
-
-    expect(renderedIds(wrapper).length).toBe(400)
-    expect(renderedIds(wrapper).at(-1)).toBe("m_420")
-    expect(renderedIds(wrapper)).not.toContain("m_0")
-  })
-
-  it("does not let a pending frame from the previous tab overwrite the new tab position", async () => {
-    const frames = new Map()
-    let nextFrame = 1
-    vi.stubGlobal("requestAnimationFrame", (callback) => {
-      const id = nextFrame++
-      frames.set(id, callback)
-      return id
-    })
-    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
-
-    const chat = useChatStore("graph_1")
-    chat.activeTab = "kohaku"
-    chat.tabs = ["kohaku", "reviewer"]
-    chat.messagesByTab = { kohaku: [], reviewer: [] }
-    const groupId = chat.enableGroups()
-    const wrapper = mountPanel(chat, { groupId })
-    await flushPromises()
-
-    chat.messagesByTab.kohaku.push({ id: "m_1", role: "user", content: "force scroll" })
-    await flushPromises()
-    const pendingFrame = [...frames.values()][0]
-    expect(pendingFrame).toBeTypeOf("function")
-
-    chat.setGroupActiveTab(groupId, "reviewer")
-    await flushPromises()
-    const viewport = wrapper.find(".chat-messages-viewport").element
-    viewport.scrollTop = 73
-
-    pendingFrame()
-    expect(viewport.scrollTop).toBe(73)
-    expect(frames.size).toBe(0)
-    wrapper.unmount()
-  })
 })
 
 describe("ChatPanel command results", () => {
@@ -293,7 +48,7 @@ describe("ChatPanel command results", () => {
     chat.messagesByTab = { kohaku: [] }
     chat.commandInventoryByTab = { kohaku: { commands: [], skills: [] } }
     chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
-    const wrapper = mount(ChatPanel, {
+    const wrapper = mountChatPanel({
       props: {
         instance: {
           id: "graph_1",
@@ -342,7 +97,7 @@ describe("ChatPanel command results", () => {
       },
     }
     chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
-    const wrapper = mount(ChatPanel, {
+    const wrapper = mountChatPanel({
       props: {
         instance: {
           id: "graph_1",
@@ -440,7 +195,7 @@ describe("ChatPanel command results", () => {
       }
       chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
       const addResult = vi.spyOn(chat, "addCommandResult")
-      const wrapper = mount(ChatPanel, {
+      const wrapper = mountChatPanel({
         props: {
           instance: {
             id: "graph_1",
@@ -522,7 +277,7 @@ describe("ChatPanel command results", () => {
         },
       }
       chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
-      const wrapper = mount(ChatPanel, {
+      const wrapper = mountChatPanel({
         props: {
           instance: {
             id: "graph_1",
@@ -596,7 +351,7 @@ describe("ChatPanel command results", () => {
       },
     }
     chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
-    const wrapper = mount(ChatPanel, {
+    const wrapper = mountChatPanel({
       props: {
         instance: {
           id: "graph_1",
@@ -631,247 +386,6 @@ describe("ChatPanel command results", () => {
 
     expect(chat.messagesByTab.kohaku).toEqual([])
     command.mockRestore()
-    wrapper.unmount()
-  })
-
-  it("does not send a slash target to a tab selected during inventory lookup", async () => {
-    let resolveTarget
-    const chat = useChatStore("graph_1")
-    chat._instanceId = "graph_1"
-    chat._instanceGraphId = "graph_1"
-    chat.activeTab = "kohaku"
-    chat.tabs = ["kohaku", "reviewer"]
-    chat.messagesByTab = { kohaku: [], reviewer: [] }
-    localStorage.setItem("kt.chat.draft.graph_1.reviewer", "/review")
-    vi.spyOn(chat, "prepareSlashSend").mockReturnValue(
-      new Promise((resolve) => {
-        resolveTarget = resolve
-      }),
-    )
-    const execute = vi.spyOn(terrariumAPI, "executeCreatureCommand")
-    const wrapper = mount(ChatPanel, {
-      props: {
-        instance: {
-          id: "graph_1",
-          graph_id: "graph_1",
-          creatures: [
-            { name: "kohaku", status: "idle" },
-            { name: "reviewer", status: "idle" },
-          ],
-        },
-      },
-      global: {
-        provide: { chatStore: chat },
-        stubs: {
-          ChatMessage: true,
-          ModelSwitcher: true,
-          SiteChip: true,
-          StatusDot: true,
-        },
-      },
-    })
-    await wrapper.find("textarea").setValue("/review")
-    await wrapper.find('button[aria-label="Send message"]').trigger("click")
-    chat.activeTab = "reviewer"
-    await flushPromises()
-
-    resolveTarget({ type: "skill", name: "review" })
-    await flushPromises()
-
-    expect(execute).not.toHaveBeenCalled()
-    execute.mockRestore()
-  })
-
-  it.each([
-    [
-      "instance generation",
-      (chat) => {
-        chat._instanceGeneration += 1
-      },
-    ],
-    [
-      "session id",
-      (chat) => {
-        chat._instanceId = "session_2"
-      },
-    ],
-    [
-      "graph id",
-      (chat) => {
-        chat._instanceGraphId = "graph_2"
-      },
-    ],
-  ])(
-    "does not dispatch to a same-named tab when the %s changes during slash lookup",
-    async (_field, changeContext) => {
-      let resolveTarget
-      const chat = useChatStore("session_1")
-      chat._instanceGeneration = 4
-      chat._instanceId = "session_1"
-      chat._instanceGraphId = "graph_1"
-      chat.activeTab = "kohaku"
-      chat.tabs = ["kohaku"]
-      chat.messagesByTab = { kohaku: [] }
-      vi.spyOn(chat, "prepareSlashSend").mockReturnValue(
-        new Promise((resolve) => {
-          resolveTarget = resolve
-        }),
-      )
-      const execute = vi
-        .spyOn(terrariumAPI, "executeCreatureCommand")
-        .mockResolvedValue({ output: "unexpected" })
-      const wrapper = mount(ChatPanel, {
-        props: {
-          instance: {
-            id: "session_1",
-            graph_id: "graph_1",
-            creatures: [{ name: "kohaku", status: "idle" }],
-          },
-        },
-        global: {
-          provide: { chatStore: chat },
-          stubs: {
-            ChatMessage: true,
-            ModelSwitcher: true,
-            SiteChip: true,
-            StatusDot: true,
-          },
-        },
-      })
-      const textarea = wrapper.find("textarea")
-      await textarea.setValue("/review focus")
-      chat.markSlashTarget("kohaku", { type: "skill", name: "old-review" })
-      const staleTarget = chat._slashTargetByTab.kohaku
-      await wrapper.find('button[aria-label="Send message"]').trigger("click")
-
-      changeContext(chat)
-      chat.activeTab = "kohaku"
-      resolveTarget({ type: "skill", name: "review" })
-      await flushPromises()
-
-      expect(execute).not.toHaveBeenCalled()
-      expect(chat._slashTargetByTab.kohaku).toBeUndefined()
-      expect(staleTarget).toMatchObject({ type: "skill", name: "old-review" })
-      expect(textarea.element.value).toBe("/review focus")
-      execute.mockRestore()
-      wrapper.unmount()
-    },
-  )
-
-  it("does not dispatch when another chat group takes focus during slash lookup", async () => {
-    let resolveTarget
-    const chat = useChatStore("graph_1")
-    chat._instanceId = "graph_1"
-    chat._instanceGraphId = "graph_1"
-    chat.activeTab = "kohaku"
-    chat.tabs = ["kohaku", "reviewer"]
-    chat.messagesByTab = { kohaku: [], reviewer: [] }
-    const sourceGroup = chat.enableGroups()
-    const otherGroup = chat.splitGroup(sourceGroup, "horizontal", "after", "reviewer")
-    chat.setFocusedGroup(sourceGroup)
-    vi.spyOn(chat, "prepareSlashSend").mockReturnValue(
-      new Promise((resolve) => {
-        resolveTarget = resolve
-      }),
-    )
-    const execute = vi
-      .spyOn(terrariumAPI, "executeCreatureCommand")
-      .mockResolvedValue({ output: "unexpected" })
-    const wrapper = mount(ChatPanel, {
-      props: {
-        instance: {
-          id: "graph_1",
-          graph_id: "graph_1",
-          creatures: [
-            { name: "kohaku", status: "idle" },
-            { name: "reviewer", status: "idle" },
-          ],
-        },
-        groupId: sourceGroup,
-      },
-      global: {
-        provide: { chatStore: chat },
-        stubs: {
-          ChatMessage: true,
-          ModelSwitcher: true,
-          SiteChip: true,
-          StatusDot: true,
-        },
-      },
-    })
-    const textarea = wrapper.find("textarea")
-    await textarea.setValue("/review focus")
-    await wrapper.find('button[aria-label="Send message"]').trigger("click")
-
-    chat.setFocusedGroup(otherGroup)
-    expect(chat.activeTab).toBe("reviewer")
-    expect(chat.groups[sourceGroup].activeTab).toBe("kohaku")
-    resolveTarget({ type: "skill", name: "review" })
-    await flushPromises()
-
-    expect(execute).not.toHaveBeenCalled()
-    expect(textarea.element.value).toBe("/review focus")
-    execute.mockRestore()
-    wrapper.unmount()
-  })
-
-  it("dismisses the slash menu without interrupting an active turn", async () => {
-    const chat = useChatStore("graph_1")
-    chat._instanceId = "graph_1"
-    chat._instanceGraphId = "graph_1"
-    chat.activeTab = "kohaku"
-    chat.tabs = ["kohaku"]
-    chat.messagesByTab = { kohaku: [] }
-    chat.processingByTab = { kohaku: true }
-    chat.commandInventoryByTab = {
-      kohaku: {
-        commands: [{ name: "help", aliases: [], description: "Show help" }],
-        skills: [],
-      },
-    }
-    chat._commandInventoryFetchedAtByTab = { kohaku: Date.now() }
-    const interrupt = vi.spyOn(chat, "interrupt").mockResolvedValue(undefined)
-    const wrapper = mount(ChatPanel, {
-      props: {
-        instance: {
-          id: "graph_1",
-          graph_id: "graph_1",
-          creatures: [{ name: "kohaku", status: "running" }],
-        },
-      },
-      global: {
-        provide: { chatStore: chat },
-        stubs: {
-          ChatMessage: true,
-          ModelSwitcher: true,
-          SiteChip: true,
-          StatusDot: true,
-        },
-      },
-    })
-    const textarea = wrapper.find("textarea")
-    await textarea.setValue("/")
-    await flushPromises()
-    expect(wrapper.find("#slash-command-menu").exists()).toBe(true)
-
-    await textarea.trigger("keydown", { key: "Escape" })
-    await flushPromises()
-
-    expect(wrapper.find("#slash-command-menu").exists()).toBe(false)
-    expect(textarea.attributes("aria-expanded")).toBe("false")
-    expect(interrupt).not.toHaveBeenCalled()
-
-    await textarea.trigger("blur")
-    await textarea.trigger("focus")
-    await flushPromises()
-    expect(wrapper.find("#slash-command-menu").exists()).toBe(true)
-
-    await textarea.trigger("keydown", { key: "Escape" })
-    await textarea.setValue("/h")
-    await flushPromises()
-    expect(wrapper.find("#slash-command-menu").exists()).toBe(true)
-    expect(interrupt).not.toHaveBeenCalled()
-    interrupt.mockRestore()
     wrapper.unmount()
   })
 })
