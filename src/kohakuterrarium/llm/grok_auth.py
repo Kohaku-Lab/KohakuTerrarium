@@ -10,6 +10,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ _EXPIRY_SKEW_SECONDS = 30
 _GROK_CLI_REFRESH_WINDOW_SECONDS = 30 * 60
 _GROK_CLI_REFRESH_TIMEOUT_SECONDS = 20.0
 _refresh_tasks: dict[asyncio.AbstractEventLoop, asyncio.Task["GrokToken | None"]] = {}
+_grok_version_cache: dict[tuple[str, int], str] = {}
 _GROK_VERSION_PATTERN = re.compile(
     r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)*(?: \([0-9A-Fa-f]+\))?$"
 )
@@ -188,9 +190,11 @@ def _grok_cli_executable() -> str | None:
     executable = shutil.which("grok")
     if executable:
         return executable
-    bundled = _grok_home() / "bin" / "grok"
-    if bundled.is_file() and os.access(bundled, os.X_OK):
-        return str(bundled)
+    bin_dir = _grok_home() / "bin"
+    for name in ("grok", "grok.exe"):
+        bundled = bin_dir / name
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            return str(bundled)
     return None
 
 
@@ -208,6 +212,10 @@ def _grok_cli_headers() -> dict[str, str]:
 
 
 def _read_grok_cli_version() -> str:
+    executable_version = _read_grok_cli_executable_version()
+    if executable_version:
+        return executable_version
+
     path = _grok_home() / ".metadata_version"
     try:
         version = path.read_text(encoding="utf-8").strip()
@@ -224,6 +232,49 @@ def _read_grok_cli_version() -> str:
         logger.warning("Ignoring invalid Grok CLI version metadata", path=str(path))
         return ""
     return version
+
+
+def _read_grok_cli_executable_version() -> str:
+    """Return the installed CLI version without trusting mutable auth data."""
+    executable = _grok_cli_executable()
+    if executable is None:
+        return ""
+    try:
+        stamp = Path(executable).stat().st_mtime_ns
+    except OSError:
+        return ""
+    cache_key = (executable, stamp)
+    cached = _grok_version_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    try:
+        result = subprocess.run(
+            [executable, "--version"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=5.0,
+            check=False,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        )
+    except (OSError, subprocess.SubprocessError):
+        result = None
+    match = (
+        re.search(
+            r"(?:^|\s)grok\s+([0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)*)",
+            result.stdout,
+        )
+        if result is not None and result.returncode == 0
+        else None
+    )
+    version = match.group(1) if match else ""
+    _grok_version_cache.clear()
+    _grok_version_cache[cache_key] = version
+    if version and _GROK_VERSION_PATTERN.fullmatch(version):
+        return version
+    return ""
 
 
 def _load_opencode_token() -> GrokToken | None:
