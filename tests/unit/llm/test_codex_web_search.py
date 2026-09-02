@@ -1,6 +1,8 @@
 """Unit contract for standalone Codex-subscription web search."""
 
+import asyncio
 import json
+import time
 from types import SimpleNamespace
 
 import pytest
@@ -189,6 +191,62 @@ class TestSearchCollector:
         assert result.metadata["verified_source_count"] == 1
         assert result.metadata["action_source_count"] == 1
 
+    def test_tracking_variants_share_one_source_slot_and_keep_both_roles(self):
+        collector = _SearchCollector(query="q", model="m")
+        collector._add_source(
+            {"title": "Consulted", "url": "https://example.com/doc?utm_source=openai"},
+            origin=collector.action_sources,
+        )
+        collector._add_source(
+            {"title": "Cited", "url": "https://example.com/doc"},
+            origin=collector.citation_sources,
+        )
+
+        result = collector.result(1)
+
+        assert result.metadata["source_count"] == 1
+        assert result.metadata["verified_source_count"] == 1
+        assert result.metadata["action_source_count"] == 1
+
+    def test_semantic_query_parameters_remain_distinct_sources(self):
+        collector = _SearchCollector(query="q", model="m")
+        for page in (1, 2):
+            collector._add_source(
+                {
+                    "title": f"Page {page}",
+                    "url": f"https://example.com/doc?page={page}",
+                },
+                origin=collector.action_sources,
+            )
+
+        result = collector.result(5)
+
+        assert result.metadata["source_count"] == 2
+
+    def test_only_unstructured_body_links_receive_a_warning(self):
+        collector = _SearchCollector(query="q", model="m")
+        collector.text.append(
+            "Verified https://example.com/cited and raw https://other.example/page"
+        )
+        collector._add_source(
+            {"title": "Cited", "url": "https://example.com/cited"},
+            origin=collector.citation_sources,
+        )
+
+        result = collector.result(5)
+
+        assert result.metadata["citation_status"] == "verified"
+        assert "other links in the answer text are unverified" in result.output
+
+        matching = _SearchCollector(query="q", model="m")
+        matching.text.append("Verified https://example.com/cited")
+        matching._add_source(
+            {"title": "Cited", "url": "https://example.com/cited?utm_source=openai"},
+            origin=matching.citation_sources,
+        )
+
+        assert "unverified provider text" not in matching.result(5).output
+
     def test_non_url_annotation_is_not_promoted_to_verified_source(self):
         collector = _SearchCollector(query="q", model="m")
         collector.observe(
@@ -341,6 +399,64 @@ class TestSearchCollector:
 
 
 class TestCodexSubscriptionSearchBackend:
+    @pytest.mark.asyncio
+    async def test_valid_credentials_do_not_enter_refresh_lock(self, monkeypatch):
+        valid = CodexTokens(
+            access_token="valid",
+            refresh_token="refresh",
+            expires_at=time.time() + 3600,
+        )
+
+        class UnexpectedLock:
+            async def __aenter__(self):
+                raise AssertionError("refresh lock entered for a valid token")
+
+            async def __aexit__(self, *_args):
+                return None
+
+        monkeypatch.setattr(search_mod, "HAS_OPENAI", True)
+        monkeypatch.setattr(search_mod.CodexTokens, "load", lambda: valid)
+        monkeypatch.setattr(search_mod, "_TOKEN_REFRESH_LOCK", UnexpectedLock())
+
+        assert await search_mod._load_valid_tokens() is valid
+
+    @pytest.mark.asyncio
+    async def test_parallel_expired_credentials_refresh_once(self, monkeypatch):
+        expired = CodexTokens(
+            access_token="expired",
+            refresh_token="refresh",
+            expires_at=time.time() - 60,
+        )
+        refreshed = CodexTokens(
+            access_token="fresh",
+            refresh_token="rotated",
+            expires_at=time.time() + 3600,
+        )
+        current = expired
+        refresh_calls = 0
+
+        def load_tokens():
+            return current
+
+        async def refresh(_tokens):
+            nonlocal current, refresh_calls
+            refresh_calls += 1
+            await asyncio.sleep(0)
+            current = refreshed
+            return refreshed
+
+        monkeypatch.setattr(search_mod, "HAS_OPENAI", True)
+        monkeypatch.setattr(search_mod.CodexTokens, "load", load_tokens)
+        monkeypatch.setattr(search_mod, "refresh_tokens", refresh)
+        monkeypatch.setattr(search_mod, "_TOKEN_REFRESH_LOCK", asyncio.Lock())
+
+        results = await asyncio.gather(
+            search_mod._load_valid_tokens(), search_mod._load_valid_tokens()
+        )
+
+        assert results == [refreshed, refreshed]
+        assert refresh_calls == 1
+
     @pytest.mark.asyncio
     async def test_sends_forced_live_search_with_cached_subscription(self, monkeypatch):
         captured = {}
