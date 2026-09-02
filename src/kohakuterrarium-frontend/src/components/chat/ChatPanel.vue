@@ -194,6 +194,7 @@ import { inject } from "vue"
 
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
+import { useChatRenderWindow } from "@/components/chat/chatRenderWindow"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
@@ -238,7 +239,11 @@ const viewGroup = computed(() => (props.groupId ? chat.groups?.[props.groupId] |
 const viewTabs = computed(() => (viewGroup.value ? viewGroup.value.tabs : chat.tabs))
 const viewActiveTab = computed(() => (viewGroup.value ? viewGroup.value.activeTab : chat.activeTab))
 const viewInstanceId = computed(() => props.instance?.id || chat._instanceId || null)
-const scrollScope = computed(() => ({ instanceId: viewInstanceId.value, tab: viewActiveTab.value }))
+const scrollScope = computed(() => ({
+  groupId: props.groupId,
+  instanceId: viewInstanceId.value,
+  tab: viewActiveTab.value,
+}))
 const viewMessages = computed(() => {
   const t = viewActiveTab.value
   return t ? chat.messagesByTab[t] || [] : []
@@ -425,9 +430,10 @@ async function scrollToPending() {
   const target = list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).pop()
   if (!target) return
   const targetIdx = list.indexOf(target)
-  if (targetIdx >= 0 && (targetIdx < windowStart.value || targetIdx >= (windowEndIndex.value ?? list.length))) {
-    windowStartIndex.value = targetIdx
-    windowEndIndex.value = Math.min(list.length, targetIdx + RENDER_WINDOW_STEP)
+  if (targetIdx >= 0 && targetIdx < windowStart.value) {
+    scrollScheduler.suppress()
+    enterHistoryAt(targetIdx)
+    isNearBottom.value = false
     await nextTick()
   }
   const el = messagesEl.value
@@ -522,45 +528,23 @@ const isNearBottom = ref(true)
 const forceScrollOnNextMessageUpdate = ref(true)
 const scrollPositions = new Map()
 
-// Tail-anchored render window: very long transcripts mount only the
-// newest RENDER_WINDOW_STEP messages. ``windowStartIndex`` stays null
-// (auto tail) until the user expands upward; once explicit, new
-// messages never shift the top of the rendered slice.
-const RENDER_WINDOW_STEP = 100
-const windowStartIndex = ref(null)
-const windowEndIndex = ref(null)
+function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value, groupId = props.groupId) {
+  if (!instanceId || !tab) return ""
+  const suffix = groupId ? `:${groupId}` : ""
+  return `${instanceId}:${tab}${suffix}`
+}
 
-const windowStart = computed(() => {
-  const total = viewMessages.value.length
-  if (windowStartIndex.value == null) return Math.max(0, total - RENDER_WINDOW_STEP)
-  // Shrinkage (branch filter / compact_replace / retry splice) can push
-  // an explicit start past the end of the list; clamping to total - 1
-  // would collapse the view to one message. Fall back to the tail window
-  // and let ``loadEarlierMessages`` re-establish an explicit start.
-  if (windowStartIndex.value >= total || (windowEndIndex.value != null && windowEndIndex.value > total && windowStartIndex.value > Math.max(0, total - RENDER_WINDOW_STEP))) {
-    windowStartIndex.value = null
-    windowEndIndex.value = null
-    return Math.max(0, total - RENDER_WINDOW_STEP)
-  }
-  return windowStartIndex.value
-})
-const windowMessages = computed(() => viewMessages.value.slice(windowStart.value, windowEndIndex.value ?? undefined))
+// Live tail is selected by an estimated render-unit budget. An explicit
+// start marks history-reading mode: its top stays fixed while the open
+// end keeps newly arriving messages reachable.
+const { enterHistoryAt, expandHistory, isHistoryMode, leaveHistory, restoreHistory, windowMessages, windowStart } = useChatRenderWindow(viewMessages, () => getScrollKey())
 
 async function loadEarlierMessages() {
   const el = messagesEl.value
   const prevHeight = el ? el.scrollHeight : 0
-  if (windowEndIndex.value == null) windowEndIndex.value = viewMessages.value.length
-  windowStartIndex.value = Math.max(0, windowStart.value - RENDER_WINDOW_STEP)
+  expandHistory()
   await nextTick()
-  // Compensate the prepended height so the content the user was
-  // reading stays under the cursor.
   if (el && prevHeight) el.scrollTop += el.scrollHeight - prevHeight
-}
-
-function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
-  if (!instanceId || !tab) return ""
-  const suffix = props.groupId ? `:${props.groupId}` : ""
-  return `${instanceId}:${tab}${suffix}`
 }
 
 let lastObservedScrollTop = 0
@@ -571,16 +555,16 @@ function updateNearBottom() {
   lastObservedScrollTop = el.scrollTop
 }
 
-function saveScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
+function saveScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value, groupId = props.groupId) {
   const el = messagesEl.value
-  const key = getScrollKey(instanceId, tab)
+  const key = getScrollKey(instanceId, tab, groupId)
   if (!el || !key) return
   scrollPositions.set(key, el.scrollTop)
 }
 
-function restoreScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value) {
+function restoreScrollPosition(instanceId = props.instance?.id || chat._instanceId, tab = viewActiveTab.value, groupId = props.groupId) {
   const el = messagesEl.value
-  const key = getScrollKey(instanceId, tab)
+  const key = getScrollKey(instanceId, tab, groupId)
   if (!el || !key) return false
   const saved = scrollPositions.get(key)
   if (saved == null) {
@@ -597,6 +581,7 @@ let scrollStateFrame = null
 function onMessagesScroll() {
   const el = messagesEl.value
   if (el && el.scrollTop < lastObservedScrollTop) {
+    if (!isHistoryMode.value) enterHistoryAt(windowStart.value)
     isNearBottom.value = false
     scrollScheduler.suppress()
   }
@@ -605,12 +590,16 @@ function onMessagesScroll() {
   scrollStateFrame = requestAnimationFrame(() => {
     scrollStateFrame = null
     updateNearBottom()
-    if (isNearBottom.value) scrollScheduler.resume()
+    if (isNearBottom.value) {
+      leaveHistory()
+      scrollScheduler.resume()
+    }
     saveScrollPosition()
   })
 }
 
 function scrollToBottom() {
+  leaveHistory()
   const el = messagesEl.value
   if (!el) return
   scrollScheduler.resume()
@@ -672,14 +661,13 @@ watch(
       scrollStateFrame = null
     }
     if (previousScope?.instanceId && previousScope.tab) {
-      saveScrollPosition(previousScope.instanceId, previousScope.tab)
+      saveScrollPosition(previousScope.instanceId, previousScope.tab, previousScope.groupId)
     }
-    windowStartIndex.value = null
-    windowEndIndex.value = null
+    restoreHistory(getScrollKey(scope.instanceId, scope.tab, scope.groupId))
     restoreDraft()
     nextTick(() => {
       if (scope !== scrollScope.value) return
-      const hadSavedScroll = restoreScrollPosition(scope.instanceId, scope.tab)
+      const hadSavedScroll = restoreScrollPosition(scope.instanceId, scope.tab, scope.groupId)
       forceScrollOnNextMessageUpdate.value = !hadSavedScroll
     })
   },
@@ -862,8 +850,7 @@ async function send() {
   inputText.value = ""
   attachments.value = []
   persistDraft()
-  windowStartIndex.value = null
-  windowEndIndex.value = null
+  leaveHistory()
   isNearBottom.value = true // force scroll after send
   scrollScheduler.resume()
   nextTick(() => {

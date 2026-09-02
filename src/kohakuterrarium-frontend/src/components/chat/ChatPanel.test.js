@@ -208,18 +208,140 @@ describe("ChatPanel long-session performance", () => {
     ).toBe(true)
   })
 
-  it("renders only the newest window for a very long transcript", async () => {
+  it("caps simple transcripts by top-level message count", async () => {
     const chat = useChatStore("graph_1")
     seedMessages(chat, 450)
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(100)
-    expect(renderedIds(wrapper)[0]).toBe("m_350")
+    expect(renderedIds(wrapper).length).toBe(200)
+    expect(renderedIds(wrapper)[0]).toBe("m_250")
     expect(renderedIds(wrapper).at(-1)).toBe("m_449")
     const earlier = wrapper.find("button.self-center")
     expect(earlier.exists()).toBe(true)
-    expect(earlier.text()).toContain("50")
+    expect(earlier.text()).toContain("250")
+  })
+
+  it("uses child parts to reduce the live-tail message count", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    for (const message of chat.messagesByTab.kohaku) {
+      if (message.role !== "assistant") continue
+      message.parts = Array.from({ length: 99 }, (_, index) => ({
+        id: `${message.id}_part_${index}`,
+        type: "text",
+        content: `part ${index}`,
+      }))
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(18)
+    expect(renderedIds(wrapper)[0]).toBe("m_432")
+    expect(renderedIds(wrapper).at(-1)).toBe("m_449")
+  })
+
+  it("keeps an oversized final message whole", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    chat.messagesByTab.kohaku[449].parts = Array.from({ length: 1500 }, (_, index) => ({
+      id: `large_part_${index}`,
+      type: "text",
+      content: `part ${index}`,
+    }))
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toEqual(["m_448", "m_449"])
+  })
+
+  it("counts content parts and legacy tool calls in the render budget", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    for (const message of chat.messagesByTab.kohaku) {
+      if (message.role === "assistant") {
+        message.tool_calls = Array.from({ length: 99 }, (_, index) => ({
+          id: `${message.id}_tool_${index}`,
+        }))
+      } else {
+        message.contentParts = Array.from({ length: 99 }, (_, index) => ({
+          type: "text",
+          text: `part ${index}`,
+        }))
+      }
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(10)
+    expect(renderedIds(wrapper)[0]).toBe("m_440")
+  })
+
+  it("does not double-count legacy assistant fields when parts are rendered", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    for (const message of chat.messagesByTab.kohaku) {
+      if (message.role !== "assistant") continue
+      message.parts = Array.from({ length: 49 }, (_, index) => ({
+        id: `${message.id}_part_${index}`,
+        type: "text",
+        content: `part ${index}`,
+      }))
+      message.tool_calls = Array.from({ length: 99 }, (_, index) => ({
+        id: `${message.id}_legacy_${index}`,
+      }))
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(38)
+    expect(renderedIds(wrapper)[0]).toBe("m_412")
+  })
+
+  it("counts direct tool children without recursively scanning their payloads", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    for (const message of chat.messagesByTab.kohaku) {
+      if (message.role !== "assistant") continue
+      message.parts = [
+        {
+          id: `${message.id}_tool`,
+          type: "tool",
+          children: Array.from({ length: 98 }, (_, index) => ({
+            id: `${message.id}_child_${index}`,
+          })),
+        },
+      ]
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(18)
+    expect(renderedIds(wrapper)[0]).toBe("m_432")
+  })
+
+  it("counts direct tool result parts that render media outside the collapsed details", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    for (const message of chat.messagesByTab.kohaku) {
+      if (message.role !== "assistant") continue
+      message.parts = [
+        {
+          id: `${message.id}_tool`,
+          type: "tool",
+          resultParts: Array.from({ length: 98 }, (_, index) => ({
+            type: "image_url",
+            image_url: { url: `data:image/png;base64,${index}` },
+          })),
+        },
+      ]
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(18)
+    expect(renderedIds(wrapper)[0]).toBe("m_432")
+    wrapper.unmount()
   })
 
   it("load-earlier expands the window toward the start", async () => {
@@ -231,9 +353,9 @@ describe("ChatPanel long-session performance", () => {
     await wrapper.find("button.self-center").trigger("click")
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(200)
-    expect(renderedIds(wrapper)[0]).toBe("m_250")
-    expect(wrapper.find("button.self-center").text()).toContain("250")
+    expect(renderedIds(wrapper).length).toBe(400)
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+    expect(wrapper.find("button.self-center").text()).toContain("50")
   })
 
   it("shrinkage below an expanded window start falls back to the tail window", async () => {
@@ -242,10 +364,10 @@ describe("ChatPanel long-session performance", () => {
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    // Expand once: explicit window start at index 250.
+    // Expand once: explicit window start at index 50.
     await wrapper.find("button.self-center").trigger("click")
     await flushPromises()
-    expect(renderedIds(wrapper).length).toBe(200)
+    expect(renderedIds(wrapper).length).toBe(400)
 
     // A resync replaces the transcript with a much shorter one.
     seedMessages(chat, 30)
@@ -260,9 +382,49 @@ describe("ChatPanel long-session performance", () => {
     seedMessages(chat, 500)
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(100)
-    expect(renderedIds(wrapper)[0]).toBe("m_400")
+    expect(renderedIds(wrapper).length).toBe(200)
+    expect(renderedIds(wrapper)[0]).toBe("m_300")
     expect(renderedIds(wrapper).at(-1)).toBe("m_499")
+  })
+
+  it("keeps the active history anchor on the same message after earlier messages are removed", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+
+    chat.messagesByTab.kohaku.splice(0, 10)
+    await flushPromises()
+
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+    wrapper.unmount()
+  })
+
+  it("falls back to the bounded live tail when the active anchor disappears", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+
+    chat.messagesByTab.kohaku = Array.from({ length: 500 }, (_, index) => ({
+      id: `replacement_${index}`,
+      role: index % 2 ? "assistant" : "user",
+      content: `replacement ${index}`,
+    }))
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(200)
+    expect(renderedIds(wrapper)[0]).toBe("replacement_300")
+    expect(renderedIds(wrapper).at(-1)).toBe("replacement_499")
+    wrapper.unmount()
   })
 
   it("new tail messages stay mounted inside the window while streaming", async () => {
@@ -274,12 +436,12 @@ describe("ChatPanel long-session performance", () => {
     chat.messagesByTab.kohaku.push({ id: "m_420", role: "user", content: "live" })
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(100)
+    expect(renderedIds(wrapper).length).toBe(200)
     expect(renderedIds(wrapper).at(-1)).toBe("m_420")
     expect(renderedIds(wrapper)).not.toContain("m_0")
   })
 
-  it("does not grow an expanded history window when new tail messages arrive", async () => {
+  it("keeps the history start fixed while new tail messages remain reachable", async () => {
     const chat = useChatStore("graph_1")
     seedMessages(chat, 450)
     const wrapper = mountPanel(chat)
@@ -287,7 +449,7 @@ describe("ChatPanel long-session performance", () => {
 
     await wrapper.find("button.self-center").trigger("click")
     await flushPromises()
-    expect(renderedIds(wrapper).length).toBe(200)
+    expect(renderedIds(wrapper).length).toBe(400)
 
     for (let index = 450; index < 500; index += 1) {
       chat.messagesByTab.kohaku.push({
@@ -298,11 +460,173 @@ describe("ChatPanel long-session performance", () => {
     }
     await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBe(200)
-    expect(renderedIds(wrapper).at(-1)).toBe("m_449")
+    expect(renderedIds(wrapper).length).toBe(450)
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+    expect(renderedIds(wrapper).at(-1)).toBe("m_499")
   })
 
-  it("keeps scroll-to-pending inside a bounded message window", async () => {
+  it("pins the live-tail start when the user scrolls upward", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    for (const message of chat.messagesByTab.kohaku) {
+      if (message.role !== "assistant") continue
+      message.parts = Array.from({ length: 99 }, (_, index) => ({
+        id: `${message.id}_part_${index}`,
+        type: "text",
+        content: `part ${index}`,
+      }))
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    frames.clear()
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+    viewport.scrollTop = 800
+    viewport.dispatchEvent(new Event("scroll"))
+    let [[frameId, frame]] = frames
+    frames.delete(frameId)
+    frame()
+
+    viewport.scrollTop = 300
+    viewport.dispatchEvent(new Event("scroll"))
+    ;[[frameId, frame]] = frames
+    frames.delete(frameId)
+    frame()
+
+    chat.messagesByTab.kohaku.push({ id: "m_450", role: "user", content: "new user" })
+    chat.messagesByTab.kohaku.push({
+      id: "m_451",
+      role: "assistant",
+      parts: Array.from({ length: 99 }, (_, index) => ({
+        id: `m_451_part_${index}`,
+        type: "text",
+        content: `part ${index}`,
+      })),
+    })
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(20)
+    expect(renderedIds(wrapper)[0]).toBe("m_432")
+    expect(renderedIds(wrapper).at(-1)).toBe("m_451")
+    wrapper.unmount()
+  })
+
+  it("returns an expanded history view to the bounded live tail at the bottom", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    frames.clear()
+
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper)).toHaveLength(400)
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+    viewport.scrollTop = 300
+    viewport.dispatchEvent(new Event("scroll"))
+    let [[frameId, frame]] = frames
+    frames.delete(frameId)
+    frame()
+
+    viewport.scrollTop = 800
+    viewport.dispatchEvent(new Event("scroll"))
+    ;[[frameId, frame]] = frames
+    frames.delete(frameId)
+    frame()
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(200)
+    expect(renderedIds(wrapper)[0]).toBe("m_250")
+    expect(renderedIds(wrapper).at(-1)).toBe("m_449")
+    wrapper.unmount()
+  })
+
+  it("restores an expanded history window after switching tabs", async () => {
+    const chat = useChatStore("graph_1")
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku", "reviewer"]
+    seedMessages(chat, 450)
+    chat.messagesByTab.reviewer = Array.from({ length: 20 }, (_, index) => ({
+      id: `r_${index}`,
+      role: index % 2 ? "assistant" : "user",
+      content: `review ${index}`,
+    }))
+    chat.commandInventoryByTab.reviewer = { commands: [], skills: [] }
+    chat._commandInventoryFetchedAtByTab.reviewer = Date.now()
+    const groupId = chat.enableGroups()
+    const wrapper = mountPanel(chat, { groupId })
+    await flushPromises()
+
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+
+    chat.setGroupActiveTab(groupId, "reviewer")
+    await flushPromises()
+    expect(renderedIds(wrapper)[0]).toBe("r_0")
+
+    chat.setGroupActiveTab(groupId, "kohaku")
+    await flushPromises()
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+    wrapper.unmount()
+  })
+
+  it("restores history and scroll state independently when a panel changes groups", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 450)
+    const firstGroupId = chat.enableGroups()
+    const secondGroupId = chat.addGroup(["kohaku"], "kohaku")
+    chat.groups[firstGroupId].tabs = ["kohaku"]
+    chat.groups[firstGroupId].activeTab = "kohaku"
+    const wrapper = mountPanel(chat, { groupId: firstGroupId })
+    await flushPromises()
+
+    await wrapper.find("button.self-center").trigger("click")
+    await flushPromises()
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+    viewport.scrollTop = 300
+
+    await wrapper.setProps({ groupId: secondGroupId })
+    await flushPromises()
+    expect(renderedIds(wrapper)[0]).toBe("m_250")
+
+    viewport.scrollTop = 700
+    await wrapper.setProps({ groupId: firstGroupId })
+    await flushPromises()
+
+    expect(renderedIds(wrapper)[0]).toBe("m_50")
+    expect(viewport.scrollTop).toBe(300)
+    wrapper.unmount()
+  })
+
+  it("keeps the live tail reachable when scrolling to an older pending message", async () => {
     const chat = useChatStore("graph_1")
     seedMessages(chat, 1000)
     chat.messagesByTab.kohaku[10] = {
@@ -317,16 +641,76 @@ describe("ChatPanel long-session performance", () => {
     await wrapper.find("textarea").setValue("draft")
 
     const scrollIntoView = vi.fn()
-    const originalScrollIntoView = Element.prototype.scrollIntoView
-    Element.prototype.scrollIntoView = scrollIntoView
-    await wrapper.find(".text-amber.hover\\:underline").trigger("click")
-    await flushPromises()
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    try {
+      await wrapper.find(".text-amber.hover\\:underline").trigger("click")
+      await flushPromises()
 
-    expect(renderedIds(wrapper).length).toBeLessThanOrEqual(100)
-    expect(renderedIds(wrapper)).toContain("pending_10")
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" })
-    Element.prototype.scrollIntoView = originalScrollIntoView
-    wrapper.unmount()
+      expect(renderedIds(wrapper)[0]).toBe("pending_10")
+      expect(renderedIds(wrapper).at(-1)).toBe("m_999")
+      expect(scrollIntoView).toHaveBeenCalledWith({ behavior: "smooth", block: "center" })
+    } finally {
+      if (descriptor) Object.defineProperty(Element.prototype, "scrollIntoView", descriptor)
+      else delete Element.prototype.scrollIntoView
+      wrapper.unmount()
+    }
+  })
+
+  it("does not let a queued forced scroll override an older pending target", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 1000)
+    chat.messagesByTab.kohaku[10] = {
+      id: "pending_10",
+      role: "ui_event",
+      content: "approval",
+      interactive: true,
+      replied: false,
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    await wrapper.find("textarea").setValue("draft")
+    frames.clear()
+
+    chat.messagesByTab.kohaku.push({ id: "m_1000", role: "assistant", content: "queued scroll" })
+    await flushPromises()
+    expect(frames.size).toBe(1)
+
+    const scrollIntoView = vi.fn()
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    try {
+      await wrapper.find(".text-amber.hover\\:underline").trigger("click")
+      await flushPromises()
+
+      for (const [id, frame] of [...frames]) {
+        frames.delete(id)
+        frame()
+      }
+      await flushPromises()
+
+      expect(renderedIds(wrapper)[0]).toBe("pending_10")
+      expect(scrollIntoView).toHaveBeenCalledOnce()
+    } finally {
+      if (descriptor) Object.defineProperty(Element.prototype, "scrollIntoView", descriptor)
+      else delete Element.prototype.scrollIntoView
+      wrapper.unmount()
+    }
   })
 
   it("does not scan branch history before sending a regular message", async () => {
