@@ -1,12 +1,14 @@
 """Behavior tests for read-only Grok subscription credential discovery."""
 
+import asyncio
 import json
 import time
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
-import asyncio
 import pytest
 
+from kohakuterrarium.llm import grok_auth
 from kohakuterrarium.llm.grok_auth import (
     GROK_CLI_BASE_URL,
     GROK_CLI_SOURCE,
@@ -98,11 +100,88 @@ class TestGrokTokens:
         )
         monkeypatch.setenv("GROK_HOME", str(grok_home))
         monkeypatch.setenv("OPENCODE_AUTH_FILE", str(tmp_path / "missing"))
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth._grok_cli_executable", lambda: None
+        )
 
         candidates = GrokTokens.load_candidates()
 
         assert len(candidates) == 1
         assert "x-grok-client-version" not in candidates[0].extra_headers
+
+    def test_cli_binary_version_is_used_when_metadata_is_missing(
+        self, tmp_path, monkeypatch
+    ):
+        grok_home = tmp_path / "grok"
+        grok_home.mkdir()
+        (grok_home / "auth.json").write_text(
+            json.dumps({"key": "usable"}), encoding="utf-8"
+        )
+        executable = grok_home / "bin" / "grok.exe"
+        executable.parent.mkdir()
+        executable.write_bytes(b"test executable placeholder")
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setenv("OPENCODE_AUTH_FILE", str(tmp_path / "missing"))
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth._grok_cli_executable",
+            lambda: str(executable),
+        )
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth.subprocess.run",
+            lambda *args, **kwargs: SimpleNamespace(
+                returncode=0,
+                stdout="grok 1.0.13 (5e9a58528b76)\n",
+                stderr="",
+            ),
+        )
+
+        candidates = GrokTokens.load_candidates()
+
+        assert candidates[0].extra_headers["x-grok-client-version"] == "1.0.13"
+
+    def test_bundled_windows_cli_is_discovered(self, tmp_path, monkeypatch):
+        grok_home = tmp_path / "grok"
+        executable = grok_home / "bin" / "grok.exe"
+        executable.parent.mkdir(parents=True)
+        executable.write_bytes(b"test executable placeholder")
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setattr(grok_auth.shutil, "which", lambda name: None)
+        monkeypatch.setattr(grok_auth.os, "access", lambda path, mode: True)
+
+        assert grok_auth._grok_cli_executable() == str(executable)
+
+    def test_failed_binary_version_probe_is_cached(self, tmp_path, monkeypatch):
+        grok_home = tmp_path / "grok"
+        grok_home.mkdir()
+        (grok_home / "auth.json").write_text(
+            json.dumps({"key": "usable"}), encoding="utf-8"
+        )
+        (grok_home / ".metadata_version").write_text("1.0.5\n", encoding="utf-8")
+        executable = grok_home / "bin" / "grok.exe"
+        executable.parent.mkdir()
+        executable.write_bytes(b"test executable placeholder")
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setenv("OPENCODE_AUTH_FILE", str(tmp_path / "missing"))
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth._grok_cli_executable",
+            lambda: str(executable),
+        )
+        calls = []
+
+        def failed_version(*args, **kwargs):
+            calls.append(args)
+            return SimpleNamespace(returncode=1, stdout="grok 9.9.9\n", stderr="")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth.subprocess.run", failed_version
+        )
+
+        first = GrokTokens.load_candidates()
+        second = GrokTokens.load_candidates()
+
+        assert first[0].extra_headers["x-grok-client-version"] == "1.0.5"
+        assert second[0].extra_headers["x-grok-client-version"] == "1.0.5"
+        assert len(calls) == 1
 
     def test_expired_and_malformed_sources_are_skipped(self, tmp_path, monkeypatch):
         grok_home = tmp_path / "grok"
