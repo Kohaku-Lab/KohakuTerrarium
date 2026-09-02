@@ -428,4 +428,137 @@ describe("ChatPanel long-session performance", () => {
     expect(frames.size).toBe(0)
     wrapper.unmount()
   })
+
+  function stubIdleExpansion() {
+    const idleCallbacks = []
+    const idleCancelled = new Set()
+    vi.stubGlobal("requestIdleCallback", (callback) => {
+      idleCallbacks.push(callback)
+      return idleCallbacks.length
+    })
+    vi.stubGlobal("cancelIdleCallback", (id) => idleCancelled.add(id))
+    return { idleCallbacks, idleCancelled }
+  }
+
+  it("auto-expands the history window when scrolling reaches the top", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+    const { idleCallbacks } = stubIdleExpansion()
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 1000)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    frames.clear()
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+
+    viewport.scrollTop = 800
+    viewport.dispatchEvent(new Event("scroll"))
+    let [id, frame] = [...frames][0]
+    frames.delete(id)
+    frame()
+
+    // Upward but away from the top: history mode pins the window,
+    // no automatic expansion yet.
+    viewport.scrollTop = 300
+    viewport.dispatchEvent(new Event("scroll"))
+    ;[id, frame] = [...frames][0]
+    frames.delete(id)
+    frame()
+    expect(renderedIds(wrapper)).toHaveLength(200)
+
+    // Reaching the top expands one small step, then the idle lookahead
+    // pre-mounts the next step exactly once.
+    viewport.scrollTop = 10
+    viewport.dispatchEvent(new Event("scroll"))
+    ;[id, frame] = [...frames][0]
+    frames.delete(id)
+    frame()
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(300)
+    expect(renderedIds(wrapper)[0]).toBe("m_700")
+    expect(viewport.scrollTop).toBe(10)
+    expect(idleCallbacks).toHaveLength(1)
+
+    idleCallbacks[0]()
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(400)
+    expect(renderedIds(wrapper)[0]).toBe("m_600")
+    expect(idleCallbacks).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it("cancels the pending idle expansion when the active tab changes", async () => {
+    const frames = new Map()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => frames.delete(id))
+    const { idleCallbacks, idleCancelled } = stubIdleExpansion()
+
+    const chat = useChatStore("graph_1")
+    chat.activeTab = "kohaku"
+    chat.tabs = ["kohaku", "reviewer"]
+    seedMessages(chat, 1000)
+    chat.messagesByTab.reviewer = Array.from({ length: 20 }, (_, index) => ({
+      id: `r_${index}`,
+      role: index % 2 ? "assistant" : "user",
+      content: `review ${index}`,
+    }))
+    chat.commandInventoryByTab.reviewer = { commands: [], skills: [] }
+    chat._commandInventoryFetchedAtByTab.reviewer = Date.now()
+    const groupId = chat.enableGroups()
+    const wrapper = mountPanel(chat, { groupId })
+    await flushPromises()
+    frames.clear()
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+
+    viewport.scrollTop = 800
+    viewport.dispatchEvent(new Event("scroll"))
+    let [id, frame] = [...frames][0]
+    frames.delete(id)
+    frame()
+
+    viewport.scrollTop = 300
+    viewport.dispatchEvent(new Event("scroll"))
+    ;[id, frame] = [...frames][0]
+    frames.delete(id)
+    frame()
+
+    viewport.scrollTop = 10
+    viewport.dispatchEvent(new Event("scroll"))
+    ;[id, frame] = [...frames][0]
+    frames.delete(id)
+    frame()
+    await flushPromises()
+
+    expect(renderedIds(wrapper)).toHaveLength(300)
+    expect(idleCallbacks).toHaveLength(1)
+
+    chat.setGroupActiveTab(groupId, "reviewer")
+    await flushPromises()
+    expect(idleCancelled.size).toBe(1)
+
+    idleCallbacks[0]()
+    await flushPromises()
+    expect(renderedIds(wrapper)).toHaveLength(20)
+    wrapper.unmount()
+  })
 })

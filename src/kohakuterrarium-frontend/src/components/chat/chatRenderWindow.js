@@ -3,6 +3,11 @@ import { computed, ref } from "vue"
 export const CHAT_RENDER_UNIT_BUDGET = 1000
 export const CHAT_RENDER_MESSAGE_LIMIT = 200
 export const CHAT_RENDER_MIN_MESSAGES = 2
+// Automatic expansion (scroll-to-top / idle lookahead) grows the window
+// in smaller steps than the explicit "show earlier" button so the mount
+// cost never lands on the interaction path all at once.
+export const CHAT_RENDER_EXPAND_UNIT_BUDGET = 500
+export const CHAT_RENDER_EXPAND_MESSAGE_LIMIT = 100
 
 function directChildCount(items) {
   if (!Array.isArray(items)) return 0
@@ -24,15 +29,19 @@ export function messageRenderUnits(message) {
   return 1 + contentParts.length + toolCalls.length + directChildCount(toolCalls)
 }
 
-export function findRenderWindowStart(messages, end = messages.length) {
+export function findRenderWindowStart(
+  messages,
+  end = messages.length,
+  { unitBudget = CHAT_RENDER_UNIT_BUDGET, messageLimit = CHAT_RENDER_MESSAGE_LIMIT } = {},
+) {
   const boundedEnd = Math.max(0, Math.min(end, messages.length))
   let start = boundedEnd
   let units = 0
   let count = 0
 
-  while (start > 0 && count < CHAT_RENDER_MESSAGE_LIMIT) {
+  while (start > 0 && count < messageLimit) {
     const nextUnits = messageRenderUnits(messages[start - 1])
-    if (count >= CHAT_RENDER_MIN_MESSAGES && units + nextUnits > CHAT_RENDER_UNIT_BUDGET) break
+    if (count >= CHAT_RENDER_MIN_MESSAGES && units + nextUnits > unitBudget) break
     start -= 1
     count += 1
     units += nextUnits
@@ -74,8 +83,8 @@ export function useChatRenderWindow(messages, getScopeKey) {
     if (key) windowStarts.set(key, messageId)
   }
 
-  function expandHistory() {
-    enterHistoryAt(findRenderWindowStart(messages.value, windowStart.value))
+  function expandHistory(step = {}) {
+    enterHistoryAt(findRenderWindowStart(messages.value, windowStart.value, step))
   }
 
   function restoreHistory(key = getScopeKey()) {

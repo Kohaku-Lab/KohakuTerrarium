@@ -194,7 +194,8 @@ import { inject } from "vue"
 
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
-import { useChatRenderWindow } from "@/components/chat/chatRenderWindow"
+import { useChatRenderWindow, CHAT_RENDER_EXPAND_MESSAGE_LIMIT, CHAT_RENDER_EXPAND_UNIT_BUDGET } from "@/components/chat/chatRenderWindow"
+import { createChatHistoryExpander } from "@/components/chat/chatHistoryExpand"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
@@ -539,6 +540,16 @@ function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab =
 // end keeps newly arriving messages reachable.
 const { enterHistoryAt, expandHistory, isHistoryMode, leaveHistory, restoreHistory, windowMessages, windowStart } = useChatRenderWindow(viewMessages, () => getScrollKey())
 
+// Continuous upward scrolling: reaching the top of the rendered window
+// expands it one small step, and an idle lookahead pre-mounts the next
+// step so back-to-back expansions never stall the scroll interaction.
+const historyExpander = createChatHistoryExpander({
+  canExpand: () => isHistoryMode.value && windowStart.value > 0,
+  expand: () => expandHistory({ unitBudget: CHAT_RENDER_EXPAND_UNIT_BUDGET, messageLimit: CHAT_RENDER_EXPAND_MESSAGE_LIMIT }),
+  getViewportEl: () => messagesEl.value,
+  getContext: () => getScrollKey(),
+})
+
 async function loadEarlierMessages() {
   const el = messagesEl.value
   const prevHeight = el ? el.scrollHeight : 0
@@ -593,6 +604,8 @@ function onMessagesScroll() {
     if (isNearBottom.value) {
       leaveHistory()
       scrollScheduler.resume()
+    } else if (el) {
+      historyExpander.maybeExpandAtTop(el.scrollTop)
     }
     saveScrollPosition()
   })
@@ -656,6 +669,7 @@ watch(
   (scope, previousScope) => {
     scrollScheduler.invalidate()
     scrollScheduler.resume()
+    historyExpander.cancelIdleExpand()
     if (scrollStateFrame !== null) {
       cancelAnimationFrame(scrollStateFrame)
       scrollStateFrame = null
@@ -990,6 +1004,7 @@ onMounted(() => window.addEventListener("keydown", onGlobalKeydown))
 onUnmounted(() => {
   window.removeEventListener("keydown", onGlobalKeydown)
   scrollScheduler.dispose()
+  historyExpander.dispose()
   if (scrollStateFrame !== null) cancelAnimationFrame(scrollStateFrame)
 })
 </script>
