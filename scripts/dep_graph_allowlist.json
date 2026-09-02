@@ -91,9 +91,9 @@
   },
   {
     "file": "src/kohakuterrarium/launcher/splash_window.py",
-    "function": "_try_tk",
+    "function": "_run_tk",
     "target": "tkinter",
-    "reason": "tkinter is the optional fallback splash backend used only when pywebview is unavailable; deferred so headless / non-Tk environments aren't required to have it"
+    "reason": "tkinter (and tkinter.ttk) is the optional fallback splash backend used only when pywebview is unavailable; deferred so headless / non-Tk environments aren't required to have it"
   },
   {
     "file": "src/kohakuterrarium/mcp/client.py",
