@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.identity import llm as llm_mod
 from kohakuterrarium.api.routes.identity import mcp as mcp_mod
+from kohakuterrarium.llm import profiles
 
 
 def _app(*routers) -> FastAPI:
@@ -194,22 +195,109 @@ class TestLlmProfilesRoutes:
 
 
 class TestLlmDefaultModelRoutes:
+    """The default-model routes against the real profile store.
+
+    ``KT_CONFIG_DIR`` is a per-test tmp dir (``tests/conftest.py``
+    ``_default_isolated_config_dir``) and every profile read/write
+    resolves it fresh, so these drive the real resolver instead of a
+    stub — the resolution is the behaviour under test.
+    """
+
+    def _client(self) -> TestClient:
+        return TestClient(_app(llm_mod.router))
+
+    def _register_acme(self, client: TestClient) -> None:
+        """Create the ``acme`` backend plus its ``acme-fast`` profile."""
+        resp = client.post("/backends", json={"name": "acme", "backend_type": "openai"})
+        assert resp.status_code == 200
+        resp = client.post(
+            "/profiles",
+            json={"name": "acme-fast", "model": "acme-model-1", "provider": "acme"},
+        )
+        assert resp.status_code == 200
+
     def test_get_default_model(self, monkeypatch):
         monkeypatch.setattr(llm_mod, "get_default", lambda: "openai/gpt-4")
-        client = TestClient(_app(llm_mod.router))
+        client = self._client()
         resp = client.get("/default-model")
         assert resp.status_code == 200
         assert resp.json() == {"default_model": "openai/gpt-4"}
 
-    def test_set_default_model(self, monkeypatch):
-        captured = []
-        monkeypatch.setattr(llm_mod, "set_default", lambda n: captured.append(n))
-        client = TestClient(_app(llm_mod.router))
-        resp = client.post("/default-model", json={"name": "openai/gpt-5"})
+    def test_set_default_model_upgrades_bare_user_profile(self):
+        client = self._client()
+        self._register_acme(client)
+        resp = client.post("/default-model", json={"name": "acme-fast"})
         assert resp.status_code == 200
-        assert resp.json() == {"status": "set", "default_model": "openai/gpt-5"}
-        # The route actually persisted the new default.
-        assert captured == ["openai/gpt-5"]
+        assert resp.json() == {"status": "set", "default_model": "acme/acme-fast"}
+        assert client.get("/default-model").json() == {
+            "default_model": "acme/acme-fast"
+        }
+
+    def test_set_default_model_accepts_qualified_user_profile(self):
+        client = self._client()
+        self._register_acme(client)
+        resp = client.post("/default-model", json={"name": "acme/acme-fast"})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "set", "default_model": "acme/acme-fast"}
+        assert client.get("/default-model").json() == {
+            "default_model": "acme/acme-fast"
+        }
+
+    def test_set_default_model_qualified_builtin(self):
+        client = self._client()
+        resp = client.post("/default-model", json={"name": "anthropic/claude-opus-4.8"})
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "status": "set",
+            "default_model": "anthropic/claude-opus-4.8",
+        }
+        assert client.get("/default-model").json() == {
+            "default_model": "anthropic/claude-opus-4.8"
+        }
+
+    def test_set_default_model_ambiguous_bare_name_rejected(self):
+        # ``claude-opus-4.8`` ships under both anthropic and openrouter.
+        # The bare name used to persist verbatim and read back as the
+        # openrouter row no matter which provider the user clicked.
+        client = self._client()
+        self._register_acme(client)
+        assert (
+            client.post("/default-model", json={"name": "acme-fast"}).status_code == 200
+        )
+        resp = client.post("/default-model", json={"name": "claude-opus-4.8"})
+        assert resp.status_code == 400
+        assert "exists under multiple providers" in resp.json()["detail"]
+        # The rejected write left the previous default untouched.
+        assert client.get("/default-model").json() == {
+            "default_model": "acme/acme-fast"
+        }
+        assert profiles._load_yaml().get("default_model", "") == "acme/acme-fast"
+
+    def test_set_default_model_unknown_name_404(self):
+        client = self._client()
+        self._register_acme(client)
+        assert (
+            client.post("/default-model", json={"name": "acme-fast"}).status_code == 200
+        )
+        resp = client.post("/default-model", json={"name": "no-such-preset"})
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Preset not found: no-such-preset"
+        assert client.get("/default-model").json() == {
+            "default_model": "acme/acme-fast"
+        }
+
+    def test_set_default_model_empty_name_clears(self):
+        client = self._client()
+        self._register_acme(client)
+        assert (
+            client.post("/default-model", json={"name": "acme-fast"}).status_code == 200
+        )
+        resp = client.post("/default-model", json={"name": ""})
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "set", "default_model": ""}
+        # The explicit default is gone from the store; what ``GET`` now
+        # reports is the built-in fallback, not a persisted choice.
+        assert profiles._load_yaml().get("default_model", "") == ""
 
     def test_get_all_models(self, monkeypatch):
         monkeypatch.setattr(
