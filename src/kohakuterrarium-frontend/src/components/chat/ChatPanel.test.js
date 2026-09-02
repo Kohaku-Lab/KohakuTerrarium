@@ -713,6 +713,71 @@ describe("ChatPanel long-session performance", () => {
     }
   })
 
+  it("does not let a queued scroll override a pending target already in the window", async () => {
+    const frames = new Map()
+    const canceledFrames = new Set()
+    let nextFrame = 1
+    vi.stubGlobal("requestAnimationFrame", (callback) => {
+      const id = nextFrame++
+      frames.set(id, callback)
+      return id
+    })
+    vi.stubGlobal("cancelAnimationFrame", (id) => canceledFrames.add(id))
+
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 1000)
+    chat.messagesByTab.kohaku[900] = {
+      id: "pending_900",
+      role: "ui_event",
+      content: "approval",
+      interactive: true,
+      replied: false,
+    }
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+    await wrapper.find("textarea").setValue("draft")
+    frames.clear()
+
+    const viewport = wrapper.find(".chat-messages-viewport").element
+    Object.defineProperty(viewport, "scrollHeight", { configurable: true, value: 1000 })
+    Object.defineProperty(viewport, "clientHeight", { configurable: true, value: 200 })
+    viewport.scrollTop = 800
+    chat.messagesByTab.kohaku.push({ id: "m_1000", role: "assistant", content: "queued scroll" })
+    await flushPromises()
+    expect(frames.size).toBe(1)
+
+    const scrollIntoView = vi.fn(() => {
+      viewport.scrollTop = 300
+    })
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollIntoView")
+    Object.defineProperty(Element.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    })
+    try {
+      await wrapper.find(".text-amber.hover\\:underline").trigger("click")
+      await flushPromises()
+
+      expect(canceledFrames).toEqual(new Set([1]))
+      frames.get(1)()
+      await flushPromises()
+
+      expect(renderedIds(wrapper)[0]).toBe("m_801")
+      expect(renderedIds(wrapper)).toContain("pending_900")
+      expect(scrollIntoView).toHaveBeenCalledOnce()
+      expect(viewport.scrollTop).toBe(300)
+
+      frames.clear()
+      chat.messagesByTab.kohaku.push({ id: "m_1001", role: "assistant", content: "stay put" })
+      await flushPromises()
+      expect(frames.size).toBe(0)
+    } finally {
+      if (descriptor) Object.defineProperty(Element.prototype, "scrollIntoView", descriptor)
+      else delete Element.prototype.scrollIntoView
+      wrapper.unmount()
+    }
+  })
+
   it("does not scan branch history before sending a regular message", async () => {
     const chat = useChatStore("graph_1")
     seedMessages(chat, 250)
