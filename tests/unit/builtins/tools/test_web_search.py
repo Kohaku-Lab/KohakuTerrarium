@@ -1,9 +1,6 @@
-"""Unit tests for the web_search tool's parser + fallback path.
+"""Unit tests for web-search parsing, backend selection, and fallback.
 
-The real DDG endpoint is NOT hit — these tests pin the HTML parser
-against fixed snippets and the backend-selection logic against
-monkey-patched search functions.  Live-network behaviour is the
-integration tier's concern.
+Network calls are replaced with fixed HTML or deterministic fakes.
 """
 
 import pytest
@@ -11,11 +8,13 @@ import pytest
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.web_search import (
     DeepSeekSearchBackend,
+    DuckDuckGoSearchBackend,
     SearchBackendOperationalError,
     SearchBackendUnavailable,
     WebSearchTool,
     _normalize_deepseek_response,
     _parse_ddg_html,
+    _search_session_metadata,
     _unwrap_ddg_redirect,
 )
 from kohakuterrarium.modules.tool.base import ToolConfig
@@ -38,6 +37,43 @@ _DDG_SAMPLE_HTML = """
 </div>
 </body></html>
 """
+
+
+def test_session_metadata_preserves_codex_grounding_sources():
+    source = {"title": "Weather", "url": "https://example.com/weather"}
+    metadata = _search_session_metadata(
+        {
+            "backend": "codex",
+            "citation_status": "grounded",
+            "source_count": 1,
+            "verified_source_count": 0,
+            "action_source_count": 1,
+            "verified_sources": [],
+            "consulted_sources": [source],
+        }
+    )
+
+    assert metadata["citation_status"] == "grounded"
+    assert metadata["source_count"] == 1
+    assert metadata["consulted_sources"] == [source]
+
+
+def test_description_discourages_repeated_search_only_for_explicit_codex():
+    codex_tool = WebSearchTool(ToolConfig(extra={"backend": "codex"}))
+
+    assert "once per question" in codex_tool.description
+    for backend in ("duckduckgo", "deepseek"):
+        tool = WebSearchTool(ToolConfig(extra={"backend": backend}))
+        assert "once per question" not in tool.description
+
+
+def test_codex_login_does_not_change_the_default_backend(monkeypatch):
+    monkeypatch.setattr(web_search, "codex_search_available", lambda: True)
+
+    tool = WebSearchTool()
+
+    assert tool.backend == "duckduckgo"
+    assert isinstance(tool._backend(), DuckDuckGoSearchBackend)
 
 
 class TestParseDdgHtml:
@@ -400,7 +436,11 @@ class TestDeepSeekSearch:
         class _FailingBackend:
             search = staticmethod(fail_search)
 
-        monkeypatch.setattr(WebSearchTool, "_backend", lambda self: _FailingBackend())
+        monkeypatch.setattr(
+            WebSearchTool,
+            "_backend",
+            lambda self, selected=None: _FailingBackend(),
+        )
         monkeypatch.setattr(web_search, "_has_ddg", lambda: False)
         monkeypatch.setattr(web_search, "_search_httpx_ddg", fallback_search)
         tool = WebSearchTool(
@@ -414,11 +454,80 @@ class TestDeepSeekSearch:
 
     def test_schema_marks_deepseek_unavailable_without_key(self, monkeypatch):
         monkeypatch.setattr(web_search, "has_api_key", lambda provider: False)
+        monkeypatch.setattr(web_search, "codex_search_available", lambda: False)
 
         schema = WebSearchTool().runtime_option_schema()
 
         assert "deepseek" in schema["backend"]["disabled_values"]
+        assert "codex" in schema["backend"]["disabled_values"]
         assert schema["backend"]["default"] == "duckduckgo"
+        assert schema["backend"]["values"] == ["duckduckgo", "codex", "deepseek"]
+
+    @pytest.mark.asyncio
+    async def test_explicit_codex_backend_uses_subscription_search(self, monkeypatch):
+        class _CodexBackend:
+            def __init__(self, model):
+                self.model = model
+
+            async def search(self, query, max_results, region):
+                return web_search.SearchResponse(
+                    output="codex result",
+                    metadata={"backend": "codex", "model": self.model},
+                )
+
+        monkeypatch.setattr(web_search, "CodexSubscriptionSearchBackend", _CodexBackend)
+
+        tool = WebSearchTool(ToolConfig(extra={"backend": "codex"}))
+        result = await tool._execute({"query": "anything"})
+
+        assert result.output == "codex result"
+        assert result.metadata["backend"] == "codex"
+        assert result.metadata["requested_backend"] == "codex"
+
+    @pytest.mark.asyncio
+    async def test_explicit_codex_operational_failure_uses_configured_fallback(
+        self, monkeypatch
+    ):
+        async def fail_search(*args):
+            raise web_search.CodexSearchOperationalError("rate limited")
+
+        async def fallback_search(*args):
+            return [{"href": "https://fallback", "title": "fallback", "body": ""}]
+
+        class _CodexBackend:
+            def __init__(self, model):
+                self.search = fail_search
+
+        monkeypatch.setattr(web_search, "CodexSubscriptionSearchBackend", _CodexBackend)
+        monkeypatch.setattr(web_search, "_has_ddg", lambda: False)
+        monkeypatch.setattr(web_search, "_search_httpx_ddg", fallback_search)
+
+        tool = WebSearchTool(
+            ToolConfig(extra={"backend": "codex", "fallback": "duckduckgo"})
+        )
+        result = await tool._execute({"query": "anything"})
+
+        assert "fallback" in result.output
+        assert result.metadata["fallback_from"] == "codex"
+
+    @pytest.mark.asyncio
+    async def test_codex_failure_without_configured_fallback_is_an_error(
+        self, monkeypatch
+    ):
+        async def fail_search(*args):
+            raise web_search.CodexSearchOperationalError("rate limited")
+
+        class _CodexBackend:
+            def __init__(self, model):
+                self.search = fail_search
+
+        monkeypatch.setattr(web_search, "CodexSubscriptionSearchBackend", _CodexBackend)
+        tool = WebSearchTool(ToolConfig(extra={"backend": "codex"}))
+
+        result = await tool._execute({"query": "anything"})
+
+        assert result.error == "rate limited"
+        assert result.output == ""
 
     def test_untrusted_annotation_url_is_not_exposed(self):
         response = _normalize_deepseek_response(
