@@ -430,10 +430,10 @@ async function scrollToPending() {
   const target = list.filter((m) => m.role === "ui_event" && m.interactive && !m.replied && !m.superseded && !m.timedOut).pop()
   if (!target) return
   const targetIdx = list.indexOf(target)
+  scrollScheduler.suppress()
+  isNearBottom.value = false
   if (targetIdx >= 0 && targetIdx < windowStart.value) {
-    scrollScheduler.suppress()
     enterHistoryAt(targetIdx)
-    isNearBottom.value = false
     await nextTick()
   }
   const el = messagesEl.value
