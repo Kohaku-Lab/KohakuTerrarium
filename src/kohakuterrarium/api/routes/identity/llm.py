@@ -14,6 +14,7 @@ from kohakuterrarium.studio.identity.llm_backends import (
 from kohakuterrarium.studio.identity.llm_default import (
     get_default,
     list_all_models_combined,
+    resolve_and_set_default,
     set_default,
 )
 from kohakuterrarium.studio.identity.llm_native_tools import list_native_tools
@@ -53,7 +54,11 @@ class ProfileRequest(BaseModel):
 
 
 class DefaultModelRequest(BaseModel):
-    """Select the profile used as the default model."""
+    """Select the profile used as the default model.
+
+    ``name`` accepts ``provider/name`` or a bare preset name that resolves
+    to exactly one preset; an empty string clears the default.
+    """
 
     name: str
 
@@ -147,9 +152,21 @@ async def get_default_model_route():
 
 @router.post("/default-model", dependencies=[Depends(verify_admin_token)])
 async def set_default_model_route(req: DefaultModelRequest):
-    """Persist the model profile used as the default."""
-    set_default(req.name)
-    return {"status": "set", "default_model": req.name}
+    """Persist the default model, resolving the request to ``provider/name``.
+
+    An empty name clears the default; anything else must resolve to exactly
+    one preset, so a bare name shared by several providers is rejected
+    instead of silently binding to the wrong one.
+    """
+    if not req.name:
+        set_default("")
+        return {"status": "set", "default_model": ""}
+    identifier, error = resolve_and_set_default(req.name)
+    if error:
+        if error.startswith("Preset not found"):
+            raise HTTPException(404, error)
+        raise HTTPException(400, error)
+    return {"status": "set", "default_model": identifier}
 
 
 @router.get("/models")
