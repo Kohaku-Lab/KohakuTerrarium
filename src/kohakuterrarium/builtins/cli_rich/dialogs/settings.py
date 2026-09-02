@@ -405,9 +405,12 @@ class SettingsOverlay:
             if not row.get("available"):
                 self._flash = f"{row['name']}: provider has no key configured"
                 return
+            # Bare names are ambiguous across providers — persist the row's own.
+            provider = row.get("provider") or ""
+            identifier = f"{provider}/{row['name']}" if provider else row["name"]
             try:
-                set_default_model(row["name"])
-                self._flash = f"Default model set: {row['name']}"
+                set_default_model(identifier)
+                self._flash = f"Default model set: {identifier}"
                 self._refresh_tab("Models")
             except Exception as e:
                 self._flash = f"Error: {e}"
