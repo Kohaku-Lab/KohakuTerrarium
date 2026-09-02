@@ -6,10 +6,12 @@ can therefore call the ordinary ``web_search`` function while this helper
 uses cached ``kt login codex`` credentials for the hosted search request.
 """
 
+import asyncio
 import hashlib
+import re
 from dataclasses import dataclass, field
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse
 
 import httpx
 
@@ -34,6 +36,9 @@ CODEX_SEARCH_MODELS = (
     "gpt-5.4",
     "gpt-5.4-mini",
 )
+_TOKEN_REFRESH_LOCK = asyncio.Lock()
+_TRACKING_QUERY_KEYS = frozenset({"fbclid", "gclid", "mc_cid", "mc_eid", "msclkid"})
+_TEXT_URL_PATTERN = re.compile(r"https?://[^\s<>\[\]{}]+")
 
 
 class CodexSearchError(RuntimeError):
@@ -127,12 +132,22 @@ async def _load_valid_tokens() -> CodexTokens:
             "Codex subscription is not connected. Run: kt login codex"
         )
     if tokens.is_expired():
-        try:
-            tokens = await refresh_tokens(tokens)
-        except Exception as exc:
-            raise CodexSearchUnavailable(
-                "Codex subscription login expired. Run: kt login codex"
-            ) from exc
+        async with _TOKEN_REFRESH_LOCK:
+            tokens = CodexTokens.load()
+            if tokens is None:
+                raise CodexSearchUnavailable(
+                    "Codex subscription is not connected. Run: kt login codex"
+                )
+            if tokens.is_expired():
+                try:
+                    tokens = await refresh_tokens(tokens)
+                except Exception as exc:
+                    recovered = CodexTokens.load()
+                    if recovered is not None and not recovered.is_expired():
+                        return recovered
+                    raise CodexSearchUnavailable(
+                        "Codex subscription login expired. Run: kt login codex"
+                    ) from exc
     return tokens
 
 
@@ -202,7 +217,41 @@ def _action(value: Any) -> dict[str, Any]:
 
 
 def _has_source_url(sources: list[dict[str, str]], candidate: dict[str, str]) -> bool:
-    return any(source["url"] == candidate["url"] for source in sources)
+    candidate_key = _source_url_key(candidate["url"])
+    return any(_source_url_key(source["url"]) == candidate_key for source in sources)
+
+
+def _source_url_key(url: str) -> str:
+    """Normalize non-content URL differences used by source tracking."""
+    parsed = urlparse(url)
+    query = urlencode(
+        [
+            (key, value)
+            for key, value in parse_qsl(parsed.query, keep_blank_values=True)
+            if not key.lower().startswith("utm_")
+            and key.lower() not in _TRACKING_QUERY_KEYS
+        ]
+    )
+    return parsed._replace(
+        scheme=parsed.scheme.lower(),
+        netloc=parsed.netloc.lower(),
+        query=query,
+        fragment="",
+    ).geturl()
+
+
+def _text_url_keys(text: str) -> set[str]:
+    return {
+        _source_url_key(_clean_text_url(match.group(0)))
+        for match in _TEXT_URL_PATTERN.finditer(text)
+    }
+
+
+def _clean_text_url(url: str) -> str:
+    cleaned = url.rstrip(".,;:!?\"'")
+    while cleaned.endswith(")") and cleaned.count(")") > cleaned.count("("):
+        cleaned = cleaned[:-1]
+    return cleaned
 
 
 @dataclass
@@ -296,18 +345,24 @@ class _SearchCollector:
             if not _has_source_url(ordered_sources, source):
                 ordered_sources.append(source)
         sources = ordered_sources[:max_results]
-        selected_urls = {source["url"] for source in sources}
+        selected_url_keys = {_source_url_key(source["url"]) for source in sources}
         citation_sources = [
-            source for source in self.citation_sources if source["url"] in selected_urls
+            source
+            for source in self.citation_sources
+            if _source_url_key(source["url"]) in selected_url_keys
         ]
         action_sources = [
-            source for source in self.action_sources if source["url"] in selected_urls
+            source
+            for source in self.action_sources
+            if _source_url_key(source["url"]) in selected_url_keys
         ]
         body = "".join(self.text).strip() or "No results found."
         if self.response_status == "incomplete":
             body = f"Incomplete Codex search response.\n\n{body}"
         output = f"Search results for: {self.query}\n\n{body}"
-        has_text_links = "http://" in body or "https://" in body
+        text_url_keys = _text_url_keys(body)
+        has_text_links = bool(text_url_keys)
+        unverified_text_links = text_url_keys - selected_url_keys
         citation_status = (
             "verified"
             if citation_sources
@@ -317,11 +372,18 @@ class _SearchCollector:
                 else "unverified_text" if has_text_links else "none"
             )
         )
-        if has_text_links and not sources:
-            output += (
-                "\n\nCitation note: Links in the answer text are unverified "
-                "provider text because no structured citations were returned."
-            )
+        if unverified_text_links:
+            if sources:
+                output += (
+                    "\n\nCitation note: Only links in the Sources list below were "
+                    "returned as structured citations; other links in the answer "
+                    "text are unverified provider text."
+                )
+            else:
+                output += (
+                    "\n\nCitation note: Links in the answer text are unverified "
+                    "provider text because no structured citations were returned."
+                )
         if action_sources and not citation_sources:
             output += (
                 "\n\nGrounding note: The Sources list contains structured URLs "
