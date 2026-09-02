@@ -97,14 +97,17 @@ With options:
 tools:
   - name: web_search
     backend: duckduckgo
+    codex_model: gpt-5.6-luna
     deepseek_model: deepseek-v4-flash
     fallback: none
 ```
 
-`web_search` keeps DuckDuckGo as its no-key default. To opt into DeepSeek,
-run `kt config key set deepseek`, then either set `backend: deepseek` in the
-creature config or switch the live creature with
-`/module set web_search backend deepseek`.
+`web_search` keeps DuckDuckGo as its no-key default. To explicitly use hosted
+Codex subscription search, run `kt login codex`, then set `backend: codex` or
+use `/module set web_search backend codex`; this is independent of the
+creature's active LLM. To use DeepSeek, run `kt config key set deepseek`, then
+select `backend: deepseek`. Set `fallback: duckduckgo` when a transient failure
+of an explicitly selected Codex or DeepSeek backend should fall back.
 
 Custom (local module):
 

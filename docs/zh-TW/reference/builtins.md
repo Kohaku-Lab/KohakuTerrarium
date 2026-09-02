@@ -91,9 +91,11 @@ KohakuTerrarium 隨附的所有內建工具、子代理、輸入、輸出、使�
 
 - 參數：`url`。
 
-**`web_search`**：預設使用 DuckDuckGo，也可選擇 DeepSeek Responses
-搜尋後端。DeepSeek 需先執行 `kt config key set deepseek`，再透過
-`/module set web_search backend deepseek` 為目前 Creature 啟用。直接執行。
+**`web_search`**：預設使用 DuckDuckGo，也可明確選擇 Codex 訂閱或
+DeepSeek Responses 後端。執行 `kt login codex` 後可設定
+`backend: codex`；此後端與目前 Creature 主模型無關。DeepSeek 需先執行
+`kt config key set deepseek`，再設定 `backend: deepseek`。兩個明確選擇的
+Provider 後端均可設定 `fallback: duckduckgo` 處理暫時故障。直接執行。
 
 - 參數：`query`、`max_results`（int）、`region`（str）。
 
