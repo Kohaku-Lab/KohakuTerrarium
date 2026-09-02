@@ -81,7 +81,7 @@
           <button v-if="windowStart > 0" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
             {{ t("chat.showEarlier", { count: windowStart }) }}
           </button>
-          <div v-for="(msg, idx) in windowMessages" :key="msg.id" :data-message-id="msg.id">
+          <div v-for="(msg, idx) in windowMessages" :key="msg.id" :data-message-id="msg.id" class="flex flex-col">
             <ChatMessage :message="msg" :prev-message="windowStart + idx > 0 ? viewMessages[windowStart + idx - 1] : null" :is-first="windowStart + idx === 0" :message-idx="windowStart + idx" :is-last-assistant="msg.role === 'assistant' && windowStart + idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
           </div>
           <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">

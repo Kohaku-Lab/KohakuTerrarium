@@ -193,6 +193,21 @@ describe("ChatPanel long-session performance", () => {
     }
   }
 
+  it("preserves the message flex layout inside per-message anchors", async () => {
+    const chat = useChatStore("graph_1")
+    seedMessages(chat, 2)
+    const wrapper = mountPanel(chat)
+    await flushPromises()
+
+    const anchors = wrapper.findAll("[data-message-id]")
+    expect(anchors).toHaveLength(2)
+    expect(
+      anchors.every(
+        (anchor) => anchor.classes().includes("flex") && anchor.classes().includes("flex-col"),
+      ),
+    ).toBe(true)
+  })
+
   it("renders only the newest window for a very long transcript", async () => {
     const chat = useChatStore("graph_1")
     seedMessages(chat, 450)
