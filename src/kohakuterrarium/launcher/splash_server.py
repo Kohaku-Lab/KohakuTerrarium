@@ -1,8 +1,12 @@
-"""Serve splash progress frames over an ephemeral loopback endpoint.
+"""Serve the splash page and its progress frames over a loopback endpoint.
 
-The server accepts only progress polling requests. An ephemeral port avoids
-collisions between concurrent launcher instances, and a single request thread
-is sufficient for the splash page's periodic polling.
+The server answers ``/`` with the splash page (when constructed with
+``page_html``) and ``/progress`` with the current frame; anything else is a
+404. Serving the page from the same origin as its feed keeps the poll
+same-origin, so neither CORS nor the browser's private-network gate can
+strand it. An ephemeral port avoids collisions between concurrent launcher
+instances, and a single request thread is sufficient for the splash page's
+periodic polling.
 """
 
 import json
@@ -31,9 +35,10 @@ class ProgressFrame:
 class SplashServer:
     """Manage the splash HTTP endpoint and its current progress frame."""
 
-    def __init__(self) -> None:
+    def __init__(self, page_html: str | None = None) -> None:
         self._lock = threading.Lock()
         self._frame = ProgressFrame()
+        self._page_html = page_html
         self._server: HTTPServer | None = None
         self._thread: threading.Thread | None = None
         # UI backends register teardown here so stopping the progress server
@@ -46,10 +51,14 @@ class SplashServer:
 
     @property
     def endpoint(self) -> str:
+        return self.page_url + "progress"
+
+    @property
+    def page_url(self) -> str:
         if self._server is None:
             raise RuntimeError("SplashServer not started")
         host, port = self._server.server_address[:2]
-        return f"http://{host}:{port}/progress"
+        return f"http://{host}:{port}/"
 
     def publish(
         self,
@@ -89,11 +98,20 @@ class SplashServer:
                 pass
 
             def _emit_cors(self) -> None:
-                # Inline pywebview content has a non-loopback origin, so its
-                # progress fetch requires explicit cross-origin permission.
+                # Harmless for the same-origin page; keeps an embedder that
+                # loads the page from another origin working too.
                 self.send_header("Access-Control-Allow-Origin", "*")
                 self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
                 self.send_header("Access-Control-Allow-Headers", "Content-Type")
+
+            def _send(self, content_type: str, body: bytes) -> None:
+                self.send_response(200)
+                self.send_header("Content-Type", content_type)
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self._emit_cors()
+                self.end_headers()
+                self.wfile.write(body)
 
             def do_OPTIONS(self):  # noqa: N802
                 self.send_response(204)
@@ -101,20 +119,18 @@ class SplashServer:
                 self.end_headers()
 
             def do_GET(self):  # noqa: N802
-                if not self.path.startswith("/progress"):
-                    self.send_response(404)
-                    self._emit_cors()
-                    self.end_headers()
+                if self.path.startswith("/progress"):
+                    frame = srv_ref.snapshot()
+                    body = json.dumps(asdict(frame)).encode("utf-8")
+                    self._send("application/json", body)
                     return
-                frame = srv_ref.snapshot()
-                body = json.dumps(asdict(frame)).encode("utf-8")
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.send_header("Cache-Control", "no-store")
+                page = srv_ref._page_html
+                if page is not None and self.path.split("?", 1)[0] == "/":
+                    self._send("text/html; charset=utf-8", page.encode("utf-8"))
+                    return
+                self.send_response(404)
                 self._emit_cors()
                 self.end_headers()
-                self.wfile.write(body)
 
         self._server = HTTPServer(("127.0.0.1", 0), _Handler)
         self._thread = threading.Thread(

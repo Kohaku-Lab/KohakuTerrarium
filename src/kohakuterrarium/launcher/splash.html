@@ -71,8 +71,9 @@
     <p class="message" id="message"></p>
   </div>
   <script>
-    // SPLASH_ENDPOINT is injected by splash_window.py before the page loads.
-    const endpoint = window.SPLASH_ENDPOINT || "http://127.0.0.1:0/progress";
+    // The page is served by the SplashServer that owns the feed, so the
+    // poll stays same-origin.
+    const endpoint = "/progress";
     let lastSeq = -1;
     async function poll() {
       try {
