@@ -206,4 +206,72 @@ describe("chat history auto expansion", () => {
     expect(expand).toHaveBeenCalledOnce()
     expect(el.scrollTop).toBe(10)
   })
+
+  it("does not rearm idle work for a new scope after a mid-expansion switch", async () => {
+    const idle = createIdleHarness()
+    const el = createViewport()
+    let context = "tab-a"
+    const expand = vi.fn()
+    const expander = createChatHistoryExpander({
+      canExpand: () => true,
+      expand,
+      getViewportEl: () => el,
+      getContext: () => context,
+      ...idle,
+    })
+
+    expander.maybeExpandAtTop(0)
+    // Scope flips while the expansion is still awaiting its DOM commit.
+    context = "tab-b"
+    await flushPromises()
+
+    expect(expand).toHaveBeenCalledOnce()
+    expect(idle.scheduled).toHaveLength(0)
+  })
+
+  it("does not rearm or expand anything after dispose", async () => {
+    const idle = createIdleHarness()
+    const expand = vi.fn()
+    const expander = createChatHistoryExpander({
+      canExpand: () => true,
+      expand,
+      getViewportEl: () => createViewport(),
+      getContext: () => "tab",
+      ...idle,
+    })
+
+    expander.maybeExpandAtTop(0)
+    // Unmount lands while the expansion is still in flight, so the
+    // continuation (not just a pending handle) must be fenced off.
+    expander.dispose()
+    await flushPromises()
+
+    expect(expand).toHaveBeenCalledOnce()
+    expect(idle.scheduled).toHaveLength(0)
+    expect(expander.maybeExpandAtTop(0)).toBe(false)
+    expect(expander.scheduleIdleExpand()).toBeUndefined()
+    expect(idle.scheduled).toHaveLength(0)
+  })
+
+  it("warns instead of rejecting when the expand callback throws", async () => {
+    const idle = createIdleHarness()
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
+    const expand = vi.fn(() => {
+      throw new Error("boom")
+    })
+    const expander = createChatHistoryExpander({
+      canExpand: () => true,
+      expand,
+      getViewportEl: () => createViewport(),
+      getContext: () => "tab",
+      ...idle,
+    })
+
+    expect(expander.maybeExpandAtTop(0)).toBe(true)
+    await flushPromises()
+
+    expect(warn).toHaveBeenCalledOnce()
+    expect(expander.maybeExpandAtTop(0)).toBe(true)
+    warn.mockRestore()
+  })
 })
