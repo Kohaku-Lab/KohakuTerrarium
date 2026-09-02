@@ -23,7 +23,8 @@ from kohakuterrarium.launcher.paths import (
     site_packages_dir,
     version_dir,
 )
-from kohakuterrarium.launcher.splash_window import open_splash
+from kohakuterrarium.launcher.splash_server import SplashServer
+from kohakuterrarium.launcher.splash_window import run_with_splash
 from kohakuterrarium.launcher.tree_ops import read_active_pointer
 from kohakuterrarium.launcher.update_runner import (
     UpdateResult,
@@ -133,41 +134,12 @@ def prepare(argv: list[str] | None = None) -> "PrepareResult":
     if pointer is None:
         # First installation can block on extraction, download, and smoke
         # checks, so keep the shell visibly responsive with progress.
-        srv = open_splash()
-        try:
-            srv.publish("Setting up", percent=5, message="")
-
-            def _progress(phase: str, percent: float, msg: str) -> None:
-                try:
-                    srv.publish(phase, percent=percent, message=msg)
-                except Exception:
-                    pass
-
-            log.info("launcher: no active pointer — first_install")
-            install_result = first_install(_progress)
-            if not install_result.ok:
-                srv.publish(
-                    "Failed",
-                    percent=100,
-                    message=install_result.error or "",
-                    status="failed",
-                )
-                log.error("launcher: first_install failed: %s", install_result.error)
-                time.sleep(2.0)
-                return PrepareResult(exit_code=5, error=install_result.error)
-            log.info("launcher: first_install succeeded at %s", install_result.version)
-            srv.publish(
-                "Ready",
-                percent=100,
-                message=str(install_result.version),
-                status="ok",
-            )
-            time.sleep(0.4)
-        finally:
-            try:
-                srv.stop()
-            except Exception:
-                pass
+        log.info("launcher: no active pointer — first_install")
+        install_result = run_with_splash(_first_install_with_progress)
+        if not install_result.ok:
+            log.error("launcher: first_install failed: %s", install_result.error)
+            return PrepareResult(exit_code=5, error=install_result.error)
+        log.info("launcher: first_install succeeded at %s", install_result.version)
         pointer = read_active_pointer()
         if pointer is None:
             log.error("launcher: first_install reported ok but pointer absent")
@@ -234,28 +206,45 @@ def _build_pythonpath(version_root) -> str:
     return os.pathsep.join([site, existing])
 
 
+def _first_install_with_progress(srv: SplashServer) -> UpdateResult:
+    """Run first_install behind the splash, mirroring progress into it."""
+    srv.publish("Setting up", percent=5, message="")
+
+    def _progress(phase: str, percent: float, msg: str) -> None:
+        srv.publish(phase, percent=percent, message=msg)
+
+    result = first_install(_progress)
+    if result.ok:
+        srv.publish("Ready", percent=100, message=str(result.version), status="ok")
+        time.sleep(0.4)
+    else:
+        srv.publish("Failed", percent=100, message=result.error or "", status="failed")
+        time.sleep(2.0)
+    return result
+
+
 def _run_splash_demo(log) -> int:
     """Run a scripted splash sequence and return a successful exit code."""
     log.info("launcher: --splash-demo running scripted sequence")
-    srv = open_splash()
-    try:
-        srv.publish("Starting…", percent=5, message="")
-        time.sleep(0.8)
-        srv.publish("Resolving feed", percent=20, message="stable.json")
-        time.sleep(0.8)
-        srv.publish(
-            "Downloading",
-            percent=55,
-            message="kohakuterrarium-1.5.1-linux-x64-py3.13.tar.zst",
-        )
-        time.sleep(0.8)
-        srv.publish("Smoke testing", percent=85, message="kt --version")
-        time.sleep(0.4)
-        srv.publish("Ready", percent=100, message="", status="ok")
-        time.sleep(1.0)
-    finally:
-        srv.stop()
+    run_with_splash(_splash_demo_sequence)
     return 0
+
+
+def _splash_demo_sequence(srv: SplashServer) -> None:
+    srv.publish("Starting…", percent=5, message="")
+    time.sleep(0.8)
+    srv.publish("Resolving feed", percent=20, message="stable.json")
+    time.sleep(0.8)
+    srv.publish(
+        "Downloading",
+        percent=55,
+        message="kohakuterrarium-1.5.1-linux-x64-py3.13.tar.zst",
+    )
+    time.sleep(0.8)
+    srv.publish("Smoke testing", percent=85, message="kt --version")
+    time.sleep(0.4)
+    srv.publish("Ready", percent=100, message="", status="ok")
+    time.sleep(1.0)
 
 
 __all__ = ["PrepareResult", "UpdateResult", "main", "prepare"]

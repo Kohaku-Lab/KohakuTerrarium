@@ -1,14 +1,13 @@
 """Unit tests for the launcher splash HTTP server.
 
-The splash page is loaded into pywebview via the ``html=`` argument
-(no http origin), so a same-origin policy treats the polling fetch as
-cross-origin.  Without CORS headers the browser drops the response and
-the splash sits forever on its hardcoded "Starting…" / 0% defaults.
+The server feeds the splash page its progress frames and, since the
+page is served from the same origin, the poll never crosses an origin
+boundary.  CORS headers stay on the feed so an embedder loading the
+page from elsewhere still gets frames instead of a silently dropped
+response and a splash stuck on its "Starting…" / 0% defaults.
 
-Window-close callbacks are the other side of that story: ``stop()``
-only killed the HTTP server, leaving the pywebview window on screen
-forever.  Registered callbacks now fire from ``stop()`` so the window
-is torn down with the server.
+Window-close callbacks registered on the server fire from ``stop()``
+so any UI bound to it is torn down together with the server.
 """
 
 import json
@@ -157,3 +156,35 @@ class TestProgressFrameDefaults:
         assert frame.percent == 0.0
         # ``None`` keeps the JS polling — only ok/failed terminate.
         assert frame.status is None
+
+
+class TestSplashServerPage:
+    """The splash page is served by the progress server itself.
+
+    Loading it from the same ``http://127.0.0.1:<port>`` origin as
+    ``/progress`` keeps the poll same-origin, so neither CORS nor the
+    browser's private-network gate can strand the page on its defaults.
+    """
+
+    def test_page_url_serves_html_and_progress_stays_json(self):
+        srv = SplashServer(page_html="<html><body>splash</body></html>").start()
+        try:
+            assert srv.page_url == srv.endpoint[: -len("progress")]
+            status, headers, body = _get(srv.endpoint, path="/")
+            assert status == 200
+            assert headers.get("Content-Type", "").startswith("text/html")
+            assert body == b"<html><body>splash</body></html>"
+            status, headers, body = _get(srv.endpoint)
+            assert status == 200
+            assert headers.get("Content-Type") == "application/json"
+            assert json.loads(body)["seq"] == 0
+        finally:
+            srv.stop()
+
+    def test_page_is_404_without_html(self, server):
+        status, _, _ = _get(server.endpoint, path="/")
+        assert status == 404
+
+    def test_page_url_requires_started_server(self):
+        with pytest.raises(RuntimeError):
+            SplashServer(page_html="x").page_url
