@@ -5,6 +5,33 @@ import { nextTick } from "vue"
 // "show earlier".
 export const CHAT_AUTO_EXPAND_TOP_PX = 48
 
+// Reading-position anchor for prepending content. The first message
+// wrapper visible at the viewport top is captured before the DOM
+// changes; after the commit its viewport-relative position is restored
+// via an absolute delta on its live rect. Unlike a scrollHeight delta
+// this is self-correcting when the browser's native scroll anchoring
+// already adjusted scrollTop for the insertion (the anchor delta then
+// reads ~0, so no double compensation).
+export function captureViewportAnchor(getViewportEl) {
+  const el = getViewportEl()
+  if (!el) return null
+  const viewportTop = el.getBoundingClientRect().top
+  for (const wrapper of el.querySelectorAll("[data-message-id]")) {
+    if (wrapper.getBoundingClientRect().bottom > viewportTop) {
+      return { element: wrapper, offset: wrapper.getBoundingClientRect().top - viewportTop }
+    }
+  }
+  return null
+}
+
+export function restoreViewportAnchor(getViewportEl, anchor) {
+  if (!anchor || !anchor.element.isConnected) return
+  const el = getViewportEl()
+  if (!el) return
+  const viewportTop = el.getBoundingClientRect().top
+  el.scrollTop += anchor.element.getBoundingClientRect().top - viewportTop - anchor.offset
+}
+
 function defaultScheduleIdle(callback) {
   if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
     return window.requestIdleCallback(callback, { timeout: 400 })
@@ -41,16 +68,14 @@ export function createChatHistoryExpander({
 
   async function expandAndCompensate() {
     const context = getContext?.()
-    const el = getViewportEl()
-    const prevHeight = el ? el.scrollHeight : 0
+    const anchor = captureViewportAnchor(getViewportEl)
     expand()
     await nextTick()
     // A scope switch during the DOM commit means the prepended content
     // no longer belongs to the mounted list — don't shift the new
     // scope's restored scroll position by a stale delta.
     if (getContext && getContext() !== context) return
-    const after = getViewportEl()
-    if (after && prevHeight) after.scrollTop += after.scrollHeight - prevHeight
+    restoreViewportAnchor(getViewportEl, anchor)
   }
 
   async function runExpand() {

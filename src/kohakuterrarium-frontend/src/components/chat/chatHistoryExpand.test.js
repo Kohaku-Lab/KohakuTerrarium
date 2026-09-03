@@ -26,50 +26,71 @@ describe("chat history auto expansion", () => {
     }
   }
 
-  function createViewport({ scrollTop = 0, height = 1000 } = {}) {
+  // A message wrapper whose viewport-relative top is readable and
+  // mutable, simulating content prepended above it.
+  function createWrapper(top, { connected = true } = {}) {
+    const element = {
+      isConnected: connected,
+      getBoundingClientRect: () => ({ top: element.top, bottom: element.top + 50 }),
+    }
+    element.top = top
+    return element
+  }
+
+  function createViewport({ scrollTop = 0, wrappers = [] } = {}) {
     const el = { scrollTop }
-    let viewportHeight = height
-    Object.defineProperty(el, "scrollHeight", {
-      configurable: true,
-      get: () => viewportHeight,
-      set: (value) => {
-        viewportHeight = value
-      },
-    })
+    el.getBoundingClientRect = () => ({ top: 0, bottom: 0 })
+    el.querySelectorAll = () => wrappers
     return el
   }
 
-  it("expands one step at the top and compensates the reading position", async () => {
-    const idle = createIdleHarness()
-    const el = createViewport({ scrollTop: 10 })
-    const expand = vi.fn(() => {
-      // Simulate the prepended content growing the scroll area.
-      el.scrollHeight = 3000
-    })
+  function createExpander(overrides = {}) {
+    const idle = overrides.idle || createIdleHarness()
     const expander = createChatHistoryExpander({
       canExpand: () => true,
-      expand,
-      getViewportEl: () => el,
+      expand: vi.fn(),
+      getViewportEl: () => createViewport(),
       getContext: () => "tab",
       ...idle,
+      ...overrides,
     })
+    return { idle, expander }
+  }
+
+  it("expands one step at the top and compensates the reading position", async () => {
+    const wrapper = createWrapper(100)
+    const el = createViewport({ scrollTop: 10, wrappers: [wrapper] })
+    const expand = vi.fn(() => {
+      // Prepending content pushes the anchor message down.
+      wrapper.top = 300
+    })
+    const { expander } = createExpander({ expand, getViewportEl: () => el })
 
     expect(expander.maybeExpandAtTop(10)).toBe(true)
     await flushPromises()
 
     expect(expand).toHaveBeenCalledOnce()
-    expect(el.scrollTop).toBe(2010)
+    expect(el.scrollTop).toBe(210)
+  })
+
+  it("does not double-compensate when the browser already restored the position", async () => {
+    const wrapper = createWrapper(100)
+    const el = createViewport({ scrollTop: 10, wrappers: [wrapper] })
+    // Native scroll anchoring keeps the anchor visually stable while the
+    // content above it grows; the anchor delta must then read zero and
+    // scrollTop must not be shifted a second time.
+    const expand = vi.fn()
+    const { expander } = createExpander({ expand, getViewportEl: () => el })
+
+    expander.maybeExpandAtTop(10)
+    await flushPromises()
+
+    expect(el.scrollTop).toBe(10)
   })
 
   it("still expands exactly at the threshold", () => {
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...createIdleHarness(),
-    })
+    const { expander } = createExpander({ expand })
 
     expect(expander.maybeExpandAtTop(CHAT_AUTO_EXPAND_TOP_PX)).toBe(true)
     expect(expand).toHaveBeenCalledOnce()
@@ -77,13 +98,7 @@ describe("chat history auto expansion", () => {
 
   it("does not expand while the viewport is away from the top", () => {
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...createIdleHarness(),
-    })
+    const { expander } = createExpander({ expand })
 
     expect(expander.maybeExpandAtTop(CHAT_AUTO_EXPAND_TOP_PX + 1)).toBe(false)
     expect(expand).not.toHaveBeenCalled()
@@ -91,13 +106,7 @@ describe("chat history auto expansion", () => {
 
   it("does not expand when the window has nothing earlier to show", () => {
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => false,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...createIdleHarness(),
-    })
+    const { expander } = createExpander({ expand, canExpand: () => false })
 
     expect(expander.maybeExpandAtTop(0)).toBe(false)
     expect(expand).not.toHaveBeenCalled()
@@ -105,13 +114,7 @@ describe("chat history auto expansion", () => {
 
   it("does not stack expansions while one is in flight", () => {
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...createIdleHarness(),
-    })
+    const { expander } = createExpander({ expand })
 
     expect(expander.maybeExpandAtTop(0)).toBe(true)
     expect(expander.maybeExpandAtTop(0)).toBe(false)
@@ -119,15 +122,8 @@ describe("chat history auto expansion", () => {
   })
 
   it("pre-mounts one idle lookahead and never chains further", async () => {
-    const idle = createIdleHarness()
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...idle,
-    })
+    const { idle, expander } = createExpander({ expand })
 
     expander.maybeExpandAtTop(0)
     await flushPromises()
@@ -142,16 +138,9 @@ describe("chat history auto expansion", () => {
   })
 
   it("drops a pending idle lookahead once the window has nothing earlier", async () => {
-    const idle = createIdleHarness()
     let expandable = true
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => expandable,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...idle,
-    })
+    const { idle, expander } = createExpander({ expand, canExpand: () => expandable })
 
     expander.maybeExpandAtTop(0)
     await flushPromises()
@@ -163,15 +152,8 @@ describe("chat history auto expansion", () => {
   })
 
   it("cancels a pending idle lookahead on demand", async () => {
-    const idle = createIdleHarness()
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...idle,
-    })
+    const { idle, expander } = createExpander({ expand })
 
     expander.maybeExpandAtTop(0)
     await flushPromises()
@@ -185,19 +167,17 @@ describe("chat history auto expansion", () => {
   })
 
   it("skips the scroll compensation when the scope changed mid-expansion", async () => {
-    const idle = createIdleHarness()
-    const el = createViewport({ scrollTop: 10 })
+    const wrapper = createWrapper(100)
+    const el = createViewport({ scrollTop: 10, wrappers: [wrapper] })
     let context = "tab"
     const expand = vi.fn(() => {
-      el.scrollHeight = 3000
+      wrapper.top = 300
       context = "other-tab"
     })
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
+    const { expander } = createExpander({
       expand,
       getViewportEl: () => el,
       getContext: () => context,
-      ...idle,
     })
 
     expander.maybeExpandAtTop(0)
@@ -207,18 +187,24 @@ describe("chat history auto expansion", () => {
     expect(el.scrollTop).toBe(10)
   })
 
+  it("ignores a detached anchor element", async () => {
+    const wrapper = createWrapper(100, { connected: false })
+    const el = createViewport({ scrollTop: 10, wrappers: [wrapper] })
+    const expand = vi.fn(() => {
+      wrapper.top = 300
+    })
+    const { expander } = createExpander({ expand, getViewportEl: () => el })
+
+    expander.maybeExpandAtTop(0)
+    await flushPromises()
+
+    expect(el.scrollTop).toBe(10)
+  })
+
   it("does not rearm idle work for a new scope after a mid-expansion switch", async () => {
-    const idle = createIdleHarness()
-    const el = createViewport()
     let context = "tab-a"
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => el,
-      getContext: () => context,
-      ...idle,
-    })
+    const { idle, expander } = createExpander({ expand, getContext: () => context })
 
     expander.maybeExpandAtTop(0)
     // Scope flips while the expansion is still awaiting its DOM commit.
@@ -230,15 +216,8 @@ describe("chat history auto expansion", () => {
   })
 
   it("does not rearm or expand anything after dispose", async () => {
-    const idle = createIdleHarness()
     const expand = vi.fn()
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...idle,
-    })
+    const { idle, expander } = createExpander({ expand })
 
     expander.maybeExpandAtTop(0)
     // Unmount lands while the expansion is still in flight, so the
@@ -254,18 +233,11 @@ describe("chat history auto expansion", () => {
   })
 
   it("warns instead of rejecting when the expand callback throws", async () => {
-    const idle = createIdleHarness()
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {})
     const expand = vi.fn(() => {
       throw new Error("boom")
     })
-    const expander = createChatHistoryExpander({
-      canExpand: () => true,
-      expand,
-      getViewportEl: () => createViewport(),
-      getContext: () => "tab",
-      ...idle,
-    })
+    const { expander } = createExpander({ expand })
 
     expect(expander.maybeExpandAtTop(0)).toBe(true)
     await flushPromises()
