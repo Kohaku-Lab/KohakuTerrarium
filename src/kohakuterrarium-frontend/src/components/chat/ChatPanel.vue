@@ -195,7 +195,7 @@ import { inject } from "vue"
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
 import { useChatRenderWindow, CHAT_RENDER_EXPAND_MESSAGE_LIMIT, CHAT_RENDER_EXPAND_UNIT_BUDGET } from "@/components/chat/chatRenderWindow"
-import { createChatHistoryExpander } from "@/components/chat/chatHistoryExpand"
+import { createChatHistoryExpander, captureViewportAnchor, restoreViewportAnchor } from "@/components/chat/chatHistoryExpand"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
@@ -551,11 +551,10 @@ const historyExpander = createChatHistoryExpander({
 })
 
 async function loadEarlierMessages() {
-  const el = messagesEl.value
-  const prevHeight = el ? el.scrollHeight : 0
+  const anchor = captureViewportAnchor(() => messagesEl.value)
   expandHistory()
   await nextTick()
-  if (el && prevHeight) el.scrollTop += el.scrollHeight - prevHeight
+  restoreViewportAnchor(() => messagesEl.value, anchor)
 }
 
 let lastObservedScrollTop = 0

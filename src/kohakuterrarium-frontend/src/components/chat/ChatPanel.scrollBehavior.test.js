@@ -493,7 +493,11 @@ describe("ChatPanel long-session performance", () => {
 
     expect(renderedIds(wrapper)).toHaveLength(300)
     expect(renderedIds(wrapper)[0]).toBe("m_700")
-    expect(viewport.scrollTop).toBe(210)
+    // jsdom rects are all zero, so the anchor delta reads 0: the panel
+    // pins "no spurious jump" (e.g. an absolute write to the bottom),
+    // while the compensation math itself is pinned with real rects in
+    // chatHistoryExpand.test.js.
+    expect(viewport.scrollTop).toBe(10)
     expect(idleCallbacks).toHaveLength(1)
 
     idleCallbacks[0]()
@@ -501,7 +505,7 @@ describe("ChatPanel long-session performance", () => {
 
     expect(renderedIds(wrapper)).toHaveLength(400)
     expect(renderedIds(wrapper)[0]).toBe("m_600")
-    expect(viewport.scrollTop).toBe(410)
+    expect(viewport.scrollTop).toBe(10)
     expect(idleCallbacks).toHaveLength(1)
     wrapper.unmount()
   })
