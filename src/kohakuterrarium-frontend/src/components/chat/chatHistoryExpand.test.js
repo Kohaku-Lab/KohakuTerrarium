@@ -16,6 +16,9 @@ describe("chat history auto expansion", () => {
         return id
       },
       cancelIdle: (id) => cancelled.add(id),
+      pendingCount() {
+        return scheduled.filter((entry) => !cancelled.has(entry.id)).length
+      },
       runNext() {
         const entry = scheduled.find((candidate) => !cancelled.has(candidate.id))
         if (!entry) return false
@@ -199,6 +202,31 @@ describe("chat history auto expansion", () => {
     await flushPromises()
 
     expect(el.scrollTop).toBe(10)
+  })
+
+  it("supersedes a stale lookahead when a new scroll-triggered expansion starts", async () => {
+    const expand = vi.fn()
+    const { idle, expander } = createExpander({ expand })
+
+    expander.maybeExpandAtTop(0)
+    await flushPromises()
+    expect(idle.pendingCount()).toBe(1)
+
+    // The user reaches the top again before the lookahead fires. The
+    // stale handle must be cancelled, not left to fire an extra
+    // expansion on top of the fresh one.
+    expect(expander.maybeExpandAtTop(0)).toBe(true)
+    expect(idle.cancelled).toContain(idle.scheduled[0].id)
+    await flushPromises()
+
+    expect(expand).toHaveBeenCalledTimes(2)
+    expect(idle.pendingCount()).toBe(1)
+
+    // The replacement lookahead fires once and never chains.
+    expect(idle.runNext()).toBe(true)
+    await flushPromises()
+    expect(expand).toHaveBeenCalledTimes(3)
+    expect(idle.pendingCount()).toBe(0)
   })
 
   it("does not rearm idle work for a new scope after a mid-expansion switch", async () => {

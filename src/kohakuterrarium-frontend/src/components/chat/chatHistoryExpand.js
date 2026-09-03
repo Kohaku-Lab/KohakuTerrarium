@@ -93,6 +93,11 @@ export function createChatHistoryExpander({
 
   function maybeExpandAtTop(scrollTop) {
     if (disposed || expanding || !canExpand() || scrollTop > CHAT_AUTO_EXPAND_TOP_PX) return false
+    // The interactive step mounts the batch a pending lookahead was
+    // going to pre-mount, so supersede it: keeps at most one batch
+    // ahead of the reading position, and keeps the setTimeout fallback
+    // from firing a stale expansion mid-gesture.
+    cancelIdleExpand()
     const context = getContext?.()
     runExpand().then(() => {
       // A scope switch or disposal during the in-flight expansion
