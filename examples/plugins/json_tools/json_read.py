@@ -5,7 +5,6 @@ from typing import Any
 
 import aiofiles
 
-from kohakuterrarium.builtins.tools.registry import register_builtin
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -57,7 +56,6 @@ def _resolve_path(data: Any, query: str) -> Any:
     return current
 
 
-@register_builtin("json_read")
 class JsonReadTool(BaseTool):
     """Read and query JSON files with path expressions."""
 

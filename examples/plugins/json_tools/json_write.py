@@ -5,7 +5,10 @@ from typing import Any
 
 import aiofiles
 
-from kohakuterrarium.builtins.tools.registry import register_builtin
+from kohakuterrarium.builtins.tools.edit import (
+    check_edit_guards,
+    update_edit_read_state,
+)
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
@@ -60,7 +63,6 @@ def _set_path(data: Any, query: str, value: Any) -> Any:
     return data
 
 
-@register_builtin("json_write")
 class JsonWriteTool(BaseTool):
     """Modify JSON files with path expressions."""
 
@@ -102,6 +104,13 @@ class JsonWriteTool(BaseTool):
             if msg:
                 return ToolResult(error=msg)
 
+        # Every other file-writing tool refuses to overwrite a file the model
+        # has not read. A JSON writer is no different.
+        if file_path.exists():
+            guard = check_edit_guards(file_path, context)
+            if guard:
+                return guard
+
         if file_path.exists():
             try:
                 async with aiofiles.open(file_path, encoding="utf-8") as f:
@@ -133,6 +142,7 @@ class JsonWriteTool(BaseTool):
             logger.error("JSON write failed", error=str(e))
             return ToolResult(error=f"Failed to write: {e}")
 
+        update_edit_read_state(file_path, context)
         logger.debug("JSON file written", file_path=str(file_path), query=query)
         return ToolResult(
             output=f"Updated {path} at '{query}'",
