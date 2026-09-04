@@ -22,8 +22,10 @@ modified value, new file). We compare SHA-256 of each file's bytes
 to keep the guard tight while ignoring no-op external rewrites.
 """
 
+import ctypes
 import hashlib
 import os
+import sys
 from pathlib import Path
 
 import pytest
@@ -101,6 +103,32 @@ def _snapshot() -> dict[str, str]:
     return out
 
 
+def _pid_alive(pid: int) -> bool:
+    """Report whether a pid is running, without signalling it."""
+    if sys.platform == "win32":
+        # os.kill on Windows maps every signal other than CTRL_C_EVENT /
+        # CTRL_BREAK_EVENT to TerminateProcess, so a "probe" would kill the
+        # daemon it is asking about.
+        process_query_limited_information = 0x1000
+        handle = ctypes.windll.kernel32.OpenProcess(
+            process_query_limited_information, False, pid
+        )
+        if not handle:
+            return False
+        ctypes.windll.kernel32.CloseHandle(handle)
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Owned by another user: running, just not ours to signal.
+        return True
+    except OSError:
+        return False
+    return True
+
+
 def _running_daemon_pid(config_dir: Path | None = None) -> int | None:
     """Return the pid of a live KT web daemon, or None if none is running."""
     root = _REAL_CONFIG_DIR if config_dir is None else config_dir
@@ -108,15 +136,7 @@ def _running_daemon_pid(config_dir: Path | None = None) -> int | None:
         pid = int((root / "run" / "web.pid").read_text().strip())
     except (OSError, ValueError):
         return None
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return None
-    except PermissionError:
-        return pid
-    except OSError:
-        return None
-    return pid
+    return pid if _pid_alive(pid) else None
 
 
 _BEFORE: dict[str, str] = _snapshot()
@@ -182,10 +202,9 @@ def test_daemon_probe_ignores_a_missing_or_dead_pid(tmp_path):
     (run_dir / "web.pid").write_text("not-a-pid")
     assert _running_daemon_pid(tmp_path) is None
 
-    # PID 1 always exists; os.kill(1, 0) raises PermissionError, which the
-    # probe must read as "alive", not "absent".
-    (run_dir / "web.pid").write_text("1")
-    assert _running_daemon_pid(tmp_path) == 1
+    # Our own pid is alive on every platform, unlike PID 1.
+    (run_dir / "web.pid").write_text(str(os.getpid()))
+    assert _running_daemon_pid(tmp_path) == os.getpid()
 
     (run_dir / "web.pid").write_text("999999")
     assert _running_daemon_pid(tmp_path) is None
