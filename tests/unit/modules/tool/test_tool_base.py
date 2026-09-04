@@ -254,8 +254,19 @@ class TestToolInfo:
         assert info.tool_name == "ok_tool"
         assert info.description == "always succeeds"
         assert info.execution_mode is ExecutionMode.BACKGROUND
-        # documentation is pulled from get_full_documentation
-        assert "ok_tool" in info.documentation
+        # Registration does not read the packaged markdown: it used to load the
+        # whole corpus at boot to serve one rare fallback.
+        assert info.documentation == ""
+        # It is resolved on demand instead.
+        assert "ok_tool" in info.resolve_documentation()
+
+    def test_explicit_documentation_wins_over_the_lazy_lookup(self):
+        info = ToolInfo(tool_name="ok_tool", description="d", documentation="EXPLICIT")
+        assert info.resolve_documentation() == "EXPLICIT"
+
+    def test_resolve_documentation_is_empty_without_a_tool(self):
+        info = ToolInfo(tool_name="x", description="d")
+        assert info.resolve_documentation() == ""
 
     def test_to_prompt_line_format(self):
         info = ToolInfo(tool_name="bash", description="run shell")

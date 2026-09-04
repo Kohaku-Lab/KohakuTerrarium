@@ -1,38 +1,29 @@
 ---
 name: mcp_connect
-description: Connect to an MCP server at runtime
+description: 'Connect to an MCP server by name or definition. Not for calling its tools - use mcp_call.'
 category: builtin
-tags: [mcp, integration]
+tags: [mcp]
 ---
 
 # mcp_connect
 
-Connect to a new MCP server at runtime. Once connected, use `mcp_list`
-to see available tools and `mcp_call` to invoke them.
+Opens a session to an MCP server so its tools become callable.
 
 ## Arguments
 
-| Arg             | Type   | Description                                                                |
-| --------------- | ------ | -------------------------------------------------------------------------- |
-| name            | string | A name for this server connection (required)                               |
-| command         | string | Executable command for stdio transport                                     |
-| args            | list   | Command arguments for stdio transport                                      |
-| transport       | string | Optional transport override: `stdio`, `http` / `sse`, or `streamable_http` |
-| url             | string | Server URL for SSE or streamable HTTP transport                            |
-| env             | object | Environment variables for stdio transport                                  |
-| connect_timeout | number | Optional connection timeout in seconds                                     |
+| Arg | Type | Req | Description |
+| --- | --- | --- | --- |
+| name | string | yes | Registry name, or a name for an inline definition |
+| command | string | no | Stdio server command |
+| args | array | no | Arguments for the command |
+| url | string | no | HTTP server URL |
 
-Provide either `command` (stdio) or `url` (HTTP transport). If `url` is given without an explicit `transport`, `streamable_http` is used by default.
+## Behavior
 
-## Examples
+- Give either a registry `name`, or `command`/`args` for stdio, or `url` for
+  HTTP.
+- Connecting is idempotent; an already-connected server returns success.
 
-```
-mcp_connect(name="fs", command="npx", args=["-y", "@modelcontextprotocol/server-filesystem", "./"])
-mcp_connect(name="github", command="npx", args=["-y", "@modelcontextprotocol/server-github"])
-mcp_connect(name="remote", url="https://mcp.example.com/mcp")
-mcp_connect(name="legacy", transport="http", url="https://mcp.example.com/sse")
-```
+## Limits
 
-## Output
-
-Shows the number of tools discovered and their names.
+- Failures are contained to this call and do not affect other servers.

@@ -267,39 +267,75 @@ class TestErrorPaths:
         assert ex.get_result(jid) is result
 
 
-def _agent(skill_mode="dynamic", has_info=True):
+def _agent(tool_doc_mode="standard", has_info=True):
     """Minimal agent stub exposing the fields the manual-read gate reads."""
     tools = {"info": object()} if has_info else {}
     registry = types.SimpleNamespace(get_tool=tools.get)
     return types.SimpleNamespace(
-        config=types.SimpleNamespace(skill_mode=skill_mode),
+        config=types.SimpleNamespace(tool_doc_mode=tool_doc_mode),
         registry=registry,
     )
+
+
+class _PlainTool(BaseTool):
+    """An ordinary tool that declares no documentation requirement."""
+
+    @property
+    def tool_name(self):
+        return "plain"
+
+    @property
+    def description(self):
+        return "Plain"
+
+    @property
+    def execution_mode(self):
+        return ExecutionMode.DIRECT
+
+    async def _execute(self, args, **kwargs):
+        return ToolResult(output="ran")
 
 
 class TestManualReadGate:
     async def test_dynamic_with_info_still_blocks(self):
         ex = Executor()
-        ex._agent = _agent(skill_mode="dynamic", has_info=True)
+        ex._agent = _agent(tool_doc_mode="standard", has_info=True)
         ex.register_tool(_ManualReadTool())
         result = await ex.wait_for(await ex.submit("manual", {}))
         assert result.error is not None
         assert result.exit_code == 1
 
-    async def test_static_mode_bypasses_gate(self):
+    async def test_full_doc_mode_bypasses_gate(self):
         # Full docs already live in the prompt — the info-read gate is moot.
         ex = Executor()
-        ex._agent = _agent(skill_mode="static")
+        ex._agent = _agent(tool_doc_mode="full")
         ex.register_tool(_ManualReadTool())
         result = await ex.wait_for(await ex.submit("manual", {}))
         assert result.error is None
         assert result.output == "never reached"
 
+    async def test_brief_mode_gates_a_tool_that_does_not_declare_it(self):
+        # brief strips the parameter prose, so the model cannot call the tool
+        # correctly without reading its docs first — the mode implies the gate.
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="brief")
+        ex.register_tool(_PlainTool())
+        result = await ex.wait_for(await ex.submit("plain", {}))
+        assert result.error is not None
+        assert "info(name=plain)" in result.error
+
+    async def test_standard_mode_does_not_gate_an_ordinary_tool(self):
+        ex = Executor()
+        ex._agent = _agent(tool_doc_mode="standard")
+        ex.register_tool(_PlainTool())
+        result = await ex.wait_for(await ex.submit("plain", {}))
+        assert result.error is None
+
     async def test_missing_info_tool_bypasses_gate(self):
         # Without an ``info`` tool the block is unsatisfiable, so the tool
         # would be permanently undispatchable — the gate must relax.
         ex = Executor()
-        ex._agent = _agent(skill_mode="dynamic", has_info=False)
+        ex._agent = _agent(tool_doc_mode="standard", has_info=False)
         ex.register_tool(_ManualReadTool())
         result = await ex.wait_for(await ex.submit("manual", {}))
         assert result.error is None

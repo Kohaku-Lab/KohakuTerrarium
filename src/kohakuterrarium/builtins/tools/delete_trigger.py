@@ -30,11 +30,7 @@ class DeleteTriggerTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Stop and remove a previously-installed trigger (timer / "
-            "schedule / channel watcher) by its trigger_id. Pair with "
-            "add_timer / add_schedule / watch_channel."
-        )
+        return "Stop and remove an installed trigger by id. Not for cancelling a running job - use stop_task."
 
     @property
     def execution_mode(self) -> ExecutionMode:

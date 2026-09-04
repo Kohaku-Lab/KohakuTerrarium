@@ -64,128 +64,8 @@ class TerrariumConfig:
     creatures: list[CreatureConfig]
     channels: list[ChannelConfig]
     root: RootConfig | None = None
-
-
-def build_channel_topology_prompt(
-    config: "TerrariumConfig",
-    creature: CreatureConfig,
-) -> str:
-    """
-    Build a prompt section describing channel topology for a creature.
-
-    Distinguish shared team channels from private sub-agent delegation, and
-    describe how triggers and result delivery use those channels.
-    """
-    ch_by_name: dict[str, ChannelConfig] = {}
-    for ch in config.channels:
-        ch_by_name[ch.name] = ch
-
-    listen_set = set(creature.listen_channels)
-    send_set = set(creature.send_channels)
-
-    relevant_names: set[str] = set()
-    relevant_names.update(creature.listen_channels)
-    relevant_names.update(creature.send_channels)
-    for ch in config.channels:
-        if ch.channel_type == "broadcast":
-            relevant_names.add(ch.name)
-
-    if not relevant_names:
-        return ""
-
-    lines: list[str] = [
-        "## Team Communication",
-        "",
-        "You are part of a multi-agent team. You communicate through **team channels**.",
-        "",
-        "### Auto-Listening",
-        "",
-        "You automatically listen to your assigned channels. Messages arrive",
-        "as trigger events in this format:",
-        "",
-        "  [Channel 'channel_name' from sender_name]: message content",
-        "",
-        "For broadcast channels:",
-        "",
-        "  [Channel 'channel_name' (broadcast) from sender_name]: message content",
-        "",
-        "**Hearing a message does NOT mean you must respond.**",
-        "Broadcast messages are informational. Only act if directly relevant to your task.",
-        "Queue messages directed to you typically require action.",
-        "",
-        "### CRITICAL RULES",
-        "",
-        "1. **All output to other creatures MUST go through `send_message`.**",
-        "   Your direct text output goes to the observer/user only.",
-        "   Other creatures CANNOT see your text output.",
-        "   To deliver results, you MUST call `send_message(channel=..., message=...)`.",
-        "",
-        "2. **Do not confuse team channels with sub-agents.**",
-        "   - Team channels (`send_message`): communicate with OTHER creatures",
-        "   - Sub-agents (`explore`, `plan`, `worker`, etc.): YOUR internal tools",
-        "   Sub-agents are NOT team members. They are tools you use privately.",
-        "",
-    ]
-
-    # Workflow section: what to do when triggered
-    lines.append("### Your Workflow")
-    lines.append("")
-
-    if listen_set and send_set:
-        listen_list = ", ".join(
-            f"`{c}`" for c in sorted(listen_set) if c != creature.name
-        )
-        send_list = ", ".join(f"`{c}`" for c in sorted(send_set))
-        if listen_list:
-            lines.append(f"1. You receive tasks/messages on: {listen_list}")
-        lines.append("2. Do your work using your tools and sub-agents")
-        lines.append(f"3. Send your results via `send_message` to: {send_list}")
-        lines.append(
-            "4. If you have nothing to send, output a brief status for the observer"
-        )
-        lines.append("")
-    elif listen_set:
-        listen_list = ", ".join(
-            f"`{c}`" for c in sorted(listen_set) if c != creature.name
-        )
-        if listen_list:
-            lines.append(f"You receive on: {listen_list}")
-        lines.append(
-            "Process the task and output your result (no outgoing channels configured)."
-        )
-        lines.append("")
-    elif send_set:
-        send_list = ", ".join(f"`{c}`" for c in sorted(send_set))
-        lines.append(f"Send your output to: {send_list}")
-        lines.append("")
-
-    # Channel listing
-    lines.append("### Team Channels")
-    lines.append("")
-
-    for ch_name in sorted(relevant_names):
-        block = _format_channel_block(ch_name, ch_by_name, listen_set, send_set)
-        if block:
-            lines.append(block)
-
-    # Direct channel
-    lines.append(
-        f"- `{creature.name}` [queue] (listen)"
-        f" -- your direct channel, for messages addressed specifically to you"
-    )
-    lines.append("")
-
-    # Team members
-    other_creatures = [c.name for c in config.creatures if c.name != creature.name]
-    if other_creatures:
-        lines.append(f"### Team Members: {', '.join(other_creatures)}")
-        lines.append(
-            "Each has a direct channel named after them. "
-            'Use `send_message(channel="name", ...)` to reach them directly.'
-        )
-        lines.append("")
-
-    return "\n".join(lines)
+    # Cap on runtime-spawned members; 0 means unbounded.
+    max_creatures: int = 0
 
 
 def _format_channel_block(
@@ -338,7 +218,11 @@ def load_terrarium_config(path: str | Path) -> TerrariumConfig:
         root = RootConfig(config_data=dict(root_raw), base_dir=base_dir)
 
     config = TerrariumConfig(
-        name=name, creatures=creatures, channels=channels, root=root
+        name=name,
+        creatures=creatures,
+        channels=channels,
+        root=root,
+        max_creatures=int(terrarium_data.get("max_creatures", 0) or 0),
     )
 
     logger.info(

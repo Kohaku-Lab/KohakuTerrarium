@@ -848,8 +848,9 @@ class TestLlmIntegration:
         by_name = {s.name: s for s in schemas}
         assert set(by_name) == {"read", "translate", "researcher"}
 
-        # ``read`` uses the builtin schema, with ``run_in_background``
-        # injected by the builder onto every tool.
+        # ``read`` uses the builtin schema verbatim: it returns in
+        # milliseconds, so it declares no background support and the builder
+        # adds no ``run_in_background`` argument.
         read_schema = by_name["read"]
         assert isinstance(read_schema, ToolSchema)
         assert read_schema.parameters == {
@@ -858,14 +859,6 @@ class TestLlmIntegration:
                 "path": {"type": "string", "description": "File path to read"},
                 "offset": {"type": "integer", "description": "Line offset (optional)"},
                 "limit": {"type": "integer", "description": "Max lines (optional)"},
-                "run_in_background": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, run without waiting for it to finish. No result is "
-                        "available immediately, and starting it does not give you "
-                        "another turn to act."
-                    ),
-                },
             },
             "required": ["path"],
         }
@@ -891,14 +884,6 @@ class TestLlmIntegration:
                     "type": "string",
                     "description": "Target language code",
                 },
-                "run_in_background": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, run without waiting for it to finish. No result is "
-                        "available immediately, and starting it does not give you "
-                        "another turn to act."
-                    ),
-                },
             },
             "required": ["text", "target_lang"],
         }
@@ -912,22 +897,14 @@ class TestLlmIntegration:
             "properties": {
                 "task": {
                     "type": "string",
-                    "description": (
-                        "Each task-subagent call is a fresh, context-isolated "
-                        "invocation. It cannot resume or inherit conversation history "
-                        "from previous calls. Provide a complete, self-contained task "
-                        "that includes the original goal, current state, work already "
-                        "completed, what remains, and any relevant paths, errors, or "
-                        "findings. Never use shorthand such as 'continue the previous "
-                        "task'."
-                    ),
+                    "description": "Complete, self-contained task description.",
                 },
+                # Sub-agents run in background by default, so the flag stays;
+                # its full semantics live once in the execution-model block.
                 "run_in_background": {
                     "type": "boolean",
                     "description": (
-                        "If true (default), run without waiting for it to finish. No "
-                        "result is available immediately, and starting it does not "
-                        "give you another turn to act. If false, wait for the result "
+                        "Default true. Set false to wait for the result "
                         "before continuing."
                     ),
                 },
@@ -936,8 +913,8 @@ class TestLlmIntegration:
         }
 
         # --- a tool with no schema at all -> the generic single-
-        # ``content`` fallback, with run_in_background injected. And a
-        # provider-native tool -> SKIPPED from the function schema list.
+        # ``content`` fallback. And a provider-native tool -> SKIPPED from
+        # the function schema list.
         registry.register_tool(_NoSchemaTool())
         registry.register_tool(_ProviderNativeTool())
         schemas2 = build_tool_schemas(registry)
@@ -951,14 +928,6 @@ class TestLlmIntegration:
                 "content": {
                     "type": "string",
                     "description": "Input content for the tool",
-                },
-                "run_in_background": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, run without waiting for it to finish. No result is "
-                        "available immediately, and starting it does not give you "
-                        "another turn to act."
-                    ),
                 },
             },
         }
@@ -980,14 +949,6 @@ class TestLlmIntegration:
                 "content": {
                     "type": "string",
                     "description": "Input content for the tool",
-                },
-                "run_in_background": {
-                    "type": "boolean",
-                    "description": (
-                        "If true, run without waiting for it to finish. No result is "
-                        "available immediately, and starting it does not give you "
-                        "another turn to act."
-                    ),
                 },
             },
         }

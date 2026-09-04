@@ -27,7 +27,7 @@ class GroupWireTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Add or remove a direct output-wire edge between creatures in your group"
+        return "Create or delete output wires that deliver a creature's turn-end text to another. Not for channels - use group_channel."
 
     @property
     def execution_mode(self) -> ExecutionMode:

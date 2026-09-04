@@ -41,6 +41,8 @@ class GraphTopology:
     listen_edges: dict[str, set[str]] = field(default_factory=dict)
     # creature_id -> set of channel names they send to
     send_edges: dict[str, set[str]] = field(default_factory=dict)
+    # Population cap for runtime spawning; 0 means unbounded.
+    max_creatures: int = 0
 
     def has_creature(self, creature_id: str) -> bool:
         return creature_id in self.creature_ids

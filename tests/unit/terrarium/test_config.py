@@ -10,12 +10,10 @@ from kohakuterrarium.packages import locations as loc_mod
 from kohakuterrarium.terrarium.config import (
     ChannelConfig,
     CreatureConfig,
-    TerrariumConfig,
     _find_terrarium_config,
     _format_channel_block,
     _parse_channels,
     _parse_creature,
-    build_channel_topology_prompt,
     load_terrarium_config,
 )
 
@@ -66,81 +64,6 @@ class TestFormatChannelBlock:
         assert "listen" in out
         assert "send" in out
         assert "docs" in out
-
-
-# ── build_channel_topology_prompt ────────────────────────────────
-
-
-class TestBuildChannelTopologyPrompt:
-    def test_no_relevant_channels_returns_empty(self):
-        cr = CreatureConfig(name="solo", config_data={}, base_dir=Path("."))
-        cfg = TerrariumConfig(name="t", creatures=[cr], channels=[])
-        assert build_channel_topology_prompt(cfg, cr) == ""
-
-    def test_listen_and_send_workflow(self):
-        cr = CreatureConfig(
-            name="alice",
-            config_data={},
-            base_dir=Path("."),
-            listen_channels=["inbox"],
-            send_channels=["outbox"],
-        )
-        cfg = TerrariumConfig(
-            name="t",
-            creatures=[cr],
-            channels=[
-                ChannelConfig(name="inbox"),
-                ChannelConfig(name="outbox"),
-            ],
-        )
-        out = build_channel_topology_prompt(cfg, cr)
-        assert "inbox" in out
-        assert "outbox" in out
-        assert "Your Workflow" in out
-
-    def test_listen_only(self):
-        cr = CreatureConfig(
-            name="alice",
-            config_data={},
-            base_dir=Path("."),
-            listen_channels=["inbox"],
-        )
-        cfg = TerrariumConfig(
-            name="t",
-            creatures=[cr],
-            channels=[ChannelConfig(name="inbox")],
-        )
-        out = build_channel_topology_prompt(cfg, cr)
-        assert "no outgoing channels configured" in out
-
-    def test_send_only(self):
-        cr = CreatureConfig(
-            name="alice",
-            config_data={},
-            base_dir=Path("."),
-            send_channels=["outbox"],
-        )
-        cfg = TerrariumConfig(
-            name="t",
-            creatures=[cr],
-            channels=[ChannelConfig(name="outbox")],
-        )
-        out = build_channel_topology_prompt(cfg, cr)
-        assert "Send your output to" in out
-
-    def test_team_members_section(self):
-        a = CreatureConfig(
-            name="alice", config_data={}, base_dir=Path("."), listen_channels=["x"]
-        )
-        b = CreatureConfig(name="bob", config_data={}, base_dir=Path("."))
-        cfg = TerrariumConfig(
-            name="t",
-            creatures=[a, b],
-            channels=[ChannelConfig(name="x")],
-        )
-        out = build_channel_topology_prompt(cfg, a)
-        assert "Team Members" in out
-        assert "bob" in out
 
 
 # ── _parse_creature ──────────────────────────────────────────────

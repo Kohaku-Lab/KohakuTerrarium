@@ -32,7 +32,7 @@ class SearchMemoryTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Search session history (keyword or semantic). Use when you need details from earlier in the conversation."
+        return "Search this session's earlier events by keyword or meaning. Use to recall details already dropped from context. Not for searching files - use grep."
 
     @property
     def execution_mode(self) -> ExecutionMode:

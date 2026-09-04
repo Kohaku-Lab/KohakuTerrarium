@@ -34,6 +34,8 @@ class ToolConfig:
     working_dir: str | None = None
     env: dict[str, str] = field(default_factory=dict)
     notify_controller_on_background_complete: bool = True
+    # Per-tool documentation tier; None defers to the creature default.
+    doc_mode: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
 
 
@@ -175,6 +177,9 @@ class BaseTool:
     # Unsafe tools share a serial lock while safe tools may remain parallel.
     is_concurrency_safe: bool = True
 
+    # False drops the ``run_in_background`` argument from this tool's schema.
+    supports_background: bool = False
+
     # Buckets order prompt contributions; names remain alphabetical within each bucket.
     prompt_contribution_bucket: str = "normal"
 
@@ -266,18 +271,29 @@ class ToolInfo:
     description: str
     execution_mode: ExecutionMode = ExecutionMode.BACKGROUND
     documentation: str = ""
+    _tool: "Tool | None" = None
+
+    def resolve_documentation(self) -> str:
+        """Return the reference text, reading it from the tool on first need.
+
+        Registration used to load every packaged markdown file eagerly, costing
+        each agent the whole corpus at boot to serve one rare fallback.
+        """
+        if self.documentation:
+            return self.documentation
+        tool = self._tool
+        if tool is None or not hasattr(tool, "get_full_documentation"):
+            return ""
+        return tool.get_full_documentation()  # type: ignore[attr-defined]
 
     @classmethod
     def from_tool(cls, tool: Tool) -> "ToolInfo":
-        """Create ToolInfo from a Tool instance."""
-        doc = ""
-        if hasattr(tool, "get_full_documentation"):
-            doc = tool.get_full_documentation()  # type: ignore[attr-defined]
+        """Create ToolInfo from a Tool instance, deferring its documentation."""
         return cls(
             tool_name=tool.tool_name,
             description=tool.description,
             execution_mode=tool.execution_mode,
-            documentation=doc,
+            _tool=tool,
         )
 
     def to_prompt_line(self) -> str:

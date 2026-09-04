@@ -312,7 +312,7 @@ class AgentInitMixin:
             system_prompt=system_prompt,
             include_job_status=True,
             include_tools_list=False,  # The aggregated prompt already contains tools.
-            include_subagent_schema_guidance=self.config.include_tools_in_prompt,
+            tool_doc_mode=self.config.tool_doc_mode,
             max_messages=self.config.max_messages,
             ephemeral=self.config.ephemeral,
             known_outputs=getattr(self, "_known_outputs", set()),
@@ -330,12 +330,13 @@ class AgentInitMixin:
         """Build a system prompt from the current registry and runtime context."""
         # The aggregator adds tools and framework hints; system.md remains agent-specific.
         base_prompt = self.config.system_prompt
+        pending_subagents_prompt = ""
 
         # Sub-agent inventory follows the same prompt-inclusion switch as tools.
         if self.config.include_tools_in_prompt:
             subagents_prompt = self.subagent_manager.get_subagents_prompt()
             if subagents_prompt:
-                base_prompt = base_prompt + "\n\n" + subagents_prompt
+                pending_subagents_prompt = subagents_prompt
 
         known_outputs = getattr(self, "_known_outputs", set())
 
@@ -345,6 +346,10 @@ class AgentInitMixin:
             if isinstance(self.config.tool_format, str)
             else "custom"
         )
+        # Native providers receive sub-agents as schema; listing them again in
+        # prose is the same duplication as the tool inventory.
+        if pending_subagents_prompt and tool_format_name != "native":
+            base_prompt = base_prompt + "\n\n" + pending_subagents_prompt
 
         # Creature hint overrides take precedence over package defaults.
         pkg_root = find_package_root_for_path(self.config.agent_path)
@@ -385,7 +390,7 @@ class AgentInitMixin:
             self.registry,
             include_tools=self.config.include_tools_in_prompt,
             include_hints=self.config.include_hints_in_prompt,
-            skill_mode=self.config.skill_mode,
+            tool_doc_mode=self.config.tool_doc_mode,
             tool_format=tool_format_name,
             known_outputs=known_outputs,
             extra_context=prompt_extra_context,

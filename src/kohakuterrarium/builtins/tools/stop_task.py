@@ -26,7 +26,7 @@ class StopTaskTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Cancel a running background task (tool or sub-agent) by job ID"
+        return "Cancel a running background job by id. Use when its result is no longer needed."
 
     @property
     def execution_mode(self) -> ExecutionMode:

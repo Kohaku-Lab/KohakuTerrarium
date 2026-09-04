@@ -147,3 +147,42 @@ def test_different_commit_builds(tmp_path):
 
     assert outputs["should_build"] == "true"
     assert outputs["skip_reason"] == ""
+
+
+class TestVersionStyleCompatibility:
+    """The nightly version lost its ``+local`` segment so PyPI would accept it.
+
+    The gate read that segment as one of three commit signals; the other two
+    (``commit_sha``, ``build_id``) still carry the revision, and old manifest
+    entries must keep matching.
+    """
+
+    def test_new_style_entry_without_local_segment_is_a_duplicate(self, tmp_path):
+        sha = "a" * 40
+        manifest = _manifest(
+            {
+                "version": "2.1.2.dev20260905030000",
+                "build_id": "20260905030000-" + sha[:7],
+                "commit_sha": sha,
+            }
+        )
+        _, outputs = _run_gate(tmp_path, manifest, sha)
+        assert outputs["should_build"] == "false"
+
+    def test_legacy_local_segment_entry_still_recognised(self, tmp_path):
+        sha = "a" * 40
+        manifest = _manifest({"version": "2.0.0.dev20260101000000+" + sha[:7]})
+        _, outputs = _run_gate(tmp_path, manifest, sha)
+        assert outputs["should_build"] == "false"
+
+    def test_unrelated_commit_still_builds(self, tmp_path):
+        sha = "a" * 40
+        manifest = _manifest(
+            {
+                "version": "2.1.2.dev20260905030000",
+                "build_id": "20260905030000-" + sha[:7],
+                "commit_sha": sha,
+            }
+        )
+        _, outputs = _run_gate(tmp_path, manifest, "b" * 40)
+        assert outputs["should_build"] == "true"

@@ -27,7 +27,7 @@ class GrokImageGenTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Generate or edit images with selectable Grok Imagine image models"
+        return "Generate or edit an image with xAI's dedicated image endpoint. Not for other providers - use image_gen."
 
     def get_parameters_schema(self) -> dict[str, Any]:
         return {

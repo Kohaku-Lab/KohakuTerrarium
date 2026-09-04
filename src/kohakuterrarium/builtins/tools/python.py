@@ -33,6 +33,8 @@ logger = get_logger(__name__)
 class PythonTool(BaseTool):
     """Execute Python code and capture its combined output and exit status."""
 
+    supports_background = True
+
     needs_context = True
 
     @property
@@ -41,7 +43,7 @@ class PythonTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Execute Python code and return output"
+        return "Run a Python snippet and return its stdout. Use for computation and data munging. Not for shell pipelines - use bash."
 
     @property
     def execution_mode(self) -> ExecutionMode:

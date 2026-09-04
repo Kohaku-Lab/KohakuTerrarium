@@ -58,12 +58,15 @@ def test_session_metadata_preserves_codex_grounding_sources():
     assert metadata["consulted_sources"] == [source]
 
 
-def test_description_discourages_repeated_search_only_for_explicit_codex():
+def test_repeat_search_warning_is_backend_specific_guidance():
+    # The description is canonical and must match the doc file, so
+    # backend-specific advice moved to the tool-guidance slot.
     codex_tool = WebSearchTool(ToolConfig(extra={"backend": "codex"}))
 
-    assert "once per question" in codex_tool.description
+    assert "once per question" in codex_tool.prompt_contribution()
     for backend in ("duckduckgo", "deepseek"):
         tool = WebSearchTool(ToolConfig(extra={"backend": backend}))
+        assert tool.prompt_contribution() is None
         assert "once per question" not in tool.description
 
 

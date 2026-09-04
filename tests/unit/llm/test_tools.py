@@ -3,8 +3,11 @@
 The contract: ``build_tool_schemas`` turns a populated ``Registry`` into
 OpenAI-compatible ``ToolSchema`` objects, using (1) the builtin schema
 map, (2) the tool's own ``get_parameters_schema``, (3) a generic
-fallback — and always injecting ``run_in_background``. Provider-native
-tools are skipped here and surfaced by ``build_provider_native_tools``.
+fallback. Framework semantics are stated once in the system prompt, so
+``run_in_background`` appears only on tools declaring ``supports_background``
+and sub-agent isolation prose never enters a ``task`` description.
+Provider-native tools are skipped here and surfaced by
+``build_provider_native_tools``.
 
 Tests use a real ``Registry`` with deterministic fake tools.
 """
@@ -20,6 +23,8 @@ from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResul
 
 class _BashTool(BaseTool):
     """A tool whose name matches an entry in _BUILTIN_SCHEMAS ('bash')."""
+
+    supports_background = True
 
     @property
     def tool_name(self):
@@ -141,14 +146,12 @@ class TestBuildToolSchemas:
             "description": "Shell command to execute",
         }
         assert schema.parameters["required"] == ["command"]
-        # run_in_background always injected
+        # Injected because this tool declares supports_background.
         background = schema.parameters["properties"]["run_in_background"]
         assert background["type"] == "boolean"
-        assert "without waiting for it to finish" in background["description"]
-        assert "No result is available immediately" in background["description"]
-        assert "another turn to act" in background["description"]
-        assert "long-running process" not in background["description"]
-        assert "controller" not in background["description"]
+        assert "later turn" in background["description"]
+        # The semantics live in the execution-model prompt block, stated once.
+        assert len(background["description"]) < 80
 
     def test_builtin_schema_dict_not_mutated(self):
         # docstring: "don't mutate builtin schemas"
@@ -169,19 +172,18 @@ class TestBuildToolSchemas:
         params = schemas[0].parameters
         assert params["properties"]["query"] == {"type": "string"}
         assert params["required"] == ["query"]
-        assert "run_in_background" in params["properties"]
+        assert "run_in_background" not in params["properties"]
 
     def test_generic_fallback_when_no_schema_available(self):
         reg = Registry()
         reg.register_tool(_NoSchemaTool())
         schemas = build_tool_schemas(reg)
         params = schemas[0].parameters
-        # generic fallback shape: {content: string} + run_in_background
         assert params["properties"]["content"] == {
             "type": "string",
             "description": "Input content for the tool",
         }
-        assert "run_in_background" in params["properties"]
+        assert "run_in_background" not in params["properties"]
 
     def test_schema_exception_falls_back_to_generic(self):
         reg = Registry()
@@ -206,27 +208,47 @@ class TestBuildToolSchemas:
         schema = schemas[0]
         assert schema.name == "explore"
         assert schema.description == "Explores the codebase"
-        # sub-agent schema shape: task (required) + run_in_background
         task_schema = schema.parameters["properties"]["task"]
         assert task_schema["type"] == "string"
-        assert "fresh, context-isolated invocation" in task_schema["description"]
-        assert (
-            "cannot resume or inherit conversation history"
-            in task_schema["description"]
-        )
         assert schema.parameters["required"] == ["task"]
-        background = schema.parameters["properties"]["run_in_background"]
-        assert "without waiting for it to finish" in background["description"]
-        assert "No result is available immediately" in background["description"]
-        assert "another turn to act" in background["description"]
-        assert "controller" not in background["description"]
+        # Sub-agents run in background by default, so the flag stays meaningful.
+        assert "run_in_background" in schema.parameters["properties"]
 
-    def test_subagent_guidance_can_be_omitted_for_prompt_opt_out(self):
+    def test_subagent_isolation_prose_is_not_repeated_per_schema(self):
+        # It used to be inlined into every task description; six sub-agents
+        # meant six copies. The execution-model prompt block states it once.
         reg = Registry()
-        reg.register_subagent("explore", _FakeSubAgent())
-        schemas = build_tool_schemas(reg, include_subagent_guidance=False)
-        task_description = schemas[0].parameters["properties"]["task"]["description"]
-        assert task_description == "Task description for the sub-agent"
+        for name in ("explore", "plan", "worker"):
+            reg.register_subagent(name, _FakeSubAgent())
+        blob = "".join(
+            s.parameters["properties"]["task"]["description"]
+            for s in build_tool_schemas(reg)
+        )
+        assert "context-isolated" not in blob
+        assert "continue the previous task" not in blob
+        assert len(blob) < 200
+
+    def test_run_in_background_only_on_background_capable_tools(self):
+        # An argument that is never the right answer is a mis-selection risk.
+        reg = Registry()
+        reg.register_tool(_BashTool())
+        reg.register_tool(_SchemaTool())
+        by_name = {s.name: s for s in build_tool_schemas(reg)}
+        assert "run_in_background" in by_name["bash"].parameters["properties"]
+        assert (
+            "run_in_background"
+            not in by_name["my_custom_tool"].parameters["properties"]
+        )
+
+    def test_brief_mode_strips_parameter_prose_but_keeps_shape(self):
+        # A native schema without parameters is uncallable, so brief drops
+        # only the description strings.
+        reg = Registry()
+        reg.register_tool(_BashTool())
+        params = build_tool_schemas(reg, tool_doc_mode="brief")[0].parameters
+        assert "command" in params["properties"]
+        assert params["required"] == ["command"]
+        assert "description" not in params["properties"]["command"]
 
     def test_subagent_without_description_gets_default(self):
         reg = Registry()

@@ -1,4 +1,14 @@
-"""Load packaged reference documentation for built-in tools and sub-agents."""
+"""Load packaged reference documentation for built-in tools and sub-agents.
+
+Every reference file is split at the ``## Reference`` heading into two tiers:
+
+- **usage** — the body above it. Argument table, behavior, limits. Small enough
+  to inline into a system prompt when a tool asks for ``doc_mode: full``.
+- **reference** — the body from that heading on. Output formats, edge cases,
+  worked failures. Reachable only through the ``info`` tool.
+
+Files without the heading are all usage; the split is opt-in per file.
+"""
 
 from pathlib import Path
 
@@ -8,6 +18,36 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 BUILTIN_SKILLS_DIR = Path(__file__).parent
+
+REFERENCE_HEADING = "## Reference"
+
+_TIERS = ("all", "usage", "reference")
+
+
+def split_doc_tiers(body: str) -> tuple[str, str]:
+    """Split a reference body into ``(usage, reference)`` at the tier heading."""
+    if not body:
+        return "", ""
+    marker = f"\n{REFERENCE_HEADING}"
+    if body.startswith(REFERENCE_HEADING):
+        return "", body.strip()
+    idx = body.find(marker)
+    if idx < 0:
+        return body.strip(), ""
+    return body[:idx].strip(), body[idx + 1 :].strip()
+
+
+def _select_tier(body: str | None, tier: str) -> str | None:
+    """Return the requested tier of a reference body."""
+    if body is None:
+        return None
+    if tier not in _TIERS:
+        logger.warning("Unknown documentation tier requested", tier=tier)
+        tier = "all"
+    if tier == "all":
+        return body
+    usage, reference = split_doc_tiers(body)
+    return usage if tier == "usage" else reference
 
 
 def read_skill_body(path: Path) -> str | None:
@@ -31,16 +71,16 @@ def read_skill_body(path: Path) -> str | None:
     return raw
 
 
-def get_builtin_tool_doc(name: str) -> str | None:
+def get_builtin_tool_doc(name: str, *, tier: str = "all") -> str | None:
     """Return a built-in tool's documentation body by name."""
     doc_path = BUILTIN_SKILLS_DIR / "tools" / f"{name}.md"
-    return read_skill_body(doc_path)
+    return _select_tier(read_skill_body(doc_path), tier)
 
 
-def get_builtin_subagent_doc(name: str) -> str | None:
+def get_builtin_subagent_doc(name: str, *, tier: str = "all") -> str | None:
     """Return a built-in sub-agent's documentation body by name."""
     doc_path = BUILTIN_SKILLS_DIR / "subagents" / f"{name}.md"
-    return read_skill_body(doc_path)
+    return _select_tier(read_skill_body(doc_path), tier)
 
 
 def list_builtin_tool_docs() -> list[str]:
@@ -59,27 +99,31 @@ def list_builtin_subagent_docs() -> list[str]:
     return [p.stem for p in subagents_dir.glob("*.md")]
 
 
-def get_all_tool_docs(tool_names: list[str] | None = None) -> dict[str, str]:
+def get_all_tool_docs(
+    tool_names: list[str] | None = None, *, tier: str = "all"
+) -> dict[str, str]:
     """Return documentation bodies for selected or all built-in tools."""
     if tool_names is None:
         tool_names = list_builtin_tool_docs()
 
     docs = {}
     for name in tool_names:
-        doc = get_builtin_tool_doc(name)
+        doc = get_builtin_tool_doc(name, tier=tier)
         if doc:
             docs[name] = doc
     return docs
 
 
-def get_all_subagent_docs(subagent_names: list[str] | None = None) -> dict[str, str]:
+def get_all_subagent_docs(
+    subagent_names: list[str] | None = None, *, tier: str = "all"
+) -> dict[str, str]:
     """Return documentation bodies for selected or all built-in sub-agents."""
     if subagent_names is None:
         subagent_names = list_builtin_subagent_docs()
 
     docs = {}
     for name in subagent_names:
-        doc = get_builtin_subagent_doc(name)
+        doc = get_builtin_subagent_doc(name, tier=tier)
         if doc:
             docs[name] = doc
     return docs

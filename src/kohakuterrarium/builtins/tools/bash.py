@@ -254,6 +254,7 @@ class ShellTool(BaseTool):
     needs_context = True
     # Commands are opaque, so concurrent invocations cannot be proven independent.
     is_concurrency_safe = False
+    supports_background = True
 
     def __init__(self, config: ToolConfig | None = None):
         super().__init__(config)
@@ -264,11 +265,18 @@ class ShellTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Execute shell commands (prefer dedicated tools for file ops)"
+        return "Run a shell command. Use for builds, tests, git, and process control. Not for reading or editing files - use read, glob, grep, multi_edit."
 
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
+
+    def prompt_contribution(self) -> str | None:
+        """Redirect the shell habits that have a structured tool."""
+        return (
+            "Use `read` not cat/head/tail, `glob` not find/ls, `grep` not "
+            "grep/rg, `write` and `multi_edit` not sed/awk/heredocs."
+        )
 
     def get_parameters_schema(self) -> dict:
         return {

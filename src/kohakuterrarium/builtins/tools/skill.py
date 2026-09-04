@@ -25,7 +25,7 @@ class SkillTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Invoke a procedural skill by name and return its instructions"
+        return "Run a procedural skill by name and return its instructions. Not for reading its docs without running it - use info."
 
     @property
     def execution_mode(self) -> ExecutionMode:

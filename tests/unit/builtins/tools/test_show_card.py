@@ -145,6 +145,6 @@ class TestValidationAndFallback:
         result = await ShowCardTool()._execute({"title": "Hi", "body": "b"}, _ctx(None))
         assert "Hi" in result.get_text_output()
 
-    def test_prompt_contribution_points_to_ask_user(self):
-        text = ShowCardTool().prompt_contribution()
-        assert text and "ask_user" in text
+    def test_description_points_to_ask_user(self):
+        assert "ask_user" in ShowCardTool().description
+        assert "Blocks the turn" in ShowCardTool().prompt_contribution()

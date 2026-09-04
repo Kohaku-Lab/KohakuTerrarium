@@ -693,14 +693,26 @@ class TestInitController:
         # The aggregated prompt embeds the agent's base personality text.
         assert "helpful assistant" in agent._controller_config.system_prompt.lower()
 
-    def test_subagents_prompt_appended_to_base(self):
+    def test_subagents_prompt_appended_only_for_text_formats(self):
+        # Native providers receive sub-agents as schema; listing them in prose
+        # too is the same duplication as the tool inventory.
         agent = self._agent(
+            config=AgentConfig(name="ctrl-agent", tool_format="bracket"),
             subagent_manager=SimpleNamespace(
                 get_subagents_prompt=lambda: "SUBAGENT-SECTION-MARKER"
-            )
+            ),
         )
         AgentInitMixin._init_controller(agent)
         assert "SUBAGENT-SECTION-MARKER" in agent._controller_config.system_prompt
+
+        native = self._agent(
+            config=AgentConfig(name="ctrl-agent", tool_format="native"),
+            subagent_manager=SimpleNamespace(
+                get_subagents_prompt=lambda: "SUBAGENT-SECTION-MARKER"
+            ),
+        )
+        AgentInitMixin._init_controller(native)
+        assert "SUBAGENT-SECTION-MARKER" not in native._controller_config.system_prompt
 
     def test_tools_prompt_opt_out_excludes_subagent_instructions(self):
         agent = self._agent(
@@ -713,7 +725,7 @@ class TestInitController:
         prompt = agent._controller_config.system_prompt
         assert "SUBAGENT-SECTION-MARKER" not in prompt
         assert "## Available Functions" not in prompt
-        assert agent._controller_config.include_subagent_schema_guidance is False
+        assert agent._controller_config.tool_doc_mode == "standard"
 
     def test_create_controller_produces_independent_instance(self):
         agent = self._agent()

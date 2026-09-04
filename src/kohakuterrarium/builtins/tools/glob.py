@@ -29,7 +29,7 @@ class GlobTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Find files by glob pattern (sorted by modification time)"
+        return "Find files by path pattern, newest first. Use when you know the name or extension. Not for searching file contents - use grep."
 
     @property
     def execution_mode(self) -> ExecutionMode:

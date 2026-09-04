@@ -35,7 +35,7 @@ class AskUserTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Ask the user a question and wait for response"
+        return "Ask the user a free-text question and wait for the answer. Not for a pick-one-of-N choice or a styled panel - use show_card."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -43,12 +43,8 @@ class AskUserTool(BaseTool):
 
     def prompt_contribution(self) -> str | None:
         return (
-            "Ask the user for a **free-text** reply and wait for it — "
-            "clarification, a missing value, a typed approval. For a "
-            "pick-one-of-N choice or a styled panel use `show_card` "
-            "instead. Waits forever by default; pass `timeout_s` for a "
-            "bounded wait. With no UI attached (headless) it returns a "
-            "no-responder note immediately rather than blocking."
+            "Blocks the turn until the user answers. Unbounded unless you "
+            "pass `timeout_s`; returns immediately when no UI is attached."
         )
 
     async def _execute(

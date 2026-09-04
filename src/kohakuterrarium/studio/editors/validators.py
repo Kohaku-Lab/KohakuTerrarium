@@ -100,7 +100,7 @@ class AgentConfigIn(BaseModel):
     system_prompt_file: str | None = None
     prompt_context_files: dict[str, str] = Field(default_factory=dict)
 
-    skill_mode: str = "dynamic"
+    tool_doc_mode: str = "standard"
     include_tools_in_prompt: bool = True
     include_hints_in_prompt: bool = True
 

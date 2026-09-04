@@ -784,10 +784,10 @@ class TestAddCreatureExtensionInjection:
             creature = await t.add_creature(
                 cfg, start=False, llm=ScriptedLLM(["ok"]), tools=[lookup]
             )
-            # The injected instance is registered AND in the prompt —
-            # the same contract as Agent.build(tools=[...]).
+            # The injected instance is registered AND callable — the same
+            # contract as Agent.build(tools=[...]).
             assert "lookup" in creature.agent.registry.list_tools()
-            assert "lookup" in creature.agent._controller_config.system_prompt
+            assert creature.agent.executor.get_tool("lookup") is not None
         finally:
             await t.shutdown()
 

@@ -29,8 +29,8 @@ class TestPromptPackageExports:
         assert prompt_pkg.PromptTemplate is PromptTemplate
         assert prompt_pkg.render_template is render_template
 
-    def test_plugin_symbols_exported(self):
-        from kohakuterrarium.prompt.plugins import ToolListPlugin, get_default_plugins
-
-        assert prompt_pkg.ToolListPlugin is ToolListPlugin
-        assert prompt_pkg.get_default_plugins is get_default_plugins
+    def test_dead_plugin_surface_is_gone(self):
+        # The second prompt-composition system was deleted; only the runtime
+        # plugin manager and BaseTool.prompt_contribution remain.
+        for name in ("ToolListPlugin", "get_default_plugins", "aggregate_with_plugins"):
+            assert not hasattr(prompt_pkg, name)

@@ -20,13 +20,15 @@ USER_AGENT = "Mozilla/5.0 (compatible; KohakuTerrarium/1.0)"
 class WebFetchTool(BaseTool):
     """Return a web page as bounded Markdown using the best available backend."""
 
+    supports_background = True
+
     @property
     def tool_name(self) -> str:
         return "web_fetch"
 
     @property
     def description(self) -> str:
-        return "Read a web page and return its content in clean markdown format"
+        return "Fetch one URL and return it as markdown. Use when you have the address. Not for finding pages - use web_search."
 
     @property
     def execution_mode(self) -> ExecutionMode:

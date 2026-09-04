@@ -16,7 +16,7 @@ override any file by placing a same-named file in their agent's
 
 ## Tool Docs (25)
 
-ask_user, bash, edit, glob, grep, image_gen, info, json_read, json_write,
+ask_user, bash, edit, glob, grep, image_gen, info,
 mcp_call, mcp_connect, mcp_disconnect, mcp_list, multi_edit, python, read,
 scratchpad, search_memory, send_message, skill, stop_task, tree, web_fetch,
 web_search, write

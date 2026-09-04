@@ -55,7 +55,7 @@ class NotebookReadTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Read a Jupyter .ipynb notebook as cells (required before notebook_edit)"
+        return "Read a Jupyter notebook as cells with outputs. Required before notebook_edit. Not for plain files - use read."
 
     @property
     def execution_mode(self) -> ExecutionMode:

@@ -32,7 +32,7 @@ class GrepTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Search file contents with regex pattern matching"
+        return "Search file contents by regex. Use to find where something is defined or used. Not for finding files by name - use glob."
 
     @property
     def execution_mode(self) -> ExecutionMode:

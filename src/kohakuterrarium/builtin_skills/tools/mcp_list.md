@@ -1,56 +1,21 @@
 ---
 name: mcp_list
-description: List MCP servers and their tools
+description: 'List connected MCP servers and the tools they expose. Not for calling one - use mcp_call.'
 category: builtin
-tags: [mcp, integration]
+tags: [mcp]
 ---
 
 # mcp_list
 
-List connected MCP servers and their available tools.
+Reports the connected servers and their available tools.
 
 ## Arguments
 
-| Arg    | Type   | Description                                   |
-| ------ | ------ | --------------------------------------------- |
-| server | string | (optional) Server name for detailed tool info |
+| Arg | Type | Req | Description |
+| --- | --- | --- | --- |
+| server | string | no | Restrict the listing to one server |
 
 ## Behavior
 
-Without arguments: shows overview of all connected servers with tool names.
-
-With `server=`: shows detailed tool info including argument schemas.
-
-## Usage
-
-Call this BEFORE `mcp_call` to discover what tools are available:
-
-1. `mcp_list()` — see all servers and their tools
-2. `mcp_list(server="github")` — see detailed args for github tools
-3. `mcp_call(server="github", tool="create_issue", args={...})` — call a tool
-
-## Output Format
-
-Overview:
-
-```
-Connected MCP servers:
-
-  github (stdio, connected, 5 tools)
-    - create_issue — Create a GitHub issue
-    - list_repos — List repositories
-    ...
-```
-
-Detailed (with server=):
-
-```
-MCP server: github
-Tools (5):
-
-  create_issue
-    Create a GitHub issue
-    - repo: string (required)
-    - title: string (required)
-    - body: string
-```
+- MCP tools are reached through this indirection rather than injected into
+  your tool list, so the prompt stays small however many servers attach.

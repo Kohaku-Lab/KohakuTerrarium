@@ -181,6 +181,8 @@ class DeepSeekSearchBackend:
 class WebSearchTool(BaseTool):
     """Search using a configured backend without changing the caller's LLM."""
 
+    supports_background = True
+
     def __init__(self, config=None):
         super().__init__(config=config)
         self.backend = "duckduckgo"
@@ -195,16 +197,17 @@ class WebSearchTool(BaseTool):
 
     @property
     def description(self) -> str:
-        if self.backend == "codex":
-            return (
-                "Search the web once per question; retry only if incomplete "
-                "or conflicting"
-            )
-        return "Search the web and return results with titles, URLs, and snippets"
+        return "Search the web and return titles, URLs, and snippets. Use to find sources. Not for reading one - use web_fetch."
 
     @property
     def execution_mode(self) -> ExecutionMode:
         return ExecutionMode.DIRECT
+
+    def prompt_contribution(self) -> str | None:
+        """Warn against repeat searches on the backend that charges for them."""
+        if self.backend != "codex":
+            return None
+        return "Search once per question; retry only if results are incomplete."
 
     def runtime_option_schema(self) -> dict[str, dict[str, Any]]:
         disabled: dict[str, str] = {}

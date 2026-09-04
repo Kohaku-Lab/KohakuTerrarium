@@ -68,8 +68,8 @@ class GroupSendTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Send a one-shot message directly to a creature in your group "
-            "(privileged caller: any target; non-privileged: privileged target only)"
+            "Send a message directly to one creature in your group. Not for "
+            "the whole group - use send_channel."
         )
 
     @property
@@ -163,7 +163,7 @@ class SendChannelTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Broadcast a message on a wired channel in your graph"
+        return "Send a message to a channel in your group. Not for one creature in particular - use group_send."
 
     @property
     def execution_mode(self) -> ExecutionMode:

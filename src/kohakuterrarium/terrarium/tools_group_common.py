@@ -64,3 +64,18 @@ def serialize_channel_history(channel: Any, limit: int) -> list[dict[str, Any]]:
             }
         )
     return out
+
+
+def population_cap_error(gctx: Any) -> ToolResult | None:
+    """Refuse a spawn that would exceed the graph's declared population cap."""
+    topology = getattr(gctx.engine, "_topology", None)
+    graph = topology.graphs.get(gctx.caller.graph_id) if topology else None
+    if graph is None:
+        return None
+    cap = getattr(graph, "max_creatures", 0) or 0
+    if cap <= 0 or len(graph.creature_ids) < cap:
+        return None
+    return err(
+        f"population cap reached ({len(graph.creature_ids)}/{cap}). "
+        "Remove a member with group_remove_node before spawning another."
+    )

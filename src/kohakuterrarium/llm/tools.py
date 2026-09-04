@@ -1,12 +1,21 @@
 """
 Build function schemas and provider-native tool lists from the registry.
+
+Framework semantics are stated once in the system prompt, never repeated per
+schema: ``run_in_background`` appears only on tools that declare
+``supports_background``, and sub-agent isolation is explained in the
+execution-model block rather than in every ``task`` parameter.
 """
 
 from typing import Any
 
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import ToolSchema
-from kohakuterrarium.modules.subagent_guidance import TASK_SUBAGENT_CONTEXT_GUIDANCE
+from kohakuterrarium.modules.tool.doc_mode import (
+    DOC_MODE_BRIEF,
+    DEFAULT_DOC_MODE,
+    resolve_doc_mode,
+)
 
 # Built-in schemas remain centralized so registry dispatch stays provider-agnostic.
 from kohakuterrarium.llm.tool_schemas import _BUILTIN_SCHEMAS
@@ -14,11 +23,58 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+_BACKGROUND_ARG = {
+    "type": "boolean",
+    "description": "Run without waiting; the result arrives in a later turn.",
+}
+
+_SUBAGENT_BACKGROUND_ARG = {
+    "type": "boolean",
+    "description": "Default true. Set false to wait for the result before continuing.",
+}
+
+_GENERIC_PARAMS = {
+    "type": "object",
+    "properties": {
+        "content": {"type": "string", "description": "Input content for the tool"}
+    },
+}
+
+
+def _strip_descriptions(schema: Any) -> Any:
+    """Return a copy of a JSON schema with every ``description`` removed."""
+    if isinstance(schema, dict):
+        return {
+            key: _strip_descriptions(value)
+            for key, value in schema.items()
+            if key != "description"
+        }
+    if isinstance(schema, list):
+        return [_strip_descriptions(item) for item in schema]
+    return schema
+
+
+def _tool_parameters(registry: Registry, name: str) -> dict:
+    """Resolve a tool's parameter schema from the builtin table or the tool."""
+    params = _BUILTIN_SCHEMAS.get(name)
+    if params:
+        return params
+
+    tool = registry.get_tool(name)
+    if tool and hasattr(tool, "get_parameters_schema"):
+        try:
+            params = tool.get_parameters_schema() or {}  # type: ignore
+        except Exception as e:
+            logger.warning(
+                "Failed to get parameters schema", tool_name=name, error=str(e)
+            )
+    return params or _GENERIC_PARAMS
+
 
 def build_tool_schemas(
     registry: Registry,
     *,
-    include_subagent_guidance: bool = True,
+    tool_doc_mode: str = DEFAULT_DOC_MODE,
 ) -> list[ToolSchema]:
     """Build callable schemas, excluding tools translated natively by providers."""
     schemas: list[ToolSchema] = []
@@ -32,51 +88,21 @@ def build_tool_schemas(
         if tool is not None and getattr(tool, "is_provider_native", False):
             continue
 
-        params = _BUILTIN_SCHEMAS.get(name)
+        params = _tool_parameters(registry, name)
 
-        if not params:
-            tool = registry.get_tool(name)
-            if tool and hasattr(tool, "get_parameters_schema"):
-                try:
-                    params = tool.get_parameters_schema() or {}  # type: ignore
-                except Exception as e:
-                    logger.warning(
-                        "Failed to get parameters schema",
-                        tool_name=name,
-                        error=str(e),
-                    )
-
-        if not params:
-            params = {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "Input content for the tool",
-                    }
-                },
-            }
+        if resolve_doc_mode(tool, tool_doc_mode) == DOC_MODE_BRIEF:
+            params = _strip_descriptions(params)
 
         # Copy before adding framework execution controls to shared schemas.
-        if "properties" in params:
+        if "properties" in params and getattr(tool, "supports_background", False):
             params = dict(params)
-            props = dict(params.get("properties", {}))
-            props["run_in_background"] = {
-                "type": "boolean",
-                "description": (
-                    "If true, run without waiting for it to finish. No result is "
-                    "available immediately, and starting it does not give you "
-                    "another turn to act."
-                ),
+            params["properties"] = {
+                **params.get("properties", {}),
+                "run_in_background": dict(_BACKGROUND_ARG),
             }
-            params["properties"] = props
 
         schemas.append(
-            ToolSchema(
-                name=name,
-                description=info.description,
-                parameters=params,
-            )
+            ToolSchema(name=name, description=info.description, parameters=params)
         )
 
     for name in registry.list_subagents():
@@ -95,21 +121,9 @@ def build_tool_schemas(
                     "properties": {
                         "task": {
                             "type": "string",
-                            "description": (
-                                TASK_SUBAGENT_CONTEXT_GUIDANCE
-                                if include_subagent_guidance
-                                else "Task description for the sub-agent"
-                            ),
+                            "description": "Complete, self-contained task description.",
                         },
-                        "run_in_background": {
-                            "type": "boolean",
-                            "description": (
-                                "If true (default), run without waiting for it to "
-                                "finish. No result is available immediately, and "
-                                "starting it does not give you another turn to act. "
-                                "If false, wait for the result before continuing."
-                            ),
-                        },
+                        "run_in_background": dict(_SUBAGENT_BACKGROUND_ARG),
                     },
                     "required": ["task"],
                 },

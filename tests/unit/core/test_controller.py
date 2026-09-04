@@ -59,14 +59,14 @@ class TestControllerConfig:
         assert c.system_prompt.startswith("You are")
         assert c.include_job_status is True
         assert c.include_tools_list is True
-        assert c.include_subagent_schema_guidance is True
+        assert c.tool_doc_mode == "standard"
         assert c.max_messages == 50
         assert c.ephemeral is False
         assert c.known_outputs == set()
         assert c.tool_format is None
         assert c.sanitize_orphan_tool_calls is True
 
-    def test_native_schema_respects_subagent_guidance_opt_out(self):
+    def test_native_schema_respects_tool_doc_mode(self):
         registry = Registry()
         registry.register_subagent(
             "explore", types.SimpleNamespace(description="finds")
@@ -75,13 +75,16 @@ class TestControllerConfig:
             ScriptedLLM([]),
             ControllerConfig(
                 tool_format="native",
-                include_subagent_schema_guidance=False,
+                tool_doc_mode="brief",
             ),
             registry=registry,
         )
         schemas = controller._get_native_tool_schemas()
+        # Sub-agents keep their one-clause task hint in every mode; without it
+        # the parameter carries no guidance at all.
         task_description = schemas[0].parameters["properties"]["task"]["description"]
-        assert task_description == "Task description for the sub-agent"
+        assert task_description == "Complete, self-contained task description."
+        assert "context-isolated" not in task_description
 
 
 class TestControllerContext:

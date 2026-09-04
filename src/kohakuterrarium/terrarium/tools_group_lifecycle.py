@@ -18,7 +18,12 @@ from kohakuterrarium.terrarium.group_tool_context import (
     cross_cluster_target_error,
     resolve_group_target,
 )
-from kohakuterrarium.terrarium.tools_group_common import err, ok, resolve_or_error
+from kohakuterrarium.terrarium.tools_group_common import (
+    err,
+    ok,
+    population_cap_error,
+    resolve_or_error,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -62,8 +67,8 @@ class GroupAddNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Spawn a new creature (disconnected) into your group; wire it "
-            "afterward via group_channel or group_wire"
+            "Spawn a creature into your group from a config path. Not for "
+            "one-shot private work - dispatch a sub-agent."
         )
 
     @property
@@ -97,6 +102,9 @@ class GroupAddNodeTool(BaseTool):
         # Configuration loading resolves and validates package references.
         name = (args.get("name") or "").strip()
         pwd = args.get("pwd") or _caller_pwd(gctx)
+        cap_error = population_cap_error(gctx)
+        if cap_error is not None:
+            return cap_error
         try:
             # Joining at creation avoids a transient singleton graph and session.
             new = await gctx.engine.add_creature(
@@ -147,7 +155,7 @@ class GroupRemoveNodeTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Destroy a non-privileged creature in your group"
+        return "Remove a creature from your group. Not for pausing one temporarily - use group_stop_node."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -210,7 +218,7 @@ class GroupStartNodeTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Start a stopped non-privileged creature in your group"
+        return "Start a stopped member of your group. Not for adding a new one - use group_add_node."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -261,9 +269,8 @@ class GroupStopNodeTool(BaseTool):
     @property
     def description(self) -> str:
         return (
-            "Force-stop a running non-privileged creature: full teardown "
-            "(NOT a warm pause — use group_pause_node for that). Session "
-            "preserved; restart with group_start_node"
+            "Stop a running member without removing it. Not for permanent "
+            "removal - use group_remove_node."
         )
 
     @property

@@ -139,7 +139,7 @@ class TestBuildRuntimeGraphSection:
         try:
             alice = t.get_creature("alice")
             out = rp.build_runtime_graph_section(t, alice)
-            assert "## Live Group" in out
+            assert "## Working with the group" in out
             assert "chat" in out
             assert "send_channel" in out
         finally:

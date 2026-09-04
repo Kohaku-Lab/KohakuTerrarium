@@ -1,10 +1,14 @@
-"""Compose system prompts from tools, skills, channels, plugins, and hints.
+"""Compose system prompts from tools, skills, plugins, and framework hints.
+
+Every framework section carries an explicit gate. A block whose subject does not
+exist in this runtime — call syntax for a native creature, graph prose for a solo
+one — is not emitted at all, because an inapplicable block is worse than a
+missing one: it teaches the model something false.
 
 Framework-hint overrides may replace canonical blocks; an empty override omits
 that block entirely.
 """
 
-from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.builtin_skills import get_all_subagent_docs, get_all_tool_docs
@@ -16,18 +20,20 @@ from kohakuterrarium.parsing.format import (
     format_tool_call_example,
 )
 from kohakuterrarium.prompt.framework_hints import (
-    HINT_EXECUTION_MODEL_DYNAMIC,
-    HINT_EXECUTION_MODEL_NATIVE,
-    HINT_EXECUTION_MODEL_STATIC,
+    HINT_CALL_SYNTAX,
+    HINT_EXECUTION_MODEL,
     HINT_OUTPUT_MODEL,
+    HINT_UNTRUSTED_CONTENT,
+    call_discipline,
     get_framework_hint,
+    is_default_hint,
 )
 from kohakuterrarium.modules.plugin.base import PluginContext as RuntimePluginContext
 from kohakuterrarium.modules.plugin.manager import PluginManager
-from kohakuterrarium.prompt.plugins import (
-    BasePlugin,
-    PluginContext,
-    get_default_plugins,
+from kohakuterrarium.modules.tool.doc_mode import (
+    DOC_MODE_FULL,
+    DEFAULT_DOC_MODE,
+    resolve_doc_mode,
 )
 from kohakuterrarium.prompt.template import render_template_safe
 from kohakuterrarium.prompt.tool_contributions import build_tool_guidance_section
@@ -50,79 +56,6 @@ Available: {outputs_list}
 If you want to send to {first_output}, wrap your message exactly like above.
 Without the wrapper, nothing gets sent.
 """
-
-
-def _build_format_header(tool_format: str) -> str:
-    """Render the configured function-call syntax header."""
-    fmt = _get_tool_call_format(tool_format)
-    generic = format_tool_call_example(
-        fmt, "function_name", {"arg": "value"}, "content here"
-    )
-    return f"## Calling Functions\n\nAll functions (tools and sub-agents) use this format:\n\n```\n{generic}\n```"
-
-
-def _build_command_hints(tool_format: str) -> str:
-    """Render command examples in the configured call syntax."""
-    fmt = _get_tool_call_format(tool_format)
-    info_ex = format_tool_call_example(fmt, "info", body="tool_name")
-    jobs_ex = format_tool_call_example(fmt, "jobs")
-    wait_ex = format_tool_call_example(fmt, "wait", body="job_id")
-
-    return (
-        "## Commands\n\n"
-        f"- Read docs: `{info_ex}`\n"
-        f"- List jobs: `{jobs_ex}`\n"
-        f"- Wait for job: `{wait_ex}`\n\n"
-        "Starting background work does not immediately return a result or give "
-        "you another turn to act. Results are normally delivered after the work "
-        "finishes. Use wait only if you must block until a specific job finishes."
-    )
-
-
-def _build_dynamic_hints(
-    registry: Registry | None = None,
-    tool_format: str = "bracket",
-    overrides: dict[str, str] | None = None,
-) -> str:
-    """Build dynamic-mode hints from registered functions."""
-    parts = [_build_format_header(tool_format)]
-
-    examples = _build_tool_examples(registry, tool_format=tool_format)
-    if examples:
-        parts.append("Examples:\n" + examples)
-
-    execution_block = get_framework_hint(HINT_EXECUTION_MODEL_DYNAMIC, overrides)
-    if execution_block:
-        parts.append(execution_block.strip())
-    parts.append(_build_command_hints(tool_format))
-    return "\n\n".join(parts)
-
-
-def _build_static_hints(
-    registry: Registry | None = None,
-    tool_format: str = "bracket",
-    overrides: dict[str, str] | None = None,
-) -> str:
-    """Build static-mode hints from registered functions."""
-    parts = [_build_format_header(tool_format)]
-
-    examples = _build_tool_examples(registry, tool_format=tool_format)
-    if examples:
-        parts.append("Examples:\n" + examples)
-
-    execution_block = get_framework_hint(HINT_EXECUTION_MODEL_STATIC, overrides)
-    if execution_block:
-        parts.append(execution_block.strip())
-    return "\n\n".join(parts)
-
-
-def _build_native_hints(
-    registry: Registry | None = None,
-    overrides: dict[str, str] | None = None,
-) -> str:
-    """Build native-call hints without textual syntax examples."""
-    block = get_framework_hint(HINT_EXECUTION_MODEL_NATIVE, overrides)
-    return block.strip() if block else ""
 
 
 def _get_tool_call_format(tool_format: str) -> ToolCallFormat:
@@ -160,11 +93,6 @@ def _build_tool_examples(
     if "write" in tool_names:
         ex = format_tool_call_example(fmt, "write", {"path": "out.txt"}, "content here")
         examples.append(f"```\n{ex}\n```")
-    elif "send_message" in tool_names:
-        ex = format_tool_call_example(
-            fmt, "send_message", {"channel": "inbox"}, "Hello from agent"
-        )
-        examples.append(f"```\n{ex}\n```")
 
     if subagent_names:
         first_sa = sorted(subagent_names)[0]
@@ -174,16 +102,63 @@ def _build_tool_examples(
     return "\n\n".join(examples)
 
 
+def _build_call_syntax(
+    registry: Registry | None,
+    tool_format: str,
+    overrides: dict[str, str] | None = None,
+) -> str:
+    """Render the call-syntax block for text tool-call formats.
+
+    Examples are generated from the active format definition, so they cannot
+    drift from what the parser actually accepts.
+    """
+    template = get_framework_hint(HINT_CALL_SYNTAX, overrides)
+    if not template:
+        return ""
+    if not is_default_hint(HINT_CALL_SYNTAX, template):
+        return template.strip()
+
+    fmt = _get_tool_call_format(tool_format)
+    examples = _build_tool_examples(registry, tool_format=tool_format)
+    return template.format(
+        format_example=format_tool_call_example(
+            fmt, "function_name", {"arg": "value"}, "content here"
+        ),
+        examples=f"\nExamples:\n\n{examples}\n" if examples else "",
+        info_example=format_tool_call_example(fmt, "info", body="tool_name"),
+        jobs_example=format_tool_call_example(fmt, "jobs"),
+        wait_example=format_tool_call_example(fmt, "wait", body="job_id"),
+    ).strip()
+
+
+def _build_execution_model(
+    tool_format: str,
+    overrides: dict[str, str] | None = None,
+) -> str:
+    """Render the single execution-model block for any tool format."""
+    template = get_framework_hint(HINT_EXECUTION_MODEL, overrides)
+    if not template:
+        return ""
+    if not is_default_hint(HINT_EXECUTION_MODEL, template):
+        return template.strip()
+    return template.format(call_discipline=call_discipline(tool_format)).strip()
+
+
+def _build_untrusted_content(overrides: dict[str, str] | None = None) -> str:
+    """Render the untrusted-content block."""
+    block = get_framework_hint(HINT_UNTRUSTED_CONTENT, overrides)
+    return block.strip() if block else ""
+
+
 def aggregate_system_prompt(
     base_prompt: str,
     registry: Registry | None = None,
     *,
     include_tools: bool = True,
     include_hints: bool = True,
-    skill_mode: str = "dynamic",
-    tool_format: str = "bracket",
+    tool_doc_mode: str = DEFAULT_DOC_MODE,
+    tool_format: str = "native",
     known_outputs: set[str] | None = None,
-    channels: list[dict[str, str]] | None = None,
     extra_context: dict | None = None,
     framework_hint_overrides: dict[str, str] | None = None,
     skill_registry: Any | None = None,
@@ -193,8 +168,10 @@ def aggregate_system_prompt(
 ) -> str:
     """Build a complete system prompt in stable component order.
 
-    Dynamic mode lists functions for on-demand documentation; static mode embeds
-    full documentation. Native mode omits textual calling syntax.
+    Sections are gated: the inventory is skipped when the provider already
+    carries it natively, the call-syntax block only exists for text formats, and
+    inline tool usage appears only for tools resolved to ``full``. Graph
+    sections are owned by the terrarium layer and are not emitted here.
     """
     parts = []
 
@@ -215,15 +192,19 @@ def aggregate_system_prompt(
     rendered_base = render_template_safe(base_prompt, **context)
     parts.append(rendered_base)
 
+    is_native = tool_format == "native"
+
     if registry and include_tools and "{{ tools }}" not in base_prompt:
-        if skill_mode == "static":
-            full_docs = _build_full_tool_docs(registry)
-            if full_docs:
-                parts.append(full_docs)
-        else:
+        # Native providers already receive name + description as schema; a
+        # second copy in prose is pure duplication.
+        if not is_native or tool_doc_mode == DOC_MODE_FULL:
             tools_list = _build_tools_list(registry)
             if tools_list:
                 parts.append(tools_list)
+
+        inline_docs = _build_inline_tool_docs(registry, tool_doc_mode)
+        if inline_docs:
+            parts.append(inline_docs)
 
     # Tool guidance follows inventory and obeys the same inclusion gate.
     if registry and include_tools:
@@ -247,44 +228,37 @@ def aggregate_system_prompt(
         if skill_index:
             parts.append(skill_index)
 
-    if registry and include_hints:
-        hint_ctx = dict(extra_context or {})
-        if channels is not None:
-            hint_ctx["channels"] = channels
-        channel_hints = _build_channel_hints(
-            registry, hint_ctx, tool_format=tool_format
-        )
-        if channel_hints:
-            parts.append(channel_hints)
-
     if include_hints:
-        # Native outputs are API-driven and need no textual wrapper guidance.
-        if tool_format != "native":
+        untrusted = _build_untrusted_content(framework_hint_overrides)
+        if untrusted:
+            parts.append(untrusted)
+
+        if not is_native:
+            syntax = _build_call_syntax(
+                registry, tool_format, overrides=framework_hint_overrides
+            )
+            if syntax:
+                parts.append(syntax)
+
             output_hints = _build_output_hints(
                 known_outputs, overrides=framework_hint_overrides
             )
             if output_hints:
                 parts.append(output_hints)
 
-        if tool_format == "native":
-            hints = _build_native_hints(registry, overrides=framework_hint_overrides)
-        elif skill_mode == "static":
-            hints = _build_static_hints(
-                registry,
-                tool_format=tool_format,
-                overrides=framework_hint_overrides,
-            )
-        else:
-            hints = _build_dynamic_hints(
-                registry,
-                tool_format=tool_format,
-                overrides=framework_hint_overrides,
-            )
-        if hints:
-            parts.append(hints)
+        execution = _build_execution_model(
+            tool_format, overrides=framework_hint_overrides
+        )
+        if execution:
+            parts.append(execution)
 
     result = "\n\n".join(parts)
-    logger.debug("Aggregated system prompt", length=len(result), skill_mode=skill_mode)
+    logger.debug(
+        "Aggregated system prompt",
+        length=len(result),
+        tool_doc_mode=tool_doc_mode,
+        tool_format=tool_format,
+    )
     return result
 
 
@@ -302,14 +276,10 @@ def _build_output_hints(
         logger.debug("Output-model block suppressed (empty override)")
         return ""
 
-    # Only the default template supports named-output interpolation.
-    is_default_template = "{named_outputs_section}" in template
-    logger.debug("Building output hints", known_outputs=known_outputs)
-    if not is_default_template:
+    if not is_default_hint(HINT_OUTPUT_MODEL, template):
         return template.strip()
 
     if not known_outputs:
-        logger.debug("No known outputs, using basic output model")
         return template.format(named_outputs_section="").strip()
 
     outputs_list = ", ".join(f"`{name}`" for name in sorted(known_outputs))
@@ -319,39 +289,6 @@ def _build_output_hints(
         first_output=first_output,
     )
     return template.format(named_outputs_section=named_section).strip()
-
-
-def _build_channel_hints(
-    registry: Registry,
-    extra_context: dict | None = None,
-    tool_format: str = "bracket",
-) -> str:
-    """Build generic channel guidance only when topology guidance is absent."""
-    tool_names = set(registry.list_tools())
-    has_send = "send_message" in tool_names
-
-    if not has_send:
-        return ""
-
-    channels: list[dict[str, str]] = []
-    if extra_context and "channels" in extra_context:
-        channels = extra_context["channels"]
-
-    # Concrete topology guidance is more specific than these generic hints.
-    if channels:
-        return ""
-
-    lines = ["## Internal Channels", ""]
-    lines.append(
-        "`send_message` is for communicating with other creatures through "
-        "team channels, or with your own sub-agents through internal channels."
-    )
-    lines.append("")
-    lines.append("**Usage:**")
-    lines.append("- `send_message(channel, message)` -- send to a named channel")
-    lines.append("")
-
-    return "\n".join(lines)
 
 
 def _build_tools_list(registry: Registry) -> str:
@@ -389,17 +326,27 @@ def _build_tools_list(registry: Registry) -> str:
     return "\n".join(lines)
 
 
-def _build_full_tool_docs(registry: Registry) -> str:
-    """Embed full registered function documentation for static mode."""
-    tool_names = registry.list_tools()
-    subagent_names = registry.list_subagents()
+def _build_inline_tool_docs(registry: Registry, default_mode: str) -> str:
+    """Inline the usage tier for every function resolved to ``full``.
+
+    Only the usage tier is inlined; reference material stays behind ``info`` in
+    every mode, so ``full`` costs a bounded amount per tool.
+    """
+    tool_names = [
+        name
+        for name in registry.list_tools()
+        if resolve_doc_mode(registry.get_tool(name), default_mode) == DOC_MODE_FULL
+    ]
+    subagent_names = (
+        list(registry.list_subagents()) if default_mode == DOC_MODE_FULL else []
+    )
 
     if not tool_names and not subagent_names:
         return ""
 
     parts = ["## Function Documentation", ""]
 
-    tool_docs = get_all_tool_docs(tool_names)
+    tool_docs = get_all_tool_docs(tool_names, tier="usage")
     for name in tool_names:
         doc = tool_docs.get(name)
         if doc:
@@ -411,7 +358,7 @@ def _build_full_tool_docs(registry: Registry) -> str:
                 parts.append(f"### {name}\n{info.description}")
                 parts.append("")
 
-    subagent_docs = get_all_subagent_docs(subagent_names)
+    subagent_docs = get_all_subagent_docs(subagent_names, tier="usage")
     for name in subagent_names:
         doc = subagent_docs.get(name)
         if doc:
@@ -427,7 +374,7 @@ def _build_full_tool_docs(registry: Registry) -> str:
             parts.append(f"### {name}\n{desc}")
             parts.append("")
 
-    return "\n".join(parts)
+    return "\n".join(parts).rstrip()
 
 
 def build_context_message(
@@ -443,50 +390,3 @@ def build_context_message(
     parts.append(events_content)
 
     return "\n\n".join(parts)
-
-
-def aggregate_with_plugins(
-    base_prompt: str,
-    plugins: list[BasePlugin] | None = None,
-    *,
-    registry: Registry | None = None,
-    working_dir: Path | None = None,
-    agent_path: Path | None = None,
-    extra_context: dict | None = None,
-) -> str:
-    """Render the base prompt and append plugin content by priority."""
-    if plugins is None:
-        plugins = get_default_plugins()
-
-    context = PluginContext(
-        registry=registry,
-        working_dir=working_dir or Path.cwd(),
-        agent_path=agent_path,
-        extra=extra_context or {},
-    )
-
-    template_vars = extra_context or {}
-    rendered_base = render_template_safe(base_prompt, **template_vars)
-    parts = [rendered_base]
-
-    sorted_plugins = sorted(plugins, key=lambda p: p.priority)
-    for plugin in sorted_plugins:
-        try:
-            content = plugin.get_content(context)
-            if content:
-                parts.append(content)
-                logger.debug(
-                    "Plugin contributed content",
-                    plugin=plugin.name,
-                    length=len(content),
-                )
-        except Exception as e:
-            logger.warning("Plugin failed", plugin=plugin.name, error=str(e))
-
-    result = "\n\n".join(parts)
-    logger.debug(
-        "Aggregated system prompt with plugins",
-        length=len(result),
-        plugin_count=len(plugins),
-    )
-    return result

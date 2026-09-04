@@ -1,0 +1,48 @@
+name: budget_ref
+version: "1.0"
+
+controller:
+  # LLM is resolved from: --llm flag > default model (kt model default) > inline config
+  # Set a default: kt model default gemini-3.1-pro
+  reasoning_effort: "${REASONING:medium}"
+
+system_prompt_file: prompts/system.md
+
+# Every tool's usage tier is inlined up front rather than fetched with `info`.
+# Costs ~3.5k more tokens than `standard` and removes a round-trip before first
+# use of anything. Set `standard` here for the lean prompt; either way the
+# reference tier stays behind `info`.
+tool_doc_mode: full
+
+# Twenty callables, inside the range where tool selection stays reliable.
+# Channel, graph, and trigger tools are registered by the engine when the
+# runtime state that gives them meaning exists.
+tools:
+  - { name: bash, type: builtin }
+  - { name: python, type: builtin }
+  - { name: read, type: builtin }
+  - { name: write, type: builtin }
+  - { name: multi_edit, type: builtin }
+  - { name: glob, type: builtin }
+  - { name: grep, type: builtin }
+  - { name: tree, type: builtin }
+  - { name: info, type: builtin }
+  - { name: skill, type: builtin }
+  - { name: search_memory, type: builtin }
+  - { name: web_fetch, type: builtin }
+  - { name: web_search, type: builtin }
+  - { name: ask_user, type: builtin }
+  - { name: show_card, type: builtin }
+  - { name: stop_task, type: builtin }
+
+subagents:
+  - { name: explore, type: builtin }
+  - { name: plan, type: builtin }
+  - { name: worker, type: builtin }
+  - { name: critic, type: builtin }
+
+output:
+  type: none
+
+input:
+  type: none

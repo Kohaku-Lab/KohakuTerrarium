@@ -219,7 +219,6 @@ class EditTool(BaseTool):
     """Edit one file through exact replacement or standard unified diffs."""
 
     needs_context = True
-    require_manual_read = True
     # Serial execution prevents a concurrent writer from invalidating guard state.
     is_concurrency_safe = False
 
@@ -229,10 +228,7 @@ class EditTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Edit file via search/replace (path, old, new) or unified diff (path, diff). "
-            "Prefer multi_edit for multiple same-file search/replace edits. Use info(edit) first."
-        )
+        return "Edit one file by unified diff, or by one search/replace. Use for patch application and text tool-call formats. Not for several edits - use multi_edit."
 
     @property
     def execution_mode(self) -> ExecutionMode:

@@ -10,7 +10,7 @@ from typing import Any
 
 import yaml
 
-from kohakuterrarium.errors import ConfigNotFoundError
+from kohakuterrarium.errors import ConfigError, ConfigNotFoundError
 from kohakuterrarium.core.config_merge import (
     merge_configs as _merge_configs,
     _merge_identity_list as _merge_identity_list,
@@ -26,6 +26,7 @@ from kohakuterrarium.core.config_types import (
 )
 from kohakuterrarium.core.mcp_registry import load_global_mcp_servers
 from kohakuterrarium.core.output_wiring import parse_wiring_list
+from kohakuterrarium.modules.tool.doc_mode import DEFAULT_DOC_MODE, validate_doc_mode
 from kohakuterrarium.packages.resolve import resolve_any_path, resolve_package_path
 
 try:
@@ -194,18 +195,40 @@ def _parse_trigger_config(data: dict[str, Any]) -> TriggerConfig:
 def _parse_tool_config(data: dict[str, Any]) -> ToolConfigItem:
     """Parse tool configuration.
 
-    ``doc`` stays reserved (never forwarded as a constructor option)
-    even though the never-implemented "override skill doc path" field
-    was removed — old configs carrying it must not break tools.
+    ``doc`` stays reserved so old configs carrying it do not break tools.
     """
-    reserved = {"name", "type", "module", "class", "doc"}
+    reserved = {"name", "type", "module", "class", "doc", "doc_mode"}
+    name = data.get("name", "")
+    doc_mode = data.get("doc_mode")
+    if doc_mode is not None:
+        validate_doc_mode(str(doc_mode), where=f"tool {name!r}")
     return ToolConfigItem(
-        name=data.get("name", ""),
+        name=name,
         type=data.get("type", "builtin"),
         module=data.get("module"),
         class_name=data.get("class"),
         options={k: v for k, v in data.items() if k not in reserved},
+        doc_mode=doc_mode,
     )
+
+
+def _resolve_tool_doc_mode(
+    controller_data: dict[str, Any], config_data: dict[str, Any]
+) -> str:
+    """Resolve the creature-level documentation tier, rejecting ``skill_mode``."""
+    for scope in (controller_data, config_data):
+        if "skill_mode" in scope:
+            raise ConfigError(
+                "'skill_mode' was replaced by 'tool_doc_mode'.\n"
+                "  dynamic -> standard   (the default; you can delete the key)\n"
+                "  static  -> full\n"
+                "Per-tool override: "
+                "tools: [{name: x, type: builtin, doc_mode: full}]"
+            )
+    value = controller_data.get(
+        "tool_doc_mode", config_data.get("tool_doc_mode", DEFAULT_DOC_MODE)
+    )
+    return validate_doc_mode(str(value), where="tool_doc_mode")
 
 
 def _parse_output_config_item(data: dict[str, Any]) -> OutputConfigItem:
@@ -269,24 +292,11 @@ def _parse_subagent_config(data: dict[str, Any] | str) -> SubAgentConfigItem:
 
 
 def load_agent_config(agent_path: str | Path) -> AgentConfig:
-    """
-    Load agent configuration from a folder *or* a direct config file.
+    """Load agent configuration from a folder, a ``@pkg/...`` reference, or a
+    config file directly.
 
-    Args:
-        agent_path: Path to the agent folder, a ``@pkg/...`` package
-            reference, or directly to its ``config.{yaml,yml,json,toml}``
-            file. When a file path is given, its parent directory is
-            used as the agent folder.
-
-    Returns:
-        Loaded AgentConfig
-
-    Raises:
-        ConfigNotFoundError: If the path / reference doesn't exist
-            (also catchable as ``FileNotFoundError``).
-        PackageError: If a ``@pkg`` reference is malformed or names an
-            uninstalled package.
-        ValueError: If config is invalid
+    Raises ConfigNotFoundError for a missing path, PackageError for a bad
+    ``@pkg`` reference, ValueError for an invalid config.
     """
     agent_path = resolve_any_path(agent_path)
 
@@ -315,20 +325,11 @@ def load_agent_config(agent_path: str | Path) -> AgentConfig:
 def _resolve_inheritance(
     config_data: dict[str, Any], agent_path: Path
 ) -> dict[str, Any]:
-    """Resolve base_config inheritance and merge parent config data.
+    """Recursively merge any declared ``base_config`` into the child config.
 
-    If config_data has a base_config reference, loads the base config
-    recursively and merges it with the child config.
-
-    Returns:
-        Merged config_data (with _base_path set if inheritance was resolved).
-
-    Raises:
-        ConfigNotFoundError: When ``base_config`` is declared but
-            cannot be resolved.  Building without the declared base
-            used to be a silent warn-and-continue — it produces an
-            agent missing its base prompt / tools / model, which then
-            "runs" and behaves like garbage with no visible cause.
+    Sets ``_base_path`` when inheritance resolved. Raises ConfigNotFoundError
+    rather than degrading: an agent missing its base runs and behaves wrongly
+    with no visible cause.
     """
     base_config_ref = config_data.get("base_config")
     if not base_config_ref:
@@ -408,9 +409,7 @@ def _construct_agent_config(
         system_prompt=config_data.get("system_prompt", "You are a helpful assistant."),
         system_prompt_file=config_data.get("system_prompt_file"),
         prompt_context_files=config_data.get("prompt_context_files", {}),
-        skill_mode=controller_data.get(
-            "skill_mode", config_data.get("skill_mode", "dynamic")
-        ),
+        tool_doc_mode=_resolve_tool_doc_mode(controller_data, config_data),
         include_tools_in_prompt=controller_data.get(
             "include_tools_in_prompt", config_data.get("include_tools_in_prompt", True)
         ),
@@ -426,7 +425,7 @@ def _construct_agent_config(
         ),
         ephemeral=controller_data.get("ephemeral", config_data.get("ephemeral", False)),
         tool_format=controller_data.get(
-            "tool_format", config_data.get("tool_format", "bracket")
+            "tool_format", config_data.get("tool_format", "native")
         ),
         input=_parse_input_config(config_data.get("input")),
         triggers=[_parse_trigger_config(t) for t in config_data.get("triggers", [])],
@@ -564,24 +563,10 @@ def build_agent_config(
     config_data: dict[str, Any],
     agent_path: Path | None = None,
 ) -> AgentConfig:
-    """
-    Build AgentConfig from a raw config dict.
+    """Build an AgentConfig from a raw config dict.
 
-    Handles base_config inheritance, system prompt loading, and
-    template rendering. Used by load_agent_config (from file), by the
-    terrarium runtime (inline creature config from dict), and directly
-    by programmatic callers building an inline agent.
-
-    Args:
-        config_data: Raw config dict (env vars interpolated automatically)
-        agent_path: Path context for resolving relative paths.  May be
-            omitted for fully-inline configs — relative references
-            (``base_config``, ``system_prompt_file``, custom modules)
-            then resolve against the process cwd, and the agent name
-            defaults to ``config_data["name"]`` or ``"agent"``.
-
-    Returns:
-        Loaded AgentConfig
+    Handles inheritance, system-prompt loading, and template rendering. With no
+    ``agent_path`` relative references resolve against the process cwd.
     """
     if agent_path is None:
         config_data = dict(config_data)

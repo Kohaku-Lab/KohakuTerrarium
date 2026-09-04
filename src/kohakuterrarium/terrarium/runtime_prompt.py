@@ -22,6 +22,12 @@ Block content per design.md Section 8:
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from kohakuterrarium.prompt.framework_hints import (
+    HINT_GROUP_GROWTH,
+    HINT_GROUP_MODEL,
+    get_framework_hint,
+    is_default_hint,
+)
 from kohakuterrarium.terrarium.events import EventKind
 from kohakuterrarium.utils.logging import get_logger
 
@@ -217,7 +223,7 @@ def build_runtime_graph_section(engine: "Terrarium", creature: "Creature") -> st
     privileged_suffix = " — privileged" if creature.is_privileged else ""
 
     lines = [
-        "## Live Group (auto-managed)",
+        get_framework_hint(HINT_GROUP_MODEL, _hint_overrides(creature)) or "",
         "",
         f"You are `{creature.creature_id}` ({creature.name}){privileged_suffix}.",
         "",
@@ -257,7 +263,37 @@ def build_runtime_graph_section(engine: "Terrarium", creature: "Creature") -> st
         "direct sends are tagged `[direct from <source>]`; channel messages "
         "are tagged `[Channel '<name>' from <sender>]`."
     )
+    if creature.is_privileged:
+        growth = _build_growth_block(engine, creature, graph)
+        if growth:
+            lines.extend(["", growth])
     return "\n".join(lines).rstrip()
+
+
+def _hint_overrides(creature: "Creature") -> dict[str, str] | None:
+    """Return the creature's framework-hint overrides, if it declares any."""
+    config = getattr(creature.agent, "config", None)
+    return getattr(config, "framework_hint_overrides", None) or None
+
+
+def _build_growth_block(engine: "Terrarium", creature: "Creature", graph: Any) -> str:
+    """Render the self-grow guidance with the graph's live population state."""
+    template = get_framework_hint(HINT_GROUP_GROWTH, _hint_overrides(creature))
+    if not template:
+        return ""
+    if not is_default_hint(HINT_GROUP_GROWTH, template):
+        return template.strip()
+
+    current = len(graph.creature_ids)
+    cap = getattr(graph, "max_creatures", 0) or 0
+    if cap > 0:
+        population = (
+            f"\nThe group holds {current} of at most {cap} creatures. "
+            "Prune before you spawn once it is full.\n"
+        )
+    else:
+        population = f"\nThe group holds {current} creatures.\n"
+    return template.format(population=population).strip()
 
 
 def apply_managed_section(agent: Any, content: str) -> None:

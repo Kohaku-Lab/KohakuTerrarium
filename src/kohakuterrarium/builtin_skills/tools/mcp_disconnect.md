@@ -1,23 +1,20 @@
 ---
 name: mcp_disconnect
-description: Disconnect from an MCP server
+description: 'Disconnect a connected MCP server by name.'
 category: builtin
-tags: [mcp, integration]
+tags: [mcp]
 ---
 
 # mcp_disconnect
 
-Disconnect from a connected MCP server. The server's tools will no longer
-be available via `mcp_call`.
+Closes the session to one MCP server.
 
 ## Arguments
 
-| Arg    | Type   | Description                                 |
-| ------ | ------ | ------------------------------------------- |
-| server | string | Name of the server to disconnect (required) |
+| Arg | Type | Req | Description |
+| --- | --- | --- | --- |
+| name | string | yes | Connected server name |
 
-## Example
+## Behavior
 
-```
-mcp_disconnect(server="github")
-```
+- Its tools stop being callable until reconnected.

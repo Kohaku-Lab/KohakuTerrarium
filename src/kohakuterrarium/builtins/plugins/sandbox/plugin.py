@@ -26,7 +26,6 @@ logger = get_logger(__name__)
 
 READ_PATH_ARGS = {
     "read": ["path"],
-    "json_read": ["path"],
     "notebook_read": ["path"],
     "glob": ["pattern"],
     "grep": ["path"],
@@ -37,7 +36,6 @@ WRITE_PATH_ARGS = {
     "write": ["path"],
     "edit": ["path"],
     "multi_edit": ["path"],
-    "json_write": ["path"],
     "notebook_edit": ["path"],
 }
 

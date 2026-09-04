@@ -1,56 +1,22 @@
 ---
 name: memory_read
-description: Search and retrieve information from memory
+description: 'Search session memory and report what it found. Not for searching files - use grep.'
 category: subagent
-tags: [memory, retrieval, context]
+tags: [memory]
 ---
 
 # memory_read
 
-Sub-agent for searching the memory folder using natural language queries.
+Searches recorded session memory for information relevant to a question.
 
-## Syntax
+## Task shape
 
-```
-tool call: memory_read(
-natural language query
-)
-```
+State what you are trying to recall and roughly when it happened.
 
-## What It Does
+## Returns
 
-- Searches memory files for relevant information
-- Uses tree, read, grep to find matching content
-- Returns found information
+Relevant recalled passages, or an explicit statement that nothing matched.
 
-## When It Helps
+## Limits
 
-- If you want more context about a user or topic
-- If you're unsure whether you've encountered something before
-- If you need to recall stored preferences or facts
-
-## Query Examples
-
-```
-tool call: memory_read(
-what do I know about User1
-)
-```
-
-```
-tool call: memory_read(
-user preferences
-)
-```
-
-```
-tool call: memory_read(
-recent conversation topics
-)
-```
-
-## Notes
-
-- Query is natural language, NOT a file path
-- Read-only (cannot modify memory)
-- Only searches configured memory path
+- Reads only what was recorded in this session.

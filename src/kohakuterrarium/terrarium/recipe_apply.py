@@ -62,6 +62,9 @@ async def apply_resolved_recipe(
 
     if created_ids is not None:
         created_ids.extend(transaction.created_creature_ids)
+    # The growth prompt reports this cap, so the graph has to carry it.
+    if config.max_creatures:
+        result.max_creatures = config.max_creatures
     return result
 
 

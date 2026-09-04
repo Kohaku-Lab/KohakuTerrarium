@@ -21,7 +21,6 @@ Core general-purpose tools:
 | `tree`                                         | List directory structure with frontmatter summaries                                       |
 | `scratchpad`                                   | Session-scoped key-value working memory                                                   |
 | `ask_user`                                     | Request human input mid-execution                                                         |
-| `json_read` / `json_write`                     | Read and modify JSON files with path expressions                                          |
 | `send_message`                                 | Send a message to a named channel                                                         |
 | `info`                                         | Load full documentation for a tool or sub-agent on demand                                 |
 | `stop_task`                                    | Cancel a running background tool, sub-agent, or trigger by id                             |

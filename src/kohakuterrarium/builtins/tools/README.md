@@ -24,7 +24,6 @@ the public API from `builtins.tool_catalog`.
 | `tree.py`                               | `tree`: list directory structure (.gitignore-aware, line-limited)                                                 |
 | `scratchpad_tool.py`                    | `scratchpad`: session-scoped key-value working memory                                                             |
 | `ask_user.py`                           | `ask_user`: request human input mid-execution                                                                     |
-| `json_read.py` / `json_write.py`        | `json_read` / `json_write` with path expressions                                                                  |
 | `send_message.py`                       | `send_message`: send to a named channel                                                                           |
 | `info.py`                               | `info`: load full documentation for a tool or sub-agent on demand                                                 |
 | `stop_task.py`                          | `stop_task`: cancel a running background tool, sub-agent, or trigger by id                                        |

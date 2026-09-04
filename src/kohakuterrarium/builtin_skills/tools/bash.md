@@ -1,100 +1,48 @@
 ---
 name: bash
-description: Execute shell commands (prefer dedicated tools for file ops)
+description: Run a shell command. Use for builds, tests, git, and process control. Not for reading or editing files - use read, glob, grep, multi_edit.
 category: builtin
 tags: [shell, command, system]
-license: internal
 ---
 
 # bash
 
-Execute shell commands and return output.
-
-## IMPORTANT: Prefer Dedicated Tools
-
-Do NOT use bash for operations that have dedicated tools:
-
-- File reading: use `read` (NOT `cat`, `head`, `tail`)
-- File editing: use `edit` (NOT `sed`, `awk`)
-- File writing: use `write` (NOT `echo >`, `cat <<EOF`)
-- File finding: use `glob` (NOT `find`, `ls`)
-- Content search: use `grep` (NOT `grep`, `rg` via bash)
-
-Using dedicated tools gives structured output and enables safety guards.
+Runs a command and returns its combined output and exit status.
 
 ## Arguments
 
-| Arg     | Type   | Description                                                                                      |
-| ------- | ------ | ------------------------------------------------------------------------------------------------ |
-| command | string | Shell command to execute (required)                                                              |
-| type    | string | Shell type: bash, zsh, sh, fish, pwsh, powershell (default: bash)                                |
-| timeout | number | Maximum total call time in seconds, including concurrency-lock waiting (default: tool config timeout; `0` = no timeout) |
-| allow_concurrent | boolean | Skip the unsafe-tool concurrency lock; use only when this call is safe to run concurrently |
-
-## Shell Type
-
-By default, all commands run in **bash** on every platform (including
-Windows, via Git Bash). The process `$SHELL` does not replace this default.
-Use `type="..."` to select another shell explicitly. Supported values are
-`bash`, `zsh`, `sh`, `fish`, `pwsh`, and `powershell`. If the requested shell
-is not available, the tool reports which shells are installed.
-
-Shell executable overrides are checked in this order:
-
-1. `KT_<SHELL>_PATH`, such as `KT_BASH_PATH`
-2. `KT_SHELL_PATH`
-3. Platform shell discovery
-
-## Git Safety
-
-- Prefer new commits over amending existing ones.
-- Never skip hooks (--no-verify) unless explicitly asked.
-- Before destructive operations (reset --hard, push --force), confirm with
-  the user.
-- Never force push to main/master.
-
-## Multiple Commands
-
-- Independent commands: run them separately (parallel execution).
-- Dependent commands: chain with `&&`.
-- Sequential (failure OK): chain with `;`.
+| Arg | Type | Req | Description |
+| --- | --- | --- | --- |
+| command | string | yes | Command to run |
+| type | string | no | Shell: bash (default), zsh, sh, fish, pwsh, powershell |
+| timeout | number | no | Total seconds including lock wait; 0 disables |
+| allow_concurrent | boolean | no | Skip the serial lock when this call is safe to parallelize |
+| run_in_background | boolean | no | Return immediately; the result arrives in a later turn |
 
 ## Behavior
 
-- Commands run in bash on all platforms (Git Bash on Windows) unless `type` selects another shell.
-- Use the `type` parameter to switch shells explicitly.
-- stdout and stderr are combined in the output.
-- Commands have a configurable total timeout; `timeout` includes concurrency-lock waiting and command execution.
-- `timeout: 0` disables the total timeout for long-running commands.
-- Unsafe tool calls wait for the shared concurrency lock by default. Set `allow_concurrent=true` only when the call is safe to run concurrently; this skips that lock at your own risk. This is an executor-level override and applies to any unsafe tool, although this manual documents its Bash use.
-- Large outputs may be truncated to the configured max size.
+- Commands run through bash on every platform unless `type` says otherwise;
+  the ambient `$SHELL` is not consulted.
+- Shell commands are opaque, so they take a serial lock by default. Set
+  `allow_concurrent` only when you know the call is independent.
+- `timeout` covers waiting for that lock as well as the command itself, so a
+  call can time out before the command starts.
 
-## WHEN TO USE
+## Limits
 
-- Running system commands (git, npm, pip, cargo, etc.)
-- Checking system state (pwd, whoami, env)
-- Running build/test commands
-- Package management operations
+- If the requested shell is missing, the error names the shells that are
+  installed.
 
-## Long-Running Processes
+## Reference
 
-A server, watcher, or daemon may keep running indefinitely. Do not start one as
-ordinary background work if you expect its completion result to let you continue
-with later requests—the process may never finish.
+### Shell resolution order
 
-When later steps need to interact with the process, start it so the startup
-command can finish while the child process keeps running. Detach and redirect the
-process appropriately for the selected shell and platform, and return identifiers
-such as its PID and log path. Continue with follow-up commands in a later turn.
-The startup result alone does not prove that the service is ready; use an explicit
-health, port, or log check before relying on it.
+1. `KT_<SHELL>_PATH`, e.g. `KT_BASH_PATH`
+2. `KT_SHELL_PATH`
+3. Platform discovery
 
-## Output
+### Chaining
 
-Returns combined stdout/stderr. Exit code is included in the result metadata.
-
-## LIMITATIONS
-
-- Commands have a total timeout (default: 60 seconds; override per call with `timeout`), including concurrency-lock waiting
-- Large outputs may be truncated
-- Shell availability varies by platform (bash via git bash on Windows)
+Run independent commands as separate calls so they parallelize. Chain with
+`&&` when a later command depends on an earlier one, `;` when failure is
+acceptable.

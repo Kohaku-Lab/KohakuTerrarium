@@ -1,57 +1,23 @@
 ---
 name: memory_write
-description: Store information to memory
+description: 'Record a durable note into session memory. Not for files the user should see - use write.'
 category: subagent
-tags: [memory, storage, persistence]
+tags: [memory]
 ---
 
 # memory_write
 
-Sub-agent for storing information in the memory folder.
+Writes a note into session memory for later recall.
 
-## Syntax
+## Task shape
 
-```
-tool call: memory_write(
-description of what to store
-)
-```
+Give the fact and why it will matter later. Notes without context are not
+findable.
 
-## What It Does
+## Returns
 
-- Determines appropriate file based on content
-- Creates or updates memory files
-- Respects protected file rules
+Confirmation of what was stored.
 
-## When It Helps
+## Limits
 
-- If you learn something noteworthy about a user
-- If there's context worth remembering for later
-- If you want to update your working memory
-
-## Content Examples
-
-```
-tool call: memory_write(
-User1 mentioned they're learning piano in #general
-)
-```
-
-```
-tool call: memory_write(
-User prefers concise responses
-)
-```
-
-```
-tool call: memory_write(
-Current project context: working on agent framework
-)
-```
-
-## Notes
-
-- Describe what to store in natural language
-- System auto-decides which file to update
-- Include context: who, what, where
-- Cannot modify protected files (character.md, rules.md)
+- Session-scoped; not a substitute for writing a file.

@@ -377,59 +377,31 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         },
         "required": ["question"],
     },
-    "json_read": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "JSON file path"},
-            "query": {"type": "string", "description": "JMESPath query (optional)"},
-        },
-        "required": ["path"],
-    },
-    "json_write": {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string", "description": "JSON file path"},
-            "content": {"type": "string", "description": "JSON content to write"},
-        },
-        "required": ["path", "content"],
-    },
     "show_card": {
         "type": "object",
         "properties": {
-            "title": {
-                "type": "string",
-                "description": "Card header (required).",
-            },
+            "title": {"type": "string", "description": "Card header"},
             "subtitle": {
                 "type": "string",
-                "description": "Optional smaller header line shown after the title.",
+                "description": "Smaller line after the title",
             },
-            "icon": {
-                "type": "string",
-                "description": "Optional emoji shown before the title (e.g. '🔧').",
-            },
+            "icon": {"type": "string", "description": "Emoji shown before the title"},
             "accent": {
                 "type": "string",
-                "enum": ["primary", "info", "success", "warning", "danger", "neutral"],
-                "description": (
-                    "Semantic color used for border / header. Pick one that "
-                    "matches the meaning: success for completion, warning for "
-                    "review-needed, danger for destructive, info for neutral."
-                ),
+                "enum": [
+                    "primary",
+                    "info",
+                    "success",
+                    "warning",
+                    "danger",
+                    "neutral",
+                ],
+                "description": "Border/header color matching the meaning",
             },
-            "body": {
-                "type": "string",
-                "description": (
-                    "Markdown body — supports headings, lists, code fences, "
-                    "links. Keep it short; cards are for at-a-glance info."
-                ),
-            },
+            "body": {"type": "string", "description": "Markdown body; keep it short"},
             "fields": {
                 "type": "array",
-                "description": (
-                    "Optional key/value rows displayed as a small grid. "
-                    "Set 'inline: true' to pack two rows side-by-side."
-                ),
+                "description": "Key/value rows",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -440,60 +412,30 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
                     "required": ["label", "value"],
                 },
             },
-            "footer": {
-                "type": "string",
-                "description": "Optional small italic line at the bottom.",
-            },
+            "footer": {"type": "string", "description": "Small closing line"},
             "actions": {
                 "type": "array",
-                "description": (
-                    "Optional buttons. When present and 'wait_for_reply' is "
-                    "true (the default), the tool blocks until the user clicks "
-                    "one and returns 'action: <id>'. Use sparingly — 2 to 4 "
-                    "actions max."
-                ),
+                "description": "Buttons; 2-4 max. Returns the clicked id",
                 "items": {
                     "type": "object",
                     "properties": {
-                        "id": {
-                            "type": "string",
-                            "description": "Stable id returned when the user clicks.",
-                        },
+                        "id": {"type": "string"},
                         "label": {"type": "string"},
                         "style": {
                             "type": "string",
                             "enum": ["primary", "secondary", "danger", "link"],
-                            "description": (
-                                "'link' actions open 'url' in a browser without "
-                                "submitting a reply (no agent round-trip)."
-                            ),
+                            "description": "'link' opens url without a reply",
                         },
-                        "url": {
-                            "type": "string",
-                            "description": "Required when style is 'link'.",
-                        },
+                        "url": {"type": "string", "description": "Required for 'link'"},
                     },
                     "required": ["id", "label"],
                 },
             },
             "wait_for_reply": {
                 "type": "boolean",
-                "description": (
-                    "Whether to block waiting for a button click. Defaults to "
-                    "true when 'actions' is non-empty, false otherwise."
-                ),
+                "description": "Default true when actions exist",
             },
-            "timeout_s": {
-                "type": "number",
-                "description": (
-                    "Seconds to wait for a reply. Default null = wait forever."
-                ),
-            },
-            "surface": {
-                "type": "string",
-                "enum": ["chat", "modal"],
-                "description": "Where to render the card. Default 'chat'.",
-            },
+            "timeout_s": {"type": "number", "description": "Bound the wait"},
         },
         "required": ["title"],
     },

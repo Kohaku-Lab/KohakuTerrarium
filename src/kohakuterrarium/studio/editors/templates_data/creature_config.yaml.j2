@@ -7,10 +7,8 @@ base_config: {{ base_config | tojson }}
 description: {{ description | tojson }}
 {% endif %}
 system_prompt_file: prompts/system.md
-skill_mode: dynamic
 
 controller:
-  tool_format: native
   reasoning_effort: high
 
 tools: []

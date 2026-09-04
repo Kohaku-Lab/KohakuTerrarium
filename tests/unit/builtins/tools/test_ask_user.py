@@ -93,6 +93,8 @@ class TestAskUserValidation:
         # prompt and must be dispatchable without an ``info`` read.
         assert AskUserTool().require_manual_read is False
 
-    def test_prompt_contribution_points_to_show_card(self):
-        text = AskUserTool().prompt_contribution()
-        assert text and "show_card" in text
+    def test_description_points_to_show_card(self):
+        # The disambiguation lives in the description, which is always loaded;
+        # the contribution carries only what the description cannot.
+        assert "show_card" in AskUserTool().description
+        assert "Blocks the turn" in AskUserTool().prompt_contribution()

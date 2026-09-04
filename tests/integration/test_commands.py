@@ -217,7 +217,7 @@ class TestCommandsIntegration:
         # all, plus distinctive prose from the body.
         asst = _assistant_text(agent)
         assert expected in asst
-        assert "## IMPORTANT: Prefer Dedicated Tools" in asst
+        assert "## Behavior" in asst
         assert "Tags: shell, command, system" in asst
 
         # The command was not silently dropped — it ran exactly once and
@@ -238,7 +238,7 @@ class TestCommandsIntegration:
             for m in last_prompt
             if isinstance(m.get("content"), str)
         )
-        assert "## IMPORTANT: Prefer Dedicated Tools" in joined
+        assert "## Behavior" in joined
 
     async def test_info_resolves_subagent_and_unknown(self, make_agent) -> None:
         """One turn: a builtin *subagent* skill resolves, a runtime
@@ -284,7 +284,7 @@ class TestCommandsIntegration:
         asst = _assistant_text(agent)
         # Builtin subagent skill fully resolved into the conversation.
         assert expected_explore in asst
-        assert "Autonomous sub-agent for codebase exploration" in asst
+        assert "Investigates a codebase across many files" in asst
         # The procedural skill resolved via the SkillRegistry fallback —
         # rendered with the ``--- Skill: ---`` preamble + origin + body.
         assert "--- Skill: deploy_routine ---" in asst
@@ -340,7 +340,7 @@ class TestCommandsIntegration:
         # tool class) — distinctive packaged-skill prose proves which source
         # won the race.
         assert "Tags: shell, command, system" in asst
-        assert "## IMPORTANT: Prefer Dedicated Tools" in asst
+        assert "## Behavior" in asst
 
         recorder: OutputRecorder = agent._recorder
         activity_kinds = recorder.activity_types()

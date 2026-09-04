@@ -55,19 +55,20 @@ class TestRegistration:
     def test_subagents_prompt_empty_when_none_registered(self):
         assert _manager().get_subagents_prompt() == ""
 
-    def test_subagents_prompt_requires_self_contained_task_context(self):
+    def test_subagents_prompt_does_not_repeat_framework_guidance(self):
+        # Sub-agent isolation is stated once in the execution-model block, not
+        # here and not in every task-parameter description.
+        from kohakuterrarium.prompt.framework_hints import (
+            HINT_EXECUTION_MODEL,
+            get_framework_hint,
+        )
+
         mgr = _manager(tool_format="native")
         mgr.register(SubAgentConfig(name="explore", description="finds"))
         prompt = mgr.get_subagents_prompt()
-        assert "fresh, context-isolated invocation" in prompt
-        assert "cannot resume or inherit conversation history" in prompt
-        assert "complete, self-contained task" in prompt
-        assert (
-            "original goal, current state, work already completed, what remains"
-            in prompt
-        )
-        assert "relevant paths, errors, or findings" in prompt
-        assert "continue the previous task" in prompt
+        assert "context-isolated" not in prompt
+        assert "continue the previous task" not in prompt
+        assert "context-isolated" in get_framework_hint(HINT_EXECUTION_MODEL)
 
     def test_register_warns_on_tools_missing_from_parent_registry(self):
         # A config referencing tools the parent doesn't have still

@@ -32,7 +32,6 @@ class ShowCardTool(BaseTool):
     needs_context: bool = True
     # The manual distinguishes display, interactive, and link-only call shapes,
     # which cannot be inferred safely from the compact tool description.
-    require_manual_read: bool = True
 
     @property
     def tool_name(self) -> str:
@@ -40,10 +39,7 @@ class ShowCardTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Display a styled card with optional action buttons. Use for "
-            "plan previews, structured summaries, or simple approval gates."
-        )
+        return "Display a styled card, optionally with buttons, and return the clicked action. Not for free-text answers - use ask_user."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -51,13 +47,8 @@ class ShowCardTool(BaseTool):
 
     def prompt_contribution(self) -> str | None:
         return (
-            "Show a styled card for structured display (plan preview, "
-            "status, key/value facts) or a small **pick-one** gate. With "
-            "non-`link` `actions` and `wait_for_reply` (on by default when "
-            "actions exist) it blocks for the click and returns the "
-            "chosen `action` id; with no actions it displays and returns "
-            "at once. `link` actions only open a URL — a link-only card "
-            "never waits. Use `ask_user` when the answer is free text."
+            "Blocks the turn when it has non-`link` actions, returning the "
+            "clicked id; displays and returns at once when it has none."
         )
 
     async def _execute(

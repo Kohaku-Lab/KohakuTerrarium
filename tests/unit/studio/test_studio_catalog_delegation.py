@@ -215,12 +215,12 @@ class TestEditorCreaturesSaveForward:
         s.editors.creatures.save(
             creatures_dir,
             "alice",
-            {"config": {"name": "alice", "version": "9.9", "skill_mode": "static"}},
+            {"config": {"name": "alice", "version": "9.9", "tool_doc_mode": "full"}},
         )
         ws = LocalWorkspace(Path(tmp_path))
         reloaded = s.catalog.creatures.get(ws, "alice")
         assert reloaded["config"]["version"] == "9.9"
-        assert reloaded["config"]["skill_mode"] == "static"
+        assert reloaded["config"]["tool_doc_mode"] == "full"
 
 
 # ── persistence.viewer — real SessionStore payloads ────────────

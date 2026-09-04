@@ -70,10 +70,10 @@ class TestDataclassDefaults:
         c = AgentConfig(name="x")
         assert c.version == "1.0"
         assert c.temperature == 0.7
-        assert c.skill_mode == "dynamic"
+        assert c.tool_doc_mode == "standard"
         assert c.include_tools_in_prompt is True
         assert c.sanitize_orphan_tool_calls is True
-        assert c.tool_format == "bracket"
+        assert c.tool_format == "native"
         assert isinstance(c.input, InputConfig)
         assert isinstance(c.output, OutputConfig)
 

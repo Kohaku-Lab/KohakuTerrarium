@@ -1,83 +1,39 @@
 ---
 name: grep
-description: Search file contents with regex pattern matching
+description: Search file contents by regex. Use to find where something is defined or used. Not for finding files by name - use glob.
 category: builtin
 tags: [search, content]
 ---
 
 # grep
 
-Search file contents with regex pattern matching.
-
-## WHEN TO USE
-
-- Finding where something is defined/used
-- Searching for specific code patterns
-- Locating TODOs, FIXMEs, or comments
-- Finding function/class definitions
-
-## HOW TO USE
-
-```
-tool call: grep(
-pattern
-)
-```
-
-With optional parameters:
-
-```
-tool call: grep(
-  path: src/
-  glob: **/*.py
-  limit: 50
-  ignore_case: true
-pattern
-)
-```
+Searches file contents with Python regular expressions and returns matching
+lines with their paths and line numbers.
 
 ## Arguments
 
-| Arg         | Type  | Description                                |
-| ----------- | ----- | ------------------------------------------ |
-| pattern     | body  | Python regex pattern to search (required)  |
-| path        | @@arg | Directory or file to search (default: cwd) |
-| glob        | @@arg | File glob filter (default: `**/*`)         |
-| limit       | @@arg | Max matches to return (default: 50)        |
-| ignore_case | @@arg | Case-insensitive search (default: false)   |
+| Arg | Type | Req | Description |
+| --- | --- | --- | --- |
+| pattern | string | yes | Python regex |
+| path | string | no | Directory or file to search; defaults to the working directory |
+| glob | string | no | File filter, e.g. `**/*.py` |
+| limit | integer | no | Maximum matches, default 50 |
+| ignore_case | boolean | no | Case-insensitive match |
 
 ## Behavior
 
-- Uses Python regex (re module), not ripgrep or shell grep
-- Binary files are automatically skipped
-- Lines longer than 2000 characters are truncated in output
-- When results exceed the limit, a hint message shows total match count so you know to narrow your pattern
-- Searches recursively through directories matching the glob filter
+- Python `re` syntax, not ripgrep or shell grep; escape `(`, `[`, and `.`.
+- Binary files are skipped.
+- When matches exceed `limit`, the total count is reported so you know the
+  pattern needs narrowing rather than the limit raising.
 
-## Examples
+## Limits
 
-```
-tool call: grep(
-  glob: **/*.py
-def \w+\(
-)
-```
+- Lines over 2000 characters are truncated in the output.
 
-```
-tool call: grep(
-  ignore_case: true
-todo|fixme
-)
-```
+## Reference
 
-```
-tool call: grep(
-  path: src/main.py
-import
-)
-```
-
-## Output Format
+### Output format
 
 ```
 src/main.py:10: def main():
@@ -85,10 +41,3 @@ src/utils.py:25: def helper(x):
 
 (2 matches in 15 files)
 ```
-
-## TIPS
-
-- Use `glob` arg to narrow file types (e.g., `**/*.py`)
-- Escape regex special chars: `\(`, `\[`, `\.`
-- Use `read` after grep to examine surrounding context
-- Set `ignore_case=true` for case-insensitive text search

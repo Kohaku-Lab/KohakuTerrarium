@@ -514,5 +514,11 @@
     "function": "_dispatch_linux",
     "target": "gi.repository",
     "reason": "PyGObject/GLib is supplied by the GTK pywebview backend and must remain lazy so non-GTK and non-Linux installs can import desktop support."
+  },
+  {
+    "file": "src/kohakuterrarium/modules/subagent/runtime_builders.py",
+    "function": "build_plugin_manager",
+    "target": "kohakuterrarium.bootstrap.plugins",
+    "reason": "cycle break: bootstrap.plugins imports the builtin catalog, whose sub-agent configs import modules.subagent, which imports this module. Importing init_plugins at module top makes `import kohakuterrarium.bootstrap.plugins` fail outright as the first import of a process. Latent before 3.0 and reachable only through certain entry points; deferring to call time is the smallest fix that does not move plugin bootstrapping out of bootstrap/."
   }
 ]

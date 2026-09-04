@@ -120,12 +120,7 @@ class ImageGenTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Generate or edit an image. When the user asks for an image "
-            "(draw / sketch / picture / render / edit this image), use "
-            "this tool — the provider's built-in image backend produces "
-            "the final PNG. Attached input images become editing targets."
-        )
+        return "Generate or edit a raster image. Not for diagrams from code - write the source and render it with bash."
 
     @property
     def execution_mode(self) -> ExecutionMode:

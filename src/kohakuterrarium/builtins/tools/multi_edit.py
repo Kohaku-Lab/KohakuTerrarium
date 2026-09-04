@@ -130,7 +130,6 @@ class MultiEditTool(BaseTool):
     """Apply multiple ordered search/replace edits to a single file."""
 
     needs_context = True
-    require_manual_read = True
     # Serial execution prevents concurrent writers from invalidating ordered edits.
     is_concurrency_safe = False
 
@@ -140,10 +139,7 @@ class MultiEditTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Apply multiple ordered search/replace edits to one file with strict, partial, "
-            "or best_effort policies. Use info(multi_edit) first."
-        )
+        return "Apply ordered exact search/replace edits to one file. Use when changing a file in one or more places. Not for whole-file rewrites - use write."
 
     @property
     def execution_mode(self) -> ExecutionMode:

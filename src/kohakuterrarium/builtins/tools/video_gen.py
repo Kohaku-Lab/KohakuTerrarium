@@ -47,7 +47,7 @@ class VideoGenTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Generate a video with a selectable Grok Imagine video model"
+        return "Generate a video from a prompt. Not for still images - use image_gen."
 
     def get_parameters_schema(self) -> dict[str, Any]:
         return {

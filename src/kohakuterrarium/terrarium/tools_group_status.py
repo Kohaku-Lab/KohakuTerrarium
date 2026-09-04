@@ -34,10 +34,7 @@ class GroupStatusTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Snapshot the caller's group: creatures, channels, output "
-            "wires, spawnable catalog"
-        )
+        return "Snapshot your group: members, channels, wires, and health. Not for changing it - use the other group tools."
 
     @property
     def execution_mode(self) -> ExecutionMode:

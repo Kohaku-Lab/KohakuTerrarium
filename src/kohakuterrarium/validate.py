@@ -18,11 +18,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.errors import LLMNotConfiguredError
 from kohakuterrarium.bootstrap.llm import _create_from_profile, coerce_llm_provider
 from kohakuterrarium.builtins.inputs.none import NoneInput
 from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.agent import Agent
+from kohakuterrarium.errors import ConfigError, LLMNotConfiguredError
 from kohakuterrarium.core.config import AgentConfig, load_agent_config
 from kohakuterrarium.llm.profiles import profile_to_identifier, resolve_controller_llm
 from kohakuterrarium.terrarium.config import TerrariumConfig, load_terrarium_config
@@ -93,6 +93,7 @@ def creature(path: "str | Path", *, llm_binding: Any = None) -> ValidationReport
         A :class:`ValidationReport` describing what was built.
     """
     cfg = load_agent_config(path)
+    _check_native_tool_support(cfg, llm_binding)
     agent = Agent(
         cfg,
         llm=llm_binding,
@@ -110,6 +111,27 @@ def creature(path: "str | Path", *, llm_binding: Any = None) -> ValidationReport
         tools=sorted(agent.registry.list_tools()),
         plugins=plugin_names,
         subagents=sorted(agent.subagent_manager.list_subagents() or []),
+    )
+
+
+def _check_native_tool_support(cfg: AgentConfig, llm_binding: Any) -> None:
+    """Fail a native-format creature bound to a model without tool calling.
+
+    ``tool_format`` defaults to ``native``, so a config that never mentions it
+    can still land on a provider that cannot honour it.
+    """
+    if cfg.tool_format != "native":
+        return
+    provider = llm_binding if not isinstance(llm_binding, str) else None
+    if provider is None:
+        return
+    supports = getattr(provider, "supports_native_tools", None)
+    if supports is None or supports:
+        return
+    raise ConfigError(
+        f"{cfg.name!r} uses tool_format 'native' but its bound model does not "
+        "support native tool calling. Set 'tool_format: bracket' on the "
+        "controller, or bind a model that does."
     )
 
 

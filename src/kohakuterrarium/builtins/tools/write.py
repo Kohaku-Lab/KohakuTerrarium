@@ -37,7 +37,7 @@ class WriteTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Write content to a file (must read first if file exists)"
+        return "Create a file or replace its entire contents. Requires a prior read if it exists. Not for changing part of a file - use multi_edit."
 
     @property
     def execution_mode(self) -> ExecutionMode:

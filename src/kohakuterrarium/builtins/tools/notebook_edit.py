@@ -252,7 +252,6 @@ class NotebookEditTool(BaseTool):
     """Apply one or more ordered cell edits to a Jupyter notebook."""
 
     needs_context = True
-    require_manual_read = True
     # Ordered cell references depend on a stable notebook snapshot.
     is_concurrency_safe = False
 
@@ -262,10 +261,7 @@ class NotebookEditTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Apply ordered cell edits to a Jupyter .ipynb notebook. "
-            "Use info(notebook_edit) and notebook_read first."
-        )
+        return "Apply ordered cell edits to a Jupyter notebook. Requires a prior notebook_read. Not for plain files - use multi_edit."
 
     @property
     def execution_mode(self) -> ExecutionMode:

@@ -37,6 +37,7 @@ from kohakuterrarium.core.tool_output import materialize_image_part
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.llm.message import ContentPart, FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.tools import build_provider_native_tools, build_tool_schemas
+from kohakuterrarium.modules.tool.doc_mode import DEFAULT_DOC_MODE
 from kohakuterrarium.modules.plugin.base import ToolVisibility
 from kohakuterrarium.modules.tool.base import ToolInfo
 from kohakuterrarium.parsing import (
@@ -101,7 +102,7 @@ class ControllerConfig:
     # Compaction can separate native calls from results; providers must not see
     # either half of such an orphaned exchange.
     sanitize_orphan_tool_calls: bool = True
-    include_subagent_schema_guidance: bool = True
+    tool_doc_mode: str = DEFAULT_DOC_MODE
 
 
 @dataclass
@@ -256,8 +257,7 @@ class Controller:
     def _get_native_tool_schemas(self) -> "list[ToolSchema]":
         """Build callable schemas, applying plugin tool-visibility restrictions."""
         schemas = build_tool_schemas(
-            self.registry,
-            include_subagent_guidance=self.config.include_subagent_schema_guidance,
+            self.registry, tool_doc_mode=self.config.tool_doc_mode
         )
         visibility = self._get_tool_visibility()
         if visibility is None:

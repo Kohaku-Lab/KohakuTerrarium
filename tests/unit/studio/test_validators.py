@@ -32,7 +32,7 @@ class TestAgentConfigInDefaults:
         assert cfg.version == "1.0"
         assert cfg.temperature == 0.7
         assert cfg.reasoning_effort == "medium"
-        assert cfg.skill_mode == "dynamic"
+        assert cfg.tool_doc_mode == "standard"
         assert cfg.max_subagent_depth == 3
         assert cfg.system_prompt == "You are a helpful assistant."
         # Collection fields default to fresh empty containers.

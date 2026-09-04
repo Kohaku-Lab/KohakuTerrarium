@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.core.output_wiring import OutputWiringEntry
+from kohakuterrarium.modules.tool.doc_mode import DEFAULT_DOC_MODE
 
 
 @dataclass
@@ -42,6 +43,8 @@ class ToolConfigItem:
     module: str | None = None  # Custom file path or package module reference.
     class_name: str | None = None  # Class instantiated from ``module``.
     options: dict[str, Any] = field(default_factory=dict)
+    # Per-tool documentation tier; None defers to the creature default.
+    doc_mode: str | None = None
 
 
 @dataclass
@@ -94,10 +97,6 @@ class AgentConfig:
     name: str
     version: str = "1.0"
 
-    # NOTE: inheritance is a *load-time* concern — the YAML
-    # ``base_config:`` key is consumed by ``config._resolve_inheritance``
-    # and never stored on the dataclass.
-
     # LLM profile reference (resolves from ~/.kohakuterrarium/llm_profiles.yaml)
     llm_profile: str = (
         ""  # Profile name or selector; empty = use inline settings or default
@@ -124,16 +123,12 @@ class AgentConfig:
     system_prompt: str = "You are a helpful assistant."
     system_prompt_file: str | None = None
 
-    # Files to inject into system prompt as template variables
-    # Maps variable name to file path (relative to agent folder)
-    # Example: { "character": "memory/character.md" }
-    # Use in system.md: {{ character }}
+    # Maps a system.md template variable to a file path, agent-folder relative.
     prompt_context_files: dict[str, str] = field(default_factory=dict)
 
-    # Skill loading mode: "dynamic" or "static"
-    # - dynamic: Model uses [/info] to read tool docs on demand (less tokens upfront)
-    # - static: All tool docs included in system prompt (no [/info] needed)
-    skill_mode: str = "dynamic"
+    # Default documentation tier for tools: "brief", "standard", or "full".
+    # See ``modules/tool/doc_mode.py``; individual tools may override it.
+    tool_doc_mode: str = DEFAULT_DOC_MODE
 
     # Prompt aggregation controls
     # Set to False if you handle tool/output instructions in your own prompt/context
@@ -148,12 +143,7 @@ class AgentConfig:
         False  # Clear conversation after each interaction (for group chat)
     )
 
-    # Pre-LLM sanitiser: drop orphan tool_call / tool-result pairs
-    # produced by compaction before they reach the provider. Most
-    # OpenAI-compatible endpoints reject messages where a ``tool``
-    # message has no preceding ``tool_calls`` entry (and vice-versa);
-    # this guard keeps the wire payload valid even when compact_manager
-    # strips a partial pair. Set ``False`` to preserve raw history.
+    # Drop orphan tool_call / tool-result pairs left by compaction.
     sanitize_orphan_tool_calls: bool = True
 
     input: InputConfig = field(default_factory=InputConfig)
@@ -162,11 +152,7 @@ class AgentConfig:
     subagents: list[SubAgentConfigItem] = field(default_factory=list)
     output: OutputConfig = field(default_factory=OutputConfig)
 
-    # Opt-out list for provider-native tools. Providers (Codex, …)
-    # auto-inject their native capabilities (``image_gen`` etc.) into
-    # every creature that runs on them; names listed here are skipped.
-    # Example: ``disable_provider_tools: ["image_gen"]`` on a
-    # research-only creature that shouldn't produce images.
+    # Provider-native tools to skip, e.g. ``["image_gen"]`` on Codex.
     disable_provider_tools: list[str] = field(default_factory=list)
 
     compact: dict[str, Any] | None = None
@@ -178,21 +164,14 @@ class AgentConfig:
     # Sub-agent depth limit (0 = unlimited)
     max_subagent_depth: int = 3
 
-    # Shared iteration budget (see core/budget.py). When set, both the
-    # parent controller and any budget_inherit=True sub-agents draw LLM
-    # turns from the same pool. Exhaustion in a sub-agent surfaces as a
-    # failed SubAgentResult; exhaustion in the parent emits a
-    # termination signal. None / 0 means "no enforcement" and preserves
-    # the legacy behavior.
+    # LLM-turn pool shared with budget_inherit sub-agents (None / 0 = off).
     max_iterations: int | None = None
 
-    # Runtime default plugin packs (e.g. ``["auto-compact"]``).
-    # Budget axes are NOT a core agent setting — opt in via the
-    # ``plugins`` field with the ``budget`` plugin and its options.
+    # Runtime default plugin packs, e.g. ``["auto-compact"]``.
     default_plugins: list[str] = field(default_factory=list)
 
-    # Tool call format: "bracket", "xml", "native", or custom dict
-    tool_format: str | dict = "bracket"
+    # "native" (provider function calling), "bracket", "xml", or a custom dict.
+    tool_format: str | dict = "native"
 
     agent_path: Path | None = None
 
@@ -205,30 +184,17 @@ class AgentConfig:
 
     memory: dict[str, Any] = field(default_factory=dict)
 
-    # Output wiring: framework-level automatic round-output routing.
-    # Each entry declares a target (creature name or magic "root")
-    # that receives a ``creature_output`` TriggerEvent at turn-end.
-    # See ``core/output_wiring.py`` for the dataclass + protocol and
-    # ``core/agent_handlers.py:_finalize_processing`` for the emission hook.
+    # Targets that receive a ``creature_output`` TriggerEvent at turn-end.
     output_wiring: list[OutputWiringEntry] = field(default_factory=list)
 
-    # Procedural-skill opt-ins (cluster 4 / Qa). Lists names of
-    # package-shipped skills that the creature wants enabled by default.
-    # User- or project-local skills are always enabled unless the user
-    # runs ``/skill disable <name>`` at runtime.
+    # Package-shipped skills enabled by default; local skills always are.
     skills: list[str] = field(default_factory=list)
 
-    # Byte budget for the auto-invoke ``## Skills`` section of the
-    # system prompt (spec 4.3). Overflow skills remain reachable via
-    # explicit `skill` / `info` tool calls.
+    # Byte budget for the ``## Skills`` section; overflow stays callable.
     skill_index_budget_bytes: int = 4096
 
-    # Framework-hint overrides for the system-prompt aggregator.
-    # Maps a canonical hint key (see ``prompt/framework_hints.py``)
-    # to replacement prose. Empty string means "omit this block entirely".
-    # Unknown keys are ignored with a warning. Load order during aggregation:
-    # built-in default -> package-level ``framework_hints`` in kohaku.yaml
-    # -> this creature-level map.
+    # Canonical hint key -> replacement prose ("" omits the block).
+    # See ``prompt/framework_hints.py`` for keys and precedence.
     framework_hint_overrides: dict[str, str] = field(default_factory=dict)
 
     def get_api_key(self) -> str | None:

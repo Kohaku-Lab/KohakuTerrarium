@@ -1,37 +1,23 @@
 ---
 name: skill
-description: Invoke a procedural skill by name and return its instructions
+description: Run a procedural skill by name and return its instructions. Not for reading its docs without running it - use info.
 category: builtin
-tags: [skills, procedures, guidance]
+tags: [skills]
 ---
 
 # skill
 
-Invoke a procedural skill through the normal tool surface.
-
-Skills are markdown how-to bundles discovered from project, user, or package skill directories. This tool returns the selected skill's instructions so you can follow them in subsequent actions.
+Loads a procedural skill and returns its body for you to follow.
 
 ## Arguments
 
-| Arg       | Type   | Description                                                |
-| --------- | ------ | ---------------------------------------------------------- |
-| name      | string | Skill name to invoke (required)                            |
-| arguments | string | Optional free-form arguments or task context for the skill |
+| Arg | Type | Req | Description |
+| --- | --- | --- | --- |
+| name | string | yes | Skill name |
+| arguments | string | no | Text passed through to the skill |
 
 ## Behavior
 
-- Looks up `name` in the active session skill registry.
-- Verifies that the skill exists and is enabled.
-- Returns the skill body as tool output.
-- Includes `arguments` in the rendered skill context when provided.
-
-## WHEN TO USE
-
-- When the current task matches a listed procedural skill.
-- When a path-based skill hint says a skill may apply.
-- When the user asks you to follow or use a named skill.
-
-## Related
-
-- Use `info(name="<skill-name>")` to read details for a specific skill without invoking it.
-- Users can trigger skills directly with `/<skill-name> [args]`.
+- Skills listed in the prompt's `## Skills` index are enabled; the index is
+  byte-budgeted, so a skill missing from it is still callable by name.
+- The returned body is instructions for you, not a completed result.

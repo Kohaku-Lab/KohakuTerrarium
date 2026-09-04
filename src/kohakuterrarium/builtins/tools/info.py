@@ -33,9 +33,7 @@ class InfoTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Get full documentation for a tool, sub-agent, or procedural skill by name"
-        )
+        return "Load the full documentation for a tool, sub-agent, or procedural skill by name. Not for running a skill - use skill."
 
     @property
     def execution_mode(self) -> ExecutionMode:

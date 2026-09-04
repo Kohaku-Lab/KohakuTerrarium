@@ -169,7 +169,6 @@ class SubAgent:
             registry=self.registry,
             include_tools=True,
             include_hints=True,
-            skill_mode="dynamic",
             tool_format=self.tool_format or "bracket",
             runtime_plugins=self._plugin_manager,
             plugin_context=plugin_ctx,

@@ -12,11 +12,12 @@ section.
 
 | File              | Description                                                                                                                                                                                    |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `__init__.py`     | Re-exports loader, template, aggregator, and plugin functions                                                                                                                                  |
+| `__init__.py`     | Re-exports loader, template, and aggregator functions                                                                                                                                          |
 | `loader.py`       | `load_prompt`, `load_prompt_with_fallback`, `load_prompts_folder`: read markdown prompt files                                                                                                  |
 | `template.py`     | `PromptTemplate`, `render_template`, `render_template_safe`: Jinja2-based variable substitution                                                                                                |
-| `aggregator.py`   | `aggregate_system_prompt`, `aggregate_with_plugins`, `build_context_message`: combine components into final prompt                                                                             |
-| `plugins.py`      | `PromptPlugin` protocol, `BasePlugin` ABC, built-in plugins (`ToolListPlugin`, `FrameworkHintsPlugin`, `EnvInfoPlugin`, `ProjectInstructionsPlugin`), `get_default_plugins`, `get_swe_plugins` |
+| `aggregator.py`   | `aggregate_system_prompt`, `build_context_message`: compose the gated framework sections                                                                                                        |
+| `framework_hints.py` | Six canonical, overrideable prose blocks (execution model, call syntax, output model, untrusted content, group model, group growth)                                                          |
+| `tool_contributions.py` | `build_tool_guidance_section`: deterministic `## Tool guidance` from `BaseTool.prompt_contribution()`                                                                                     |
 | `skill_loader.py` | Markdown skill/documentation loader with YAML frontmatter support                                                                                                                              |
 
 ## Dependencies

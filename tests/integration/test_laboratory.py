@@ -74,7 +74,8 @@ def _write_creature_config(root, name: str) -> str:
         "model: gpt-4\n"
         "provider: openai\n"
         "input:\n  type: cli\n"
-        "output:\n  type: stdout\n",
+        "output:\n  type: stdout\n"
+        "controller:\n  tool_format: bracket\n",
         encoding="utf-8",
     )
     return str(cdir)
@@ -808,6 +809,8 @@ class TestLaboratoryDeepWorkflows:
             "provider: openai\n"
             "input:\n  type: cli\n"
             "output:\n  type: stdout\n"
+            # The scripted LLM emits bracket-format calls; native is the default.
+            "controller:\n  tool_format: bracket\n"
             "tools:\n"
             "  - name: write\n    type: builtin\n"
             "  - name: read\n    type: builtin\n",
@@ -1479,9 +1482,11 @@ class TestLaboratoryAdapterDirect:
                     chunks.append(tok)
                     if len(chunks) > 50:
                         break
-                assert any(
-                    "streamed-reply" in c for c in chunks
-                ), f"got chunks: {chunks!r}"
+                # The contract is that the reply arrives through the demux,
+                # not where the chunk boundaries fall — native streaming
+                # forwards provider chunks verbatim rather than buffering
+                # them through the text parser.
+                assert "streamed-reply" in "".join(chunks), f"got chunks: {chunks!r}"
                 await _safe(coord.shutdown())
             finally:
                 await _safe(client.stop())

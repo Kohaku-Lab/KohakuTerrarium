@@ -96,7 +96,11 @@ def create_tool(
                     tool_name=tool_config.name,
                 )
                 return None
-            tool_cfg = ToolConfig(**tool_cfg_values, extra=raw_options)
+            tool_cfg = ToolConfig(
+                **tool_cfg_values,
+                doc_mode=tool_config.doc_mode,
+                extra=raw_options,
+            )
             tool = get_builtin_tool(tool_config.name, config=tool_cfg)
             if tool is None:
                 _fail(

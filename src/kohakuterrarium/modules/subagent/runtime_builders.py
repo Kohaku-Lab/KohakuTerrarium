@@ -3,7 +3,6 @@
 from pathlib import Path
 from typing import Any
 
-from kohakuterrarium.bootstrap.plugins import init_plugins
 from kohakuterrarium.core.compact import CompactConfig, CompactManager
 from kohakuterrarium.core.loader import ModuleLoader
 from kohakuterrarium.llm.base import LLMProvider
@@ -24,6 +23,10 @@ def build_plugin_manager(
     default_plugin_specs: list[dict[str, Any]],
 ):
     """Build a per-run manager from inline, catalog, and inherited plugins."""
+    # Lazy: bootstrap.plugins pulls in the builtin catalog, which reaches back
+    # here through the sub-agent package. Importing at call time breaks the cycle.
+    from kohakuterrarium.bootstrap.plugins import init_plugins  # noqa: PLC0415
+
     return init_plugins(
         list(getattr(config, "plugins", []) or []),
         loader,

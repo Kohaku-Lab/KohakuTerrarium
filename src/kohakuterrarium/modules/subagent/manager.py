@@ -12,7 +12,6 @@ from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.llm.base import LLMProvider
 from kohakuterrarium.modules.subagent.base import SubAgent, SubAgentJob, SubAgentResult
 from kohakuterrarium.modules.subagent.config import SubAgentConfig, SubAgentInfo
-from kohakuterrarium.modules.subagent_guidance import TASK_SUBAGENT_CONTEXT_GUIDANCE
 from kohakuterrarium.modules.subagent.runtime_builders import (
     build_compact_manager,
     build_plugin_manager,
@@ -132,7 +131,6 @@ class SubAgentManager(InteractiveManagerMixin):
             lines.append("Sub-agents are called as tools via the API (param: `task`).")
         else:
             lines.append("Call sub-agents like tools with a task description.")
-        lines.append(TASK_SUBAGENT_CONTEXT_GUIDANCE)
 
         return "\n".join(lines)
 

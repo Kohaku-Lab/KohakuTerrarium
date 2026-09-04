@@ -16,6 +16,7 @@ from kohakuterrarium.core.config_types import AgentConfig, InputConfig, OutputCo
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.modules.plugin.base import BasePlugin
 from kohakuterrarium.modules.tool.function import FunctionTool
+from kohakuterrarium.llm.tools import build_tool_schemas
 from kohakuterrarium.testing.llm import ScriptedLLM
 
 
@@ -98,10 +99,11 @@ class TestConstructorInjection:
             llm=ScriptedLLM(["[/add_numbers]a=1 b=2[add_numbers/]", "Done: 3"]),
             tools=[add_numbers],
         )
-        # In the registry AND the initial aggregated prompt.
+        # In the registry AND on the wire. Native providers carry the
+        # inventory as schema, so the prompt no longer repeats it.
         assert "add_numbers" in agent.registry.list_tools()
-        sys_prompt = agent._controller_config.system_prompt
-        assert "add_numbers" in sys_prompt
+        schemas = build_tool_schemas(agent.registry)
+        assert "add_numbers" in {s.name for s in schemas}
 
     async def test_plugins_kwarg_registers_enabled(self, tmp_path):
         class Probe(BasePlugin):
@@ -120,12 +122,12 @@ class TestRuntimeAdds:
         agent = await kt.Agent.build(_cfg(tmp_path), llm=ScriptedLLM(["x"]))
         await agent.start()
         try:
-            assert "add_numbers" not in agent._controller_config.system_prompt
+            assert "add_numbers" not in agent.registry.list_tools()
             agent.add_tool(add_numbers)
-            # Registry + executor + the LIVE conversation system message.
+            # Registry + executor + the schemas the next call will carry.
             assert "add_numbers" in agent.registry.list_tools()
-            sys_msg = agent.controller.conversation.get_system_message()
-            assert "add_numbers" in sys_msg.content
+            schemas = build_tool_schemas(agent.registry)
+            assert "add_numbers" in {s.name for s in schemas}
         finally:
             await agent.stop()
 

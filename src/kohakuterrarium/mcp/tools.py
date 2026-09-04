@@ -39,7 +39,7 @@ class MCPListTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "List MCP servers and their tools (use before mcp_call)"
+        return "List connected MCP servers and the tools they expose. Not for calling one - use mcp_call."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -127,9 +127,7 @@ class MCPCallTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return (
-            "Call a tool on an MCP server (use mcp_list first to see available tools)"
-        )
+        return "Call one tool on a connected MCP server. Not for discovering what exists - use mcp_list."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -206,7 +204,7 @@ class MCPConnectTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Connect to an MCP server (stdio, SSE, or streamable HTTP)"
+        return "Connect to an MCP server by name or definition. Not for calling its tools - use mcp_call."
 
     @property
     def execution_mode(self) -> ExecutionMode:
@@ -327,7 +325,7 @@ class MCPDisconnectTool(BaseTool):
 
     @property
     def description(self) -> str:
-        return "Disconnect from an MCP server"
+        return "Disconnect a connected MCP server by name."
 
     @property
     def execution_mode(self) -> ExecutionMode:

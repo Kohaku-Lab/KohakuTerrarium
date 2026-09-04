@@ -18,6 +18,12 @@ from kohakuterrarium.core.tool_output import (
     merge_tool_metadata,
     normalize_tool_output,
 )
+from kohakuterrarium.modules.tool.doc_mode import (
+    DEFAULT_DOC_MODE,
+    DOC_MODE_BRIEF,
+    DOC_MODE_FULL,
+    resolve_doc_mode,
+)
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext, ToolResult
 from kohakuterrarium.parsing.events import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -135,21 +141,10 @@ class Executor:
         job_id: str | None = None,
         is_direct: bool = False,
     ) -> str:
-        """
-        Submit a tool for execution.
+        """Submit a tool for execution and return its job id.
 
-        Args:
-            tool_name: Name of the tool to execute
-            args: Arguments for the tool
-            job_id: Optional job ID (generated if not provided)
-            is_direct: If True, skip _on_complete callback and event queue
-                       (direct tools are awaited by the processing loop)
-
-        Returns:
-            Job ID
-
-        Raises:
-            ValueError: If tool not registered
+        ``is_direct`` skips the completion callback and event queue, for tools
+        the processing loop awaits itself. Raises ValueError for an unknown tool.
         """
         tool = self._tools.get(tool_name)
         if tool is None:
@@ -181,34 +176,40 @@ class Executor:
     async def submit_from_event(
         self, event: ToolCallEvent, is_direct: bool = False
     ) -> str:
-        """
-        Submit a tool from a ToolCallEvent.
-
-        Args:
-            event: Parsed tool call event
-            is_direct: If True, skip completion callback (awaited by loop)
-
-        Returns:
-            Job ID
-        """
+        """Submit a parsed tool-call event and return its job id."""
         return await self.submit(event.name, event.args, is_direct=is_direct)
 
     def _manual_read_gate_active(self) -> bool:
         """Return whether first-use documentation gating is actionable.
 
-        Static prompts already contain full docs, and absence of the ``info`` tool
-        would make a manual-read requirement impossible to satisfy.
+        Inlined docs make the gate redundant; a missing ``info`` tool makes it
+        impossible to satisfy.
         """
         agent = self._agent
         if agent is None:
             return True
         config = getattr(agent, "config", None)
-        if getattr(config, "skill_mode", "dynamic") == "static":
+        if getattr(config, "tool_doc_mode", DEFAULT_DOC_MODE) == DOC_MODE_FULL:
             return False
         registry = getattr(agent, "registry", None)
         if registry is not None and registry.get_tool("info") is None:
             return False
         return True
+
+    def _requires_manual_read(self, tool: Tool) -> bool:
+        """Return whether this tool must be documented before its first use.
+
+        Either the tool declares it, or its resolved tier withheld the
+        parameter prose that would let the model call it correctly.
+        """
+        if not isinstance(tool, BaseTool):
+            return False
+        if tool.require_manual_read:
+            return True
+        default = getattr(
+            getattr(self._agent, "config", None), "tool_doc_mode", DEFAULT_DOC_MODE
+        )
+        return resolve_doc_mode(tool, default) == DOC_MODE_BRIEF
 
     async def _run_bash(
         self,
@@ -284,8 +285,7 @@ class Executor:
         """Run a tool and update status."""
         try:
             if (
-                isinstance(tool, BaseTool)
-                and tool.require_manual_read
+                self._requires_manual_read(tool)
                 and not tool._manual_read
                 and self._manual_read_gate_active()
             ):

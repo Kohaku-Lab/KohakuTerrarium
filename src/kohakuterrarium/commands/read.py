@@ -144,7 +144,7 @@ class InfoCommand(BaseCommand):
 
                 # Registry metadata is the final tool fallback.
                 return CommandResult(
-                    content=tool_info.documentation
+                    content=tool_info.resolve_documentation()
                     or f"# {target_name}\n\n{tool_info.description}"
                 )
 
