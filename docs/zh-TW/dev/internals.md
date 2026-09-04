@@ -98,7 +98,7 @@ Resume 時，觸發器的狀態會從 session store 的 `events[agent]:*` 列重
 `prompt/aggregator.py:aggregate_system_prompt` 依下列順序組最終的 system prompt：
 
 1. 基底 prompt (來自 `system.md` 的代理人格)，用 `render_template_safe` 走 Jinja2 渲染；未定義變數會 degrade 成空字串。
-2. 工具說明。`skill_mode: dynamic` 時只放名稱 + 一行描述；`static` 時放完整說明。
+2. 工具說明。`tool_doc_mode: standard` 時只放名稱 + 一行描述；`static` 時放完整說明。
 3. 頻道拓樸提示，由 `terrarium/config.py:build_channel_topology_prompt` 在 creature 建起來時產生。
 4. 依工具格式產生的框架提示 (bracket / xml / native)。
 5. Named-output 模型 (怎麼寫到 `discord`、`tts` 等)。

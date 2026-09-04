@@ -20,7 +20,7 @@ useful mental models in their own right.
   stops talking.
 - [Prompt aggregation](prompt-aggregation.md): how the final system
   prompt is assembled (base + tools + hints + topology + named
-  outputs + plugins), and why `skill_mode` lets you choose "ship full
+  outputs + plugins), and why `tool_doc_mode` lets you choose "ship full
   docs" vs "load on demand."
 - [Session persistence](session-persistence.md): the dual-store model
   (append-only event log + conversation snapshots) that lets one

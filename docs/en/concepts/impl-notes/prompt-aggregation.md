@@ -1,6 +1,6 @@
 ---
 title: Prompt aggregation
-summary: How the system prompt is assembled from personality, tool list, framework hints, and on-demand skills.
+summary: What the framework injects into a turn, in what order, and under what condition.
 tags:
   - concepts
   - impl-notes
@@ -11,110 +11,139 @@ tags:
 
 ## The problem this solves
 
-An agent's "system prompt" is not one string. It is a composition of:
+An agent's "system prompt" is not one string, and it is not even one payload.
+Two things reach the model every turn:
 
-- the creature's personality / role,
-- a list of available tools (names + descriptions),
-- how to actually call tools in this creature's chosen format,
-- any channel topology (in a terrarium),
-- a description of named outputs (so the LLM knows when to route to
-  Discord vs stdout),
-- tool-contributed guidance paragraphs (for tools that want to teach the
-  model how to use them well),
-- plugin-contributed sections (project rules, environment info, etc.),
-- optional full documentation for every tool (if in `static` skill
-  mode), or none of it (if in `dynamic` mode),
-- a procedural-skill index and on-demand skill bodies.
+1. the assembled system prompt, and
+2. the native tool schemas, which the provider carries separately.
 
-If you leave this to hand-written prompts, you ship bugs: stale tool
-lists, wrong call syntax, duplicated sections. The framework
-assembles the whole thing deterministically.
+For a 20-callable creature the schemas are the larger half. Any accounting that
+looks only at the prompt is measuring the smaller one.
+
+The framework owns both. What it injects is everything the creature author
+cannot know: how dispatch works, what a background job means, which channels
+exist right now, how arriving messages are tagged. The creature owns who it is.
+
+## The governing rule
+
+**Every framework section is gated, and a block whose subject does not exist is
+not emitted.** An inapplicable block is worse than a missing one, because it
+teaches the model something false — call syntax for a creature using native
+function calling, or channel etiquette for a creature with no channels.
 
 ## Options considered
 
-- **Hand-written prompts.** Fragile. Breaks whenever you add a tool.
-- **Always-full static prompts.** Complete but huge; tool docs alone
-  can be tens of kilotokens.
-- **Load-on-demand docs.** Ship names only; let the agent pull full
-  docs via the `info` framework command when needed.
-- **Procedural skills as full inline bodies.** Powerful but too expensive
-  when a creature discovers many local/user/project skills.
-- **Configurable.** Each creature picks the trade-off: `skill_mode:
-  dynamic` or `skill_mode: static`; procedural skills get a separate
-  byte-budgeted index.
+- **Hand-written prompts.** Fragile; breaks whenever a tool is added.
+- **Always-full documentation.** Complete but unaffordable — tool docs alone ran
+  to tens of kilotokens.
+- **Load-on-demand.** Ship names and descriptions, let the agent pull the rest
+  through `info`. This is the industry's progressive-disclosure pattern, and it
+  is what `standard` mode does.
+- **Per-tool choice.** The trade-off is not the same for every tool: a tool with
+  three interacting policy flags is worth inlining, a file reader is not.
 
 ## What we actually do
 
-`prompt/aggregator.py:aggregate_system_prompt(...)` concatenates
-sections in this order:
+### Three tiers, selected per creature and per tool
 
-1. **Base prompt.** Rendered with Jinja2 (safe-undefined fallback);
-   contains the creature's personality and any project context files
-   declared under `prompt_context_files`.
-2. **Tool section.**
-   - `skill_mode: dynamic` → tool *index*: name + one-line description
-     per tool. Agent loads full docs on demand via the `info` framework command.
-   - `skill_mode: static` → full documentation for every tool inline.
-3. **Tool guidance section.** Deterministic aggregation of every tool's
-   `prompt_contribution()` output, ordered by bucket (`first`, `normal`,
-   `last`) and then alphabetically within each bucket.
-4. **Procedural-skill index.** A byte-budgeted `## Skills` section built
-   from discovered skills. Only enabled, model-invocable skills are listed.
-   Overflow skills remain reachable through `##skill <name>##` or
-   `##info <name>##`.
-5. **Channel topology section** (terrarium creatures only). Describes
-   "you listen on X, Y; you can send on Z; here is who sits on the
-   other side." Emitted by
-   `terrarium/config.py:build_channel_topology_prompt`.
-6. **Framework hints.** How to call tools in this creature's format
-   (bracket / XML / native), how to use the inline framework commands
-   (`read_job`, `info`, `jobs`, `wait`, and `skill` when present), and
-   what the output protocol looks like.
-7. **Named outputs section.** For each `named_outputs.<name>`, a short
-   description of when to route text there.
-8. **Prompt plugin sections.** Each registered prompt plugin (priority
-   sorted, low→high) contributes one section. Built-ins:
-   `ToolListPlugin`, `FrameworkHintsPlugin`, `EnvInfoPlugin`,
-   `ProjectInstructionsPlugin`.
+`tool_doc_mode` picks the default; a `tools:` entry may override it.
 
-Framework-hint prose itself is now overrideable. The aggregator merges
-package-level `framework_hints:` overrides from `kohaku.yaml` with any
-creature-level `framework_hint_overrides`, then resolves four canonical
-blocks: output model, dynamic execution model, static execution model,
-and native execution model.
+| Mode | Description | Usage tier | Parameter schema |
+| --- | --- | --- | --- |
+| `brief` | yes | no | present, prose stripped; first use gated on `info` |
+| `standard` *(default)* | yes | no | present, full |
+| `full` | yes | **inlined** | present, full |
 
-MCP tools, when connected, are injected as an extra section under
-"Available MCP Tools" with per-server bullet lists.
+The tiers map onto the documentation files themselves. Each file in
+`builtin_skills/` splits at `## Reference`: everything above is the **usage**
+tier that `full` inlines, everything below is reachable only through `info`, in
+every mode.
+
+```yaml
+tool_doc_mode: standard          # creature default
+
+tools:
+  - { name: read,       type: builtin }
+  - { name: multi_edit, type: builtin, doc_mode: full }
+```
+
+### Section order and gating
+
+`prompt/aggregator.py:aggregate_system_prompt` emits these in a fixed order, so
+provider-side prompt caching sees a stable prefix:
+
+| # | Section | Emitted when |
+| --- | --- | --- |
+| 1 | Creature base prompt | always |
+| 2 | `## Available Functions` | `tool_format != "native"` or `tool_doc_mode == "full"` |
+| 3 | `## Function Documentation` | any tool resolves to `full` |
+| 4 | `## Tool guidance` | some tool returns a `prompt_contribution()` |
+| 5 | Plugin contributions | a registered plugin returns content |
+| 6 | `## Skills` | the skill registry is non-empty |
+| 7 | `## Working with the group` | the creature is in a graph with channels or wires |
+| 8 | `## Growing the group` | the creature is privileged |
+| 9 | `## Untrusted content` | `include_hints_in_prompt` |
+| 10 | `## Calling functions` | `tool_format != "native"` |
+| 11 | `## Output format` | `include_hints_in_prompt` and `tool_format != "native"` |
+| 12 | `## Execution model` | `include_hints_in_prompt` |
+
+Sections 7 and 8 are rendered by `terrarium/runtime_prompt.py` into a
+sentinel-bounded block and refreshed on every topology change, so they cannot go
+stale. A solo creature costs zero bytes for both; the moment it is wired, the
+block appears.
+
+### Schema construction
+
+`llm/tools.py` states framework semantics once rather than per tool:
+
+- `run_in_background` appears only on tools declaring `supports_background`.
+  Mid-flight promotion (`core/backgroundify.py`) covers a direct call that turns
+  out to be slow.
+- Sub-agent context isolation is explained in `## Execution model`, not inside
+  every `task` parameter.
+- A tool `description` is capped at 160 characters and carries a "Not for …"
+  clause wherever a confusable sibling exists. It is the always-loaded tier and
+  the field the model routes on.
+
+### Framework hints
+
+Six canonical, overrideable blocks in `prompt/framework_hints.py`:
+`framework.execution_model`, `framework.call_syntax`, `framework.output_model`,
+`framework.untrusted_content`, `framework.group_model`,
+`framework.group_growth`. Package-level `framework_hints:` in `kohaku.yaml`
+merge under creature-level `framework_hint_overrides`; an empty string omits a
+block entirely.
+
+Call-syntax examples are **generated** from the active format definition rather
+than written by hand, so they cannot drift from what the parser accepts.
 
 ## Invariants preserved
 
-- **Deterministic.** Given the same config + registry + plugin set,
-  the prompt is byte-stable.
-- **Auto sections never duplicate hand-written ones.** If you put a
-  tool list in your `system.md`, the aggregator's tool list is still
-  added; the framework does not deduplicate by content.
-- **Skill mode is a knob, not a policy.** Nothing else in the system
-  changes based on `skill_mode`; it is exclusively a prompt-size
-  trade-off.
-- **Skill index is budgeted, not all-or-nothing.** Procedural skills
-  are indexed up to `skill_index_budget_bytes`; missing ones are still
-  callable explicitly.
-- **Tool guidance is cache-stable.** Bucket ordering plus alphabetical
-  sort keeps prompt prefixes stable for provider-side prompt caching.
-- **Plugin order is explicit.** Priority sorted. Same priority → stable
-  insertion order.
+- **Deterministic.** Same config plus registry plus plugin set yields a
+  byte-stable prompt.
+- **No duplication across payloads.** Anything the provider already carries as
+  schema is not repeated in prose.
+- **Gates are two-way.** Each section's presence *and* absence is asserted in
+  `tests/unit/prompt/test_aggregator.py`; a block firing when its subject does
+  not exist is the failure mode this system had.
+- **Budgeted.** `tests/integration/test_prompt_budget.py` fails the build if the
+  framework payload for the reference creature exceeds its target.
+- **Documentation cannot drift.** `tests/unit/test_tool_doc_shape.py` asserts
+  each tool's class description equals its file's, and that every schema-backed
+  tool has a doc file and vice versa.
 
 ## Where it lives in the code
 
-- `src/kohakuterrarium/prompt/aggregator.py`: the composition function.
-- `src/kohakuterrarium/prompt/plugins.py`: built-in prompt plugins.
-- `src/kohakuterrarium/prompt/templates.py`: Jinja safe rendering.
-- `src/kohakuterrarium/terrarium/config.py`: channel topology block.
-- `src/kohakuterrarium/core/agent.py`: `_init_controller()` calls the
-  aggregator once on start.
+- `src/kohakuterrarium/prompt/aggregator.py` — the composition function.
+- `src/kohakuterrarium/prompt/framework_hints.py` — the canonical blocks.
+- `src/kohakuterrarium/prompt/tool_contributions.py` — `## Tool guidance`.
+- `src/kohakuterrarium/llm/tools.py` — native schema construction.
+- `src/kohakuterrarium/modules/tool/doc_mode.py` — tier resolution.
+- `src/kohakuterrarium/terrarium/runtime_prompt.py` — the live graph block.
+- `src/kohakuterrarium/builtin_skills/` — the tiered documentation corpus.
 
 ## See also
 
-- [Plugin](../modules/plugin.md): writing prompt plugins.
+- [Plugin](../modules/plugin.md): contributing a prompt section at runtime.
 - [Tool](../modules/tool.md): how tool documentation is registered.
-- [skill_mode, tool_format, include_* in reference/configuration.md](../../reference/configuration.md): the knobs.
+- [tool_doc_mode, tool_format, include_* in reference/configuration.md](../../reference/configuration.md)

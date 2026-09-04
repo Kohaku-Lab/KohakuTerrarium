@@ -19,10 +19,24 @@ KohakuTerrarium is a Python framework that enables building any kind of agent sy
 - Highly modularized - one responsibility per module
 
 ### Coding style rules
-1. NO memo/noting/editorial comments (existing codebase may still violate this, but new code should not)
-2. comment is for "explain when the code itself can't explain"
-3. AVOID long-multi-line inline comments
-4. doc-string for whole functino quick intro, inline comments for indicare corresopnding stuff
+
+Comment + code + docstring are all for **WHAT**. *How* and *why* live in docs
+(`plans/`, `docs/`) — not in the source.
+
+1. NO memo/noting/editorial comments (existing code may still violate this; new code must not)
+2. A comment says what the code itself cannot say clearly
+3. A docstring says what the class or function is *for*, so a reader can place it
+4. Soft limits: inline comment blocks ≤ 2 lines, docstrings ≤ 14 lines.
+   Not hard rules — exceeding one needs a reason, and "this is rationale"
+   is not one (move it to a doc).
+
+A local `PostToolUse` hook flags violations after each Python edit:
+`.claude/hooks/comment_density.py`, wired in `.claude/settings.json`. Both live
+under the gitignored `.claude/`, so the hook is **per-developer, not team-wide** —
+a fresh clone will not have it. To adopt it, copy those two files, or run
+`python .claude/hooks/comment_density.py` over a file with
+`{"tool_input":{"file_path":"<abs path>"}}` on stdin. It only ever advises;
+it exits 0 and blocks nothing.
 
 ### Import Rules
 1. No imports inside functions (except optional dep and lazy import to avoid long init time)
@@ -407,6 +421,7 @@ src/kohakuterrarium/
 │   ├── trigger/              # Produces TriggerEvent(type=...)
 │   ├── tool/                 # On complete → TriggerEvent(type="tool_complete");
 │   │                         #   function.py = @kohakuterrarium.tool function adapter
+│   │                         #   doc_mode.py = brief / standard / full tier resolution
 │   ├── output/               # State-machine router + output modules
 │   ├── subagent/             # Sub-agent lifecycle management
 │   │   ├── base.py           # SubAgent class (conversation loop)
@@ -426,7 +441,7 @@ src/kohakuterrarium/
 │   ├── plugin_catalog.py     # Global builtin plugin lookup
 │   ├── tools/                # ~30 general tool classes (read, write, edit, multi_edit,
 │   │                         # glob, grep, tree, bash, python, notebook_read/edit,
-│   │                         # web_search, web_fetch, json_read/write, info, ask_user,
+│   │                         # web_search, web_fetch, info, ask_user,
 │   │                         # scratchpad_tool, send_message, stop_task, search_memory,
 │   │                         # skill, image_gen, canvas_preview, show_card, …)
 │   │                         #: group_* terrarium tools live in terrarium/tools_group*.py
@@ -478,10 +493,9 @@ src/kohakuterrarium/
 │   └── api_keys.py           # API key storage/retrieval
 │
 ├── prompt/                   # Prompt assembly and templating
-│   ├── aggregator.py         # Combines system prompt + tools + framework hints
-│   ├── framework_hints.py    # Tool-call syntax + ##info## / ##read## hint text
+│   ├── aggregator.py         # Gated composition of every framework section
+│   ├── framework_hints.py    # Six canonical, overrideable prose blocks
 │   ├── loader.py             # Loads prompt files / inline strings
-│   ├── plugins.py            # Plugin prompt contributions
 │   ├── tool_contributions.py # Tool-supplied prompt guidance fragments
 │   ├── skill_loader.py       # On-demand built-in skill loading
 │   └── template.py           # Jinja-like templating
@@ -680,34 +694,64 @@ Pure async combinators with zero framework coupling beyond `terrarium/`. Nothing
 
 ### System Prompt Aggregation
 
-The system prompt is built by `prompt/aggregator.py` which combines:
-1. **Base prompt from system.md**: agent personality / guidelines ONLY
-2. **Auto-generated tool list**: name + one-line description for each tool
-3. **Framework hints**: tool call syntax, ##info##, ##read## commands
-4. **Plugin contributions** (`prompt/plugins.py`): plugin-supplied prompt fragments
+Two payloads reach the model each turn: the assembled system prompt and the
+native tool schemas. For a 20-callable creature the schemas are the larger half,
+so prompt-size work that ignores `llm/tools.py` is optimizing the smaller one.
+
+`prompt/aggregator.py` composes the prompt from **gated** sections. The rule:
+**a block whose subject does not exist is not emitted.** An inapplicable block
+is worse than a missing one — it teaches the model something false.
+
+1. **Base prompt from system.md** — always. Personality and domain judgment only.
+2. **`## Available Functions`** — only when `tool_format != "native"` or
+   `tool_doc_mode == "full"`. Native providers already carry the inventory.
+3. **`## Function Documentation`** — only for tools resolved to `full`.
+4. **`## Tool guidance`** — `BaseTool.prompt_contribution()`, cache-stable order.
+5. **Plugin contributions** — `modules/plugin/manager.py`.
+6. **`## Skills`** — byte-budgeted procedural-skill index.
+7. **`## Working with the group`** / **`## Growing the group`** — injected by
+   `terrarium/runtime_prompt.py` only when the creature is actually in a graph /
+   is privileged. A solo creature costs zero bytes for both.
+8. **`## Untrusted content`**, **`## Calling functions`** (text formats only),
+   **`## Output format`** (text formats only), **`## Execution model`**.
+
+### Documentation tiers
+
+`tool_doc_mode` is `brief` | `standard` (default) | `full`, overridable per tool
+with `doc_mode` on a `tools:` entry. Files in `builtin_skills/` split at
+`## Reference`: above it is the **usage** tier that `full` inlines, below it is
+reachable only through `info`, in every mode.
 
 ### What Goes Where
 
-| Content | Location | Example |
-|---------|----------|---------|
-| Agent personality / role | `system.md` | "You are a SWE agent" |
-| Agent-specific guidelines | `system.md` | "Use tools immediately" |
-| Tool list (name + desc) | AUTO-GENERATED | `- bash: Execute shell commands` |
-| Tool call syntax | `aggregator.py` hints | `##tool##...##tool##` |
-| Full tool documentation | `builtin_skills/` | Loaded via `##info##` |
+| Content | Location |
+|---------|----------|
+| Agent personality / role / domain judgment | `system.md` |
+| What is true about the runtime (dispatch, channels, graph) | framework blocks |
+| Tool name + one-line description (≤160 chars, with a "Not for" clause) | tool class, mirrored in the doc frontmatter |
+| Argument tables, behavior, limits | `builtin_skills/<tool>.md` above `## Reference` |
+| Output formats, edge cases, worked failures | below `## Reference` |
+| A procedure for a task | a skill, not a creature prompt |
 
 ### NEVER Do These
 
-1. **NEVER put tool list in system.md**: it's auto-aggregated
-2. **NEVER put tool call syntax in system.md**: it's in framework hints
-3. **NEVER put full tool docs in system prompt**: use `##info##` command
-4. **NEVER hardcode tool descriptions**: they come from tool classes
+1. **NEVER put a tool list in system.md** — it is auto-aggregated or carried as schema.
+2. **NEVER put tool call syntax in system.md or a tool doc** — examples are
+   generated from the active format, and native creatures get none.
+3. **NEVER repeat framework semantics per tool** — `run_in_background` appears
+   only on tools declaring `supports_background`; sub-agent isolation is stated
+   once in `## Execution model`.
+4. **NEVER hardcode a tool description** — it must equal its doc frontmatter;
+   `tests/unit/test_tool_doc_shape.py` enforces that.
+5. **NEVER add a framework section without asserting its gate in both
+   directions** — present when true, absent when false.
 
-### On-Demand Documentation
+### Budget
 
-Full tool / sub-agent documentation is loaded ONLY when requested:
-- Controller uses `##info tool_name##` to get full docs
-- Docs come from: agent folder override → `builtin_skills/` → `tool.get_full_documentation()`
+`tests/integration/test_prompt_budget.py` fails the build if the framework
+payload for the reference creature exceeds its target, and
+`tests/unit/test_tool_doc_shape.py` enforces the tier caps and the
+schema ⟷ doc bijection. Design detail lives in `plans/sys-prompt-opt/`.
 
 ## Tool Execution Design (CRITICAL - MUST FOLLOW)
 

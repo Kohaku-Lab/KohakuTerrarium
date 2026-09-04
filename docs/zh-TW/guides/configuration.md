@@ -287,9 +287,9 @@ tool_format: native         # provider 原生的 function calling
 ## 怎麼選 dynamic 或 static skill mode？
 
 ```yaml
-skill_mode: dynamic   # 預設：`info` 框架指令會在需要時才載完整文件
+tool_doc_mode: standard   # 預設：`info` 框架指令會在需要時才載完整文件
 # 或
-skill_mode: static    # 完整工具文件直接塞進 system prompt
+tool_doc_mode: full    # 完整工具文件直接塞進 system prompt
 ```
 
 ## 怎麼讓生物沒有使用者輸入也能持續運作？

@@ -1,0 +1,8 @@
+name: bounded_agent
+version: "1.0"
+
+# Demonstrates the shared iteration budget: the parent controller and any
+# budget_inherit sub-agents draw LLM turns from one pool. See core/budget.py.
+base_config: "@kt-biome/creatures/general"
+
+max_iterations: 50

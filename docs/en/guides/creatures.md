@@ -153,8 +153,8 @@ The aggregator appends tool-list, framework hints, env info, and `CLAUDE.md` aut
 
 ## Skill mode: dynamic vs static
 
-- `skill_mode: dynamic` (default): tools show up in the prompt as one-line descriptions. The controller loads full docs on demand with the `info` framework command.
-- `skill_mode: static`: all tool docs are inlined upfront (larger system prompt, fewer round-trips).
+- `tool_doc_mode: standard` (default): tools reach the model as a name, a one-line description, and a parameter schema. The controller loads full docs on demand with the `info` tool.
+- `tool_doc_mode: full`: every tool's usage tier is inlined upfront (larger prompt, fewer round-trips). Set `doc_mode: full` on a single `tools:` entry to pay it for one tool only.
 
 Use `dynamic` unless you want a fixed, auditable prompt.
 

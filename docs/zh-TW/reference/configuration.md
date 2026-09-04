@@ -37,7 +37,7 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 | `system_prompt` | str | `"You are a helpful assistant."` | 否 | 行內 system prompt。 |
 | `system_prompt_file` | str | `null` | 否 | Markdown prompt 檔路徑，相對於代理資料夾。會沿繼承鏈串接。 |
 | `prompt_context_files` | dict[str,str] | `{}` | 否 | Jinja 變數 → 檔案路徑；prompt 渲染時讀進來插入。 |
-| `skill_mode` | str | `"dynamic"` | 否 | `dynamic` (需要時透過 `info` 框架指令載) 或 `static` (完整文件一次塞進去)。 |
+| `tool_doc_mode` | str | `"dynamic"` | 否 | `brief` (只有名稱與描述，首次使用前需 `info`)、`standard` (再加完整參數 schema) 或 `full` (內聯使用層文件)。單一工具可用 `tools:` 項目的 `doc_mode` 覆寫。 |
 | `include_tools_in_prompt` | bool | `true` | 否 | 是否納入自動生成的工具清單。 |
 | `include_hints_in_prompt` | bool | `true` | 否 | 是否納入框架提示 (工具呼叫語法、`info` / `read_job` / `jobs` / `wait` 指令範例)。 |
 | `max_messages` | int | `0` | 否 | 對話上限。`0` = 無上限。 |
@@ -78,7 +78,7 @@ Config 裡指到其他檔案或套件的欄位，解析順序：
 | `reasoning_effort` | str | `"medium"` | `none`、`minimal`、`low`、`medium`、`high`、`xhigh`。Codex 直接讀取；其他 provider 請用 `extra_body` (見 [Provider 專屬 `extra_body` 說明](#provider-專屬-extra_body-說明))。 |
 | `service_tier` | str | `null` | `priority`、`flex`。 |
 | `extra_body` | dict | `{}` | 深層合併到解析後 preset 的 `extra_body` 上 (後者可能已經帶有 variation patch)。 |
-| `skill_mode`、`include_tools_in_prompt`、`include_hints_in_prompt`、`max_messages`、`ephemeral`、`tool_format` | | | 對映頂層同名欄位。 |
+| `tool_doc_mode`、`include_tools_in_prompt`、`include_hints_in_prompt`、`max_messages`、`ephemeral`、`tool_format` | | | 對映頂層同名欄位。 |
 
 每回合解析順序 (見 `llm/profiles.py:resolve_controller_llm`)：
 

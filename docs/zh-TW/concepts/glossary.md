@@ -76,7 +76,7 @@ session 或圖的共用 environment 裡。一個 `send_message` 工具加上
 
 ## Skill mode / Skill 模式
 
-設定旋鈕 (`skill_mode: dynamic | static`)，決定 system prompt 要不要一開始就放上完整的工具說明 (`static`，比較大) 或只放名字加一行描述、等 agent 需要時用 `info` 框架指令擴展 (`dynamic`，比較小)。純粹的取捨；其他行為沒變。完整說明：[提示詞組合](impl-notes/prompt-aggregation.md)。
+設定旋鈕 (`tool_doc_mode: standard | static`)，決定 system prompt 要不要一開始就放上完整的工具說明 (`static`，比較大) 或只放名字加一行描述、等 agent 需要時用 `info` 框架指令擴展 (`dynamic`，比較小)。純粹的取捨；其他行為沒變。完整說明：[提示詞組合](impl-notes/prompt-aggregation.md)。
 
 ## Framework commands / 框架指令
 

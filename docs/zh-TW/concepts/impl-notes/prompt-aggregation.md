@@ -7,6 +7,9 @@ tags:
   - prompt
 ---
 
+> **注意**：本页描述的 prompt 组合流程已在 3.0 重写（分层工具文件、逐区块闸门、`tool_doc_mode`）。本文的英文版是權威版本：
+> [prompt-aggregation](../../../en/concepts/impl-notes/prompt-aggregation.md)
+
 # 提示詞聚合
 
 ## 這要解決的問題
@@ -34,8 +37,8 @@ tags:
   就可能有數萬 tokens。
 - **按需載入文件。** 只提供名稱；需要時再讓代理透過 `info`
   framework command 拉取完整文件。
-- **可設定。** 每個生物自行選擇取捨：`skill_mode:
-  dynamic` 或 `skill_mode: static`。這就是實際採用的方案。
+- **可設定。** 每個生物自行選擇取捨：`tool_doc_mode:
+  dynamic` 或 `tool_doc_mode: full`。這就是實際採用的方案。
 
 ## 我們實際怎麼做
 
@@ -46,10 +49,10 @@ tags:
    內容包含生物的人格，以及宣告在 `prompt_context_files`
    底下的任何專案上下文檔案。
 2. **工具區段。**
-   - `skill_mode: dynamic` → 工具*索引*：每個工具提供名稱 +
+   - `tool_doc_mode: standard` → 工具*索引*：每個工具提供名稱 +
      一行描述。代理會在需要時透過 `info` framework command
      載入完整文件。
-   - `skill_mode: static` → 直接內嵌每個工具的完整文件。
+   - `tool_doc_mode: full` → 直接內嵌每個工具的完整文件。
 3. **頻道拓樸區段**（僅限生態瓶中的生物）。描述
    「你會監聽 X、Y；你可以傳送到 Z；另一端是誰。」
    由 `terrarium/config.py:build_channel_topology_prompt`
@@ -75,14 +78,13 @@ tags:
 - **自動區段不會取代手寫區段。** 如果你在 `system.md` 裡自行放入
   工具清單，aggregator 的工具清單仍然會被加入；框架不會依內容去重。
 - **Skill mode 是調節旋鈕，不是策略。** 系統中其他任何部分都不會因
-  `skill_mode` 而改變，它純粹是 prompt 大小上的取捨。
+  `tool_doc_mode` 而改變，它純粹是 prompt 大小上的取捨。
 - **外掛順序是明確的。** 依優先級排序。若優先級相同，則保持穩定的
   插入順序。
 
 ## 程式碼中的位置
 
 - `src/kohakuterrarium/prompt/aggregator.py`：組合函式。
-- `src/kohakuterrarium/prompt/plugins.py`：內建 prompt plugins。
 - `src/kohakuterrarium/prompt/templates.py`：Jinja 安全渲染。
 - `src/kohakuterrarium/terrarium/config.py`：頻道拓樸區塊。
 - `src/kohakuterrarium/core/agent.py`：`_init_controller()` 會在
@@ -92,4 +94,4 @@ tags:
 
 - [Plugin](../modules/plugin.md)：如何撰寫 prompt plugins。
 - [Tool](../modules/tool.md)：工具文件如何被註冊。
-- [reference/configuration.md：skill_mode, tool_format, include_*](../../reference/configuration.md)：相關設定旋鈕。
+- [reference/configuration.md：tool_doc_mode, tool_format, include_*](../../reference/configuration.md)：相關設定旋鈕。

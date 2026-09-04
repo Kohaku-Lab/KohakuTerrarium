@@ -48,7 +48,7 @@ order: `config.yaml` → `config.yml` → `config.json` → `config.toml`.
 | `system_prompt` | str | `"You are a helpful assistant."` | no | Inline system prompt. |
 | `system_prompt_file` | str | `null` | no | Path to a markdown prompt file; relative to the agent folder. Concatenated through the inheritance chain. |
 | `prompt_context_files` | dict[str,str] | `{}` | no | Jinja variable → file path; files are read and injected when the prompt is rendered. |
-| `skill_mode` | str | `"dynamic"` | no | `dynamic` (on-demand via the `info` framework command) or `static` (full docs up-front). |
+| `tool_doc_mode` | str | `"standard"` | no | `brief` (name + description only, `info` gated), `standard` (plus full parameter schema), or `full` (usage tier inlined). Per-tool override: `doc_mode` on a `tools:` entry. |
 | `include_tools_in_prompt` | bool | `true` | no | Include auto-generated tool list. |
 | `include_hints_in_prompt` | bool | `true` | no | Include framework hints (tool-call syntax and `info` / `read_job` / `jobs` / `wait` command examples). |
 | `max_messages` | int | `0` | no | Conversation cap. `0` = unlimited. |
@@ -95,7 +95,7 @@ All fields may also be set at the top level for backward compatibility.
 | `reasoning_effort` | str | `"medium"` | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`. Consumed directly by Codex; for other providers use `extra_body` (see [Provider-specific `extra_body` notes](#provider-specific-extra_body-notes)). |
 | `service_tier` | str | `null` | `priority`, `flex`. |
 | `extra_body` | dict | `{}` | Deep-merged onto the resolved preset's `extra_body` (which may already carry variation patches). |
-| `skill_mode`, `include_tools_in_prompt`, `include_hints_in_prompt`, `max_messages`, `ephemeral`, `tool_format` | | | Mirror top-level fields. |
+| `tool_doc_mode`, `include_tools_in_prompt`, `include_hints_in_prompt`, `max_messages`, `ephemeral`, `tool_format` | | | Mirror top-level fields. |
 
 Canonical model identifiers are now `provider/name[@group=option,...]`. The runtime stores and surfaces this full identifier (for `/model`, session-info events, and UI display), so a round-trip like `/model openai/gpt-5.4-api@reasoning=high` is stable.
 

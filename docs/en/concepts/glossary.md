@@ -129,7 +129,7 @@ to the system prompt) and **lifecycle plugins** (hook `pre_llm_call`,
 
 ## Skill mode
 
-Config knob (`skill_mode: dynamic | static`) that decides whether the
+Config knob (`tool_doc_mode: brief | standard | full`) that decides whether the
 system prompt ships full tool documentation up front (`static`,
 bigger) or just names + one-liners that the agent expands on demand
 via the `info` framework command (`dynamic`, smaller). Pure trade-off; nothing else

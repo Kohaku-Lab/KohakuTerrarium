@@ -1,0 +1,91 @@
+# Auto-Research Terrarium
+# Universal version of Karpathy's autoresearch pattern.
+# Automatically runs experiments, evaluates results, and iterates.
+#
+# The ratchet loop:
+#   ideator proposes -> coder implements -> runner executes
+#   -> analyzer evaluates -> feedback to ideator (keep/discard)
+#
+# Pipeline edges are implemented via `output_wiring` (framework-level
+# automatic round-output routing). Each upstream creature's turn-end
+# text is automatically delivered to the next stage as a
+# `creature_output` TriggerEvent. Creatures do NOT need to call
+# `send_message` for the normal pipeline hand-off anymore.
+#
+# Channels remain in use for the CONDITIONAL edges that a static
+# wiring graph cannot express:
+#   - analyzer -> ideator (feedback, "keep")  or  analyzer -> coder (reverts, "discard")
+#   - team_chat: cross-creature status + strategic coordination
+#
+# Every creature also pings `root` on turn-end (with_content: false)
+# so root observes lifecycle without the creature having to report.
+#
+# Design:
+#   Each creature inherits the full `@kt-biome/creatures/general`
+#   toolset and subagents. Role is shaped by the per-creature prompt
+#   and wiring + channel topology, NOT by stripping tools.
+#
+# Usage:
+#   kt run examples/terrariums/auto_research/
+
+terrarium:
+  name: auto_research
+
+  root:
+    base_config: "@kt-biome/creatures/general"
+    system_prompt_file: prompts/root.md
+    controller:
+      tool_format: native
+    # Privileged group_* tools are force-registered on the root by the
+    # engine — no explicit ``tools:`` block needed here.
+
+  creatures:
+    - name: ideator
+      base_config: "@kt-biome/creatures/general"
+      system_prompt_file: prompts/ideator.md
+      # Turn-end text auto-delivers to coder. Root also pinged for lifecycle.
+      output_wiring:
+        - coder
+        - { to: root, with_content: false }
+      channels:
+        # Conditional / observation channels remain.
+        listen: [goals, feedback, team_chat]
+        can_send: [team_chat]
+
+    - name: coder
+      base_config: "@kt-biome/creatures/general"
+      system_prompt_file: prompts/coder.md
+      output_wiring:
+        - runner
+        - { to: root, with_content: false }
+      channels:
+        listen: [reverts, team_chat]
+        can_send: [team_chat]
+
+    - name: runner
+      base_config: "@kt-biome/creatures/general"
+      system_prompt_file: prompts/runner.md
+      output_wiring:
+        - analyzer
+        - { to: root, with_content: false }
+      channels:
+        listen: [team_chat]
+        can_send: [team_chat]
+
+    - name: analyzer
+      base_config: "@kt-biome/creatures/general"
+      system_prompt_file: prompts/analyzer.md
+      # Analyzer is the CONDITIONAL stage: keep -> feedback to ideator;
+      # discard -> reverts to coder. Wiring can't branch, so analyzer
+      # keeps using channels for its decision. Only lifecycle pings root.
+      output_wiring:
+        - { to: root, with_content: false }
+      channels:
+        listen: [team_chat]
+        can_send: [feedback, reverts, team_chat]
+
+  channels:
+    goals:      { description: "Research goals from root" }
+    feedback:   { description: "Analyzer -> ideator (keep-path feedback)" }
+    reverts:    { description: "Analyzer -> coder (discard-path revert requests)" }
+    team_chat:  { description: "Cross-creature status + strategic coordination" }

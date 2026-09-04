@@ -321,9 +321,9 @@ See the Tool format section of the [creatures guide](creatures.md) for the concr
 ## How do I choose dynamic vs static skill mode?
 
 ```yaml
-skill_mode: dynamic   # default; the `info` framework command loads full docs on demand
+tool_doc_mode: standard   # default; `info` loads the full docs on demand
 # or
-skill_mode: static    # full tool docs baked into system prompt
+tool_doc_mode: full       # every tool's usage tier inlined into the prompt
 ```
 
 Procedural skills are a separate layer. Package skills default disabled and are

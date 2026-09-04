@@ -188,7 +188,7 @@ system prompt in this order:
 1. Base prompt (agent personality from `system.md`), rendered with
    Jinja2 via `render_template_safe` so undefined variables degrade to
    empty strings.
-2. Tool documentation. In `skill_mode: dynamic` this is just name +
+2. Tool documentation. In `tool_doc_mode: standard` this is just name +
    one-line description; in `static` it is the full doc.
 3. Tool-guidance contributions collected from live tool instances.
 4. Procedural-skill index (byte-budgeted, enabled skills only).

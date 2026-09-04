@@ -153,8 +153,8 @@ prompt_context_files:
 
 ## Skill mode：dynamic 與 static
 
-- `skill_mode: dynamic`（預設）：工具會以單行描述出現在提示詞中。控制器會在需要時透過 `info` 框架指令載入完整文件。
-- `skill_mode: static`：所有工具文件都會預先內嵌（system prompt 較大，但 round-trip 較少）。
+- `tool_doc_mode: standard`（預設）：工具會以單行描述出現在提示詞中。控制器會在需要時透過 `info` 框架指令載入完整文件。
+- `tool_doc_mode: full`：所有工具文件都會預先內嵌（system prompt 較大，但 round-trip 較少）。
 
 除非你需要固定、可稽核的提示詞，否則建議使用 `dynamic`。
 

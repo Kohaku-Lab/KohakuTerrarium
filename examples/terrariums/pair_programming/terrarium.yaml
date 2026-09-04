@@ -1,0 +1,73 @@
+# Pair Programming Terrarium
+# Classic driver / navigator pair: two swe creatures collaborate on the
+# same coding task. The driver writes code in small increments; the
+# navigator reviews each draft, gives targeted feedback, and either
+# approves or asks for a revision.
+#
+# Topology:
+#   root -> tasks -> driver
+#   driver ==========> navigator       (every draft auto-delivered via output_wiring)
+#   navigator -> feedback -> driver    (review comments + verdicts, channel)
+#   driver   -> results                (final approved output, channel)
+#   every creature -> root             (lifecycle ping, with_content: false)
+#   pair_chat (broadcast, strategic discussion across both + root)
+#
+# The driver → navigator pipeline edge uses output_wiring: every turn-end
+# text from the driver is automatically delivered to the navigator as a
+# `creature_output` event. The navigator keeps channel-based outbound
+# because approve/revise is conditional.
+#
+# Design: both creatures inherit the full swe toolset and subagents from
+# `@kt-biome/creatures/swe`. Role is shaped by the per-creature prompt
+# and wiring / channel topology, not by stripping tools. Model, auth_mode,
+# and service_tier are intentionally left to user defaults so anyone can
+# run this terrarium.
+#
+# Usage:
+#   kt run examples/terrariums/pair_programming/
+
+terrarium:
+  name: pair_programming
+
+  root:
+    base_config: "@kt-biome/creatures/general"
+    system_prompt_file: prompts/root.md
+    controller:
+      tool_format: native
+    # Privileged group_* tools are force-registered on the root by the
+    # engine — no explicit ``tools:`` block needed here.
+
+  creatures:
+    - name: driver
+      base_config: "@kt-biome/creatures/swe"
+      system_prompt_file: prompts/driver.md
+      controller:
+        reasoning_effort: high
+        tool_format: native
+      # Every driver turn-end → navigator (wiring). Lifecycle → root.
+      output_wiring:
+        - navigator
+        - { to: root, with_content: false }
+      channels:
+        listen: [tasks, feedback, pair_chat]
+        can_send: [results, pair_chat]
+
+    - name: navigator
+      base_config: "@kt-biome/creatures/swe"
+      system_prompt_file: prompts/navigator.md
+      controller:
+        reasoning_effort: xhigh
+        tool_format: native
+      # Navigator is CONDITIONAL (approve vs revise). Outbound on channels.
+      # Only lifecycle pings root.
+      output_wiring:
+        - { to: root, with_content: false }
+      channels:
+        listen: [pair_chat]
+        can_send: [feedback, pair_chat]
+
+  channels:
+    tasks:     { description: "Incoming coding tasks from root to the driver" }
+    feedback:  { description: "Navigator's review comments and verdicts back to driver" }
+    results:   { description: "Final, navigator-approved output (root auto-observes)" }
+    pair_chat: { description: "Strategic coordination between driver, navigator, and root" }

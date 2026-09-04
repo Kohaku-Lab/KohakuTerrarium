@@ -98,7 +98,7 @@ Sub-agent 由 `modules/subagent/manager.py:spawn` 启动。深度受 `config.max
 `prompt/aggregator.py:aggregate_system_prompt` 会按以下顺序组装最终的 system prompt：
 
 1. 基础 prompt，也就是 `system.md` 中的 agent personality。它会经过 Jinja2 和 `render_template_safe` 渲染，因此未定义的变量会变成空字符串。
-2. Tool 文档。`skill_mode: dynamic` 时这里只放名称和一行说明；`static` 时会插入完整文档。
+2. Tool 文档。`tool_doc_mode: standard` 时这里只放名称和一行说明；`static` 时会插入完整文档。
 3. Channel topology 提示，由 `terrarium/config.py:build_channel_topology_prompt` 在 creature 构建时生成。
 4. 各种 tool format 对应的框架提示（bracket / xml / native）。
 5. Named-output 说明，也就是如何向 `discord`、`tts` 等输出写内容。

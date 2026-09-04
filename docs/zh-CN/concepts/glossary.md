@@ -76,7 +76,7 @@ Creature session 里的 key-value store。跨回合存活；用 `scratchpad` 工
 
 ## Skill mode / Skill 模式
 
-配置旋钮 (`skill_mode: dynamic | static`)，决定 system prompt 要不要一开始就放上完整的工具说明 (`static`，比较大) 或只放名字加一行描述、等 Agent 需要时用 `info` 框架指令扩展 (`dynamic`，比较小)。纯粹的取舍；其他行为没变。完整说明：[提示词组合](impl-notes/prompt-aggregation.md)。
+配置旋钮 (`tool_doc_mode: standard | static`)，决定 system prompt 要不要一开始就放上完整的工具说明 (`static`，比较大) 或只放名字加一行描述、等 Agent 需要时用 `info` 框架指令扩展 (`dynamic`，比较小)。纯粹的取舍；其他行为没变。完整说明：[提示词组合](impl-notes/prompt-aggregation.md)。
 
 ## Framework commands / 框架指令
 

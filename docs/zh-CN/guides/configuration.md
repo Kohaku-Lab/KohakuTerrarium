@@ -287,9 +287,9 @@ tool_format: native         # provider 原生的 function calling
 ## 怎么选 dynamic 或 static skill mode？
 
 ```yaml
-skill_mode: dynamic   # 默认：`info` 框架指令会在需要时才载完整文件
+tool_doc_mode: standard   # 默认：`info` 框架指令会在需要时才载完整文件
 # 或
-skill_mode: static    # 完整工具文件直接塞进 system prompt
+tool_doc_mode: full    # 完整工具文件直接塞进 system prompt
 ```
 
 ## 怎么让Creature 没有用户输入也能持续工作？
