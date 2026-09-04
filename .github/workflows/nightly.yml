@@ -12,465 +12,69 @@ on:
         default: false
         type: boolean
 
+# Serialised and never cancelled: a second run has to see what the first
+# published, or both decide the same commit is unbuilt.
 concurrency:
-  group: nightly-${{ github.ref }}
+  group: nightly
   cancel-in-progress: false
 
+# Decides only. Release is the sole workflow that builds or uploads, so PyPI
+# needs exactly one trusted publisher and there is one build matrix to
+# maintain instead of two that drift.
 permissions:
-  contents: write
-  # PyPI trusted publishing for the nightly wheel.
-  id-token: write
+  contents: read
+  actions: write
 
 jobs:
-  # Compute the nightly version ONCE so every downstream cell embeds the
-  # same string. The previous per-cell ``date`` call drifted by a few
-  # seconds across runners and made ``publish_manifest.py`` reject the
-  # sidecars with "sidecars span multiple versions".
-  version:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.compute.outputs.version }}
-      build_id: ${{ steps.compute.outputs.build_id }}
-      tag: ${{ steps.compute.outputs.tag }}
-      date: ${{ steps.compute.outputs.date }}
-      commit_sha: ${{ steps.compute.outputs.commit_sha }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Compute nightly version
-        id: compute
-        shell: bash
-        run: |
-          ts=$(date -u +%Y%m%d%H%M%S)
-          date=$(date -u +%Y%m%d)
-          sha=$(git rev-parse --short=7 HEAD)
-          commit_sha=$(git rev-parse HEAD)
-          # Derived from pyproject, never hardcoded: X.Y.(Z+1).devYYYYmmdd
-          # sorts ABOVE the released X.Y.Z, so `pip install --pre` upgrades
-          # onto a nightly and the eventual patch release reads as their
-          # summary. The old literal "2.0.0.dev..." sorted below every
-          # release. No +local segment, so PyPI accepts it.
-          version=$(python scripts/set_pyproject_version.py nightly)
-          {
-            echo "version=${version}"
-            echo "build_id=${ts}-${sha}"
-            echo "tag=nightly-${date}"
-            echo "date=${date}"
-            echo "commit_sha=${commit_sha}"
-          } >> "$GITHUB_OUTPUT"
-          echo "nightly version=${version}"
-
-  nightly_gate:
-    needs: [version]
-    runs-on: ubuntu-latest
-    outputs:
-      should_build: ${{ steps.gate.outputs.should_build }}
-      skip_reason: ${{ steps.gate.outputs.skip_reason }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Fetch previous nightly manifest
-        shell: bash
-        run: |
-          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
-            -o previous-nightly.json || echo "no previous manifest"
-
-      - name: Check nightly duplicate
-        id: gate
-        shell: bash
-        run: |
-          python scripts/nightly_gate.py \
-            --manifest previous-nightly.json \
-            --commit-sha "${{ needs.version.outputs.commit_sha }}" \
-            --force-rebuild "${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild == true || false }}" \
-            --github-output "$GITHUB_OUTPUT"
-
-  skipped:
-    needs: [nightly_gate]
-    if: needs.nightly_gate.outputs.should_build != 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Report skipped nightly
-        run: echo "${{ needs.nightly_gate.outputs.skip_reason }}"
-
-  # Per-platform release-tree tarballs the launcher consumes.
-  # Briefcase ships cp313 on Win/macOS, so cp313 is the only abi any
-  # user-facing path actually downloads. Linux x64 cp313 is kept for
-  # advanced users running the launcher on their own Linux Python.
-  build-release-tree:
-    needs: [version, nightly_gate]
-    if: needs.nightly_gate.outputs.should_build == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            py: "3.13"
-            abi: cp313
-            plat: linux-x64
-          - os: macos-latest
-            py: "3.13"
-            abi: cp313
-            plat: macos-arm64
-          - os: windows-latest
-            py: "3.13"
-            abi: cp313
-            plat: win-x64
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.py }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Build frontend
-        working-directory: src/kohakuterrarium-frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Install build deps
-        shell: bash
-        run: |
-          python -m pip install --upgrade pip
-          pip install zstandard
-
-      - name: Patch pyproject.toml version
-        shell: bash
-        run: |
-          python scripts/set_pyproject_version.py "${{ needs.version.outputs.version }}"
-
-      - name: Build release tree
-        shell: bash
-        run: |
-          python scripts/build_release_tree.py \
-            --version "${{ needs.version.outputs.version }}" \
-            --build-id "${{ needs.version.outputs.build_id }}" \
-            --commit-sha "${{ needs.version.outputs.commit_sha }}" \
-            --platform "${{ matrix.plat }}" \
-            --py-abi "${{ matrix.abi }}" \
-            --channel nightly \
-            --out dist/release-trees/
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nightly-release-tree-${{ matrix.plat }}-${{ matrix.abi }}
-          path: dist/release-trees/
-
-  # Wheel + sdist so ``pip install --pre`` users can update from the
-  # GH nightly release without waiting for a stable PyPI bump. The
-  # wheel is universal (pure Python ≥3.10) so one cell covers all
-  # pip users.
-  build-wheel:
-    needs: [version, nightly_gate]
-    if: needs.nightly_gate.outputs.should_build == 'true'
+  dispatch:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.13"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Build frontend
-        working-directory: src/kohakuterrarium-frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Patch pyproject.toml version
-        shell: bash
-        run: |
-          python scripts/set_pyproject_version.py "${{ needs.version.outputs.version }}"
-
-      - name: Build wheel + sdist
-        run: |
-          pip install build
-          python -m build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nightly-dist
-          path: dist/
-
-  # Briefcase desktop bundles. Nightlies may include launcher fixes,
-  # so we ship installers — both as a delivery vehicle for launcher
-  # changes AND so a fresh user can install the nightly directly
-  # (no "install stable then switch channels" detour).
-  build-desktop:
-    needs: [version, nightly_gate, build-release-tree, build-wheel]
-    if: needs.nightly_gate.outputs.should_build == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            plat_tag: win-x64
-            abi: cp313
-            py: "3.13"
-          - os: macos-latest
-            platform: macOS
-            plat_tag: macos-arm64
-            abi: cp313
-            py: "3.13"
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          submodules: true
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.py }}
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "24"
-
-      - name: Build frontend
-        working-directory: src/kohakuterrarium-frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Patch pyproject.toml version
-        shell: bash
-        run: |
-          python scripts/set_pyproject_version.py "${{ needs.version.outputs.version }}"
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: nightly-release-tree-${{ matrix.plat_tag }}-${{ matrix.abi }}
-          path: bundled-release/
-
-      - name: Verify bundled-release has the right tarball
-        shell: bash
-        run: |
-          ls -la bundled-release/
-          test -n "$(find bundled-release -maxdepth 1 -name 'kohakuterrarium-*.tar.*' | head -n 1)"
-
-      - name: Install briefcase
-        run: pip install briefcase
-
-      - name: Pre-build wheels for sdist-only deps
-        shell: bash
-        run: |
-          mkdir -p wheels
-          pip wheel proxy_tools -w wheels --no-deps
-
-      # The bundle's ``KohakuTerrarium[desktop]`` requirement otherwise
-      # resolves from PyPI, i.e. to the last STABLE release rather than the
-      # nightly being built — and pip has no solution at all whenever the two
-      # disagree on a pinned dep (the pywebview 6.1 -> 6.2.1 bump).
-      - uses: actions/download-artifact@v4
-        with:
-          name: nightly-dist
-          path: nightly-dist/
-
-      - name: Stage the nightly wheel for briefcase
-        shell: bash
-        run: |
-          find nightly-dist -maxdepth 1 -name "*.whl" -exec cp {} wheels/ \;
-          python scripts/pin_briefcase_local_wheel.py --wheel-dir wheels
-          ls -la wheels/
-
-      - name: Create briefcase project
-        run: briefcase create
-
-      - name: Build briefcase app
-        run: briefcase build
-
-      - name: Package briefcase app
-        shell: bash
-        run: |
-          if [ "${{ matrix.platform }}" = "macOS" ]; then
-            briefcase package --adhoc-sign
-          else
-            briefcase package
-          fi
-
-      - name: Collect artifacts
-        shell: bash
-        run: |
-          mkdir -p artifacts
-          find dist/ -maxdepth 1 -type f \( -name "*.msi" -o -name "*.dmg" -o -name "*.zip" -o -name "*.exe" \) -exec cp {} artifacts/ \; 2>/dev/null || true
-          ls -la artifacts/
-          test -n "$(find artifacts -maxdepth 1 -type f | head -n 1)"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: nightly-desktop-${{ matrix.platform }}
-          path: artifacts/
-
-  # Nightlies are valid PEP 440 public versions, so `pip install --pre
-  # kohakuterrarium` reaches them without a GitHub detour.
-  #
-  # PyPI scopes trusted publishing to a workflow FILENAME, so this needs its
-  # own publisher entry for nightly.yml alongside the release.yml one.
-  publish-pypi:
-    needs: [version, nightly_gate, build-wheel]
-    if: needs.nightly_gate.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    environment: release
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: nightly-dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # The version carries only the date, so a forced same-day re-cut
-          # would collide. Skipping beats failing the whole nightly.
-          skip-existing: true
-
-  publish:
-    needs: [version, nightly_gate, build-release-tree, build-wheel, build-desktop]
-    if: needs.nightly_gate.outputs.should_build == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      # Full history: the release notes are the commit list since the
-      # previous nightly.
-      - uses: actions/checkout@v4
-        with:
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
 
-      - uses: actions/download-artifact@v4
-        with:
-          path: all-artifacts
-          pattern: nightly-release-tree-*
-      - uses: actions/download-artifact@v4
-        with:
-          name: nightly-dist
-          path: all-artifacts/dist
-      - uses: actions/download-artifact@v4
-        with:
-          path: all-artifacts
-          pattern: nightly-desktop-*
-
-      - name: Flatten artifacts
-        shell: bash
-        run: |
-          mkdir -p release-trees release-assets
-          # Launcher tarballs + sidecars (consumed by publish_manifest.py
-          # AND uploaded as release assets so the launcher can fetch them).
-          find all-artifacts -type f \( -name "*.tar.zst" -o -name "*.manifest.json" \) -exec cp {} release-trees/ \;
-          # Everything that becomes a GitHub release asset.
-          cp release-trees/* release-assets/
-          find all-artifacts/dist -type f -exec cp {} release-assets/ \;
-          find all-artifacts -path "*/nightly-desktop-*/*" -type f -exec cp {} release-assets/ \;
-          echo "--- release-trees/ ---"
-          ls -la release-trees/
-          echo "--- release-assets/ ---"
-          ls -la release-assets/
-
-      # Fetched before the release is cut: its head entry names the commit the
-      # previous nightly shipped, which anchors this build's commit list.
       - name: Fetch previous nightly manifest
         shell: bash
         run: |
           curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
             -o previous-nightly.json || echo "no previous manifest"
 
-      - name: Build release notes
+      - name: Decide whether a nightly is due
+        id: gate
         shell: bash
         run: |
-          since=""
-          if [ -f previous-nightly.json ]; then
-            since=$(jq -r '.releases[0].commit_sha // empty' previous-nightly.json || true)
-          fi
-          # No previous nightly recorded: fall back to the last stable tag.
-          [ -n "${since}" ] || since="auto"
-          python scripts/release_notes.py \
-            --since "${since}" \
-            --until "${{ needs.version.outputs.commit_sha }}" \
-            --github-repo "${GITHUB_REPOSITORY}" \
-            --intro "Automatic nightly build. Channel: \`nightly\`. Version: \`${{ needs.version.outputs.version }}\`." \
-            --out nightly-notes.md
-          cat nightly-notes.md
+          python scripts/nightly_gate.py \
+            --manifest previous-nightly.json \
+            --commit-sha "$(git rev-parse HEAD)" \
+            --force-rebuild "${{ github.event_name == 'workflow_dispatch' && inputs.force_rebuild == true || false }}" \
+            --github-output "$GITHUB_OUTPUT"
 
-      - name: Create dated nightly release
+      - name: Report skipped nightly
+        if: steps.gate.outputs.should_build != 'true'
+        run: echo "${{ steps.gate.outputs.skip_reason }}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      # Computed after the gate so the stamp names the moment of the build.
+      - name: Compute the nightly version
+        id: compute
+        if: steps.gate.outputs.should_build == 'true'
+        shell: bash
+        run: |
+          version=$(python scripts/set_pyproject_version.py nightly)
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "nightly ${version}" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Dispatch the release workflow
+        if: steps.gate.outputs.should_build == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
         run: |
-          tag="${{ needs.version.outputs.tag }}"
-          date="${{ needs.version.outputs.date }}"
-          if ! gh release view "${tag}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release create "${tag}" \
-              --title "Nightly ${date}" \
-              --notes-file nightly-notes.md \
-              --prerelease \
-              -R "${GITHUB_REPOSITORY}"
-          else
-            gh release edit "${tag}" \
-              --title "Nightly ${date}" \
-              --notes-file nightly-notes.md \
-              --prerelease \
-              -R "${GITHUB_REPOSITORY}"
-          fi
-          for f in release-assets/*; do
-            [ -f "$f" ] && gh release upload "${tag}" "$f" --clobber -R "${GITHUB_REPOSITORY}"
-          done
-
-      - name: Build channel manifest
-        shell: bash
-        run: |
-          tag="${{ needs.version.outputs.tag }}"
-          # --max-releases matches the prune step below: entries must
-          # never outlive the dated release their download URLs point at.
-          python scripts/publish_manifest.py \
-            --channel nightly \
-            --release-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}" \
-            --artifacts-dir release-trees/ \
-            --previous-manifest previous-nightly.json \
-            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
-            --max-releases 5 \
-            --out nightly.json
-
-      - name: Publish manifest to manifests-nightly release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          if ! gh release view "manifests-nightly" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release create "manifests-nightly" \
-              --title "Channel manifest: nightly" \
-              --notes "Auto-updated. Do not delete." \
-              --prerelease \
-              -R "${GITHUB_REPOSITORY}"
-          fi
-          gh release upload "manifests-nightly" nightly.json --clobber -R "${GITHUB_REPOSITORY}"
-
-      - name: Prune old nightly releases
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          # Keep the newest 5 dated nightlies (same bound as the manifest's
-          # --max-releases); delete the rest together with their git tags.
-          keep=5
-          tags=$(gh release list -R "${GITHUB_REPOSITORY}" --limit 1000 \
-            --json tagName --jq '.[].tagName' \
-            | { grep -E '^nightly-[0-9]{8}$' || true; } | sort -r)
-          echo "${tags}" | tail -n +$((keep + 1)) | while read -r tag; do
-            [ -n "${tag}" ] || continue
-            echo "pruning ${tag}"
-            gh release delete "${tag}" --cleanup-tag --yes -R "${GITHUB_REPOSITORY}"
-          done
+          gh workflow run release.yml \
+            -R "${GITHUB_REPOSITORY}" \
+            -f ref=main \
+            -f version="${{ steps.compute.outputs.version }}" \
+            -f channel=nightly

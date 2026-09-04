@@ -5,6 +5,14 @@ on:
     tags: ["v*"]
   workflow_dispatch:
     inputs:
+      ref:
+        description: "Tag, branch or sha to build"
+        required: false
+        default: ""
+      version:
+        description: "Stamp this version before building (nightlies pass X.Y.Z.devN)"
+        required: false
+        default: ""
       channel:
         description: "Channel to publish (override)"
         required: false
@@ -18,17 +26,119 @@ permissions:
   packages: write
 
 jobs:
+  # ── One resolution of version / channel / tag, consumed by every job ──
+  # This is the only workflow that builds or uploads, so PyPI needs exactly
+  # one trusted publisher. Nightly decides and dispatches; it builds nothing.
+  meta:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.m.outputs.ref }}
+      version: ${{ steps.m.outputs.version }}
+      channel: ${{ steps.m.outputs.channel }}
+      tag: ${{ steps.m.outputs.tag }}
+      title: ${{ steps.m.outputs.title }}
+      prerelease: ${{ steps.m.outputs.prerelease }}
+      stamp: ${{ steps.m.outputs.stamp }}
+      sha: ${{ steps.m.outputs.sha }}
+      keep_nightlies: ${{ steps.m.outputs.keep_nightlies }}
+      max_releases: ${{ steps.m.outputs.max_releases }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Resolve release metadata
+        id: m
+        shell: bash
+        run: |
+          ref="${{ inputs.ref }}"
+          [ -n "${ref}" ] || ref="${GITHUB_REF}"
+
+          # A dispatched version wins; a tag push carries its own; otherwise
+          # pyproject is the source of truth.
+          version="${{ inputs.version }}"
+          stamp=true
+          if [ -z "${version}" ]; then
+            stamp=false
+            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              version="${GITHUB_REF_NAME#v}"
+            else
+              version=$(python scripts/set_pyproject_version.py read)
+            fi
+          fi
+
+          channel="${{ inputs.channel }}"
+          if [ -z "${channel}" ]; then
+            case "${GITHUB_REF_NAME}" in
+              *b*|*rc*) channel="beta" ;;
+              *) channel="stable" ;;
+            esac
+          fi
+
+          # A nightly is dated, not versioned: the tag names the day it was
+          # cut so the launcher's URLs stay predictable and prunable.
+          if [ "${channel}" = "nightly" ]; then
+            date=$(date -u +%Y%m%d)
+            tag="nightly-${date}"
+            title="Nightly ${date}"
+            prerelease=true
+            keep_nightlies=5
+            max_releases=5
+          else
+            tag="v${version}"
+            title="v${version}"
+            case "${version}" in
+              *dev*|*rc*|*a*|*b*) prerelease=true ;;
+              *) prerelease=false ;;
+            esac
+            # A formal release supersedes the nightly backlog. A manual
+            # dispatch is not a release and prunes nothing.
+            if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+              keep_nightlies=1
+            else
+              keep_nightlies=""
+            fi
+            max_releases=""
+          fi
+
+          {
+            echo "ref=${ref}"
+            echo "version=${version}"
+            echo "channel=${channel}"
+            echo "tag=${tag}"
+            echo "title=${title}"
+            echo "prerelease=${prerelease}"
+            echo "stamp=${stamp}"
+            echo "sha=$(git rev-parse HEAD)"
+            echo "keep_nightlies=${keep_nightlies}"
+            echo "max_releases=${max_releases}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "${title} (channel=${channel} tag=${tag} prerelease=${prerelease})" \
+            | tee -a "$GITHUB_STEP_SUMMARY"
+
   # ── Wheel + sdist (PyPI source-of-truth, unchanged) ────────────────
   build-wheel:
+    needs: [meta]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.meta.outputs.ref }}
           submodules: true
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+
+      - name: Stamp the dispatched version
+        if: needs.meta.outputs.stamp == 'true'
+        run: python scripts/set_pyproject_version.py write "${{ needs.meta.outputs.version }}"
 
       - uses: actions/setup-node@v4
         with:
@@ -77,7 +187,7 @@ jobs:
   # The Linux cell is kept for advanced users running the launcher on
   # their own Linux Python.
   build-release-tree:
-    needs: [build-wheel]
+    needs: [meta, build-wheel]
     strategy:
       fail-fast: false
       matrix:
@@ -98,11 +208,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.meta.outputs.ref }}
           submodules: true
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
+
+      - name: Stamp the dispatched version
+        if: needs.meta.outputs.stamp == 'true'
+        run: python scripts/set_pyproject_version.py write "${{ needs.meta.outputs.version }}"
 
       - uses: actions/setup-node@v4
         with:
@@ -120,39 +235,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install zstandard
 
-      - name: Resolve version from tag (or workflow_dispatch)
-        id: ver
-        shell: bash
-        run: |
-          if [ -n "${GITHUB_REF_NAME#v}" ] && [[ "${GITHUB_REF_NAME}" == v* ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
-          else
-            # Workflow_dispatch path: derive a dev/nightly version.
-            ts=$(date -u +%Y%m%d%H%M%S)
-            echo "version=0.0.0-dev${ts}" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Resolve channel
-        id: ch
-        shell: bash
-        run: |
-          channel="${{ inputs.channel }}"
-          if [ -z "${channel}" ]; then
-            case "${GITHUB_REF_NAME}" in
-              *b*|*rc*) channel="beta" ;;
-              *) channel="stable" ;;
-            esac
-          fi
-          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
-
       - name: Build release tree
         shell: bash
         run: |
           python scripts/build_release_tree.py \
-            --version "${{ steps.ver.outputs.version }}" \
+            --version "${{ needs.meta.outputs.version }}" \
             --platform "${{ matrix.plat }}" \
             --py-abi "${{ matrix.abi }}" \
-            --channel "${{ steps.ch.outputs.channel }}" \
+            --channel "${{ needs.meta.outputs.channel }}" \
             --out dist/release-trees/
 
       - uses: actions/upload-artifact@v4
@@ -162,12 +252,12 @@ jobs:
 
   # ── Aggregate sidecars into channel manifests ─────────────────────
   publish-channel-manifests:
-    needs: [build-release-tree]
+    needs: [meta, build-release-tree]
     runs-on: ubuntu-latest
-    outputs:
-      channel: ${{ steps.ch.outputs.channel }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.ref }}
 
       - uses: actions/setup-python@v5
         with:
@@ -191,46 +281,38 @@ jobs:
           find tarballs -type f \( -name "*.tar.zst" -o -name "*.manifest.json" \) -exec cp {} release-trees/ \;
           ls -la release-trees/
 
-      - name: Resolve channel
-        id: ch
-        shell: bash
-        run: |
-          channel="${{ inputs.channel }}"
-          if [ -z "${channel}" ]; then
-            case "${GITHUB_REF_NAME}" in
-              *b*|*rc*) channel="beta" ;;
-              *) channel="stable" ;;
-            esac
-          fi
-          echo "channel=${channel}" >> "$GITHUB_OUTPUT"
-
       - name: Fetch previous channel manifest (if any)
         shell: bash
         run: |
-          channel="${{ steps.ch.outputs.channel }}"
+          channel="${{ needs.meta.outputs.channel }}"
           url="https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-${channel}/${channel}.json"
           curl -fsSL "${url}" -o "previous-${channel}.json" || echo "no previous manifest"
 
       - name: Build channel manifest
         shell: bash
         run: |
-          channel="${{ steps.ch.outputs.channel }}"
-          version="${GITHUB_REF_NAME#v}"
-          if [[ "${GITHUB_REF_NAME}" != v* ]]; then
-            version="0.0.0-dev"
+          channel="${{ needs.meta.outputs.channel }}"
+          tag="${{ needs.meta.outputs.tag }}"
+          # Nightly entries are bounded to match the prune below: a manifest
+          # entry must never outlive the release its URLs point at.
+          max_releases=""
+          if [ -n "${{ needs.meta.outputs.max_releases }}" ]; then
+            max_releases="--max-releases ${{ needs.meta.outputs.max_releases }}"
           fi
+          # shellcheck disable=SC2086
           python scripts/publish_manifest.py \
             --channel "${channel}" \
-            --release-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/v${version}" \
+            --release-url-prefix "https://github.com/${GITHUB_REPOSITORY}/releases/download/${tag}" \
             --artifacts-dir release-trees/ \
             --previous-manifest "previous-${channel}.json" \
-            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/v${version}" \
+            --release-notes-url "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}" \
+            ${max_releases} \
             --out "${channel}.json"
 
       - uses: actions/upload-artifact@v4
         with:
           name: channel-manifest
-          path: ${{ steps.ch.outputs.channel }}.json
+          path: ${{ needs.meta.outputs.channel }}.json
 
       - name: Publish manifest to manifests-<channel> release
         # Overwrites the asset on the fixed-tag release so the launcher's
@@ -239,7 +321,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          channel="${{ steps.ch.outputs.channel }}"
+          channel="${{ needs.meta.outputs.channel }}"
           tag="manifests-${channel}"
           if ! gh release view "${tag}" -R "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             gh release create "${tag}" \
@@ -254,7 +336,7 @@ jobs:
 
   # ── Briefcase desktop shell (slim — bundles ONE release-tree as fallback) ─
   build-desktop:
-    needs: [build-wheel, build-release-tree]
+    needs: [meta, build-wheel, build-release-tree]
     strategy:
       fail-fast: false
       matrix:
@@ -273,11 +355,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.meta.outputs.ref }}
           submodules: true
 
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
+
+      - name: Stamp the dispatched version
+        if: needs.meta.outputs.stamp == 'true'
+        run: python scripts/set_pyproject_version.py write "${{ needs.meta.outputs.version }}"
 
       - uses: actions/setup-node@v4
         with:
@@ -357,7 +444,7 @@ jobs:
 
   # ── Docker images (unchanged) ──────────────────────────────────────
   build-docker:
-    needs: [build-wheel]
+    needs: [meta, build-wheel]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -375,6 +462,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.meta.outputs.ref }}
           submodules: true
 
       - uses: actions/download-artifact@v4
@@ -387,12 +475,18 @@ jobs:
         shell: bash
         run: |
           repo="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/kohakuterrarium${{ matrix.image.suffix }}"
-          version="${GITHUB_REF_NAME#v}"
+          version="${{ needs.meta.outputs.version }}"
+          # :latest means the newest stable image. A nightly that moved it
+          # would silently become what `docker pull` hands every user.
           {
             echo "repo=${repo}"
             echo "version=${version}"
-            echo "tag_version=${repo}:${version}"
-            echo "tag_latest=${repo}:latest"
+            echo "tags<<__TAGS__"
+            echo "${repo}:${version}"
+            if [ "${{ needs.meta.outputs.channel }}" = "stable" ]; then
+              echo "${repo}:latest"
+            fi
+            echo "__TAGS__"
           } >> "$GITHUB_OUTPUT"
 
       - name: Set up QEMU
@@ -416,9 +510,7 @@ jobs:
           file: ${{ matrix.image.dockerfile }}
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ steps.tags.outputs.tag_version }}
-            ${{ steps.tags.outputs.tag_latest }}
+          tags: ${{ steps.tags.outputs.tags }}
           build-args: |
             WHEEL_GLOB=dist/kohakuterrarium-*.whl
 
@@ -434,7 +526,7 @@ jobs:
 
   # ── PyPI publish (unchanged) ───────────────────────────────────────
   publish-pypi:
-    needs: [build-wheel]
+    needs: [meta, build-wheel]
     runs-on: ubuntu-latest
     environment: release
     steps:
@@ -446,7 +538,7 @@ jobs:
 
   # ── GitHub Release (release-tree tarballs + briefcase artifacts) ──
   github-release:
-    needs: [build-wheel, build-release-tree, build-desktop, publish-channel-manifests]
+    needs: [meta, build-wheel, build-release-tree, build-desktop, publish-channel-manifests]
     runs-on: ubuntu-latest
     steps:
       # Checkout first: the action cleans its destination directory, which
@@ -454,6 +546,7 @@ jobs:
       # history so the notes can list commits back to the previous release.
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.meta.outputs.ref }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -487,44 +580,64 @@ jobs:
           find all-artifacts/desktop-* -type f -exec cp {} release/ \;
           ls -la release/
 
+      # Anchors the nightly commit list: the previous manifest's head entry
+      # names the commit the last nightly shipped.
+      - name: Fetch previous nightly manifest
+        if: needs.meta.outputs.channel == 'nightly'
+        shell: bash
+        run: |
+          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
+            -o previous-nightly.json || echo "no previous manifest"
+
       # A plain commit list beats ``generate_release_notes``: that groups by
       # pull request, so direct pushes vanish and a branch collapses to one
       # line regardless of how much landed in it.
       - name: Build release notes
         shell: bash
         run: |
+          since="auto"
+          intro=()
+          if [ "${{ needs.meta.outputs.channel }}" = "nightly" ]; then
+            if [ -f previous-nightly.json ]; then
+              since=$(jq -r '.releases[0].commit_sha // empty' previous-nightly.json || true)
+            fi
+            # No previous nightly recorded: fall back to the last stable tag.
+            [ -n "${since}" ] || since="auto"
+            intro=(--intro "Automatic nightly build. Channel: \`nightly\`. Version: \`${{ needs.meta.outputs.version }}\`.")
+          fi
           python scripts/release_notes.py \
-            --since auto \
-            --until "${GITHUB_REF_NAME}" \
+            --since "${since}" \
+            --until "${{ needs.meta.outputs.sha }}" \
             --github-repo "${GITHUB_REPOSITORY}" \
+            "${intro[@]}" \
             --out release-notes.md
           cat release-notes.md
 
+      # A dated nightly re-run overwrites its own release rather than
+      # failing on the existing tag.
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.meta.outputs.tag }}
+          name: ${{ needs.meta.outputs.title }}
+          target_commitish: ${{ needs.meta.outputs.sha }}
           files: release/*
           body_path: release-notes.md
           draft: false
-          # PEP 440 pre-release identifiers: alpha (``a``), beta (``b``),
-          # release-candidate (``rc``), and dev (``dev``).  The old check
-          # only looked at ``b`` / ``rc``, so ``v2.0.0.dev6`` was published
-          # as a *stable* release and showed up as "Latest" on the repo's
-          # release page.  Reading ``github.ref_name`` (the bare tag,
-          # e.g. ``v2.0.0.dev6``) keeps the ``contains`` matches scoped
-          # to user-supplied tag text instead of the literal
-          # ``refs/tags/`` prefix.
-          prerelease: ${{ contains(github.ref_name, 'dev') || contains(github.ref_name, 'rc') || contains(github.ref_name, 'a') || contains(github.ref_name, 'b') }}
+          # PEP 440 pre-release identifiers: alpha, beta, rc and dev all
+          # publish as prereleases, so a v2.0.0.dev6 never shows up as
+          # "Latest" on the release page. Resolved once, in ``meta``.
+          prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
 
-      - name: Prune nightly releases
-        # A formal release supersedes the nightly backlog. Keep only the
-        # newest dated nightly — the nightly channel manifest's head entry
-        # still points at it; the next nightly run prunes it in turn.
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Prune old nightly releases
+        if: needs.meta.outputs.keep_nightlies != ''
+        # Nightlies keep the newest 5, matching the manifest's --max-releases:
+        # an entry must never outlive the release its URLs point at. A formal
+        # release supersedes the backlog and keeps only 1.
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
-          keep=1
+          keep="${{ needs.meta.outputs.keep_nightlies }}"
           tags=$(gh release list -R "${GITHUB_REPOSITORY}" --limit 1000 \
             --json tagName --jq '.[].tagName' \
             | { grep -E '^nightly-[0-9]{8}$' || true; } | sort -r)
