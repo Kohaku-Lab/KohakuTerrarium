@@ -735,6 +735,19 @@ def resolve_sync(spec: str) -> tuple[MarketplaceEntry, MarketplaceVersion]:
     return _run_blocking(resolve(spec), sync_name="resolve_sync", async_name="resolve")
 
 
+def has_entry(name: str) -> bool:
+    """Report whether ``name`` resolves in any configured marketplace source.
+
+    Never raises: callers use it to choose an update strategy, and an offline
+    or misconfigured marketplace should fall through, not abort the update.
+    """
+    try:
+        resolve_sync(f"@{name}")
+    except Exception:
+        return False
+    return True
+
+
 def fetch_marketplace_sync(*, force: bool = False) -> list[MarketplaceEntry]:
     """Synchronous wrapper around :func:`fetch_marketplace`."""
     return _run_blocking(

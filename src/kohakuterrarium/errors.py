@@ -60,7 +60,7 @@ class ConfigNotFoundError(ConfigError, FileNotFoundError):
 # ---------------------------------------------------------------------------
 
 
-class PackageError(KTError):
+class PackageError(KTError, RuntimeError):
     """Base class for package-system errors."""
 
 

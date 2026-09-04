@@ -217,7 +217,7 @@ packages.install_package_spec("@kt-biome@v1.2.0")
 packages.install_package("https://github.com/you/my-pack.git")
 packages.install_package("./my-pack", editable=True)
 
-packages.update_package("my-pack")        # git pull --ff-only; refuses pins
+packages.update_package("my-pack")        # re-resolve or fast-forward; refuses explicit pins
 packages.uninstall_package("my-pack")
 
 # Resolution and enumeration:
@@ -326,7 +326,7 @@ Listing on TerrariumMarket is **not required**: packages are still just git repo
 
 ### Versioning
 
-Keep `version:` in sync with git tags. `kt update` does `git pull` under the hood; consumers pinned to a tag can check it out manually:
+Keep `version:` in sync with git tags. `kt update` re-resolves a marketplace package to its newest compatible version and swaps it in transactionally; a plain git clone is fast-forwarded. A package installed with an explicit version (`kt install @pkg@v1.2.0`) is refused, because that is what a pin means — move it with `kt install @pkg@<newversion>`:
 
 ```bash
 cd ~/.kohakuterrarium/packages/my-pack
@@ -370,6 +370,8 @@ This lets a creature inside one package reference extensions declared in another
 
 - **`@my-pack/...` fails to resolve.** `kt list` to confirm the package is installed. For editable installs, check the `.link` file points at an existing directory.
 - **`kt update my-pack` says "skipped".** Editable and non-git packages can't be updated through `kt update`. Edit the source (editable) or reinstall (copy).
+- **`kt update` refuses with "installed at pinned version".** You asked for that exact version at install time. Run `kt install @my-pack@<newversion>`.
+- **`kt update` refuses with "local modifications".** Something (often a Studio editor) changed files inside the installed package. Commit or discard them, or reinstall.
 - **`python_dependencies` didn't install.** Confirm `kt install` had permission to install packages in the current environment (use a virtualenv or `pip install --user`).
 - **Package tool shadows a builtin.** Built-in tools are resolved first. Rename the package tool if you want yours to win.
 

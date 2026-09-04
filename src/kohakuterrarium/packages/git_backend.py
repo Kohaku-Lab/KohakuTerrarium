@@ -69,6 +69,59 @@ def clone_repo(url: str, target: Path, ref: str | None = None) -> None:
         _clone_dulwich(url, target, ref)
 
 
+def is_dirty(target: Path) -> bool:
+    """Report whether the working tree has uncommitted changes.
+
+    Studio's editors write into installed package directories, so this is the
+    common reason a pull would fail; asking first turns git's message into an
+    actionable one.
+    """
+    if _has_native_git():
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(target), "status", "--porcelain"],
+                check=True,
+                capture_output=True,
+            )
+            return bool(out.stdout.strip())
+        except subprocess.CalledProcessError:
+            return False
+    porcelain = _import_dulwich()
+    try:
+        status = porcelain.status(str(target))
+    except Exception:
+        return False
+    staged = status.staged or {}
+    return bool(
+        any(staged.get(k) for k in ("add", "delete", "modify")) or status.unstaged
+    )
+
+
+def is_detached(target: Path) -> bool:
+    """Report whether HEAD points at a commit rather than a branch.
+
+    ``git clone -b <tag>`` leaves every pinned install detached, and
+    ``git pull --ff-only`` there exits 0 without advancing anything.
+    """
+    if _has_native_git():
+        proc = subprocess.run(
+            ["git", "-C", str(target), "symbolic-ref", "-q", "HEAD"],
+            capture_output=True,
+        )
+        # 0 = on a branch, 1 = detached, anything else = cannot tell.
+        return proc.returncode == 1
+    try:
+        from dulwich.repo import Repo  # noqa: PLC0415
+
+        repo = Repo(str(target))
+        try:
+            return repo.refs.follow(b"HEAD")[0][-1] == b"HEAD"
+        finally:
+            repo.close()
+    except Exception:
+        return False
+
+
 def pull_repo(target: Path) -> None:
     """Pull (fast-forward only) the existing clone at ``target``.
 
@@ -278,10 +331,47 @@ def _pull_dulwich(target: Path) -> None:
     porcelain = _import_dulwich()
     if not (target / ".git").exists():
         raise RuntimeError(f"Not a git clone: {target}")
+    before = _head_sha_dulwich(target)
     try:
         porcelain.pull(str(target))
     except Exception as exc:
         raise RuntimeError(f"Git pull failed (dulwich): {exc}") from exc
+    # ``porcelain.pull`` can merge; the native backend refuses to. Keep both
+    # backends on one contract rather than diverging on Android.
+    if before is not None and not _is_ancestor_dulwich(target, before):
+        raise RuntimeError(
+            "Git pull failed (dulwich): history diverged and a fast-forward "
+            "is not possible; reinstall the package instead."
+        )
+
+
+def _head_sha_dulwich(target: Path) -> bytes | None:
+    """Return the current HEAD sha, or None when it cannot be read."""
+    try:
+        from dulwich.repo import Repo  # noqa: PLC0415
+
+        repo = Repo(str(target))
+        try:
+            return repo.head()
+        finally:
+            repo.close()
+    except Exception:
+        return None
+
+
+def _is_ancestor_dulwich(target: Path, sha: bytes) -> bool:
+    """Report whether ``sha`` is reachable from the current HEAD."""
+    try:
+        from dulwich.repo import Repo  # noqa: PLC0415
+
+        repo = Repo(str(target))
+        try:
+            walker = repo.get_walker(include=[repo.head()])
+            return any(entry.commit.id == sha for entry in walker)
+        finally:
+            repo.close()
+    except Exception:
+        return True
 
 
 def _reset_backend_cache_for_tests() -> None:

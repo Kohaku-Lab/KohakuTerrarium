@@ -608,7 +608,9 @@ class TestInstallSpecCommitPreferred:
         def fake_resolve(spec: str):
             return entry, version
 
-        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
+        def fake_install(
+            source, *, editable, name_override, ref=None, deps="auto", intent=None
+        ):
             captured["ref"] = ref
             return name_override
 
@@ -639,7 +641,9 @@ class TestInstallSpecCommitPreferred:
         )
         captured: dict[str, object] = {}
 
-        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
+        def fake_install(
+            source, *, editable, name_override, ref=None, deps="auto", intent=None
+        ):
             captured["ref"] = ref
             return name_override
 

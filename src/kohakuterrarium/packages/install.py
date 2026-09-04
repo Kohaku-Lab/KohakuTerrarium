@@ -25,7 +25,6 @@ from kohakuterrarium.packages import git_backend
 from kohakuterrarium.packages import marketplace
 from kohakuterrarium.packages.locations import _packages_dir
 from kohakuterrarium.packages.locations import get_package_root
-from kohakuterrarium.packages.locations import read_link
 from kohakuterrarium.packages.locations import remove_link
 from kohakuterrarium.packages.locations import write_link
 from kohakuterrarium.packages.manifest import DEP_POLICIES
@@ -159,12 +158,19 @@ def install_package_spec(
             url=url,
             source=entry.source_alias,
         )
+        _alias, _name, requested = marketplace.parse_spec(spec)
         return install_package(
             url,
             editable=False,
             name_override=name_override or entry.name,
             ref=ref,
             deps=deps,
+            intent={
+                "spec": spec,
+                "source_alias": entry.source_alias or None,
+                "pinned": requested is not None,
+                "version": version.tag,
+            },
         )
     return install_package(
         spec, editable=editable, name_override=name_override, deps=deps
@@ -178,6 +184,7 @@ def install_package(
     ref: str | None = None,
     *,
     deps: str = "auto",
+    intent: dict | None = None,
 ) -> str:
     """Install a creature/terrarium package.
 
@@ -209,7 +216,9 @@ def install_package(
         or source.endswith(".git")
     ):
         # Git clone
-        return _install_from_git(source, name_override, ref=ref, deps=deps)
+        return _install_from_git(
+            source, name_override, ref=ref, deps=deps, intent=intent
+        )
     elif source_path.is_dir():
         # Local directory
         return _install_from_local(source_path, editable, name_override, deps=deps)
@@ -221,74 +230,118 @@ def install_package(
 
 
 def update_package(name: str, *, deps: str = "auto") -> str:
-    """Pull latest changes for a git-installed package.
+    """Move an installed, non-editable, git-backed package to its newest version.
 
-    Unlike :func:`install_package`, this is only valid for an *already*
-    installed, non-editable, git-backed package. It runs
-    ``git -C <pkg> pull --ff-only`` in place and re-runs the post-install
-    hooks (manifest validation + python deps). The caller is expected to
-    have already filtered out editable and non-git packages.
+    Four cases. A package the user pinned to an explicit version is refused,
+    because that is what a pin means. A marketplace package installed without a
+    version is re-resolved and swapped transactionally — resolution is what
+    "newest" means, and ``git pull`` cannot express it against the detached
+    HEAD every pinned clone leaves behind. A plain git clone is fast-forwarded.
+    Editable and non-git packages are the caller's to filter.
 
-    Refuses to update packages that were installed at a pinned ref
-    (recorded in ``.kt_install_info.json``).  ``git pull --ff-only``
-    on a detached-HEAD checkout fails with a confusing message; the
-    user wanted reproducibility, so the correct next move is
-    ``kt install @<name>@<newversion>``, not silent state mutation.
-
-    Raises
-    ------
-    FileNotFoundError
-        If no package with ``name`` exists under
-        :data:`~kohakuterrarium.packages.locations.PACKAGES_DIR`.
-    RuntimeError
-        If the package is not a git clone, or ``git pull`` fails, or
-        the install was pinned to a specific ref.
+    Raises FileNotFoundError when nothing by that name is installed, and
+    PackageError for a refusal or a failed update.
     """
     _check_deps_policy(deps)
-    # Resolve through ``.link`` pointers / symlinks to the real
-    # checkout. ``_packages_dir() / name`` alone misses editable
-    # installs (which live as ``<name>.link`` siblings) and resolves
-    # to the *symlinked* path on Windows junctions — both of which
-    # break ``git -C`` when the checkout is a submodule. Submodule
-    # ``.git`` files carry a relative ``gitdir: ../.git/modules/<name>``
-    # that git resolves against the literal cwd; if that cwd is the
-    # symlink, git looks for the gitdir under the wrong parent and
-    # bails with "fatal: not a git repository".
+    # Resolve through ``.link`` pointers / symlinks to the real checkout so
+    # ``git -C`` sees the literal path a submodule's gitdir resolves against.
     target = get_package_root(name)
     if target is None:
         raise FileNotFoundError(f"Package not installed: {name}")
     target = target.resolve()
-    is_editable = read_link(name) is not None
     if not (target / ".git").exists():
-        raise RuntimeError(f"Package is not a git clone: {name}")
+        raise PackageError(f"Package is not a git clone: {name}")
 
-    # Refuse pinned installs cleanly — ``git pull --ff-only`` against
-    # a detached HEAD (typical after ``git clone -b <tag>``) produces
-    # a confusing "You are not currently on a branch" error.  Direct
-    # the user at the right next move.
-    info = _read_install_info(target)
-    if info and info.get("ref"):
-        raise RuntimeError(
-            f"{name} was installed at pinned ref {info['ref']!r}; "
-            f"`git pull` would be a no-op against a detached HEAD.  "
-            f"To move to a newer version, run: "
-            f"kt install @{name}@<newversion>"
+    info = _read_install_info(target) or {}
+
+    # A missing ``pinned`` key predates intent tracking. Those installs were
+    # overwhelmingly auto-resolved, and reading them as pinned would keep the
+    # long-standing "update always refuses" behaviour for every one of them.
+    if info.get("pinned"):
+        raise PackageError(
+            f"{name} was installed at pinned version "
+            f"{info.get('version') or info.get('ref')!r}. "
+            f"To move it, run: kt install @{name}@<newversion>"
         )
 
-    logger.info(
-        "Updating package",
-        package=name,
-        path=str(target),
-        editable=is_editable,
-    )
+    spec = info.get("spec")
+    if spec and marketplace.is_spec(spec):
+        return _update_from_marketplace(name, target, info, deps=deps)
+
+    # Installs predating intent tracking record a ref but no spec. They were
+    # cloned at that ref, so they sit on a detached HEAD where `git pull`
+    # exits 0 and changes nothing. Re-resolve them by name instead.
+    if spec is None and info.get("ref") and marketplace.has_entry(name):
+        return _update_from_marketplace(name, target, info, deps=deps)
+
+    if git_backend.is_dirty(target):
+        raise PackageError(
+            f"{name} has local modifications at {target}. `kt update` will not "
+            f"overwrite them. Commit or discard them, or reinstall with "
+            f"`kt install {info.get('source') or name}`."
+        )
+
+    # A detached HEAD cannot fast-forward. Git reports success and does
+    # nothing, so refuse rather than claim an update that did not happen.
+    if git_backend.is_detached(target):
+        raise PackageError(
+            f"{name} is checked out at a fixed commit, not a branch, so "
+            f"`git pull` cannot advance it. Reinstall it instead: "
+            f"kt install {info.get('source') or name}"
+        )
+
+    logger.info("Updating package", package=name, path=str(target))
     try:
         git_backend.pull_repo(target)
     except RuntimeError as e:
-        raise RuntimeError(f"Git pull failed for {name}: {e}") from e
+        raise PackageError(f"Git pull failed for {name}: {e}") from e
 
     _validate_package(target, name)
     _install_python_deps(target, deps=deps)
     logger.info("Package updated", package=name, path=str(target))
+    return name
+
+
+def _update_from_marketplace(
+    name: str, target: Path, info: dict, *, deps: str = "auto"
+) -> str:
+    """Re-resolve an unpinned marketplace install and swap in the new version.
+
+    Uses the recorded source alias so ``@myfork/pkg`` cannot silently
+    re-resolve against the default source.
+    """
+    alias = info.get("source_alias")
+    lookup = f"@{alias}/{name}" if alias else f"@{name}"
+    try:
+        entry, version = marketplace.resolve_sync(lookup)
+    except marketplace.MarketplaceError as exc:
+        raise PackageError(f"Could not resolve {lookup} for update: {exc}") from exc
+
+    if version.tag and version.tag == info.get("version"):
+        logger.info("Package already current", package=name, version=version.tag)
+        return name
+
+    url = marketplace.install_url(entry, version)
+    ref = version.commit or version.tag
+    logger.info(
+        "Updating package from marketplace",
+        package=name,
+        from_version=info.get("version"),
+        to_version=version.tag,
+    )
+    # Stage, validate, then swap: a failed clone leaves the working install.
+    _swap_in_clone(url, target, name, ref=ref)
+    _install_python_deps(target, deps=deps)
+    _write_install_info(
+        target,
+        source=url,
+        ref=ref,
+        spec=info.get("spec"),
+        source_alias=alias,
+        pinned=False,
+        version=version.tag,
+    )
+    logger.info("Package updated", package=name, version=version.tag)
     return name
 
 
@@ -298,6 +351,7 @@ def _install_from_git(
     ref: str | None = None,
     *,
     deps: str = "auto",
+    intent: dict | None = None,
 ) -> str:
     """Clone a git repo into packages directory.
 
@@ -362,7 +416,7 @@ def _install_from_git(
             raise
 
     _install_python_deps(target, deps=deps)
-    _write_install_info(target, source=url, ref=ref)
+    _write_install_info(target, source=url, ref=ref, **(intent or {}))
     logger.info("Package installed", package=name, path=str(target))
     return name
 
@@ -422,20 +476,30 @@ def _swap_in_clone(url: str, target: Path, name: str, *, ref: str) -> None:
         )
 
 
-def _write_install_info(target: Path, *, source: str, ref: str | None) -> None:
-    """Persist install metadata so update_package can reason about it.
+def _write_install_info(
+    target: Path,
+    *,
+    source: str,
+    ref: str | None,
+    spec: str | None = None,
+    source_alias: str | None = None,
+    pinned: bool = False,
+    version: str | None = None,
+) -> None:
+    """Persist what the user asked for, not only what was resolved.
 
-    Currently records ``{source, ref, written}`` — enough for
-    ``update_package`` to detect a pinned install (``ref`` set) and
-    refuse a meaningless ``git pull`` against a detached-HEAD tree.
-    Marketplace-aware update flow (re-resolve to the newest
-    compatible version) can read the same file later without
-    breaking the format.
+    ``pinned`` is true only when the spec named an explicit version. Every
+    marketplace install resolves to a concrete ref, so ``ref`` alone cannot
+    distinguish "give me the newest" from "give me exactly this".
     """
     info_path = target / ".kt_install_info.json"
     payload = {
         "source": source,
         "ref": ref,
+        "spec": spec,
+        "source_alias": source_alias,
+        "pinned": pinned,
+        "version": version,
         "written": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     try:

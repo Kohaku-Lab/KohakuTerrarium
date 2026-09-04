@@ -45,7 +45,9 @@ class TestSpecRouting:
             captured["spec"] = spec
             return entry, version
 
-        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
+        def fake_install(
+            source, *, editable, name_override, ref=None, deps="auto", intent=None
+        ):
             captured["install"] = (source, editable, name_override, ref)
             return name_override or "fallback"
 
@@ -72,7 +74,9 @@ class TestSpecRouting:
             install_mod.marketplace, "resolve_sync", lambda s: (entry, version)
         )
 
-        def fake_install(source, *, editable, name_override, ref=None, deps="auto"):
+        def fake_install(
+            source, *, editable, name_override, ref=None, deps="auto", intent=None
+        ):
             captured["name_override"] = name_override
             captured["ref"] = ref
             return name_override or "fallback"

@@ -231,22 +231,27 @@ class TestUpdatePackage:
         with pytest.raises(RuntimeError, match="Git pull failed for gitpkg"):
             update_package("gitpkg")
 
-    def test_refuses_pinned_install(self, pkg_dir, tmp_path, monkeypatch, no_deps):
-        # AUDIT FIX #2 (round-2): a package installed at a pinned ref
-        # (recorded in .kt_install_info.json) is on a detached HEAD
-        # after ``git clone -b <tag>``; ``git pull --ff-only`` against
-        # detached HEAD fails with a confusing message.  update_package
-        # must detect the marker and error cleanly, telling the user
-        # to ``kt install @<name>@<newversion>`` instead.
+    def test_refuses_explicitly_pinned_install(
+        self, pkg_dir, tmp_path, monkeypatch, no_deps
+    ):
+        # A version the user named is a pin: ``git pull`` against the detached
+        # HEAD it produced would be meaningless, so refuse with the next move.
         import json
 
         pkg = pkg_dir / "gitpkg"
         (pkg / ".git").mkdir(parents=True)
         (pkg / "kohaku.yaml").write_text("name: gitpkg")
         (pkg / ".kt_install_info.json").write_text(
-            json.dumps({"source": "https://x/y.git", "ref": "v1.0.0"})
+            json.dumps(
+                {
+                    "source": "https://x/y.git",
+                    "ref": "v1.0.0",
+                    "version": "v1.0.0",
+                    "pinned": True,
+                }
+            )
         )
-        with pytest.raises(RuntimeError, match="pinned ref 'v1.0.0'"):
+        with pytest.raises(RuntimeError, match="pinned version 'v1.0.0'"):
             update_package("gitpkg")
 
 
