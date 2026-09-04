@@ -18,6 +18,8 @@ concurrency:
 
 permissions:
   contents: write
+  # PyPI trusted publishing for the nightly wheel.
+  id-token: write
 
 jobs:
   # Compute the nightly version ONCE so every downstream cell embeds the
@@ -42,10 +44,12 @@ jobs:
           date=$(date -u +%Y%m%d)
           sha=$(git rev-parse --short=7 HEAD)
           commit_sha=$(git rev-parse HEAD)
-          # PEP 440 dev release with +local segment for traceability.
-          # Pip accepts +local in URL / file installs (we don't push
-          # nightlies to PyPI, where +local is rejected).
-          version="2.0.0.dev${ts}+${sha}"
+          # Derived from pyproject, never hardcoded: X.Y.(Z+1).devYYYYmmdd
+          # sorts ABOVE the released X.Y.Z, so `pip install --pre` upgrades
+          # onto a nightly and the eventual patch release reads as their
+          # summary. The old literal "2.0.0.dev..." sorted below every
+          # release. No +local segment, so PyPI accepts it.
+          version=$(python scripts/set_pyproject_version.py nightly)
           {
             echo "version=${version}"
             echo "build_id=${ts}-${sha}"
@@ -310,6 +314,27 @@ jobs:
         with:
           name: nightly-desktop-${{ matrix.platform }}
           path: artifacts/
+
+  # Nightlies are valid PEP 440 public versions, so `pip install --pre
+  # kohakuterrarium` reaches them without a GitHub detour.
+  #
+  # PyPI scopes trusted publishing to a workflow FILENAME, so this needs its
+  # own publisher entry for nightly.yml alongside the release.yml one.
+  publish-pypi:
+    needs: [version, nightly_gate, build-wheel]
+    if: needs.nightly_gate.outputs.should_build == 'true'
+    runs-on: ubuntu-latest
+    environment: release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: nightly-dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # The version carries only the date, so a forced same-day re-cut
+          # would collide. Skipping beats failing the whole nightly.
+          skip-existing: true
 
   publish:
     needs: [version, nightly_gate, build-release-tree, build-wheel, build-desktop]
