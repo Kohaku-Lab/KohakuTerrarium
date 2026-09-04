@@ -5,6 +5,7 @@ from typing import Any
 from kohakuterrarium.llm.profiles import (
     get_default_model,
     list_all,
+    profile_to_identifier,
     set_default_model,
 )
 from kohakuterrarium.studio.identity.llm_profiles import (
@@ -37,7 +38,10 @@ def resolve_and_set_default(name: str) -> tuple[str, str | None]:
         return "", str(e)
     if not profile:
         return "", f"Preset not found: {name}"
-    identifier = f"{profile.provider}/{profile.name}"
+    # Round-trip the variation selections too; rebuilding "provider/name" by
+    # hand dropped them, so `kt model default x@reasoning=ultra` silently
+    # stored plain x.
+    identifier = profile_to_identifier(profile)
     set_default_model(identifier)
     return identifier, None
 

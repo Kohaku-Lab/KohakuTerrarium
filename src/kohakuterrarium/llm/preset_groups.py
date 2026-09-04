@@ -16,8 +16,8 @@ _CODEX_REASONING_GROUP: dict[str, dict[str, Any]] = {
     "xhigh": {"reasoning_effort": "xhigh"},
 }
 
-# GPT-5.6 adds max. Ultra is a Codex CLI orchestration mode, not a wire value,
-# so API-facing groups stop at max and Luna shares the same accepted values.
+# GPT-5.6 adds max. Codex's catalog also lists ultra for sol / terra, but it is
+# not offered here: the 5.6 backend does not honour it.
 _GPT56_REASONING_GROUP: dict[str, dict[str, Any]] = {
     "low": {"reasoning_effort": "low"},
     "medium": {"reasoning_effort": "medium"},
@@ -26,8 +26,27 @@ _GPT56_REASONING_GROUP: dict[str, dict[str, Any]] = {
     "max": {"reasoning_effort": "max"},
 }
 
-_GPT56_LUNA_REASONING_GROUP: dict[str, dict[str, Any]] = {
-    key: patch for key, patch in _GPT56_REASONING_GROUP.items() if key != "ultra"
+# GPT-6 adds ultra on top — a real wire value (Codex's ``ReasoningEffort``
+# serializes it) that also triggers server-side task delegation.
+_GPT6_REASONING_GROUP: dict[str, dict[str, Any]] = {
+    **_GPT56_REASONING_GROUP,
+    "ultra": {"reasoning_effort": "ultra"},
+}
+
+# Operating context window, selectable per run. ``max_context`` is not just
+# wire metadata: it sets the auto-compaction threshold
+# (``compact_at = max_context * threshold``), so picking a variant changes when
+# the conversation gets summarised, not only what the backend is asked for.
+#
+# 1M is the full window. Codex's catalog reports 872k because it subtracts the
+# 128k output reservation; at the default 0.8 threshold compaction fires at
+# 800k input, inside that ceiling. Raising ``compact.threshold`` above ~0.87
+# with this variant selected would let input exceed what the model accepts.
+_GPT5X_CONTEXT_GROUP: dict[str, dict[str, Any]] = {
+    "272k": {"max_context": 272000},
+    "400k": {"max_context": 400000},
+    "700k": {"max_context": 700000},
+    "1m": {"max_context": 1000000},
 }
 
 # Codex fast mode maps to the API's priority tier; the literal fast tier is invalid.
@@ -37,10 +56,9 @@ _CODEX_SPEED_GROUP: dict[str, dict[str, Any]] = {
 }
 
 # GPT-5.6 execution mode: ``reasoning.mode = standard | pro`` on the Responses
-# API, independent of ``reasoning.effort``. Exposed on every 5.6 route; note
-# the Codex OAuth backend currently rejects ``pro`` ("`reasoning.mode` is not
-# supported with this model", probed 2026-07), which surfaces as a request
-# error until OpenAI enables it there.
+# API, independent of ``reasoning.effort``. Direct-API and OpenRouter routes
+# only — the Codex OAuth backend rejects ``pro`` outright ("`reasoning.mode` is
+# not supported with this model"), so offering it there only produces errors.
 _GPT56_MODE_GROUP: dict[str, dict[str, Any]] = {
     "standard": {},
     "pro": {"extra_body.reasoning.mode": "pro"},

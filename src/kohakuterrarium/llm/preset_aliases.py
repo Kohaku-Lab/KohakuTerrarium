@@ -45,6 +45,8 @@ _CANONICAL_NAMES: dict[str, str] = {
 ALIASES: dict[str, tuple[str, str]] = {
     # Common short names.
     "gpt5": ("codex", "gpt-5.5"),
+    "gpt6": ("codex", "gpt-6-astra"),
+    "astra": ("codex", "gpt-6-astra"),
     "gpt56": ("codex", "gpt-5.6-sol"),
     "sol": ("codex", "gpt-5.6-sol"),
     "terra": ("codex", "gpt-5.6-terra"),

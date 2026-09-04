@@ -117,7 +117,9 @@ class TestLlmDefault:
     def test_resolve_and_set_default_success(self, monkeypatch):
         from types import SimpleNamespace
 
-        profile = SimpleNamespace(provider="openai", name="gpt-4")
+        profile = SimpleNamespace(
+            provider="openai", name="gpt-4", selected_variations={}
+        )
         monkeypatch.setattr(
             default_mod, "get_profile_for_identifier", lambda n: profile
         )
@@ -128,7 +130,31 @@ class TestLlmDefault:
         ident, err = default_mod.resolve_and_set_default("gpt-4")
         assert ident == "openai/gpt-4"
         assert err is None
-        assert captured
+        assert captured == ["openai/gpt-4"]
+
+    def test_resolve_and_set_default_keeps_variation_selections(self, monkeypatch):
+        # Rebuilding "provider/name" by hand dropped them, so
+        # `kt model default x@reasoning=ultra` silently stored plain x.
+        from types import SimpleNamespace
+
+        profile = SimpleNamespace(
+            provider="codex",
+            name="gpt-6-astra",
+            selected_variations={"reasoning": "ultra", "context": "1m"},
+        )
+        monkeypatch.setattr(
+            default_mod, "get_profile_for_identifier", lambda n: profile
+        )
+        captured = []
+        monkeypatch.setattr(
+            default_mod, "set_default_model", lambda i: captured.append(i)
+        )
+        ident, err = default_mod.resolve_and_set_default(
+            "gpt-6-astra@reasoning=ultra,context=1m"
+        )
+        assert err is None
+        assert ident == "codex/gpt-6-astra@context=1m,reasoning=ultra"
+        assert captured == [ident]
 
     def test_list_all_models_combined(self, monkeypatch):
         monkeypatch.setattr(default_mod, "list_all", lambda: [{"n": "x"}])

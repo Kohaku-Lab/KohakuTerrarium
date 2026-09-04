@@ -79,7 +79,7 @@ class TestGetAllPresets:
         codex_entry = allp[("codex", "gpt-5.4")]
         assert "provider" not in codex_entry
         assert codex_entry["model"] == "gpt-5.4"
-        assert codex_entry["max_context"] == 400000
+        assert codex_entry["max_context"] == 272000
 
     def test_or_variant_has_distinct_model_id(self):
         allp = get_all_presets()
@@ -209,28 +209,91 @@ class TestPresetsDataIntegrity:
         assert ("openai", "gpt-5.3-codex-spark") not in all_presets
         assert ("openrouter", "gpt-5.3-codex-spark") not in all_presets
 
-    def test_gpt56_effort_scales_top_out_at_max(self):
-        # ``ultra`` is deliberately not exposed on any GPT-5.6 variant:
-        # it is not a wire value (the Codex CLI rewrites Ultra -> Max).
+    def test_ultra_is_gpt6_only(self):
+        # ``ultra`` is a real wire value (Codex's ``ReasoningEffort`` serializes
+        # it, nothing rewrites it to max), but only GPT-6 honours it. The 5.6
+        # backend does not, so offering it there would only produce errors.
+        astra = PRESETS["gpt-6-astra"]["variation_groups"]["reasoning"]
+        assert astra["ultra"] == {"reasoning_effort": "ultra"}
+
+        for name in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            group = PRESETS[name]["variation_groups"]["reasoning"]
+            assert "ultra" not in group, name
+            assert "max" in group, name
+
+    def test_direct_api_routes_stop_at_max(self):
+        # The Codex catalog is authoritative for the Codex backend only. No
+        # OpenAI or OpenRouter source confirms ultra there, so those routes
+        # keep their own groups and top out at max.
         for name in (
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
             "gpt-5.6-sol-api",
             "gpt-5.6-terra-api",
             "gpt-5.6-luna-api",
+            "gpt-5.6-sol-or",
+            "gpt-5.6-terra-or",
+            "gpt-5.6-luna-or",
         ):
             group = PRESETS[name]["variation_groups"]["reasoning"]
             assert "ultra" not in group, name
             assert "max" in group, name
 
-    def test_gpt56_mode_group_on_every_route(self):
-        # ``reasoning.mode`` (standard | pro) is exposed uniformly on the
-        # codex / -api / -or routes for the whole 5.6 family.
+    def test_codex_context_defaults_and_variants(self):
+        # ``max_context`` drives the compaction threshold, so it is behaviour,
+        # not metadata. The 5.6 family and GPT-6 expose the window as a
+        # selectable variant; the rest are fixed at the catalog's window.
+        assert PRESETS["gpt-6-astra"]["max_context"] == 1_000_000
+        for name in ("gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            assert PRESETS[name]["max_context"] == 400_000, name
+
+        for name in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            group = PRESETS[name]["variation_groups"]["context"]
+            assert list(group) == ["272k", "400k", "700k", "1m"], name
+            assert group["1m"] == {"max_context": 1_000_000}, name
+            # The default must be one of the offered options.
+            assert PRESETS[name]["max_context"] in {
+                patch["max_context"] for patch in group.values()
+            }, name
+
+        # Models whose catalog window has no headroom get no context group,
+        # and stay at the catalog value. gpt-5.4-mini used to claim 400k —
+        # above even its own 272k ceiling.
+        for name in ("gpt-5.5", "gpt-5.4", "gpt-5.4-mini"):
+            assert PRESETS[name]["max_context"] == 272000, name
+            assert "context" not in PRESETS[name]["variation_groups"], name
+
+        # The direct-API routes keep their own, larger documented context.
+        assert PRESETS["gpt-5.6-sol-api"]["max_context"] > 400_000
+
+    def test_astra_mirrors_the_codex_catalog(self):
+        # Codex catalog (codex-rs/models-manager/models.json), 2026-09:
+        # slug gpt-6-astra, prefer_websockets, context 272k/872k, efforts
+        # low..ultra, supported_in_api, visibility "hide" (rolled out but not
+        # yet in the picker).
+        preset = PRESETS["gpt-6-astra"]
+        assert preset["provider"] == "codex"
+        assert preset["model"] == "gpt-6-astra"
+        assert preset["extra_body"]["websocket_mode"] is True
+        assert set(preset["variation_groups"]) == {"context", "reasoning", "speed"}
+
+        # Same shape as the 5.6 flagship it sits above, with two differences:
+        # GPT-6 defaults to the full window, and it is the only one that
+        # honours the ultra effort.
+        sol = PRESETS["gpt-5.6-sol"]
+        assert preset["max_context"] == 1_000_000
+        assert sol["max_context"] == 400_000
+        assert preset["max_output"] == sol["max_output"]
+        assert (
+            preset["variation_groups"]["context"] == sol["variation_groups"]["context"]
+        )
+        assert set(preset["variation_groups"]["reasoning"]) == set(
+            sol["variation_groups"]["reasoning"]
+        ) | {"ultra"}
+
+    def test_mode_group_is_direct_api_only(self):
+        # ``reasoning.mode = standard | pro`` is a Responses-API knob. The
+        # Codex OAuth backend rejects ``pro`` outright, so the codex routes
+        # must not offer it.
         for name in (
-            "gpt-5.6-sol",
-            "gpt-5.6-terra",
-            "gpt-5.6-luna",
             "gpt-5.6-sol-api",
             "gpt-5.6-terra-api",
             "gpt-5.6-luna-api",
@@ -241,7 +304,9 @@ class TestPresetsDataIntegrity:
             group = PRESETS[name]["variation_groups"]["mode"]
             assert set(group) == {"standard", "pro"}, name
             assert group["standard"] == {}, name
-            assert group["pro"] == {"extra_body.reasoning.mode": "pro"}, name
+
+        for name in ("gpt-6-astra", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"):
+            assert "mode" not in PRESETS[name]["variation_groups"], name
 
     def test_openai_direct_speed_group_mirrors_codex_fast_mode(self):
         # -api GPT presets expose fast mode via the priority service tier;

@@ -108,7 +108,7 @@ class TestGetProfile:
         assert profile.model == "gpt-5.4"
         assert profile.provider == "codex"
         assert profile.backend_type == "codex"
-        assert profile.max_context == 400000
+        assert profile.max_context == 272000
         assert profile.backend_native_tools == ["image_gen"]
 
     def test_spark_opts_out_of_codex_image_generation(self):
@@ -426,7 +426,7 @@ class TestDefaultModel:
         from kohakuterrarium.llm.api_keys import save_api_key
 
         save_api_key("glm-coding", "glm-key")
-        assert get_default_model() == "glm-coding/glm-5.2"
+        assert get_default_model() == "glm-coding/glm-5.3"
 
     def test_upgrade_bare_default_via_alias(self):
         # 'gpt-5.4-or' is an alias -> (openrouter, gpt-5.4)

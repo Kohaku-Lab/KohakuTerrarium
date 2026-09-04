@@ -150,16 +150,18 @@ def load_profiles() -> dict[tuple[str, str], LLMProfile]:
     return profiles
 
 
-# The first available provider supplies the implicit default model.
+# The first available provider supplies the implicit default model — this is
+# what a fresh install runs on before anyone sets `kt model default`. Each
+# entry names that provider's current flagship.
 _PROVIDER_DEFAULT_MODELS: list[tuple[str, str]] = [
-    ("codex", "gpt-5.5"),
+    ("codex", "gpt-6-astra"),
     ("openrouter", "mimo-v2.5-pro"),
     ("anthropic", "claude-opus-4.8"),
-    ("openai", "gpt-5.5"),
+    ("openai", "gpt-5.6-sol"),
     ("gemini", "gemini-3.1-pro"),
     ("mimo", "mimo-v2.5-pro"),
     ("kimi-code", "kimi-for-coding"),
-    ("glm-coding", "glm-5.2"),
+    ("glm-coding", "glm-5.3"),
 ]
 
 
