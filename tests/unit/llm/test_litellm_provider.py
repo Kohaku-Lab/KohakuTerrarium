@@ -4,6 +4,7 @@ LiteLLM is an optional dependency, so the SDK module is replaced with a small
 fake that exposes the same ``acompletion`` surface used by the provider.
 """
 
+import base64
 import importlib
 import sys
 
@@ -68,6 +69,32 @@ def lpm(monkeypatch):
     monkeypatch.setitem(sys.modules, "litellm", _fake_litellm)
     module = importlib.import_module("kohakuterrarium.llm.litellm_provider")
     return module, _fake_litellm
+
+
+class TestMediaReferences:
+    def test_build_params_inlines_local_media_references(self, lpm, tmp_path):
+        module, _ = lpm
+        pic = tmp_path / "seen.png"
+        pic.write_bytes(b"PNGDATA")
+        provider = module.LiteLLMProvider(model="openai/gpt-4o", api_key="k")
+
+        params = provider._build_params(
+            [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "look"},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": pic.resolve().as_uri()},
+                        },
+                    ],
+                }
+            ]
+        )
+
+        image = params["messages"][0]["content"][1]["image_url"]["url"]
+        assert image == "data:image/png;base64," + base64.b64encode(b"PNGDATA").decode()
 
 
 class TestStreamingReasoningCapture:

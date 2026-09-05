@@ -11,6 +11,7 @@ import base64
 
 from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm.artifact_resolve import (
+    file_reference_path,
     resolve_artifact_url,
     resolve_message_image_urls,
 )
@@ -50,6 +51,25 @@ class TestResolveArtifactUrl:
         monkeypatch.setattr(artifact_resolve, "_session_dir", lambda: tmp_path)
         url = "/api/sessions/sid/artifacts/nope.png"
         assert resolve_artifact_url(url) == url
+
+
+class TestFileReferences:
+    def test_file_reference_inlined_from_disk(self, tmp_path):
+        pic = tmp_path / "a b.png"
+        pic.write_bytes(b"PNGDATA")
+        out = resolve_artifact_url(pic.resolve().as_uri())
+        assert out == "data:image/png;base64," + base64.b64encode(b"PNGDATA").decode()
+
+    def test_missing_file_reference_falls_back_to_original(self, tmp_path):
+        url = (tmp_path / "gone.png").resolve().as_uri()
+        assert resolve_artifact_url(url) == url
+
+    def test_file_reference_path_parsing(self, tmp_path):
+        pic = tmp_path / "a b.png"
+        assert file_reference_path(pic.resolve().as_uri()) == pic.resolve()
+        assert file_reference_path("file://host/share/x.png") is None
+        assert file_reference_path("https://example.com/x.png") is None
+        assert file_reference_path(None) is None
 
 
 class TestResolveMessageImageUrls:

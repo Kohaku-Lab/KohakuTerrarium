@@ -13,6 +13,7 @@ from kohakuterrarium.llm.base import (
     NativeToolCall,
     ToolSchema,
 )
+from kohakuterrarium.llm.artifact_resolve import resolve_message_image_urls
 from kohakuterrarium.llm.openai_helpers import (
     delta_field,
     delta_field_present,
@@ -265,7 +266,9 @@ class LiteLLMProvider(BaseLLMProvider):
     ) -> dict[str, Any]:
         params: dict[str, Any] = {
             "model": self.config.model,
-            "messages": strip_internal_message_fields(messages),
+            "messages": strip_internal_message_fields(
+                resolve_message_image_urls(messages)
+            ),
             "temperature": kwargs.get("temperature", self.config.temperature),
             "stream": stream,
             "drop_params": True,
