@@ -577,6 +577,30 @@ class TestActivityHandlers:
         finally:
             store.close()
 
+    def test_tool_start_persists_identity_independently_of_display(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            out.on_activity_with_metadata(
+                "tool_start",
+                "[unrelated[abc123]] running",
+                {
+                    "job_id": "web_search_abc123ff",
+                    "tool_name": "web_search",
+                    "tool_call_id": "call_provider",
+                    "tool_call_arguments": '{"_option":true}',
+                    "args": {},
+                },
+            )
+            event = next(
+                e for e in store.get_events("alice") if e["type"] == "tool_call"
+            )
+            assert event["name"] == "web_search"
+            assert event["call_id"] == "web_search_abc123ff"
+            assert event["tool_call_id"] == "call_provider"
+            assert event["tool_call_arguments"] == '{"_option":true}'
+        finally:
+            store.close()
+
     def test_tool_done(self, tmp_path):
         store, out = _make(tmp_path)
         try:

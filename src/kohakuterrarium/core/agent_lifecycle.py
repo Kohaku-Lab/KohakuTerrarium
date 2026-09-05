@@ -7,9 +7,26 @@ import asyncio
 from typing import Any
 
 from kohakuterrarium.core.job import JobState, JobType
+from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+async def wait_for_turn_completion(
+    agent: Any, completion: asyncio.Future | None, *, timeout: float = 10.0
+) -> None:
+    """Join one captured turn without cancelling it when the waiter times out."""
+    if completion is None or completion.done():
+        return
+    if getattr(agent, "_turn_lock_holder", None) is asyncio.current_task():
+        raise ConflictError("Cannot wait for the current turn from its own callback")
+    try:
+        await asyncio.wait_for(asyncio.shield(completion), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        raise ConflictError(
+            "The previous turn is still finishing; retry after it stops"
+        ) from exc
 
 
 class AgentLifecycleMixin:
@@ -26,6 +43,21 @@ class AgentLifecycleMixin:
     _running: bool
     _paused: bool
     _shutdown_event: Any
+
+    @property
+    def is_processing(self) -> bool:
+        """Whether a turn is active, finalizing, or waiting in the inbox."""
+        lock = getattr(self, "_processing_lock", None)
+        inbox = getattr(self, "_event_inbox", None)
+        return bool(
+            (lock is not None and lock.locked()) or (inbox is not None and len(inbox))
+        )
+
+    async def interrupt_and_wait(self, *, timeout: float = 10.0) -> None:
+        """Interrupt the captured turn and wait until its finalization releases it."""
+        completion = getattr(self, "_turn_completion", None)
+        self.interrupt()
+        await wait_for_turn_completion(self, completion, timeout=timeout)
 
     @property
     def paused(self) -> bool:

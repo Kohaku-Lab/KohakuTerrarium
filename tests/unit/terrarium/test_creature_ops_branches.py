@@ -259,6 +259,7 @@ class TestChatHistoryForBranches:
         agent = SimpleNamespace(
             conversation_history=["msg"],
             session_store=_Store(),
+            is_processing=False,
             _processing_task=None,
             _direct_job_meta={},
         )
@@ -278,6 +279,7 @@ class TestChatHistoryForBranches:
         agent = SimpleNamespace(
             conversation_history=[],
             session_store=None,
+            is_processing=False,
             _processing_task=None,
             _direct_job_meta={},
         )

@@ -8,6 +8,33 @@ beforeEach(() => {
 })
 
 describe("chat store — edit/rerun semantic guards", () => {
+  it("keeps a newer running turn after an earlier interrupt response", async () => {
+    const chat = useChatStore()
+    chat._instanceId = "graph_1"
+    chat._instanceGraphId = "graph_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.processingByTab = { main: true }
+    const { terrariumAPI } = await import("@/utils/api")
+    let finishInterrupt
+    const interrupt = vi.spyOn(terrariumAPI, "interruptCreature").mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishInterrupt = resolve
+        }),
+    )
+    const history = vi
+      .spyOn(terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [], messages: [], is_processing: true })
+    const pending = chat.interrupt("main")
+    finishInterrupt({ status: "interrupted" })
+    await pending
+    expect(history).toHaveBeenCalledWith("graph_1", "main")
+    expect(chat.processingByTab.main).toBe(true)
+    interrupt.mockRestore()
+    history.mockRestore()
+  })
+
   it("does not let injected mid-turn rows shift canonical user locators", () => {
     const events = [
       { type: "user_input", event_id: 1, content: "first", turn_index: 1, branch_id: 1 },

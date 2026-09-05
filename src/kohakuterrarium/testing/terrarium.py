@@ -56,6 +56,7 @@ class _FakeAgent:
         self.tools: list[Any] = []
         self.subagents: list[Any] = []
         self._processing_task = None
+        self.is_processing = False
         self.trigger_manager = _FakeTriggerManager()
         self.output_router = _FakeOutputRouter()
         self.output_handlers: list[Any] = []
@@ -84,6 +85,12 @@ class _FakeAgent:
     async def stop(self) -> None:
         self._running = False
         self.stop_calls += 1
+
+    def interrupt(self) -> None:
+        self.is_processing = False
+
+    async def interrupt_and_wait(self, *, timeout: float = 10.0) -> None:
+        self.interrupt()
 
     def attach_session_store(
         self, store: Any, *, capture_activity: bool = True

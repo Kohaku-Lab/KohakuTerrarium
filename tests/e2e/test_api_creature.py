@@ -68,6 +68,7 @@ _REPLY_SECOND_APP = "Second app instance reply."
 _CREATURE_CONFIG = """\
 name: alice
 system_prompt: "You are a deterministic e2e-test creature."
+tool_format: bracket
 input:
   type: none
 output:
@@ -98,6 +99,7 @@ def scripted_llm(monkeypatch: pytest.MonkeyPatch) -> ScriptedLLM:
             ScriptEntry(
                 _REPLY_SLOW, match="long turn", chunk_size=1, delay_per_chunk=0.05
             ),
+            ScriptEntry("Edited turn completed.", match="replacement after interrupt"),
             ScriptEntry(_REPLY_TRACE, match="trace turn"),
             ScriptEntry(_REPLY_RENAMED, match="after rename"),
             ScriptEntry(_REPLY_SECOND_APP, match="second app turn"),
@@ -429,6 +431,36 @@ class TestApiCreatureJourney:
             assert resp.status_code == 200
             assert resp.json() == {"status": "interrupted"}
 
+            # The stop acknowledgement is the edit boundary; no polling or sleep.
+            stopped = client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history"
+            ).json()
+            assert stopped["is_processing"] is False
+            target = next(
+                e
+                for e in stopped["events"]
+                if e.get("type") == "user_message"
+                and e.get("content") == "long turn now"
+            )
+            edited = client.post(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/messages/0/edit",
+                json={
+                    "content": "replacement after interrupt",
+                    "target": {
+                        key: target[key]
+                        for key in ("event_id", "turn_index", "branch_id")
+                    },
+                },
+            )
+            assert edited.status_code == 200, edited.text
+            replayed = client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history"
+            ).json()
+            assert replayed["messages"][-1]["content"] == "Edited turn completed."
+            for message in replayed["messages"]:
+                for call in message.get("tool_calls") or []:
+                    assert call["function"]["name"] == "scratchpad"
+
             saw_interrupt = False
             collected = ""
             while True:
@@ -533,7 +565,7 @@ class TestApiCreatureJourney:
             json={"turn_index": 1},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "regenerating"
+        assert resp.json()["status"] == "completed"
 
         resp = client.get(f"/api/sessions/{session_id}/creatures/{creature_id}/history")
         assert resp.status_code == 200
@@ -554,7 +586,7 @@ class TestApiCreatureJourney:
             json={"content": "edited hello creature", "turn_index": 1},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "edited"
+        assert resp.json()["status"] == "completed"
 
         resp = client.get(f"/api/sessions/{session_id}/creatures/{creature_id}/history")
         assert resp.status_code == 200
@@ -789,7 +821,7 @@ class TestApiCreatureJourney:
             json={"turn_index": 1},
         )
         assert resp.status_code == 200
-        assert resp.json()["status"] == "regenerating"
+        assert resp.json()["status"] == "completed"
         resp = client.get(f"/api/sessions/{resumed_id}/creatures/alice/history")
         assert resp.status_code == 200
         turn1_branches_after = {

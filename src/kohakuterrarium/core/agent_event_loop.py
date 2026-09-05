@@ -137,6 +137,8 @@ class AgentEventLoopMixin:
         events = [env.event for env in run]
         primary = events[0]
         captures = [env.capture for env in run if env.capture is not None]
+        completion = asyncio.get_running_loop().create_future()
+        self._turn_completion = completion
         self._active_event_run = run
         self._active_event_captures = captures
         for cap in captures:
@@ -165,6 +167,10 @@ class AgentEventLoopMixin:
                 self.output_router.remove_secondary(cap)
             self._active_event_run = None
             self._active_event_captures = None
+            if self._turn_completion is completion:
+                self._turn_completion = None
+            if not completion.done():
+                completion.set_result(None)
         self._resolve_run(
             run,
             status="interrupted" if interrupted else "ok",

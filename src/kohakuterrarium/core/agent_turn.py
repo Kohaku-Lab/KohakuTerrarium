@@ -232,9 +232,10 @@ class AgentTurnMixin:
             if capture.error is None:
                 capture.error = str(exc)
 
-        # A rejected outcome means the consumer never ran the event (agent
-        # stopped / warm-paused) — surface a rejection rather than a hollow
-        # ``ok`` with empty text.
-        if outcome is not None and outcome.status == "rejected" and status == "ok":
-            status = "rejected"
-        return capture.build_result(status, duration_s=time.monotonic() - t0)
+        # Preserve the consumer's terminal status unless this caller timed out
+        # or failed independently. Cancellation must not become an empty success.
+        if outcome is not None and status == "ok":
+            status = outcome.status
+        result = capture.build_result(status, duration_s=time.monotonic() - t0)
+        result.interrupted_by_user = bool(outcome and outcome.interrupted_by_user)
+        return result

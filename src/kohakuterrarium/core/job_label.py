@@ -8,6 +8,16 @@ truth. Kept free of any KohakuTerrarium imports so low-level modules
 (e.g. session.history) can use it without import cycles.
 """
 
+import re
+
+_JOB_LABEL = re.compile(r"([^\[\]\r\n]+)\[[0-9a-fA-F]{6}\]")
+
+
+def canonical_tool_name(name: str) -> str:
+    """Restore names from the hex-suffixed display labels emitted by KT."""
+    match = _JOB_LABEL.fullmatch(name)
+    return match[1] if match else name
+
 
 def make_job_label(job_id: str) -> tuple[str, str]:
     """Extract ``(tool_name, label)`` from a job id.

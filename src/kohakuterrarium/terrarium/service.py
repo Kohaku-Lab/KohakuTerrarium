@@ -686,7 +686,7 @@ class LocalTerrariumService(LocalCommandServiceMixin, DriveServiceMixin):
 
     async def interrupt(self, creature_id: str) -> None:
         agent = self._engine.get_creature(creature_id).agent
-        agent.interrupt()
+        await agent.interrupt_and_wait()
 
     async def list_jobs(self, creature_id: str) -> list[dict[str, Any]]:
         agent = self._engine.get_creature(creature_id).agent

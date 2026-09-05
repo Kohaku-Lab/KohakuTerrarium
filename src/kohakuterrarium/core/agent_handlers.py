@@ -225,8 +225,6 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         """Inner loop: run LLM → dispatch tools → collect feedback → repeat."""
         while True:
             if self._interrupt_requested:
-                self._interrupt_requested = False
-                controller._interrupted = False
                 self.output_router.notify_activity(
                     "interrupt", "[system] Processing interrupted"
                 )
@@ -249,8 +247,6 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             # Check interrupt after LLM turn (before waiting for tools)
             if self._interrupt_requested:
                 self._cancel_handles(round_result.handles)
-                self._interrupt_requested = False
-                controller._interrupted = False
                 self.output_router.notify_activity(
                     "interrupt", "[system] Processing interrupted"
                 )
@@ -434,7 +430,9 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
         )
 
         await self._flush_output()
-        self._notify_tool_start(parse_event, job_id, is_direct)
+        self._notify_tool_start(
+            parse_event, job_id, is_direct, tool_call_id=tool_call_id
+        )
 
     async def _dispatch_subagent_event(
         self,

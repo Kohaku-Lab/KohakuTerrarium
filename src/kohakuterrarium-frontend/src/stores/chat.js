@@ -2295,6 +2295,7 @@ const _chatStoreOptions = {
       if (!this._instanceId) return
       const target = tab || this.activeTab
       if (!target || target.startsWith("ch:")) return
+      const generation = this._instanceGeneration
 
       try {
         // Interrupt the main agent processing only.
@@ -2306,7 +2307,9 @@ const _chatStoreOptions = {
           // and creatures keyed by name. ``interruptCreature`` works
           // for both solo (1-creature graph) and multi-creature.
           await terrariumAPI.interruptCreature(this._instanceGraphId, target)
-          this.processingByTab[target] = false
+          if (generation === this._instanceGeneration) {
+            await this._resyncHistory(target, { generation })
+          }
         }
         // Do NOT mark running parts as interrupted or remove running jobs.
         // The backend will send proper done/error events when jobs complete.

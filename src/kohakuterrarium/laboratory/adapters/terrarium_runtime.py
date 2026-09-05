@@ -61,6 +61,7 @@ from kohakuterrarium.terrarium.wire import (
     unpack_creature_build_input,
 )
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.errors import ConflictError
 
 logger = get_logger(__name__)
 
@@ -142,6 +143,8 @@ class TerrariumRuntimeAdapter:
             return {"error": {"kind": "creature_not_hosted", "message": str(e)}}
         except KeyError as e:
             return {"error": {"kind": "not_found", "message": str(e)}}
+        except ConflictError as e:
+            return {"error": {"kind": "conflict", "message": str(e)}}
         except ValueError as e:
             return {"error": {"kind": "invalid", "message": str(e)}}
         except Exception as e:  # pragma: no cover - defensive
@@ -489,7 +492,7 @@ class TerrariumRuntimeAdapter:
             case "interrupt":
                 cid = msg.body["creature_id"]
                 creature = self._require_hosted(cid)
-                creature.agent.interrupt()
+                await creature.agent.interrupt_and_wait()
                 return {}
 
             case "list_jobs":

@@ -5,6 +5,7 @@ Modify past messages, regenerate responses, and replay conversation branches.
 
 import asyncio
 
+from kohakuterrarium.core.agent_lifecycle import wait_for_turn_completion
 from kohakuterrarium.core.agent_message_history import (
     live_user_turns as _live_user_turns,
     max_branch_id_for_turn as _max_branch_id_for_turn,
@@ -106,6 +107,7 @@ class AgentMessagesMixin:
 
     async def _regenerate_tail_response(self, *, request_id: str | None) -> None:
         """Regenerate the current tail while holding the mutation lock."""
+        await self._wait_for_history_finalization()
         self._ensure_history_mutation_idle()
         self._ensure_rerun_available()
         conv = self.controller.conversation
@@ -203,6 +205,7 @@ class AgentMessagesMixin:
         truncation target resolves correctly even when the user has
         switched to an older subtree in the UI.
         """
+        await self._wait_for_history_finalization()
         self._ensure_history_mutation_idle()
         self._ensure_rerun_available()
         # Canonical persisted targets reconstruct original context before
@@ -315,6 +318,7 @@ class AgentMessagesMixin:
     async def rewind_to(self, message_idx: int) -> None:
         """Drop messages from ``message_idx`` onward without re-running."""
         async with self._get_message_mutation_lock():
+            await self._wait_for_history_finalization()
             self._ensure_history_mutation_idle()
             conv = self.controller.conversation
             removed = conv.truncate_from(message_idx)
@@ -338,6 +342,16 @@ class AgentMessagesMixin:
             lock = asyncio.Lock()
             self._message_mutation_lock = lock
         return lock
+
+    async def _wait_for_history_finalization(self) -> None:
+        """Wait for cancellation or finalization, never for an actively generating turn."""
+        if (
+            getattr(self, "_interrupt_requested", False)
+            or getattr(self, "_processing_task", None) is None
+        ):
+            await wait_for_turn_completion(
+                self, getattr(self, "_turn_completion", None)
+            )
 
     def _ensure_history_mutation_idle(self) -> None:
         """Reject destructive history changes while another turn can observe it."""

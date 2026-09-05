@@ -20,6 +20,7 @@ from kohakuterrarium.core.conversation_sanitize import (  # noqa: F401
     _is_empty_content,
 )
 from kohakuterrarium.core.conversation_sanitize import (
+    normalize_tool_names,
     prune_orphan_tool_pairs as _prune_orphan_tool_pairs,
 )
 from kohakuterrarium.core.conversation_sanitize import (
@@ -159,7 +160,7 @@ class Conversation:
         ``include_metadata`` is for session snapshots only; provider calls leave
         it disabled so internal message identity never reaches the wire.
         """
-        messages = messages_to_dicts(self._messages)
+        messages = normalize_tool_names(messages_to_dicts(self._messages))
         if include_metadata:
             for msg, serialized in zip(self._messages, messages):
                 if msg.metadata:

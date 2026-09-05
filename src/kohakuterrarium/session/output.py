@@ -3,6 +3,7 @@
 import json
 from typing import Any
 
+from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.history import replay_conversation
@@ -471,18 +472,22 @@ class SessionOutput(OutputModule):
         )
 
     def _handle_tool_start(self, name: str, detail: str, metadata: dict) -> None:
+        data = {
+            "name": metadata.get("tool_name") or canonical_tool_name(name),
+            "call_id": metadata.get("job_id", ""),
+            "args": metadata.get("args", {}),
+        }
+        if metadata.get("tool_call_id"):
+            data["tool_call_id"] = metadata["tool_call_id"]
+            data["tool_call_arguments"] = metadata.get("tool_call_arguments")
         self._record(
             "tool_call",
-            {
-                "name": name,
-                "call_id": metadata.get("job_id", ""),
-                "args": metadata.get("args", {}),
-            },
+            data,
         )
 
     def _handle_tool_done(self, name: str, detail: str, metadata: dict) -> None:
         event_data: dict[str, Any] = {
-            "name": name,
+            "name": _tool_name(name, metadata),
             "call_id": metadata.get("job_id", ""),
             "output": metadata.get("result", metadata.get("output", detail)),
             "exit_code": metadata.get("exit_code", 0),
@@ -500,7 +505,7 @@ class SessionOutput(OutputModule):
         self._record(
             "tool_result",
             {
-                "name": name,
+                "name": _tool_name(name, metadata),
                 "call_id": metadata.get("job_id", ""),
                 "output": metadata.get("result", metadata.get("output", detail)),
                 "exit_code": metadata.get("exit_code", 1),
@@ -906,6 +911,15 @@ def _token_metadata(metadata: dict) -> dict[str, Any]:
     if "cost_usd" in metadata:
         data["cost_usd"] = metadata.get("cost_usd")
     return data
+
+
+def _tool_name(label: str, metadata: dict) -> str:
+    """Resolve canonical identity from structured activity or legacy labels."""
+    return metadata.get("tool_name") or (
+        make_job_label(metadata["job_id"])[0]
+        if "_" in metadata.get("job_id", "")
+        else canonical_tool_name(label)
+    )
 
 
 def _parse_detail(detail: str) -> tuple[str, str]:

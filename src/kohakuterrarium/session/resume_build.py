@@ -5,6 +5,7 @@ facade stays under the source-file size guard.
 """
 
 from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.core.conversation_sanitize import normalize_tool_names
 
 
 def build_conversation(messages: list[dict]) -> Conversation:
@@ -15,11 +16,8 @@ def build_conversation(messages: list[dict]) -> Conversation:
     retained when present.
     """
     conv = Conversation()
-    for msg in messages:
-        if not isinstance(msg, dict):
-            # Malformed persisted entry (corrupt snapshot): skip it rather
-            # than crashing on msg.get(...).
-            continue
+    # Skip malformed persisted entries before repairing legacy tool labels.
+    for msg in normalize_tool_names([m for m in messages if isinstance(m, dict)]):
         role = msg.get("role", "user")
         content = msg.get("content", "")
         kwargs = {}

@@ -4054,8 +4054,10 @@ class TestInterruptMidStream:
                 )
 
             agent._run_single_turn = fake_run_single_turn
-            await agent._process_event(create_user_input_event("hi"))
-            assert agent._interrupt_requested is False
+            event = create_user_input_event("hi")
+            await agent._process_event(event)
+            assert event.context["interrupted_by_user"] is True
+            assert agent._interrupt_requested is True  # reset by the next turn
         finally:
             await agent.stop()
 
