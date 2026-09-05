@@ -106,6 +106,33 @@ describe("ToolCallBlock — generated artifacts", () => {
     expect(wrapper.find(`video[src="${videoUrl}"]`).exists()).toBe(true)
   })
 
+  it("folds media away with the block when the tool's policy is not pinned", async () => {
+    const seen = "file:///tmp/seen.png"
+    const tc = {
+      type: "tool",
+      id: "t-read-image",
+      name: "read",
+      kind: "tool",
+      args: { path: "/tmp/seen.png" },
+      status: "done",
+      result: "Image: /tmp/seen.png",
+      resultParts: [
+        { type: "text", text: "Image: /tmp/seen.png" },
+        { type: "image_url", image_url: { url: seen }, meta: { source_type: "file" } },
+      ],
+      resultMeta: { media: { persist: false, pinned: false } },
+    }
+    const collapsed = mountBlock(tc, false)
+    expect(collapsed.find("img").exists()).toBe(false)
+    expect(collapsed.find('[data-testid="tool-media-pinned"]').exists()).toBe(false)
+
+    const expanded = mountBlock(tc, true)
+    const img = expanded.find('[data-testid="tool-media-collapsible"] img')
+    expect(img.exists()).toBe(true)
+    // A file reference loads through the raw file route, never as file://.
+    expect(img.attributes("src")).toBe("/api/files/raw?path=%2Ftmp%2Fseen.png")
+  })
+
   it("does not preview media from non-artifact URLs", () => {
     const wrapper = mountBlock(
       {

@@ -47,7 +47,9 @@ const props = defineProps({
 defineEmits(["toggle", "tool-toggle"])
 
 const summary = computed(() => summarizeBatch(props.tools))
-const mediaParts = computed(() => props.tools.flatMap((tool) => safeMediaParts(tool.resultParts)))
+// Only media a tool's policy pins stays above the fold; the rest lives in
+// each ToolCallBlock and appears when that block is expanded.
+const mediaParts = computed(() => props.tools.flatMap((tool) => (tool.resultMeta?.media?.pinned === false ? [] : safeMediaParts(tool.resultParts))))
 
 // Compact name list e.g. ``read x3, bash x1, edit x1``.  Truncated to
 // the top 4 names; remainder collapses into ``+N more`` so the chip

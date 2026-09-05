@@ -41,4 +41,33 @@ describe("ToolCallBatch — generated media", () => {
     expect(wrapper.find(`img[src="${imageUrl}"]`).exists()).toBe(true)
     expect(wrapper.find(`video[src="${videoUrl}"]`).exists()).toBe(true)
   })
+
+  it("keeps unpinned media (a file the creature looked at) out of the collapsed strip", () => {
+    const imageUrl = "/api/sessions/s1/artifacts/generated_images/grok.jpeg"
+    const wrapper = mount(ToolCallBatch, {
+      props: {
+        expanded: false,
+        tools: [
+          {
+            id: "image",
+            name: "grok_image_gen",
+            kind: "tool",
+            status: "done",
+            resultParts: [{ type: "image_url", image_url: { url: imageUrl } }],
+          },
+          {
+            id: "read",
+            name: "read",
+            kind: "tool",
+            status: "done",
+            resultParts: [{ type: "image_url", image_url: { url: "file:///tmp/seen.png" } }],
+            resultMeta: { media: { persist: false, pinned: false } },
+          },
+        ],
+      },
+    })
+
+    expect(wrapper.find(`img[src="${imageUrl}"]`).exists()).toBe(true)
+    expect(wrapper.findAll("img").length).toBe(1)
+  })
 })

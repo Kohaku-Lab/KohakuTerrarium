@@ -12,12 +12,12 @@
 
 <script setup>
 import { computed } from "vue"
-import { safeArtifactUrl } from "@/utils/artifacts"
+import { mediaSourceUrl } from "@/utils/artifacts"
 
 const props = defineProps({
   file: { type: Object, required: true },
 })
 
-const url = computed(() => safeArtifactUrl(props.file?.path))
+const url = computed(() => mediaSourceUrl(props.file?.path))
 const name = computed(() => props.file?.name || "video.mp4")
 </script>
