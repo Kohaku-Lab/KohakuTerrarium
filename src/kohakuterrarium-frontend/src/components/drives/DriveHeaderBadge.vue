@@ -6,13 +6,13 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 import DriveCountBadges from "@/components/drives/DriveCountBadges.vue"
 import DrivesPanel from "@/components/panels/DrivesPanel.vue"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useDrivesStore } from "@/stores/drives"
-import { fireOpenDrives } from "@/utils/layoutEvents"
+import { LAYOUT_EVENTS, fireOpenDrives, onLayoutEvent } from "@/utils/layoutEvents"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -27,9 +27,24 @@ const show = computed(() => store.order.length > 0)
 const drawerOpen = ref(false)
 
 let poller = null
+let unsubDrawer = () => {}
 
 onMounted(() => {
   if (sessionId.value) start()
+  // Other surfaces (the compact Creature State tab) ask this host to open
+  // the full panel as a drawer; claiming the event tells them it is handled.
+  unsubDrawer = onLayoutEvent(LAYOUT_EVENTS.OPEN_DRIVES_DRAWER, async (evt) => {
+    const detail = evt?.detail || {}
+    if (detail.sessionId && detail.sessionId !== sessionId.value) return
+    evt?.preventDefault?.()
+    drawerOpen.value = true
+    // The drawer's panel mounts on the next tick and resets the store as it
+    // loads, so the deep link is handed to it only once it is listening.
+    if (detail.driveId) {
+      await nextTick()
+      fireOpenDrives(detail)
+    }
+  })
 })
 
 watch(sessionId, (id, prev) => {
@@ -39,7 +54,10 @@ watch(sessionId, (id, prev) => {
   if (id) start()
 })
 
-onBeforeUnmount(stop)
+onBeforeUnmount(() => {
+  stop()
+  unsubDrawer()
+})
 
 function start() {
   // Best-effort: a session without the Drive runtime simply 404s and the

@@ -38,7 +38,7 @@
         </div>
       </div>
       <div v-if="store.selected" class="drive-detail-pane">
-        <DriveDetail :record="store.selected" :detail="store.detail" :deliveries="store.deliveries[store.selectedId] || []" :flags="store.deliveryFlags[store.selectedId]" :allowed-actions="store.selected.allowed_actions || []" :replaying="replaying" :pending-proposal="store.pendingProposals[store.selectedId] || null" closable @close="store.selectedId = null" @transition="onTransition" @wake="onWake" @assign="onAssign" @unassign="onUnassign" @transfer-owner="onTransferOwner" @report-progress="onProgress" @propose-terminal="onProposeTerminal" @verify-terminal="onVerifyTerminal" @edit="openEdit" @replay="onReplay" />
+        <DriveDetail :record="store.selected" :detail="store.detail" :deliveries="store.deliveries[store.selectedId] || []" :flags="store.deliveryFlags[store.selectedId]" :allowed-actions="store.selected.allowed_actions || []" :replaying="replaying" :pending-proposal="store.pendingProposals[store.selectedId] || null" closable @close="store.selectedId = null" @transition="actions.onTransition" @wake="actions.onWake" @assign="actions.onAssign" @unassign="actions.onUnassign" @transfer-owner="actions.onTransferOwner" @report-progress="actions.onProgress" @propose-terminal="actions.onProposeTerminal" @verify-terminal="actions.onVerifyTerminal" @edit="openEdit" @replay="actions.onReplay" />
       </div>
     </div>
 
@@ -47,18 +47,17 @@
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
-import { ElMessage, ElMessageBox } from "element-plus"
+import { computed, onBeforeUnmount, onMounted, ref } from "vue"
 
 import DriveCountBadges from "@/components/drives/DriveCountBadges.vue"
 import DriveDetail from "@/components/drives/DriveDetail.vue"
 import DriveEditor from "@/components/drives/DriveEditor.vue"
 import DriveSummaryRow from "@/components/drives/DriveSummaryRow.vue"
-import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import { useDriveActions } from "@/composables/useDriveActions"
+import { useDrivesLive } from "@/composables/useDrivesLive"
 import { useDrivesStore } from "@/stores/drives"
 import { driveSettingsAPI } from "@/utils/driveSettingsApi"
 import { LAYOUT_EVENTS, onLayoutEvent } from "@/utils/layoutEvents"
-import { wsUrl } from "@/utils/wsUrl"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -71,13 +70,14 @@ const store = useDrivesStore(sessionId.value || undefined)
 
 const editorOpen = ref(false)
 const editorMode = ref("create")
-const saving = ref(false)
-const replaying = ref(null)
 // Empty until the node's enabled registrations load — never a silent "generic"
 // fallback, so an unavailable-runtime create is surfaced, not attempted (R1-38).
 const createKinds = ref([])
 // Session members for the creature-scope picker (R1-38).
 const creatures = computed(() => props.instance?.creatures || [])
+
+const actions = useDriveActions(store, { sessionId })
+const { saving, replaying } = actions
 
 // Rows grouped by assignee so a graph reads per creature; members keep the
 // session's order and unassigned records sit last.
@@ -103,15 +103,12 @@ const hasFilters = computed(() => {
   return f.status.length || f.kind.length || f.text || f.owner || f.assignee || f.scope
 })
 
-let poller = null
-let ws = null
-let wsClosedByUs = false
-let reconnectTimer = null
 let kindsGen = 0
 let unsubDeepLink = () => {}
 
+useDrivesLive(sessionId, store, { onStart: loadKinds })
+
 onMounted(() => {
-  if (sessionId.value) start()
   // Deep-link from the header badge / chat / graph: focus the record when
   // the event targets this session. Never opens the panel itself.
   unsubDeepLink = onLayoutEvent(LAYOUT_EVENTS.OPEN_DRIVES, (evt) => {
@@ -123,78 +120,9 @@ onMounted(() => {
   })
 })
 
-watch(sessionId, (id, prev) => {
-  if (id === prev) return
-  stopLive()
-  if (id) start()
-})
-
 onBeforeUnmount(() => {
-  stopLive()
   unsubDeepLink()
 })
-
-function start() {
-  store.load(sessionId.value)
-  loadKinds()
-  poller = createVisibilityInterval(() => store.reconcile(), 6000)
-  poller.start()
-  startLive()
-}
-
-function stopLive() {
-  if (poller) {
-    poller.stop()
-    poller = null
-  }
-  wsClosedByUs = true
-  // Cancel any pending reconnect so its callback can't reopen the socket after
-  // a session switch or unmount (R1-39).
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer)
-    reconnectTimer = null
-  }
-  if (ws) {
-    ws.close()
-    ws = null
-  }
-}
-
-// Subscribe to the runtime-graph event stream; Drive EngineEvents are folded
-// into the store as they arrive. The periodic reconcile is the reliable
-// backstop when the socket is down or an event is missed.
-function startLive() {
-  if (typeof WebSocket === "undefined") return
-  wsClosedByUs = false
-  try {
-    ws = new WebSocket(wsUrl("/ws/runtime/graph"))
-    ws.onmessage = (event) => {
-      let data
-      try {
-        data = JSON.parse(event.data)
-      } catch {
-        return
-      }
-      const kind = data.kind || data.type || ""
-      if (String(kind).startsWith("drive")) store.applyEvent(data)
-    }
-    ws.onclose = () => {
-      ws = null
-      // Track the reconnect timer so stopLive() can cancel it, and recheck the
-      // shutdown flag when it fires (the panel may have unmounted or switched
-      // sessions in the interval) — R1-39.
-      if (!wsClosedByUs) {
-        reconnectTimer = setTimeout(() => {
-          reconnectTimer = null
-          if (!wsClosedByUs && sessionId.value) startLive()
-        }, 2000)
-      }
-    }
-    ws.onerror = () => {}
-  } catch {
-    /* live updates are best-effort; reconcile covers the gap */
-  }
-}
 
 async function loadKinds() {
   const gen = ++kindsGen
@@ -222,113 +150,11 @@ function openEdit() {
 }
 
 async function onCreate(request) {
-  saving.value = true
-  try {
-    // A graph-scoped Drive lives in this session's graph; a creature-scoped one
-    // carries the picked creature id from the editor — never override it with
-    // the graph id (R1-38).
-    const scope_id = request.scope_type === "creature" ? request.scope_id : sessionId.value
-    const res = await store.create({ ...request, scope_id })
-    if (res.ok) {
-      editorOpen.value = false
-      ElMessage.success("Drive created.")
-    } else {
-      ElMessage.error(res.detail || "Create failed.")
-    }
-  } finally {
-    saving.value = false
-  }
+  if (await actions.onCreate(request)) editorOpen.value = false
 }
 
-async function onSave({ patch, expectedRevision }) {
-  saving.value = true
-  try {
-    // Thread the editor's captured base revision through unchanged so a stale
-    // draft conflicts instead of overwriting a newer record (R1-35).
-    const res = await store.update(store.selectedId, patch, expectedRevision)
-    if (res.ok) {
-      editorOpen.value = false
-      ElMessage.success("Saved.")
-    } else if (res.conflict) {
-      ElMessage.warning("This Drive changed — compare and retry.")
-    } else {
-      ElMessage.error(res.detail || "Save failed.")
-    }
-  } finally {
-    saving.value = false
-  }
-}
-
-async function onTransition(target) {
-  await runAction(() => store.transition(store.selectedId, target), `Moved to ${target}.`)
-}
-
-async function onWake() {
-  await runAction(() => store.wake(store.selectedId), "Woken.")
-}
-
-async function onAssign() {
-  const id = store.selectedId
-  try {
-    const { value } = await ElMessageBox.prompt("Creature id to assign", "Assign Drive", { inputPlaceholder: "creature-id" })
-    if (value) await runAction(() => store.assign(id, value), "Assigned.")
-  } catch {
-    /* cancelled */
-  }
-}
-
-async function onUnassign() {
-  await runAction(() => store.unassign(store.selectedId), "Unassigned.")
-}
-
-async function onTransferOwner() {
-  const id = store.selectedId
-  try {
-    const { value } = await ElMessageBox.prompt("New owner (e.g. user:alice)", "Transfer owner", { inputPlaceholder: "kind:identity" })
-    if (value) await runAction(() => store.setOwner(id, value), "Owner transferred.")
-  } catch {
-    /* cancelled */
-  }
-}
-
-async function onProgress(summary) {
-  await runAction(() => store.reportProgress(store.selectedId, summary), "Progress recorded.")
-}
-
-async function onProposeTerminal() {
-  const res = await store.propose(store.selectedId, "completed")
-  if (res.ok && res.pending) ElMessage.info("Completion proposed — awaiting verification.")
-  else if (res.ok) ElMessage.success("Completed.")
-  else if (res.conflict) ElMessage.warning("This Drive changed — reloaded the current version.")
-  else ElMessage.error(res.detail || "Propose failed.")
-}
-
-async function onVerifyTerminal(approved) {
-  if (approved) {
-    await runAction(() => store.approve(store.selectedId), "Approved.")
-  } else {
-    // No dedicated reject route; block the Drive so it leaves the pending
-    // terminal state and can be reworked.
-    await runAction(() => store.transition(store.selectedId, "blocked", { reason: "verification rejected" }), "Rejected.")
-  }
-}
-
-async function onReplay(deliveryId) {
-  replaying.value = deliveryId
-  try {
-    const res = await store.replayDelivery(store.selectedId, deliveryId)
-    if (res.ok) ElMessage.success("Delivery replayed.")
-    else ElMessage.error(res.detail || "Replay failed.")
-  } finally {
-    replaying.value = null
-  }
-}
-
-async function runAction(fn, okMsg) {
-  const res = await fn()
-  if (res.ok) ElMessage.success(okMsg)
-  else if (res.conflict) ElMessage.warning("This Drive changed — reloaded the current version.")
-  else ElMessage.error(res.detail || "Action failed.")
+async function onSave(payload) {
+  if (await actions.onSave(payload)) editorOpen.value = false
 }
 
 // Deep-link: a parent can request a specific Drive be opened.

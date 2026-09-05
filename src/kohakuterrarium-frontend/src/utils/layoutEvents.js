@@ -19,6 +19,9 @@ const LAYOUT_EVENTS = Object.freeze({
   // panel for that session focuses the record and marks the event handled;
   // the header badge opens a drawer when nothing claimed it.
   OPEN_DRIVES: "drives:open",
+  // Open the full Drives panel as a drawer over the current layout:
+  // {sessionId, driveId?}. Handled by the header badge that hosts the drawer.
+  OPEN_DRIVES_DRAWER: "drives:open-drawer",
 })
 
 function _dispatch(name, detail) {
@@ -47,6 +50,11 @@ export function fireModelConfigOpen(detail = {}) {
 /** Returns true when a mounted Drives panel claimed the event. */
 export function fireOpenDrives(detail = {}) {
   return _dispatch(LAYOUT_EVENTS.OPEN_DRIVES, detail)
+}
+
+/** Returns true when a drawer host claimed the event. */
+export function fireOpenDrivesDrawer(detail = {}) {
+  return _dispatch(LAYOUT_EVENTS.OPEN_DRIVES_DRAWER, detail)
 }
 
 export function onLayoutEvent(name, handler) {

@@ -27,14 +27,16 @@ Dashboard 用的是可设置的二元 split tree：每个区块不是 leaf (一�
 
 | 快捷键 | Preset | 布局 |
 |----------|--------|--------|
-| Ctrl+1 | Chat Focus | chat \| status-dashboard (上) + state (下) |
+| Ctrl+1 | Chat Focus | chat \| status (上) + creature state (下) |
 | Ctrl+2 | Workspace | files \| editor+terminal \| chat+activity |
 | Ctrl+3 | Multi-creature | creatures \| chat \| activity+state |
 | Ctrl+4 | Canvas | chat \| canvas+activity |
 | Ctrl+5 | Debug | chat+state (上) / debug (下) |
 | Ctrl+6 | Settings | settings (全萤幕) |
 
-Instance 页会自动：Creature用 Chat Focus、Terrarium用 Multi-creature。每个 instance 上次用的 preset 存在 localStorage。
+每个新打开的 instance 都落在 Chat Focus，不论它是单个 Creature 还是多 Creature 的图：Status 侧栏自带 Creature 列表，多 Creature 图不用切换布局就能操作。侧栏上的 Creatures 图标显示成员数，并会在你看别处时随图增长而发光。Multi-creature 仍留在 Ctrl+3 作为宽版布局。每个 instance 上次用的 preset 存在 localStorage，并且永远优先于默认值。
+
+面板选择器和命令面板会为每个面板显示一行说明；两个旧别名 (`file-tree`、`editor-status`) 仍能被旧 preset 解析，但不再提供给用户选择。
 
 ## Edit 模式
 
@@ -80,11 +82,20 @@ Ctrl+K 就算 input 聚焦也会触发。Preset 快捷键在 text input/textarea
 ### Chat
 主要对话介面。支持消息编辑+重跑、重新生成、工具调用折叠、子代理巢状显示。
 
-### Activity (分页)
-三个分页：Session (id、cwd、Creature/频道)、Tokens (in/out/cache + context bar 与压缩门槛)、Jobs (执行中的工具调用与 stop 按钮)。
+### Status (分页侧栏)
+五个分页：Session (代理、模型、provider、会话 id、状态)、Creatures (图里每个成员：点击聚焦、启动/停止、按 Creature 切换模型，以及频道；侧栏图标带成员数)、Tokens (in/out/cache + context bar 与压缩门槛)、Jobs (执行中的工具调用与 stop 按钮)、Modules (完整的模块界面)。
 
-### State (分页)
-四个分页：Scratchpad (代理工作记忆的 key-value)、Tool History (这个会话所有工具调用)、Memory (对会话事件做 FTS5 搜索)、Compaction (历次压缩记录)。
+### Overview
+同样的会话身份、token 用量与执行中作业，但是一页滚动、没有分页。不在任何默认 preset 里；想一次看完全部时从面板选择器里选它。
+
+### Jobs
+只有模型、context bar 与执行中的作业。Settings preset 使用它。
+
+### Creature State (分页)
+四个分页：Drives (聚焦 Creature 的驱动，管理能力与完整 Drives 面板相同：暂停、恢复、唤醒、取消、完成、进度记录，以及新建目标表单；范围切换可看整个图，"打开完整面板"会把 Drives 面板以抽屉打开)、Scratchpad (代理工作记忆的 key-value)、Memory (对会话事件做 FTS5 搜索)、Compaction (历次压缩记录)。
+
+### Drives
+会话里的全部驱动，按受派者分组，含完整记录详情。可从面板选择器、标题栏徽章，以及 Creature State 面板的"打开完整面板"进入。
 
 ### Files
 文件树加 refresh，再加一个 "Touched" view：按动作分组显示代理读过/写过/错过的文件。

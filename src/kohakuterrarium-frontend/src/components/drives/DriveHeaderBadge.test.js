@@ -19,7 +19,7 @@ vi.mock("@/composables/useVisibilityInterval", () => ({
 import DriveHeaderBadge from "./DriveHeaderBadge.vue"
 import DriveCountBadges from "./DriveCountBadges.vue"
 import { drivesAPI } from "@/utils/drivesApi"
-import { LAYOUT_EVENTS, onLayoutEvent } from "@/utils/layoutEvents"
+import { LAYOUT_EVENTS, fireOpenDrivesDrawer, onLayoutEvent } from "@/utils/layoutEvents"
 
 const ElDrawerStub = {
   name: "ElDrawer",
@@ -67,6 +67,19 @@ describe("DriveHeaderBadge", () => {
     } finally {
       off()
     }
+  })
+
+  it("hosts the drawer for other surfaces and claims their open request", async () => {
+    const w = mountBadge()
+    await flushPromises()
+    expect(fireOpenDrivesDrawer({ sessionId: "g1" })).toBe(true)
+    await w.vm.$nextTick()
+    expect(w.find(".el-drawer-stub").attributes("data-open")).toBe("1")
+    // Another session's request is not ours to handle.
+    w.vm.drawerOpen = false
+    await w.vm.$nextTick()
+    expect(fireOpenDrivesDrawer({ sessionId: "elsewhere" })).toBe(false)
+    expect(w.find(".el-drawer-stub").attributes("data-open")).toBe("0")
   })
 
   it("stays hidden for a session without drives", async () => {

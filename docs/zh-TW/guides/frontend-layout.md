@@ -27,14 +27,16 @@ Dashboard 用的是可設定的二元 split tree：每個區塊不是 leaf (一�
 
 | 快捷鍵 | Preset | 版面 |
 |----------|--------|--------|
-| Ctrl+1 | Chat Focus | chat \| status-dashboard (上) + state (下) |
+| Ctrl+1 | Chat Focus | chat \| status (上) + creature state (下) |
 | Ctrl+2 | Workspace | files \| editor+terminal \| chat+activity |
 | Ctrl+3 | Multi-creature | creatures \| chat \| activity+state |
 | Ctrl+4 | Canvas | chat \| canvas+activity |
 | Ctrl+5 | Debug | chat+state (上) / debug (下) |
 | Ctrl+6 | Settings | settings (全螢幕) |
 
-Instance 頁會自動：生物用 Chat Focus、生態瓶用 Multi-creature。每個 instance 上次用的 preset 存在 localStorage。
+每個新開啟的 instance 都落在 Chat Focus，不論它是單一生物還是多生物的圖：Status 側欄自帶生物列表，多生物圖不用切換版面就能操作。側欄上的 Creatures 圖示顯示成員數，並會在你看別處時隨圖成長而發光。Multi-creature 仍留在 Ctrl+3 作為寬版版面。每個 instance 上次用的 preset 存在 localStorage，並且永遠優先於預設值。
+
+面板選擇器和命令面板會為每個面板顯示一行說明；兩個舊別名 (`file-tree`、`editor-status`) 仍能被舊 preset 解析，但不再提供給使用者選擇。
 
 ## Edit 模式
 
@@ -80,11 +82,20 @@ Ctrl+K 就算 input 聚焦也會觸發。Preset 快捷鍵在 text input/textarea
 ### Chat
 主要對話介面。支援訊息編輯+重跑、重新生成、工具呼叫折疊、子代理巢狀顯示。
 
-### Activity (分頁)
-三個分頁：Session (id、cwd、生物/頻道)、Tokens (in/out/cache + context bar 與壓縮門檻)、Jobs (執行中的工具呼叫與 stop 按鈕)。
+### Status (分頁側欄)
+五個分頁：Session (代理、模型、provider、工作階段 id、狀態)、Creatures (圖裡每個成員：點擊聚焦、啟動/停止、按生物切換模型，以及頻道；側欄圖示帶成員數)、Tokens (in/out/cache + context bar 與壓縮門檻)、Jobs (執行中的工具呼叫與 stop 按鈕)、Modules (完整的模組介面)。
 
-### State (分頁)
-四個分頁：Scratchpad (代理工作記憶的 key-value)、Tool History (這個工作階段所有工具呼叫)、Memory (對工作階段事件做 FTS5 搜尋)、Compaction (歷次壓縮紀錄)。
+### Overview
+同樣的工作階段身份、token 用量與執行中作業，但是一頁捲動、沒有分頁。不在任何預設 preset 裡；想一次看完全部時從面板選擇器裡選它。
+
+### Jobs
+只有模型、context bar 與執行中的作業。Settings preset 使用它。
+
+### Creature State (分頁)
+四個分頁：Drives (聚焦生物的驅動，管理能力與完整 Drives 面板相同：暫停、恢復、喚醒、取消、完成、進度紀錄，以及新增目標表單；範圍切換可看整個圖，「開啟完整面板」會把 Drives 面板以抽屜開啟)、Scratchpad (代理工作記憶的 key-value)、Memory (對工作階段事件做 FTS5 搜尋)、Compaction (歷次壓縮紀錄)。
+
+### Drives
+工作階段裡的全部驅動，按受派者分組，含完整紀錄詳情。可從面板選擇器、標題列徽章，以及 Creature State 面板的「開啟完整面板」進入。
 
 ### Files
 檔案樹加 refresh，再加一個 "Touched" view：按動作分組顯示代理讀過/寫過/錯過的檔案。

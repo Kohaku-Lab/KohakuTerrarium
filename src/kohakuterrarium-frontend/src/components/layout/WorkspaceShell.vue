@@ -9,19 +9,6 @@
     <!-- Save-as-new-preset modal -->
     <SavePresetModal v-model="saveModalOpen" @saved="onSaved" />
 
-    <!-- Jump-to-multi-creature hint: shown when the active preset
-         doesn't surface the creatures panel but the graph has new
-         creatures or channels worth seeing. Dismissable until the
-         next graph mutation. -->
-    <button v-if="showJumpHint" class="shrink-0 flex items-center gap-2 px-3 py-1.5 text-xs bg-iolite/10 hover:bg-iolite/20 border-b border-iolite/30 text-iolite text-left transition-colors" @click="jumpToMultiCreature">
-      <span class="i-carbon-network-4 shrink-0" />
-      <span class="flex-1">
-        This graph now has <strong>{{ instance?.creatures?.length || 0 }}</strong> creature(s) and <strong>{{ instance?.channels?.length || 0 }}</strong> channel(s). Switch to the Multi-creature preset to see them.
-      </span>
-      <span class="i-carbon-arrow-right shrink-0" />
-      <span class="i-carbon-close shrink-0 ml-1 hover:text-coral" :title="'Dismiss'" @click.stop="dismissHint" />
-    </button>
-
     <!-- Main content area: the split tree fills all remaining space -->
     <div class="flex-1 relative min-h-0">
       <div class="absolute inset-0">
@@ -44,6 +31,7 @@ import AppHeader from "@/components/chrome/AppHeader.vue"
 import StatusBar from "@/components/chrome/StatusBar.vue"
 import { useInstancesStore } from "@/stores/instances"
 import { useLayoutStore } from "@/stores/layout"
+import { DEFAULT_PRESET_ID } from "@/stores/layoutPanels"
 import { LAYOUT_EVENTS, onLayoutEvent } from "@/utils/layoutEvents"
 import EditModeBanner from "./EditModeBanner.vue"
 import LayoutNode from "./LayoutNode.vue"
@@ -75,62 +63,14 @@ const treeRoot = computed(() => {
   return p.tree || null
 })
 
-// Walk a preset tree looking for a leaf with the given panel id.
-function _treeContainsPanel(node, panelId) {
-  if (!node) return false
-  if (node.type === "leaf") return node.panelId === panelId
-  for (const child of node.children || []) {
-    if (_treeContainsPanel(child, panelId)) return true
-  }
-  return false
-}
-
-const activePresetHasCreaturesPanel = computed(() => {
-  const p = layout.activePreset
-  if (!p) return false
-  return _treeContainsPanel(p.tree, "creatures")
-})
-
-// Snapshot the topology size that was already acknowledged via the
-// hint dismiss action. The hint re-arms whenever the graph grows
-// past the dismissed snapshot.
-const dismissedSize = ref({ creatures: 0, channels: 0 })
-
-const currentSize = computed(() => ({
-  creatures: instance.value?.creatures?.length || 0,
-  channels: instance.value?.channels?.length || 0,
-}))
-
-const showJumpHint = computed(() => {
-  if (activePresetHasCreaturesPanel.value) return false
-  const cur = currentSize.value
-  // Only nudge when the graph is interesting AND has grown since
-  // the user dismissed last time.
-  if (cur.creatures < 2 && cur.channels < 1) return false
-  if (cur.creatures <= dismissedSize.value.creatures && cur.channels <= dismissedSize.value.channels) return false
-  return true
-})
-
-function jumpToMultiCreature() {
-  layout.switchPreset("multi-creature")
-}
-
-function dismissHint() {
-  dismissedSize.value = { ...currentSize.value }
-}
-
 // Self-heal: if no preset is active when this shell mounts (or the
-// stored id no longer resolves), pick a sensible default rather than
-// stranding the user on the "No layout preset active" empty state.
+// stored id no longer resolves), land on the default layout rather than
+// stranding the user on the "No layout preset active" empty state. The
+// graph's shape never picks a different layout: the status rail shows
+// the creatures wherever the user is.
 function ensurePresetActive() {
   if (layout.activePreset) return
-  const inst = instance.value
-  const fallback = inst && (inst.creatures?.length || 0) > 1 ? "multi-creature" : "chat-focus"
-  layout.switchPreset(fallback)
-  if (!layout.activePreset) {
-    // builtin lookup failed for some reason — try chat-focus as a last resort
-    layout.switchPreset("chat-focus")
-  }
+  layout.switchPreset(DEFAULT_PRESET_ID)
 }
 
 watch(

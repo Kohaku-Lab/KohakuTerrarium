@@ -1,77 +1,34 @@
 <template>
   <div class="h-full overflow-y-auto bg-white dark:bg-warm-900">
     <div class="flex flex-col gap-3 p-3 text-xs">
-      <template v-if="instance?.type !== 'terrarium'">
-        <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-4">
-          <div class="flex items-center gap-2 mb-3">
-            <StatusDot :status="instance?.status" />
-            <span class="font-semibold text-warm-700 dark:text-warm-300 text-sm">
-              {{ instance?.config_name }}
-            </span>
-          </div>
-          <div class="flex flex-col gap-1.5 text-warm-500">
-            <div class="flex items-center gap-2">
-              <span class="text-warm-400 w-12">{{ t("common.name") }}</span>
-              <span class="text-warm-600 dark:text-warm-400">
-                {{ instance?.creatures?.[0]?.name || instance?.config_name }}
-              </span>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-warm-400 w-12">{{ t("common.model") }}</span>
-              <span class="text-warm-600 dark:text-warm-400 font-mono text-[11px] break-all">
-                {{ chat.modelDisplay || instance?.llm_name || instance?.model || "default" }}
-              </span>
-            </div>
-          </div>
+      <!-- One identity block: who is running, on what, and where. -->
+      <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
+        <div class="flex items-center gap-2 mb-2">
+          <StatusDot :status="instance?.status" />
+          <span class="font-semibold text-warm-700 dark:text-warm-300 text-sm truncate" :title="chat.activeCreatureInfo.configRef || instance?.config_ref || ''">{{ agentLabel }}</span>
+          <span class="flex-1" />
+          <span v-if="instance?.status" class="text-[10px] px-1.5 py-0.5 rounded shrink-0" :class="instance.status === 'running' ? 'bg-aquamarine/10 text-aquamarine' : 'bg-warm-100 dark:bg-warm-800 text-warm-400'">{{ statusLabel(instance.status, instance.status) }}</span>
         </div>
-      </template>
-
-      <div class="border-t border-warm-200 dark:border-warm-700" />
-
-      <div v-if="instance?.type === 'terrarium'" class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
-        <div class="section-label">{{ t("common.target") }}</div>
         <div class="flex flex-col gap-1.5">
-          <div class="flex items-center gap-2">
-            <span class="text-warm-400 w-16">{{ t("common.type") }}</span>
+          <div v-if="instance?.type === 'terrarium'" class="flex items-center gap-2">
+            <span class="text-warm-400 w-16">{{ t("common.target") }}</span>
             <span class="text-warm-600 dark:text-warm-400 capitalize">{{ currentTargetKindLabel }}</span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-warm-400 w-16">{{ t("common.name") }}</span>
             <span class="text-warm-600 dark:text-warm-400 font-mono text-[11px] break-all">{{ currentTargetLabel }}</span>
           </div>
           <div v-if="canSwitchTargetModel" class="flex items-start gap-2">
             <span class="text-warm-400 w-16 pt-1">{{ t("common.model") }}</span>
-            <div class="flex-1 min-w-0 flex flex-col gap-2">
+            <div class="flex-1 min-w-0 flex flex-col gap-1.5">
               <span class="text-iolite font-mono text-[11px] break-all">{{ sessionModel || instance?.llm_name || instance?.model || "--" }}</span>
-              <div class="flex items-center gap-2">
-                <el-select v-model="selectedModel" size="small" class="flex-1 min-w-0" :placeholder="t('status.selectModel')" :loading="modelsLoading" @change="handleModelSwitch">
-                  <el-option v-for="model in availableModels" :key="`${model.provider || model.login_provider || ''}/${model.name}`" :label="`${model.provider || model.login_provider || ''}/${model.name}`" :value="`${model.provider || model.login_provider || ''}/${model.name}`" />
-                </el-select>
-              </div>
+              <el-select v-model="selectedModel" size="small" class="flex-1 min-w-0" :placeholder="t('status.selectModel')" :loading="modelsLoading" @change="handleModelSwitch">
+                <el-option v-for="model in availableModels" :key="`${model.provider || model.login_provider || ''}/${model.name}`" :label="`${model.provider || model.login_provider || ''}/${model.name}`" :value="`${model.provider || model.login_provider || ''}/${model.name}`" />
+              </el-select>
               <div v-if="modelSwitchError" class="text-coral text-[10px]">{{ modelSwitchError }}</div>
             </div>
           </div>
           <div v-else class="flex items-center gap-2">
             <span class="text-warm-400 w-16">{{ t("common.model") }}</span>
-            <span class="text-warm-500 dark:text-warm-400 text-[11px]">{{ t("status.modelSwitchHint") }}</span>
-          </div>
-        </div>
-      </div>
-
-      <div class="rounded-lg border border-warm-200 dark:border-warm-700 p-3">
-        <div class="section-label">{{ t("common.session") }}</div>
-        <div class="flex flex-col gap-1.5">
-          <div class="flex items-center gap-2">
-            <span class="text-warm-400 w-16">{{ t("common.agent") }}</span>
-            <span class="text-warm-600 dark:text-warm-400">
-              <span :title="chat.activeCreatureInfo.configRef || instance?.config_ref || ''">{{ chat.activeCreatureInfo.configName || instance?.creature_config_name || instance?.creatures?.[0]?.config_name || chat.sessionInfo.agentName || instance?.config_name || instance?.creatures?.[0]?.name || "--" }}</span>
-            </span>
-          </div>
-          <div class="flex items-center gap-2">
-            <span class="text-warm-400 w-16">{{ t("common.model") }}</span>
-            <span class="text-iolite font-mono text-[11px] break-all">
-              {{ chat.modelDisplay || instance?.llm_name || instance?.model || "--" }}
-            </span>
+            <span class="text-iolite font-mono text-[11px] break-all">{{ chat.modelDisplay || instance?.llm_name || instance?.model || "--" }}</span>
+            <span v-if="instance?.type === 'terrarium'" class="text-warm-400 text-[10px]">{{ t("status.modelSwitchHint") }}</span>
           </div>
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">{{ t("common.provider") }}</span>
@@ -81,7 +38,7 @@
           </div>
           <div class="flex items-center gap-2">
             <span class="text-warm-400 w-16">{{ t("common.session") }}</span>
-            <span class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-32">
+            <span class="text-warm-600 dark:text-warm-400 font-mono text-[10px] truncate max-w-48">
               {{ chat.sessionInfo.sessionId || instance?.session_id || instance?.id || "--" }}
             </span>
           </div>
@@ -146,10 +103,12 @@
 </template>
 
 <script setup>
+import { computed, onMounted, ref, watch } from "vue"
+
 import StatusDot from "@/components/common/StatusDot.vue"
 import { useChatStore } from "@/stores/chat"
 import { useI18n } from "@/utils/i18n"
-import { agentAPI, configAPI, terrariumAPI } from "@/utils/api"
+import { configAPI, terrariumAPI } from "@/utils/api"
 
 const props = defineProps({
   instance: { type: Object, default: null },
@@ -166,7 +125,7 @@ const props = defineProps({
 // mode that produced identical token-usage across two sessions
 // sharing the same creature name.
 const chat = useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
-const { t } = useI18n()
+const { t, statusLabel } = useI18n()
 
 const selectedModel = ref("")
 const modelsLoading = ref(false)
@@ -176,6 +135,8 @@ const availableModels = ref([])
 onMounted(() => {
   loadModels()
 })
+
+const agentLabel = computed(() => chat.activeCreatureInfo.configName || props.instance?.creature_config_name || props.instance?.creatures?.[0]?.config_name || chat.sessionInfo.agentName || props.instance?.config_name || props.instance?.creatures?.[0]?.name || "--")
 
 const totalUsage = computed(() => {
   let prompt = 0

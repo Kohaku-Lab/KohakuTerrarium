@@ -52,16 +52,19 @@ function vsplit(ratio, top, bottom) {
 
 // ─── Presets ─────────────────────────────────────────────────────
 
-/** Chat focus — default for single-creature instances.
- *  chat | status-dashboard(top) + modules(bottom). Modules replaces
- *  the legacy ``state`` slot — runtime config is the more useful
- *  default than scratchpad inspection. ``state`` panel is still
- *  registered and reachable via the panel picker. */
+/** The preset every freshly opened session lands on, whatever its shape.
+ *  The status rail carries the creature list, so a multi-creature graph
+ *  needs no separate layout to be operable. */
+export const DEFAULT_PRESET_ID = "chat-focus"
+
+/** Chat focus — chat | status rail (top) + creature state (bottom).
+ *  The rail holds session / creatures / tokens / jobs / modules; the
+ *  state panel holds drives / scratchpad / memory / compaction. */
 const CHAT_FOCUS_PRESET = {
   id: "chat-focus",
   label: "Chat Focus",
   shortcut: "Ctrl+1",
-  tree: hsplit(70, leaf("chat"), vsplit(65, leaf("status-dashboard"), leaf("modules"))),
+  tree: hsplit(70, leaf("chat"), vsplit(40, leaf("status-tab"), leaf("state"))),
 }
 
 /** Workspace — files + editor + chat for code-work creatures. */
@@ -88,7 +91,7 @@ const CHAT_TERMINAL_PRESET = {
   ),
 }
 
-/** Multi-creature — default for terrarium instances. */
+/** Multi-creature — the wide layout with a dedicated creature column. */
 const MULTI_CREATURE_PRESET = {
   id: "multi-creature",
   label: "Multi-creature",
@@ -154,6 +157,9 @@ export const DEFAULT_PRESETS = [
 ]
 
 // ─── Registration ────────────────────────────────────────────────
+//
+// Labels and descriptions here are the English fallbacks; the picker
+// and palette translate them through ``utils/i18n`` by panel id.
 
 export function registerBuiltinPanels() {
   const layout = useLayoutStore()
@@ -167,65 +173,105 @@ export function registerBuiltinPanels() {
   // into multi-group via the Settings toggle / context-menu split.
   // The legacy ``ChatPanel`` is still exported and used directly by
   // ``SessionHistoryViewer.vue`` (read-only session viewer) and tests.
-  layout.registerPanel({ id: "chat", label: "Chat", component: ChatPanelContainer })
+  layout.registerPanel({
+    id: "chat",
+    label: "Chat",
+    description: "The conversation with the focused creature.",
+    component: ChatPanelContainer,
+  })
   layout.registerPanel({
     id: "status-dashboard",
-    label: "Status",
+    label: "Overview",
+    description: "Session identity, model, tokens, and jobs on one scroll.",
     component: StatusDashboard,
   })
+  // Legacy alias — legacy-editor preset references this id.
   layout.registerPanel({
     id: "file-tree",
     label: "File Tree",
     component: FileTree,
+    hidden: true,
   })
   layout.registerPanel({
     id: "monaco-editor",
     label: "Editor",
+    description: "Code editor for the workspace.",
     component: EditorMain,
   })
   // Legacy alias — legacy-editor preset references this id.
   layout.registerPanel({
     id: "editor-status",
-    label: "Activity",
+    label: "Editor Status",
     component: EditorStatus,
+    hidden: true,
   })
-  layout.registerPanel({ id: "files", label: "Files", component: FilesPanel })
-  layout.registerPanel({ id: "activity", label: "Activity", component: ActivityPanel })
-  layout.registerPanel({ id: "settings", label: "Settings", component: SettingsPanel })
-  layout.registerPanel({ id: "state", label: "State", component: StatePanel })
+  layout.registerPanel({
+    id: "files",
+    label: "Files",
+    description: "Workspace file tree and files the creature touched.",
+    component: FilesPanel,
+  })
+  layout.registerPanel({
+    id: "activity",
+    label: "Jobs",
+    description: "Model, context usage, and running jobs.",
+    component: ActivityPanel,
+  })
+  layout.registerPanel({
+    id: "settings",
+    label: "Settings",
+    description: "Per-instance settings.",
+    component: SettingsPanel,
+  })
+  layout.registerPanel({
+    id: "state",
+    label: "Creature State",
+    description: "Drives, scratchpad, memory search, and compaction for the focused creature.",
+    component: StatePanel,
+  })
   layout.registerPanel({
     id: "creatures",
     label: "Creatures",
+    description: "Graph members and channels for a multi-creature session.",
     component: CreaturesPanel,
   })
   layout.registerPanel({
     id: "canvas",
     label: "Canvas",
+    description: "Images and artifacts the creature produced.",
     component: CanvasPanel,
   })
-  layout.registerPanel({ id: "debug", label: "Debug", component: DebugPanel })
+  layout.registerPanel({
+    id: "debug",
+    label: "Debug",
+    description: "Runtime logs and diagnostics.",
+    component: DebugPanel,
+  })
   layout.registerPanel({
     id: "status-tab",
     label: "Status",
+    description: "Session, creatures, tokens, jobs, and modules in one rail.",
     component: StatusDashboardTab,
   })
   layout.registerPanel({
     id: "terminal",
     label: "Terminal",
+    description: "A terminal in the creature's working directory.",
     component: TerminalPanel,
   })
   layout.registerPanel({
     id: "modules",
     label: "Modules",
+    description: "Tools, plugins, triggers, and other runtime modules.",
     component: ModulesPanel,
   })
-  // Drive record panel. Registered so it's reachable from the panel
-  // picker for every session, but deliberately NOT part of any default
-  // preset: a session with zero Drives must look byte-identical to today
-  // (no new chrome forcing itself open).
+  // The full Drive record panel. The compact per-creature view lives in
+  // the Creature State panel; this one is the option for whole-session
+  // management and stays out of the default presets.
   layout.registerPanel({
     id: "drives",
     label: "Drives",
+    description: "Every drive in the session with full management.",
     component: DrivesPanel,
   })
 

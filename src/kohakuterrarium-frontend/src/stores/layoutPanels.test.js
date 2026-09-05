@@ -98,4 +98,52 @@ describe("layoutPanels — registerBuiltinPanels", () => {
       expect(p.tree.type).toMatch(/leaf|split/)
     }
   })
+
+  function leaves(node, out = []) {
+    if (!node) return out
+    if (node.type === "leaf") out.push(node.panelId)
+    for (const child of node.children || []) leaves(child, out)
+    return out
+  }
+
+  it("chat-focus is the default and pairs the status rail with creature state", async () => {
+    const { DEFAULT_PRESET_ID, registerBuiltinPanels } = await import("./layoutPanels.js")
+    registerBuiltinPanels()
+    const store = useLayoutStore()
+    expect(DEFAULT_PRESET_ID).toBe("chat-focus")
+    const tree = store.allPresets["chat-focus"].tree
+    expect(leaves(tree)).toEqual(["chat", "status-tab", "state"])
+    // The state column gets the larger share: drives and scratchpad need
+    // height, the status rail does not.
+    const right = tree.children[1]
+    expect(right.direction).toBe("vertical")
+    expect(right.ratio).toBeLessThan(50)
+  })
+
+  it("hides legacy aliases from the picker but keeps them resolvable", async () => {
+    const { registerBuiltinPanels } = await import("./layoutPanels.js")
+    registerBuiltinPanels()
+    const store = useLayoutStore()
+    for (const id of ["file-tree", "editor-status"]) {
+      expect(store.getPanel(id).hidden).toBe(true)
+      expect(store.visiblePanelList.some((p) => p.id === id)).toBe(false)
+    }
+    const visible = store.visiblePanelList.map((p) => p.id)
+    expect(visible).toContain("status-tab")
+    expect(visible).toContain("drives")
+  })
+
+  it("gives every visible panel a distinct label and a description", async () => {
+    const { registerBuiltinPanels } = await import("./layoutPanels.js")
+    registerBuiltinPanels()
+    const store = useLayoutStore()
+    const labels = store.visiblePanelList.map((p) => p.label)
+    expect(new Set(labels).size).toBe(labels.length)
+    for (const p of store.visiblePanelList) {
+      expect(p.description, `panel ${p.id} needs a description`).toBeTruthy()
+    }
+    expect(store.getPanel("status-dashboard").label).toBe("Overview")
+    expect(store.getPanel("activity").label).toBe("Jobs")
+    expect(store.getPanel("state").label).toBe("Creature State")
+  })
 })

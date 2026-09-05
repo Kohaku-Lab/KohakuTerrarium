@@ -126,6 +126,8 @@ const props = defineProps({
   kinds: { type: Array, default: () => [] },
   /** Session members, for the creature-scope picker: [{creature_id, name}]. */
   creatures: { type: Array, default: () => [] },
+  /** Creature preselected as scope / assignee on a fresh create form. */
+  defaultCreatureId: { type: String, default: "" },
   conflict: { type: Object, default: null },
   saving: { type: Boolean, default: false },
 })
@@ -206,7 +208,7 @@ function resetForm(record) {
     form.title = ""
     form.priority = 0
     form.scope_type = "graph"
-    form.scope_id = ""
+    form.scope_id = props.defaultCreatureId || ""
     form.presentationText = "{}"
     form.specText = "{}"
     form.metadataText = "{}"
