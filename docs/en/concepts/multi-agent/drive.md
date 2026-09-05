@@ -170,6 +170,12 @@ Tools that perform side effects should carry their own idempotency
 keys; the Drive delivery context exposes `delivery_id` precisely so a
 side-effecting tool has a stable key to deduplicate against.
 
+A user interrupt is a deterministic engine fact, so the engine acts on
+it: the interrupted delivery is acknowledged with reason
+`user_interrupted`, the Drive moves to `paused` with the same status
+reason, and no readiness scan re-arms it. Pursuit resumes only through
+an explicit resume or wake by an authorized actor.
+
 ### Recovery is honest about uncertainty
 
 If a creature stops (or the process crashes) between admission and

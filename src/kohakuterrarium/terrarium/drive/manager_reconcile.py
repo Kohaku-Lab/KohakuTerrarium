@@ -16,7 +16,7 @@ from dataclasses import replace
 from typing import Any
 
 from kohakuterrarium.terrarium.drive.acl import DriveOperation, authorize
-from kohakuterrarium.terrarium.drive.delivery import BLOCKABLE_STATUSES
+from kohakuterrarium.terrarium.drive.delivery_failure import BLOCKABLE_STATUSES
 from kohakuterrarium.terrarium.drive.errors import (
     DriveDeliveryError,
     DriveNotFoundError,

@@ -97,6 +97,7 @@ def make_delivery():
         claimed_at=NOW,
         admitted_at=LATER,
         last_error=None,
+        ack_reason="user_interrupted",
     )
 
 
@@ -360,3 +361,10 @@ def test_omitted_optional_collections_default_to_empty():
     assert back.dependency_ids == ()
     assert back.policy_options == {}
     assert back.spec == {}
+
+
+def test_delivery_without_ack_reason_unpacks_as_none():
+    # Rows written before ``ack_reason`` existed must still load.
+    payload = wire.pack_drive_delivery(make_delivery())
+    del payload["data"]["ack_reason"]
+    assert wire.unpack_drive_delivery(payload).ack_reason is None

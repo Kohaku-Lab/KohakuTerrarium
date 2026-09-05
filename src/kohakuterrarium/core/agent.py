@@ -574,9 +574,8 @@ class Agent(
         The consumer's turn body swallows the cancellation, finalizes, and
         loops — so any events still queued on the inbox process as the next
         fresh turn (no explicit re-fire needed). Queued Drive deliveries
-        are dropped WITHOUT running and their settlement resolved
-        ``interrupted`` so the dispatcher redelivers, matching the prior
-        drop-drive-on-interrupt behavior."""
+        are dropped WITHOUT running and settle as user-interrupted, so the
+        dispatcher pauses their drive instead of redelivering."""
         already_requested = self._interrupt_requested
         self._interrupt_requested = True
         self.controller._interrupted = True
@@ -593,7 +592,13 @@ class Agent(
         for env in dropped:
             fut = env.future
             if fut is not None and not fut.done():
-                fut.set_result(TurnOutcome(status="interrupted", was_primary=False))
+                fut.set_result(
+                    TurnOutcome(
+                        status="interrupted",
+                        was_primary=False,
+                        interrupted_by_user=True,
+                    )
+                )
         if dropped:
             logger.info(
                 "Dropped queued Drive deliveries after user interrupt",

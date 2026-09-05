@@ -256,6 +256,7 @@ def pack_drive_delivery(x: DriveDelivery) -> dict[str, Any]:
             "admitted_at": _dt(x.admitted_at),
             "acknowledged_at": _dt(x.acknowledged_at),
             "last_error": x.last_error,
+            "ack_reason": x.ack_reason,
         },
     )
 
@@ -279,6 +280,7 @@ def unpack_drive_delivery(payload: object) -> DriveDelivery:
         admitted_at=_parse_dt(d.get("admitted_at"), "admitted_at"),
         acknowledged_at=_parse_dt(d.get("acknowledged_at"), "acknowledged_at"),
         last_error=d.get("last_error"),
+        ack_reason=d.get("ack_reason"),
     )
 
 

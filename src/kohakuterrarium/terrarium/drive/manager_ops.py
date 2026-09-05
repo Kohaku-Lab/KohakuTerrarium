@@ -12,6 +12,7 @@ from typing import Any
 
 import kohakuterrarium.terrarium.drive.wire as drive_wire
 from kohakuterrarium.terrarium.drive.acl import DriveOperation, authorize
+from kohakuterrarium.terrarium.drive.delivery import USER_INTERRUPTED_REASON
 from kohakuterrarium.terrarium.drive.errors import (
     DriveConflictError,
     DriveError,
@@ -22,6 +23,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveValidationError,
 )
 from kohakuterrarium.terrarium.drive.models import (
+    SYSTEM_ACTOR,
     ActorRef,
     DriveRecord,
     DriveStatus,
@@ -37,12 +39,51 @@ from kohakuterrarium.terrarium.drive.repository import (
 from kohakuterrarium.terrarium.drive.requests import (
     DriveTransitionProposal,
 )
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
 
 _TERMINAL_PROPOSAL_TARGETS = frozenset({DriveStatus.COMPLETED, DriveStatus.FAILED})
+# A user interrupt suspends pursuit; suspended and terminal drives are left alone.
+_USER_INTERRUPT_PAUSABLE = frozenset({DriveStatus.ACTIVE, DriveStatus.WAITING})
 
 
 class DriveManagerOps:
     """Build atomic mutations for ownership and terminal verification."""
+
+    async def _on_delivery_user_interrupted(self, drive_id: str) -> None:
+        """Pause a drive whose turn the user interrupted.
+
+        Stop means stop: pursuit resumes only through an explicit resume or
+        wake, never through the next readiness scan.
+        """
+        record = await self._repo.get(drive_id)
+        if record is None or record.status not in _USER_INTERRUPT_PAUSABLE:
+            return
+        try:
+            paused = await self._repo.transition_drive(
+                drive_id,
+                DriveStatus.PAUSED,
+                expected_revision=record.revision,
+                actor=SYSTEM_ACTOR,
+                status_reason=USER_INTERRUPTED_REASON,
+                operation="user_interrupt_pause",
+            )
+        except DriveError as exc:
+            # The acknowledgement already blocks self-continuation.
+            logger.warning(
+                "user-interrupt pause failed", drive_id=drive_id, error=str(exc)
+            )
+            return
+        self._emit(
+            "drive_status_changed",
+            drive_id,
+            {
+                "status": paused.status.value,
+                "revision": paused.revision,
+                "reason": USER_INTERRUPTED_REASON,
+            },
+        )
 
     async def _run_mutation(
         self,

@@ -74,6 +74,7 @@ def delivery_to_dict(delivery: DriveDelivery) -> dict[str, Any]:
         "admitted_at": _iso_or_none(delivery.admitted_at),
         "acknowledged_at": _iso_or_none(delivery.acknowledged_at),
         "last_error": delivery.last_error,
+        "ack_reason": delivery.ack_reason,
     }
 
 

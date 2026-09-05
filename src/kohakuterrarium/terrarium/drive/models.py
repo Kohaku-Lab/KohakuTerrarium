@@ -293,6 +293,8 @@ class DriveDelivery:
     admitted_at: datetime | None = None
     acknowledged_at: datetime | None = None
     last_error: str | None = None
+    # Why an acknowledged row settled, when the turn did not simply finish.
+    ack_reason: str | None = None
 
     def __post_init__(self) -> None:
         _require_nonempty(self.delivery_id, "delivery_id")

@@ -106,6 +106,7 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
             readiness_generation=self._current_readiness_generation,
             scan_callback=self._scan_ready,
             ack_callback=self._on_delivery_acknowledged,
+            interrupt_callback=self._on_delivery_user_interrupted,
             lease_seconds=lease_seconds,
             scan_interval=scan_interval,
         )
@@ -421,6 +422,9 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
             {"status": record.status.value, "revision": record.revision},
         )
         if record.status is DriveStatus.ACTIVE:
+            # A resumed drive whose generation already settled needs a fresh
+            # logical key, or dispatch supersedes the resume as a duplicate.
+            await self._ensure_wake_generation(record)
             await self._maybe_enqueue(record, "ready")
         return record
 

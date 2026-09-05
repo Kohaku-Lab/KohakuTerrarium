@@ -10,7 +10,15 @@ import logging
 from datetime import timedelta
 
 from kohakuterrarium.terrarium.drive.config import DriveRetryConfig
-from kohakuterrarium.terrarium.drive.delivery import RECOVERY_WARNING
+from kohakuterrarium.terrarium.drive.delivery import (
+    RECOVERY_WARNING,
+    USER_INTERRUPTED_REASON,
+)
+from kohakuterrarium.terrarium.drive.goal import (
+    GoalDriveRegistration,
+    build_goal_spec,
+)
+from kohakuterrarium.terrarium.drive.manager_readiness import settled_by_turn
 from kohakuterrarium.terrarium.drive.manager import DriveManager
 from kohakuterrarium.terrarium.drive.memory import MemoryDriveRepository
 from kohakuterrarium.terrarium.drive.models import DriveStatus
@@ -36,6 +44,7 @@ from tests.unit.terrarium.drive._harness import (
     ids,
     kinds,
     make_config,
+    make_snapshot,
 )
 
 
@@ -211,7 +220,10 @@ class TestRetry:
         settled = (await h.repo.list_deliveries(did))[0]
         assert settled.state == "acknowledged"
         assert settled.attempt == 0
-        assert (await h.repo.get(did)).status is DriveStatus.ACTIVE
+        # Stop means stop: the drive is paused, not left to re-arm.
+        record = await h.repo.get(did)
+        assert record.status is DriveStatus.PAUSED
+        assert record.status_reason == USER_INTERRUPTED_REASON
 
     async def test_settled_error_never_auto_completes(self):
         h = build_manager(sink=FakeSink(default=SettlementStatus.ERROR))
@@ -516,3 +528,101 @@ class TestRepoCloseRace:
 
 async def _set_soon(event: asyncio.Event) -> None:
     event.set()
+
+
+# ── user interrupt: acknowledged with a reason, paused, never re-armed ──
+
+
+async def _create_continuing_goal(h) -> str:
+    record = await h.manager.create_drive(
+        creature_request(
+            kind="goal",
+            spec=build_goal_spec("keep going", autonomy="continue_when_ready"),
+        ),
+        actor=WORKER,
+        graph_id="g1",
+    )
+    return record.drive_id
+
+
+class TestUserInterrupt:
+    async def test_ack_reason_is_persisted_and_observed(self):
+        sink = FakeSink(default=SettlementStatus.INTERRUPTED)
+        h = build_manager(sink=sink)
+        did = await _create_worker(h)
+        delivery = (await h.repo.list_deliveries(did))[0]
+        sink.per_delivery_detail[delivery.delivery_id] = {"interrupted_by_user": True}
+
+        await _round(h)
+
+        settled = (await h.repo.list_deliveries(did))[0]
+        assert settled.ack_reason == USER_INTERRUPTED_REASON
+        assert not settled_by_turn(settled)
+        pause = [
+            o
+            for o in h.observations
+            if o.kind == "drive_status_changed"
+            and o.payload.get("reason") == USER_INTERRUPTED_REASON
+        ]
+        assert pause and pause[0].payload["status"] == "paused"
+
+    async def test_interrupted_continuing_goal_does_not_refire_on_scan(self):
+        sink = FakeSink(default=SettlementStatus.INTERRUPTED)
+        h = build_manager(sink=sink, snapshot=make_snapshot(GoalDriveRegistration()))
+        did = await _create_continuing_goal(h)
+        first = (await h.repo.list_deliveries(did))[0]
+        sink.per_delivery_detail[first.delivery_id] = {"interrupted_by_user": True}
+
+        await _round(h)
+        await h.manager._scan_ready()
+        await _round(h)
+
+        assert [d.state for d in await h.repo.list_deliveries(did)] == ["acknowledged"]
+        assert len(sink.delivered) == 1
+        assert (await h.repo.get(did)).status is DriveStatus.PAUSED
+
+    async def test_interrupted_ack_never_counts_as_a_settled_generation(self):
+        # Defence in depth: even if the pause were lost, the acknowledged row
+        # must not earn the goal a continuation.
+        sink = FakeSink(default=SettlementStatus.INTERRUPTED)
+        h = build_manager(sink=sink, snapshot=make_snapshot(GoalDriveRegistration()))
+        did = await _create_continuing_goal(h)
+        first = (await h.repo.list_deliveries(did))[0]
+        sink.per_delivery_detail[first.delivery_id] = {"interrupted_by_user": True}
+        await _round(h)
+        record = await h.repo.get(did)
+        assert await h.manager._current_generation_settled(record) is False
+
+    async def test_explicit_resume_redelivers_under_a_fresh_generation(self):
+        sink = FakeSink(default=SettlementStatus.INTERRUPTED)
+        h = build_manager(sink=sink, snapshot=make_snapshot(GoalDriveRegistration()))
+        did = await _create_continuing_goal(h)
+        first = (await h.repo.list_deliveries(did))[0]
+        sink.per_delivery_detail[first.delivery_id] = {"interrupted_by_user": True}
+        await _round(h)
+
+        sink.default = SettlementStatus.OK
+        paused = await h.repo.get(did)
+        await h.manager.transition(
+            did,
+            DriveStatus.ACTIVE,
+            expected_revision=paused.revision,
+            actor=WORKER,
+        )
+        await _round(h)
+
+        resumed = [
+            d
+            for d in await h.repo.list_deliveries(did)
+            if d.readiness_generation == first.readiness_generation + 1
+        ]
+        assert len(resumed) == 1
+        assert resumed[0].state == "acknowledged"
+        assert resumed[0].ack_reason is None
+        assert len(sink.delivered) == 2
+        # A normally settled turn re-arms the continuing goal as before.
+        assert (await h.repo.get(did)).status is DriveStatus.ACTIVE
+        assert any(
+            d.readiness_generation == first.readiness_generation + 2
+            for d in await h.repo.list_deliveries(did)
+        )

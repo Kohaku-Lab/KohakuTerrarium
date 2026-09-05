@@ -14,7 +14,8 @@ from enum import Enum
 from typing import Any
 
 from kohakuterrarium.terrarium.drive.acl import DriveOperation
-from kohakuterrarium.terrarium.drive.delivery import BLOCKABLE_STATUSES
+from kohakuterrarium.terrarium.drive.delivery import USER_INTERRUPTED_REASON
+from kohakuterrarium.terrarium.drive.delivery_failure import BLOCKABLE_STATUSES
 from kohakuterrarium.terrarium.drive.errors import (
     DriveBackpressureError,
     DriveError,
@@ -68,6 +69,18 @@ def _accepts_turns_used(fn: Any) -> bool:
     return any(p.kind is p.VAR_KEYWORD for p in params.values())
 
 
+def settled_by_turn(delivery: DriveDelivery) -> bool:
+    """Return whether an acknowledged delivery settled through a finished turn.
+
+    A user interrupt acknowledges the row so it is never retried, but it must
+    not count as a settled generation that earns a continuation.
+    """
+    return (
+        delivery.state == "acknowledged"
+        and delivery.ack_reason != USER_INTERRUPTED_REASON
+    )
+
+
 def _call_readiness(
     registration: Any,
     record: DriveRecord,
@@ -101,7 +114,7 @@ class ManagerReadinessMixin:
             if (
                 delivery.readiness_generation == gen
                 and delivery.lifecycle_epoch == record.lifecycle_epoch
-                and delivery.state == "acknowledged"
+                and settled_by_turn(delivery)
             ):
                 return True
         return False
@@ -488,7 +501,7 @@ class ManagerReadinessMixin:
             for d in deliveries
             if d.readiness_generation == gen
             and d.lifecycle_epoch == record.lifecycle_epoch
-            and d.state == "acknowledged"
+            and settled_by_turn(d)
         ]
         if not settled:
             # Re-arm requires a settled generation.

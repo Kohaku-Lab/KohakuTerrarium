@@ -14,24 +14,22 @@ exhausted attempts dead-letter the delivery and normally block its drive.
 import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import replace
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from kohakuterrarium.core.events import TriggerEvent
 from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
-from kohakuterrarium.terrarium.drive.errors import DriveError
+from kohakuterrarium.terrarium.drive.delivery_failure import (
+    DeliveryFailureMixin,
+)
 from kohakuterrarium.terrarium.drive.models import (
-    SYSTEM_ACTOR,
     DriveAssignment,
     DriveDelivery,
     DriveRecord,
-    DriveStatus,
 )
 from kohakuterrarium.terrarium.drive.policy import (
     DeliveryFailureKind,
     DriveScheduleItem,
-    RetryDisposition,
-    classify_delivery_failure,
     is_delivery_stale,
     schedule_sort_key,
 )
@@ -65,15 +63,13 @@ RECOVERY_WARNING = (
     "idempotency key where supported."
 )
 
-# Dead-letter handling may block only non-terminal pursuit states.
-BLOCKABLE_STATUSES = frozenset(
-    {DriveStatus.ACTIVE, DriveStatus.WAITING, DriveStatus.PAUSED}
-)
 # Dispatcher shutdown releases claims that have not reached physical admission.
 _CLAIMED_STATE = "claimed"
+# Acknowledgement reason recorded when the user interrupted the drive turn.
+USER_INTERRUPTED_REASON = "user_interrupted"
 
 
-class DriveDispatcher:
+class DriveDispatcher(DeliveryFailureMixin):
     """Claim due deliveries, admit them to creatures, and track settlement."""
 
     def __init__(
@@ -90,6 +86,7 @@ class DriveDispatcher:
         readiness_generation: Callable[[str], int] | None = None,
         scan_callback: Callable[[], Awaitable[None]] | None = None,
         ack_callback: Callable[[str], Awaitable[None]] | None = None,
+        interrupt_callback: Callable[[str], Awaitable[None]] | None = None,
         lease_seconds: float = 30.0,
         scan_interval: float = 5.0,
     ) -> None:
@@ -104,6 +101,7 @@ class DriveDispatcher:
         self._readiness_gen = readiness_generation or (lambda _drive_id: 0)
         self._scan_callback = scan_callback
         self._ack_callback = ack_callback
+        self._interrupt_callback = interrupt_callback
         self._lease_seconds = lease_seconds
         self._scan_interval = scan_interval
         self._wake = asyncio.Event()
@@ -355,7 +353,7 @@ class DriveDispatcher:
                         await self._repo.mark_delivery(
                             delivery.delivery_id,
                             "acknowledged",
-                            reason="user_interrupted",
+                            reason=USER_INTERRUPTED_REASON,
                             detail=settlement.detail,
                             now=now,
                         )
@@ -366,8 +364,10 @@ class DriveDispatcher:
                             {
                                 "delivery_id": delivery.delivery_id,
                                 "outcome": settlement.detail,
+                                "ack_reason": USER_INTERRUPTED_REASON,
                             },
                         )
+                        await self._notify_user_interrupted(delivery.drive_id)
                     else:
                         await self._on_failure(
                             delivery, DeliveryFailureKind.TRANSIENT, "interrupted", now
@@ -393,96 +393,20 @@ class DriveDispatcher:
                 error=str(exc),
             )
 
-    async def _on_failure(
-        self,
-        delivery: DriveDelivery,
-        kind: DeliveryFailureKind,
-        error: str,
-        now: datetime,
-    ) -> None:
-        new_attempt = delivery.attempt + 1
-        disposition = classify_delivery_failure(
-            kind, attempt=new_attempt, max_attempts=self._config.retry.max_attempts
-        )
-        match disposition:
-            case RetryDisposition.RETRY_BACKOFF:
-                available_at = now + timedelta(
-                    seconds=self._backoff_seconds(new_attempt)
-                )
-                await self._repo.mark_delivery(
-                    delivery.delivery_id,
-                    "retry_wait",
-                    error=error,
-                    available_at=available_at,
-                    attempt=new_attempt,
-                    now=now,
-                )
-                emit_observation(
-                    self._observer,
-                    "drive_delivery_retrying",
-                    delivery.drive_id,
-                    {
-                        "delivery_id": delivery.delivery_id,
-                        "attempt": new_attempt,
-                        "available_at": available_at.isoformat(),
-                    },
-                )
-            case RetryDisposition.DEFER:
-                await self._repo.mark_delivery(delivery.delivery_id, "pending", now=now)
-            case RetryDisposition.SUPERSEDE:
-                await self._repo.mark_delivery(
-                    delivery.delivery_id, "superseded", now=now
-                )
-            case _:
-                # Dead-letter and fail-closed dispositions both terminate delivery.
-                await self._repo.mark_delivery(
-                    delivery.delivery_id,
-                    "dead_letter",
-                    error=error,
-                    reason="max_attempts_exhausted",
-                    detail={"attempt": new_attempt},
-                    now=now,
-                )
-                emit_observation(
-                    self._observer,
-                    "drive_delivery_dead_lettered",
-                    delivery.drive_id,
-                    {"delivery_id": delivery.delivery_id, "attempt": new_attempt},
-                )
-                await self._block_on_dead_letter(delivery.drive_id, now)
+    async def _notify_user_interrupted(self, drive_id: str) -> None:
+        """Let the manager suspend a drive whose turn the user interrupted.
 
-    async def _block_on_dead_letter(self, drive_id: str, now: datetime) -> None:
-        """Block a non-terminal drive after its delivery dead-letters."""
-        record = await self._repo.get(drive_id)
-        if record is None or record.status not in BLOCKABLE_STATUSES:
+        The acknowledgement is already durable; a failing callback must not
+        undo it.
+        """
+        if self._interrupt_callback is None:
             return
         try:
-            await self._repo.transition_drive(
-                drive_id,
-                DriveStatus.BLOCKED,
-                expected_revision=record.revision,
-                actor=SYSTEM_ACTOR,
-                status_reason="delivery_dead_lettered",
-                operation="dead_letter_block",
-            )
-            emit_observation(
-                self._observer,
-                "drive_status_changed",
-                drive_id,
-                {"status": "blocked", "reason": "dead_letter"},
-            )
-        except DriveError as exc:
-            # Dead-letter persistence remains authoritative if blocking races.
+            await self._interrupt_callback(drive_id)
+        except Exception as exc:
             logger.warning(
-                "dead-letter block failed", drive_id=drive_id, error=str(exc)
+                "post-interrupt drive pause failed", drive_id=drive_id, error=str(exc)
             )
-
-    def _backoff_seconds(self, attempt: int) -> float:
-        retry = self._config.retry
-        base = min(retry.initial_backoff_s * (2 ** (attempt - 1)), retry.max_backoff_s)
-        # Symmetric jitter keeps the expected delay at the capped exponential base.
-        delta = retry.jitter * (2 * self._rng.random() - 1)
-        return max(0.0, base * (1 + delta))
 
     def _build_event(
         self,

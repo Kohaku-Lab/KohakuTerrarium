@@ -163,6 +163,8 @@ class DeliveryOpsMixin:
                     fields["admitted_at"] = moment
                 case "acknowledged":
                     fields["acknowledged_at"] = moment
+                    if reason is not None:
+                        fields["ack_reason"] = reason
                 case "retry_wait":
                     fields["available_at"] = available_at or moment
                     fields["last_error"] = error
