@@ -6,8 +6,10 @@ dated nightlies survive the prune. A mistake here is only observable in
 production, so the script is run here directly rather than reviewed by eye.
 """
 
+import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -52,7 +54,17 @@ def _run(tmp_path, *, ref="", version="", channel="", git_ref, git_ref_name):
         check=True,
         capture_output=True,
         env={
-            "PATH": f"{stub_dir}:{REPO_ROOT / '.venv' / 'bin'}:/usr/bin:/bin:/usr/local/bin",
+            # The step shells out to `python`; CI has no .venv and macOS
+            # ships no bare `python`, so put this interpreter on PATH.
+            "PATH": os.pathsep.join(
+                [
+                    str(stub_dir),
+                    str(Path(sys.executable).parent),
+                    "/usr/bin",
+                    "/bin",
+                    "/usr/local/bin",
+                ]
+            ),
             "GITHUB_REF": git_ref,
             "GITHUB_REF_NAME": git_ref_name,
             "GITHUB_OUTPUT": str(out),
@@ -116,7 +128,7 @@ class TestReleaseMeta:
         assert meta["keep_nightlies"] == ""
         assert meta["stamp"] == "false"
         # Falls back to pyproject as the source of truth.
-        assert meta["version"] and meta["version"][0].isdigit()
+        assert meta["version"][0].isdigit(), meta["version"]
 
     def test_prerelease_tags_land_in_beta(self, tmp_path):
         for tag in ("v2.2.0rc1", "v2.2.0b1"):
