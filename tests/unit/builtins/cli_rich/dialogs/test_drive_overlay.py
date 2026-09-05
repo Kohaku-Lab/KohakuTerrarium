@@ -114,6 +114,27 @@ class ScriptedService:
             raise DrivePermissionError("not allowed")
         return DriveProgress("p2", drive_id, USER, summary, NOW)
 
+    async def create_drive(self, request, *, graph_id, actor, operator=False, **kw):
+        self.calls.append(("create_drive", request, graph_id, actor, operator))
+        if self.reject:
+            raise DrivePermissionError("not allowed")
+        view = make_view("new1", DriveStatus.ACTIVE)
+        self._views["new1"] = view
+        return view
+
+
+class FakeEngine:
+    """Enough of a Terrarium for the overlay to walk a graph's members."""
+
+    def __init__(self, members):
+        self._members = [
+            type("C", (), {"creature_id": cid, "name": name, "graph_id": gid})()
+            for cid, name, gid in members
+        ]
+
+    def list_creatures(self):
+        return list(self._members)
+
 
 class Harness:
     """Wraps a DriveOverlay + a coroutine collector for deterministic drives."""
@@ -302,3 +323,85 @@ async def test_no_engine_shows_unavailable_message():
     await h.overlay.reload()
     assert "not available" in h.overlay._error
     assert h.overlay.render(80)  # renders without raising
+
+
+# ── new goal + creature cycling ─────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_new_goal_mode_creates_manual_goal_for_scoped_creature():
+    svc = ScriptedService([])
+    h = Harness(svc)
+    h.overlay.handle_text("n")
+    assert h.overlay.mode == "create"
+    for ch in "ship it":
+        h.overlay.handle_text(ch)
+    h.overlay.handle_key("backspace")
+    h.overlay.handle_text("t")
+    h.overlay.handle_key("enter")
+    await h.drain()
+    created = [c for c in svc.calls if c[0] == "create_drive"]
+    assert len(created) == 1
+    _, request, graph_id, actor, operator = created[0]
+    assert request.kind == "goal"
+    assert request.spec["objective"] == "ship it"
+    assert request.spec["autonomy"] == "manual"
+    assert request.assignee_creature_id == "c1"
+    assert graph_id == "g1" and actor == USER and operator is True
+    assert h.overlay.mode == "list"
+    assert "goal created: new1" in h.overlay._flash
+    assert h.overlay.render(80)
+
+
+@pytest.mark.asyncio
+async def test_new_goal_escape_discards_and_empty_objective_is_ignored():
+    svc = ScriptedService([])
+    h = Harness(svc)
+    h.overlay.handle_text("n")
+    h.overlay.handle_text("x")
+    h.overlay.handle_key("escape")
+    assert h.overlay.mode == "list" and h.overlay._create_text == ""
+    h.overlay.handle_text("n")
+    h.overlay.handle_key("enter")
+    await h.drain()
+    assert not [c for c in svc.calls if c[0] == "create_drive"]
+
+
+@pytest.mark.asyncio
+async def test_cycle_creature_walks_graph_members_and_rescopes_reload():
+    svc = ScriptedService(
+        [make_view("d1", DriveStatus.ACTIVE), make_view("d2", DriveStatus.ACTIVE)]
+    )
+    svc._views["d2"] = DriveView(
+        record=make_record("d2", DriveStatus.ACTIVE),
+        assignee_creature_id="c2",
+        assignment_state="assigned",
+        availability="available",
+        durability="persistent",
+        allowed_actions=("transition",),
+    )
+    engine = FakeEngine(
+        [("c1", "alice", "g1"), ("c2", "bob", "g1"), ("c9", "zed", "g2")]
+    )
+    h = Harness(svc, engine=engine)
+    assert h.overlay.creature_label() == "alice"
+    h.overlay.handle_text("m")
+    await h.drain()
+    assert h.overlay.current_creature() == "c2"
+    assert h.overlay.creature_label() == "bob"
+    assert svc.calls[-1][1]["assignee_creature_id"] == "c2"
+    assert [r["drive_id"] for r in h.overlay._rows] == ["d2"]
+    # Wraps around the graph only; the other graph's member is never offered.
+    h.overlay.handle_text("m")
+    await h.drain()
+    assert h.overlay.current_creature() == "c1"
+    assert "creature:" in h.overlay.render(80)
+
+
+@pytest.mark.asyncio
+async def test_cycle_creature_with_single_member_flashes():
+    h = Harness(ScriptedService([]), engine=FakeEngine([("c1", "alice", "g1")]))
+    h.overlay.handle_text("m")
+    await h.drain()
+    assert h.overlay.current_creature() == "c1"
+    assert "no other creature" in h.overlay._flash

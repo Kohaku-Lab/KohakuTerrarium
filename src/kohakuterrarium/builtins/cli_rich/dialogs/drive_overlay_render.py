@@ -46,6 +46,8 @@ def _build_panel(overlay: "DriveOverlay") -> RenderableType:
         body = _render_confirm(overlay)
     elif overlay.mode == "progress":
         body = _render_progress(overlay)
+    elif overlay.mode == "create":
+        body = _render_create(overlay)
     elif overlay.mode == "detail":
         body = _render_detail(overlay)
     else:
@@ -71,7 +73,9 @@ def _build_panel(overlay: "DriveOverlay") -> RenderableType:
 
 def _render_header(overlay: "DriveOverlay") -> Text:
     line = Text()
-    line.append("scope: ", style="dim")
+    line.append("creature: ", style="dim")
+    line.append(overlay.creature_label(), style="bold cyan")
+    line.append("   scope: ", style="dim")
     line.append(
         "assigned to me" if overlay.scope == "mine" else "whole graph",
         style="bold cyan",
@@ -215,6 +219,20 @@ def _render_progress(overlay: "DriveOverlay") -> RenderableType:
     )
 
 
+def _render_create(overlay: "DriveOverlay") -> RenderableType:
+    return Group(
+        Text(
+            f"  New goal for {overlay.creature_label()} (manual autonomy; "
+            "/goal resume wakes the next turn):",
+            style="bold",
+        ),
+        Text(""),
+        _cursor_line(overlay._create_text),
+        Text(""),
+        Text("  enter create · esc cancel", style="dim"),
+    )
+
+
 def _cursor_line(text: str) -> Text:
     out = Text("  ")
     out.append(text or "", style="cyan")
@@ -235,7 +253,9 @@ def _render_hint(mode: str) -> Text:
         segments = [
             ("↑↓", "navigate"),
             ("tab", "scope"),
+            ("m", "creature"),
             ("s", "filter"),
+            ("n", "new goal"),
             ("enter", "open"),
             ("r", "refresh"),
             ("esc", "close"),
@@ -248,6 +268,8 @@ def _render_hint(mode: str) -> Text:
         ]
     elif mode == "confirm":
         segments = [("y", "confirm"), ("n/esc", "cancel")]
+    elif mode == "create":
+        segments = [("type", "objective"), ("enter", "create"), ("esc", "cancel")]
     else:
         segments = [("type", "note"), ("enter", "submit"), ("esc", "cancel")]
     for i, (key, label) in enumerate(segments):

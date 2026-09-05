@@ -32,10 +32,17 @@ from kohakuterrarium.builtins.cli_rich.dialogs.drive_format import (
     status_label,
     warning_badges,
 )
+from kohakuterrarium.builtins.tui.widgets.drive_panel_goal import (
+    GoalCreateModal,
+    graph_members,
+    next_member,
+)
 from kohakuterrarium.builtins.tui.widgets.drive_settings_pane import DriveSettingsPane
 from kohakuterrarium.builtins.tui.widgets.modals import ConfirmModal
 from kohakuterrarium.terrarium.drive.errors import DriveError
+from kohakuterrarium.terrarium.drive.goal import GoalSpecError, build_goal_spec
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.events import EventFilter, EventKind
 from kohakuterrarium.utils.logging import get_logger
 
@@ -188,6 +195,8 @@ class DriveScreen(ModalScreen[None]):
         Binding("f5", "reload", "Reload", show=True),
         Binding("f", "cycle_filter", "Filter", show=True),
         Binding("v", "cycle_scope", "Scope", show=True),
+        Binding("m", "cycle_creature", "Creature", show=True),
+        Binding("n", "new_goal", "New goal", show=True),
     ]
 
     def __init__(
@@ -226,7 +235,8 @@ class DriveScreen(ModalScreen[None]):
                 with TabPane("Settings", id="drive-settings"):
                     yield DriveSettingsPane(get_engine=lambda: self._engine)
             yield Static(
-                "↑↓ select · f filter · v scope · f5 reload · esc close",
+                "↑↓ select · f filter · v scope · m creature · n new goal · "
+                "f5 reload · esc close",
                 classes="drive-hint",
             )
 
@@ -283,11 +293,19 @@ class DriveScreen(ModalScreen[None]):
             self.query_one("#drive-detail", Static).update("(no drives)")
             await self._clear_actions()
 
+    def creature_label(self) -> str:
+        """Return the scoped creature's display name, or its id."""
+        for member_id, name in graph_members(self._engine, self._creature_id):
+            if member_id == self._creature_id:
+                return name
+        return self._creature_id or "-"
+
     def _update_status_line(self) -> None:
         active = sum(1 for r in self._rows if r["status"] in ("active", "waiting"))
         blocked = sum(1 for r in self._rows if r["status"] == "blocked")
         label = STATUS_FILTERS[self._filter_idx][0]
         text = (
+            f"creature: {escape(self.creature_label())}   "
             f"scope: {'assigned to me' if self._scope == 'mine' else 'whole graph'}"
             f"   filter: {label}   {len(self._rows)} shown · {active} active · {blocked} blocked"
         )
@@ -453,5 +471,76 @@ class DriveScreen(ModalScreen[None]):
         if self._service is not None:
             self.run_worker(self._reload, exclusive=True, group="drive-reload")
 
+    def action_cycle_creature(self) -> None:
+        """Scope the panel to the next member of the graph."""
+        target = next_member(
+            graph_members(self._engine, self._creature_id), self._creature_id
+        )
+        if target is None:
+            self.query_one("#drive-status-line", Static).update(
+                "[yellow]no other creature in this graph[/yellow]"
+            )
+            return
+        self._creature_id = target
+        self._selected = 0
+        if self._service is not None:
+            self.run_worker(self._reload, exclusive=True, group="drive-reload")
 
-__all__ = ["DriveScreen", "DriveProgressModal", "detail_lines", "load_drive_rows"]
+    def action_new_goal(self) -> None:
+        if self._service is None:
+            return
+        self.app.push_screen(
+            GoalCreateModal(self.creature_label()), self._on_goal_submitted
+        )
+
+    def _on_goal_submitted(self, text: str | None) -> None:
+        if text:
+            self.run_worker(self._create_goal(text), exclusive=False)
+
+    async def _create_goal(self, objective: str) -> None:
+        """Create a manual goal assigned to the scoped creature."""
+        if self._service is None:
+            return
+        status = self.query_one("#drive-status-line", Static)
+        try:
+            spec = build_goal_spec(objective)
+        except GoalSpecError as exc:
+            status.update(f"[red]invalid goal: {escape(str(exc))}[/red]")
+            return
+        try:
+            info = await self._service.get_creature_info(self._creature_id)
+            graph_id = getattr(info, "graph_id", None) if info is not None else None
+            request = CreateDriveRequest(
+                kind="goal",
+                title=objective[:120],
+                scope_type="graph",
+                scope_id=graph_id or "",
+                owner=self._actor,
+                owner_scope="actor",
+                created_by=self._actor,
+                spec=spec,
+                assignee_creature_id=self._creature_id,
+            )
+            view = await self._service.create_drive(
+                request,
+                graph_id=graph_id,
+                actor=self._actor,
+                operator=self._is_operator,
+            )
+            await self._reload()
+            status.update(
+                f"goal created: {escape(view.record.drive_id)} (manual autonomy)"
+            )
+        except DriveError as exc:
+            status.update(f"[red]{escape(str(exc))}[/red]")
+
+
+__all__ = [
+    "DriveScreen",
+    "DriveProgressModal",
+    "GoalCreateModal",
+    "detail_lines",
+    "graph_members",
+    "load_drive_rows",
+    "next_member",
+]

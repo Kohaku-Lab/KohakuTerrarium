@@ -28,13 +28,18 @@ from kohakuterrarium.builtins.cli_rich.dialogs.drive_overlay_render import (
     render_drive_overlay,
 )
 from kohakuterrarium.terrarium.drive.errors import (
+    DriveBackpressureError,
     DriveConflictError,
     DriveError,
     DriveIdempotencyConflictError,
     DriveNotFoundError,
     DrivePermissionError,
+    DriveRegistrationDisabledError,
+    DriveRegistrationNotFoundError,
 )
+from kohakuterrarium.terrarium.drive.goal import GoalSpecError, build_goal_spec
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.utils.logging import get_logger
 
@@ -77,7 +82,7 @@ class DriveOverlay:
         self._on_close = on_close or (lambda: None)
 
         self.visible = False
-        self.mode = "list"  # list, detail, confirm, or progress
+        self.mode = "list"  # list, detail, confirm, progress, or create
         self.scope = "mine"
         self._status_filter_idx = 0
         self._views: list[Any] = []
@@ -88,6 +93,10 @@ class DriveOverlay:
         self._detail_progress: list[Any] = []
         self._confirm: dict[str, Any] | None = None
         self._progress_text = ""
+        self._create_text = ""
+        # A creature picked inside the overlay overrides the app focus so a
+        # graph can be walked member by member without leaving the panel.
+        self._creature_override: str | None = None
         self._flash = ""
         self._error = ""
         self._loading = False
@@ -100,8 +109,53 @@ class DriveOverlay:
         self._detail_row = None
         self._confirm = None
         self._progress_text = ""
+        self._create_text = ""
+        self._creature_override = None
         self._flash = ""
         self._error = ""
+        self._schedule(self.reload())
+
+    def current_creature(self) -> str:
+        """Return the creature the overlay is scoped to."""
+        return self._creature_override or self._get_creature_id() or ""
+
+    def creature_label(self) -> str:
+        """Return the scoped creature's display name, or its id."""
+        cid = self.current_creature()
+        for member_id, name in self._graph_members():
+            if member_id == cid:
+                return name
+        return cid or "-"
+
+    def _graph_members(self) -> list[tuple[str, str]]:
+        """List ``(creature_id, name)`` for the focused creature's graph."""
+        engine = self._get_engine()
+        cid = self.current_creature()
+        if engine is None or not cid:
+            return []
+        try:
+            creatures = list(engine.list_creatures())
+        except Exception:  # pragma: no cover - engine without a creature listing
+            return []
+        graph_id = next((c.graph_id for c in creatures if c.creature_id == cid), None)
+        members = [
+            (c.creature_id, c.name or c.creature_id)
+            for c in creatures
+            if graph_id is None or c.graph_id == graph_id
+        ]
+        return sorted(members, key=lambda m: (m[1], m[0]))
+
+    def _cycle_creature(self) -> None:
+        members = [m[0] for m in self._graph_members()]
+        if len(members) < 2:
+            self._flash = "no other creature in this graph"
+            self._on_invalidate()
+            return
+        current = self.current_creature()
+        idx = members.index(current) if current in members else -1
+        self._creature_override = members[(idx + 1) % len(members)]
+        self._cursor = 0
+        self._flash = ""
         self._schedule(self.reload())
 
     def close(self) -> None:
@@ -156,7 +210,7 @@ class DriveOverlay:
             if self.scope == "graph":
                 graph_id = await self._focused_graph(service)
             else:
-                assignee = self._get_creature_id() or None
+                assignee = self.current_creature() or None
             statuses = self._status_filter()
             drive_statuses = (
                 frozenset(DriveStatus(s) for s in statuses) if statuses else None
@@ -186,7 +240,7 @@ class DriveOverlay:
             self._on_invalidate()
 
     async def _focused_graph(self, service: Any) -> str | None:
-        cid = self._get_creature_id()
+        cid = self.current_creature()
         if not cid:
             return None
         info = await service.get_creature_info(cid)
@@ -238,6 +292,8 @@ class DriveOverlay:
             return self._confirm_key(key)
         if self.mode == "progress":
             return self._progress_key(key)
+        if self.mode == "create":
+            return self._create_key(key)
         if self.mode == "detail":
             return self._detail_key(key)
         return self._list_key(key)
@@ -256,6 +312,9 @@ class DriveOverlay:
             return True
         if self.mode == "progress":
             self._progress_text += char
+            return True
+        if self.mode == "create":
+            self._create_text += char
             return True
         if self.mode == "detail":
             return self._detail_letter(char)
@@ -292,8 +351,65 @@ class DriveOverlay:
             self._cycle_status_filter()
         elif char == "r":
             self._schedule(self.reload())
+        elif char == "n":
+            self.mode = "create"
+            self._create_text = ""
+            self._error = ""
+        elif char == "m":
+            self._cycle_creature()
         # Modal input must not leak into the composer behind the overlay.
         return True
+
+    def _create_key(self, key: str) -> bool:
+        if key == "escape":
+            self.mode = "list"
+            self._create_text = ""
+            return True
+        if key in ("backspace", "c-h"):
+            self._create_text = self._create_text[:-1]
+            return True
+        if key == "enter":
+            if self._create_text.strip():
+                self._schedule(self._submit_create())
+            return True
+        return True
+
+    async def _submit_create(self) -> None:
+        """Create a manual goal for the scoped creature from the typed objective."""
+        objective = self._create_text.strip()
+        self.mode = "list"
+        self._create_text = ""
+        service = self._service()
+        creature_id = self.current_creature()
+        if not objective or service is None or not creature_id:
+            self._on_invalidate()
+            return
+        actor = self._actor()
+        try:
+            spec = build_goal_spec(objective)
+            graph_id = await self._focused_graph(service)
+            request = CreateDriveRequest(
+                kind="goal",
+                title=objective[:120],
+                scope_type="graph",
+                scope_id=graph_id or "",
+                owner=actor,
+                owner_scope="actor",
+                created_by=actor,
+                spec=spec,
+                assignee_creature_id=creature_id,
+            )
+            view = await service.create_drive(
+                request, graph_id=graph_id, actor=actor, operator=self._is_operator
+            )
+            self._flash = f"goal created: {view.record.drive_id} (manual autonomy)"
+            await self.reload()
+        except GoalSpecError as exc:
+            self._error = f"invalid goal: {exc}"
+            self._on_invalidate()
+        except DriveError as exc:
+            self._error = _error_text(exc)
+            self._on_invalidate()
 
     def _detail_key(self, key: str) -> bool:
         if key == "escape":
@@ -464,6 +580,12 @@ def _sort_key(view: Any) -> tuple[int, int, str]:
 
 
 def _error_text(exc: DriveError) -> str:
+    if isinstance(
+        exc, (DriveRegistrationDisabledError, DriveRegistrationNotFoundError)
+    ):
+        return "the goal registration is not enabled; enable it in Drive settings"
+    if isinstance(exc, DriveBackpressureError):
+        return f"at the goal limit: {exc}; pause or cancel a live goal first"
     if isinstance(exc, (DriveConflictError, DriveIdempotencyConflictError)):
         return f"conflict: {exc}; refreshing"
     if isinstance(exc, DrivePermissionError):

@@ -11,7 +11,9 @@ from datetime import datetime, timezone
 from kohakuterrarium.builtins.tui.widgets.drive_panel import (
     DriveScreen,
     detail_lines,
+    graph_members,
     load_drive_rows,
+    next_member,
 )
 from kohakuterrarium.builtins.tui.widgets.drive_settings_pane import (
     build_settings_from_values,
@@ -243,3 +245,36 @@ async def test_drive_screen_reload_does_not_duplicate_action_buttons():
                 break
         assert names.count("pause") == 1
         assert set(names) == {"pause", "cancel", "progress"}
+
+
+class _Engine:
+    def __init__(self, members):
+        self._members = [
+            type("C", (), {"creature_id": cid, "name": name, "graph_id": gid})()
+            for cid, name, gid in members
+        ]
+
+    def list_creatures(self):
+        return list(self._members)
+
+
+def test_graph_members_stays_inside_the_focused_graph_and_sorts_by_name():
+    engine = _Engine([("c2", "bob", "g1"), ("c1", "alice", "g1"), ("c9", "zed", "g2")])
+    assert graph_members(engine, "c1") == [("c1", "alice"), ("c2", "bob")]
+    assert graph_members(object(), "c1") == []
+    assert graph_members(engine, "") == []
+
+
+def test_next_member_wraps_and_needs_two_members():
+    members = [("c1", "alice"), ("c2", "bob")]
+    assert next_member(members, "c1") == "c2"
+    assert next_member(members, "c2") == "c1"
+    assert next_member(members, "unknown") == "c1"
+    assert next_member([("c1", "alice")], "c1") is None
+
+
+def test_drive_screen_creature_label_uses_graph_member_name():
+    engine = _Engine([("c1", "alice", "g1")])
+    screen = DriveScreen(object(), engine, creature_id="c1")
+    assert screen.creature_label() == "alice"
+    assert DriveScreen(object(), object(), creature_id="c7").creature_label() == "c7"
