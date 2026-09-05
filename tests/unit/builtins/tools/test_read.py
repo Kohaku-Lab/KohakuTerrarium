@@ -37,6 +37,30 @@ class TestReadPathGuard:
         assert str(workspace) in result.error
 
 
+class TestReadImage:
+    async def test_image_is_referenced_in_place_not_inlined(self, tmp_path):
+        from PIL import Image
+
+        path = tmp_path / "shot.png"
+        Image.new("RGB", (2, 2), "red").save(path)
+
+        result = await ReadTool().execute({"path": str(path)}, context=_ctx(tmp_path))
+
+        assert result.success is True
+        image = next(p for p in result.output if p.type == "image_url")
+        assert image.url == path.resolve().as_uri()
+        assert image.source_type == "file"
+        assert image.source_name == "shot.png"
+        assert "base64" not in image.url
+
+    def test_read_media_is_a_reference_that_folds_away(self):
+        # Reading is looking, not producing: nothing is copied into the
+        # session and the preview collapses with the tool block.
+        policy = ReadTool().media_policy
+        assert policy.persist is False
+        assert policy.pinned is False
+
+
 class TestReadDefaultLineGuard:
     async def test_huge_file_capped_at_default_lines_with_navigation(self, tmp_path):
         path = tmp_path / "big.txt"

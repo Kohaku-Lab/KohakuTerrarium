@@ -18,6 +18,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
     resolve_tool_path,
 )
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.utils.file_guard import is_binary_file
 from kohakuterrarium.utils.logging import get_logger
 
@@ -32,6 +33,9 @@ class ReadTool(BaseTool):
     """Read files with line ranges and multimodal handling where supported."""
 
     needs_context = True
+    # A read image is context the creature looked at, not a product: it is
+    # referenced in place, never copied, and folds away with the tool block.
+    media_policy = MediaPolicy(persist=False, pinned=False)
 
     @property
     def tool_name(self) -> str:
@@ -278,7 +282,15 @@ class ReadTool(BaseTool):
             rendered=len(parts) - 1,
         )
 
-        return ToolResult(output=parts, exit_code=0)
+        # Rendered pages exist nowhere else, so they are persisted like any
+        # generated image; they still fold away with the tool block.
+        return ToolResult(
+            output=parts,
+            exit_code=0,
+            metadata={
+                "media_policy": MediaPolicy(persist=True, pinned=False).to_dict()
+            },
+        )
 
     async def _read_image(self, file_path: Path, original_path: str) -> ToolResult:
         """Validate an image and return provider-compatible multimodal content."""
@@ -327,9 +339,6 @@ class ReadTool(BaseTool):
                 )
             )
 
-        b64 = base64.b64encode(data).decode("ascii")
-        data_url = f"data:{mime};base64,{b64}"
-
         logger.info(
             "Image read",
             file_path=str(file_path),
@@ -337,13 +346,15 @@ class ReadTool(BaseTool):
             mime=mime,
         )
 
+        # The file itself is the source of truth: providers inline it at send
+        # time and the web UI loads it through the raw file route.
         return ToolResult(
             output=[
                 TextPart(
                     text=f"Image: {original_path} ({len(data) // 1024}KB, {mime})"
                 ),
                 ImagePart(
-                    url=data_url,
+                    url=file_path.resolve().as_uri(),
                     detail="auto",
                     source_type="file",
                     source_name=file_path.name,

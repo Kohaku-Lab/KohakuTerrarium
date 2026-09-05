@@ -46,6 +46,10 @@ from kohakuterrarium.core.events import (
     create_user_input_event,
 )
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
+from kohakuterrarium.llm.artifact_resolve import (
+    file_reference_path,
+    resolve_artifact_url,
+)
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.codex_format import to_responses_input
 from kohakuterrarium.session.raw_history import UserMessageSelector
@@ -1882,13 +1886,22 @@ class TestCoreIntegration:
             image_call_parts = [
                 part for part in image_user_message["content"] if isinstance(part, dict)
             ]
-            assert any(
-                part.get("type") == "image_url"
-                and part.get("image_url", {})
-                .get("url", "")
-                .startswith("data:image/png;base64,")
-                for part in image_call_parts
-            ), image_call_parts
+            # ReadTool hands the image over as a ``file://`` reference (nothing
+            # is copied into the session); the provider boundary inlines it.
+            image_ref = next(
+                (
+                    part["image_url"]["url"]
+                    for part in image_call_parts
+                    if part.get("type") == "image_url"
+                ),
+                None,
+            )
+            assert image_ref is not None, image_call_parts
+            assert image_ref.startswith("file://"), image_ref
+            assert Path(file_reference_path(image_ref)).is_file()
+            assert resolve_artifact_url(image_ref) == (
+                "data:image/png;base64," + png_b64
+            )
             assert not any(
                 "File read failed" in str(part.get("text", ""))
                 for part in image_call_parts
