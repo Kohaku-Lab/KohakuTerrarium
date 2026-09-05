@@ -27,7 +27,14 @@
         <div v-else-if="store.error" class="text-coral text-xs py-6 text-center px-3">{{ store.error }}</div>
         <div v-else-if="store.list.length === 0" class="text-warm-400 text-xs py-8 text-center px-3">No Drives{{ hasFilters ? " match the filters" : " yet" }}.</div>
         <div v-else class="flex flex-col">
-          <DriveSummaryRow v-for="r in store.list" :key="r.drive_id" :record="r" :selected="store.selectedId === r.drive_id" :flags="store.deliveryFlags[r.drive_id]" @select="store.select" />
+          <template v-for="group in groupedList" :key="group.key">
+            <div v-if="showGroupHeaders" class="drive-group-header" :data-testid="`drive-group-${group.key}`">
+              <span :class="group.key === UNASSIGNED ? 'i-carbon-user-x' : 'i-carbon-user-avatar'" class="text-[11px]" />
+              <span class="truncate">{{ group.label }}</span>
+              <span class="text-warm-400 ml-auto">{{ group.rows.length }}</span>
+            </div>
+            <DriveSummaryRow v-for="r in group.rows" :key="r.drive_id" :record="r" :selected="store.selectedId === r.drive_id" :flags="store.deliveryFlags[r.drive_id]" @select="store.select" />
+          </template>
         </div>
       </div>
       <div v-if="store.selected" class="drive-detail-pane">
@@ -72,6 +79,25 @@ const createKinds = ref([])
 // Session members for the creature-scope picker (R1-38).
 const creatures = computed(() => props.instance?.creatures || [])
 
+// Rows grouped by assignee so a graph reads per creature; members keep the
+// session's order and unassigned records sit last.
+const UNASSIGNED = "__unassigned"
+const groupedList = computed(() => {
+  const names = new Map(creatures.value.map((c) => [c.creature_id, c.name || c.creature_id]))
+  const rank = new Map([...names.keys()].map((id, i) => [id, i]))
+  const groups = new Map()
+  for (const r of store.list) {
+    const key = r.assignee_creature_id || UNASSIGNED
+    if (!groups.has(key)) {
+      groups.set(key, { key, label: key === UNASSIGNED ? "Unassigned" : names.get(key) || key, rows: [] })
+    }
+    groups.get(key).rows.push(r)
+  }
+  const order = (g) => (g.key === UNASSIGNED ? Number.MAX_SAFE_INTEGER : (rank.get(g.key) ?? names.size))
+  return [...groups.values()].sort((a, b) => order(a) - order(b))
+})
+const showGroupHeaders = computed(() => groupedList.value.length > 1 || creatures.value.length > 1)
+
 const hasFilters = computed(() => {
   const f = store.filters
   return f.status.length || f.kind.length || f.text || f.owner || f.assignee || f.scope
@@ -91,6 +117,8 @@ onMounted(() => {
   unsubDeepLink = onLayoutEvent(LAYOUT_EVENTS.OPEN_DRIVES, (evt) => {
     const detail = evt?.detail || {}
     if (detail.sessionId && detail.sessionId !== sessionId.value) return
+    // Claiming the event tells the header badge a panel is already showing.
+    evt?.preventDefault?.()
     if (detail.driveId) store.select(detail.driveId)
   })
 })
@@ -312,6 +340,19 @@ defineExpose({
 </script>
 
 <style scoped>
+.drive-group-header {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 11px;
+  font-weight: 500;
+  color: rgb(120, 109, 98);
+  background: rgba(120, 109, 98, 0.08);
+  border-bottom: 1px solid rgba(120, 109, 98, 0.12);
+  position: sticky;
+  top: 0;
+}
 .drive-list-pane {
   width: 20rem;
   flex-shrink: 0;

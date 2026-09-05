@@ -270,3 +270,63 @@ describe("DrivesPanel — R1-39 WebSocket reconnect lifecycle", () => {
     }
   })
 })
+
+describe("DrivesPanel — per-creature grouping", () => {
+  it("groups rows by assignee in member order with unassigned last", async () => {
+    drivesAPI.list.mockResolvedValue({
+      drives: [
+        _rec("d-none"),
+        _rec("d-bob", { assignee_creature_id: "c2", assignment_state: "assigned" }),
+        _rec("d-alice", { assignee_creature_id: "c1", assignment_state: "assigned" }),
+      ],
+    })
+    const w = mountPanel({
+      graph_id: "g1",
+      home_node: "_host",
+      creatures: [
+        { creature_id: "c1", name: "Alice" },
+        { creature_id: "c2", name: "Bob" },
+      ],
+    })
+    await flushPromises()
+    const headers = w.findAll(".drive-group-header")
+    expect(headers.map((h) => h.attributes("data-testid"))).toEqual([
+      "drive-group-c1",
+      "drive-group-c2",
+      "drive-group-__unassigned",
+    ])
+    expect(headers.map((h) => h.text())).toEqual(["Alice1", "Bob1", "Unassigned1"])
+    // Rows follow their group header.
+    const order = w
+      .findAll(".drive-group-header, [data-drive-id]")
+      .map((n) => n.attributes("data-testid") || n.attributes("data-drive-id"))
+    expect(order.indexOf("drive-group-c1")).toBeLessThan(order.indexOf("drive-group-c2"))
+  })
+
+  it("shows no headers for a single-creature session with one group", async () => {
+    drivesAPI.list.mockResolvedValue({
+      drives: [_rec("d1", { assignee_creature_id: "c1", assignment_state: "assigned" })],
+    })
+    const w = mountPanel({
+      graph_id: "g1",
+      home_node: "_host",
+      creatures: [{ creature_id: "c1", name: "Alice" }],
+    })
+    await flushPromises()
+    expect(w.findAll(".drive-group-header")).toHaveLength(0)
+  })
+})
+
+describe("DrivesPanel — open-drives deep link", () => {
+  it("claims the event for its own session and ignores other sessions", async () => {
+    const { fireOpenDrives } = await import("@/utils/layoutEvents")
+    // A session id no other mount in this file listens on, so the claim
+    // and the unmount check observe only this panel.
+    const w = mountPanel({ graph_id: "g-deeplink", home_node: "_host", creatures: [] })
+    await flushPromises()
+    expect(fireOpenDrives({ sessionId: "g-deeplink" })).toBe(true)
+    expect(fireOpenDrives({ sessionId: "g-other-session" })).toBe(false)
+    w.unmount()
+    expect(fireOpenDrives({ sessionId: "g-deeplink" })).toBe(false)
+  })
+})

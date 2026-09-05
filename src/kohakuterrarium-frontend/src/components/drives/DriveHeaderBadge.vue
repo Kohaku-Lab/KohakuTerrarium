@@ -1,11 +1,15 @@
 <template>
   <DriveCountBadges v-if="show" :counts="store.counts" clickable @badge-click="onClick" />
+  <el-drawer v-model="drawerOpen" direction="rtl" size="min(760px, 94vw)" :with-header="false" append-to-body class="drive-drawer" data-testid="drive-drawer">
+    <DrivesPanel v-if="drawerOpen" :instance="instance" />
+  </el-drawer>
 </template>
 
 <script setup>
-import { computed, onBeforeUnmount, onMounted, watch } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
 import DriveCountBadges from "@/components/drives/DriveCountBadges.vue"
+import DrivesPanel from "@/components/panels/DrivesPanel.vue"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useDrivesStore } from "@/stores/drives"
 import { fireOpenDrives } from "@/utils/layoutEvents"
@@ -20,6 +24,7 @@ const store = useDrivesStore(sessionId.value || undefined)
 // Invisible until the session actually has Drives — a zero-Drive session
 // shows no new header chrome (byte-identical to today).
 const show = computed(() => store.order.length > 0)
+const drawerOpen = ref(false)
 
 let poller = null
 
@@ -30,6 +35,7 @@ onMounted(() => {
 watch(sessionId, (id, prev) => {
   if (id === prev) return
   stop()
+  drawerOpen.value = false
   if (id) start()
 })
 
@@ -51,8 +57,11 @@ function stop() {
 }
 
 function onClick() {
-  // Ask any open Drives panel for this session to focus. Never forces the
-  // panel open (see the "no empty chrome" rule).
-  fireOpenDrives({ sessionId: sessionId.value })
+  // An open Drives panel for this session focuses itself and claims the
+  // event; otherwise the badge is the way in, so open the panel as a drawer.
+  const handled = fireOpenDrives({ sessionId: sessionId.value })
+  if (!handled) drawerOpen.value = true
 }
+
+defineExpose({ drawerOpen })
 </script>

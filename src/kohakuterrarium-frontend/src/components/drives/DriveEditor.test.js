@@ -130,3 +130,83 @@ describe("DriveEditor — R1-38 creature scope", () => {
     expect(created[0][0].scope_id).toBeUndefined()
   })
 })
+
+describe("DriveEditor — goal kind form", () => {
+  it("builds the goal spec from the form and assigns the picked creature", async () => {
+    const w = mountEditor({
+      mode: "create",
+      kinds: ["goal", "generic"],
+      creatures: [{ creature_id: "c1", name: "Alice" }],
+    })
+    await w.vm.$nextTick()
+    // Goal fields replace the raw spec editor.
+    expect(w.find('[data-testid="goal-objective"]').exists()).toBe(true)
+    expect(w.text()).not.toContain("Spec (JSON)")
+
+    const create = buttonByText(w, "Create")
+    expect(create.attributes("disabled")).toBeDefined()
+
+    await w.find('textarea[data-testid="goal-objective"]').setValue("Ship the release")
+    await w
+      .find('textarea[data-testid="goal-criteria"]')
+      .setValue("tests green\n\nchangelog written")
+    const picker = w
+      .findAllComponents(ElSelect)
+      .find((s) => s.attributes("data-testid") === "creature-picker")
+    picker.vm.$emit("update:modelValue", "c1")
+    await w.vm.$nextTick()
+    expect(buttonByText(w, "Create").attributes("disabled")).toBeUndefined()
+
+    await buttonByText(w, "Create").trigger("click")
+    const [payload] = w.emitted("create")[0]
+    expect(payload.kind).toBe("goal")
+    expect(payload.title).toBe("Ship the release")
+    expect(payload.scope_type).toBe("graph")
+    expect(payload.scope_id).toBeUndefined()
+    expect(payload.assignee_creature_id).toBe("c1")
+    expect(payload.spec).toEqual({
+      objective: "Ship the release",
+      success_criteria: ["tests green", "changelog written"],
+      constraints: [],
+      autonomy: "manual",
+      completion_policy: "self_propose",
+      budgets: { max_turns: null, max_tool_calls: null, max_walltime_s: null },
+    })
+  })
+
+  it("edit mode loads the goal spec into the form and saves it back", async () => {
+    const record = {
+      drive_id: "goal-1",
+      kind: "goal",
+      title: "Old title",
+      priority: 0,
+      scope_type: "graph",
+      scope_id: "g1",
+      revision: 7,
+      presentation: {},
+      metadata: {},
+      spec: {
+        objective: "Keep the build green",
+        success_criteria: ["ci passes"],
+        constraints: ["no force push"],
+        autonomy: "continue_when_ready",
+        completion_policy: "user_confirm",
+        budgets: { max_turns: 3, max_tool_calls: null, max_walltime_s: null },
+      },
+    }
+    const w = mountEditor({ mode: "edit", record })
+    await w.vm.$nextTick()
+    expect(w.find('textarea[data-testid="goal-objective"]').element.value).toBe(
+      "Keep the build green",
+    )
+    await w.find('textarea[data-testid="goal-constraints"]').setValue("no force push\nno secrets")
+    await buttonByText(w, "Save").trigger("click")
+    const [{ patch, expectedRevision }] = w.emitted("save")[0]
+    expect(expectedRevision).toBe(7)
+    expect(patch.title).toBe("Old title")
+    expect(patch.spec.autonomy).toBe("continue_when_ready")
+    expect(patch.spec.completion_policy).toBe("user_confirm")
+    expect(patch.spec.constraints).toEqual(["no force push", "no secrets"])
+    expect(patch.spec.budgets.max_turns).toBe(3)
+  })
+})

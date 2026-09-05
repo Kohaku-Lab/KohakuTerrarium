@@ -16,14 +16,16 @@ const LAYOUT_EVENTS = Object.freeze({
   PALETTE_OPEN: "palette:open",
   MODEL_CONFIG_OPEN: "model:config-open",
   // Deep-link into the Drives panel: {sessionId, driveId?}. An open Drives
-  // panel for that session focuses the record; when none is open this is a
-  // no-op (panels are never force-opened — see the "no empty chrome" rule).
+  // panel for that session focuses the record and marks the event handled;
+  // the header badge opens a drawer when nothing claimed it.
   OPEN_DRIVES: "drives:open",
 })
 
 function _dispatch(name, detail) {
-  if (typeof CustomEvent === "undefined" || !target.dispatchEvent) return
-  target.dispatchEvent(new CustomEvent(name, { detail }))
+  if (typeof CustomEvent === "undefined" || !target.dispatchEvent) return false
+  // A listener that acts on the event calls ``preventDefault`` so the
+  // dispatcher can tell "handled" from "nobody was listening".
+  return !target.dispatchEvent(new CustomEvent(name, { detail, cancelable: true }))
 }
 
 export function fireLayoutEditRequested(detail = {}) {
@@ -42,8 +44,9 @@ export function fireModelConfigOpen(detail = {}) {
   _dispatch(LAYOUT_EVENTS.MODEL_CONFIG_OPEN, detail)
 }
 
+/** Returns true when a mounted Drives panel claimed the event. */
 export function fireOpenDrives(detail = {}) {
-  _dispatch(LAYOUT_EVENTS.OPEN_DRIVES, detail)
+  return _dispatch(LAYOUT_EVENTS.OPEN_DRIVES, detail)
 }
 
 export function onLayoutEvent(name, handler) {
