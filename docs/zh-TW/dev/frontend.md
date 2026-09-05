@@ -124,11 +124,12 @@ Panel 在 app 啟動時於 `stores/layoutPanels.js` 註冊 (同步、在 `app.mo
 layout.registerPanel({
   id: "chat",
   label: "Chat",
+  description: "The conversation with the focused creature.",
   component: ChatPanel,
 });
 ```
 
-`component` 會被包一層 `markRaw()`，讓 Vue 的 reactivity 不會把它包起來。
+`component` 會被包一層 `markRaw()`，讓 Vue 的 reactivity 不會把它包起來。`description` 是面板選擇器與命令面板顯示的英文回退文案；`utils/i18n.js` 會按面板 id 翻譯 label 與 description。舊 preset 仍引用、但不該再提供給使用者的別名傳 `hidden: true`：它仍可被解析，但不會出現在 `layout.visiblePanelList` 裡。
 
 ### Presets
 
@@ -139,9 +140,11 @@ const CHAT_FOCUS = {
   id: "chat-focus",
   label: "Chat Focus",
   shortcut: "Ctrl+1",
-  tree: hsplit(70, leaf("chat"), vsplit(65, leaf("status-dashboard"), leaf("state"))),
+  tree: hsplit(70, leaf("chat"), vsplit(40, leaf("status-tab"), leaf("state"))),
 };
 ```
+
+`DEFAULT_PRESET_ID` 指定每個新 attach 頁落在的 preset；instance 的形狀不會換成別的。
 
 Helper 函式 `hsplit(ratio, left, right)`、`vsplit(ratio, top, bottom)`、`leaf(panelId)` 讓 tree 節點可以寫得精簡。
 

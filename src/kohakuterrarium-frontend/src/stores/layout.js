@@ -133,6 +133,8 @@ const _allPresets = computed(() => ({
   ..._userPresets.value,
 }))
 const _panelList = computed(() => Object.values(_panels.value))
+/** Panels the user may pick: everything registered minus hidden aliases. */
+const _visiblePanelList = computed(() => _panelList.value.filter((p) => !p.hidden))
 
 // Recursively apply saved ratio values onto a tree structure.
 // Only updates ratios — does not change tree topology.
@@ -179,6 +181,11 @@ function registerPanel(meta) {
   const normalized = {
     id: meta.id,
     label: meta.label || meta.id,
+    // One line for the picker and palette; the id alone never disambiguates.
+    description: meta.description || "",
+    // A hidden panel stays resolvable for presets that reference it but is
+    // never offered to the user (legacy aliases).
+    hidden: meta.hidden === true,
     component: meta.component ? markRaw(meta.component) : null,
     preferredZones: meta.preferredZones || [],
     orientation: meta.orientation || "any",
@@ -644,6 +651,7 @@ function _setupForScope(scope) {
       allPresets: _allPresets,
       activePreset,
       panelList: _panelList,
+      visiblePanelList: _visiblePanelList,
       // fns
       effectivePreset,
       slotsForZone,

@@ -5,19 +5,38 @@ import { messages } from "@/utils/i18n/locales"
 
 const panelLabelKeys = {
   chat: "layout.panel.chat",
-  "status-dashboard": "layout.panel.statusDashboard",
+  "status-dashboard": "layout.panel.overview",
   "file-tree": "layout.panel.fileTree",
   "monaco-editor": "layout.panel.editor",
-  "editor-status": "layout.panel.activity",
+  "editor-status": "layout.panel.editorStatus",
   files: "layout.panel.files",
-  activity: "layout.panel.activity",
+  activity: "layout.panel.jobs",
   settings: "layout.panel.settings",
-  state: "layout.panel.state",
+  state: "layout.panel.creatureState",
   creatures: "layout.panel.creatures",
   canvas: "layout.panel.canvas",
   debug: "layout.panel.debug",
   terminal: "layout.panel.terminal",
   "status-tab": "layout.panel.statusDashboard",
+  modules: "layout.panel.modules",
+  drives: "layout.panel.drives",
+}
+
+const panelDescriptionKeys = {
+  chat: "layout.panelDesc.chat",
+  "status-dashboard": "layout.panelDesc.overview",
+  "status-tab": "layout.panelDesc.status",
+  "monaco-editor": "layout.panelDesc.editor",
+  files: "layout.panelDesc.files",
+  activity: "layout.panelDesc.jobs",
+  settings: "layout.panelDesc.settings",
+  state: "layout.panelDesc.creatureState",
+  creatures: "layout.panelDesc.creatures",
+  canvas: "layout.panelDesc.canvas",
+  debug: "layout.panelDesc.debug",
+  terminal: "layout.panelDesc.terminal",
+  modules: "layout.panelDesc.modules",
+  drives: "layout.panelDesc.drives",
 }
 
 const presetLabelKeys = {
@@ -54,6 +73,14 @@ export function translatePanelLabel(locale, panelId, fallback = panelId) {
   return typeof message === "function" ? message({ panelId }) : message
 }
 
+export function translatePanelDescription(locale, panelId, fallback = "") {
+  const key = panelDescriptionKeys[panelId]
+  if (!key) return fallback
+  const message = resolveMessage(locale, key)
+  if (message == null) return fallback
+  return typeof message === "function" ? message({ panelId }) : message
+}
+
 export function translatePresetLabel(locale, presetId, fallback = presetId) {
   const key = presetLabelKeys[presetId]
   if (!key) return fallback
@@ -82,6 +109,10 @@ export function useI18n() {
     return translatePanelLabel(localeStore.locale, panelId, fallback)
   }
 
+  function panelDescription(panelId, fallback = "") {
+    return translatePanelDescription(localeStore.locale, panelId, fallback)
+  }
+
   function presetLabel(presetId, fallback = presetId) {
     return translatePresetLabel(localeStore.locale, presetId, fallback)
   }
@@ -94,6 +125,7 @@ export function useI18n() {
     locale,
     t,
     panelLabel,
+    panelDescription,
     presetLabel,
     statusLabel,
     localeStore,

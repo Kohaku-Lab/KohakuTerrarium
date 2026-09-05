@@ -2,7 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import { LOCALE_DISPLAY_NAMES } from "@/stores/locale"
 
-import { translate, translatePanelLabel, translatePresetLabel } from "./i18n"
+import {
+  translate,
+  translatePanelDescription,
+  translatePanelLabel,
+  translatePresetLabel,
+} from "./i18n"
 
 describe("i18n helpers", () => {
   it("translates plain string keys", () => {
@@ -42,5 +47,45 @@ describe("i18n helpers", () => {
     expect(translatePresetLabel("zh-CN", "chat-focus")).toBe("聊天聚焦")
     expect(translatePanelLabel("ja", "chat")).toBe("チャット")
     expect(translatePanelLabel("ko", "chat")).toBe("채팅")
+  })
+
+  it("keeps the two status panels and the two activity panels apart in every locale", () => {
+    for (const locale of ["en", "zh-CN", "zh-TW", "ja", "ko"]) {
+      expect(translatePanelLabel(locale, "status-dashboard")).not.toBe(
+        translatePanelLabel(locale, "status-tab"),
+      )
+      expect(translatePanelLabel(locale, "activity")).not.toBe(
+        translatePanelLabel(locale, "editor-status"),
+      )
+    }
+    expect(translatePanelLabel("en", "status-dashboard")).toBe("Overview")
+    expect(translatePanelLabel("en", "activity")).toBe("Jobs")
+    expect(translatePanelLabel("en", "state")).toBe("Creature State")
+  })
+
+  it("describes every user-facing panel in every locale", () => {
+    const ids = [
+      "chat",
+      "status-dashboard",
+      "status-tab",
+      "monaco-editor",
+      "files",
+      "activity",
+      "settings",
+      "state",
+      "creatures",
+      "canvas",
+      "debug",
+      "terminal",
+      "modules",
+      "drives",
+    ]
+    for (const locale of ["en", "zh-CN", "zh-TW", "ja", "ko"]) {
+      for (const id of ids) {
+        expect(translatePanelDescription(locale, id), `${locale}/${id}`).toBeTruthy()
+      }
+    }
+    // Hidden aliases carry no description.
+    expect(translatePanelDescription("en", "file-tree", "")).toBe("")
   })
 })

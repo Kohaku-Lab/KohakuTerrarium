@@ -84,6 +84,31 @@ describe("layout store — panel registry", () => {
   })
 })
 
+describe("layout store — hidden panels and descriptions", () => {
+  it("normalizes hidden and description and filters hidden panels from the visible list", () => {
+    const store = useLayoutStore()
+    store.registerPanel({
+      id: "shown",
+      label: "Shown",
+      component: fakeComponent("Shown"),
+      description: "A panel",
+    })
+    store.registerPanel({
+      id: "alias",
+      label: "Alias",
+      component: fakeComponent("Alias"),
+      hidden: true,
+    })
+    expect(store.getPanel("shown").hidden).toBe(false)
+    expect(store.getPanel("shown").description).toBe("A panel")
+    expect(store.getPanel("alias").hidden).toBe(true)
+    expect(store.getPanel("alias").description).toBe("")
+    expect(store.panelList.map((p) => p.id)).toEqual(expect.arrayContaining(["shown", "alias"]))
+    expect(store.visiblePanelList.map((p) => p.id)).toContain("shown")
+    expect(store.visiblePanelList.map((p) => p.id)).not.toContain("alias")
+  })
+})
+
 describe("layout store — preset switching", () => {
   it("switches to a registered builtin", () => {
     const store = useLayoutStore()

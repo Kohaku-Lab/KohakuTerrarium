@@ -123,11 +123,12 @@ Panel 会在应用启动时注册到 `stores/layoutPanels.js`，而且必须同�
 layout.registerPanel({
   id: "chat",
   label: "Chat",
+  description: "The conversation with the focused creature.",
   component: ChatPanel,
 });
 ```
 
-`component` 内部会先经过一层 `markRaw()`，避免 Vue 将其纳入响应式系统。
+`component` 内部会先经过一层 `markRaw()`，避免 Vue 将其纳入响应式系统。`description` 是面板选择器与命令面板显示的英文回退文案；`utils/i18n.js` 会按面板 id 翻译 label 与 description。旧 preset 仍引用、但不该再提供给用户的别名传 `hidden: true`：它仍可被解析，但不会出现在 `layout.visiblePanelList` 里。
 
 ### Preset
 
@@ -138,9 +139,11 @@ const CHAT_FOCUS = {
   id: "chat-focus",
   label: "Chat Focus",
   shortcut: "Ctrl+1",
-  tree: hsplit(70, leaf("chat"), vsplit(65, leaf("status-dashboard"), leaf("state"))),
+  tree: hsplit(70, leaf("chat"), vsplit(40, leaf("status-tab"), leaf("state"))),
 };
 ```
+
+`DEFAULT_PRESET_ID` 指定每个新 attach 页落在的 preset；instance 的形状不会换成别的。
 
 `hsplit(ratio, left, right)`、`vsplit(ratio, top, bottom)`、`leaf(panelId)` 这些辅助函数，就是为了减少手写树结构的负担。
 

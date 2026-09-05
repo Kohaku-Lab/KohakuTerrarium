@@ -65,7 +65,7 @@ const presetPanels = computed(() => {
 // then everything else in registration order.
 const panels = computed(() => {
   const presetIds = new Set(presetPanels.value.map((p) => p.id))
-  const extras = layout.panelList.filter((p) => p && p.id && !presetIds.has(p.id))
+  const extras = layout.visiblePanelList.filter((p) => p && p.id && !presetIds.has(p.id))
   return [...presetPanels.value, ...extras]
 })
 

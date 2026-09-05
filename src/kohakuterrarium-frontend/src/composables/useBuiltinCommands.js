@@ -60,7 +60,7 @@ export function useBuiltinCommands() {
       })
     }
 
-    for (const panel of layout.panelList) {
+    for (const panel of layout.visiblePanelList) {
       if (!panel?.id || panel.id === "status-bar") continue
       palette.register({
         id: `panel:${panel.id}`,

@@ -136,12 +136,17 @@ Panels are registered in `stores/layoutPanels.js` at app startup
 layout.registerPanel({
   id: "chat",
   label: "Chat",
+  description: "The conversation with the focused creature.",
   component: ChatPanel,
 });
 ```
 
 The `component` is wrapped in `markRaw()` internally so Vue reactivity
-doesn't wrap it.
+doesn't wrap it. `description` is the English fallback shown in the
+panel picker and palette; `utils/i18n.js` translates both label and
+description by panel id. Pass `hidden: true` for an alias a legacy
+preset still references but users should never be offered; such panels
+stay resolvable but drop out of `layout.visiblePanelList`.
 
 ### Presets
 
@@ -152,12 +157,14 @@ const CHAT_FOCUS = {
   id: "chat-focus",
   label: "Chat Focus",
   shortcut: "Ctrl+1",
-  tree: hsplit(70, leaf("chat"), vsplit(65, leaf("status-dashboard"), leaf("state"))),
+  tree: hsplit(70, leaf("chat"), vsplit(40, leaf("status-tab"), leaf("state"))),
 };
 ```
 
 Helper functions `hsplit(ratio, left, right)`, `vsplit(ratio, top, bottom)`,
-and `leaf(panelId)` create the tree nodes concisely.
+and `leaf(panelId)` create the tree nodes concisely. `DEFAULT_PRESET_ID`
+names the preset every fresh attach tab lands on; the instance's shape
+never picks a different one.
 
 ### Panel props
 

@@ -6,8 +6,9 @@
       <button v-for="p in filtered" :key="p.id" class="flex items-center gap-2 px-3 py-2 rounded text-left hover:bg-warm-100 dark:hover:bg-warm-800 transition-colors" :class="currentPanelId === p.id ? 'bg-iolite/10' : ''" @click="select(p.id)">
         <div class="flex-1 min-w-0">
           <div class="text-xs font-medium text-warm-700 dark:text-warm-300 truncate">
-            {{ p.label }}
+            {{ panelLabel(p.id, p.label) }}
           </div>
+          <div v-if="panelDescription(p.id, p.description)" class="text-[10px] text-warm-500 truncate" :data-testid="`panel-desc-${p.id}`">{{ panelDescription(p.id, p.description) }}</div>
           <div class="text-[10px] text-warm-400 font-mono truncate">{{ p.id }} · {{ p.orientation }}</div>
           <div v-if="p.preferredZones?.length" class="text-[10px] text-warm-500 truncate">prefers: {{ p.preferredZones.join(", ") }}</div>
         </div>
@@ -30,6 +31,7 @@ import { useRoute } from "vue-router"
 
 import { useLayoutStore } from "@/stores/layout"
 import { useInstancesStore } from "@/stores/instances"
+import { useI18n } from "@/utils/i18n"
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },
@@ -41,6 +43,7 @@ const emit = defineEmits(["update:modelValue", "select", "cancel"])
 
 const layout = useLayoutStore()
 const instances = useInstancesStore()
+const { panelLabel, panelDescription } = useI18n()
 
 const open = ref(props.modelValue)
 watch(
@@ -64,13 +67,11 @@ const currentInstance = computed(() => {
 
 const filtered = computed(() => {
   const q = query.value.trim().toLowerCase()
-  const all = layout.panelList.filter(
-    // Hide non-user-facing chrome panels from the picker.
-    (p) => p.id !== "status-bar",
-  )
+  // Hidden legacy aliases and non-user-facing chrome never appear here.
+  const all = layout.visiblePanelList.filter((p) => p.id !== "status-bar")
   if (!q) return all
   return all.filter((p) => {
-    const hay = `${p.id} ${p.label || ""} ${(p.preferredZones || []).join(" ")}`
+    const hay = `${p.id} ${p.label || ""} ${panelLabel(p.id, p.label)} ${panelDescription(p.id, p.description)} ${(p.preferredZones || []).join(" ")}`
     return hay.toLowerCase().includes(q)
   })
 })
