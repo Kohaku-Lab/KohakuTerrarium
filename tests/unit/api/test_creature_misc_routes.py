@@ -9,6 +9,9 @@ from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_command as cmd_mod,
 )
 from kohakuterrarium.api.routes.sessions_v2 import (
+    creatures_ctl as ctl_mod,
+)
+from kohakuterrarium.api.routes.sessions_v2 import (
     creatures_model as model_mod,
 )
 from kohakuterrarium.terrarium.service import CreatureInfo
@@ -50,6 +53,16 @@ class _FakeService:
         if self._switch_raises is not None:
             raise self._switch_raises
         return self._switch_returns
+
+    async def start_creature(self, cid):
+        if self._switch_raises is not None:
+            raise self._switch_raises
+        self.lifecycle_calls = getattr(self, "lifecycle_calls", []) + [("start", cid)]
+
+    async def stop_creature(self, cid):
+        if self._switch_raises is not None:
+            raise self._switch_raises
+        self.lifecycle_calls = getattr(self, "lifecycle_calls", []) + [("stop", cid)]
 
     async def execute_command(
         self, cid, command, args, *, principal="user:local", is_operator=False
@@ -94,6 +107,38 @@ class TestSwitchModelRoute:
         client = _client(model_mod.router, svc)
         resp = client.post("/sess/creatures/alice/model", json={"model": "x"})
         assert resp.status_code == 404
+
+
+# ── start / stop creature ──────────────────────────────────────
+
+
+class TestStartStopRoutes:
+    def test_start_resolves_name_to_id(self):
+        svc = _FakeService()
+        client = _client(ctl_mod.router, svc)
+        resp = client.post("/sess/creatures/alice/start")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "started", "creature_id": "cid-1"}
+        assert svc.lifecycle_calls == [("start", "cid-1")]
+
+    def test_stop_resolves_name_to_id(self):
+        svc = _FakeService()
+        client = _client(ctl_mod.router, svc)
+        resp = client.post("/sess/creatures/cid-1/stop")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "stopped", "creature_id": "cid-1"}
+        assert svc.lifecycle_calls == [("stop", "cid-1")]
+
+    def test_unknown_creature_is_404(self):
+        svc = _FakeService(creatures=[])
+        client = _client(ctl_mod.router, svc)
+        assert client.post("/sess/creatures/ghost/start").status_code == 404
+        assert client.post("/sess/creatures/ghost/stop").status_code == 404
+
+    def test_key_error_from_service_is_404(self):
+        svc = _FakeService(switch_raises=KeyError("gone"))
+        client = _client(ctl_mod.router, svc)
+        assert client.post("/sess/creatures/alice/stop").status_code == 404
 
 
 # ── execute_command ────────────────────────────────────────────

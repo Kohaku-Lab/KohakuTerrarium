@@ -15,6 +15,16 @@ async def interrupt(
     await service.interrupt(creature_id)
 
 
+async def start(service: "TerrariumService", session_id: str, creature_id: str) -> None:
+    """Start a stopped creature in place."""
+    await service.start_creature(creature_id)
+
+
+async def stop(service: "TerrariumService", session_id: str, creature_id: str) -> None:
+    """Stop a running creature without removing it from its graph."""
+    await service.stop_creature(creature_id)
+
+
 async def list_jobs(
     service: "TerrariumService", session_id: str, creature_id: str
 ) -> list[dict]:

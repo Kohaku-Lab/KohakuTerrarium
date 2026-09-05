@@ -354,6 +354,18 @@ export const terrariumAPI = {
     return data
   },
 
+  /** Start a stopped creature in place (it stays in its graph). */
+  async startCreature(id, name) {
+    const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/start`)
+    return data
+  },
+
+  /** Stop a running creature without removing it from its graph. */
+  async stopCreature(id, name) {
+    const { data } = await api.post(`/sessions/${id}/creatures/${encodeTarget(name)}/stop`)
+    return data
+  },
+
   async listCreatureJobs(id, name) {
     const { data } = await api.get(`/sessions/${id}/creatures/${encodeTarget(name)}/jobs`)
     return data

@@ -1,4 +1,4 @@
-"""Interrupt creatures and manage their background jobs.
+"""Interrupt, start, or stop creatures and manage their background jobs.
 
 Service routing reaches remote home workers and retries once when home-node routing
 is stale.
@@ -29,6 +29,34 @@ async def interrupt_creature(
         raise HTTPException(409, str(exc)) from exc
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
+
+
+@router.post("/{session_id}/creatures/{creature_id}/start")
+async def start_creature(
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
+):
+    cid = await resolve_creature_id(service, creature_id, session_id)
+    try:
+        await creature_ctl.start(service, session_id, cid)
+    except KeyError:
+        raise HTTPException(404, f"creature {creature_id!r} not found")
+    return {"status": "started", "creature_id": cid}
+
+
+@router.post("/{session_id}/creatures/{creature_id}/stop")
+async def stop_creature(
+    session_id: str,
+    creature_id: str,
+    service: TerrariumService = Depends(get_service),
+):
+    cid = await resolve_creature_id(service, creature_id, session_id)
+    try:
+        await creature_ctl.stop(service, session_id, cid)
+    except KeyError:
+        raise HTTPException(404, f"creature {creature_id!r} not found")
+    return {"status": "stopped", "creature_id": cid}
 
 
 @router.get("/{session_id}/creatures/{creature_id}/jobs")
