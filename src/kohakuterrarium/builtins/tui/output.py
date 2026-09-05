@@ -398,6 +398,8 @@ class TUIOutput(BaseOutputModule):
                 self._handle_subagent_tool(s, name, rest, t, metadata)
             case "trigger_fired":
                 self._handle_trigger_fired(name, t, metadata)
+            case "drive_turn":
+                self._handle_drive_turn(t, metadata)
             case "token_usage":
                 self._handle_token_usage(metadata)
             case "compact_start" | "compact_complete" | "compact_skipped":
@@ -558,6 +560,14 @@ class TUIOutput(BaseOutputModule):
         content = metadata.get("content", "")
         label = f"[{channel}] {sender}" if channel else name
         self._tui.add_trigger_message(label, content, target=t)
+
+    def _handle_drive_turn(self, t: str, metadata: dict) -> None:
+        kind = metadata.get("drive_kind") or "drive"
+        label = (
+            f"drive turn · {kind} {metadata.get('drive_id', '')} "
+            f"({metadata.get('delivery_reason', '')})"
+        )
+        self._tui.add_trigger_message(label, metadata.get("objective", ""), target=t)
 
     def _handle_token_usage(self, metadata: dict) -> None:
         prompt = metadata.get("prompt_tokens", 0)

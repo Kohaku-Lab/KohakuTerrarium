@@ -5670,3 +5670,48 @@ describe("chat store — concurrent history resyncs apply in order", () => {
     getHistorySpy.mockRestore()
   })
 })
+
+describe("chat store — drive-turn transcript marker", () => {
+  it("live drive_turn activity inserts a trigger message with the goal identity", () => {
+    const chat = useChatStore()
+    chat.messagesByTab = { main: [{ id: "m1", role: "assistant", parts: [] }] }
+    chat.activeTab = "main"
+    chat._handleActivity("main", {
+      type: "activity",
+      activity_type: "drive_turn",
+      name: "unknown",
+      drive_id: "goal-abc",
+      drive_kind: "goal",
+      delivery_reason: "resume",
+      objective: "ship the release",
+    })
+    const marker = chat.messagesByTab.main.at(-1)
+    expect(marker.role).toBe("trigger")
+    expect(marker.content).toBe("drive turn: goal goal-abc (resume)")
+    expect(marker.triggerContent).toBe("ship the release")
+    expect(marker.driveId).toBe("goal-abc")
+  })
+
+  it("history replay renders the persisted drive_turn activity the same way", () => {
+    const events = [
+      { type: "processing_start" },
+      {
+        type: "activity",
+        activity_type: "drive_turn",
+        drive_id: "goal-abc",
+        drive_kind: "goal",
+        delivery_reason: "activated",
+        objective: "ship the release",
+      },
+      { type: "text", content: "working on it" },
+      { type: "processing_end" },
+    ]
+    const { messages: replayed } = _replayEvents([], events)
+    const marker = replayed.find((m) => m.role === "trigger")
+    expect(marker).toBeTruthy()
+    expect(marker.content).toBe("drive turn: goal goal-abc (activated)")
+    expect(marker.triggerContent).toBe("ship the release")
+    // The marker sits right after the turn shell processing_start opens.
+    expect(replayed.indexOf(marker)).toBe(1)
+  })
+})

@@ -12,6 +12,8 @@ that file past the 600-line guard. They all share the same shape:
 Split as a mixin so ``app.py`` stays focused on lifecycle + layout.
 """
 
+from typing import Any
+
 from rich.markup import escape
 from rich.panel import Panel
 
@@ -159,6 +161,19 @@ class AppOutputMixin:
         """Commit an 'interrupted' notice to scrollback."""
         self._flush_assistant_message()
         self.committer.text("[yellow]⚠ interrupted[/yellow]")
+        self._invalidate()
+
+    def on_drive_turn(self, metadata: dict[str, Any]) -> None:
+        """Commit a marker for a turn that a Drive delivery started."""
+        self._flush_assistant_message()
+        kind = escape(str(metadata.get("drive_kind") or "drive"))
+        drive_id = escape(str(metadata.get("drive_id") or ""))
+        reason = escape(str(metadata.get("delivery_reason") or ""))
+        line = f"[magenta]◆ drive turn · {kind} {drive_id} ({reason})[/magenta]"
+        objective = str(metadata.get("objective") or "")
+        if objective:
+            line += f"[dim] — {escape(objective)}[/dim]"
+        self.committer.text(line)
         self._invalidate()
 
     def on_background_result(self, kind: str, label: str, count: int = 1) -> None:

@@ -40,6 +40,22 @@ const COMMAND_INVENTORY_TTL_MS = 30_000
 // dropped and the view reconciles to whatever the backend has.
 const BRANCH_RESYNC_MAX_RETRIES = 40
 
+/** Transcript marker for a turn that a Drive delivery started. */
+function _driveTurnMessage(data, id, timestamp) {
+  const kind = data.drive_kind || "drive"
+  const reason = data.delivery_reason || ""
+  return {
+    id,
+    role: "trigger",
+    content: `drive turn: ${kind} ${data.drive_id || ""}${reason ? ` (${reason})` : ""}`,
+    triggerContent: data.objective || "",
+    channel: "",
+    sender: "",
+    driveId: data.drive_id || "",
+    timestamp,
+  }
+}
+
 function _newRequestId() {
   if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID()
   return `branch_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
@@ -1006,6 +1022,9 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
           sender,
           timestamp: "",
         })
+      } else if (at === "drive_turn") {
+        cur = null
+        result.push(_driveTurnMessage(evt, stableId("drv_"), ""))
       } else if (at === "token_usage") {
         if (cur) cur._pendingReasoningCursor = cur.parts.length
       } else if (at === "processing_complete") {
@@ -3342,6 +3361,11 @@ const _chatStoreOptions = {
           timestamp: new Date().toISOString(),
         })
         if (source) this.processingByTab[source] = false
+        return
+      }
+
+      if (at === "drive_turn") {
+        msgs.push(_driveTurnMessage(data, "drv_" + Date.now(), new Date().toISOString()))
         return
       }
 

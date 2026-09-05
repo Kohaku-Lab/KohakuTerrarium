@@ -367,6 +367,32 @@ class AgentEventLoopMixin:
             },
         )
 
+    def _notify_drive_turn(self, event) -> None:
+        """Mark a turn that a Drive delivery started, for every output surface."""
+        ctx = event.context or {}
+        projected = ctx.get("drive") if isinstance(ctx.get("drive"), dict) else {}
+        drive_id = str(ctx.get("drive_id") or "")
+        kind = str(ctx.get("drive_kind") or projected.get("kind") or "drive")
+        reason = str(ctx.get("delivery_reason") or event.type.removeprefix("drive_"))
+        objective = str(projected.get("objective") or "")[:240]
+        detail = f"[drive] {kind} {drive_id} ({reason})"
+        if objective:
+            detail += f": {objective}"
+        self.output_router.notify_activity(
+            "drive_turn",
+            detail,
+            metadata={
+                "drive_id": drive_id,
+                "drive_kind": kind,
+                "delivery_reason": reason,
+                "delivery_id": str(ctx.get("delivery_id") or ""),
+                "objective": objective,
+                "event_type": event.type,
+                "turn_index": self._turn_index,
+                "branch_id": self._branch_id,
+            },
+        )
+
     async def _process_batch_with_controller(self, events: list, controller) -> None:
         """Push the whole stackable run to the controller (one combined
         ``role=user`` message) and drive the controller loop. Cancellable
@@ -381,6 +407,8 @@ class AgentEventLoopMixin:
                 payload={"request_id": self._branch_request_id},
             )
         )
+        if primary.type.startswith("drive_"):
+            self._notify_drive_turn(primary)
 
         all_round_text: list[str] = []
         loop_task = asyncio.create_task(

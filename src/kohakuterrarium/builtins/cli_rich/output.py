@@ -374,6 +374,10 @@ class RichCLIOutput(BaseOutputModule):
             self.app.on_interrupt_notice(detail)
             return
 
+        if activity_type == "drive_turn":
+            self.app.on_drive_turn(metadata)
+            return
+
         if activity_type == "background_result":
             labels = metadata.get("labels")
             label = (
