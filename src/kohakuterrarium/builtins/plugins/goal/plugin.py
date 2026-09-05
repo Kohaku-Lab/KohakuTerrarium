@@ -17,6 +17,7 @@ from kohakuterrarium.modules.user_command.base import (
     ui_list,
 )
 from kohakuterrarium.terrarium.drive.errors import (
+    DriveBackpressureError,
     DriveConflictError,
     DriveError,
     DriveIdempotencyConflictError,
@@ -27,7 +28,11 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationNotFoundError,
     DriveTransitionError,
 )
-from kohakuterrarium.terrarium.drive.goal import GoalSpecError, build_goal_spec
+from kohakuterrarium.terrarium.drive.goal import (
+    DEFAULT_AUTONOMY,
+    GoalSpecError,
+    build_goal_spec,
+)
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -74,9 +79,18 @@ _TERMINAL = frozenset(
     }
 )
 _LIVE = frozenset(DriveStatus) - _TERMINAL
+# Resume also covers an active goal: a manual goal that finished its turn is
+# still active and needs a wake for the next one.
 _ELIGIBLE_STATUSES = {
     "pause": frozenset({DriveStatus.ACTIVE, DriveStatus.WAITING, DriveStatus.BLOCKED}),
-    "resume": frozenset({DriveStatus.WAITING, DriveStatus.BLOCKED, DriveStatus.PAUSED}),
+    "resume": frozenset(
+        {
+            DriveStatus.ACTIVE,
+            DriveStatus.WAITING,
+            DriveStatus.BLOCKED,
+            DriveStatus.PAUSED,
+        }
+    ),
     "cancel": _LIVE,
     "complete": frozenset({DriveStatus.ACTIVE}),
 }
@@ -92,10 +106,12 @@ _TRANSITION_TITLES = {
 }
 _SET_FLAG_KEYS = frozenset({"autonomy", "policy", "criteria"})
 _USAGE = (
-    "usage: /goal set <objective> | show [id] | list | pause [id] | "
+    "usage: /goal set [autonomy=manual|continue_when_ready] [policy=...] "
+    "[criteria=a;b] <objective> | show [id] | list | pause [id] | "
     "resume [id] | cancel [id] | complete [id] | assign <id> <creature>\n"
-    "list shows live goals; show <id> can display terminal history; "
-    "actions without an id select an eligible live goal"
+    "list shows live goals in the graph; show <id> can display terminal "
+    "history; actions without an id select an eligible live goal on the "
+    "focused creature; resume wakes a manual goal for its next turn"
 )
 
 
@@ -159,11 +175,12 @@ class GoalCommand(BaseUserCommand):
                 objective,
                 success_criteria=_split_criteria(opts.get("criteria")),
                 completion_policy=opts.get("policy", "self_propose"),
-                autonomy=opts.get("autonomy", "continue_when_ready"),
+                autonomy=opts.get("autonomy", DEFAULT_AUTONOMY),
             )
         except GoalSpecError as exc:
             return UserCommandResult(error=f"invalid goal: {exc}")
         graph_id = await _graph_of(ctx, ctx.creature_id)
+        others = [v for v in await _list_goals(ctx) if v.record.status in _LIVE]
         request = CreateDriveRequest(
             kind="goal",
             title=objective[:120],
@@ -189,16 +206,24 @@ class GoalCommand(BaseUserCommand):
             expected_revision=view.record.revision,
             is_privileged=False,
         )
-        return _panel("Goal created", view)
+        result = _panel("Goal created", view)
+        return _with_notes(result, _set_notes(spec, others))
 
     async def _list(self, ctx: "_Resolved") -> UserCommandResult:
-        views = [view for view in await _list_goals(ctx) if view.record.status in _LIVE]
+        views = [
+            view
+            for view in await _list_goals(ctx, graph_wide=True)
+            if view.record.status in _LIVE
+        ]
         if not views:
-            return UserCommandResult(output="No live goals for this creature.")
+            return UserCommandResult(output="No live goals in this graph.")
         items = [
             {
                 "label": f"{v.record.title} [status: {v.record.status.value}]",
-                "description": f"id={v.record.drive_id} owner={v.record.owner.format()}",
+                "description": (
+                    f"id={v.record.drive_id} owner={v.record.owner.format()} "
+                    f"assignee={_assignee_of(v)}"
+                ),
             }
             for v in views
         ]
@@ -222,13 +247,16 @@ class GoalCommand(BaseUserCommand):
         # The authenticated owner can manage lifecycle without operator elevation;
         # an operator user also manages goals created by their creatures.
         elevated = ctx.is_operator and view.record.owner != ctx.principal
-        updated = await ctx.service.transition_drive(
-            view.record.drive_id,
-            _TRANSITION_TARGETS[sub],
-            expected_revision=view.record.revision,
-            actor=ctx.principal,
-            is_privileged=elevated,
-        )
+        if sub == "resume":
+            updated = await _resume(ctx, view, elevated)
+        else:
+            updated = await ctx.service.transition_drive(
+                view.record.drive_id,
+                _TRANSITION_TARGETS[sub],
+                expected_revision=view.record.revision,
+                actor=ctx.principal,
+                is_privileged=elevated,
+            )
         return _panel(_TRANSITION_TITLES[sub], updated)
 
     async def _complete(self, drive_id: str, ctx: "_Resolved") -> UserCommandResult:
@@ -336,15 +364,74 @@ async def _graph_of(ctx: _Resolved, creature_id: str) -> str:
     return info.graph_id
 
 
-async def _list_goals(ctx: _Resolved) -> list[Any]:
+async def _list_goals(ctx: _Resolved, *, graph_wide: bool = False) -> list[Any]:
+    """List goals assigned to the focused creature, or every goal in its graph."""
     # Service authorization limits plain-user reads to owned or assigned records.
-    views = await ctx.service.list_drives(
-        actor=ctx.principal,
-        assignee_creature_id=ctx.creature_id,
-        kinds=frozenset({"goal"}),
-        is_privileged=False,
-    )
+    if graph_wide:
+        views = await ctx.service.list_drives(
+            actor=ctx.principal,
+            graph_id=await _graph_of(ctx, ctx.creature_id),
+            kinds=frozenset({"goal"}),
+            is_privileged=False,
+        )
+    else:
+        views = await ctx.service.list_drives(
+            actor=ctx.principal,
+            assignee_creature_id=ctx.creature_id,
+            kinds=frozenset({"goal"}),
+            is_privileged=False,
+        )
     return list(views)
+
+
+async def _resume(ctx: _Resolved, view: Any, elevated: bool) -> Any:
+    """Reactivate a suspended goal, then wake it for its next turn.
+
+    A continuing goal re-arms on activation, so the wake is a no-op for it; a
+    manual goal needs the wake to earn another turn.
+    """
+    record = view.record
+    if record.status is not DriveStatus.ACTIVE:
+        view = await ctx.service.transition_drive(
+            record.drive_id,
+            DriveStatus.ACTIVE,
+            expected_revision=record.revision,
+            actor=ctx.principal,
+            is_privileged=elevated,
+        )
+    return await ctx.service.wake_drive(
+        view.record.drive_id,
+        actor=ctx.principal,
+        expected_revision=view.record.revision,
+        is_privileged=elevated,
+    )
+
+
+def _assignee_of(view: Any) -> str:
+    return getattr(view, "assignee_creature_id", None) or "-"
+
+
+def _set_notes(spec: dict[str, Any], others: list[Any]) -> list[str]:
+    notes: list[str] = []
+    if spec.get("autonomy") == "manual":
+        notes.append("autonomy=manual: one turn now; /goal resume wakes the next")
+    if others:
+        listed = ", ".join(
+            f"{v.record.drive_id} [{v.record.status.value}]" for v in others[:5]
+        )
+        more = f" (+{len(others) - 5} more)" if len(others) > 5 else ""
+        notes.append(
+            f"{len(others)} other live goal(s) stay assigned here: {listed}{more}; "
+            "pause or cancel them with /goal pause|cancel <id>"
+        )
+    return notes
+
+
+def _with_notes(result: UserCommandResult, notes: list[str]) -> UserCommandResult:
+    if not notes:
+        return result
+    text = "\n".join([result.output or "", *(f"note: {n}" for n in notes)])
+    return UserCommandResult(output=text, data=result.data)
 
 
 def _require_goal(view: Any, drive_id: str) -> Any:
@@ -447,7 +534,8 @@ def _list_text(views: list[Any]) -> str:
     lines = ["Goals:"]
     for v in views:
         lines.append(
-            f"  {v.record.drive_id}  [status: {v.record.status.value}]  {v.record.title}"
+            f"  {v.record.drive_id}  [status: {v.record.status.value}]  "
+            f"{v.record.title}  → {_assignee_of(v)}"
         )
     return "\n".join(lines)
 
@@ -464,6 +552,11 @@ def _error_text(exc: DriveError) -> str:
         return (
             "the Goal drive registration is not enabled on this terrarium; "
             "enable it in Drive settings"
+        )
+    if isinstance(exc, DriveBackpressureError):
+        return (
+            f"at the goal limit: {exc}; pause or cancel a live goal "
+            "(/goal list, then /goal pause|cancel <id>) before setting another"
         )
     if isinstance(exc, (DriveConflictError, DriveIdempotencyConflictError)):
         return f"conflict: {exc}; refresh and retry"

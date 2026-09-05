@@ -80,6 +80,7 @@ class _FakeService:
         self.transition_call = None
         self.wake_call = None
         self.assign_call = None
+        self.list_calls = []
         self._drive_kind = drive_kind
         self._views = (
             list(views) if views is not None else [_fake_view(kind=self._drive_kind)]
@@ -112,6 +113,7 @@ class _FakeService:
         return _fake_view(drive_id=drive_id)
 
     async def list_drives(self, *, actor, assignee_creature_id=None, **kw):
+        self.list_calls.append({"assignee_creature_id": assignee_creature_id, **kw})
         return tuple(self._views)
 
     async def get_drive(self, drive_id, *, actor, is_privileged=False):
@@ -207,8 +209,10 @@ class TestGoalCommand:
         # as an operator (graph-authority is denied downstream, not defaulted on).
         assert svc.create_call.operator is False
 
-    async def test_set_defaults_to_continuing_autonomy(self):
-        svc = _FakeService()
+    async def test_set_defaults_to_manual_autonomy(self):
+        # The command shares the registration default: no self-continuing
+        # loop unless the user asks for one.
+        svc = _FakeService(views=[])
         res = await GoalCommand()._execute(
             "set Fix the auth race",
             _ctx(
@@ -219,8 +223,40 @@ class TestGoalCommand:
             ),
         )
         assert res.success, res.error
-        assert svc.create_call.request.spec["autonomy"] == "continue_when_ready"
+        assert svc.create_call.request.spec["autonomy"] == "manual"
         assert svc.wake_call.drive_id == "d1"
+        assert "note: autonomy=manual" in res.output
+
+    async def test_set_reports_other_live_goals(self):
+        svc = _FakeService(
+            views=[
+                _fake_view(drive_id="older", status=DriveStatus.ACTIVE),
+                _fake_view(drive_id="done", status=DriveStatus.COMPLETED),
+            ]
+        )
+        res = await GoalCommand()._execute(
+            "set autonomy=continue_when_ready Fix the auth race",
+            _ctx(service=svc, creature_id="worker", principal="user:alice"),
+        )
+        assert res.success, res.error
+        assert "1 other live goal(s)" in res.output
+        assert "older [active]" in res.output
+        assert "done" not in res.output
+        assert "autonomy=manual" not in res.output
+
+    async def test_set_at_goal_limit_explains_backpressure(self):
+        from kohakuterrarium.terrarium.drive.errors import DriveBackpressureError
+
+        class _Full(_FakeService):
+            async def create_drive(self, request, **kw):
+                raise DriveBackpressureError("assignee at the active-Drive limit (8)")
+
+        res = await GoalCommand()._execute(
+            "set Fix the auth race",
+            _ctx(service=_Full(views=[]), creature_id="worker", principal="user:alice"),
+        )
+        assert res.error and "at the goal limit" in res.error
+        assert "/goal pause|cancel" in res.error
 
     async def test_set_creates_user_owned_drive_with_user_actor(self):
         svc = _FakeService()
@@ -368,7 +404,39 @@ class TestGoalCommand:
         res = await GoalCommand()._execute(
             "list", _ctx(service=svc, creature_id="worker", principal="user:alice")
         )
-        assert res.output == "No live goals for this creature."
+        assert res.output == "No live goals in this graph."
+
+    async def test_list_is_graph_wide_and_shows_assignees(self):
+        svc = _FakeService(views=[_fake_view(drive_id="d1", title="Current")])
+        res = await GoalCommand()._execute(
+            "list", _ctx(service=svc, creature_id="worker", principal="user:alice")
+        )
+        assert res.success, res.error
+        assert svc.list_calls[-1].get("graph_id") == "g1"
+        assert svc.list_calls[-1]["assignee_creature_id"] is None
+        assert "→ worker" in res.output
+        assert "assignee=worker" in res.data["items"][0]["description"]
+
+    async def test_resume_on_active_manual_goal_wakes_without_transition(self):
+        svc = _FakeService(views=[_fake_view(drive_id="d1", status=DriveStatus.ACTIVE)])
+        res = await GoalCommand()._execute(
+            "resume", _ctx(service=svc, creature_id="worker", principal="user:alice")
+        )
+        assert res.success, res.error
+        assert svc.transition_call is None
+        assert svc.wake_call.drive_id == "d1"
+        assert res.output.startswith("Goal resumed: d1")
+
+    async def test_resume_on_paused_goal_transitions_then_wakes(self):
+        svc = _FakeService(
+            views=[_fake_view(drive_id="d1", status=DriveStatus.PAUSED, revision=4)]
+        )
+        res = await GoalCommand()._execute(
+            "resume d1", _ctx(service=svc, creature_id="worker", principal="user:alice")
+        )
+        assert res.success, res.error
+        assert svc.transition_call.target is DriveStatus.ACTIVE
+        assert svc.wake_call.drive_id == "d1"
 
     async def test_bare_goal_skips_newer_terminal_history(self):
         svc = _FakeService(
@@ -443,7 +511,7 @@ class TestGoalCommand:
         ("command", "status"),
         [
             ("pause", DriveStatus.PAUSED),
-            ("resume", DriveStatus.ACTIVE),
+            ("resume", DriveStatus.CANCELLED),
             ("cancel", DriveStatus.CANCELLED),
             ("complete", DriveStatus.PAUSED),
         ],

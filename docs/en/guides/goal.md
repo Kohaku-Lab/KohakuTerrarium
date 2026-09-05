@@ -111,6 +111,17 @@ stores no state of its own: every `show` / `list` reads live Drive
 state. `/goal set` with no explicit id operates on the creature's single
 most recent active Goal; give an id to disambiguate.
 
+`/goal set` defaults to `autonomy=manual`: the creature works one turn
+now, and `/goal resume` wakes it for the next one. Pass
+`autonomy=continue_when_ready` for a goal that keeps going on its own.
+`/goal list` shows every live goal in the focused creature's graph with
+its assignee, so a goal assigned to another creature is still visible.
+`/goal resume` reactivates a paused, waiting, or blocked goal and then
+wakes it; on an active manual goal it is simply the wake. Setting a new
+goal while others are still live reports those goals; the per-creature
+active-goal limit is enforced by the runtime, and the command tells you
+to pause or cancel one when it is reached.
+
 The command is only UI. It calls the same `TerrariumService` methods
 that Python, HTTP, the web panel, and the generic Drive tools call, so a
 Goal created through `/goal` is identical to one created any other way.
@@ -203,6 +214,20 @@ before it must stop and check in. When a budget is exhausted:
 
 Budget exhaustion is a "stop and ask", not a success. This is a hard
 rule across the whole Drive runtime, not just Goal.
+
+## Interrupting pauses the goal
+
+Stop means stop. When the user interrupts a turn that a Goal delivery
+started, the runtime acknowledges that delivery with reason
+`user_interrupted` and moves the Goal to `paused` with the same status
+reason. A `continue_when_ready` Goal therefore does **not** re-arm on
+the next readiness scan, and a delivery that was still queued behind the
+interrupted turn is settled the same way instead of being retried. The
+Goal resumes only through an explicit `/goal resume` (or a wake through
+the generic Drive surfaces). Every surface marks the start of a
+drive-triggered turn in the transcript with the Goal id and delivery
+reason, so a turn the creature did not start from user input is never
+silent.
 
 ## Recovery is honest
 

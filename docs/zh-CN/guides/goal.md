@@ -102,6 +102,15 @@ Creature。它从不从命令文本接受一个 actor 字符串，也不存自�
 每次 `show` / `list` 都读取实时 Drive 状态。`/goal set` 不带显式 id 时
 作用于该 Creature 最近一个活跃的 Goal；给一个 id 来消歧。
 
+`/goal set` 默认 `autonomy=manual`：Creature 现在推进一个回合，之后由
+`/goal resume` 唤醒下一个回合。传 `autonomy=continue_when_ready` 得到一个
+自行持续的 Goal。`/goal list` 列出聚焦 Creature 所在图里的所有存活 Goal
+并标出各自的受派者，所以派给其他 Creature 的 Goal 也看得见。
+`/goal resume` 重新激活一个 paused / waiting / blocked 的 Goal 然后唤醒它；
+对一个活跃的 manual Goal 它就只是唤醒。在仍有其他存活 Goal 时设置新 Goal
+会把那些 Goal 报告出来；每个 Creature 的活跃 Goal 上限由运行时强制执行，
+到达上限时命令会提示你先暂停或取消一个。
+
 命令只是 UI。它调用 Python、HTTP、web 面板和通用 Drive 工具所调用的同一批
 `TerrariumService` 方法，所以一个通过 `/goal` 创建的 Goal 和用任何其他
 方式创建的都完全相同。
@@ -184,6 +193,16 @@ Terrarium 从不判断目标是否真的达成。它只应用一个被授权、�
 
 预算耗尽是「停下来问」，不是成功。这是贯穿整个 Drive 运行时的硬规则，
 不只 Goal。
+
+## 中断会暂停 Goal
+
+停就是停。当用户中断一个由 Goal 投递启动的回合时，运行时以
+`user_interrupted` 为原因确认该投递，并把 Goal 移到 `paused`，状态原因
+相同。因此一个 `continue_when_ready` Goal **不会** 在下一次就绪扫描时
+重新武装，而排在被中断回合后面、尚未执行的投递也以同样方式落定而不是
+重试。Goal 只会通过显式的 `/goal resume`（或通用 Drive 界面上的唤醒）
+恢复。每个界面都会在对话记录里标出由 Drive 触发的回合的开始，带上
+Goal id 和投递原因，所以一个并非由用户输入开始的回合从不会悄无声息。
 
 ## 恢复是诚实的
 

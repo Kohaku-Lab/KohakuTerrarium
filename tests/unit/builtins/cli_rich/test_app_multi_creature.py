@@ -203,7 +203,7 @@ class TestEngineAwareCommandDispatch:
             handled = await app.dispatch_topology_command("goal", "list")
 
             assert handled is True
-            assert committed == ["No live goals for this creature."]
+            assert committed == ["No live goals in this graph."]
             assert "running terrarium" not in committed[0]
         finally:
             await engine.shutdown()
