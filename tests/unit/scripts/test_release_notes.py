@@ -1,8 +1,14 @@
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
+
+_SCRIPT = Path(__file__).resolve().parents[3] / "scripts" / "release_notes.py"
+_spec = importlib.util.spec_from_file_location("release_notes", _SCRIPT)
+mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(mod)
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -184,3 +190,37 @@ def test_no_lower_bound_lists_the_whole_history(repo, render):
     assert "feat: first" in notes
     assert "feat: second" in notes
     assert "compare/" not in notes
+
+
+class TestMentionNeutralization:
+    """GitHub reads a bare ``@token`` in release notes as a user mention."""
+
+    def test_a_flag_named_like_a_handle_is_not_a_mention(self):
+        # `fix default @vars` listed a phantom "@vars" under Contributors on
+        # the release page. The notes list commits, never contributors.
+        out = mod.neutralize_mentions("feat(llm): fix default @vars")
+        assert out == "feat(llm): fix default `@vars`"
+
+    def test_a_real_handle_is_also_defused(self):
+        # Otherwise every nightly re-pings whoever a subject named.
+        assert mod.neutralize_mentions("thanks @SLAPaper") == "thanks `@SLAPaper`"
+
+    def test_emails_and_selectors_are_left_alone(self):
+        for text in (
+            "use name@group=option selectors",
+            "contact foo@example.com",
+        ):
+            assert mod.neutralize_mentions(text) == text
+
+    def test_rendered_notes_carry_no_live_mention(self):
+        body = mod.render(
+            [("abc1234", "fix default @vars")],
+            truncated=False,
+            since="v2.1.1",
+            until="HEAD",
+            intro="",
+            heading="### Commits",
+            github_repo="owner/repo",
+        )
+        assert "`@vars`" in body
+        assert " @vars" not in body

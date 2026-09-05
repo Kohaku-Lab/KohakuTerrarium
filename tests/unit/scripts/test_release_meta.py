@@ -38,13 +38,21 @@ def _run(tmp_path, *, ref="", version="", channel="", git_ref, git_ref_name):
 
     out = tmp_path / "gh_output"
     out.touch()
+
+    # The step reads the published nightly manifest. Stub curl to fail so the
+    # test stays offline and exercises the no-previous-manifest fallback.
+    stub_dir = tmp_path / "stub"
+    stub_dir.mkdir(exist_ok=True)
+    curl = stub_dir / "curl"
+    curl.write_text("#!/bin/sh\nexit 1\n")
+    curl.chmod(0o755)
     subprocess.run(
         ["bash", "-c", script],
         cwd=REPO_ROOT,
         check=True,
         capture_output=True,
         env={
-            "PATH": f"{REPO_ROOT / '.venv' / 'bin'}:/usr/bin:/bin:/usr/local/bin",
+            "PATH": f"{stub_dir}:{REPO_ROOT / '.venv' / 'bin'}:/usr/bin:/bin:/usr/local/bin",
             "GITHUB_REF": git_ref,
             "GITHUB_REF_NAME": git_ref_name,
             "GITHUB_OUTPUT": str(out),
@@ -89,6 +97,12 @@ class TestReleaseMeta:
         assert meta["stamp"] == "true"
         # Manifest entries must not outlive the releases they point at.
         assert meta["keep_nightlies"] == meta["max_releases"] == "5"
+        # Sidecars carry this into the channel manifest, which is what anchors
+        # the NEXT nightly's commit list.
+        assert meta["build_id"].split("-")[-1] == meta["sha"][:7]
+        # No previous manifest reachable: fall back to the last stable tag
+        # rather than inventing a range.
+        assert meta["notes_since"] == "auto"
 
     def test_manual_stable_dispatch_prunes_nothing(self, tmp_path):
         # Not a release: deleting four nightlies because someone pressed

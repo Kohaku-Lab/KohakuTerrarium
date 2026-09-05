@@ -152,6 +152,17 @@ def collect_commits(
     return commits[:max_commits], truncated
 
 
+# GitHub linkifies a bare ``@name`` in release notes into a user mention,
+# which pings that account and lists it under "Contributors" on the release
+# page. A commit subject naming a flag or variable is not a person.
+MENTION = re.compile(r"(?<![\w`])@([A-Za-z0-9][A-Za-z0-9-]*)")
+
+
+def neutralize_mentions(subject: str) -> str:
+    """Render ``@token`` as inline code so GitHub cannot read it as a user."""
+    return MENTION.sub(r"`@\1`", subject)
+
+
 def render(
     commits: list[tuple[str, str]],
     *,
@@ -171,7 +182,11 @@ def render(
         span = f" since `{since}`" if since else ""
         plural = "" if len(commits) == 1 else "s"
         parts.append(f"{len(commits)} commit{plural}{span}:")
-        parts.append("\n".join(f"- `{sha}` {subject}" for sha, subject in commits))
+        parts.append(
+            "\n".join(
+                f"- `{sha}` {neutralize_mentions(subject)}" for sha, subject in commits
+            )
+        )
         if truncated:
             parts.append("_(list truncated)_")
     else:

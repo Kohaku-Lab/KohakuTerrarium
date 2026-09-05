@@ -42,6 +42,8 @@ jobs:
       sha: ${{ steps.m.outputs.sha }}
       keep_nightlies: ${{ steps.m.outputs.keep_nightlies }}
       max_releases: ${{ steps.m.outputs.max_releases }}
+      build_id: ${{ steps.m.outputs.build_id }}
+      notes_since: ${{ steps.m.outputs.notes_since }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -106,8 +108,18 @@ jobs:
             max_releases=""
           fi
 
+          notes_since="auto"
+          if [ "${channel}" = "nightly" ]; then
+            if curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" -o previous-nightly.json; then
+              notes_since=$(jq -r '.releases[0].commit_sha // "auto"' previous-nightly.json)
+            fi
+            [ -n "${notes_since}" ] || notes_since="auto"
+          fi
+
           {
             echo "ref=${ref}"
+            echo "build_id=$(date -u +%Y%m%d%H%M%S)-$(git rev-parse --short=7 HEAD)"
+            echo "notes_since=${notes_since}"
             echo "version=${version}"
             echo "channel=${channel}"
             echo "tag=${tag}"
@@ -240,6 +252,8 @@ jobs:
         run: |
           python scripts/build_release_tree.py \
             --version "${{ needs.meta.outputs.version }}" \
+            --build-id "${{ needs.meta.outputs.build_id }}" \
+            --commit-sha "${{ needs.meta.outputs.sha }}" \
             --platform "${{ matrix.plat }}" \
             --py-abi "${{ matrix.abi }}" \
             --channel "${{ needs.meta.outputs.channel }}" \
@@ -580,29 +594,16 @@ jobs:
           find all-artifacts/desktop-* -type f -exec cp {} release/ \;
           ls -la release/
 
-      # Anchors the nightly commit list: the previous manifest's head entry
-      # names the commit the last nightly shipped.
-      - name: Fetch previous nightly manifest
-        if: needs.meta.outputs.channel == 'nightly'
-        shell: bash
-        run: |
-          curl -fsSL "https://github.com/${GITHUB_REPOSITORY}/releases/download/manifests-nightly/nightly.json" \
-            -o previous-nightly.json || echo "no previous manifest"
-
       # A plain commit list beats ``generate_release_notes``: that groups by
       # pull request, so direct pushes vanish and a branch collapses to one
       # line regardless of how much landed in it.
       - name: Build release notes
         shell: bash
         run: |
-          since="auto"
+          # Resolved in `meta`, before the nightly manifest is overwritten.
+          since="${{ needs.meta.outputs.notes_since }}"
           intro=()
           if [ "${{ needs.meta.outputs.channel }}" = "nightly" ]; then
-            if [ -f previous-nightly.json ]; then
-              since=$(jq -r '.releases[0].commit_sha // empty' previous-nightly.json || true)
-            fi
-            # No previous nightly recorded: fall back to the last stable tag.
-            [ -n "${since}" ] || since="auto"
             intro=(--intro "Automatic nightly build. Channel: \`nightly\`. Version: \`${{ needs.meta.outputs.version }}\`.")
           fi
           python scripts/release_notes.py \
