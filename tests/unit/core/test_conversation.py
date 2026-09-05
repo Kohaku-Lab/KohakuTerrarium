@@ -19,6 +19,34 @@ from kohakuterrarium.llm.message import (
 # ── private helpers ──────────────────────────────────────────────
 
 
+def test_legacy_tool_labels_are_repaired_without_changing_snapshot_context():
+    conv = Conversation()
+    original_call = {
+        "id": "call_original",
+        "type": "function",
+        "function": {"name": "web_search[abc123]", "arguments": '{"q":"exact"}'},
+    }
+    conv.append("system", "compressed summary")
+    conv.append(
+        "assistant",
+        "before",
+        tool_calls=[original_call],
+        extra_fields={"reasoning_content": "preserved"},
+    )
+    conv.append(
+        "tool", "result", tool_call_id="call_original", name="web_search[abc123]"
+    )
+    wire = conv.to_messages()
+    assert wire[0]["content"] == "compressed summary"
+    assert wire[1]["tool_calls"][0]["function"]["name"] == "web_search"
+    assert wire[1]["tool_calls"][0]["id"] == "call_original"
+    assert wire[1]["reasoning_content"] == "preserved"
+    assert wire[2]["name"] == "web_search"
+    assert wire[2]["tool_call_id"] == "call_original"
+    assert original_call["function"]["name"] == "web_search[abc123]"
+    assert conv.snapshot_messages() == wire
+
+
 class TestGetContentTextLength:
     def test_none(self):
         assert _get_content_text_length(None) == 0

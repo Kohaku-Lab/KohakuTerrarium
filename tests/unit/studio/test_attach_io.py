@@ -161,6 +161,7 @@ class TestHandleUiReply:
 class TestProcessInput:
     async def test_success_emits_idle(self):
         agent = MagicMock()
+        agent.is_processing = False
         agent.inject_input = AsyncMock(return_value=True)
         q = asyncio.Queue()
         await io_mod._process_input(agent, "hi", q, "src", "pending_1")
@@ -198,6 +199,7 @@ class TestProcessInput:
 
     async def test_queue_full_dropped_on_idle(self):
         agent = MagicMock()
+        agent.is_processing = False
         agent.inject_input = AsyncMock(return_value=True)
         q = asyncio.Queue(maxsize=1)
         q.put_nowait({"x": 1})

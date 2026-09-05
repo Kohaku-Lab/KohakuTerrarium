@@ -3,10 +3,37 @@
 from datetime import datetime
 from typing import Any
 
+from kohakuterrarium.core.job_label import canonical_tool_name
 from kohakuterrarium.llm.message import TextPart, messages_to_dicts
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def normalize_tool_names(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Repair legacy tool labels without modifying the source or provider state."""
+    normalized = []
+    for message in messages:
+        result = message
+        if message.get("role") == "tool" and isinstance(message.get("name"), str):
+            name = canonical_tool_name(message["name"])
+            if name != message["name"]:
+                result = {**result, "name": name}
+        calls = message.get("tool_calls") or []
+        repaired = []
+        for call in calls:
+            function = call.get("function") or {}
+            name = function.get("name")
+            canonical = canonical_tool_name(name) if isinstance(name, str) else name
+            repaired.append(
+                {**call, "function": {**function, "name": canonical}}
+                if canonical != name
+                else call
+            )
+        if any(a is not b for a, b in zip(calls, repaired)):
+            result = {**result, "tool_calls": repaired}
+        normalized.append(result)
+    return normalized
 
 
 def _is_empty_content(content: Any) -> bool:

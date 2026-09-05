@@ -24,6 +24,7 @@ side effect (conversation contents, tool output text, engine state).
 """
 
 import asyncio
+import re
 from pathlib import Path
 
 import pytest
@@ -45,6 +46,10 @@ from kohakuterrarium.core.events import (
     create_user_input_event,
 )
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
+from kohakuterrarium.llm.base import NativeToolCall
+from kohakuterrarium.llm.codex_format import to_responses_input
+from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
 from kohakuterrarium.modules.tool.base import (
@@ -63,6 +68,42 @@ from kohakuterrarium.testing.output import OutputRecorder
 # ---------------------------------------------------------------------------
 # Deterministic tool stubs — real BaseTool subclasses, no faked methods.
 # ---------------------------------------------------------------------------
+
+
+class _HistoryReplayLLM(ScriptedLLM):
+    """Supply native/text tool calls and a cancellable response for history workflows."""
+
+    def __init__(self, native):
+        super().__init__(["OK"])
+        self.native = native
+        self.started = asyncio.Event()
+        self.last_tool_calls = []
+
+    async def chat(self, messages, **kwargs):
+        normalized = self._normalize_messages(messages)
+        self.call_log.append(normalized)
+        self.call_count += 1
+        for item in to_responses_input(normalized):
+            if item.get("type") == "function_call":
+                assert re.fullmatch(r"[a-zA-Z0-9_-]+", item["name"])
+        self.last_tool_calls = []
+        if self.call_count == 1:
+            if self.native:
+                self.last_tool_calls = [
+                    NativeToolCall(
+                        "call_history_1",
+                        "scratchpad",
+                        '{"action":"set","key":"history","value":"preserved"}',
+                    )
+                ]
+                yield ""
+            else:
+                yield "[/scratchpad]@@action=set\n@@key=history\n@@value=preserved\n[scratchpad/]"
+        elif self.call_count == 3:
+            self.started.set()
+            await asyncio.Event().wait()
+        else:
+            yield "OK"
 
 
 class _EchoTool(BaseTool):
@@ -1281,7 +1322,7 @@ class TestCoreIntegration:
             )
             assert "background-kaboom" in (bgboom_result.error or "")
 
-    async def test_history_ops(self, make_creature):
+    async def test_history_ops(self, make_creature, tmp_path):
         """One workflow over the three history operations: run a turn,
         ``regenerate_last_response`` opens a new branch, ``edit_and_rerun``
         replaces the user message and re-runs, ``rewind_to`` drops the
@@ -1530,6 +1571,79 @@ class TestCoreIntegration:
             assert replay_call_id in {
                 call["id"] for call in replay_announcement.tool_calls
             }
+
+        for mode in ("native", "bracket"):
+            folder = tmp_path / mode
+            folder.mkdir()
+            config = folder / "config.yaml"
+            config.write_text(
+                f"name: history_probe\nsystem_prompt: offline\ntool_format: {mode}\n"
+                "input: {type: none}\noutput: {type: stdout}\n"
+                "tools:\n  - {name: scratchpad, type: builtin}\n"
+            )
+            llm = _HistoryReplayLLM(mode == "native")
+            async with Terrarium(session_dir=folder / "sessions") as engine:
+                creature = await engine.add_creature(
+                    str(config), llm=llm, io="headless", pwd=folder, start=True
+                )
+                service = LocalTerrariumService(engine)
+                agent = creature.agent
+                assert (await creature.run("seed", timeout=5)).ok
+                assert agent.scratchpad.get("history") == "preserved"
+                pending = asyncio.create_task(
+                    creature.run("original", timeout=5, raise_on_error=False)
+                )
+                await asyncio.wait_for(llm.started.wait(), 2)
+                await service.interrupt(creature.creature_id)
+                await pending
+                assert not agent.is_processing
+                assert not (await service.chat_history(creature.creature_id))[
+                    "is_processing"
+                ]
+                events = agent.session_store.get_events(agent.config.name)
+                target = [e for e in events if e["type"] == "user_message"][-1]
+                recorded_call = next(e for e in events if e["type"] == "tool_call")
+                assert recorded_call["name"] == "scratchpad"
+                expected_id = (
+                    "call_history_1" if llm.native else recorded_call["call_id"]
+                )
+                selector = UserMessageSelector(
+                    target["event_id"], target["turn_index"], target["branch_id"]
+                )
+                result = await service.edit_message(
+                    creature.creature_id, 0, "edited", target=selector
+                )
+                assert result["branch_id"] == 2
+                calls = [
+                    call
+                    for message in llm.last_messages
+                    for call in message.get("tool_calls") or []
+                ]
+                assert [(call["id"], call["function"]["name"]) for call in calls] == [
+                    (expected_id, "scratchpad")
+                ]
+                assert any(
+                    m.get("tool_call_id") == expected_id for m in llm.last_messages
+                )
+                assert (await creature.run("followup", timeout=5)).text == "OK"
+                session_path = agent.session_store.path
+            resumed = await Terrarium.resume(
+                str(session_path), llm=ScriptedLLM(["resumed OK"])
+            )
+            async with resumed:
+                restored = resumed.list_creatures()[0]
+                assert (
+                    await restored.run("after resume", timeout=5)
+                ).text == "resumed OK"
+                messages = restored.agent.controller.conversation.to_messages()
+                calls = [
+                    call
+                    for message in messages
+                    for call in message.get("tool_calls") or []
+                ]
+                assert [(call["id"], call["function"]["name"]) for call in calls] == [
+                    (expected_id, "scratchpad")
+                ]
 
     async def test_inject_event_and_unified_trigger_model(self, make_creature):
         """The unified ``TriggerEvent`` model: a non-user-input event

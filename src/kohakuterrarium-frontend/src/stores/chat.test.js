@@ -5379,6 +5379,13 @@ describe("chat store — interrupt targets the given tab", () => {
 
     const importActual = await vi.importActual("@/utils/api")
     const spy = vi.spyOn(importActual.terrariumAPI, "interruptCreature").mockResolvedValue({})
+    const history = vi
+      .spyOn(importActual.terrariumAPI, "getHistory")
+      .mockResolvedValue({ events: [], messages: [], is_processing: false })
+    spy.mockImplementation(async () => {
+      chat._onMessage({ type: "processing_end", source: "root_b" })
+      return { status: "interrupted" }
+    })
 
     await chat.interrupt("root_b")
 
@@ -5389,6 +5396,8 @@ describe("chat store — interrupt targets the given tab", () => {
     expect(chat.processingByTab.root_a).toBe(true)
 
     spy.mockRestore()
+    history.mockRestore()
+    chat._clearBranchResyncTimers()
   })
 })
 

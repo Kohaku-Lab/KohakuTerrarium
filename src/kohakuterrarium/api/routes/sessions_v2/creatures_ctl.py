@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2._helpers import resolve_creature_id
+from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.studio.sessions import creature_ctl
 from kohakuterrarium.terrarium.service import TerrariumService
 
@@ -24,6 +25,8 @@ async def interrupt_creature(
     try:
         await creature_ctl.interrupt(service, session_id, cid)
         return {"status": "interrupted"}
+    except ConflictError as exc:
+        raise HTTPException(409, str(exc)) from exc
     except KeyError:
         raise HTTPException(404, f"creature {creature_id!r} not found")
 

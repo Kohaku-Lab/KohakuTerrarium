@@ -140,6 +140,9 @@ async def _process_input(
         except asyncio.QueueFull:
             logger.debug("input_queued frame dropped — queue full")
         return
+    # A queued turn can start before this older input coroutine resumes.
+    if agent.is_processing:
+        return
     try:
         queue.put_nowait({"type": "idle", "source": source_name, "ts": time.time()})
     except asyncio.QueueFull:

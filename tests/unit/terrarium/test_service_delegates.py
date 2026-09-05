@@ -60,6 +60,8 @@ class _MockAgent:
         self.edit_and_rerun = AsyncMock(return_value=True)
         self.rewind_to = AsyncMock()
         self.interrupt = MagicMock()
+        self.interrupt_and_wait = AsyncMock(side_effect=self.interrupt)
+        self.is_processing = False
         self._interrupt_direct_job = MagicMock(return_value=False)
         self._promote_handle = MagicMock(return_value=True)
         self.session = None

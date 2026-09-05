@@ -550,6 +550,7 @@ class TestChatHistoryFor:
             conversation_history=[],
             session_store=None,
             _processing_task=None,
+            is_processing=False,
             _direct_job_meta={},
         )
         eng = _Engine(creatures={"c1": _Creature(agent)})

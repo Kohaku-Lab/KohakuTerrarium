@@ -5,7 +5,7 @@ import json
 from collections.abc import Hashable, Mapping
 from typing import Any, Iterable
 
-from kohakuterrarium.core.job_label import make_job_label
+from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
 
 # Parent paths identify the selected branches of earlier turns. Legacy events
 # derive this ancestry from event order when no explicit path was persisted.
@@ -457,24 +457,15 @@ def dedupe_adjacent_duplicate_events(
 
 
 def _clean_tool_name(evt: dict) -> str:
-    """Resolve the provider-safe tool name for a ``tool_result`` event.
-
-    The event's ``name`` may be a UI display label (``bash[ff6427]``) or
-    already clean (``bash``). A clean name is used as-is; a label or a
-    missing name is resolved from the job id through the shared job-label
-    helper (``bash_ff642767`` -> ``bash``), the same source the live
-    conversation path uses. Falls back to stripping the bracketed suffix.
-    """
-    name = evt.get("name", "")
-    if isinstance(name, str) and name and "[" not in name:
-        return name
+    """Prefer recorded identity, repairing legacy labels or missing names."""
+    name = evt.get("tool_name") or evt.get("name", "")
+    if isinstance(name, str) and name:
+        return canonical_tool_name(name)
     call_id = evt.get("call_id") or evt.get("job_id") or ""
     if call_id:
         tool_name, _ = make_job_label(str(call_id))
         if tool_name:
             return tool_name
-    if isinstance(name, str) and "[" in name:
-        return name.split("[", 1)[0]
     return name if isinstance(name, str) else ""
 
 
@@ -563,6 +554,13 @@ def replay_conversation(
     # Nested branch ancestry determines the live event set and the selected
     # branch projection compaction rules are validated against.
     live_ids = select_live_event_ids(events_list, branch_view=branch_view)
+    provider_ids = {
+        evt.get("call_id") or evt.get("job_id"): evt["tool_call_id"]
+        for evt in events_list
+        if evt.get("type") == "tool_call"
+        and evt.get("tool_call_id")
+        and (not isinstance(evt.get("event_id"), int) or evt["event_id"] in live_ids)
+    }
     selected = resolve_selected_branches(
         events_list, index_parent_paths(events_list), branch_view
     )
@@ -750,11 +748,13 @@ def replay_conversation(
                     }
                 )
         elif etype == "tool_result":
+            job_id = evt.get("call_id", "") or evt.get("job_id", "")
             messages.append(
                 {
                     "role": "tool",
                     "content": evt.get("output", "") or "",
-                    "tool_call_id": evt.get("call_id", "") or evt.get("job_id", ""),
+                    "tool_call_id": evt.get("tool_call_id")
+                    or provider_ids.get(job_id, job_id),
                     "name": _clean_tool_name(evt),
                 }
             )
@@ -819,11 +819,13 @@ def _inject_synthetic_announcements(
         for tc in items:
             tool_calls.append(
                 {
-                    "id": str(tc.get("call_id") or tc.get("job_id") or ""),
+                    "id": _provider_call_id(tc),
                     "type": "function",
                     "function": {
-                        "name": tc.get("name", "") or "",
-                        "arguments": _coerce_tool_args_to_json(tc.get("args")),
+                        "name": _clean_tool_name(tc),
+                        "arguments": _coerce_tool_args_to_json(
+                            tc.get("tool_call_arguments") or tc.get("args")
+                        ),
                     },
                 }
             )
@@ -840,7 +842,7 @@ def _inject_synthetic_announcements(
             return
         result.append(_build_announce(pending))
         for tc in pending:
-            cid = str(tc.get("call_id") or tc.get("job_id") or "")
+            cid = _provider_call_id(tc)
             if cid:
                 announced_ids.add(cid)
         pending.clear()
@@ -849,7 +851,7 @@ def _inject_synthetic_announcements(
         etype = evt.get("type", "")
 
         if etype == "tool_call":
-            cid = str(evt.get("call_id") or evt.get("job_id") or "")
+            cid = _provider_call_id(evt)
             # Calls already announced must not be synthesized again.
             if cid and cid in announced_ids:
                 result.append(evt)
@@ -871,9 +873,7 @@ def _inject_synthetic_announcements(
                 if tid:
                     announced_ids.add(tid)
             pending = [
-                tc
-                for tc in pending
-                if str(tc.get("call_id") or tc.get("job_id") or "") not in announced_ids
+                tc for tc in pending if _provider_call_id(tc) not in announced_ids
             ]
             result.append(evt)
             continue
@@ -885,6 +885,12 @@ def _inject_synthetic_announcements(
     # An unfinished stream still needs a valid trailing assistant announcement.
     _flush_pending()
     return result
+
+
+def _provider_call_id(event: dict[str, Any]) -> str:
+    return str(
+        event.get("tool_call_id") or event.get("call_id") or event.get("job_id") or ""
+    )
 
 
 def normalize_tool_call_events(

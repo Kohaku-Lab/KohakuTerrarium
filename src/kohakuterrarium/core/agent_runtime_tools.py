@@ -33,7 +33,12 @@ class AgentRuntimeToolsMixin:
         self.output_router.notify_activity(activity, detail)
 
     def _notify_tool_start(
-        self, parse_event: ToolCallEvent, job_id: str, is_direct: bool
+        self,
+        parse_event: ToolCallEvent,
+        job_id: str,
+        is_direct: bool,
+        *,
+        tool_call_id: str | None = None,
     ) -> None:
         """Notify output of a tool start with a human-readable preview."""
         _, label = _make_job_label(job_id)
@@ -44,10 +49,20 @@ class AgentRuntimeToolsMixin:
             full_args[k] = v
             arg_parts.append(f"{k}={str(v)[:40]}")
         bg_tag = " (bg)" if not is_direct else ""
+        metadata = {
+            "job_id": job_id,
+            "tool_name": parse_event.name,
+            "args": full_args,
+            "background": not is_direct,
+        }
+        if tool_call_id:
+            metadata.update(
+                tool_call_id=tool_call_id, tool_call_arguments=parse_event.raw
+            )
         self.output_router.notify_activity(
             "tool_start",
             f"[{label}]{bg_tag} {' '.join(arg_parts)[:80]}",
-            metadata={"job_id": job_id, "args": full_args, "background": not is_direct},
+            metadata=metadata,
         )
 
     def _emit_token_usage(self, controller: Controller) -> None:

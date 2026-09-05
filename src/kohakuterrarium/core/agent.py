@@ -181,6 +181,7 @@ class Agent(
         # Interrupt: flag + task reference for immediate cancellation
         self._interrupt_requested = False
         self._processing_task: asyncio.Task | None = None
+        self._turn_completion: asyncio.Future[None] | None = None
         self._branch_request_id: str | None = None
 
         self._active_handles: dict[str, Any] = {}
@@ -576,10 +577,11 @@ class Agent(
         are dropped WITHOUT running and their settlement resolved
         ``interrupted`` so the dispatcher redelivers, matching the prior
         drop-drive-on-interrupt behavior."""
+        already_requested = self._interrupt_requested
         self._interrupt_requested = True
         self.controller._interrupted = True
         processing = getattr(self, "_processing_task", None)
-        if processing and not processing.done():
+        if processing and not processing.done() and not already_requested:
             processing.cancel()
         for job_id in list(self._active_handles.keys()):
             self._interrupt_direct_job(job_id)

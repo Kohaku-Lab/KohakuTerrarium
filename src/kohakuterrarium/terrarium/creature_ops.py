@@ -670,7 +670,7 @@ def chat_history_for(engine: Terrarium, creature_id: str) -> dict[str, Any]:
         "session_id": creature.graph_id,
         "messages": list(getattr(agent, "conversation_history", []) or []),
         "events": events,
-        "is_processing": bool(getattr(agent, "_processing_task", None)),
+        "is_processing": bool(agent.is_processing),
     }
 
 

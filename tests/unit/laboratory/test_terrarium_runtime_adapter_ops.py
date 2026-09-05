@@ -10,6 +10,7 @@ test-builder's `_FakeAgent` lacks the production agent surface.
 
 from types import SimpleNamespace
 
+from kohakuterrarium.errors import ConflictError
 
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.adapters.terrarium_runtime import (
@@ -111,8 +112,12 @@ def _stub_agent_control(creature):
     async def _sa_cancel(jid):
         return jid == "sa-job"
 
+    async def _interrupt_and_wait():
+        state["interrupted"] = True
+
     creature.agent = SimpleNamespace(
         is_running=False,
+        interrupt_and_wait=_interrupt_and_wait,
         interrupt=lambda: state.__setitem__("interrupted", True),
         executor=SimpleNamespace(get_running_jobs=lambda: running, cancel=_ex_cancel),
         subagent_manager=SimpleNamespace(
@@ -125,6 +130,20 @@ def _stub_agent_control(creature):
 
 
 class TestControlOps:
+    async def test_interrupt_conflict_retains_retryable_error_kind(self):
+        adapter = await _make_adapter()
+        try:
+
+            async def finishing():
+                raise ConflictError("The previous turn is still finishing")
+
+            adapter._engine.get_creature("alice").agent.interrupt_and_wait = finishing
+            out = await adapter._dispatch(_msg("interrupt", {"creature_id": "alice"}))
+            assert out["error"]["kind"] == "conflict"
+            assert "still finishing" in out["error"]["message"]
+        finally:
+            await adapter._engine.shutdown()
+
     async def test_interrupt_calls_agent_interrupt(self):
         adapter = await _make_adapter()
         try:
@@ -223,6 +242,7 @@ class TestChatOps:
     async def test_chat_history_returns_history_payload(self):
         adapter = await _make_adapter()
         try:
+            adapter._engine.get_creature("alice").agent.is_processing = False
             out = await adapter._dispatch(
                 _msg("chat_history", {"creature_id": "alice"})
             )
