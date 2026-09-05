@@ -13,6 +13,7 @@
 
 import { onMounted, onUnmounted } from "vue"
 
+import { activeLayoutStore } from "@/composables/useActiveLayout"
 import { useLayoutStore } from "@/stores/layout"
 import { DEFAULT_DESKTOP_ZOOM, DEFAULT_MOBILE_ZOOM, useThemeStore } from "@/stores/theme"
 import { fireLayoutEditRequested, firePaletteOpen } from "@/utils/layoutEvents"
@@ -74,7 +75,7 @@ export function useKeyboardShortcuts() {
         const id = PRESET_ORDER[idx]
         if (layout.allPresets[id]) {
           e.preventDefault()
-          layout.switchPreset(id)
+          activeLayoutStore().switchPreset(id)
         }
       }
     }

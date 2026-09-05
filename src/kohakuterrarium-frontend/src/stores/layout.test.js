@@ -291,3 +291,70 @@ describe("layout store — detached panels", () => {
     expect(store.detachedPanels[0].instanceId).toBe("inst-2")
   })
 })
+
+describe("layout store — save-as-new keeps the edited tree", () => {
+  function editableBuiltin(id = "chat-focus") {
+    return {
+      ...makeBuiltinPreset(id),
+      tree: {
+        type: "split",
+        direction: "horizontal",
+        ratio: 50,
+        children: [
+          { type: "leaf", panelId: "chat" },
+          { type: "leaf", panelId: "status-dashboard" },
+        ],
+      },
+    }
+  }
+
+  it("a builtin edited then saved as new lands the edited tree in the new preset", () => {
+    const store = useLayoutStore()
+    store.registerBuiltinPreset(editableBuiltin())
+    store.switchPreset("chat-focus")
+    store.enterEditMode()
+    const leaf = store.activePreset.tree.children[1]
+    store.replaceTreePanel(leaf, "drives")
+    expect(store.activePreset.tree.children[1].panelId).toBe("drives")
+
+    const saved = store.saveAsNewPreset("mine", "Mine")
+    expect(saved.tree.children[1].panelId).toBe("drives")
+    // The flow the shell runs right after the modal closes.
+    if (store.editMode) store.exitEditMode()
+
+    expect(store.activePresetId).toBe("mine")
+    expect(store.activePreset.builtin).toBe(false)
+    expect(store.activePreset.id).toBe("mine")
+    expect(store.activePreset.tree.children[1].panelId).toBe("drives")
+    // Persisted copy agrees with the in-memory one, so no reload is needed.
+    expect(JSON.parse(storage.get("kt.presets.user")).mine.tree.children[1].panelId).toBe("drives")
+    // The builtin returns to its pristine shape.
+    expect(store.builtinPresets["chat-focus"].tree.children[1].panelId).toBe("status-dashboard")
+    expect(store.editMode).toBe(false)
+  })
+
+  it("exitEditMode never restores a snapshot over a different active preset", () => {
+    const store = useLayoutStore()
+    store.registerBuiltinPreset(editableBuiltin("chat-focus"))
+    store.registerBuiltinPreset(editableBuiltin("workspace"))
+    store.switchPreset("chat-focus")
+    store.enterEditMode()
+    store.replaceTreePanel(store.activePreset.tree.children[1], "drives")
+    store.saveAsNewPreset("mine", "Mine")
+    store.switchPreset("workspace")
+    store.exitEditMode()
+    expect(store.userPresets.mine.tree.children[1].panelId).toBe("drives")
+    expect(store.builtinPresets.workspace.tree.children[1].panelId).toBe("status-dashboard")
+  })
+
+  it("patches can never rewrite a preset's identity", () => {
+    const store = useLayoutStore()
+    store.registerBuiltinPreset(editableBuiltin())
+    store.switchPreset("chat-focus")
+    store.saveAsNewPreset("mine", "Mine")
+    store.enterEditMode()
+    store.addSlotToZone("main", "drives")
+    expect(store.activePreset.id).toBe("mine")
+    expect(store.activePreset.builtin).toBe(false)
+  })
+})

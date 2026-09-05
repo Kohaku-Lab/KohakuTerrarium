@@ -13,15 +13,14 @@
 
 import { onMounted, onUnmounted, watch } from "vue"
 
+import { activeLayoutStore } from "@/composables/useActiveLayout"
 import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
-import { useLayoutStore } from "@/stores/layout"
 import { useNotificationsStore } from "@/stores/notifications"
 
 export function useAutoTriggers() {
   const chat = useChatStore()
   const canvas = useCanvasStore()
-  const layout = useLayoutStore()
   const notifications = useNotificationsStore()
 
   let stopCanvasWatch = null
@@ -65,7 +64,7 @@ export function useAutoTriggers() {
             title: "Agent error",
             body: "Opening the debug panel.",
           })
-          layout.switchPreset("debug")
+          activeLayoutStore().switchPreset("debug")
         }
       },
     )

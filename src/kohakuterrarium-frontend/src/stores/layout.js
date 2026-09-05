@@ -381,9 +381,26 @@ function _setupForScope(scope) {
       snapshot.builtin = false
       _userPresets.value = { ..._userPresets.value, [newId]: snapshot }
       _writeJson(USER_PRESETS_KEY, _userPresets.value)
+      // The edit session forked into the new preset, so an edited builtin
+      // returns to its pristine shape and no later exit may restore the
+      // pre-edit snapshot over the preset just saved.
+      const source = editModeSnapshot.value
+      if (source && source.id !== newId) _restorePreset(source)
+      editModeSnapshot.value = null
+      editModeDirty.value = false
+      editMode.value = false
       activePresetId.value = newId
       _writeJson(activeKey, newId)
       return snapshot
+    }
+
+    function _restorePreset(snapshot) {
+      const copy = _clone(snapshot)
+      if (copy.builtin) {
+        _builtinPresets.value = { ..._builtinPresets.value, [copy.id]: copy }
+      } else {
+        _userPresets.value = { ..._userPresets.value, [copy.id]: copy }
+      }
     }
 
     function resetPresetToDefault(id) {
@@ -448,7 +465,8 @@ function _setupForScope(scope) {
 
     function exitEditMode() {
       const snap = editModeSnapshot.value
-      if (snap) {
+      // A snapshot only ever restores the preset it was taken from.
+      if (snap && snap.id === activePresetId.value) {
         _mutateActivePreset(_clone(snap))
       }
       editMode.value = false
@@ -458,7 +476,7 @@ function _setupForScope(scope) {
 
     function revertEditMode() {
       const snap = editModeSnapshot.value
-      if (!snap) return
+      if (!snap || snap.id !== activePresetId.value) return
       _mutateActivePreset(_clone(snap))
       editModeDirty.value = false
     }
@@ -511,7 +529,9 @@ function _setupForScope(scope) {
     function _mutateActivePreset(patch) {
       const p = activePreset.value
       if (!p) return
-      const next = { ...p, ...patch }
+      // Identity fields belong to the preset, never to a patch.
+      const { id: _id, builtin: _builtin, ...body } = patch || {}
+      const next = { ...p, ...body }
       if (p.builtin) {
         _builtinPresets.value = {
           ..._builtinPresets.value,

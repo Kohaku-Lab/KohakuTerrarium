@@ -9,6 +9,7 @@
 
 import { watchEffect } from "vue"
 
+import { activeLayoutStore } from "@/composables/useActiveLayout"
 import { useLayoutStore } from "@/stores/layout"
 import { usePaletteStore } from "@/stores/palette"
 import { fireLayoutEditRequested, fireLayoutSaveAsRequested } from "@/utils/layoutEvents"
@@ -38,8 +39,9 @@ export function useBuiltinCommands() {
     label: "Layout: reset current preset to default",
     icon: "i-carbon-reset",
     handler: () => {
-      const id = layout.activePresetId
-      if (id) layout.resetPresetToDefault(id)
+      const active = activeLayoutStore()
+      const id = active.activePresetId
+      if (id) active.resetPresetToDefault(id)
     },
   })
 
@@ -54,7 +56,7 @@ export function useBuiltinCommands() {
         icon: "i-carbon-layout",
         keywords: `preset ${preset.id}`,
         shortcut: preset.shortcut || "",
-        handler: () => layout.switchPreset(preset.id),
+        handler: () => activeLayoutStore().switchPreset(preset.id),
       })
     }
 
@@ -68,7 +70,7 @@ export function useBuiltinCommands() {
         handler: () => {
           // Add the panel to its preferred zone in the active preset.
           const target = (panel.preferredZones && panel.preferredZones[0]) || "main"
-          layout.addSlotToZone(target, panel.id)
+          activeLayoutStore().addSlotToZone(target, panel.id)
         },
       })
     }
@@ -80,7 +82,7 @@ export function useBuiltinCommands() {
     label: "Debug: open logs tab",
     icon: "i-carbon-catalog",
     handler: () => {
-      layout.switchPreset("debug")
+      activeLayoutStore().switchPreset("debug")
     },
   })
 }
