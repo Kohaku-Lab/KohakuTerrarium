@@ -31,6 +31,7 @@ Contract (`kohakuterrarium.modules.tool.base`):
 - optionally override `execution_mode`
 - optionally provide `prompt_contribution()` for a short prompt hint
 - optionally mark `is_concurrency_safe = False` if this tool should be serialized against other unsafe tools
+- optionally set `media_policy = MediaPolicy(...)` to say how images / video / audio in results are stored and shown
 - optionally override `get_full_documentation()` (loaded by the `info` framework command)
 
 Minimal tool:
@@ -80,6 +81,34 @@ same resource, etc.). The executor will serialize those behind one shared lock.
 Provider-native tools are a different category again. If you build one, set
 `is_provider_native = True` and `provider_support = frozenset({...})`; the
 executor will skip it and the provider will handle it on the wire.
+
+### Media in tool results
+
+A tool that returns `ImagePart` / `FilePart` media declares a
+`MediaPolicy` (`kohakuterrarium.modules.tool.media_policy`) with two
+independent switches:
+
+- `persist` (default `True`): inline `data:` images are copied into the
+  session's artifact store and listed under "Saved artifacts". A tool that
+  *looks at* media rather than *producing* it sets `persist=False`; nothing
+  is written and the part travels through as-is.
+- `pinned` (default `True`): the preview stays visible under the tool
+  block. `pinned=False` folds the preview into the block's expandable body.
+
+```python
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
+
+
+class ScreenshotViewer(BaseTool):
+    media_policy = MediaPolicy(persist=False, pinned=False)
+```
+
+A single result can override the class default through
+`ToolResult(metadata={"media_policy": {"persist": True}})`; only the keys
+it names change. Media that already lives on disk should be referenced by
+`file://` URL (`Path(...).resolve().as_uri()`) instead of being inlined:
+the LLM provider reads it at send time, and the web UI serves it through
+`GET /api/files/raw?path=…`. The built-in `read` tool works this way.
 
 Testing:
 

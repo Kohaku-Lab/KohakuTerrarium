@@ -72,6 +72,31 @@ tools:
 - **background**：送出后回传 job id，结果晚点再到。
 - **stateful**：类似 generator，跨回合 yield 中间结果。
 
+### 工具结果里的媒体
+
+回传 `ImagePart` / `FilePart` 媒体的工具，可用
+`media_policy = MediaPolicy(...)` (`kohakuterrarium.modules.tool.media_policy`)
+声明两个独立开关：
+
+- `persist` (默认 `True`)：内嵌的 `data:` 图片会复制进 session 的 artifact
+  store，并列在「已保存的 artifacts」里。只是「查看」而非「产出」媒体的工具设
+  `persist=False`：什么都不写，part 原样传递。
+- `pinned` (默认 `True`)：预览常驻在工具区块下方。`pinned=False` 则把预览折进
+  区块的展开内容里。
+
+```python
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
+
+
+class ScreenshotViewer(BaseTool):
+    media_policy = MediaPolicy(persist=False, pinned=False)
+```
+
+单一结果可通过 `ToolResult(metadata={"media_policy": {"persist": True}})`
+覆盖类默认值，只改它点名的键。已在磁盘上的媒体应以 `file://` URL
+(`Path(...).resolve().as_uri()`) 引用而非内嵌：LLM provider 在送出时读取，
+web UI 则通过 `GET /api/files/raw?path=…` 提供。内建 `read` 工具就是这样做的。
+
 测试：
 
 ```python
