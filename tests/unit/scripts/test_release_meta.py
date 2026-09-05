@@ -18,8 +18,12 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW = REPO_ROOT / ".github" / "workflows" / "release.yml"
 
+# The step is POSIX shell and the fixtures below install an executable
+# `#!/bin/sh` stub, neither of which Windows can honour even when Git Bash
+# puts a `bash` on PATH. The workflow itself only ever runs on Linux.
 pytestmark = pytest.mark.skipif(
-    shutil.which("bash") is None, reason="needs bash to run the workflow step"
+    sys.platform == "win32" or shutil.which("bash") is None,
+    reason="release workflow steps are POSIX shell; runs on Linux and macOS only",
 )
 
 
