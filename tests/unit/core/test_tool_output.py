@@ -1,14 +1,16 @@
 """Unit tests for :mod:`kohakuterrarium.core.tool_output`."""
 
 import base64
+import types
 from pathlib import Path
-
 
 from kohakuterrarium.core.tool_output import (
     NormalizedToolOutput,
     OutputStats,
     materialize_image_part,
+    merge_tool_metadata,
     normalize_tool_output,
+    normalize_tool_result,
     output_stats,
     render_content_text,
     truncate_text_utf8,
@@ -18,6 +20,8 @@ from kohakuterrarium.llm.message import (
     ImagePart,
     TextPart,
 )
+from kohakuterrarium.modules.tool.base import ToolResult
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 
 # ── helpers ──────────────────────────────────────────────────────
 
@@ -252,6 +256,77 @@ class TestNormalizeMultimodal:
             for f in store.written
         )
         assert n.metadata["artifacts"][0]["relative_path"].startswith("tool_outputs/")
+
+    def test_reference_policy_keeps_inline_media_and_writes_nothing(self, tmp_path):
+        store = _FakeArtifactStore(tmp_path)
+        parts = [ImagePart(url=_png_data_url(b"RAW"), source_type="file")]
+        n = normalize_tool_output(
+            parts,
+            max_output=10_000,
+            artifact_store=store,
+            tool_name="read",
+            media_policy=MediaPolicy(persist=False, pinned=False),
+        )
+        kept = next(p for p in n.output if isinstance(p, ImagePart))
+        assert kept.url.startswith("data:image/png;base64,")
+        assert store.written == {}
+        assert "artifacts" not in n.metadata
+        assert "data_urls_materialized" not in n.metadata
+        # The presentation half still travels with the result.
+        assert n.metadata["media_policy"] == {"persist": False, "pinned": False}
+
+    def test_file_reference_passes_through_under_any_policy(self, tmp_path):
+        store = _FakeArtifactStore(tmp_path)
+        ref = ImagePart(
+            url="file:///tmp/pic.png", source_type="file", source_name="pic.png"
+        )
+        n = normalize_tool_output(
+            [ref], max_output=10_000, artifact_store=store, tool_name="read"
+        )
+        assert n.output[0] is ref
+        assert store.written == {}
+        assert n.metadata["media_policy"] == {"persist": True, "pinned": True}
+
+    def test_media_policy_is_only_reported_for_media_results(self):
+        n = normalize_tool_output(
+            [TextPart(text="plain")],
+            max_output=10_000,
+            media_policy=MediaPolicy(pinned=False),
+        )
+        assert "media_policy" not in n.metadata
+
+    def test_merge_lifts_media_policy_into_session_metadata(self):
+        merged = merge_tool_metadata(
+            {"session_metadata": {"artifacts": [{"kind": "file"}]}},
+            {"media_policy": {"persist": True, "pinned": False}},
+        )
+        assert merged["session_metadata"]["media"] == {"persist": True, "pinned": False}
+        assert merged["session_metadata"]["artifacts"] == [{"kind": "file"}]
+        # One canonical location: the raw key does not survive the merge.
+        assert "media_policy" not in merged
+
+    def test_normalize_tool_result_applies_tool_policy_and_result_override(
+        self, tmp_path
+    ):
+        store = _FakeArtifactStore(tmp_path)
+        tool = types.SimpleNamespace(
+            tool_name="camera", media_policy=MediaPolicy(persist=False)
+        )
+        result = ToolResult(
+            output=[ImagePart(url=_png_data_url(b"SHOT"))],
+            metadata={"media_policy": {"pinned": False}, "_image_artifact_subdir": "x"},
+        )
+        normalized, metadata = normalize_tool_result(
+            tool, result, max_output=10_000, job_id="j1", artifact_store=store
+        )
+        assert normalized.output[0].url.startswith("data:image/png;base64,")
+        assert store.written == {}
+        assert metadata["session_metadata"]["media"] == {
+            "persist": False,
+            "pinned": False,
+        }
+        assert "media_policy" not in metadata
+        assert "_image_artifact_subdir" not in metadata
 
     def test_generated_image_can_use_a_dedicated_subdirectory(self, tmp_path):
         store = _FakeArtifactStore(tmp_path)

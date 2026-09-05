@@ -18,6 +18,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
 )
 from kohakuterrarium.llm.message import ImagePart
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.parsing.events import ToolCallEvent
 
 # ── tool fixtures ────────────────────────────────────────────────
@@ -164,6 +165,30 @@ class _GeneratedImageTool(BaseTool):
         )
 
 
+class _ReferenceImageTool(BaseTool):
+    """A tool whose images are looked at, not produced."""
+
+    media_policy = MediaPolicy(persist=False, pinned=False)
+
+    @property
+    def tool_name(self):
+        return "reference_image"
+
+    @property
+    def description(self):
+        return "reference image"
+
+    async def _execute(self, args, **kwargs):
+        encoded = base64.b64encode(b"IMAGE").decode()
+        metadata = {}
+        if args.get("generated"):
+            metadata["media_policy"] = {"persist": True}
+        return ToolResult(
+            output=[ImagePart(url=f"data:image/png;base64,{encoded}")],
+            metadata=metadata,
+        )
+
+
 class _ArtifactStore:
     session_id = "session-1"
 
@@ -237,6 +262,42 @@ class TestSubmitWaitFor:
             "/api/sessions/session-1/artifacts/generated_images/"
         )
         assert list((tmp_path / "generated_images").glob("*.png"))
+
+    async def test_tool_media_policy_skips_persistence_and_reaches_metadata(
+        self, tmp_path
+    ):
+        ex = Executor()
+        ex._agent = types.SimpleNamespace(session_store=_ArtifactStore(tmp_path))
+        ex.register_tool(_ReferenceImageTool())
+
+        result = await ex.wait_for(await ex.submit("reference_image", {}))
+
+        assert result is not None
+        assert result.output[0].url.startswith("data:image/png;base64,")
+        assert not list(tmp_path.rglob("*.png"))
+        assert "artifacts" not in result.metadata.get("session_metadata", {})
+        assert result.metadata["session_metadata"]["media"] == {
+            "persist": False,
+            "pinned": False,
+        }
+        # The raw override key never leaks into the stored result.
+        assert "media_policy" not in result.metadata
+
+    async def test_result_metadata_overrides_the_tool_media_policy(self, tmp_path):
+        ex = Executor()
+        ex._agent = types.SimpleNamespace(session_store=_ArtifactStore(tmp_path))
+        ex.register_tool(_ReferenceImageTool())
+
+        result = await ex.wait_for(
+            await ex.submit("reference_image", {"generated": True})
+        )
+
+        assert result.output[0].url.startswith("/api/sessions/session-1/artifacts/")
+        assert list(tmp_path.rglob("*.png"))
+        assert result.metadata["session_metadata"]["media"] == {
+            "persist": True,
+            "pinned": False,
+        }
 
 
 # ── error paths ──────────────────────────────────────────────────
@@ -440,7 +501,7 @@ class TestExecutorException:
     async def test_unexpected_exception_path(self, monkeypatch):
         """Force an exception OUTSIDE the BaseTool wrapper (raw exception
         in ``_run_tool``) — covers the ``except Exception`` arm. We do
-        this by mocking ``normalize_tool_output`` to raise."""
+        this by mocking ``normalize_tool_result`` to raise."""
         ex = Executor()
         ex.register_tool(_EchoTool())
         from kohakuterrarium.core import executor as ex_mod
@@ -448,7 +509,7 @@ class TestExecutorException:
         def explode(*a, **k):
             raise RuntimeError("normalize boom")
 
-        monkeypatch.setattr(ex_mod, "normalize_tool_output", explode)
+        monkeypatch.setattr(ex_mod, "normalize_tool_result", explode)
         jid = await ex.submit("echo", {"msg": "hi"})
         result = await ex.wait_for(jid)
         assert result is not None
@@ -847,7 +908,7 @@ class TestRunToolExceptionWithDirect:
         def explode(*a, **k):
             raise RuntimeError("boom")
 
-        monkeypatch.setattr(ex_mod, "normalize_tool_output", explode)
+        monkeypatch.setattr(ex_mod, "normalize_tool_result", explode)
         jid = await ex.submit("fail", {}, is_direct=True)
         result = await ex.wait_for(jid)
         # No event was queued (is_direct skip).
@@ -882,7 +943,7 @@ class TestRunToolExceptionWithCallbackBackground:
         def explode(*a, **k):
             raise RuntimeError("normalize boom")
 
-        monkeypatch.setattr(ex_mod, "normalize_tool_output", explode)
+        monkeypatch.setattr(ex_mod, "normalize_tool_result", explode)
         jid = await ex.submit("fail", {}, is_direct=False)
         await ex.wait_for(jid)
         # Callback fired for the failed job.

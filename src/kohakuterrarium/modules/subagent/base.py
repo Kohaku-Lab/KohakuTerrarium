@@ -31,6 +31,7 @@ from kohakuterrarium.modules.subagent.result import (  # noqa: F401
     build_subagent_framework_hints,
 )
 from kohakuterrarium.modules.tool.base import BaseTool
+from kohakuterrarium.modules.tool.media_policy import resolve_media_policy
 from kohakuterrarium.parsing import ParserConfig, StreamParser, TextEvent, ToolCallEvent
 from kohakuterrarium.parsing.format import BRACKET_FORMAT, XML_FORMAT, ToolCallFormat
 from kohakuterrarium.prompt.aggregator import aggregate_system_prompt
@@ -686,6 +687,7 @@ class SubAgent:
                     max_output=max_output,
                     tool_name=tool_call.name,
                     saved_to=result_metadata.get("raw_output_path"),
+                    media_policy=resolve_media_policy(tool, result_metadata),
                 )
                 if tool_call.name == "bash" and (
                     not result.success or not normalized.metadata.get("truncated")

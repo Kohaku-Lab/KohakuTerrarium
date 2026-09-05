@@ -13,11 +13,7 @@ from kohakuterrarium.core.job import (
     JobType,
     generate_job_id,
 )
-from kohakuterrarium.core.tool_output import (
-    discard_raw_output_file,
-    merge_tool_metadata,
-    normalize_tool_output,
-)
+from kohakuterrarium.core.tool_output import normalize_tool_result
 from kohakuterrarium.modules.tool.doc_mode import (
     DEFAULT_DOC_MODE,
     DOC_MODE_BRIEF,
@@ -345,25 +341,13 @@ class Executor:
             else:
                 result = await exec_fn(args, context=context)
             max_output = tool.config.max_output if isinstance(tool, BaseTool) else 0
-            artifact_store = getattr(self._agent, "session_store", None)
-            result_metadata = (
-                dict(result.metadata) if isinstance(result.metadata, dict) else {}
-            )
-            image_subdir = result_metadata.pop("_image_artifact_subdir", "tool_outputs")
-            normalized = normalize_tool_output(
-                result.output,
+            normalized, metadata = normalize_tool_result(
+                tool,
+                result,
                 max_output=max_output,
                 job_id=job_id,
-                tool_name=tool.tool_name,
-                artifact_store=artifact_store,
-                image_subdir=image_subdir,
-                # Bash materializes the full output to a temp file and exposes
-                # its path via this metadata key (see builtins.tools.bash).
-                saved_to=result_metadata.get("raw_output_path"),
+                artifact_store=getattr(self._agent, "session_store", None),
             )
-            metadata = merge_tool_metadata(result_metadata, normalized.metadata)
-            if tool.tool_name == "bash" and not normalized.metadata.get("truncated"):
-                discard_raw_output_file(metadata)
             job_result = JobResult(
                 job_id=job_id,
                 output=normalized.output,

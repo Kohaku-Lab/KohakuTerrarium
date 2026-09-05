@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from kohakuterrarium.builtin_skills import get_builtin_tool_doc
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.modules.tool.runtime_options import validate_tool_options
 from kohakuterrarium.utils.logging import get_logger
 
@@ -179,6 +180,10 @@ class BaseTool:
 
     # False drops the ``run_in_background`` argument from this tool's schema.
     supports_background: bool = False
+
+    # How inline media in results is transported and shown; a result may
+    # override it through ``ToolResult.metadata["media_policy"]``.
+    media_policy: MediaPolicy = MediaPolicy()
 
     # Buckets order prompt contributions; names remain alphabetical within each bucket.
     prompt_contribution_bucket: str = "normal"

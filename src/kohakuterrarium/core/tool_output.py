@@ -21,6 +21,11 @@ from kohakuterrarium.llm.message import (
     normalize_content_parts,
 )
 from kohakuterrarium.utils.logging import get_logger
+from kohakuterrarium.modules.tool.media_policy import (
+    METADATA_KEY as MEDIA_POLICY_KEY,
+    MediaPolicy,
+    resolve_media_policy,
+)
 
 logger = get_logger(__name__)
 
@@ -56,9 +61,18 @@ class NormalizedToolOutput:
 def merge_tool_metadata(
     result_metadata: dict[str, Any], normalized_metadata: dict[str, Any]
 ) -> dict[str, Any]:
-    """Merge normalized artifacts into the session-facing metadata envelope."""
+    """Merge normalized artifacts and media policy into the session-facing envelope.
+
+    ``session_metadata`` is the bounded bag every surface receives with a tool
+    result, so the presentation half of the media policy travels there.
+    """
     metadata = dict(result_metadata)
     metadata.update(normalized_metadata)
+    media = metadata.pop(MEDIA_POLICY_KEY, None)
+    if isinstance(media, dict):
+        session_metadata = dict(metadata.get("session_metadata") or {})
+        session_metadata["media"] = dict(media)
+        metadata["session_metadata"] = session_metadata
     artifacts = normalized_metadata.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         return metadata
@@ -85,6 +99,40 @@ def discard_raw_output_file(metadata: dict[str, Any]) -> None:
             file_path=str(raw_output_path),
             error=str(e),
         )
+
+
+def normalize_tool_result(
+    tool: Any,
+    result: Any,
+    *,
+    max_output: int,
+    job_id: str | None = None,
+    artifact_store: Any = None,
+) -> tuple["NormalizedToolOutput", dict[str, Any]]:
+    """Normalize a finished ``ToolResult`` into output plus its metadata envelope.
+
+    The tool's ``media_policy`` (overridable per result) and the private
+    ``_image_artifact_subdir`` hint are consumed here; neither reaches the
+    stored metadata.
+    """
+    result_metadata = dict(result.metadata) if isinstance(result.metadata, dict) else {}
+    image_subdir = result_metadata.pop("_image_artifact_subdir", "tool_outputs")
+    media_policy = resolve_media_policy(tool, result_metadata)
+    result_metadata.pop(MEDIA_POLICY_KEY, None)
+    normalized = normalize_tool_output(
+        result.output,
+        max_output=max_output,
+        job_id=job_id,
+        tool_name=tool.tool_name,
+        artifact_store=artifact_store,
+        image_subdir=image_subdir,
+        saved_to=result_metadata.get("raw_output_path"),
+        media_policy=media_policy,
+    )
+    metadata = merge_tool_metadata(result_metadata, normalized.metadata)
+    if tool.tool_name == "bash" and not normalized.metadata.get("truncated"):
+        discard_raw_output_file(metadata)
+    return normalized, metadata
 
 
 def truncate_text_utf8(
@@ -190,12 +238,17 @@ def normalize_tool_output(
     image_subdir: str = "tool_outputs",
     preview_chars: int = TOOL_OUTPUT_PREVIEW_CHARS,
     saved_to: str | None = None,
+    media_policy: MediaPolicy | None = None,
 ) -> NormalizedToolOutput:
     """Normalize and byte-limit a tool result before storage or injection.
 
-    Inline images become session artifacts when possible and safe placeholders
-    otherwise, preventing raw base64 from entering model context.
+    Under the default media policy inline images become session artifacts when
+    possible and safe placeholders otherwise, preventing raw base64 from
+    entering model context. A policy with ``persist=False`` leaves inline media
+    untouched and writes nothing. ``file://`` and served URLs always pass
+    through unchanged.
     """
+    policy = media_policy or MediaPolicy()
     metadata: dict[str, Any] = {}
     normalized = normalize_content_parts(output)
     if normalized is None:
@@ -212,9 +265,14 @@ def normalize_tool_output(
     parts: list[ContentPart] = []
     materialized = 0
     elided = 0
+    has_media = False
     artifacts: list[dict[str, str]] = []
     for idx, part in enumerate(normalized):
-        if isinstance(part, ImagePart):
+        if isinstance(part, ImagePart) and not policy.persist:
+            has_media = True
+            parts.append(part)
+        elif isinstance(part, ImagePart):
+            has_media = True
             replacement = materialize_image_part(
                 part,
                 artifact_store,
@@ -237,6 +295,7 @@ def normalize_tool_output(
                 elided += 1
             parts.append(replacement)
         elif isinstance(part, FilePart):
+            has_media = has_media or _is_media_file_part(part)
             parts.append(_normalize_file_part(part))
         else:
             parts.append(part)
@@ -250,6 +309,8 @@ def normalize_tool_output(
         metadata["artifacts"] = artifacts
     if elided:
         metadata["data_urls_elided"] = elided
+    if has_media:
+        metadata[MEDIA_POLICY_KEY] = policy.to_dict()
     stats = output_stats(parts, preview_chars=preview_chars)
     return NormalizedToolOutput(output=parts, stats=stats, metadata=metadata)
 
@@ -418,6 +479,12 @@ def _render_image_placeholder(part: ImagePart) -> str:
             url = url[:500] + "..."
         return f"{desc} {url}"
     return desc
+
+
+def _is_media_file_part(part: FilePart) -> bool:
+    """Return whether a file part is playable media rather than a document."""
+    mime = getattr(part, "mime", None) or ""
+    return mime.startswith("video/") or mime.startswith("audio/")
 
 
 def _render_file_placeholder(part: FilePart) -> str:
