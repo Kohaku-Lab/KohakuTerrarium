@@ -4,7 +4,7 @@ The handlers delegate filesystem policy and behavior to the Studio attachment
 layer while preserving the URL shapes expected by existing frontend callers.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 
 from kohakuterrarium.api.schemas import FileDelete, FileMkdir, FileRename, FileWrite
 from kohakuterrarium.studio.attach import workspace_files
@@ -32,6 +32,13 @@ async def browse_directories(path: str | None = None):
 async def read_file(path: str):
     """Read a file and return its content with metadata."""
     return await workspace_files.read_file(path)
+
+
+@router.get("/raw")
+async def read_file_raw(path: str):
+    """Serve a file's bytes with its media type; how ``file://`` media loads."""
+    data, media_type = await workspace_files.read_file_raw(path)
+    return Response(content=data, media_type=media_type)
 
 
 @router.post("/write")

@@ -53,6 +53,18 @@ class TestAttachFilesRoute:
         assert body["size"] == 4
         assert body["path"] == str(f)
 
+    def test_read_raw_serves_bytes_with_media_type(self, tmp_path):
+        f = tmp_path / "shot.png"
+        f.write_bytes(b"\x89PNG-bytes")
+        r = _files_client().get(f"/x/raw?path={f}")
+        assert r.status_code == 200
+        assert r.headers["content-type"].startswith("image/png")
+        assert r.content == b"\x89PNG-bytes"
+
+    def test_read_raw_missing_is_404(self, tmp_path):
+        r = _files_client().get(f"/x/raw?path={tmp_path / 'nope.png'}")
+        assert r.status_code == 404
+
     def test_write_file(self, tmp_path):
         f = tmp_path / "w.txt"
         r = _files_client().post("/x/write", json={"path": str(f), "content": "hello"})

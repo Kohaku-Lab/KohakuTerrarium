@@ -1,5 +1,6 @@
 """Provide route-independent workspace browsing and file operations."""
 
+import mimetypes
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -221,6 +222,27 @@ async def browse_directories(path: str | None = None):
         "roots": [_dir_entry(root) for root in roots],
         "directories": [],
     }
+
+
+async def read_file_raw(path: str) -> tuple[bytes, str]:
+    """Read a file's bytes and guess its media type for direct serving.
+
+    This is how a browser loads a ``file://`` media reference a tool result
+    carries; the path policy is the same as :func:`read_file`.
+    """
+    file_path = _validate_path(path)
+    if not file_path.exists():
+        raise HTTPException(404, f"File not found: {path}")
+    if not file_path.is_file():
+        raise HTTPException(400, f"Not a file: {path}")
+    try:
+        data = file_path.read_bytes()
+    except PermissionError:
+        raise HTTPException(400, f"Permission denied: {path}")
+    except OSError as e:
+        raise HTTPException(500, f"Read error: {e}")
+    mime, _ = mimetypes.guess_type(file_path.name)
+    return data, mime or "application/octet-stream"
 
 
 async def read_file(path: str):
