@@ -45,10 +45,11 @@ See also: [Serving](serving.md) for how to open the dashboard.
 
 Every freshly opened instance lands on Chat Focus, whatever its shape:
 the Status rail carries the creature list, so a multi-creature graph is
-operable without switching layouts. The Creatures icon on that rail
-shows the member count and glows when the graph grows while you are
-looking elsewhere. Multi-creature stays available on Ctrl+3 for the
-wide layout. The last-used preset per instance is remembered in
+operable without switching layouts. The Creatures tab on that rail
+exists only once the graph has more than one creature; it shows the
+member count and glows when the graph grows while you are looking
+elsewhere. A solo session shows no creature chrome at all.
+Multi-creature stays available on Ctrl+3 for the wide layout. The last-used preset per instance is remembered in
 localStorage and always wins over the default.
 
 The panel picker and the palette list each panel with a one-line
@@ -109,9 +110,9 @@ regenerate, tool call accordion, sub-agent nesting.
 
 ### Status (tabbed rail)
 Five tabs: Session (agent, model, provider, session id, status),
-Creatures (every graph member with focus-on-click, start / stop, and a
-per-creature model switch, plus the channels; the rail icon carries the
-member count), Tokens (in/out/cache + context bar with compact
+Creatures (only for a graph with more than one creature: every member
+with focus-on-click, start / stop, and a per-creature model switch,
+plus the channels; the rail icon carries the member count), Tokens (in/out/cache + context bar with compact
 threshold), Jobs (running tool calls with stop button), Modules (the
 full modules surface).
 

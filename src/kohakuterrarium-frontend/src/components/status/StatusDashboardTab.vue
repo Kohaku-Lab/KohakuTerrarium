@@ -153,7 +153,9 @@ const allTabs = computed(() => [
 ])
 const activeTab = ref("session")
 
-const visibleTabs = computed(() => allTabs.value)
+// A solo session has nothing to walk: the Creatures tab, its count, and its
+// glow exist only once the graph holds more than one creature.
+const visibleTabs = computed(() => allTabs.value.filter((tab) => tab.id !== "creatures" || isMulti.value))
 const activeLabel = computed(() => allTabs.value.find((tab) => tab.id === activeTab.value)?.label || "")
 
 const selectedModel = ref("")
@@ -173,12 +175,16 @@ const graphSize = computed(() => creatureCount.value + channels.value.length)
 // The rail icon glows once the graph grows past what the user last looked
 // at, so a spawned creature or a new channel is never silent.
 const lastSeenSize = ref(graphSize.value)
-const graphGrew = computed(() => activeTab.value !== "creatures" && graphSize.value > lastSeenSize.value)
+const graphGrew = computed(() => isMulti.value && activeTab.value !== "creatures" && graphSize.value > lastSeenSize.value)
 watch(activeTab, (tab) => {
   if (tab === "creatures") lastSeenSize.value = graphSize.value
 })
 watch(graphSize, (size) => {
   if (activeTab.value === "creatures") lastSeenSize.value = size
+})
+// Losing the second creature removes the tab; never strand the rail on it.
+watch(isMulti, (multi) => {
+  if (!multi && activeTab.value === "creatures") activeTab.value = "session"
 })
 
 const busy = reactive({})

@@ -34,7 +34,7 @@ Dashboard 用的是可設定的二元 split tree：每個區塊不是 leaf (一�
 | Ctrl+5 | Debug | chat+state (上) / debug (下) |
 | Ctrl+6 | Settings | settings (全螢幕) |
 
-每個新開啟的 instance 都落在 Chat Focus，不論它是單一生物還是多生物的圖：Status 側欄自帶生物列表，多生物圖不用切換版面就能操作。側欄上的 Creatures 圖示顯示成員數，並會在你看別處時隨圖成長而發光。Multi-creature 仍留在 Ctrl+3 作為寬版版面。每個 instance 上次用的 preset 存在 localStorage，並且永遠優先於預設值。
+每個新開啟的 instance 都落在 Chat Focus，不論它是單一生物還是多生物的圖：Status 側欄自帶生物列表，多生物圖不用切換版面就能操作。側欄上的 Creatures 分頁只在圖裡有多於一個生物時才存在；它顯示成員數，並會在你看別處時隨圖成長而發光。單生物工作階段完全不顯示這些。Multi-creature 仍留在 Ctrl+3 作為寬版版面。每個 instance 上次用的 preset 存在 localStorage，並且永遠優先於預設值。
 
 面板選擇器和命令面板會為每個面板顯示一行說明；兩個舊別名 (`file-tree`、`editor-status`) 仍能被舊 preset 解析，但不再提供給使用者選擇。
 
@@ -83,7 +83,7 @@ Ctrl+K 就算 input 聚焦也會觸發。Preset 快捷鍵在 text input/textarea
 主要對話介面。支援訊息編輯+重跑、重新生成、工具呼叫折疊、子代理巢狀顯示。
 
 ### Status (分頁側欄)
-五個分頁：Session (代理、模型、provider、工作階段 id、狀態)、Creatures (圖裡每個成員：點擊聚焦、啟動/停止、按生物切換模型，以及頻道；側欄圖示帶成員數)、Tokens (in/out/cache + context bar 與壓縮門檻)、Jobs (執行中的工具呼叫與 stop 按鈕)、Modules (完整的模組介面)。
+五個分頁：Session (代理、模型、provider、工作階段 id、狀態)、Creatures (僅當圖裡多於一個生物時出現：每個成員點擊聚焦、啟動/停止、按生物切換模型，以及頻道；側欄圖示帶成員數)、Tokens (in/out/cache + context bar 與壓縮門檻)、Jobs (執行中的工具呼叫與 stop 按鈕)、Modules (完整的模組介面)。
 
 ### Overview
 同樣的工作階段身份、token 用量與執行中作業，但是一頁捲動、沒有分頁。不在任何預設 preset 裡；想一次看完全部時從面板選擇器裡選它。

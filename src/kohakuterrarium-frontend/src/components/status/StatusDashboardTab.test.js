@@ -73,6 +73,29 @@ afterEach(() => {
 })
 
 describe("StatusDashboardTab — Creatures tab", () => {
+  it("does not exist for a solo session, and appears with a glow once a second creature joins", async () => {
+    const solo = { ...INSTANCE, creatures: [INSTANCE.creatures[0]] }
+    const w = mountTab(solo)
+    await flushPromises()
+    expect(w.find('[data-testid="status-tab-creatures"]').exists()).toBe(false)
+    expect(w.find('[data-testid="status-creature-count"]').exists()).toBe(false)
+    await w.setProps({ instance: INSTANCE })
+    const rail = w.find('[data-testid="status-tab-creatures"]')
+    expect(rail.exists()).toBe(true)
+    expect(rail.classes()).toContain("rail-glow")
+    expect(w.find('[data-testid="status-creature-count"]').text()).toBe("2")
+  })
+
+  it("falls back to the session tab when the graph shrinks to one creature", async () => {
+    const w = mountTab()
+    await flushPromises()
+    await w.find('[data-testid="status-tab-creatures"]').trigger("click")
+    expect(w.find('[data-testid="status-creature-alice"]').exists()).toBe(true)
+    await w.setProps({ instance: { ...INSTANCE, creatures: [INSTANCE.creatures[0]] } })
+    expect(w.find('[data-testid="status-tab-creatures"]').exists()).toBe(false)
+    expect(w.find('[data-testid="status-tab-session"]').classes()).toContain("bg-iolite/10")
+  })
+
   it("counts members on the rail icon and lists them with controls", async () => {
     const w = mountTab()
     await flushPromises()

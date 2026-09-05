@@ -34,7 +34,7 @@ Dashboard 用的是可设置的二元 split tree：每个区块不是 leaf (一�
 | Ctrl+5 | Debug | chat+state (上) / debug (下) |
 | Ctrl+6 | Settings | settings (全萤幕) |
 
-每个新打开的 instance 都落在 Chat Focus，不论它是单个 Creature 还是多 Creature 的图：Status 侧栏自带 Creature 列表，多 Creature 图不用切换布局就能操作。侧栏上的 Creatures 图标显示成员数，并会在你看别处时随图增长而发光。Multi-creature 仍留在 Ctrl+3 作为宽版布局。每个 instance 上次用的 preset 存在 localStorage，并且永远优先于默认值。
+每个新打开的 instance 都落在 Chat Focus，不论它是单个 Creature 还是多 Creature 的图：Status 侧栏自带 Creature 列表，多 Creature 图不用切换布局就能操作。侧栏上的 Creatures 分页只在图里有多于一个 Creature 时才存在；它显示成员数，并会在你看别处时随图增长而发光。单 Creature 会话完全不显示这些。Multi-creature 仍留在 Ctrl+3 作为宽版布局。每个 instance 上次用的 preset 存在 localStorage，并且永远优先于默认值。
 
 面板选择器和命令面板会为每个面板显示一行说明；两个旧别名 (`file-tree`、`editor-status`) 仍能被旧 preset 解析，但不再提供给用户选择。
 
@@ -83,7 +83,7 @@ Ctrl+K 就算 input 聚焦也会触发。Preset 快捷键在 text input/textarea
 主要对话介面。支持消息编辑+重跑、重新生成、工具调用折叠、子代理巢状显示。
 
 ### Status (分页侧栏)
-五个分页：Session (代理、模型、provider、会话 id、状态)、Creatures (图里每个成员：点击聚焦、启动/停止、按 Creature 切换模型，以及频道；侧栏图标带成员数)、Tokens (in/out/cache + context bar 与压缩门槛)、Jobs (执行中的工具调用与 stop 按钮)、Modules (完整的模块界面)。
+五个分页：Session (代理、模型、provider、会话 id、状态)、Creatures (仅当图里多于一个 Creature 时出现：每个成员点击聚焦、启动/停止、按 Creature 切换模型，以及频道；侧栏图标带成员数)、Tokens (in/out/cache + context bar 与压缩门槛)、Jobs (执行中的工具调用与 stop 按钮)、Modules (完整的模块界面)。
 
 ### Overview
 同样的会话身份、token 用量与执行中作业，但是一页滚动、没有分页。不在任何默认 preset 里；想一次看完全部时从面板选择器里选它。
