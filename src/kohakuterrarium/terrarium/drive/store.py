@@ -20,6 +20,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveConflictError,
     DriveError,
     DriveSchemaVersionError,
+    DriveStorageError,
 )
 from kohakuterrarium.terrarium.drive.models import (
     DriveAssignment,
@@ -120,7 +121,16 @@ class _SqliteDriveTransaction:
         await self._repo._ensure_open()
         # Read-only sidecars require a deferred transaction because they cannot lock writes.
         stmt = "BEGIN" if self._repo._read_only else "BEGIN IMMEDIATE"
-        await self._repo._run(lambda c: c.execute(stmt))
+        await self._repo._run(lambda c: self._begin_sync(c, stmt))
+
+    @staticmethod
+    def _begin_sync(conn: sqlite3.Connection, stmt: str) -> None:
+        # The connection state is authoritative: a caller cancelled mid-BEGIN
+        # leaves a transaction open that no coroutine will ever roll back.
+        if conn.in_transaction:
+            logger.warning("Drive connection had a stale open transaction; rolled back")
+            conn.execute("ROLLBACK")
+        conn.execute(stmt)
 
     async def commit(self) -> None:
         await self._repo._run(lambda c: c.execute("COMMIT"))
@@ -129,12 +139,16 @@ class _SqliteDriveTransaction:
         await self._repo._run(self._rollback_sync)
 
     @staticmethod
-    def _rollback_sync(conn: sqlite3.Connection) -> None:
+    def _rollback_sync(conn: sqlite3.Connection | None) -> None:
+        # A failed open leaves no connection and therefore nothing to roll back.
+        if conn is None:
+            return
         try:
             conn.execute("ROLLBACK")
         except sqlite3.OperationalError:
             # A completed or absent transaction has nothing left to roll back.
-            pass
+            if conn.in_transaction:
+                raise
 
     async def apply(self, mutation: Mutation) -> None:
         await self._repo._run(lambda c: self._apply_sync(c, mutation))
@@ -403,6 +417,12 @@ class SqliteDriveRepository(BaseDriveRepository):
                     "Drive repository closed while an operation was in flight"
                 ) from exc
             raise
+        except sqlite3.Error as exc:
+            if self._read_only:
+                raise _readonly_open_error(self._path, exc) from exc
+            raise DriveStorageError(
+                f"Drive store {self._path!r} failed: {exc}"
+            ) from exc
 
     async def _ensure_open(self) -> None:
         if self._opened:
@@ -521,8 +541,9 @@ class SqliteDriveRepository(BaseDriveRepository):
                         pairs.append((record, assignment))
                 pairs.sort(key=lambda ra: (ra[0].created_at, ra[0].drive_id))
                 return pairs[: query.limit] if query.limit is not None else pairs
+        except DriveError:
+            raise
         except (
-            sqlite3.Error,
             json.JSONDecodeError,
             UnicodeError,
             TypeError,
@@ -530,10 +551,6 @@ class SqliteDriveRepository(BaseDriveRepository):
             KeyError,
             AttributeError,
         ) as exc:
-            if isinstance(exc, DriveError):
-                raise
-            if isinstance(exc, sqlite3.Error):
-                raise _readonly_open_error(self._path, exc) from exc
             raise DriveError(
                 f"Drive sidecar {self._path!r} contains an invalid saved row: {exc}"
             ) from exc

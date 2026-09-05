@@ -24,6 +24,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveNotFoundError,
     DrivePermissionError,
     DriveRegistrationDisabledError,
+    DriveStorageError,
     DriveTransitionError,
 )
 from kohakuterrarium.terrarium.drive.models import (
@@ -407,6 +408,14 @@ class TestActorFromContextNotBody:
 
 
 class TestStatusMatrix:
+    def test_storage_failure_503(self):
+        # A broken sidecar is a typed, retryable failure, not a bare 500.
+        svc = _FakeService(raise_on={"list_drives": DriveStorageError("db gone")})
+        client = _client(svc)
+        resp = client.get("/api/sessions/g1/drives")
+        assert resp.status_code == 503
+        assert "db gone" in resp.text
+
     def test_conflict_409(self):
         svc = _FakeService(
             raise_on={

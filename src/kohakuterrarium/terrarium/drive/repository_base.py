@@ -72,9 +72,11 @@ class BaseDriveRepository(DeliveryOpsMixin):
     async def _txn(self) -> AsyncIterator[DriveTransaction]:
         async with self._lock:
             txn = self._new_transaction()
-            await txn.begin()
             committed = False
+            # ``begin`` sits inside the guard so a cancellation that lands while
+            # BEGIN is in flight still reaches the rollback.
             try:
+                await txn.begin()
                 yield txn
                 await txn.commit()
                 committed = True

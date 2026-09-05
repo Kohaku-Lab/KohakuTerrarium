@@ -107,6 +107,10 @@ class DriveDeliveryError(DriveError):
     """A delivery could not be admitted, claimed, or acknowledged."""
 
 
+class DriveStorageError(DriveError):
+    """The Drive storage backend failed outside any Drive semantic rule."""
+
+
 class DriveSettingsConflictError(DriveError, ConflictError):
     """A managed Drive settings save lost an optimistic-concurrency race."""
 

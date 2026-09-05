@@ -23,6 +23,7 @@ from kohakuterrarium.terrarium.drive import store_migration
 from kohakuterrarium.terrarium.drive.errors import (
     DriveConflictError,
     DriveSchemaVersionError,
+    DriveStorageError,
 )
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.repository import Mutation, build_create
@@ -942,3 +943,56 @@ class TestMigrationLockFileLifecycle:
                 FileLock(lock_path).acquire()
         finally:
             lk.release()
+
+
+# ── cancellation must never poison the connection ───────────────────
+
+
+class TestCancellationSafety:
+    async def test_cancel_during_begin_rolls_back_and_next_txn_works(self, tmp_path):
+        # A task cancelled while BEGIN is in flight used to leave the
+        # transaction open forever, so every later call failed with
+        # "cannot start a transaction within a transaction".
+        repo = _open(tmp_path / "s.kohakutr.drives")
+        await repo._ensure_open()
+        orig_run = repo._run
+
+        async def slow_run(fn):
+            def wrapped(conn):
+                time.sleep(0.2)
+                return fn(conn)
+
+            return await orig_run(wrapped)
+
+        repo._run = slow_run
+        victim = asyncio.ensure_future(repo.list_drives(DriveQuery()))
+        await asyncio.sleep(0.05)
+        victim.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await victim
+        repo._run = orig_run
+        assert repo._conn.in_transaction is False
+        record = await repo.create_drive(_req(), actor=WORKER, graph_id="g1")
+        assert (await repo.get(record.drive_id)) is not None
+        await repo.close()
+
+    async def test_stale_open_transaction_is_healed_on_next_begin(self, tmp_path):
+        # The connection state is authoritative: a BEGIN nobody rolled back
+        # (a cancelled rollback, an older build) is rolled back before the
+        # next transaction starts instead of failing every call afterwards.
+        repo = _open(tmp_path / "s.kohakutr.drives")
+        await repo._ensure_open()
+        repo._conn.execute("BEGIN IMMEDIATE")
+        assert repo._conn.in_transaction is True
+        record = await repo.create_drive(_req(), actor=WORKER, graph_id="g1")
+        assert (await repo.get(record.drive_id)) is not None
+        assert repo._conn.in_transaction is False
+        await repo.close()
+
+    async def test_sqlite_failure_is_a_typed_storage_error(self, tmp_path):
+        repo = _open(tmp_path / "s.kohakutr.drives")
+        await repo._ensure_open()
+        repo._conn.close()
+        with pytest.raises(DriveStorageError):
+            await repo.list_drives(DriveQuery())
+        await repo.close()

@@ -29,6 +29,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationDisabledError,
     DriveRegistrationIncompatibleError,
     DriveRegistrationNotFoundError,
+    DriveStorageError,
     DriveTransitionError,
 )
 from kohakuterrarium.laboratory._internal.client import (
@@ -369,6 +370,8 @@ def drive_error_status(exc: DriveError) -> int:
         return 422
     if isinstance(exc, DriveBackpressureError):
         return 429
+    if isinstance(exc, DriveStorageError):
+        return 503
     return kt_error_status(exc)
 
 
