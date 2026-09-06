@@ -2,6 +2,7 @@ import { createPinia, setActivePinia } from "pinia"
 import { computed, isReactive, toRaw } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
+import { subscribeAttentionEdges } from "./attention"
 import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
 
 beforeEach(() => {
@@ -5713,5 +5714,58 @@ describe("chat store — drive-turn transcript marker", () => {
     expect(marker.triggerContent).toBe("ship the release")
     // The marker sits right after the turn shell processing_start opens.
     expect(replayed.indexOf(marker)).toBe(1)
+  })
+})
+
+describe("chat store — attention edge summaries", () => {
+  it("summarizes a completed live response from the streamed text parts", () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    chat._onMessage({ type: "processing_start", source: "main" })
+    chat._onMessage({ type: "text", source: "main", content: "Deploy finished. " })
+    chat._onMessage({ type: "text", source: "main", content: "All checks passed." })
+    chat._onMessage({ type: "processing_end", source: "main" })
+    unsubscribe()
+
+    expect(edges).toHaveLength(1)
+    expect(edges[0]).toMatchObject({
+      kind: "completed",
+      summary: "Deploy finished. All checks passed.",
+    })
+  })
+
+  it("summarizes an interactive prompt from its frame payload", () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    chat._onMessage({
+      type: "ask_text",
+      source: "main",
+      event_id: "prompt-1",
+      interactive: true,
+      surface: "chat",
+      payload: { prompt: "Deploy the staging build?" },
+    })
+    unsubscribe()
+
+    expect(edges).toHaveLength(1)
+    expect(edges[0]).toMatchObject({
+      kind: "waiting-input",
+      eventId: "prompt-1",
+      summary: "Deploy the staging build?",
+    })
   })
 })

@@ -112,9 +112,13 @@ function _attentionEdgeSummary(data, messages) {
     const message = list[i]
     if (message?.role === "user") break
     if (message?.role !== "assistant") continue
-    const text = extractTextContent(
-      (Array.isArray(message.parts) ? message.parts : []).filter((part) => part?.type === "text"),
-    )
+    // Assistant parts store their text in ``content`` (streaming and
+    // history replay both append ``{type: "text", content}``), while
+    // user-message content parts use ``text`` — accept either.
+    const text = (Array.isArray(message.parts) ? message.parts : [])
+      .filter((part) => part?.type === "text")
+      .map((part) => part.content ?? part.text ?? "")
+      .join("\n")
     const summary = _truncateAttentionSummary(text)
     if (summary) return summary
   }
