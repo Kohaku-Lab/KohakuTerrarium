@@ -48,7 +48,7 @@
       <div class="flex-1 border-b border-b-warm-200 dark:border-b-warm-700" />
     </div>
 
-    <div ref="bubbleEl" class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm relative" :class="{ 'ring-2 ring-iolite/40 ring-inset': dragOver }" @dragenter.prevent="onDragEnter" @dragleave.prevent="onDragLeave" @dragover.prevent="onBubbleDragOver" @drop.prevent="onDrop">
+    <div ref="bubbleEl" class="flex-1 mx-4 mb-4 bg-white dark:bg-warm-900 rounded-b-xl rounded-tr-xl border border-warm-200 dark:border-warm-700 border-t-0 overflow-hidden flex flex-col shadow-sm relative" :class="{ 'ring-2 ring-iolite/40 ring-inset': dragOver }" @dragenter="onBubbleDragEnter" @dragleave="onBubbleDragLeave" @dragover="onBubbleDragOver" @drop="onBubbleDrop">
       <template v-if="props.groupId && tabDragHoverEdge">
         <div v-if="tabDragHoverEdge === 'left'" class="absolute inset-y-0 left-0 w-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-r-2 border-iolite/50 pointer-events-none z-20" />
         <div v-if="tabDragHoverEdge === 'right'" class="absolute inset-y-0 right-0 w-1/4 bg-iolite/15 dark:bg-iolite-light/12 border-l-2 border-iolite/50 pointer-events-none z-20" />
@@ -67,29 +67,7 @@
         <div class="px-4 py-2 rounded-lg bg-white dark:bg-warm-900 border border-iolite/40 shadow-lg text-sm text-iolite dark:text-iolite-light font-medium"><span class="i-carbon-upload mr-1" /> {{ t("chat.dropToAttach") }}</div>
       </div>
 
-      <div ref="messagesEl" class="chat-messages-viewport flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
-        <div class="flex flex-col gap-3">
-          <template v-if="viewMessages.length === 0">
-            <div class="text-center py-16">
-              <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-iolite/10 to-amber/10 dark:from-iolite/5 dark:to-amber/5 flex items-center justify-center mx-auto mb-3">
-                <div class="i-carbon-chat text-xl text-iolite/40 dark:text-iolite-light/30" />
-              </div>
-              <p class="text-warm-400 dark:text-warm-500 text-sm">{{ resolvedEmptyTitle }}</p>
-              <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ resolvedEmptySubtitle }}</p>
-            </div>
-          </template>
-          <button v-if="windowStart > 0" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
-            {{ t("chat.showEarlier", { count: windowStart }) }}
-          </button>
-          <div v-for="(msg, idx) in windowMessages" :key="msg.id" :data-message-id="msg.id" class="flex flex-col">
-            <ChatMessage :message="msg" :prev-message="windowStart + idx > 0 ? viewMessages[windowStart + idx - 1] : null" :is-first="windowStart + idx === 0" :message-idx="windowStart + idx" :is-last-assistant="msg.role === 'assistant' && windowStart + idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
-          </div>
-          <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
-            <span class="w-2 h-2 rounded-full bg-amber kohaku-pulse" />
-            <span class="text-sm text-amber/80 kohaku-pulse">{{ kohakuwuingLabel }}</span>
-          </div>
-        </div>
-      </div>
+      <ChatTranscriptSection :messages="windowMessages" :message-offset="windowStart" :total-count="viewMessages.length" :previous-message="windowStart > 0 ? viewMessages[windowStart - 1] : null" :empty-title="resolvedEmptyTitle" :empty-subtitle="resolvedEmptySubtitle" :processing="showKohakUwUingIndicator" :processing-label="kohakuwuingLabel" :reconnecting="chat.wsStatus === 'reconnecting'" :reconnect-label="t('chat.disconnected')" :earlier-count="windowStart" :earlier-label="t('chat.showEarlier', { count: windowStart })" :render-message="renderTranscriptMessage" @load-earlier="loadEarlierMessages" @scroll="onMessagesScroll" @viewport-ready="onTranscriptViewportReady" />
 
       <div v-if="!readOnly && activeQueue.length" class="px-4 pt-2 flex flex-col gap-1.5">
         <div v-for="qm in visibleQueued" :key="qm.id" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-amber/5 dark:bg-amber/5 border border-amber/20 text-sm" :class="{ 'opacity-50': qm.cancelling }">
@@ -114,74 +92,21 @@
       <div v-if="!readOnly" class="px-4 pb-4 pt-2 border-t border-t-warm-100 dark:border-t-warm-800">
         <div v-if="showPendingBanner" class="mb-2 flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-amber/10 dark:bg-amber/15 border border-amber/30 text-xs">
           <span class="i-carbon-warning-alt text-amber" />
-          <span class="text-amber-shadow dark:text-amber-light">
-            {{ t("chat.pendingBanner", { count: pendingCount }) }}
-          </span>
+          <span class="text-amber-shadow dark:text-amber-light">{{ t("chat.pendingBanner", { count: pendingCount }) }}</span>
           <button class="ml-auto text-amber hover:underline" @click="scrollToPending">{{ t("chat.pendingShow") }}</button>
         </div>
-        <div v-if="attachments.length" class="mb-2 flex flex-wrap gap-2">
-          <div v-for="(file, idx) in attachments" :key="file.name + ':' + idx" class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-iolite/8 dark:bg-iolite/12 border border-iolite/20 text-xs">
-            <span :class="file.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" />
-            <span class="text-warm-700 dark:text-warm-200 max-w-40 truncate">{{ file.name }}</span>
-            <button class="text-warm-400 hover:text-coral" @click="removeAttachment(idx)">
-              <span class="i-carbon-close" />
-            </button>
-          </div>
-        </div>
-        <div class="chat-input-shell relative flex gap-2 pl-2 pr-3 py-2 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors items-end" :class="{ 'is-active': inputActive }">
-          <input ref="imageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onFileChange(e, 'image')" />
-          <input ref="fileInputEl" type="file" class="hidden" @change="(e) => onFileChange(e, 'file')" />
-
-          <button v-if="isCompact && inputActive" class="kt-input-pill-btn shrink-0 mb-0.5 text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.moreActions')" :aria-label="t('chat.moreActions')" @click="toggleSecondaryMenu">
-            <span class="i-carbon-add" />
-          </button>
-          <div v-else class="flex items-center gap-0 shrink-0 mb-0.5">
-            <button class="kt-input-pill-btn text-warm-400 hover:text-aquamarine hover:bg-aquamarine/10" :title="t('chat.attachFile')" :aria-label="t('chat.attachFile')" @click="fileInputEl?.click()">
-              <span class="i-carbon-add" />
-            </button>
-            <button class="kt-input-pill-btn text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.attachImage')" :aria-label="t('chat.attachImage')" @click="imageInputEl?.click()">
-              <span class="i-carbon-image" />
-            </button>
-          </div>
-
-          <SlashCommandMenu :open="slashMenuOpen" :loading="slashInventoryLoading" :entries="slashMatches" :selected-index="slashSelectedIndex" @choose="chooseSlashEntry" @select-index="slashSelectedIndex = $event" />
-          <textarea ref="inputEl" v-model="inputText" rows="1" class="chat-input-textarea flex-1 bg-transparent border-none outline-none kt-text-body text-warm-800 dark:text-warm-200 placeholder-warm-400 dark:placeholder-warm-500 resize-none max-h-32 leading-relaxed py-1 min-w-0" style="min-height: 2em" :placeholder="inputPlaceholder" aria-autocomplete="list" :aria-expanded="slashMenuOpen" aria-controls="slash-command-menu" :aria-activedescendant="slashActiveDescendant" role="combobox" @keydown="onInputKeydown" @input="onInputChanged" @paste="onPaste" @focus="onInputFocus" @blur="onInputBlur" />
-
-          <div class="flex items-center gap-1 shrink-0 mb-0.5">
-            <button v-if="!(isCompact && inputActive)" class="kt-input-pill-btn text-warm-400 hover:text-iolite hover:bg-iolite/10" :title="t('chat.compactContext')" :aria-label="t('chat.compactContext')" @click="triggerCompact">
-              <span class="i-carbon-collapse-all" />
-            </button>
-            <button v-if="!(isCompact && inputActive)" class="kt-input-pill-btn text-warm-400 hover:text-coral hover:bg-coral/10" :title="t('chat.clearContext')" :aria-label="t('chat.clearContext')" @click="triggerClear">
-              <span class="i-carbon-clean" />
-            </button>
-            <button v-if="viewProcessing" class="kt-input-send-btn bg-coral/90 text-white hover:bg-coral shadow-sm shadow-coral/20" :title="`${t('chat.stopGeneration')} (Esc)`" :aria-label="t('chat.stopGeneration')" @click="chat.interrupt(viewActiveTab)">
-              <span class="i-carbon-stop-filled" />
-            </button>
-            <button v-else class="kt-input-send-btn" :class="inputCanSend ? 'bg-iolite text-white hover:bg-iolite-shadow shadow-sm shadow-iolite/20' : 'text-warm-300 dark:text-warm-600 cursor-not-allowed'" :disabled="!inputCanSend" :aria-label="t('chat.sendMessage')" @click="send">
-              <span class="i-carbon-send" />
-            </button>
-          </div>
-
-          <template v-if="isCompact && secondaryMenuOpen">
-            <div class="fixed inset-0 z-40" @click="secondaryMenuOpen = false" />
-            <div class="absolute left-0 right-0 bottom-full mb-2 z-50 flex items-center gap-1 px-2 py-2 rounded-xl bg-white dark:bg-warm-800 border border-warm-200 dark:border-warm-700 shadow-lg" @click.stop>
-              <button class="kt-input-pill-btn text-warm-500 hover:text-aquamarine hover:bg-aquamarine/10" :aria-label="t('chat.attachFile')" @click="onSecondaryAction(() => fileInputEl?.click())">
-                <span class="i-carbon-add" />
-                <span class="kt-text-caption ml-1">{{ t("chat.attachFile") }}</span>
-              </button>
-              <button class="kt-input-pill-btn text-warm-500 hover:text-iolite hover:bg-iolite/10" :aria-label="t('chat.attachImage')" @click="onSecondaryAction(() => imageInputEl?.click())">
-                <span class="i-carbon-image" />
-                <span class="kt-text-caption ml-1">{{ t("chat.attachImage") }}</span>
-              </button>
-              <button class="kt-input-pill-btn text-warm-500 hover:text-iolite hover:bg-iolite/10" :aria-label="t('chat.compactContext')" @click="onSecondaryAction(triggerCompact)">
-                <span class="i-carbon-collapse-all" />
-              </button>
-              <button class="kt-input-pill-btn text-warm-500 hover:text-coral hover:bg-coral/10" :aria-label="t('chat.clearContext')" @click="onSecondaryAction(triggerClear)">
-                <span class="i-carbon-clean" />
-              </button>
-            </div>
-          </template>
-        </div>
+        <ChatComposer ref="composerEl" v-model="inputText" v-model:attachments="attachments" :processing="viewProcessing" :compact-mode="isCompact" :managed-submit="true" :max-attachment-bytes="MAX_ATTACHMENT_BYTES" :max-image-bytes="MAX_IMAGE_BYTES" :placeholder="inputPlaceholder" :labels="composerLabels" aria-autocomplete="list" :aria-expanded="slashMenuOpen" aria-controls="slash-command-menu" :aria-activedescendant="slashActiveDescendant" input-role="combobox" :attachment-transform="transformAttachment" @update:attachments="onComposerAttachmentsChanged" @submit="send" @interrupt="chat.interrupt(viewActiveTab)" @compact="triggerCompact" @clear="triggerClear" @error="onAttachmentError" @input="onInputChanged" @keydown="onInputKeydown" @focus="onInputFocus" @blur="onInputBlur" @drag-state="dragOver = $event">
+          <template #suggestions><SlashCommandMenu :open="slashMenuOpen" :loading="slashInventoryLoading" :entries="slashMatches" :selected-index="slashSelectedIndex" @choose="chooseSlashEntry" @select-index="slashSelectedIndex = $event" /></template>
+          <template #attachment-icon="{ attachment }"><span :class="attachment.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" /></template>
+          <template #remove-icon><span class="i-carbon-close" /></template>
+          <template #file-icon><span class="i-carbon-add" /></template>
+          <template #image-icon><span class="i-carbon-image" /></template>
+          <template #more-icon><span class="i-carbon-add" /></template>
+          <template #compact-icon><span class="i-carbon-collapse-all" /></template>
+          <template #clear-icon><span class="i-carbon-clean" /></template>
+          <template #stop-icon><span class="i-carbon-stop-filled" /></template>
+          <template #send-icon><span class="i-carbon-send" /></template>
+        </ChatComposer>
       </div>
     </div>
   </div>
@@ -190,10 +115,11 @@
 <script setup>
 import { ElMessage, ElMessageBox } from "element-plus"
 
-import { inject } from "vue"
+import { h, inject, provide } from "vue"
 
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
+import { ChatComposer, ChatTranscriptSection } from "@kohakuterrarium/chat-ui"
 import { useChatRenderWindow, CHAT_RENDER_EXPAND_MESSAGE_LIMIT, CHAT_RENDER_EXPAND_UNIT_BUDGET } from "@/components/chat/chatRenderWindow"
 import { createChatHistoryExpander, captureViewportAnchor, restoreViewportAnchor } from "@/components/chat/chatHistoryExpand"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
@@ -202,7 +128,7 @@ import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useDensity } from "@/composables/useDensity"
 import { useSlashCommandCompletion } from "@/composables/useSlashCommandCompletion"
-import { useChatStore } from "@/stores/chat"
+import { _parseSlashCommand, useChatStore } from "@/stores/chat"
 import { useChatTabDrag } from "@/composables/useChatTabDrag"
 import { useI18n } from "@/utils/i18n"
 import { terrariumAPI, agentAPI } from "@/utils/api"
@@ -223,18 +149,19 @@ const emit = defineEmits(["focus-group"])
 
 const injectedChat = inject("chatStore", null)
 const chat = injectedChat || useChatStore(props.instance?.id || props.instance?.graph_id || undefined)
+provide("chatStore", chat)
 const { t } = useI18n()
 const { isCompact } = useDensity()
 const inputText = ref("")
+const composerRevision = ref(0)
+const submitInFlight = ref(false)
 const messagesEl = ref(null)
-const inputEl = ref(null)
-const imageInputEl = ref(null)
-const fileInputEl = ref(null)
+const composerEl = ref(null)
 const bubbleEl = ref(null)
 const attachments = ref([])
 const queueExpanded = ref(false)
 const dragOver = ref(false)
-let dragDepth = 0
+let fileDragDepth = 0
 
 const viewGroup = computed(() => (props.groupId ? chat.groups?.[props.groupId] || null : null))
 const viewTabs = computed(() => (viewGroup.value ? viewGroup.value.tabs : chat.tabs))
@@ -308,8 +235,32 @@ function onTabStripDrop(ev, dstIndex) {
   if (!props.groupId) return
   tabDrag.onTabStripDrop(ev, props.groupId, dstIndex)
 }
+function hasDraggedFiles(ev) {
+  return Array.from(ev.dataTransfer?.types || []).includes("Files")
+}
+function onBubbleDragEnter(ev) {
+  if (props.readOnly || !hasDraggedFiles(ev)) return
+  ev.preventDefault()
+  fileDragDepth += 1
+  dragOver.value = true
+}
+function onBubbleDragLeave(ev) {
+  if (hasDraggedFiles(ev)) {
+    fileDragDepth = Math.max(0, fileDragDepth - 1)
+    if (!fileDragDepth) dragOver.value = false
+  }
+  if (props.groupId) tabDrag.onBubbleDragLeave(ev, props.groupId)
+}
 function onBubbleDragOver(ev) {
-  if (props.groupId) tabDrag.onBubbleDragOver(ev, props.groupId)
+  const types = Array.from(ev.dataTransfer?.types || [])
+  const isTabDrag = props.groupId && types.includes("application/x-kt-tab")
+  if (isTabDrag) {
+    tabDrag.onBubbleDragOver(ev, props.groupId)
+    return
+  }
+  if (hasDraggedFiles(ev) || types.includes("text/uri-list") || types.includes("text/plain")) {
+    ev.preventDefault()
+  }
 }
 
 const activeQueue = computed(() => {
@@ -355,7 +306,7 @@ function restoreDraft() {
     return
   }
   inputText.value = readLocalPref(key) || ""
-  nextTick(autoResize)
+  nextTick(() => composerEl.value?.resize())
 }
 
 function persistDraft() {
@@ -371,7 +322,17 @@ const activeUsage = computed(() => {
 })
 
 const activeTokens = computed(() => activeUsage.value.total)
-const inputCanSend = computed(() => inputText.value.trim() || attachments.value.length > 0)
+const composerLabels = computed(() => ({
+  attachFile: t("chat.attachFile"),
+  attachImage: t("chat.attachImage"),
+  clear: t("chat.clearContext"),
+  compact: t("chat.compactContext"),
+  message: inputPlaceholder.value,
+  moreActions: t("chat.moreActions"),
+  removeAttachment: "Remove {name}",
+  send: t("chat.sendMessage"),
+  stop: t("chat.stopGeneration"),
+}))
 
 const contextPct = computed(() => {
   const threshold = viewModelInfo.value.compactThreshold
@@ -414,6 +375,15 @@ const showKohakUwUingIndicator = computed(() => {
   }
   return viewProcessing.value
 })
+
+function onTranscriptViewportReady(viewport) {
+  messagesEl.value = viewport
+  viewport.classList.add("chat-messages-viewport")
+}
+
+function renderTranscriptMessage(message, context) {
+  return h(ChatMessage, { message, prevMessage: context.previousMessage, isFirst: context.isFirst, messageIdx: context.absoluteIndex, isLastAssistant: context.isLastAssistant, tabId: viewActiveTab.value })
+}
 
 const kohakuwuingLabel = computed(() => {
   const streaming = !props.groupId || isFocusedGroup.value ? chat.processing && chat.viewingRunningBranch : viewProcessing.value
@@ -491,39 +461,16 @@ function onInputKeydown(e) {
   }
 }
 
-function autoResize() {
-  const el = inputEl.value
-  if (!el) return
-  el.style.height = "auto"
-  el.style.height = Math.min(el.scrollHeight, 128) + "px"
-}
-
-const inputFocused = ref(false)
-const secondaryMenuOpen = ref(false)
-const inputActive = computed(() => inputFocused.value || inputText.value.length > 0)
-
-function onInputChanged(event) {
-  autoResize(event)
+function onInputChanged() {
+  composerRevision.value += 1
   chat.markSlashTarget(viewActiveTab.value, null)
 }
 
 function onInputFocus() {
-  inputFocused.value = true
   reopenSlashMenu()
 }
 
-function onInputBlur() {
-  inputFocused.value = false
-}
-
-function toggleSecondaryMenu() {
-  secondaryMenuOpen.value = !secondaryMenuOpen.value
-}
-
-function onSecondaryAction(fn) {
-  secondaryMenuOpen.value = false
-  if (typeof fn === "function") fn()
-}
+function onInputBlur() {}
 
 const isNearBottom = ref(true)
 const forceScrollOnNextMessageUpdate = ref(true)
@@ -691,89 +638,40 @@ watch(inputText, () => {
   persistDraft()
 })
 
-function _pushAttachment(file, kind) {
-  const limit = kind === "image" ? MAX_IMAGE_BYTES : MAX_ATTACHMENT_BYTES
-  if (file.size > limit) {
-    ElMessage.error(
-      t("chat.attachmentTooLarge", {
-        name: file.name,
-        size: formatBytes(file.size),
-        limit: formatBytes(limit),
-      }),
-    )
-    return false
-  }
-  if (kind === "image" && file.type && !file.type.startsWith("image/")) {
-    ElMessage.error(t("chat.attachmentNotImage", { name: file.name }))
-    return false
-  }
-  attachments.value.push({ file, name: file.name, kind })
-  return true
+function onComposerAttachmentsChanged() {
+  composerRevision.value += 1
 }
 
-async function onFileChange(e, kind = "file") {
-  const files = Array.from(e.target.files || [])
-  for (const file of files) _pushAttachment(file, kind)
-  e.target.value = ""
-}
-
-function onDragEnter(e) {
-  if (props.readOnly) return
-  if (!e.dataTransfer || !Array.from(e.dataTransfer.types).includes("Files")) return
-  dragDepth++
-  dragOver.value = true
-}
-function onDragLeave() {
-  if (props.readOnly) return
-  dragDepth = Math.max(0, dragDepth - 1)
-  if (dragDepth === 0) dragOver.value = false
-}
-function onDrop(e) {
-  if (props.groupId && e.dataTransfer?.types) {
-    const types = Array.from(e.dataTransfer.types)
-    if (types.includes("application/x-kt-tab")) {
-      tabDrag.onBubbleDrop(e, props.groupId)
-      return
-    }
-  }
-  dragDepth = 0
+function onBubbleDrop(e) {
+  fileDragDepth = 0
   dragOver.value = false
-  if (props.readOnly) return
-  const files = Array.from(e.dataTransfer?.files || [])
-  for (const file of files) {
-    const kind = file.type.startsWith("image/") ? "image" : "file"
-    _pushAttachment(file, kind)
+  e.preventDefault()
+  if (!props.readOnly && hasDraggedFiles(e)) {
+    e.stopPropagation()
+    composerEl.value?.addFiles(e.dataTransfer?.files || [], undefined, "drop")
+    return
+  }
+  if (!props.groupId || !Array.from(e.dataTransfer?.types || []).includes("application/x-kt-tab")) return
+  e.stopPropagation()
+  tabDrag.onBubbleDrop(e, props.groupId)
+}
+
+function onAttachmentError(error) {
+  if (error.code === "too-large") {
+    ElMessage.error(t("chat.attachmentTooLarge", { name: error.name, size: formatBytes(error.size), limit: formatBytes(error.limit) }))
+  } else if (error.code === "not-image") {
+    ElMessage.error(t("chat.attachmentNotImage", { name: error.name }))
+  } else {
+    ElMessage.error(error.error?.message || String(error.error || error.code))
   }
 }
 
-function onPaste(e) {
-  if (props.readOnly) return
-  const cd = e.clipboardData
-  if (!cd) return
-
-  const direct = Array.from(cd.files || [])
-  const collected = []
-  for (const file of direct) collected.push(file)
-
-  if (collected.length === 0 && cd.items) {
-    for (const item of cd.items) {
-      if (item.kind !== "file") continue
-      const file = item.getAsFile()
-      if (file) collected.push(file)
-    }
-  }
-  if (collected.length === 0) return // nothing pasted 閳?let the textarea handle text
-
-  let any = false
-  for (const file of collected) {
-    const kind = (file.type || "").startsWith("image/") ? "image" : "file"
-    const named = file.name && file.name !== "image.png" && file.name !== "blob" ? file : _renameClipboardBlob(file, kind)
-    if (_pushAttachment(named, kind)) any = true
-  }
-  if (any) e.preventDefault()
+function transformAttachment(file, kind, source) {
+  if (source !== "paste" || (file.name && file.name !== "image.png" && file.name !== "blob")) return file
+  return renameClipboardBlob(file, kind || ((file.type || "").startsWith("image/") ? "image" : "file"))
 }
 
-function _renameClipboardBlob(file, kind) {
+function renameClipboardBlob(file, kind) {
   const ts = new Date().toISOString().replace(/[:.]/g, "-").replace(/T/, "_").replace(/Z$/, "")
   const ext = (file.type.split("/")[1] || (kind === "image" ? "png" : "bin")).split("+")[0] // image/svg+xml 閳?svg
   const stem = kind === "image" ? `pasted-image-${ts}` : `pasted-file-${ts}`
@@ -787,119 +685,138 @@ function _renameClipboardBlob(file, kind) {
   }
 }
 
-function removeAttachment(index) {
-  attachments.value.splice(index, 1)
-}
-
 async function send() {
-  if (props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
-  const sendTab = viewActiveTab.value
-  const sendText = inputText.value
-  const sendAttachments = [...attachments.value]
-  const sendInstanceGeneration = chat._instanceGeneration
-  const sendInstanceId = chat._instanceId
-  const sendGraphId = chat._instanceGraphId
-  const sendPropInstanceId = props.instance?.id
-  const sendPropGraphId = props.instance?.graph_id
-  let ownedSlashTarget = chat._slashTargetByTab?.[sendTab]
-  const contextChanged = () => chat._instanceGeneration !== sendInstanceGeneration || chat._instanceId !== sendInstanceId || chat._instanceGraphId !== sendGraphId || props.instance?.id !== sendPropInstanceId || props.instance?.graph_id !== sendPropGraphId || chat.activeTab !== sendTab || viewActiveTab.value !== sendTab || inputText.value !== sendText || attachments.value.length !== sendAttachments.length || attachments.value.some((attachment, index) => attachment !== sendAttachments[index])
-  const clearOwnedSlashTarget = () => {
-    if (chat._slashTargetByTab?.[sendTab] === ownedSlashTarget) {
-      chat.markSlashTarget(sendTab, null)
-    }
-  }
-  if (slashMenuOpen.value && slashMatches.value.length) {
-    chooseSlashEntry(slashMatches.value[slashSelectedIndex.value] || slashMatches.value[0])
-    return
-  }
-  if (props.groupId) onGroupFocus()
-  let slashTarget = null
+  if (submitInFlight.value || props.readOnly || (!inputText.value.trim() && attachments.value.length === 0)) return
+  submitInFlight.value = true
   try {
-    slashTarget = await chat.prepareSlashSend(
-      {
-        key: sendTab,
-        creature: sendTab,
-        type: sendTab?.startsWith("ch:") ? "channel" : "creature",
-      },
-      sendText,
-    )
-  } catch (err) {
-    console.warn("Slash inventory lookup failed; using command fallback:", err)
-  }
-  if (contextChanged()) {
-    clearOwnedSlashTarget()
-    return
-  }
-  chat.markSlashTarget(sendTab, slashTarget)
-  ownedSlashTarget = chat._slashTargetByTab?.[sendTab]
-  let parts
-  try {
-    parts = await buildMessageParts(sendText, sendAttachments)
-  } catch (err) {
-    clearOwnedSlashTarget()
-    throw err
-  }
-  if (contextChanged()) {
-    clearOwnedSlashTarget()
-    return
-  }
-  const inlineCommand = /^\/goal(?:\s|$)/i.test(sendText)
-  const resultContext = inlineCommand ? chat.registerCommandResultContext(sendTab) : null
-  if (contextChanged()) {
-    if (inlineCommand) chat.releaseCommandResultContext(sendTab, resultContext)
-    clearOwnedSlashTarget()
-    return
-  }
-  const commandTarget = {
-    sessionId: sendGraphId || sendInstanceId,
-    creatureId: sendTab || "root",
-    tabKey: sendTab,
-    commandText: sendText,
-    inline: inlineCommand,
-    resultContext,
-  }
-  const commandContextChanged = () => chat._instanceGeneration !== sendInstanceGeneration || chat._instanceId !== sendInstanceId || chat._instanceGraphId !== sendGraphId || props.instance?.id !== sendPropInstanceId || props.instance?.graph_id !== sendPropGraphId
-  const outcomePromise = chat.send(parts)
-  inputText.value = ""
-  attachments.value = []
-  persistDraft()
-  leaveHistory()
-  isNearBottom.value = true // force scroll after send
-  scrollScheduler.resume()
-  nextTick(() => {
-    if (inputEl.value) inputEl.value.style.height = "auto"
-  })
-  scheduleScrollToBottom(true)
-  try {
-    const outcome = await outcomePromise
-    if (outcome?.handled === "command") {
-      if (commandContextChanged()) {
-        chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
-      } else {
-        await surfaceCommandResult(outcome.result, commandTarget)
-      }
-    } else if (commandTarget.inline) {
-      chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
-    }
-  } catch (err) {
-    console.error("Command failed:", err)
-    if (commandContextChanged()) {
-      chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
+    const sendTab = viewActiveTab.value
+    if (!sendTab) {
+      ElMessage.error("Select a chat before sending")
       return
     }
-    if (commandTarget.inline) {
-      chat.addCommandResult(
-        commandTarget.tabKey,
-        commandTarget.commandText,
-        {
-          error: err?.response?.data?.detail || err?.message || String(err),
-        },
-        commandTarget.resultContext,
-      )
-      if (viewActiveTab.value === commandTarget.tabKey) scheduleScrollToBottom(true)
-    } else {
-      ElMessage.error(`Command failed: ${err?.message || err}`)
+    const sendText = inputText.value
+    const sendAttachments = [...attachments.value]
+    const sendComposerRevision = composerRevision.value
+    const sendInstanceGeneration = chat._instanceGeneration
+    const sendInstanceId = chat._instanceId
+    const sendGraphId = chat._instanceGraphId
+    const sendPropInstanceId = props.instance?.id
+    const sendPropGraphId = props.instance?.graph_id
+    let ownedSlashTarget = chat._slashTargetByTab?.[sendTab]
+    const contextChanged = () => chat._instanceGeneration !== sendInstanceGeneration || chat._instanceId !== sendInstanceId || chat._instanceGraphId !== sendGraphId || props.instance?.id !== sendPropInstanceId || props.instance?.graph_id !== sendPropGraphId || chat.activeTab !== sendTab || viewActiveTab.value !== sendTab || inputText.value !== sendText || attachments.value.length !== sendAttachments.length || attachments.value.some((attachment, index) => attachment !== sendAttachments[index])
+    const clearOwnedSlashTarget = () => {
+      if (chat._slashTargetByTab?.[sendTab] === ownedSlashTarget) {
+        chat.markSlashTarget(sendTab, null)
+      }
     }
+    if (slashMenuOpen.value && slashMatches.value.length) {
+      chooseSlashEntry(slashMatches.value[slashSelectedIndex.value] || slashMatches.value[0])
+      return
+    }
+    if (props.groupId) onGroupFocus()
+    let slashTarget = null
+    try {
+      slashTarget = await chat.prepareSlashSend(
+        {
+          key: sendTab,
+          creature: sendTab,
+          type: sendTab?.startsWith("ch:") ? "channel" : "creature",
+        },
+        sendText,
+      )
+    } catch (err) {
+      console.warn("Slash inventory lookup failed; using command fallback:", err)
+    }
+    if (contextChanged()) {
+      clearOwnedSlashTarget()
+      return
+    }
+    chat.markSlashTarget(sendTab, slashTarget)
+    ownedSlashTarget = chat._slashTargetByTab?.[sendTab]
+    let parts
+    try {
+      parts = await buildMessageParts(sendText, sendAttachments)
+    } catch (err) {
+      clearOwnedSlashTarget()
+      throw err
+    }
+    if (contextChanged()) {
+      clearOwnedSlashTarget()
+      return
+    }
+    const parsedCommand = _parseSlashCommand(parts)
+    const inlineCommand = parsedCommand?.command === "goal" && (!slashTarget || (slashTarget.type === "command" && slashTarget.name.toLowerCase() === "goal"))
+    if (!parsedCommand && slashTarget) clearOwnedSlashTarget()
+    const resultContext = inlineCommand ? chat.registerCommandResultContext(sendTab) : null
+    if (contextChanged()) {
+      if (inlineCommand) chat.releaseCommandResultContext(sendTab, resultContext)
+      clearOwnedSlashTarget()
+      return
+    }
+    const commandTarget = {
+      sessionId: sendGraphId || sendInstanceId,
+      creatureId: sendTab || "root",
+      tabKey: sendTab,
+      commandText: sendText,
+      inline: inlineCommand,
+      resultContext,
+    }
+    const commandContextChanged = () => chat._instanceGeneration !== sendInstanceGeneration || chat._instanceId !== sendInstanceId || chat._instanceGraphId !== sendGraphId || props.instance?.id !== sendPropInstanceId || props.instance?.graph_id !== sendPropGraphId
+    const canUseHttp = sendTab.startsWith("ch:") || inlineCommand
+    const stillOwnsComposer = () => composerRevision.value === sendComposerRevision && chat._instanceGeneration === sendInstanceGeneration && chat._instanceId === sendInstanceId && chat._instanceGraphId === sendGraphId && props.instance?.id === sendPropInstanceId && props.instance?.graph_id === sendPropGraphId && chat.activeTab === sendTab && viewActiveTab.value === sendTab && inputText.value === sendText && attachments.value.length === sendAttachments.length && attachments.value.every((attachment, index) => attachment === sendAttachments[index])
+    if (!canUseHttp && chat._ws?.readyState !== WebSocket.OPEN) {
+      if (inlineCommand) chat.releaseCommandResultContext(sendTab, resultContext)
+      clearOwnedSlashTarget()
+      ElMessage.error("Chat is not connected")
+      return
+    }
+    let outcomePromise
+    try {
+      outcomePromise = chat.send(parts)
+      let outcome = null
+      if (!canUseHttp) outcome = await outcomePromise
+      if (stillOwnsComposer()) {
+        inputText.value = ""
+        attachments.value = []
+        persistDraft()
+        nextTick(() => composerEl.value?.resetHeight())
+      }
+      isNearBottom.value = true // force scroll after send
+      leaveHistory()
+      scrollScheduler.resume()
+      scheduleScrollToBottom(true)
+      if (canUseHttp) outcome = await outcomePromise
+      if (outcome?.handled === "command") {
+        if (commandContextChanged()) {
+          chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
+        } else {
+          await surfaceCommandResult(outcome.result, commandTarget)
+        }
+      } else if (commandTarget.inline) {
+        chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
+      }
+    } catch (err) {
+      console.error("Command failed:", err)
+      if (commandContextChanged()) {
+        chat.releaseCommandResultContext(commandTarget.tabKey, commandTarget.resultContext)
+        return
+      }
+      if (commandTarget.inline) {
+        chat.addCommandResult(
+          commandTarget.tabKey,
+          commandTarget.commandText,
+          {
+            error: err?.response?.data?.detail || err?.message || String(err),
+          },
+          commandTarget.resultContext,
+        )
+        if (viewActiveTab.value === commandTarget.tabKey) scheduleScrollToBottom(true)
+      } else {
+        ElMessage.error(`Command failed: ${err?.message || err}`)
+      }
+    }
+  } finally {
+    submitInFlight.value = false
   }
 }
 

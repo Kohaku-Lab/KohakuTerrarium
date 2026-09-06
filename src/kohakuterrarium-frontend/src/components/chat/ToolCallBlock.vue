@@ -37,13 +37,13 @@
             <template v-if="tc.resultParts?.length">
               <div class="flex flex-col gap-2">
                 <template v-for="(part, i) in tc.resultParts" :key="i">
-                  <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+                  <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :origin="markdownOrigin" />
                   <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
                   <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
                 </template>
               </div>
             </template>
-            <MarkdownRenderer v-else :content="tc.result" />
+            <MarkdownRenderer v-else :content="tc.result" :origin="markdownOrigin" />
           </div>
         </div>
         <div v-else-if="tc.status === 'interrupted'" class="px-3 py-2 text-xs text-amber dark:text-amber-light bg-amber/6 dark:bg-amber/10">(interrupted)</div>
@@ -88,7 +88,7 @@
           <template v-if="detailParts.length">
             <div class="flex flex-col gap-2">
               <template v-for="(part, i) in detailParts" :key="i">
-                <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" />
+                <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :origin="markdownOrigin" />
               </template>
             </div>
           </template>
@@ -111,7 +111,9 @@
 </template>
 
 <script setup>
-import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import { inject } from "vue"
+
+import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
 import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
 import SubagentConversationPanel from "@/components/subagents/SubagentConversationPanel.vue"
 import { useChatStore } from "@/stores/chat"
@@ -125,8 +127,9 @@ const props = defineProps({
 })
 
 const emit = defineEmits(["toggle"])
-const chat = useChatStore()
+const chat = inject("chatStore", null) || useChatStore()
 const { t } = useI18n()
+const markdownOrigin = window.location.origin
 const mediaParts = computed(() => safeMediaParts(props.tc.resultParts))
 // The tool's media policy (``session_metadata.media``) decides whether its
 // media is pinned above the fold; absent metadata keeps the pinned default.

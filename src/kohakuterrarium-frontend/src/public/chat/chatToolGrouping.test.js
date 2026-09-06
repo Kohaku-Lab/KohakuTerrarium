@@ -77,9 +77,6 @@ describe("computeRenderGroups", () => {
   })
 
   it("uses the first tool's id as the batch id (stable across streaming)", () => {
-    // Simulate a batch growing as tools stream in.  The id must
-    // remain ``batch_a`` so the caller's ``expandedTools[id]`` entry
-    // doesn't churn.
     const parts3 = [tool("a"), tool("b"), tool("c")]
     const parts5 = [...parts3, tool("d"), tool("e")]
     expect(computeRenderGroups(parts3)[0].id).toBe("batch_a")
@@ -93,21 +90,16 @@ describe("computeRenderGroups", () => {
   })
 
   it("drops null / undefined / typeless entries entirely (no pass-through)", () => {
-    // Regression: previously null entries were emitted as
-    // ``{type:'part', part: null}`` which crashed the chat template
-    // when it dereferenced ``group.part.type`` to pick a renderer.
     const parts = [tool("a"), tool("b"), null, tool("c"), tool("d"), tool("e")]
     const out = computeRenderGroups(parts)
-    // null is dropped → the run is uninterrupted → 5 tools → batch.
     expect(out.map((g) => g.type)).toEqual(["tool-batch"])
     expect(out[0].tools.map((t) => t.id)).toEqual(["a", "b", "c", "d", "e"])
   })
 
   it("drops entries missing a type field", () => {
-    const malformed = { id: "bad", kind: "tool" } // no ``type``
+    const malformed = { id: "bad", kind: "tool" }
     const parts = [tool("a"), tool("b"), malformed, tool("c"), tool("d")]
     const out = computeRenderGroups(parts)
-    // malformed entry dropped → a,b,c,d run of 4 → one batch.
     expect(out.map((g) => g.type)).toEqual(["tool-batch"])
     expect(out[0].tools.map((t) => t.id)).toEqual(["a", "b", "c", "d"])
   })

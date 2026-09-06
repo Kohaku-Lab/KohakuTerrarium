@@ -6,6 +6,36 @@ import { sessionAPI } from "@/utils/api"
 
 vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: (key) => key }) }))
 
+describe("SubagentConversationPanel Markdown links", () => {
+  it("passes the Dashboard origin to transcript Markdown", async () => {
+    vi.spyOn(sessionAPI, "getSubagentConversation").mockResolvedValue({
+      live: false,
+      can_receive: false,
+      messages: [
+        {
+          role: "assistant",
+          content: `[session](${window.location.origin}/sessions/subagent)`,
+        },
+      ],
+    })
+    const wrapper = mount(SubagentConversationPanel, {
+      props: { sessionId: "session-a", parent: "root", name: "explore", live: false },
+      global: {
+        stubs: {
+          MarkdownRenderer: {
+            props: ["content", "origin"],
+            template: `<div class="md" :data-origin="origin">{{ content }}</div>`,
+          },
+          ToolCallBlock: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get(".md").attributes("data-origin")).toBe(window.location.origin)
+  })
+})
+
 describe("SubagentConversationPanel ambiguity selector", () => {
   beforeEach(() => {
     // Individual tests also restore locally; this guards against an

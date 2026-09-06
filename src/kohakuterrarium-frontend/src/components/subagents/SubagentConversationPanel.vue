@@ -39,22 +39,22 @@
             <div class="text-[9px] uppercase tracking-wide text-warm-400 mb-0.5">user</div>
             <div v-if="item.parts" class="flex flex-col gap-1 text-body">
               <template v-for="(part, pi) in item.parts" :key="pi">
-                <MarkdownRenderer v-if="part.type === 'text' && part.text" :content="part.text" />
+                <MarkdownRenderer v-if="part.type === 'text' && part.text" :content="part.text" :origin="markdownOrigin" />
                 <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
               </template>
             </div>
-            <div v-else class="text-body"><MarkdownRenderer :content="item.content" /></div>
+            <div v-else class="text-body"><MarkdownRenderer :content="item.content" :origin="markdownOrigin" /></div>
           </div>
 
           <div v-else class="max-w-[92%] min-w-0">
             <div class="text-[9px] uppercase tracking-wide text-warm-400 mb-0.5">assistant</div>
             <div v-if="item.parts" class="flex flex-col gap-1 text-body">
               <template v-for="(part, pi) in item.parts" :key="pi">
-                <MarkdownRenderer v-if="part.type === 'text' && part.text" :content="part.text" />
+                <MarkdownRenderer v-if="part.type === 'text' && part.text" :content="part.text" :origin="markdownOrigin" />
                 <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="tool-inline-image" />
               </template>
             </div>
-            <div v-else-if="item.content" class="text-body"><MarkdownRenderer :content="item.content" /></div>
+            <div v-else-if="item.content" class="text-body"><MarkdownRenderer :content="item.content" :origin="markdownOrigin" /></div>
             <div v-if="item.toolCalls.length" class="flex flex-col gap-1.5 mt-1.5 min-w-0">
               <ToolCallBlock v-for="call in item.toolCalls" :key="call.id" :tc="call" :depth="depth + 1" :expanded="expandedTools.has(call.id)" @toggle="toggleTool(call.id)" />
             </div>
@@ -74,7 +74,7 @@
 <script setup>
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue"
 
-import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
 import { sessionAPI, terrariumAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 
@@ -96,6 +96,7 @@ const props = defineProps({
 defineEmits(["back"])
 
 const { t } = useI18n()
+const markdownOrigin = window.location.origin
 const loading = ref(false)
 const error = ref("")
 const messages = ref([])
