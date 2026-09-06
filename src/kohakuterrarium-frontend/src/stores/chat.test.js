@@ -5833,3 +5833,31 @@ describe("chat store — attention edge summaries", () => {
     })
   })
 })
+
+describe("chat store — attention accumulator bounds", () => {
+  it("bounds the retained stream copy while preserving the summary", () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    chat._onMessage({ type: "processing_start", source: "main" })
+    const bigWord = "x".repeat(50)
+    for (let i = 0; i < 100; i++) {
+      chat._onMessage({ type: "text", source: "main", content: `${bigWord} ` })
+    }
+    // The retained accumulator never grows past the ceiling despite ~5000
+    // streamed characters.
+    expect(chat._attentionStreamTextByTab.main.length).toBeLessThanOrEqual(400)
+    chat._onMessage({ type: "processing_end", source: "main" })
+    unsubscribe()
+
+    expect(edges).toHaveLength(1)
+    expect(edges[0].summary).toHaveLength(200)
+    expect(edges[0].summary.endsWith("…")).toBe(true)
+  })
+})

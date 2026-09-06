@@ -83,6 +83,11 @@ function extractTextContent(content) {
 
 const ATTENTION_INTERACTIVE_TYPES = ["ask_text", "confirm", "selection", "card"]
 const ATTENTION_SUMMARY_MAX = 200
+// Accumulators re-normalize (whitespace + trim) once they pass this bound,
+// then refuse further growth; summaries only ever read the first
+// ATTENTION_SUMMARY_MAX characters, so the retained copy stays bounded no
+// matter how long the turn streams.
+const ATTENTION_ACCUMULATOR_CEILING = ATTENTION_SUMMARY_MAX * 2
 
 function _truncateAttentionSummary(text) {
   const flat = String(text || "")
@@ -90,6 +95,24 @@ function _truncateAttentionSummary(text) {
     .trim()
   if (!flat) return ""
   return flat.length > ATTENTION_SUMMARY_MAX ? `${flat.slice(0, ATTENTION_SUMMARY_MAX - 1)}…` : flat
+}
+
+/** Fold one streamed chunk into the per-tab accumulator, bounded.
+ *
+ * Normalizing at the ceiling keeps the retained copy tiny for arbitrarily
+ * long responses while producing the same summary as normalizing the full
+ * text: leading whitespace is dropped before the first ceiling compaction,
+ * and a summary never reads past the first ATTENTION_SUMMARY_MAX chars.
+ */
+function _accumulateAttentionStreamText(accumulated, chunk) {
+  const next = (accumulated || "") + chunk
+  if (next.length > ATTENTION_ACCUMULATOR_CEILING) {
+    const flat = next.replace(/\s+/g, " ").trim()
+    return flat.length > ATTENTION_ACCUMULATOR_CEILING
+      ? flat.slice(0, ATTENTION_ACCUMULATOR_CEILING)
+      : flat
+  }
+  return next
 }
 
 /**
@@ -2857,12 +2880,15 @@ const _chatStoreOptions = {
         }
         const scope = scopeOfStoreId(this.$id) || "default"
         // Accumulate the turn's raw stream text before any branch-view
-        // gating drops frames from the displayed message list.
+        // gating drops frames from the displayed message list. Bounded by
+        // the accumulator ceiling — no full-response second copy is kept.
         if (data.type === "processing_start") {
           this._attentionStreamTextByTab[source] = ""
         } else if (data.type === "text" && typeof data.content === "string") {
-          this._attentionStreamTextByTab[source] =
-            (this._attentionStreamTextByTab[source] || "") + data.content
+          this._attentionStreamTextByTab[source] = _accumulateAttentionStreamText(
+            this._attentionStreamTextByTab[source],
+            data.content,
+          )
         }
         const { state } = reduceAttentionEdge(
           this.attentionByTab[source] || createAttentionState(),
