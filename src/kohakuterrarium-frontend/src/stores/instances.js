@@ -126,9 +126,7 @@ export const useInstancesStore = defineStore("instances", {
     startPolling() {
       this._subscribers++
       if (this._pollInterval === null) {
-        this._pollInterval = createVisibilityInterval(() => {
-          this.fetchAll()
-        }, 5000)
+        this._pollInterval = createVisibilityInterval(() => this.fetchAll(), 5000)
         this._pollInterval.start()
       }
     },

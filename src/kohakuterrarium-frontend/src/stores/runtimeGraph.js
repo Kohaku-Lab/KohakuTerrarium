@@ -158,7 +158,7 @@ export const useRuntimeGraphStore = defineStore("runtimeGraph", () => {
     // re-render every card.
     state._pollInterval = createVisibilityInterval(() => {
       if (state.wsConnected) return
-      loadSnapshot()
+      return loadSnapshot()
     }, 5000)
     state._pollInterval.start()
   }
