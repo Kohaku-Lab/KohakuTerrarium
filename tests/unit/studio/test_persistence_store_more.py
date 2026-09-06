@@ -8,6 +8,7 @@ This file now covers only the remaining per-session helpers in
 ``store.py`` — the ones that the sidecar does NOT subsume.
 """
 
+import errno
 import os
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -196,6 +197,19 @@ class TestDiskUsageStatFailures:
         # Sidecar bytes excluded (its stat raised), main file counted.
         assert out["session_bytes"] == len(b"main")
         assert out["total_bytes"] == len(b"main")
+
+    def test_scan_failure_reports_empty_usage(self, tmp_path, monkeypatch):
+        (tmp_path / "s.kohakutr").write_bytes(b"main")
+        monkeypatch.setattr(store_mod, "_session_dir", lambda: tmp_path)
+
+        def _exhausted(directory):
+            raise OSError(errno.EMFILE, "Too many open files")
+
+        monkeypatch.setattr(store_mod, "pick_canonical_per_session", _exhausted)
+        out = store_mod.disk_usage()
+        assert out["count"] == 0
+        assert out["total_bytes"] == 0
+        assert out["session_dir"] == str(tmp_path)
 
     def test_artifact_file_stat_failure_is_skipped(self, tmp_path, monkeypatch):
         session = tmp_path / "s.kohakutr"

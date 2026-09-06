@@ -9,6 +9,7 @@ import pytest
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence import session_index as pkg
 from kohakuterrarium.studio.persistence.session_index import (
+    ReconcileReport,
     close_session_index,
     get_session_index_default,
     sidecar_path_for,
@@ -367,6 +368,31 @@ class TestSingleton:
         # Singleton still serves whatever state was already in the
         # sidecar — alice survives.
         assert idx2 is not None
+        assert idx2.list().total == 1
+        close_session_index()
+
+    def test_aborted_bootstrap_leaves_flag_unset(self, tmp_path, monkeypatch):
+        sdir = tmp_path / "s"
+        sdir.mkdir()
+        _make_session(sdir, "alice")
+        calls: list[bool] = []
+
+        def aborted(instance, directory, *, full):
+            calls.append(full)
+            return ReconcileReport(
+                read=0, deleted=0, total=0, elapsed_ms=0.0, aborted=True
+            )
+
+        monkeypatch.setattr(pkg, "_run_reconcile", aborted)
+        idx = get_session_index_default(sdir)
+        assert idx.meta_get("bootstrap_completed") != "1"
+        assert calls == [True]
+        close_session_index()
+
+        # With the scan healthy again, the next start retries the full pass.
+        monkeypatch.undo()
+        idx2 = get_session_index_default(sdir)
+        assert idx2.meta_get("bootstrap_completed") == "1"
         assert idx2.list().total == 1
         close_session_index()
 

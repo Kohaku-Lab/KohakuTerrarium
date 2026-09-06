@@ -14,7 +14,26 @@ contract under test:
   highest-versioned when both are present.
 """
 
+import errno
+
+import pytest
+
 from kohakuterrarium.studio.persistence.viewer import paths as p
+
+
+class TestIsSessionFileName:
+    @pytest.mark.parametrize(
+        "name", ["a.kohakutr", "b.kohakutr.v2", "c.kt", ".hidden.kohakutr"]
+    )
+    def test_accepts_every_form(self, name):
+        assert p.is_session_file_name(name)
+
+    @pytest.mark.parametrize(
+        "name",
+        ["a.txt", "a.kohakutr-wal", "a.kohakutr-shm", "a.artifacts", "kohakutr"],
+    )
+    def test_rejects_sidecars_and_unrelated_names(self, name):
+        assert not p.is_session_file_name(name)
 
 
 class TestNormalizeSessionStem:
@@ -44,6 +63,25 @@ class TestAllSessionFiles:
         (tmp_path / "ignored.txt").write_bytes(b"x")
         names = {f.name for f in p.all_session_files(tmp_path)}
         assert names == {"a.kohakutr", "b.kohakutr.v2", "c.kt"}
+
+    def test_includes_mirror_directory(self, tmp_path):
+        (tmp_path / "a.kohakutr").write_bytes(b"x")
+        mirror = tmp_path / "mirror"
+        mirror.mkdir()
+        (mirror / "worker.kohakutr").write_bytes(b"x")
+        (mirror / "notes.txt").write_bytes(b"x")
+        names = {f.name for f in p.all_session_files(tmp_path)}
+        assert names == {"a.kohakutr", "worker.kohakutr"}
+
+    def test_scan_failure_propagates(self, tmp_path, monkeypatch):
+        (tmp_path / "a.kohakutr").write_bytes(b"x")
+
+        def _exhausted(*args, **kwargs):
+            raise OSError(errno.EMFILE, "Too many open files")
+
+        monkeypatch.setattr(p.os, "scandir", _exhausted)
+        with pytest.raises(OSError):
+            p.all_session_files(tmp_path)
 
 
 class TestResolveSessionPath:

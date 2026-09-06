@@ -114,8 +114,10 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
                     "Bootstrapping session index from disk (full)",
                     path=str(sidecar),
                 )
-                _run_reconcile(instance, normalized_dir, full=True)
-                instance.meta_put(_BOOTSTRAP_FLAG, "1")
+                report = _run_reconcile(instance, normalized_dir, full=True)
+                # An aborted pass leaves the flag unset so the next start retries.
+                if not report.aborted:
+                    instance.meta_put(_BOOTSTRAP_FLAG, "1")
             else:
                 logger.debug(
                     "Reconciling session index on startup (incremental)",

@@ -5,7 +5,13 @@ versioned, legacy-short, and mirrored session files. Every helper accepts an
 explicit directory and prefers the highest available format version.
 """
 
+import os
 from pathlib import Path
+
+
+def is_session_file_name(name: str) -> bool:
+    """Return whether a file name has a supported session-file form."""
+    return name.endswith((".kohakutr", ".kt")) or ".kohakutr.v" in name
 
 
 def normalize_session_stem(path: Path) -> str:
@@ -25,19 +31,23 @@ def all_session_files(session_dir: Path) -> list[Path]:
     """Return supported session files from the main and mirror directories.
 
     Lab-host mirrors are included so listing and history can surface worker
-    sessions with their recorded node IDs.
+    sessions with their recorded node IDs. A directory that exists but cannot
+    be scanned raises ``OSError`` rather than reading as empty.
     """
     if not session_dir.exists():
         return []
-    patterns = ("*.kohakutr", "*.kohakutr.v*", "*.kt")
     scan_dirs = [session_dir]
     mirror_dir = session_dir / "mirror"
     if mirror_dir.is_dir():
         scan_dirs.append(mirror_dir)
     found: list[Path] = []
     for d in scan_dirs:
-        for pattern in patterns:
-            found.extend(d.glob(pattern))
+        with os.scandir(d) as entries:
+            found.extend(
+                Path(entry.path)
+                for entry in entries
+                if is_session_file_name(entry.name)
+            )
     return found
 
 

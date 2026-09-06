@@ -64,6 +64,19 @@ def all_session_files_default() -> list[Path]:
     return all_session_files(_session_dir())
 
 
+def _empty_disk_usage(session_dir: Path) -> dict[str, Any]:
+    """Return the disk-usage shape for a directory with nothing measurable."""
+    return {
+        "count": 0,
+        "session_bytes": 0,
+        "artifacts_bytes": 0,
+        "total_bytes": 0,
+        "oldest_at": None,
+        "newest_at": None,
+        "session_dir": str(session_dir),
+    }
+
+
 def disk_usage() -> dict[str, Any]:
     """Return session and retained-artifact byte usage separately.
 
@@ -74,17 +87,18 @@ def disk_usage() -> dict[str, Any]:
     """
     session_dir = _session_dir()
     if not session_dir.exists():
-        return {
-            "count": 0,
-            "session_bytes": 0,
-            "artifacts_bytes": 0,
-            "total_bytes": 0,
-            "oldest_at": None,
-            "newest_at": None,
-            "session_dir": str(session_dir),
-        }
+        return _empty_disk_usage(session_dir)
 
-    canonical = pick_canonical_per_session(session_dir)
+    try:
+        canonical = pick_canonical_per_session(session_dir)
+    except OSError as exc:
+        logger.warning(
+            "session directory scan failed; reporting empty usage",
+            path=str(session_dir),
+            error=str(exc),
+            exc_info=True,
+        )
+        return _empty_disk_usage(session_dir)
     session_bytes = 0
     oldest: float | None = None
     newest: float | None = None

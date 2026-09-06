@@ -30,12 +30,17 @@ _MAX_WORKERS = min(32, (os.cpu_count() or 4) * 4)
 
 @dataclass
 class ReconcileReport:
-    """What :func:`reconcile` actually did, surfaced to the API."""
+    """What :func:`reconcile` actually did, surfaced to the API.
+
+    ``aborted`` marks a pass that could not scan the session directory and
+    therefore left the index untouched.
+    """
 
     read: int
     deleted: int
     total: int
     elapsed_ms: float
+    aborted: bool = False
 
 
 def _extract_text_preview(content, limit: int = 200) -> str:
@@ -177,13 +182,30 @@ def reconcile(
 
     Missing files are always removed. ``full`` controls whether unchanged
     fingerprints may skip reads. The report exposes read, deletion, and timing
-    counts to callers.
+    counts to callers. A directory scan failure aborts the pass with the index
+    untouched, since an unreadable directory is not an empty one.
     """
     started = time.monotonic()
     if not session_dir.exists():
         return ReconcileReport(read=0, deleted=0, total=0, elapsed_ms=0.0)
 
-    on_disk_paths = {p.name: p for p in pick_canonical_per_session(session_dir)}
+    try:
+        canonical = pick_canonical_per_session(session_dir)
+    except OSError as exc:
+        logger.error(
+            "session directory scan failed; index left untouched",
+            path=str(session_dir),
+            error=str(exc),
+            exc_info=True,
+        )
+        return ReconcileReport(
+            read=0,
+            deleted=0,
+            total=index.count(),
+            elapsed_ms=(time.monotonic() - started) * 1000.0,
+            aborted=True,
+        )
+    on_disk_paths = {p.name: p for p in canonical}
     in_index = set(index.all_filenames())
 
     # Remove missing files before fingerprint checks so the sidecar reflects

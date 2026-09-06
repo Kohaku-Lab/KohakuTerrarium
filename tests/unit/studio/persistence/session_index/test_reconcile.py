@@ -1,5 +1,7 @@
 """Unit tests for ``session_index.reconcile`` — every code path."""
 
+import errno
+import os
 from pathlib import Path
 
 import pytest
@@ -445,3 +447,23 @@ class TestReconcile:
         reconcile(idx, session_dir, full=True)
         ts = idx.meta_get("last_reconcile_at")
         assert isinstance(ts, float) and ts > 0
+
+    def test_scan_failure_leaves_index_untouched(self, idx, session_dir, monkeypatch):
+        _make_session(session_dir, "alice")
+        reconcile(idx, session_dir, full=True)
+        stamp_before = idx.meta_get("last_reconcile_at")
+        real_scandir = os.scandir
+
+        def _exhausted(path=".", *args, **kwargs):
+            if Path(path) == session_dir:
+                raise OSError(errno.EMFILE, "Too many open files")
+            return real_scandir(path, *args, **kwargs)
+
+        monkeypatch.setattr(os, "scandir", _exhausted)
+        report = reconcile(idx, session_dir, full=False)
+        assert report.aborted is True
+        assert report.deleted == 0
+        assert report.read == 0
+        assert report.total == 1
+        assert idx.list().total == 1
+        assert idx.meta_get("last_reconcile_at") == stamp_before
