@@ -4,8 +4,9 @@ Full reconciliation rereads every canonical session file; incremental
 reconciliation only rereads files whose WAL-aware ``(mtime, size)`` fingerprint
 changed. Both modes remove entries for missing files.
 
-Session files are opened only here. Parallel reads are bounded to four workers
-per CPU and at most 32 to limit cold-start latency and file-handle pressure.
+Session files are opened only here. Parallel reads are bounded by the CPU
+count and by the process descriptor budget, since every open store holds
+about twenty descriptors.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -18,14 +19,26 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.session_index.entry import SessionIndexEntry
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
 from kohakuterrarium.studio.persistence.viewer.paths import pick_canonical_per_session
+from kohakuterrarium.utils.fd_limit import soft_fd_limit
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
-# SQLite reads spend most time waiting on I/O; the cap prevents excessive
-# file-handle pressure in large session directories.
-_MAX_WORKERS = min(32, (os.cpu_count() or 4) * 4)
+_MAX_WORKERS = 8
+# Descriptors one open SessionStore holds, and the number kept free for
+# sockets, config files, and live sessions.
+_FDS_PER_STORE = 20
+_FD_HEADROOM = 128
+
+
+def _worker_budget() -> int:
+    """Return the reader count the CPU count and descriptor limit allow."""
+    cap = min(_MAX_WORKERS, os.cpu_count() or 4)
+    soft = soft_fd_limit()
+    if soft is None:
+        return cap
+    return max(1, min(cap, (soft - _FD_HEADROOM) // _FDS_PER_STORE))
 
 
 @dataclass
@@ -240,7 +253,7 @@ def reconcile(
     # apply their own sort.
     if to_read:
         worker_count = (
-            workers if workers is not None else min(_MAX_WORKERS, len(to_read))
+            workers if workers is not None else min(_worker_budget(), len(to_read))
         )
         worker_count = max(1, worker_count)
         if worker_count == 1:

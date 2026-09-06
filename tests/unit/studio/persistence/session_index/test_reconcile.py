@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import kohakuterrarium.studio.persistence.session_index.reconcile as reconcile_mod
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.session_index.reconcile import (
     ReconcileReport,
@@ -467,3 +468,51 @@ class TestReconcile:
         assert report.total == 1
         assert idx.list().total == 1
         assert idx.meta_get("last_reconcile_at") == stamp_before
+
+
+# ── worker budget ─────────────────────────────────────────────────
+
+
+class TestWorkerBudget:
+    def test_descriptor_limit_bounds_workers(self, monkeypatch):
+        monkeypatch.setattr(reconcile_mod.os, "cpu_count", lambda: 64)
+        monkeypatch.setattr(reconcile_mod, "soft_fd_limit", lambda: 256)
+        assert reconcile_mod._worker_budget() == 6
+
+    def test_generous_limit_uses_fixed_cap(self, monkeypatch):
+        monkeypatch.setattr(reconcile_mod.os, "cpu_count", lambda: 64)
+        monkeypatch.setattr(reconcile_mod, "soft_fd_limit", lambda: 65536)
+        assert reconcile_mod._worker_budget() == 8
+
+    def test_cpu_count_bounds_workers(self, monkeypatch):
+        monkeypatch.setattr(reconcile_mod.os, "cpu_count", lambda: 2)
+        monkeypatch.setattr(reconcile_mod, "soft_fd_limit", lambda: 65536)
+        assert reconcile_mod._worker_budget() == 2
+
+    def test_unknown_limit_uses_fixed_cap(self, monkeypatch):
+        monkeypatch.setattr(reconcile_mod.os, "cpu_count", lambda: 64)
+        monkeypatch.setattr(reconcile_mod, "soft_fd_limit", lambda: None)
+        assert reconcile_mod._worker_budget() == 8
+
+    def test_tiny_limit_still_runs_one_reader(self, monkeypatch):
+        monkeypatch.setattr(reconcile_mod.os, "cpu_count", lambda: 64)
+        monkeypatch.setattr(reconcile_mod, "soft_fd_limit", lambda: 64)
+        assert reconcile_mod._worker_budget() == 1
+
+    def test_reconcile_pool_honours_budget(self, idx, session_dir, monkeypatch):
+        for i in range(4):
+            _make_session(session_dir, f"s{i}")
+        sizes: list[int | None] = []
+        real_executor = reconcile_mod.ThreadPoolExecutor
+
+        class RecordingExecutor(real_executor):
+            def __init__(self, max_workers=None, **kwargs):
+                sizes.append(max_workers)
+                super().__init__(max_workers=max_workers, **kwargs)
+
+        monkeypatch.setattr(reconcile_mod, "ThreadPoolExecutor", RecordingExecutor)
+        monkeypatch.setattr(reconcile_mod, "_worker_budget", lambda: 2)
+        report = reconcile(idx, session_dir, full=True)
+        assert report.read == 4
+        assert idx.list().total == 4
+        assert sizes == [2]
