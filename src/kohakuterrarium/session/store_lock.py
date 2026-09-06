@@ -5,12 +5,26 @@ released automatically when a process exits.
 """
 
 from collections.abc import Callable, Iterable
+from typing import Any
 
 from kohakuterrarium.errors import SessionLockedError
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# SessionStore KVault table attributes in close order; the FTS TextVault is
+# handled apart.
+TABLE_ATTRS: tuple[str, ...] = (
+    "events",
+    "meta",
+    "state",
+    "channels",
+    "subagents",
+    "jobs",
+    "conversation",
+    "turn_rollup",
+)
 
 
 def acquire_writer_lock(path: str) -> FileLock:
@@ -69,3 +83,41 @@ def close_tables(
             pass
     finally:
         release_writer_lock(lock)
+
+
+def discard_partial_open(tables: Iterable[tuple[str, Any]], fts, path: str) -> None:
+    """Release tables opened before a store construction failure.
+
+    ``tables`` pairs each attribute name with its KVault, or ``None`` when the
+    failure happened before that table opened. Every step is best-effort so one
+    failing table cannot keep the others, or the events cache daemon, alive.
+    """
+    for name, table in tables:
+        if table is None:
+            continue
+        for step in (table.disable_cache, table.close):
+            try:
+                step()
+            except Exception:
+                logger.warning(
+                    "partial-open cleanup step failed",
+                    table=name,
+                    path=path,
+                    exc_info=True,
+                )
+        try:
+            del table._inner
+        except AttributeError:
+            pass
+    if fts is None:
+        return
+    try:
+        fts.close()
+    except Exception:
+        logger.warning(
+            "partial-open cleanup step failed", table="fts", path=path, exc_info=True
+        )
+    try:
+        del fts._vault
+    except AttributeError:
+        pass

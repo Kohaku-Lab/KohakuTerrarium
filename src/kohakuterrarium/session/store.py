@@ -29,8 +29,10 @@ from kohakuterrarium.session.store_counters import (
 )
 from kohakuterrarium.session.store_fork import perform_fork
 from kohakuterrarium.session.store_lock import (
+    TABLE_ATTRS,
     acquire_writer_lock,
     close_tables,
+    discard_partial_open,
     release_writer_lock,
 )
 from kohakuterrarium.session.token_views import (
@@ -115,11 +117,16 @@ class SessionStore:
         # Subscribers observe events only after persistence and FTS indexing.
         self._event_subscribers: list[Callable[[str, dict], None]] = []
 
-        # Construction failures must not strand the cross-process writer lock.
+        # Construction failures must not strand tables or the writer lock.
         try:
             self._open_tables()
             self._restore_counters()
         except BaseException:
+            discard_partial_open(
+                [(name, getattr(self, name, None)) for name in TABLE_ATTRS],
+                getattr(self, "fts", None),
+                self._path,
+            )
             release_writer_lock(self._writer_lock)
             self._writer_lock = None
             raise
@@ -930,16 +937,7 @@ class SessionStore:
                     error=str(e),
                     exc_info=True,
                 )
-        tables = (
-            self.events,
-            self.meta,
-            self.state,
-            self.channels,
-            self.subagents,
-            self.jobs,
-            self.conversation,
-            self.turn_rollup,
-        )
+        tables = tuple(getattr(self, name) for name in TABLE_ATTRS)
         # Close helpers release the writer lock even if a companion closer fails.
         close_tables(tables, self.fts, self._writer_lock, self._companion_closers)
         self._writer_lock = None
