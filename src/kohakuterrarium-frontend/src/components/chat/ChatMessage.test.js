@@ -42,6 +42,24 @@ function mountMessage(store, pinia) {
   })
 }
 
+function mountAssistantParts(store, pinia, parts) {
+  const message = { id: "a1", role: "assistant", parts }
+  store.messagesByTab.main = [message]
+  store.activeTab = "main"
+  return mount(ChatMessage, {
+    props: { message, messageIdx: 0, tabId: "main" },
+    global: {
+      plugins: [pinia],
+      stubs: {
+        MarkdownRenderer: true,
+        ToolCallBlock: true,
+        ToolCallBatch: true,
+        UIEventBlock: true,
+      },
+    },
+  })
+}
+
 describe("ChatMessage branch operations", () => {
   let pinia
 
@@ -271,5 +289,35 @@ describe("ChatMessage branch operations", () => {
     await vi.waitFor(() => expect(wrapper.text()).toContain("branch collision"))
     expect(wrapper.get("textarea").element.value).toBe("keep this draft")
     expect(document.activeElement).toBe(wrapper.get("textarea").element)
+  })
+
+  it("resolves file:// media parts through the host media route via renderContentPart", () => {
+    const wrapper = mountAssistantParts(useChatStore(), pinia, [
+      { type: "image_url", id: "img1", image_url: { url: "file:///tmp/looked at.png" } },
+    ])
+
+    const img = wrapper.get("img")
+    expect(img.classes()).toContain("chat-inline-image")
+    expect(img.attributes("src")).toBe(
+      `/api/files/raw?path=${encodeURIComponent("/tmp/looked at.png")}`,
+    )
+  })
+
+  it("keeps session artifact image refs on the host inline-image layout", () => {
+    const wrapper = mountAssistantParts(useChatStore(), pinia, [
+      { type: "image_url", id: "img2", image_url: { url: "/api/sessions/s1/artifacts/pic.png" } },
+    ])
+
+    const img = wrapper.get("img")
+    expect(img.classes()).toContain("chat-inline-image")
+    expect(img.attributes("src")).toBe("/api/sessions/s1/artifacts/pic.png")
+  })
+
+  it("drops non-displayable media refs without rendering an img", () => {
+    const wrapper = mountAssistantParts(useChatStore(), pinia, [
+      { type: "image_url", id: "img3", image_url: { url: "javascript:alert(1)" } },
+    ])
+
+    expect(wrapper.find("img").exists()).toBe(false)
   })
 })

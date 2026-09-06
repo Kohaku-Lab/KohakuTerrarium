@@ -1,4 +1,4 @@
-.chat-messages-viewport {
+:deep(.chat-messages-viewport) {
   container-type: size;
 }
 
@@ -18,37 +18,87 @@
   width: 7rem;
 }
 
-.kt-input-pill-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  border-radius: 0.375rem;
-  transition:
-    background-color 0.15s ease,
-    color 0.15s ease;
-  flex-shrink: 0;
+:deep(.kt-chat-composer__attachments) {
+  margin-bottom: 0.5rem;
 }
 
-.kt-input-send-btn {
+:deep(.kt-chat-composer__chip) {
+  gap: 0.5rem;
+  padding: 0.25rem 0.625rem;
+  border-color: rgb(112 91 169 / 0.2);
+  background: rgb(112 91 169 / 0.08);
+  font-size: 0.75rem;
+}
+
+:deep(.kt-chat-composer__shell) {
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem 0.5rem 0.5rem;
+  border-color: rgb(168 162 158 / 0.35);
+  background: rgb(250 250 249);
+  transition: border-color 0.15s ease;
+}
+
+:deep(.kt-chat-composer__shell:focus-within) {
+  border-color: rgb(112 91 169 / 0.4);
+}
+
+:deep(.kt-chat-composer__shell textarea) {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 0.875rem;
+  line-height: 1.625;
+}
+
+:deep(.kt-chat-composer__shell > button),
+:deep(.kt-chat-composer__menu button) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 1.75rem;
+  min-height: 1.75rem;
+  border-radius: 0.375rem;
+  color: rgb(120 113 108);
+  transition: all 0.15s ease;
+}
+
+:deep(.kt-chat-composer__shell > button:hover) {
+  color: rgb(112 91 169);
+  background: rgb(112 91 169 / 0.1);
+}
+
+:deep(.kt-chat-composer__shell > .kt-chat-composer__primary) {
   width: 2rem;
   height: 2rem;
   border-radius: 0.5rem;
-  transition: all 0.15s ease;
-  flex-shrink: 0;
+  color: white;
+  background: rgb(112 91 169);
+}
+
+:deep(.kt-chat-composer__shell > .kt-chat-composer__primary:disabled) {
+  color: rgb(168 162 158);
+  background: transparent;
+}
+
+:deep(.kt-chat-composer__menu) {
+  border-color: rgb(168 162 158 / 0.35);
+  background: white;
+}
+
+:global(.dark) :deep(.kt-chat-composer__shell),
+:global(.dark) :deep(.kt-chat-composer__menu) {
+  border-color: rgb(87 83 78);
+  background: rgb(41 37 36);
 }
 
 @media (pointer: coarse) {
-  .kt-input-pill-btn {
-    width: 2.5rem;
-    height: 2.5rem;
+  :deep(.kt-chat-composer__shell > button) {
+    min-width: 2.5rem;
+    min-height: 2.5rem;
   }
 
-  .kt-input-send-btn {
+  :deep(.kt-chat-composer__shell > .kt-chat-composer__primary) {
     width: 2.75rem;
     height: 2.75rem;
   }

@@ -33,7 +33,7 @@ import { computed } from "vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
 import { safeMediaParts } from "@/utils/artifacts"
-import { summarizeBatch } from "@/utils/chatToolGrouping"
+import { summarizeBatch } from "@kohakuterrarium/chat-ui"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()

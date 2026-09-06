@@ -1,0 +1,96 @@
+.kt-chat-composer {
+  width: 100%;
+}
+
+.kt-chat-composer__attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.kt-chat-composer__chip,
+.kt-chat-composer__shell {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.kt-chat-composer__chip {
+  max-width: 12rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 0.5rem;
+}
+
+.kt-chat-composer__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.kt-chat-composer__shell {
+  align-items: end;
+  padding: 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 0.75rem;
+}
+
+.kt-chat-composer__shell textarea {
+  flex: 1;
+  min-width: 0;
+  min-height: 2em;
+  max-height: 128px;
+  resize: none;
+  overflow-y: auto;
+}
+
+.kt-chat-composer__shell button,
+.kt-chat-composer__chip button {
+  min-width: 2rem;
+  min-height: 2rem;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.kt-chat-composer__shell button:disabled,
+.kt-chat-composer__chip button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.kt-chat-composer__file-input {
+  display: none;
+}
+
+.kt-chat-composer.is-dragging .kt-chat-composer__shell {
+  outline: 2px solid currentColor;
+}
+
+.kt-chat-composer__shell {
+  position: relative;
+}
+
+.kt-chat-composer__menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+
+.kt-chat-composer__menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 0.5rem);
+  left: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.5rem;
+  border: 1px solid currentColor;
+  border-radius: 0.75rem;
+  background: inherit;
+  box-shadow: 0 10px 15px rgb(0 0 0 / 0.1);
+}

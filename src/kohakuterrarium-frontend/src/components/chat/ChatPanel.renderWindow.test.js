@@ -77,7 +77,7 @@ describe("ChatPanel long-session performance", () => {
     }
   }
 
-  it("preserves the message flex layout inside per-message anchors", async () => {
+  it("preserves keyed message siblings beside navigation anchors", async () => {
     const chat = useChatStore("graph_1")
     seedMessages(chat, 2)
     const wrapper = mountPanel(chat)
@@ -86,10 +86,11 @@ describe("ChatPanel long-session performance", () => {
     const anchors = wrapper.findAll("[data-message-id]")
     expect(anchors).toHaveLength(2)
     expect(
-      anchors.every(
-        (anchor) => anchor.classes().includes("flex") && anchor.classes().includes("flex-col"),
-      ),
+      anchors.every((anchor) => anchor.classes().includes("kt-transcript-message-anchor")),
     ).toBe(true)
+    expect(
+      anchors.map((anchor) => anchor.element.nextElementSibling?.getAttribute("data-message-key")),
+    ).toEqual(["m_0", "m_1"])
   })
 
   it("caps simple transcripts by top-level message count", async () => {
@@ -101,7 +102,7 @@ describe("ChatPanel long-session performance", () => {
     expect(renderedIds(wrapper).length).toBe(200)
     expect(renderedIds(wrapper)[0]).toBe("m_250")
     expect(renderedIds(wrapper).at(-1)).toBe("m_449")
-    const earlier = wrapper.find("button.self-center")
+    const earlier = wrapper.find("button.kt-transcript-earlier")
     expect(earlier.exists()).toBe(true)
     expect(earlier.text()).toContain("250")
   })
@@ -234,12 +235,12 @@ describe("ChatPanel long-session performance", () => {
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
 
     expect(renderedIds(wrapper).length).toBe(400)
     expect(renderedIds(wrapper)[0]).toBe("m_50")
-    expect(wrapper.find("button.self-center").text()).toContain("50")
+    expect(wrapper.find("button.kt-transcript-earlier").text()).toContain("50")
   })
 
   it("shrinkage below an expanded window start falls back to the tail window", async () => {
@@ -249,7 +250,7 @@ describe("ChatPanel long-session performance", () => {
     await flushPromises()
 
     // Expand once: explicit window start at index 50.
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
     expect(renderedIds(wrapper).length).toBe(400)
 
@@ -261,7 +262,7 @@ describe("ChatPanel long-session performance", () => {
     // single message (clamp to total - 1).
     expect(renderedIds(wrapper).length).toBe(30)
     expect(renderedIds(wrapper)[0]).toBe("m_0")
-    expect(wrapper.find("button.self-center").exists()).toBe(false)
+    expect(wrapper.find("button.kt-transcript-earlier").exists()).toBe(false)
 
     seedMessages(chat, 500)
     await flushPromises()
@@ -277,7 +278,7 @@ describe("ChatPanel long-session performance", () => {
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
     expect(renderedIds(wrapper)[0]).toBe("m_50")
 
@@ -294,7 +295,7 @@ describe("ChatPanel long-session performance", () => {
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
     expect(renderedIds(wrapper)[0]).toBe("m_50")
 
@@ -331,7 +332,7 @@ describe("ChatPanel long-session performance", () => {
     const wrapper = mountPanel(chat)
     await flushPromises()
 
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
     expect(renderedIds(wrapper).length).toBe(400)
 
@@ -422,7 +423,7 @@ describe("ChatPanel long-session performance", () => {
     await flushPromises()
     frames.clear()
 
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
     expect(renderedIds(wrapper)).toHaveLength(400)
 
@@ -464,7 +465,7 @@ describe("ChatPanel long-session performance", () => {
     const wrapper = mountPanel(chat, { groupId })
     await flushPromises()
 
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
     expect(renderedIds(wrapper)[0]).toBe("m_50")
 
@@ -488,7 +489,7 @@ describe("ChatPanel long-session performance", () => {
     const wrapper = mountPanel(chat, { groupId: firstGroupId })
     await flushPromises()
 
-    await wrapper.find("button.self-center").trigger("click")
+    await wrapper.find("button.kt-transcript-earlier").trigger("click")
     await flushPromises()
     expect(renderedIds(wrapper)[0]).toBe("m_50")
 

@@ -1,0 +1,399 @@
+.kt-conversation-host {
+  --kt-conversation-text: #4a4540;
+  --kt-conversation-muted: #8a8480;
+  --kt-conversation-surface: #f7f5f2;
+  --kt-conversation-surface-raised: #ffffff;
+  --kt-conversation-border: #e0dbd4;
+  --kt-conversation-accent: #5a4fcf;
+  --kt-conversation-tool: #0f52ba;
+  --kt-conversation-warning: #d4920a;
+  --kt-conversation-error: #d46b6b;
+  --kt-conversation-success: #4c9989;
+  --kt-conversation-code: #2a2724;
+}
+
+.dark .kt-conversation-host {
+  --kt-conversation-text: #e0dbd4;
+  --kt-conversation-muted: #a09a92;
+  --kt-conversation-surface: #3a3632;
+  --kt-conversation-surface-raised: #2a2724;
+  --kt-conversation-border: #6a645f;
+  --kt-conversation-accent: #ddd0f0;
+  --kt-conversation-tool: #d6e3f8;
+  --kt-conversation-warning: #f5e6c8;
+  --kt-conversation-error: #f5d5d5;
+  --kt-conversation-success: #d4ede8;
+  --kt-conversation-code: #1a1816;
+}
+
+.kt-conversation-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.kt-conversation-message {
+  box-sizing: border-box;
+  color: var(--kt-conversation-text);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 6rem;
+}
+
+.kt-conversation-message--user {
+  align-self: flex-end;
+  width: min(80%, 46rem);
+}
+
+.kt-conversation-message--assistant {
+  width: min(92%, 52rem);
+}
+
+.kt-conversation-user-bubble {
+  padding: 0.55rem 0.875rem 0.75rem;
+  border-radius: 0.75rem;
+  background: var(--kt-conversation-surface);
+}
+
+.kt-conversation-author {
+  color: var(--kt-conversation-muted);
+  font-size: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.kt-conversation-text {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.kt-conversation-parts {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.kt-conversation-part {
+  min-width: 0;
+}
+
+.kt-conversation-reasoning {
+  padding: 0.4rem 0.6rem;
+  border: 1px solid color-mix(in srgb, var(--kt-conversation-accent) 25%, transparent);
+  border-radius: 0.5rem;
+  background: color-mix(in srgb, var(--kt-conversation-accent) 6%, transparent);
+}
+
+.kt-conversation-reasoning summary {
+  color: var(--kt-conversation-accent);
+  cursor: pointer;
+  font-size: 0.75rem;
+}
+
+.kt-conversation-reasoning pre,
+.kt-conversation-tool__result,
+.kt-conversation-banner pre {
+  margin: 0.5rem 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Reasoning disclosure layout, restored from the Dashboard
+   ChatMessage.vue scoped styles when rendering moved into this shared
+   module. The preview truncates inside the summary row and hides while
+   the full text is mounted; the full text stays capped and scrollable
+   like the upstream ``max-h-60`` disclosure. */
+.reasoning-summary-row {
+  max-width: calc(100% - 1rem);
+}
+
+.reasoning-details[open] .reasoning-preview {
+  display: none;
+}
+
+.reasoning-full {
+  max-height: 15rem;
+  overflow-y: auto;
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  font-size: 0.75rem;
+}
+
+.kt-conversation-tool,
+.kt-conversation-tool-batch {
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--kt-conversation-tool) 24%, transparent);
+  border-radius: 0.5rem;
+}
+
+.kt-conversation-tool__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.4rem 0.65rem;
+  color: var(--kt-conversation-text);
+  background: color-mix(in srgb, var(--kt-conversation-tool) 8%, transparent);
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+}
+
+.kt-conversation-tool__status {
+  width: 0.45rem;
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--kt-conversation-muted);
+}
+
+.kt-conversation-tool__status.is-running {
+  background: var(--kt-conversation-warning);
+}
+
+.kt-conversation-tool__status.is-done,
+.kt-conversation-tool__status.is-completed {
+  background: var(--kt-conversation-success);
+}
+
+.kt-conversation-tool__status.is-error {
+  background: var(--kt-conversation-error);
+}
+
+.kt-conversation-tool__summary {
+  flex: 1;
+  color: var(--kt-conversation-muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.kt-conversation-tool-batch__items {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.45rem;
+  border-top: 1px solid color-mix(in srgb, var(--kt-conversation-tool) 18%, transparent);
+}
+
+.kt-conversation-tool__result {
+  max-height: 16rem;
+  padding: 0.6rem 0.75rem;
+  color: var(--kt-conversation-text);
+  background: color-mix(in srgb, var(--kt-conversation-tool) 4%, transparent);
+  border-top: 1px solid color-mix(in srgb, var(--kt-conversation-tool) 18%, transparent);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.kt-conversation-event,
+.kt-conversation-banner {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--kt-conversation-border);
+  border-radius: 0.625rem;
+  background: var(--kt-conversation-surface-raised);
+}
+
+.kt-conversation-event.is-resolved {
+  opacity: 0.65;
+}
+
+.kt-conversation-event__header {
+  color: var(--kt-conversation-accent);
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.kt-conversation-event__prompt,
+.kt-conversation-event__body {
+  margin: 0.5rem 0;
+}
+
+.kt-conversation-event__detail {
+  margin: 0.5rem 0;
+  white-space: pre-wrap;
+}
+
+.kt-conversation-event__fields {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.2rem 0.65rem;
+  margin: 0.5rem 0;
+}
+
+.kt-conversation-event__fields dt {
+  color: var(--kt-conversation-muted);
+  font-weight: 600;
+}
+
+.kt-conversation-event__fields dd {
+  margin: 0;
+}
+
+.kt-conversation-event__footer {
+  color: var(--kt-conversation-muted);
+  font-size: 0.75rem;
+  font-style: italic;
+}
+
+.kt-conversation-event__choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.kt-conversation-event__choice {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.kt-conversation-event__form,
+.kt-conversation-event__actions {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+  margin-top: 0.5rem;
+}
+
+.kt-conversation-event input,
+.kt-conversation-event textarea,
+.kt-conversation-event select {
+  flex: 1;
+  min-width: 0;
+}
+
+.kt-conversation-event progress {
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.kt-conversation-banner.is-error {
+  color: var(--kt-conversation-error);
+  border-color: color-mix(in srgb, var(--kt-conversation-error) 35%, transparent);
+  background: color-mix(in srgb, var(--kt-conversation-error) 8%, transparent);
+}
+
+.kt-conversation-banner.is-compact {
+  padding: 0;
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--kt-conversation-accent) 25%, transparent);
+  background: color-mix(in srgb, var(--kt-conversation-accent) 6%, transparent);
+}
+
+.kt-conversation-compact__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.75rem;
+  color: var(--kt-conversation-text);
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.kt-conversation-compact__header:disabled {
+  cursor: default;
+}
+
+.kt-conversation-compact__status {
+  flex: 0 0 auto;
+  width: 0.375rem;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--kt-conversation-warning);
+  animation: kt-conversation-pulse 1.5s ease-in-out infinite;
+}
+
+.kt-conversation-compact__label {
+  color: var(--kt-conversation-accent);
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+
+.kt-conversation-compact__metadata {
+  color: var(--kt-conversation-muted);
+  font-size: 0.625rem;
+}
+
+.kt-conversation-compact__spacer {
+  flex: 1;
+}
+
+.kt-conversation-compact__chevron {
+  width: 0.625rem;
+  height: 0.625rem;
+  flex: 0 0 auto;
+  background: var(--kt-conversation-muted);
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M16 22 6 12l1.4-1.4 8.6 8.6 8.6-8.6L26 12z'/%3E%3C/svg%3E")
+    center / contain no-repeat;
+  transition: transform 150ms ease;
+}
+
+.kt-conversation-compact__chevron.is-expanded {
+  transform: rotate(180deg);
+}
+
+.kt-conversation-compact__summary {
+  max-height: 12rem;
+  padding: 0.5rem 0.75rem;
+  overflow-y: auto;
+  border-top: 1px solid color-mix(in srgb, var(--kt-conversation-accent) 15%, transparent);
+  font-size: 0.75rem;
+}
+
+@keyframes kt-conversation-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.kt-conversation-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  color: var(--kt-conversation-muted);
+  font-size: 0.75rem;
+}
+
+.kt-conversation-divider::before,
+.kt-conversation-divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px dashed var(--kt-conversation-border);
+}
+
+.kt-conversation-file,
+.kt-conversation-channel {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--kt-conversation-border);
+  border-radius: 0.5rem;
+  background: var(--kt-conversation-surface-raised);
+}
+
+.kt-conversation-file {
+  color: var(--kt-conversation-muted);
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+
+.kt-conversation-system {
+  color: var(--kt-conversation-muted);
+  text-align: center;
+  font-size: 0.75rem;
+}
+
+.kt-conversation-image {
+  display: block;
+  max-width: min(65%, 42rem);
+  max-height: 35vh;
+  border: 1px solid var(--kt-conversation-border);
+  border-radius: 0.5rem;
+  object-fit: contain;
+}

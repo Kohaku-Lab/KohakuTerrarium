@@ -1,33 +1,13 @@
 <template>
   <!-- System message -->
-  <div v-if="message.role === 'system'" class="text-center text-xs text-warm-400 dark:text-warm-500 py-1">
-    {{ message.content }}
-  </div>
+  <ConversationMessage v-if="message.role === 'system'" :message="message" :render-text="renderSharedText" />
 
   <CommandResultMessage v-else-if="message.role === 'command_result'" :message="message" />
 
   <!-- Context cleared banner -->
-  <div v-else-if="message.role === 'clear'" class="flex items-center gap-3 py-2">
-    <div class="flex-1 border-t border-warm-300 dark:border-warm-600 border-dashed" />
-    <span class="text-xs text-warm-400 dark:text-warm-500 shrink-0"> Context Cleared{{ message.messagesCleared ? ` — ${message.messagesCleared} messages` : "" }} </span>
-    <div class="flex-1 border-t border-warm-300 dark:border-warm-600 border-dashed" />
-  </div>
+  <ConversationMessage v-else-if="message.role === 'clear'" :message="message" />
 
-  <!-- Context compacted (accordion) -->
-  <div v-else-if="message.role === 'compact'" class="rounded-lg overflow-hidden" :class="message.status === 'running' ? 'bg-amber/6 dark:bg-amber/8 border border-amber/15 dark:border-amber/20' : 'bg-iolite/6 dark:bg-iolite/8 border border-iolite/15 dark:border-iolite/20'">
-    <div role="button" tabindex="0" :aria-expanded="!!expandedTools['compact_' + message.id]" class="flex items-center gap-2 py-1.5 px-3 cursor-pointer select-none" @click="toggleTool('compact_' + message.id)" @keydown.enter="toggleTool('compact_' + message.id)" @keydown.space.prevent="toggleTool('compact_' + message.id)">
-      <span v-if="message.status === 'running'" class="w-1.5 h-1.5 rounded-full bg-amber kohaku-pulse shrink-0" />
-      <span class="text-xs font-medium" :class="message.status === 'running' ? 'text-amber dark:text-amber-light' : 'text-iolite dark:text-iolite-light'">
-        {{ message.status === "running" ? "Compacting context..." : message.status === "skipped" ? `Compaction skipped${message.reason ? ` (${message.reason})` : ""}` : `Context Compacted (round ${message.round || "?"})` }}
-      </span>
-      <span v-if="message.messagesCompacted" class="text-[10px] text-warm-400"> {{ message.messagesCompacted }} messages summarized </span>
-      <span class="flex-1" />
-      <span v-if="message.summary" class="i-carbon-chevron-down text-warm-400 text-[10px] transition-transform" :class="{ 'rotate-180': expandedTools['compact_' + message.id] }" />
-    </div>
-    <div v-if="expandedTools['compact_' + message.id] && message.summary" class="px-3 py-2 border-t border-iolite/10 dark:border-iolite/15 text-xs max-h-48 overflow-y-auto">
-      <MarkdownRenderer :content="message.summary" />
-    </div>
-  </div>
+  <ConversationMessage v-else-if="message.role === 'compact'" :message="message" :render-text="renderSharedText" />
 
   <!-- Background result delivered -->
   <div v-else-if="message.role === 'bg_result'" class="flex items-center gap-2 py-0.5">
@@ -37,7 +17,7 @@
   </div>
 
   <!-- Processing error -->
-  <div v-else-if="message.role === 'error'" class="rounded-lg bg-coral/8 dark:bg-coral/12 border border-coral/25 dark:border-coral/30 overflow-hidden chat-cv">
+  <div v-else-if="message.role === 'error'" class="kt-conversation-banner is-error overflow-hidden chat-cv">
     <div role="button" tabindex="0" :aria-expanded="errorExpanded" class="flex items-center gap-2 py-2 px-3 cursor-pointer select-none hover:bg-coral/12 dark:hover:bg-coral/18" @click="errorExpanded = !errorExpanded" @keydown.enter="errorExpanded = !errorExpanded" @keydown.space.prevent="errorExpanded = !errorExpanded">
       <span class="text-coral font-bold text-sm">&#x2717;</span>
       <span class="text-coral dark:text-coral-light font-semibold text-xs flex-1">
@@ -72,7 +52,7 @@
       <span v-if="message.preview" class="i-carbon-chevron-down text-iolite/50 text-[10px] transition-transform" :class="{ 'rotate-180': expandedTools['wire_' + message.id] }" />
     </div>
     <div v-if="expandedTools['wire_' + message.id] && message.preview" class="px-3 py-2 border-t border-iolite/10 dark:border-iolite/15 text-xs max-h-32 overflow-y-auto">
-      <MarkdownRenderer :content="message.preview" />
+      <MarkdownRenderer :content="message.preview" :origin="markdownOrigin" />
     </div>
   </div>
 
@@ -85,13 +65,13 @@
       <span v-if="message.triggerContent" class="i-carbon-chevron-down text-amber/50 text-[10px] transition-transform" :class="{ 'rotate-180': expandedTools['trig_' + message.id] }" />
     </div>
     <div v-if="expandedTools['trig_' + message.id] && message.triggerContent" class="px-3 py-2 border-t border-amber/10 dark:border-amber/15 text-xs max-h-32 overflow-y-auto">
-      <MarkdownRenderer :content="message.triggerContent" />
+      <MarkdownRenderer :content="message.triggerContent" :origin="markdownOrigin" />
     </div>
   </div>
 
   <!-- User message -->
   <div v-else-if="message.role === 'user'" class="ml-auto group relative" :class="editing ? 'w-[min(760px,92%)] max-w-[92%]' : 'max-w-[80%]'">
-    <div class="user-message chat-cv" :class="{ 'opacity-70': message.queued, 'user-message-editing': editing }">
+    <div class="kt-conversation-user-bubble chat-cv" :class="{ 'opacity-70': message.queued, 'user-message-editing': editing }">
       <div class="text-xs text-warm-400 mb-1 flex items-center gap-1.5">
         <span>You</span>
         <span v-if="message.queued" class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber/15 text-amber leading-none">Queued</span>
@@ -128,24 +108,7 @@
           </button>
         </div>
       </div>
-      <div v-else class="text-body break-words overflow-wrap-anywhere min-w-0">
-        <template v-if="message.contentParts?.length">
-          <div class="flex flex-col gap-2">
-            <template v-for="(part, i) in message.contentParts" :key="i">
-              <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" />
-              <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
-              <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
-              <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
-                <span class="i-carbon-document mr-1 text-aquamarine" />
-                {{ part.file?.name || part.file?.path || "file" }}
-              </div>
-            </template>
-          </div>
-        </template>
-        <template v-else>
-          <div class="whitespace-pre-wrap">{{ message.content }}</div>
-        </template>
-      </div>
+      <ConversationMessage v-else :message="message" :render-text="renderSharedText" :render-content-part="renderSharedContentPart" bare />
       <p v-if="editError || branchOperationError" class="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{{ editError || branchOperationError }}</p>
     </div>
     <!-- Hover actions for user messages -->
@@ -179,39 +142,7 @@
        in-progress batch doesn't reshuffle ``expandedTools`` state. -->
   <div v-else-if="message.role === 'assistant' && message.parts" class="max-w-[90%] group relative">
     <div class="chat-cv">
-      <template v-for="(group, gi) in renderGroups" :key="groupKey(group, gi)">
-        <!-- Pass-through part -->
-        <template v-if="group.type === 'part'">
-          <div v-if="group.part.type === 'reasoning'" class="mb-1.5">
-            <details class="reasoning-details rounded-lg border border-iolite/20 dark:border-iolite/25 bg-iolite/5 dark:bg-iolite/10 px-2 py-1" @toggle="setReasoningExpanded(groupKey(group, gi), $event.currentTarget.open)">
-              <summary class="text-xs text-iolite dark:text-iolite-light cursor-pointer select-none">
-                <span class="reasoning-summary-row inline-flex items-center gap-2 min-w-0 align-middle">
-                  <span class="shrink-0"
-                    >Thinking<span v-if="group.part.source" class="ml-1 text-warm-400">· {{ group.part.source }}</span></span
-                  >
-                  <span class="reasoning-preview truncate flex-1 min-w-0 text-warm-600 dark:text-warm-400 font-mono">{{ reasoningPreview(group.part) }}</span>
-                </span>
-              </summary>
-              <pre v-if="expandedReasoning.has(groupKey(group, gi))" class="reasoning-full mt-2 text-xs whitespace-pre-wrap break-words font-mono text-warm-700 dark:text-warm-300 max-h-60 overflow-y-auto">{{ reasoningText(group.part) }}</pre>
-            </details>
-          </div>
-          <div v-if="group.part.type === 'text' && group.part.content" class="text-body mb-1">
-            <MarkdownRenderer :content="group.part.content" />
-          </div>
-          <div v-else-if="group.part.type === 'tool'" class="mb-1.5">
-            <ToolCallBlock :tc="group.part" :expanded="expandedTools[group.part.id]" @toggle="toggleTool(group.part.id)" />
-          </div>
-          <div v-else-if="group.part.type === 'image_url'" class="mb-1.5">
-            <img :src="group.part.image_url?.url" class="chat-inline-image" :alt="group.part.meta?.source_name || 'generated image'" />
-          </div>
-        </template>
-        <!-- Tool-batch group (collapsed by default; per-tool expand state
-           lives in the same ``expandedTools`` map keyed by tool id, so
-           opening the batch doesn't open the tools and vice-versa). -->
-        <div v-else-if="group.type === 'tool-batch'" class="mb-1.5">
-          <ToolCallBatch :tools="group.tools" :expanded="!!expandedTools[group.id]" :tool-expanded="expandedTools" @toggle="toggleTool(group.id)" @tool-toggle="toggleTool" />
-        </div>
-      </template>
+      <ConversationMessage :message="message" :render-text="renderSharedText" :render-content-part="renderSharedAssistantPart" bare />
     </div>
     <!-- Hover actions -->
     <div class="absolute -bottom-5 left-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--left">
@@ -242,14 +173,7 @@
   </div>
 
   <!-- Assistant message (legacy: content + tool_calls) -->
-  <div v-else-if="message.role === 'assistant'" class="max-w-[90%] chat-cv">
-    <div v-if="message.tool_calls?.length" class="mb-2 flex flex-col gap-1.5">
-      <ToolCallBlock v-for="tc in message.tool_calls" :key="tc.id" :tc="tc" :expanded="expandedTools[tc.id]" @toggle="toggleTool(tc.id)" />
-    </div>
-    <div v-if="message.content" class="text-body">
-      <MarkdownRenderer :content="message.content" />
-    </div>
-  </div>
+  <ConversationMessage v-else-if="message.role === 'assistant'" :message="message" :render-text="renderSharedText" :render-content-part="renderSharedAssistantPart" />
 
   <!-- Channel message (group chat style) -->
   <div v-else-if="message.role === 'channel'" class="max-w-[90%] chat-cv">
@@ -265,7 +189,7 @@
       <template v-if="message.contentParts?.length">
         <div class="flex flex-col gap-2">
           <template v-for="(part, i) in message.contentParts" :key="i">
-            <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" />
+            <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" :origin="markdownOrigin" />
             <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
             <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
             <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
@@ -275,29 +199,31 @@
           </template>
         </div>
       </template>
-      <MarkdownRenderer v-else :content="message.content" :breaks="true" />
+      <MarkdownRenderer v-else :content="message.content" :breaks="true" :origin="markdownOrigin" />
     </div>
   </div>
 
   <!-- Phase B output-event kinds (ask_text, confirm, selection, progress, notification, card) -->
-  <UIEventBlock v-else-if="message.role === 'ui_event'" :message="message" @reply="onUIEventReply" />
+  <ConversationMessage v-else-if="message.role === 'ui_event'" :message="message" :render-ui-event="renderSharedUIEvent" @reply="onUIEventReply" />
 </template>
 
 <script setup>
 import { ElMessage } from "element-plus"
+import { h, inject } from "vue"
 
-import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
+import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
 import CommandResultMessage from "@/components/chat/CommandResultMessage.vue"
 import ToolCallBatch from "@/components/chat/ToolCallBatch.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
 import UIEventBlock from "@/components/chat/UIEventBlock.vue"
+import { ConversationMessage } from "@kohakuterrarium/chat-ui"
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
+import { mediaSourceUrl } from "@/utils/artifacts"
 import { GEM } from "@/utils/colors"
 import { buildMessageParts, contentToEditableDraft, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
-import { computeRenderGroups } from "@/utils/chatToolGrouping"
 import { useI18n } from "@/utils/i18n"
 
 const { t } = useI18n()
@@ -340,22 +266,7 @@ const props = defineProps({
 })
 
 const expandedTools = reactive({})
-const expandedReasoning = reactive(new Set())
 const editing = ref(false)
-
-// Group consecutive non-subagent tool parts into a single batch so a
-// turn that fired 10+ tools doesn't flood the chat with stacked cards.
-// Sub-agent parts and any text / image break the run; runs below the
-// threshold (default 3) render flat.  See utils/chatToolGrouping.js.
-const renderGroups = computed(() => computeRenderGroups(props.message.parts || []))
-
-// Batch groups carry a stable id (first tool's id); pass-through groups
-// key on the part's own id when it has one so appending tools mid-stream
-// doesn't reshuffle subsequent group keys.
-function groupKey(group, gi) {
-  if (group.type === "tool-batch") return group.id
-  return group.part?.id ?? `g_${gi}`
-}
 
 const editText = ref("")
 const editAttachments = ref([])
@@ -377,25 +288,58 @@ function toggleTool(id) {
   expandedTools[id] = !expandedTools[id]
 }
 
-const REASONING_PREVIEW_CHARS = 240
-
-function reasoningPreview(part) {
-  const text = part?.text || ""
-  if (text.length <= REASONING_PREVIEW_CHARS) return text
-  const preview = text.slice(0, REASONING_PREVIEW_CHARS)
-  const lastCodeUnit = preview.charCodeAt(preview.length - 1)
-  return `${lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff ? preview.slice(0, -1) : preview}…`
+const markdownOrigin = window.location.origin
+function renderSharedText(content, breaks = false) {
+  return h(MarkdownRenderer, { content, breaks, origin: markdownOrigin })
 }
 
-function setReasoningExpanded(key, open) {
-  if (open) expandedReasoning.add(key)
-  else expandedReasoning.delete(key)
+function renderSharedTool(tool) {
+  return h(ToolCallBlock, {
+    tc: tool,
+    expanded: !!expandedTools[tool.id],
+    onToggle: () => toggleTool(tool.id),
+  })
 }
 
-function reasoningText(part) {
-  const text = part?.text || ""
-  if (!part?.signature) return text
-  return text ? `${text}\n[signature: ${part.signature}]` : `[signature: ${part.signature}]`
+function renderSharedAssistantPart(part) {
+  if (part.type === "tool") return renderSharedTool(part)
+  if (part.type === "tool-batch") {
+    return h(ToolCallBatch, {
+      tools: part.tools,
+      expanded: !!expandedTools[part.id],
+      toolExpanded: expandedTools,
+      onToggle: () => toggleTool(part.id),
+      onToolToggle: toggleTool,
+    })
+  }
+  return renderSharedContentPart(part)
+}
+
+function renderSharedUIEvent(message, reply) {
+  return h(UIEventBlock, { message, onReply: reply })
+}
+
+function renderSharedContentPart(part) {
+  // Host-owned media resolution (session artifact route or a local
+  // ``file://`` reference) happens here so the shared renderer stays
+  // host-neutral: no backend routes or URL helpers inside ``public``.
+  if (part.type === "image_url") {
+    const url = mediaSourceUrl(part.image_url?.url)
+    return url
+      ? h("img", {
+          class: "chat-inline-image",
+          src: url,
+          alt: part.meta?.source_name || "generated image",
+        })
+      : null
+  }
+  if (part.type === "file" && part.file?.mime?.startsWith("video/")) {
+    return h(VideoFilePreview, { file: part.file })
+  }
+  if (part.type === "file") {
+    return h("div", { class: "px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300" }, [h("span", { class: "i-carbon-document mr-1 text-aquamarine" }), part.file?.name || part.file?.path || "file"])
+  }
+  return null
 }
 
 // Phase B UI event reply: forward to chat store, which sends
@@ -425,7 +369,7 @@ const senderHomeNode = computed(() => {
 
 // ── Message actions (copy / edit / regenerate) ──
 
-const chat = useChatStore()
+const chat = inject("chatStore", null) || useChatStore()
 const messageTab = computed(() => props.tabId || chat.activeTab)
 const branchOperation = computed(() => chat.branchOperationByTab[messageTab.value] || null)
 const branchOperationBusy = computed(() => branchOperation.value != null)
@@ -592,14 +536,6 @@ function goToNextAssistantBranch() {
 </script>
 
 <style scoped>
-.reasoning-summary-row {
-  max-width: calc(100% - 1rem);
-}
-
-.reasoning-details[open] .reasoning-preview {
-  display: none;
-}
-
 .chat-inline-image {
   display: block;
   max-width: min(65%, 42vw);

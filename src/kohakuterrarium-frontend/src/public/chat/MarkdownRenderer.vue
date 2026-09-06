@@ -9,11 +9,12 @@ import MarkdownIt from "markdown-it"
 import markdownItKatex from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
 
-import { applyExternalLinkRule } from "@/utils/externalLinks"
-import { IncrementalMarkdownRenderer } from "@/utils/markdownIncremental"
+import { applyExternalLinkRule } from "./externalLinks.js"
+import { IncrementalMarkdownRenderer } from "./markdownIncremental.js"
 
 const props = defineProps({
   content: { type: String, default: "" },
+  origin: { type: String, default: null },
   // ``breaks: true`` matches the chat-app convention: a single newline
   // becomes a ``<br>`` instead of CommonMark's soft-break-as-space, so
   // user-typed messages preserve their line breaks. Off by default to
@@ -135,7 +136,7 @@ if (typeof katexPlugin === "function") {
 }
 
 // Model-authored links must not navigate the shell away from the app.
-applyExternalLinkRule(md)
+applyExternalLinkRule(md, props.origin)
 
 function onClick(e) {
   const btn = e.target.closest(".code-copy-btn")
