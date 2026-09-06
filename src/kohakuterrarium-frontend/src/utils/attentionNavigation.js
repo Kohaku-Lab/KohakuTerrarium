@@ -34,11 +34,18 @@ export function attentionTargetLabel({ scope, tab }) {
   const instances = useInstancesStore()
   const inst = instances.list.find((it) => _matchesInstance(it, scope)) || null
   const sessionName = (inst && (inst.session_name || inst.config_name)) || scope || ""
+  const creatures = inst?.creatures || []
+  // ``_tabForSource`` rewrites the privileged creature's real WS source
+  // name to the tab key "root"; resolve that alias through is_root so the
+  // label shows the creature's actual name.
+  const isRootAlias = tab === "root" && creatures.some((c) => c.is_root && c.name)
+  const creature = creatures.find((c) =>
+    isRootAlias ? c.is_root : c.name === tab || c.creature_id === tab,
+  )
   // The periodic listActive() poll replaces list entries with listing
   // shapes whose ``creatures`` normalizes to [] — a known creature can be
   // missing from the record at any moment. The edge's ``tab`` IS the
   // creature's WS source name, so it is a safe label fallback.
-  const creature = (inst?.creatures || []).find((c) => c.name === tab || c.creature_id === tab)
   const creatureName = creature?.name || tab || ""
   return creatureName ? `${sessionName} · ${creatureName}` : sessionName
 }
