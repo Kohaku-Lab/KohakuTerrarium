@@ -108,6 +108,67 @@ class TestVideoGenTool:
         assert args["input_image"] == str(image_path)
 
     @pytest.mark.asyncio
+    async def test_file_reference_input_image_is_inlined(self, tmp_path):
+        image_path = tmp_path / "reference.png"
+        image_path.write_bytes(_png_bytes())
+        client = _Client()
+        context = ToolContext(
+            agent_name="a",
+            session=None,
+            working_dir=tmp_path,
+            agent=SimpleNamespace(session_store=None),
+        )
+        encoded = base64.b64encode(_png_bytes()).decode("ascii")
+
+        # The model may hand back the file:// reference it saw in context.
+        args = {"prompt": "dance", "input_image": image_path.resolve().as_uri()}
+        result = await VideoGenTool(client=client).execute(args, context=context)
+        assert result.success
+        assert client.calls[0]["input_image"] == f"data:image/png;base64,{encoded}"
+
+        missing = (tmp_path / "gone.png").resolve().as_uri()
+        result = await VideoGenTool(client=_Client()).execute(
+            {"prompt": "dance", "input_image": missing}, context=context
+        )
+        assert not result.success
+        assert "input_image" in (result.error or "")
+
+    @pytest.mark.asyncio
+    async def test_latest_uses_file_reference_image_from_conversation(self, tmp_path):
+        image_path = tmp_path / "seen.png"
+        image_path.write_bytes(_png_bytes())
+        encoded = base64.b64encode(_png_bytes()).decode("ascii")
+        conversation_history = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "animate this"},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": image_path.resolve().as_uri()},
+                    },
+                ],
+            }
+        ]
+        client = _Client()
+        context = ToolContext(
+            agent_name="a",
+            session=None,
+            working_dir=tmp_path,
+            agent=SimpleNamespace(
+                session_store=None,
+                conversation_history=conversation_history,
+            ),
+        )
+
+        result = await VideoGenTool(client=client).execute(
+            {"prompt": "dance", "input_image": "latest"}, context=context
+        )
+
+        assert result.success
+        assert client.calls[0]["input_image"] == f"data:image/png;base64,{encoded}"
+
+    @pytest.mark.asyncio
     async def test_latest_uses_inline_user_attachment_without_model_output(
         self, tmp_path
     ):

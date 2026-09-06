@@ -158,18 +158,15 @@ async def _resolve_input_image(reference: str, context: ToolContext) -> str:
             raise ValueError("No attached image is available for input_image='latest'")
         return attached
 
-    if reference.startswith("data:"):
-        return _validated_data_image(reference)
+    inlined = _inline_local_reference(reference)
+    if inlined is not None:
+        return inlined
+    if _is_local_reference(reference):
+        raise ValueError("Could not resolve the local media reference for input_image")
 
     parsed = urlparse(reference)
     if parsed.scheme in {"http", "https"} and parsed.hostname:
         return reference
-
-    if reference.startswith("/api/sessions/"):
-        resolved = resolve_artifact_url(reference)
-        if resolved == reference:
-            raise ValueError("Could not resolve the KT artifact URL for input_image")
-        return _validated_data_image(resolved)
 
     path = context.resolve_path(reference)
     if _is_temporary_path(path) and not path.is_file():
@@ -184,9 +181,31 @@ async def _resolve_input_image(reference: str, context: ToolContext) -> str:
         image = next(
             (part for part in result.output if isinstance(part, ImagePart)), None
         )
-        if image is not None:
-            return image.url
+        inlined = _inline_local_reference(image.url) if image is not None else None
+        if inlined is not None:
+            return inlined
     raise ValueError("input_image is not a supported image")
+
+
+def _is_local_reference(url: str) -> bool:
+    """Return whether ``url`` names media KT itself can read from disk."""
+    return url.startswith("/api/sessions/") or url.startswith("file://")
+
+
+def _inline_local_reference(url: str) -> str | None:
+    """Return the validated data URL behind a stored media reference, or ``None``.
+
+    Accepts an inline ``data:`` URL as-is, and reads session artifacts and
+    ``file://`` references the way the provider boundary does.
+    """
+    if url.startswith("data:"):
+        return _validated_data_image(url)
+    if not _is_local_reference(url):
+        return None
+    resolved = resolve_artifact_url(url)
+    if resolved == url:
+        return None
+    return _validated_data_image(resolved)
 
 
 def _latest_attached_image(context: ToolContext) -> str | None:
@@ -205,12 +224,9 @@ def _latest_attached_image(context: ToolContext) -> str | None:
                 image = part.get("image_url")
                 url = image.get("url") if isinstance(image, dict) else None
                 if isinstance(url, str) and url:
-                    if url.startswith("data:"):
-                        return _validated_data_image(url)
-                    if url.startswith("/api/sessions/"):
-                        resolved = resolve_artifact_url(url)
-                        if resolved != url:
-                            return _validated_data_image(resolved)
+                    inlined = _inline_local_reference(url)
+                    if inlined is not None:
+                        return inlined
                     parsed = urlparse(url)
                     if parsed.scheme in {"http", "https"} and parsed.hostname:
                         return url
