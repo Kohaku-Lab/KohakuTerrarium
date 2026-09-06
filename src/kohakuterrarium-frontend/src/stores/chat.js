@@ -81,6 +81,46 @@ function extractTextContent(content) {
     .join("\n")
 }
 
+const ATTENTION_INTERACTIVE_TYPES = ["ask_text", "confirm", "selection", "card"]
+const ATTENTION_SUMMARY_MAX = 200
+
+function _truncateAttentionSummary(text) {
+  const flat = String(text || "")
+    .replace(/\s+/g, " ")
+    .trim()
+  if (!flat) return ""
+  return flat.length > ATTENTION_SUMMARY_MAX ? `${flat.slice(0, ATTENTION_SUMMARY_MAX - 1)}…` : flat
+}
+
+/**
+ * Extract a bounded notification summary from a live WS frame.
+ *
+ * Called from ``_onMessage`` BEFORE the frame's own handler stores anything,
+ * so interactive prompts must be read from the frame payload and completion
+ * summaries from the messages the preceding text chunks already built.
+ */
+function _attentionEdgeSummary(data, messages) {
+  if (ATTENTION_INTERACTIVE_TYPES.includes(data.type)) {
+    const payload = data.payload || {}
+    return _truncateAttentionSummary(
+      payload.prompt || payload.body || payload.text || payload.title,
+    )
+  }
+  if (data.type !== "processing_end") return ""
+  const list = Array.isArray(messages) ? messages : []
+  for (let i = list.length - 1; i >= 0; i--) {
+    const message = list[i]
+    if (message?.role === "user") break
+    if (message?.role !== "assistant") continue
+    const text = extractTextContent(
+      (Array.isArray(message.parts) ? message.parts : []).filter((part) => part?.type === "text"),
+    )
+    const summary = _truncateAttentionSummary(text)
+    if (summary) return summary
+  }
+  return ""
+}
+
 function normalizeMessageContent(content) {
   const contentParts = normalizeContentParts(content)
   return {
@@ -2818,7 +2858,7 @@ const _chatStoreOptions = {
         const { state } = reduceAttentionEdge(
           this.attentionByTab[source] || createAttentionState(),
           data,
-          { scope, tab: source },
+          { scope, tab: source, summary: _attentionEdgeSummary(data, this.messagesByTab[source]) },
         )
         this.attentionByTab[source] = state
         publishAttention(scope, source, state)

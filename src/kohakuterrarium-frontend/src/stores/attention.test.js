@@ -73,6 +73,53 @@ describe("chat attention", () => {
     expect(state.completed).toBe(1)
   })
 
+  it("does not count a turn that ended to wait for background jobs", () => {
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    let state = createAttentionState()
+
+    state = reduceAttention(state, { type: "processing_start" })
+    state = reduceAttention(state, { type: "processing_end", awaiting_background: true })
+    state = reduceAttention(state, { type: "idle" })
+    unsubscribe()
+
+    expect(state.completed).toBe(0)
+    expect(state.processing).toBe(false)
+    expect(edges).toEqual([])
+  })
+
+  it("counts the genuine completion after the background wait ends", () => {
+    let state = createAttentionState()
+    state = reduceAttention(state, { type: "processing_start" })
+    state = reduceAttention(state, { type: "processing_end", awaiting_background: true })
+    state = reduceAttention(state, { type: "processing_start" })
+    state = reduceAttention(state, { type: "processing_end" })
+    expect(state.completed).toBe(1)
+  })
+
+  it("forwards the edge summary to reminder effects", () => {
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    let state = createAttentionState()
+
+    ;({ state } = reduceAttentionEdge(
+      state,
+      { type: "ask_text", event_id: "ask", interactive: true, payload: { prompt: "Proceed?" } },
+      { scope: "graph-a", tab: "reviewer", summary: "Proceed?" },
+    ))
+    unsubscribe()
+
+    expect(edges).toEqual([
+      {
+        scope: "graph-a",
+        tab: "reviewer",
+        kind: "waiting-input",
+        eventId: "ask",
+        summary: "Proceed?",
+      },
+    ])
+  })
+
   it("emits one target-keyed edge for genuine real-time attention", () => {
     const edges = []
     const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))

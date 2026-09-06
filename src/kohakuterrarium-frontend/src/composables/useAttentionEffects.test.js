@@ -2,12 +2,13 @@ import { mount } from "@vue/test-utils"
 import { defineComponent, nextTick } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const { navigation, prefs, edgeState } = vi.hoisted(() => ({
+const { navigation, prefs, edgeState, i18n } = vi.hoisted(() => ({
   navigation: vi.fn(),
   prefs: {
     systemNotifications: true,
     notifyWaiting: true,
     notifyCompletion: false,
+    notificationPreview: true,
     attentionSound: false,
     soundWaiting: true,
     soundCompletion: false,
@@ -15,6 +16,12 @@ const { navigation, prefs, edgeState } = vi.hoisted(() => ({
     desktopAttention: true,
   },
   edgeState: { listener: undefined },
+  i18n: {
+    t: vi.fn((key, params = {}) => {
+      const entries = Object.entries(params)
+      return entries.length ? `${key}: ${entries.map(([k, v]) => `${k}=${v}`).join(", ")}` : key
+    }),
+  },
 }))
 
 vi.mock("@/stores/attention", async () => {
@@ -30,7 +37,11 @@ vi.mock("@/stores/attention", async () => {
   }
 })
 vi.mock("@/stores/attentionPrefs", () => ({ useAttentionPrefs: () => ({ state: prefs }) }))
-vi.mock("@/utils/attentionNavigation", () => ({ navigateToAttention: navigation }))
+vi.mock("@/utils/attentionNavigation", () => ({
+  navigateToAttention: navigation,
+  attentionTargetLabel: ({ scope, tab }) => `${scope}/${tab}`,
+}))
+vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: i18n.t }) }))
 
 import { useAttentionEffects } from "./useAttentionEffects"
 
@@ -60,10 +71,12 @@ describe("useAttentionEffects", () => {
       systemNotifications: true,
       notifyWaiting: true,
       notifyCompletion: false,
+      notificationPreview: true,
       attentionSound: false,
       faviconBadge: true,
       desktopAttention: true,
     })
+    i18n.t.mockClear()
     delete window.pywebview
   })
 
@@ -93,6 +106,76 @@ describe("useAttentionEffects", () => {
       tab: "reviewer",
       kind: "waiting-input",
     })
+    wrapper.unmount()
+  })
+
+  it("composes localized bodies with the attention target and message preview", () => {
+    const notifications = []
+    class FakeNotification {
+      static permission = "granted"
+      constructor(title, options) {
+        this.title = title
+        this.options = options
+        notifications.push(this)
+      }
+      close() {}
+    }
+    vi.stubGlobal("Notification", FakeNotification)
+    prefs.notifyCompletion = true
+    const wrapper = mountEffects()
+
+    edgeState.listener({
+      scope: "graph-a",
+      tab: "reviewer",
+      kind: "waiting-input",
+      summary: "Deploy the staging build?",
+    })
+    edgeState.listener({
+      scope: "graph-a",
+      tab: "reviewer",
+      kind: "completed",
+      summary: "All checks passed.",
+    })
+    expect(notifications).toHaveLength(2)
+    expect(notifications[0].title).toBe("attention.notify.waitingTitle")
+    expect(notifications[0].options.body).toBe(
+      "attention.notify.waitingBodySummary: target=graph-a/reviewer, summary=Deploy the staging build?",
+    )
+    expect(notifications[1].title).toBe("attention.notify.completedTitle")
+    expect(notifications[1].options.body).toBe(
+      "attention.notify.completedBodySummary: target=graph-a/reviewer, summary=All checks passed.",
+    )
+    wrapper.unmount()
+  })
+
+  it("falls back to plain bodies without a summary and honours the preview preference", () => {
+    const notifications = []
+    class FakeNotification {
+      static permission = "granted"
+      constructor(title, options) {
+        this.title = title
+        this.options = options
+        notifications.push(this)
+      }
+      close() {}
+    }
+    vi.stubGlobal("Notification", FakeNotification)
+    prefs.notifyCompletion = true
+    const wrapper = mountEffects()
+
+    edgeState.listener({ scope: "graph-a", tab: "root", kind: "waiting-input" })
+    expect(notifications[0].options.body).toBe("attention.notify.waitingBody: target=graph-a/root")
+
+    prefs.notificationPreview = false
+    edgeState.listener({
+      scope: "graph-a",
+      tab: "root",
+      kind: "completed",
+      summary: "Hidden preview.",
+    })
+    expect(notifications[1].options.body).toBe(
+      "attention.notify.completedBody: target=graph-a/root",
+    )
     wrapper.unmount()
   })
 

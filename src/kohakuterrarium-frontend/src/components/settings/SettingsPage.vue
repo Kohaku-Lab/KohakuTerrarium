@@ -671,6 +671,11 @@ const notificationAttentionSettings = [
     label: "settings.prefs.notifyCompletion",
     hint: "settings.prefs.notifyCompletionHint",
   },
+  {
+    key: "notificationPreview",
+    label: "settings.prefs.notificationPreview",
+    hint: "settings.prefs.notificationPreviewHint",
+  },
 ]
 
 const soundAttentionSettings = [

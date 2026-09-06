@@ -80,7 +80,7 @@ describe("SettingsPage model presets", () => {
     expect(wrapper.find('[data-attention-group="notifications"]').exists()).toBe(true)
     expect(wrapper.find('[data-attention-group="sound"]').exists()).toBe(true)
     expect(wrapper.find('[data-attention-group="desktop"]').exists()).toBe(true)
-    expect(wrapper.findAll("[data-attention-setting]")).toHaveLength(10)
+    expect(wrapper.findAll("[data-attention-setting]")).toHaveLength(11)
     expect(wrapper.find("[data-in-app-toggle]").exists()).toBe(true)
   })
 
