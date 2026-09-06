@@ -505,6 +505,18 @@ class TestStreamOutputAwaitingBackground:
         await so.on_processing_end()
         assert "awaiting_background" not in q.get_nowait()
 
+    async def test_processing_end_via_emit_carries_the_flag(self):
+        # The typed-emit arm must produce the same annotated frame as the
+        # hook path — a direct emit must not bypass awaiting_background.
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=1, branch=1)
+        agent._turn_dispatched_bg = {"job_1"}
+        so = StreamOutput("src", q, [], agent=agent)
+        await so.emit(_evt("processing_end"))
+        msg = q.get_nowait()
+        assert msg["type"] == "processing_end"
+        assert msg["awaiting_background"] is True
+
     async def test_processing_start_never_flagged(self):
         q = asyncio.Queue()
         agent = _StubAgent(turn=1, branch=1)

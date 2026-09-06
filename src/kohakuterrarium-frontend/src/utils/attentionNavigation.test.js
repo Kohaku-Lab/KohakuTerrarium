@@ -112,4 +112,10 @@ describe("attentionTargetLabel", () => {
   it("falls back to the raw scope when the session is unknown", () => {
     expect(attentionTargetLabel({ scope: "gone", tab: "reviewer" })).toBe("gone · reviewer")
   })
+
+  it("does not leak the default routing placeholder as a session name", () => {
+    // Detached/editor windows bind the default chat store; scope "default"
+    // is not an instance identity.
+    expect(attentionTargetLabel({ scope: "default", tab: "reviewer" })).toBe("reviewer")
+  })
 })

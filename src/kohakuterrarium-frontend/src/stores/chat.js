@@ -2140,6 +2140,7 @@ const _chatStoreOptions = {
       this.runningJobs = {}
       this.unreadCounts = {}
       this.attentionByTab = {}
+      this._attentionStreamTextByTab = {}
       removeAttentionScope(scopeOfStoreId(this.$id) || "default")
       this.queuedMessagesByTab = {}
       this.processingByTab = {}
@@ -5292,6 +5293,7 @@ const _chatStoreOptions = {
       this.runningJobs = {}
       this.unreadCounts = {}
       this.attentionByTab = {}
+      this._attentionStreamTextByTab = {}
       removeAttentionScope(scopeOfStoreId(this.$id) || "default")
       this.queuedMessagesByTab = {}
       this.processingByTab = {}

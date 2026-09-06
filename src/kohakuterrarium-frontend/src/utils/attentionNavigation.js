@@ -33,7 +33,11 @@ function _matchesInstance(inst, id) {
 export function attentionTargetLabel({ scope, tab }) {
   const instances = useInstancesStore()
   const inst = instances.list.find((it) => _matchesInstance(it, scope)) || null
-  const sessionName = (inst && (inst.session_name || inst.config_name)) || scope || ""
+  // Detached/editor windows bind the DEFAULT chat store (scope "default"),
+  // which is a routing placeholder, not an instance identity — showing it
+  // verbatim would leak "default · …" into localized bodies.
+  const sessionName =
+    (inst && (inst.session_name || inst.config_name)) || (scope && scope !== "default" ? scope : "")
   const creatures = inst?.creatures || []
   // ``_tabForSource`` rewrites the privileged creature's real WS source
   // name to the tab key "root"; resolve that alias through is_root so the
@@ -47,5 +51,6 @@ export function attentionTargetLabel({ scope, tab }) {
   // missing from the record at any moment. The edge's ``tab`` IS the
   // creature's WS source name, so it is a safe label fallback.
   const creatureName = creature?.name || tab || ""
-  return creatureName ? `${sessionName} · ${creatureName}` : sessionName
+  if (!creatureName) return sessionName
+  return sessionName ? `${sessionName} · ${creatureName}` : creatureName
 }

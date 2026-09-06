@@ -234,7 +234,9 @@ class StreamOutput(OutputModule):
                     frame["request_id"] = event.payload["request_id"]
                 self._put(frame)
             case "processing_end":
-                self._put({"type": "processing_end"})
+                # Same annotated frame as the hook path; a direct emit must
+                # not bypass the awaiting_background flag.
+                await self.on_processing_end()
             case "user_input":
                 # User input is echoed by the attachment loop to avoid duplicate frames.
                 pass
