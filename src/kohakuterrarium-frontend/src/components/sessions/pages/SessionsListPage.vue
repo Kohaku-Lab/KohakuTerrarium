@@ -212,11 +212,11 @@ async function fetchSessions(forceRefresh = false) {
   loading.value = true
   error.value = null
   try {
-    // ``refresh: true`` forces the backend to re-scan + re-parse every
-    // session file on disk. We respect the 30s server-side cache by
-    // default; only the explicit Refresh button (forceRefresh=true)
-    // triggers a full rebuild. Without this, opening the Sessions list
-    // tab is laggy because every navigation rebuilds the index.
+    // Default listing reads the persistent session-index sidecar — no
+    // re-scan, no per-file parse. Only the explicit Refresh button
+    // (forceRefresh=true) asks the backend to reconcile the index
+    // against disk; concurrent refreshes are single-flighted there, so
+    // hammering the button cannot fan out into parallel scans.
     const result = await sessionAPI.list({
       limit: pageSize,
       offset: currentOffset.value,
