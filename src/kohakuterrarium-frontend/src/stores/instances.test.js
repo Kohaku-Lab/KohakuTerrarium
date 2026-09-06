@@ -126,6 +126,33 @@ describe("instances store", () => {
     expect(store.list).toEqual([])
   })
 
+  it("shares one in-flight request between concurrent fetchOne callers for the same id", async () => {
+    const store = useInstancesStore()
+    const deferred = promiseWithResolvers()
+    sessionAPI.getActive.mockReturnValue(deferred.promise)
+
+    // Route navigation and the 5 s attach-tab poll racing on the same
+    // instance must not stack duplicate lookups.
+    const first = store.fetchOne("graph_slow")
+    const second = store.fetchOne("graph_slow")
+    expect(sessionAPI.getActive).toHaveBeenCalledTimes(1)
+
+    deferred.resolve({ session_id: "graph_slow", name: "slow", creatures: 0, channels: [] })
+    const [a, b] = await Promise.all([first, second])
+    expect(a).toBe(b)
+    expect(store.current.id).toBe("graph_slow")
+
+    // A different id still gets its own request.
+    sessionAPI.getActive.mockResolvedValue({
+      session_id: "graph_other",
+      name: "other",
+      creatures: 0,
+      channels: [],
+    })
+    await store.fetchOne("graph_other")
+    expect(sessionAPI.getActive).toHaveBeenCalledTimes(2)
+  })
+
   it("maps a unified Session payload to a terrarium-shaped instance", async () => {
     const store = useInstancesStore()
     sessionAPI.getActive.mockResolvedValue({
