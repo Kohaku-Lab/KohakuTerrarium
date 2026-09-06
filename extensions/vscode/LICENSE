@@ -1,0 +1,156 @@
+                              KohakuTerrarium License
+                        Version 1.0, April 2026
+
+   Based on the Apache License, Version 2.0, with Additional Terms.
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but not
+      limited to compiled object code, generated documentation, and
+      conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License.
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship.
+
+      "Contribution" shall mean any work of authorship submitted to the
+      Licensor for inclusion in the Work.
+
+      "Contributor" shall mean Licensor and any Legal Entity on behalf of
+      whom a Contribution has been received by the Licensor.
+
+      "Service" shall mean making the functionality of the Work or
+      Derivative Works available to third parties over a network, whether
+      as a hosted service, API, or any other form of remote interaction,
+      regardless of whether a fee is charged.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source and Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      patent license to make, have made, use, offer to sell, sell,
+      import, and otherwise transfer the Work.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or Derivative
+          Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work; and
+
+      (d) If the Work includes a "NOTICE" text file, You must include
+          a readable copy of the attribution notices contained within
+          such NOTICE file.
+
+   5. Naming Requirement. Any Derivative Work, software product, package,
+      or Service that incorporates, is built upon, or is substantially
+      derived from the Work MUST include either "Kohaku" or "Terrarium"
+      (or both) in its product name, package name, or primary branding.
+
+      This requirement applies to:
+      (a) Software packages distributed via package managers (e.g., PyPI,
+          npm, crates.io);
+      (b) Software products or applications offered to end users;
+      (c) Services accessible over a network;
+      (d) Forks or Derivative Works distributed under a different name.
+
+      This requirement does NOT apply to:
+      (a) Internal tools or scripts not distributed to third parties;
+      (b) Academic papers or research that merely references the Work;
+      (c) Contributions submitted back to the original Work.
+
+   6. Attribution Requirement. Any Derivative Work, software product, or
+      Service that incorporates or is derived from the Work MUST provide
+      visible attribution to KohakuTerrarium in a location that is
+      reasonably discoverable by end users. This attribution MUST include:
+
+      (a) The name "KohakuTerrarium"; and
+      (b) A link to the official project repository or website
+          (https://github.com/Kohaku-Lab/KohakuTerrarium or any
+          successor URL designated by the Licensor).
+
+      "Visible" means:
+      (a) For software with a graphical interface: in an "About" dialog,
+          settings page, or equivalent user-accessible location;
+      (b) For command-line tools: in the help output or version output;
+      (c) For Services: on a publicly accessible page (e.g., footer,
+          about page, or documentation);
+      (d) For libraries or packages: in the package metadata and README.
+
+   7. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+
+   8. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing
+      the origin of the Work and reproducing the content of the NOTICE
+      file, and as required by Section 5 (Naming Requirement).
+
+   9. Disclaimer of Warranty. The Work is provided on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE.
+
+  10. Limitation of Liability. In no event shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work.
+
+  11. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License.
+
+   Copyright 2024-2026 Shih-Ying Yeh (KohakuBlueLeaf) and contributors
+
+   Licensed under the KohakuTerrarium License, Version 1.0 (this document).
+   You may not use this file except in compliance with the License.
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+   implied. See the License for the specific language governing
+   permissions and limitations under the License.

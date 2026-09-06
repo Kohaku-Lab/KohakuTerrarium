@@ -1,0 +1,314 @@
+:root {
+  color-scheme: light dark;
+  font-family: var(--vscode-font-family);
+  color: var(--vscode-foreground);
+  background: var(--vscode-sideBar-background);
+}
+
+* {
+  box-sizing: border-box;
+}
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+body {
+  margin: 0;
+}
+button,
+input,
+textarea {
+  font: inherit;
+}
+h1,
+p {
+  margin: 0;
+}
+
+.kt-conversation-host {
+  --kt-conversation-text: var(--vscode-foreground);
+  --kt-conversation-muted: var(--vscode-descriptionForeground);
+  --kt-conversation-surface: var(--vscode-editorWidget-background);
+  --kt-conversation-surface-raised: var(--vscode-sideBar-background);
+  --kt-conversation-border: var(--vscode-panel-border);
+  --kt-conversation-accent: var(--vscode-textLink-foreground);
+  --kt-conversation-tool: var(--vscode-charts-blue);
+  --kt-conversation-warning: var(--vscode-charts-yellow);
+  --kt-conversation-error: var(--vscode-errorForeground);
+  --kt-conversation-success: var(--vscode-testing-iconPassed);
+  --kt-conversation-code: var(--vscode-textPreformat-background);
+  --color-text: var(--vscode-foreground);
+  --color-text-muted: var(--vscode-descriptionForeground);
+  --color-border: var(--vscode-panel-border);
+  --font-mono: var(--vscode-editor-font-family, monospace);
+  --kt-chat-code-meta-size: 0.8em;
+  --kt-chat-code-size: 0.9em;
+  --kt-chat-code-line-height: 1.5;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.app-header {
+  display: flex;
+  flex: none;
+  gap: 8px;
+  align-items: center;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  object-fit: contain;
+}
+.header-copy {
+  min-width: 0;
+}
+h1 {
+  overflow: hidden;
+  font-size: 14px;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.header-copy p {
+  overflow: hidden;
+  color: var(--vscode-descriptionForeground);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.session-region {
+  flex: none;
+  min-width: 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.session-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  min-height: 34px;
+  padding: 2px 6px;
+}
+.session-disclosure {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  gap: 5px;
+  align-items: center;
+  color: var(--vscode-foreground);
+  background: transparent;
+  border: 0;
+  padding: 5px 2px;
+  text-align: left;
+}
+.session-disclosure[aria-expanded='true'] .action-icon--chevron {
+  transform: rotate(180deg);
+}
+.session-summary,
+.row-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-actions {
+  display: flex;
+  flex: none;
+}
+.session-actions button,
+.stop-session {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--vscode-foreground);
+  background: transparent;
+  border: 0;
+  padding: 5px;
+}
+.action-icon {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  fill: currentColor;
+  transition: transform 120ms ease;
+}
+.session-list {
+  max-height: min(38vh, 280px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  border-top: 1px solid var(--vscode-panel-border);
+}
+.session-group {
+  min-width: 0;
+}
+.session-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  gap: 7px;
+  align-items: center;
+  color: var(--vscode-foreground);
+  background: transparent;
+  border: 0;
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding: 7px 10px;
+  text-align: left;
+}
+button.session-row:hover {
+  background: var(--vscode-list-hoverBackground);
+}
+.session-row.is-active {
+  color: var(--vscode-list-activeSelectionForeground, var(--vscode-foreground));
+  background: var(--vscode-list-activeSelectionBackground);
+}
+.session-row--label {
+  font-weight: 600;
+}
+.creature-row {
+  padding-left: 29px;
+}
+.status-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  background: var(--vscode-testing-iconPassed);
+  border-radius: 50%;
+}
+.status-dot--dormant {
+  background: var(--vscode-descriptionForeground);
+}
+.stop-session {
+  width: 100%;
+  gap: 6px;
+  justify-content: flex-start;
+  color: var(--vscode-errorForeground);
+  border-bottom: 1px solid var(--vscode-panel-border);
+  padding: 7px 10px;
+}
+
+.status {
+  flex: none;
+  padding: 6px 10px;
+  color: var(--vscode-errorForeground);
+  border-bottom: 1px solid var(--vscode-panel-border);
+}
+.chat-region {
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  padding: 8px 0;
+}
+.chat-region > * {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+.kt-conversation-host .kt-transcript-viewport {
+  overflow-x: hidden;
+  padding-inline: 0.5rem;
+}
+.kt-conversation-host .kt-conversation-message--assistant {
+  width: 100%;
+  max-width: none;
+}
+.composer-region {
+  flex: none;
+  min-width: 0;
+  border-top: 1px solid var(--vscode-panel-border);
+  padding: 8px;
+}
+.composer-placeholder {
+  color: var(--vscode-descriptionForeground);
+  font-size: 12px;
+  padding: 4px;
+}
+.kt-conversation-host .kt-chat-composer {
+  color: var(--vscode-input-foreground);
+}
+.kt-conversation-host .kt-chat-composer__shell {
+  background: var(--vscode-input-background);
+  border-color: var(--vscode-input-border, var(--vscode-panel-border));
+}
+.kt-conversation-host .kt-chat-composer__shell.is-active {
+  border-color: var(--vscode-focusBorder);
+}
+.kt-conversation-host .kt-chat-composer__shell textarea {
+  color: var(--vscode-input-foreground);
+  background: transparent;
+  border: 0;
+  outline: 0;
+}
+.kt-conversation-host .kt-chat-composer__shell textarea::placeholder {
+  color: var(--vscode-input-placeholderForeground);
+}
+.kt-conversation-host .kt-chat-composer__chip {
+  color: var(--vscode-badge-foreground);
+  background: var(--vscode-badge-background);
+  border-color: var(--vscode-panel-border);
+}
+.kt-conversation-host .kt-chat-composer__primary {
+  color: var(--vscode-button-foreground);
+  background: var(--vscode-button-background);
+  border-radius: 4px;
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: -2px;
+}
+button:disabled {
+  opacity: 0.55;
+}
+.kt-conversation-host .md-content a {
+  color: var(--vscode-textLink-foreground);
+}
+.kt-conversation-host .md-content code:not(.katex-fallback) {
+  background: var(--vscode-textPreformat-background);
+}
+.kt-conversation-host .kt-conversation-message--user {
+  justify-self: end;
+}
+
+body.vscode-high-contrast .kt-conversation-host *,
+body.vscode-high-contrast-light .kt-conversation-host * {
+  border-color: var(--vscode-contrastBorder);
+}
+body.vscode-high-contrast .kt-conversation-host .code-block,
+body.vscode-high-contrast-light .kt-conversation-host .code-block {
+  border: 1px solid var(--vscode-contrastBorder);
+}
+@media (max-width: 420px) {
+  .kt-conversation-host .kt-conversation-message--user {
+    width: 100%;
+  }
+}
+@media (max-width: 220px) {
+  .app-header {
+    padding-inline: 8px;
+  }
+  .brand-mark {
+    width: 24px;
+    height: 24px;
+  }
+  .session-toolbar {
+    padding-inline: 3px;
+  }
+  .session-summary {
+    font-size: 11px;
+  }
+}

@@ -1,0 +1,8 @@
+src/**
+test/**
+scripts/**
+node_modules/**
+*.vsix
+package-lock.json
+vite.config.mjs
+dist/*.map

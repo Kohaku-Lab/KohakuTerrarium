@@ -1,0 +1,101 @@
+{
+  "name": "kohakuterrarium-vscode",
+  "displayName": "KohakuTerrarium",
+  "description": "Build and operate KohakuTerrarium agents from VS Code.",
+  "version": "0.1.2",
+  "publisher": "kohaku-lab",
+  "private": true,
+  "license": "LicenseRef-KohakuTerrarium-1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kohaku-Lab/KohakuTerrarium"
+  },
+  "type": "commonjs",
+  "main": "./dist/extension.cjs",
+  "icon": "media/kohaku-icon.png",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onView:kohakuterrarium.chat",
+    "onCommand:kohakuterrarium.configure",
+    "onCommand:kohakuterrarium.useAutomaticDiscovery"
+  ],
+  "categories": [
+    "Other"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "kohakuterrarium.configure",
+        "title": "KohakuTerrarium: Configure Local Connection Override"
+      },
+      {
+        "command": "kohakuterrarium.useAutomaticDiscovery",
+        "title": "KohakuTerrarium: Use Automatic Local Discovery"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "kohakuterrarium",
+          "title": "KohakuTerrarium",
+          "icon": "media/kohaku-icon.png"
+        }
+      ]
+    },
+    "views": {
+      "kohakuterrarium": [
+        {
+          "type": "webview",
+          "id": "kohakuterrarium.chat",
+          "name": "KohakuTerrarium"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "KohakuTerrarium",
+      "properties": {
+        "kohakuterrarium.defaultCreature": {
+          "type": "string",
+          "scope": "machine",
+          "default": "@kt-biome/creatures/swe",
+          "description": "Trusted Creature config reference used when creating a new Session."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "format": "prettier --write .prettierrc.json scripts/ src/ test/ package.json vite.config.mjs",
+    "format:check": "prettier --check .prettierrc.json scripts/ src/ test/ package.json vite.config.mjs",
+    "test": "node --test test/*.test.cjs",
+    "build": "node scripts/build.cjs",
+    "package": "npm run build && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@vitejs/plugin-vue": "^6.0.5",
+    "@vscode/markdown-it-katex": "^1.1.2",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.10",
+    "highlight.js": "^11.11.0",
+    "katex": "^0.16.45",
+    "markdown-it": "^14.0.0",
+    "pinia": "^3.0.3",
+    "prettier": "^3.8.2",
+    "unplugin-auto-import": "^20.2.0",
+    "vite": "^7.1.7",
+    "vue": "^3.5.22",
+    "ws": "^8.18.3",
+    "yauzl": "^3.4.0"
+  },
+  "allowScripts": {
+    "@vscode/vsce-sign@2.1.0": true,
+    "esbuild@0.25.12": true,
+    "esbuild@0.28.2": true,
+    "keytar@7.9.0": true
+  }
+}
