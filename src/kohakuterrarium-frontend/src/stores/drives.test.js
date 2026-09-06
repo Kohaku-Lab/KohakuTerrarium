@@ -101,6 +101,70 @@ describe("drives store", () => {
     expect(store.order).toEqual(["d1"])
   })
 
+  it("reconcile coalesces overlapping callers onto one in-flight request", async () => {
+    drivesAPI.list.mockResolvedValue([])
+    const store = freshStore()
+    await store.load("s1")
+    drivesAPI.list.mockClear()
+
+    let resolveList
+    drivesAPI.list.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveList = resolve
+        }),
+    )
+    // The 6 s panel poller, the 8 s badge poller, and an event-scheduled
+    // reconcile can all fire while one listing is unanswered — they must
+    // share it, not stack three identical requests.
+    const calls = [store.reconcile(), store.reconcile(), store.reconcile()]
+    expect(drivesAPI.list).toHaveBeenCalledTimes(1)
+
+    resolveList([_rec("d1")])
+    await Promise.all(calls)
+    expect(store.order).toEqual(["d1"])
+
+    // Once settled, a fresh reconcile issues a new request.
+    drivesAPI.list.mockResolvedValue([_rec("d1"), _rec("d2")])
+    await store.reconcile()
+    expect(drivesAPI.list).toHaveBeenCalledTimes(2)
+    expect(store.order).toEqual(["d1", "d2"])
+  })
+
+  it("a session switch releases the shared in-flight reconcile", async () => {
+    const store = freshStore()
+    let resolveLoad
+    drivesAPI.list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLoad = resolve
+        }),
+    )
+    const firstLoad = store.load("s1")
+
+    // Old session's reconcile hangs; the new session's load must detach
+    // from it so its own reconciles never wait on stale work.
+    let resolveReconcile
+    drivesAPI.list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveReconcile = resolve
+        }),
+    )
+    const staleReconcile = store.reconcile()
+
+    drivesAPI.list.mockResolvedValue([_rec("n1")])
+    const secondLoad = await store.load("s2")
+    expect(secondLoad).toHaveLength(1)
+
+    resolveLoad([])
+    resolveReconcile([_rec("d1")])
+    await Promise.all([firstLoad, staleReconcile])
+    // The stale responses arrived after the switch: discarded, not merged.
+    expect(store.records.n1).toBeDefined()
+    expect(store.records.d1).toBeUndefined()
+  })
+
   it("applyEvent upserts an embedded view and guards older revisions", async () => {
     drivesAPI.list.mockResolvedValue([_rec("d1", { revision: 4 })])
     const store = freshStore()

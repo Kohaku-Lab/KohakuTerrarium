@@ -80,6 +80,8 @@ const _drivesOptions = {
     saved: false,
     filters: { status: [], kind: [], owner: "", assignee: "", scope: "", text: "" },
     _reconcileTimer: null,
+    /** Shared in-flight reconcile so overlapping callers coalesce onto one request. */
+    _reconcileInflight: null,
     /** Monotonic load token: a response is committed only if it is the latest. */
     _loadGen: 0,
     /** Monotonic detail token: a stale detail/deliveries load never overwrites. */
@@ -193,9 +195,27 @@ const _drivesOptions = {
      * Periodic / refocus full refetch. Merges with the revision guard so an
      * in-flight event that arrived first is never rolled back, and drops
      * records the server no longer returns for the current filter.
+     *
+     * Two independent pollers (the Drives panel at 6 s and the header badge
+     * at 8 s) plus event-scheduled reconciles can all fire while a slow
+     * listing is still unanswered; they coalesce onto the in-flight request
+     * instead of stacking duplicates. No spacing window is applied — a
+     * minimum gap would also delay the event-driven reconciles that keep
+     * mutations visible promptly.
      */
     async reconcile() {
       if (!this.sessionId) return
+      if (this._reconcileInflight) return this._reconcileInflight
+      const task = this._reconcileNow()
+      this._reconcileInflight = task
+      try {
+        await task
+      } finally {
+        if (this._reconcileInflight === task) this._reconcileInflight = null
+      }
+    },
+
+    async _reconcileNow() {
       const gen = this._loadGen
       const sid = this.sessionId
       try {
@@ -525,6 +545,9 @@ const _drivesOptions = {
       this.conflict = null
       // A pending detail load for the old session must not commit into the new.
       this._detailGen++
+      // An in-flight reconcile for the old session must not make the new
+      // session's first reconcile wait on (or share) it.
+      this._reconcileInflight = null
     },
 
     _queryFilters() {
