@@ -116,6 +116,9 @@ def test_desktop_launcher_log_honors_config_dir(monkeypatch, tmp_path):
 def test_desktop_blocking_ensures_file_logging(monkeypatch):
     calls = []
     monkeypatch.setattr(web_mod, "configure_utf8_stdio", lambda **kwargs: None)
+    monkeypatch.setattr(
+        web_mod, "raise_fd_limit", lambda **kwargs: calls.append("fd_limit")
+    )
     monkeypatch.setattr(web_mod, "enable_file_logging", lambda: calls.append("file"))
     monkeypatch.setattr(web_mod, "set_level", lambda level: None)
     monkeypatch.setattr(web_mod, "enable_stderr_logging", lambda level: None)
@@ -124,7 +127,7 @@ def test_desktop_blocking_ensures_file_logging(monkeypatch):
     with pytest.raises(SystemExit):
         _run_desktop_app_blocking()
 
-    assert calls == ["file"]
+    assert calls == ["fd_limit", "file"]
 
 
 # ── find_free_port ──────────────────────────────────────────────

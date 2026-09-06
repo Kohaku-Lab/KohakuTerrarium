@@ -46,6 +46,7 @@ from kohakuterrarium.cli.service import add_service_subparser, service_cli
 from kohakuterrarium.cli.version import format_version_report
 from kohakuterrarium.serving.desktop import launch_desktop_app
 from kohakuterrarium.serving.web import run_web_server
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
@@ -624,6 +625,7 @@ COMMANDS: dict[str, callable] = {
 def main() -> int:
     """Main CLI entry point."""
     configure_utf8_stdio(log=False)
+    raise_fd_limit()
     parser = _build_parser()
     args = parser.parse_args()
     mark_startup("parser_ready", surface="cli")

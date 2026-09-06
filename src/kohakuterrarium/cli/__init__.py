@@ -4,6 +4,7 @@ import argparse
 import sys
 
 from kohakuterrarium.cli.select_args import add_run_like_args
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
@@ -93,6 +94,7 @@ def _dispatch_surface(command: str, args: argparse.Namespace) -> int:
 
 def main() -> int:
     configure_utf8_stdio(log=False)
+    raise_fd_limit()
     argv = sys.argv[1:]
     if _version_requested(argv):
         from kohakuterrarium.cli.version import format_version_report

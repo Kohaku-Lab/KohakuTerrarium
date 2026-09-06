@@ -61,6 +61,12 @@ class TestMainStartup:
         )
         monkeypatch.setattr(
             cli,
+            "raise_fd_limit",
+            lambda **kwargs: events.append(("fd_limit", kwargs)),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            cli,
             "_build_parser",
             lambda: events.append(("parser", {})) or _Parser(),
         )
@@ -68,7 +74,11 @@ class TestMainStartup:
 
         assert cli.main() == 0
         assert capsys.readouterr().out == "version\n"
-        assert events == [("utf8", {"log": False}), ("parser", {})]
+        assert events == [
+            ("utf8", {"log": False}),
+            ("fd_limit", {}),
+            ("parser", {}),
+        ]
 
     def test_records_parser_and_dispatch_milestones(self, monkeypatch):
         milestones = []

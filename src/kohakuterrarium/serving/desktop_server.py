@@ -14,6 +14,7 @@ from kohakuterrarium.serving.web import (
     _resolve_config_dirs,
     start_uvicorn_with_port_fallback,
 )
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_file_logging,
@@ -76,6 +77,7 @@ def create_app(**kwargs):
 def start_desktop_server(port: int, log_level: str):
     """Start the desktop FastAPI server and return its server and bound port."""
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
     os.environ["KT_STARTUP_SURFACE"] = "desktop"
     enable_file_logging()
     set_level(log_level)

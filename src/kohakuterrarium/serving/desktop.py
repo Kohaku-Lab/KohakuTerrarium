@@ -13,6 +13,7 @@ from pathlib import Path
 
 from kohakuterrarium.serving.desktop_attention import expose_desktop_attention
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 from kohakuterrarium.utils.startup_trace import mark as mark_startup
 
@@ -292,6 +293,7 @@ def _run_startup(
 def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     """Show a native loading shell, then start and navigate to the local server."""
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
     os.environ["KT_STARTUP_SURFACE"] = "desktop"
     webview = _load_webview()
     icons_dir = Path(__file__).parent.parent / "app_icons"

@@ -7,6 +7,7 @@ embedded runtime has no CLI arguments; otherwise run the normal CLI.
 import sys
 from pathlib import Path
 
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import configure_utf8_stdio
 
 
@@ -18,6 +19,7 @@ def _is_briefcase_bundle() -> bool:
 
 def main() -> int:
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
     if _is_briefcase_bundle() and len(sys.argv) <= 1:
         from kohakuterrarium.__briefcase__ import main as briefcase_main
 

@@ -47,6 +47,7 @@ from kohakuterrarium.llm.codex_auth import (
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.identity import drive_settings as _drive_settings
 from kohakuterrarium.terrarium import Terrarium
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -155,6 +156,7 @@ def lab_client_cli(args: argparse.Namespace) -> int:
     if getattr(args, "home_dir", ""):
         os.environ["KT_CONFIG_DIR"] = args.home_dir
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
     set_level(args.log_level)
     enable_stderr_logging(args.log_level)
     try:

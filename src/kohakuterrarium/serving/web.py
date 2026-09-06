@@ -19,6 +19,7 @@ import uvicorn
 from kohakuterrarium.packages.locations import get_package_root, packages_dir
 from kohakuterrarium.packages.walk import list_packages
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_file_logging,
@@ -205,6 +206,7 @@ def run_web_server(
     WebSocket transport at ``lab_bind`` and requires ``lab_token``.
     """
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
 
     set_level(log_level)
     # Daemon stderr is the user-facing service log, so mirror framework logs
@@ -337,6 +339,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
 def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None:
     """Run uvicorn and the native desktop window until the UI closes."""
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
     os.environ["KT_STARTUP_SURFACE"] = "desktop"
     enable_file_logging()
 

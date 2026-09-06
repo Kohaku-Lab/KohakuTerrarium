@@ -21,6 +21,7 @@ from kohakuterrarium.cli.picker import pick_runnable
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -89,6 +90,7 @@ def run_agent_cli(
     every creature as both listener and sender.
     """
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
     set_level(log_level)
     # Stderr logging would corrupt prompt-toolkit's redraw region —
     # only enable it when the chosen surface leaves the terminal free.

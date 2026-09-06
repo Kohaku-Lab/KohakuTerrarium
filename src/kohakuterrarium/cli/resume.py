@@ -17,6 +17,7 @@ from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.studio.persistence.resume import announce_migration_if_needed
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -55,6 +56,7 @@ def resume_cli(
     surfaces own the terminal.
     """
     configure_utf8_stdio(log=True)
+    raise_fd_limit(log=True)
     set_level(log_level)
 
     if log_stderr == "on":
