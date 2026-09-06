@@ -260,6 +260,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useStatusStore } from "@/stores/status"
 import { configAPI, settingsAPI, statsAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 
 const { t } = useI18n()
 
@@ -522,16 +523,17 @@ onMounted(() => {
   refreshAll()
   // Auto-refresh: process metrics + instances + sessionStats every
   // 5 s. Disk is pure stat — refresh on the same cadence so the
-  // numbers stay live without a manual click.
-  refreshTimer = setInterval(() => {
-    instances.fetchAll()
-    loadSessionStats()
-    loadMetrics()
+  // numbers stay live without a manual click. The async tick body
+  // makes the interval skip overlaps while a slow round is pending,
+  // and pauses entirely while the tab is hidden.
+  refreshTimer = createVisibilityInterval(async () => {
+    await Promise.all([instances.fetchAll(), loadSessionStats(), loadMetrics()])
   }, 5000)
+  refreshTimer.start()
 })
 
 onUnmounted(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+  if (refreshTimer) refreshTimer.stop()
 })
 
 // ── Formatting helpers ──────────────────────────────────────────
