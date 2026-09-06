@@ -1793,6 +1793,8 @@ const _chatStoreOptions = {
     _reconnectTimer: null,
     /** @type {number} Current reconnect delay (exponential backoff) */
     _reconnectDelay: 500,
+    /** @type {boolean} Whether this host owns automatic reconnect policy. */
+    _autoReconnect: true,
     /** Connection status for the single instance WS. Used by the UI to
      *  show "reconnecting" banners. "open" | "reconnecting" | "closed" */
     wsStatus: "closed",
@@ -2028,7 +2030,7 @@ const _chatStoreOptions = {
     },
 
     initForInstance(instance, options = {}) {
-      const { initialTab = null } = options
+      const { initialTab = null, autoReconnect = true } = options
       // A solo creature that grew via group_add_node is reported by
       // the backend as ``terrarium`` after the second creature joins.
       // Without this type-change check the chat store stays in
@@ -2069,6 +2071,7 @@ const _chatStoreOptions = {
       this._instanceId = instance.id
       this._instanceGraphId = instance.graph_id || instance.id
       this._instanceType = instance.type
+      this._autoReconnect = autoReconnect
       this.tabs = []
       this.messagesByTab = {}
       this.tokenUsage = {}
@@ -2473,7 +2476,9 @@ const _chatStoreOptions = {
           return { handled: "command", result }
         }
       }
-      if (!this._ws) return
+      if (!tab.startsWith("ch:") && (!this._ws || this._ws.readyState !== WebSocket.OPEN)) {
+        throw Error("Chat is not connected")
+      }
 
       const now = Date.now()
       const contentParts = typeof text === "string" ? [{ type: "text", text }] : text
@@ -2514,16 +2519,14 @@ const _chatStoreOptions = {
         }
       } else {
         const target = tab
-        if (this._ws.readyState === WebSocket.OPEN) {
-          this._ws.send(
-            JSON.stringify({ type: "input", target, content: contentParts, event_id: eventId }),
-          )
-          // Flip processing optimistically — the backend's
-          // processing_start event will confirm it; this ensures the
-          // indicator and interrupt button appear immediately on the
-          // correct tab even before the first chunk arrives.
-          this.processingByTab[target] = true
-        }
+        this._ws.send(
+          JSON.stringify({ type: "input", target, content: contentParts, event_id: eventId }),
+        )
+        // Flip processing optimistically — the backend's
+        // processing_start event will confirm it; this ensures the
+        // indicator and interrupt button appear immediately on the
+        // correct tab even before the first chunk arrives.
+        this.processingByTab[target] = true
       }
     },
 
@@ -2577,7 +2580,7 @@ const _chatStoreOptions = {
 
     /** Shared WS bootstrap: wires onmessage/onclose, handles generation
      *  checks, and schedules exponential-backoff reconnects. */
-    _openWs({ generation, url, onOpen, reconnect }) {
+    _openWs({ generation, url, onOpen, reconnect, autoReconnect = this._autoReconnect }) {
       // Always replace the buffer so history events are re-accumulated
       // on reconnect — the backend re-replays state on open.
       this._historyLoaded = false
@@ -2587,8 +2590,10 @@ const _chatStoreOptions = {
         this._reconnectTimer = null
       }
 
-      const ws = new WebSocket(url)
+      const previousWs = this._ws
+      const ws = markRaw(new WebSocket(url))
       this._ws = ws
+      if (previousWs && previousWs !== ws) previousWs.close()
       this.wsStatus = "reconnecting"
 
       ws.onopen = () => {
@@ -2626,6 +2631,10 @@ const _chatStoreOptions = {
         if (wasOpen) {
           this._notifyWorkerDisconnect()
         }
+        if (!autoReconnect) {
+          this.wsStatus = "closed"
+          return
+        }
         // Exponential backoff, capped at 10s.
         const delay = this._reconnectDelay
         this._reconnectDelay = Math.min(delay * 2, 10000)
@@ -2636,6 +2645,7 @@ const _chatStoreOptions = {
         }, delay)
       }
       ws.onerror = () => {
+        if (generation !== this._instanceGeneration || ws !== this._ws) return
         // onclose fires after this; reconnect is scheduled there.
         for (const tab of Object.keys(this.branchOperationByTab)) {
           this._failBranchOperation(tab, "Connection lost before the operation completed.")
@@ -3011,14 +3021,9 @@ const _chatStoreOptions = {
      * (status: accepted / superseded / unknown).
      */
     submitUIReply(tab, eventId, actionId, values) {
-      if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return
+      if (!this._ws || this._ws.readyState !== WebSocket.OPEN) return false
       const list = this.messagesByTab[tab] || []
       const target = list.find((m) => m.role === "ui_event" && m.eventId === eventId)
-      if (target) {
-        target.replied = true
-        target.repliedActionId = actionId
-        target.repliedValues = values || null
-      }
       try {
         this._ws.send(
           JSON.stringify({
@@ -3036,7 +3041,14 @@ const _chatStoreOptions = {
         )
       } catch (err) {
         console.error("submitUIReply failed:", err)
+        return false
       }
+      if (target) {
+        target.replied = true
+        target.repliedActionId = actionId
+        target.repliedValues = values || null
+      }
+      return true
     },
 
     /**
@@ -5185,22 +5197,14 @@ const _chatStoreOptions = {
     },
 
     /**
-     * Wipe the chat store back to a neutral, disconnected state.
+     * Unbind the store from its current live or saved instance.
      *
-     * Used when leaving a surface that borrowed the chat store (most
-     * importantly the SessionHistoryViewer, which writes saved-session
-     * data into ``messagesByTab``/``tabs``/``_instanceId``). Without
-     * this, navigating from the session viewer back to a running
-     * ``/instances/<id>`` page renders the previous session's content
-     * for the brief window between mount and the async
-     * ``initForInstance`` call — and ``_saveTabs``/``_restoreTabs``
-     * keys can hit the wrong instance bucket because ``_instanceId``
-     * still points at ``session:<name>``.
-     *
-     * Does NOT open a websocket; pair it with ``initForInstance`` if
-     * you want to attach to a new live instance afterwards.
+     * Closes transport and timers, invalidates in-flight callbacks, and
+     * returns all instance-scoped view state to a neutral baseline. Does
+     * not open a websocket; pair it with ``initForInstance`` to bind a
+     * new live instance afterwards.
      */
-    resetForRouteSwitch() {
+    unbindFromInstance() {
       this._cleanup()
       this._instanceGeneration++
       this._instanceId = null
@@ -5252,6 +5256,11 @@ const _chatStoreOptions = {
       statusStore.reset()
     },
 
+    /** Clear instance state when leaving a route-owned chat surface. */
+    resetForRouteSwitch() {
+      this.unbindFromInstance()
+    },
+
     _cleanup() {
       this.activeTab = null
       this._historyLoaded = false
@@ -5269,6 +5278,7 @@ const _chatStoreOptions = {
         this._reconnectTimer = null
       }
       this._reconnectDelay = 500
+      this._autoReconnect = true
       this.wsStatus = "closed"
       if (this._ws) {
         // Null the callbacks first — otherwise onclose will fire during
