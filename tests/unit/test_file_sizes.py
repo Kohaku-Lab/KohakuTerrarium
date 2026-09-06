@@ -4,7 +4,10 @@ from pathlib import Path
 
 import pytest
 
-SRC = Path(__file__).resolve().parents[2] / "src" / "kohakuterrarium"
+ROOT = Path(__file__).resolve().parents[2]
+SRC = ROOT / "src" / "kohakuterrarium"
+VSCODE_SRC = ROOT / "extensions" / "vscode" / "src"
+VSCODE_TESTS = ROOT / "extensions" / "vscode" / "test"
 
 # Pure-data files exempt from BOTH the 600-line and 1000-line caps.
 # These grow linearly with the data they describe (one entry per
@@ -230,6 +233,12 @@ def _all_py_files():
         yield p
 
 
+def _all_vscode_files():
+    for root in (VSCODE_SRC, VSCODE_TESTS):
+        for suffix in ("*.js", "*.cjs", "*.mjs"):
+            yield from root.rglob(suffix)
+
+
 @pytest.mark.parametrize(
     "path", list(_all_py_files()), ids=lambda p: str(p.relative_to(SRC))
 )
@@ -254,3 +263,14 @@ def test_file_under_1000_lines(path):
         return  # pure data, no upper limit
     lines = len(path.read_text(encoding="utf-8").splitlines())
     assert lines <= 1000, f"{path.relative_to(SRC)} is {lines} lines (hard max 1000)"
+
+
+@pytest.mark.parametrize(
+    "path",
+    list(_all_vscode_files()),
+    ids=lambda p: str(p.relative_to(ROOT / "extensions" / "vscode")),
+)
+def test_vscode_file_under_600_lines(path):
+    lines = len(path.read_text(encoding="utf-8").splitlines())
+    rel = path.relative_to(ROOT / "extensions" / "vscode")
+    assert lines <= 600, f"{rel} is {lines} lines (max 600)"
