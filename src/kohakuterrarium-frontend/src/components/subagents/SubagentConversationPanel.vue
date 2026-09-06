@@ -76,6 +76,7 @@ import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } fr
 
 import MarkdownRenderer from "@/components/common/MarkdownRenderer.vue"
 import { sessionAPI, terrariumAPI } from "@/utils/api"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 import { useI18n } from "@/utils/i18n"
 
 const ToolCallBlock = defineAsyncComponent(() => import("@/components/chat/ToolCallBlock.vue"))
@@ -316,16 +317,23 @@ function isLive() {
 }
 
 function stopPolling() {
-  if (timer) clearInterval(timer)
+  if (timer) timer.stop()
   timer = null
 }
 
 function startPolling() {
   if (timer || !props.live || !isLive()) return
-  timer = setInterval(() => {
-    if (isLive()) loadConversation({ silent: true })
-    else stopPolling()
+  timer = createVisibilityInterval(() => {
+    if (!isLive()) {
+      stopPolling()
+      return
+    }
+    // Returning the promise lets the interval skip ticks while a slow
+    // conversation read is in flight: this is the hottest poll in the
+    // app (1.5 s) and every request reopens the session store.
+    return loadConversation({ silent: true })
   }, 1500)
+  timer.start()
 }
 
 watch(
