@@ -205,7 +205,8 @@ class TestReconcileSingleFlight:
 
         monkeypatch.setattr(saved_mod, "reconcile", fake_reconcile)
         # Fresh per-directory state (tmp_path is unique per test anyway).
-        saved_mod._RECONCILE_STATE.clear()
+        saved_mod._RECONCILE_LOCKS.clear()
+        saved_mod._RECONCILE_STARTED.clear()
 
     def _call(self, **params):
         kw = dict(
@@ -223,7 +224,9 @@ class TestReconcileSingleFlight:
         kw.update(params)
         return saved_mod._list_via_index(**kw)
 
-    def test_concurrent_refreshes_share_one_scan(self, monkeypatch, tmp_path):
+    def test_concurrent_refresh_burst_costs_at_most_two_scans(
+        self, monkeypatch, tmp_path
+    ):
         calls = []
         release = threading.Event()
         self._install(monkeypatch, tmp_path, calls, block=release)
@@ -241,51 +244,59 @@ class TestReconcileSingleFlight:
         assert calls, "first refresh never reached reconcile"
 
         # Both later callers queue on the per-directory lock while the
-        # first scan is still running, then fall inside the dedupe window.
+        # first scan is still running. Best-effort pause — gives them
+        # time to reach the lock before the release so the skip path is
+        # exercised; an arrival that lands after the release runs its
+        # own scan instead, which the assertion below still tolerates
+        # only while a scan started after it — hence the bounded count.
         others = [threading.Thread(target=refresh_once) for _ in range(2)]
         for t in others:
             t.start()
-        # Best-effort only — lets the queued callers reach the lock while
-        # the first scan runs. Not load-bearing: an arrival that lands
-        # after the scan still falls inside the dedupe window and skips.
         time.sleep(0.2)
         release.set()
         first.join(timeout=5)
         for t in others:
             t.join(timeout=5)
 
-        assert len(calls) == 1, "concurrent refreshes must share one scan"
+        assert (
+            len(calls) == 2
+        ), "burst must cost at most one trailing scan beyond the in-flight one"
 
-    def test_sequential_refresh_outside_window_rescans(self, monkeypatch, tmp_path):
+    def test_refresh_after_a_completed_scan_rescans(self, monkeypatch, tmp_path):
         calls = []
         self._install(monkeypatch, tmp_path, calls)
-        fake_now = [1000.0]
-        monkeypatch.setattr(saved_mod, "_monotonic", lambda: fake_now[0])
 
         self._call(refresh=True)
         assert len(calls) == 1
 
-        # Inside the dedupe window: reuse the fresh scan.
-        fake_now[0] += 0.5
-        self._call(refresh=True)
-        assert len(calls) == 1
-
-        # Outside the window: a real rescan runs.
-        fake_now[0] += 5.0
+        # Regression pin (CI, test_session_persistence_and_resume_workflow):
+        # a fork lands between two refreshes milliseconds apart. An
+        # explicit refresh that arrives when NO scan is running must
+        # scan — skipping it silently serves a pre-fork index.
         self._call(refresh=True)
         assert len(calls) == 2
-
-    def test_full_rescan_bypasses_dedupe_window(self, monkeypatch, tmp_path):
-        calls = []
-        self._install(monkeypatch, tmp_path, calls)
-        fake_now = [1000.0]
-        monkeypatch.setattr(saved_mod, "_monotonic", lambda: fake_now[0])
-
         self._call(refresh=True)
-        fake_now[0] += 0.1
-        # Explicit reread-everything intent is never short-circuited by
-        # a recent incremental scan.
+        assert len(calls) == 3
+
+    def test_full_rescan_queued_behind_a_scan_never_skips(self, monkeypatch, tmp_path):
+        calls = []
+        release = threading.Event()
+        self._install(monkeypatch, tmp_path, calls, block=release)
+
+        first = threading.Thread(target=lambda: self._call(refresh=True))
+        first.start()
+        deadline = 5.0
+        while not calls and deadline > 0:
+            time.sleep(0.01)
+            deadline -= 0.01
+        assert calls, "first refresh never reached reconcile"
+
+        # Explicit reread-everything intent never dedupes, even though a
+        # scan for the same directory is in flight right now.
         self._call(refresh=True, full_rescan=True)
+        release.set()
+        first.join(timeout=5)
+
         assert len(calls) == 2
         assert calls[1]["full"] is True
 

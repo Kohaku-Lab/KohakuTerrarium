@@ -12,8 +12,9 @@ relevance scores.
 ``refresh=true`` incrementally reconciles only files whose ``(mtime, size)``
 fingerprint changed. ``full_rescan=true`` rereads every file and is intended
 for changes made outside the application. Concurrent refreshes are
-single-flighted: bursts collapse onto one reconcile (see
-``_reconcile_guarded``) instead of fanning out into parallel scans.
+single-flighted: bursts queue behind the running scan and at most one
+trailing scan runs for the whole burst (see ``_reconcile_guarded``), while
+every refresh still reflects the changes that made the client ask.
 
 The router mounts under both ``/api/persistence/saved`` and ``/api/sessions``
 to preserve the session API URLs.
@@ -21,7 +22,6 @@ to preserve the session API URLs.
 
 import os
 import threading
-import time
 
 from fastapi import APIRouter, HTTPException
 
@@ -41,30 +41,25 @@ from kohakuterrarium.studio.persistence.store import (
 
 router = APIRouter()
 
-# Per-session-directory reconcile state: a lock serialising scans and the
-# monotonic time the last scan completed. Entries are never evicted, but
-# the key set is the set of distinct session directories this process has
-# listed — a handful in every real deployment.
-_RECONCILE_STATE: dict[str, tuple[threading.Lock, float]] = {}
+# Per-session-directory reconcile state: a lock serialising scans, plus a
+# count of scans started (freshness marker — see ``_reconcile_guarded``).
+# Entries are never evicted, but the key set is the set of distinct session
+# directories this process has listed — a handful in every real deployment.
+_RECONCILE_LOCKS: dict[str, threading.Lock] = {}
+_RECONCILE_STARTED: dict[str, int] = {}
 # Guards creation of the per-directory entries (get-or-create itself is
 # racy without it).
 _RECONCILE_STATE_LOCK = threading.Lock()
-# A burst of ``refresh=true`` requests (several clients, a retrying
-# frontend) reuses a scan completed within this window instead of running
-# one reconcile per request.
-_RECONCILE_DEDUPE_WINDOW_S = 1.0
-# Indirection keeps tests from having to patch the global ``time`` module.
-_monotonic = time.monotonic
 
 
-def _reconcile_state_for(key: str) -> tuple[threading.Lock, float]:
-    """Return the get-or-create reconcile state tuple for a directory."""
+def _reconcile_lock_for(key: str) -> threading.Lock:
+    """Return the get-or-create per-directory serialising lock."""
     with _RECONCILE_STATE_LOCK:
-        state = _RECONCILE_STATE.get(key)
-        if state is None:
-            state = (threading.Lock(), 0.0)
-            _RECONCILE_STATE[key] = state
-        return state
+        lock = _RECONCILE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _RECONCILE_LOCKS[key] = lock
+        return lock
 
 
 def _reconcile_guarded(session_dir, index, *, full_rescan: bool) -> None:
@@ -73,24 +68,26 @@ def _reconcile_guarded(session_dir, index, *, full_rescan: bool) -> None:
     Every reconcile opens session stores (~20 descriptors each), so a
     burst of forced refreshes each running its own directory scan could
     exhaust the process descriptor budget and slow the API for everyone.
-    Concurrent callers serialise on the per-directory lock; ones arriving
-    within the dedupe window after a completed scan reuse its result —
-    fingerprints move with writes, so a sub-second-old index is fresh
-    enough for any burst. ``full_rescan`` keeps its explicit reread
-    intent and only skips while another scan for the same directory is
-    still running.
+    Concurrent callers serialise on the per-directory lock, and a caller
+    skips its own pass only once a scan **started after its arrival** has
+    run — that scan's snapshot is at least as fresh as the request, so a
+    burst of K refreshes costs at most two scans while ``refresh=true``
+    still always reflects the changes that made the client ask. A refresh
+    that arrives while no scan is running always scans. ``full_rescan``
+    keeps its explicit reread-everything intent and never skips.
     """
     key = os.path.normcase(str(session_dir))
-    lock, _ = _reconcile_state_for(key)
+    lock = _reconcile_lock_for(key)
+    # Scans started before our arrival cannot reflect the change that
+    # made us ask for a refresh; scans started after it can.
+    started_at_arrival = _RECONCILE_STARTED.get(key, 0)
     with lock:
-        # Re-read the completion time after acquiring: callers that
-        # queued behind a finished scan must see its fresh timestamp,
-        # not the stale one captured before waiting.
-        done_at = _RECONCILE_STATE.get(key, (lock, 0.0))[1]
-        if not full_rescan and (_monotonic() - done_at) < _RECONCILE_DEDUPE_WINDOW_S:
+        if not full_rescan and _RECONCILE_STARTED.get(key, 0) > started_at_arrival:
             return
+        # Mark the start before scanning so waiters compare against this
+        # scan, not against a count that lags the work being done.
+        _RECONCILE_STARTED[key] = _RECONCILE_STARTED.get(key, 0) + 1
         reconcile(index, session_dir, full=full_rescan)
-        _RECONCILE_STATE[key] = (lock, _monotonic())
 
 
 @router.get("/disk-usage")
