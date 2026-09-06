@@ -42,7 +42,9 @@ from kohakuterrarium.studio.persistence.store import (
 router = APIRouter()
 
 # Per-session-directory reconcile state: a lock serialising scans and the
-# monotonic time the last scan completed.
+# monotonic time the last scan completed. Entries are never evicted, but
+# the key set is the set of distinct session directories this process has
+# listed — a handful in every real deployment.
 _RECONCILE_STATE: dict[str, tuple[threading.Lock, float]] = {}
 # Guards creation of the per-directory entries (get-or-create itself is
 # racy without it).

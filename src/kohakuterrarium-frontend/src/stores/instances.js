@@ -65,7 +65,9 @@ export const useInstancesStore = defineStore("instances", {
       // Route navigation and the 5 s attach-tab poll can request the
       // same instance while a slow lookup is unanswered; share one
       // request instead of stacking duplicates. fetchAll already has
-      // the equivalent single-request guard.
+      // the equivalent single-request guard. Sharers inherit the first
+      // caller's result or rejection — an error here is shared by
+      // everyone joined on the request (every call site catches).
       const existing = this._inflightOne[id]
       if (existing) return existing
       const task = this._fetchOneNow(id).finally(() => {

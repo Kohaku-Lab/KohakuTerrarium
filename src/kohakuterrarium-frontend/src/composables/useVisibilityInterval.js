@@ -21,6 +21,11 @@
  * skipped; only return a promise from the callback when overlapping
  * ticks are unsafe.
  *
+ * The visibility-resume catch-up tick obeys the same skip: if a
+ * request was still in flight when the tab was hidden, the first tick
+ * after returning may be dropped and data can sit up to one poll
+ * window stale until the next tick lands.
+ *
  * Usage inside a component:
  *
  *   import { useVisibilityInterval } from "@/composables/useVisibilityInterval"

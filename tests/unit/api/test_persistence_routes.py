@@ -245,6 +245,9 @@ class TestReconcileSingleFlight:
         others = [threading.Thread(target=refresh_once) for _ in range(2)]
         for t in others:
             t.start()
+        # Best-effort only — lets the queued callers reach the lock while
+        # the first scan runs. Not load-bearing: an arrival that lands
+        # after the scan still falls inside the dedupe window and skips.
         time.sleep(0.2)
         release.set()
         first.join(timeout=5)
