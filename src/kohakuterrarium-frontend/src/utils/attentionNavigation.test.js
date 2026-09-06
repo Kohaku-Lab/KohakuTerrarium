@@ -69,8 +69,19 @@ describe("attentionTargetLabel", () => {
     )
   })
 
-  it("falls back to the session name when the tab is not a creature", () => {
-    expect(attentionTargetLabel({ scope: "graph-a", tab: "unknown-tab" })).toBe("review-team")
+  it("falls back to the tab name when the creature record lacks detail", () => {
+    // listActive() listings normalize a numeric ``creatures`` count to []
+    // and the poll can replace a detailed record at any moment.
+    instances[0].creatures = []
+    expect(attentionTargetLabel({ scope: "graph-a", tab: "reviewer" })).toBe(
+      "review-team · reviewer",
+    )
+  })
+
+  it("keeps the creature label even when it is not in the (stale) listing", () => {
+    expect(attentionTargetLabel({ scope: "graph-a", tab: "unknown-tab" })).toBe(
+      "review-team · unknown-tab",
+    )
   })
 
   it("matches lenient identities (graph id, session id, creature id)", () => {
@@ -80,6 +91,6 @@ describe("attentionTargetLabel", () => {
   })
 
   it("falls back to the raw scope when the session is unknown", () => {
-    expect(attentionTargetLabel({ scope: "gone", tab: "reviewer" })).toBe("gone")
+    expect(attentionTargetLabel({ scope: "gone", tab: "reviewer" })).toBe("gone · reviewer")
   })
 })

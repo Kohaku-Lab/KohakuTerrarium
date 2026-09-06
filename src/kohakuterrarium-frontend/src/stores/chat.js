@@ -95,33 +95,22 @@ function _truncateAttentionSummary(text) {
 /**
  * Extract a bounded notification summary from a live WS frame.
  *
- * Called from ``_onMessage`` BEFORE the frame's own handler stores anything,
- * so interactive prompts must be read from the frame payload and completion
- * summaries from the messages the preceding text chunks already built.
+ * Called from ``_onMessage`` BEFORE the frame's own handler stores anything.
+ * Interactive prompts are read from the frame payload; completion summaries
+ * come from the turn's raw stream text accumulated in
+ * ``_attentionStreamTextByTab`` — which is collected before branch-view
+ * gating, so the preview describes the response that just completed even
+ * when the user is viewing a different branch, and a text-less turn
+ * summaries to "" instead of surfacing a stale earlier turn.
  */
-function _attentionEdgeSummary(data, messages) {
+function _attentionEdgeSummary(data, streamedText) {
   if (ATTENTION_INTERACTIVE_TYPES.includes(data.type)) {
     const payload = data.payload || {}
     return _truncateAttentionSummary(
       payload.prompt || payload.body || payload.text || payload.title,
     )
   }
-  if (data.type !== "processing_end") return ""
-  const list = Array.isArray(messages) ? messages : []
-  for (let i = list.length - 1; i >= 0; i--) {
-    const message = list[i]
-    if (message?.role === "user") break
-    if (message?.role !== "assistant") continue
-    // Assistant parts store their text in ``content`` (streaming and
-    // history replay both append ``{type: "text", content}``), while
-    // user-message content parts use ``text`` — accept either.
-    const text = (Array.isArray(message.parts) ? message.parts : [])
-      .filter((part) => part?.type === "text")
-      .map((part) => part.content ?? part.text ?? "")
-      .join("\n")
-    const summary = _truncateAttentionSummary(text)
-    if (summary) return summary
-  }
+  if (data.type === "processing_end") return _truncateAttentionSummary(streamedText)
   return ""
 }
 
@@ -1861,6 +1850,14 @@ const _chatStoreOptions = {
     _historyRequestSeqByTab: {},
     /** @type {Record<string, number>} Per-tab live/optimistic mutation generation invalidating in-flight snapshots */
     _historyMutationSeqByTab: {},
+    /**
+     * Per-tab raw text seen on the current turn's WS stream. Deliberately
+     * branch-agnostic — notification summaries describe the turn that just
+     * completed, not the branch the user is viewing — and reset on each
+     * ``processing_start`` so a text-less turn can never surface a stale
+     * preview from an earlier turn.
+     */
+    _attentionStreamTextByTab: {},
     /** @type {Record<string, number>} Per-tab watermark: max event_id last applied by a resync; a lower-max response is stale (branch ops exempt) */
     _appliedMaxEventIdByTab: {},
     /**
@@ -2859,10 +2856,22 @@ const _chatStoreOptions = {
           this._historyMutationSeqByTab[source] = (this._historyMutationSeqByTab[source] || 0) + 1
         }
         const scope = scopeOfStoreId(this.$id) || "default"
+        // Accumulate the turn's raw stream text before any branch-view
+        // gating drops frames from the displayed message list.
+        if (data.type === "processing_start") {
+          this._attentionStreamTextByTab[source] = ""
+        } else if (data.type === "text" && typeof data.content === "string") {
+          this._attentionStreamTextByTab[source] =
+            (this._attentionStreamTextByTab[source] || "") + data.content
+        }
         const { state } = reduceAttentionEdge(
           this.attentionByTab[source] || createAttentionState(),
           data,
-          { scope, tab: source, summary: _attentionEdgeSummary(data, this.messagesByTab[source]) },
+          {
+            scope,
+            tab: source,
+            summary: _attentionEdgeSummary(data, this._attentionStreamTextByTab[source]),
+          },
         )
         this.attentionByTab[source] = state
         publishAttention(scope, source, state)

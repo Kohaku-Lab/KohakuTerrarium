@@ -5741,6 +5741,70 @@ describe("chat store — attention edge summaries", () => {
     })
   })
 
+  it("summarizes the completed turn even when its chunks stream on a non-viewed branch", () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+    // The user is viewing branch 1 while the regen streams on branch 2:
+    // the branch-isolation gate drops the chunks from the displayed list.
+    chat.branchViewByTab = { main: { 1: 1 } }
+
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    chat._onMessage({
+      type: "processing_start",
+      source: "main",
+      turn_index: 1,
+      branch_id: 2,
+    })
+    chat._onMessage({
+      type: "text",
+      source: "main",
+      content: "Regenerated answer.",
+      turn_index: 1,
+      branch_id: 2,
+    })
+    chat._onMessage({
+      type: "processing_end",
+      source: "main",
+      turn_index: 1,
+      branch_id: 2,
+    })
+    unsubscribe()
+
+    // Display isolation is intact…
+    expect(chat.messagesByTab.main.some((m) => m.role === "assistant")).toBe(false)
+    // …but the notification still previews the response that just completed.
+    expect(edges).toHaveLength(1)
+    expect(edges[0]).toMatchObject({ kind: "completed", summary: "Regenerated answer." })
+  })
+
+  it("does not surface a stale preview when a later turn completes without text", () => {
+    const chat = useChatStore()
+    chat._instanceId = "agent_1"
+    chat._instanceGraphId = "agent_1"
+    chat.activeTab = "main"
+    chat.tabs = ["main"]
+    chat.messagesByTab = { main: [] }
+
+    const edges = []
+    const unsubscribe = subscribeAttentionEdges((edge) => edges.push(edge))
+    chat._onMessage({ type: "processing_start", source: "main" })
+    chat._onMessage({ type: "text", source: "main", content: "First turn answer." })
+    chat._onMessage({ type: "processing_end", source: "main" })
+    chat._onMessage({ type: "processing_start", source: "main" })
+    chat._onMessage({ type: "processing_end", source: "main" })
+    unsubscribe()
+
+    expect(edges).toHaveLength(2)
+    expect(edges[0]).toMatchObject({ kind: "completed", summary: "First turn answer." })
+    expect(edges[1]).toMatchObject({ kind: "completed" })
+    expect(edges[1].summary).toBeUndefined()
+  })
+
   it("summarizes an interactive prompt from its frame payload", () => {
     const chat = useChatStore()
     chat._instanceId = "agent_1"
