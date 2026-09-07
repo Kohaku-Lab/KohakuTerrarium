@@ -11,13 +11,17 @@ relevance scores.
 
 ``refresh=true`` incrementally reconciles only files whose ``(mtime, size)``
 fingerprint changed. ``full_rescan=true`` rereads every file and is intended
-for changes made outside the application.
+for changes made outside the application. Concurrent refreshes are
+single-flighted: bursts queue behind the running scan and at most one
+trailing scan runs for the whole burst (see ``_reconcile_guarded``), while
+every refresh still reflects the changes that made the client ask.
 
 The router mounts under both ``/api/persistence/saved`` and ``/api/sessions``
 to preserve the session API URLs.
 """
 
 import os
+import threading
 
 from fastapi import APIRouter, HTTPException
 
@@ -36,6 +40,65 @@ from kohakuterrarium.studio.persistence.store import (
 )
 
 router = APIRouter()
+
+# Per-session-directory reconcile state: a lock serialising scans, plus a
+# count of scans started (freshness marker — see ``_reconcile_guarded``).
+# Entries are never evicted, but the key set is the set of distinct session
+# directories this process has listed — a handful in every real deployment.
+_RECONCILE_LOCKS: dict[str, threading.Lock] = {}
+_RECONCILE_STARTED: dict[str, int] = {}
+# Guards creation of the per-directory entries (get-or-create itself is
+# racy without it).
+_RECONCILE_STATE_LOCK = threading.Lock()
+
+
+def _reconcile_lock_for(key: str) -> threading.Lock:
+    """Return the get-or-create per-directory serialising lock."""
+    with _RECONCILE_STATE_LOCK:
+        lock = _RECONCILE_LOCKS.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _RECONCILE_LOCKS[key] = lock
+        return lock
+
+
+def _reconcile_guarded(session_dir, index, *, full_rescan: bool) -> None:
+    """Run one reconcile for a burst of concurrent refresh requests.
+
+    Every reconcile opens session stores (~20 descriptors each), so a
+    burst of forced refreshes each running its own directory scan could
+    exhaust the process descriptor budget and slow the API for everyone.
+    Concurrent callers serialise on the per-directory lock, and a caller
+    skips its own pass only once a scan **started after its arrival** has
+    run — that scan's snapshot is at least as fresh as the request, so a
+    burst of K refreshes costs at most two scans while ``refresh=true``
+    still always reflects the changes that made the client ask. A refresh
+    that arrives while no scan is running always scans. ``full_rescan``
+    keeps its explicit reread-everything intent and never skips.
+
+    A scan that produced no index update — ``reconcile`` reporting
+    ``aborted`` (directory-walk failure) or raising — does not count as
+    that fresher scan: the start is rolled back so queued waiters run
+    their own pass instead of skipping on a start that reflected no work.
+    """
+    key = os.path.normcase(str(session_dir))
+    lock = _reconcile_lock_for(key)
+    # Scans started before our arrival cannot reflect the change that
+    # made us ask for a refresh; scans started after it can.
+    started_at_arrival = _RECONCILE_STARTED.get(key, 0)
+    with lock:
+        if not full_rescan and _RECONCILE_STARTED.get(key, 0) > started_at_arrival:
+            return
+        # Mark the start before scanning so waiters compare against this
+        # scan, not against a count that lags the work being done.
+        _RECONCILE_STARTED[key] = _RECONCILE_STARTED.get(key, 0) + 1
+        try:
+            report = reconcile(index, session_dir, full=full_rescan)
+        except BaseException:
+            _RECONCILE_STARTED[key] -= 1
+            raise
+        if getattr(report, "aborted", False):
+            _RECONCILE_STARTED[key] -= 1
 
 
 @router.get("/disk-usage")
@@ -91,7 +154,7 @@ def _list_via_index(
     session_dir = _session_dir()
     index = get_session_index_default(session_dir)
     if refresh or full_rescan:
-        reconcile(index, session_dir, full=full_rescan)
+        _reconcile_guarded(session_dir, index, full_rescan=full_rescan)
     page = index.list(
         search=search,
         status=status,

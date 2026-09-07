@@ -24,6 +24,8 @@ export const useInstancesStore = defineStore("instances", {
     _pollInterval: null,
     _subscribers: 0,
     _inflightFetch: null,
+    /** id -> shared in-flight fetchOne promise. */
+    _inflightOne: {},
     _fetchSeq: 0,
   }),
 
@@ -60,6 +62,22 @@ export const useInstancesStore = defineStore("instances", {
     },
 
     async fetchOne(id) {
+      // Route navigation and the 5 s attach-tab poll can request the
+      // same instance while a slow lookup is unanswered; share one
+      // request instead of stacking duplicates. fetchAll already has
+      // the equivalent single-request guard. Sharers inherit the first
+      // caller's result or rejection — an error here is shared by
+      // everyone joined on the request (every call site catches).
+      const existing = this._inflightOne[id]
+      if (existing) return existing
+      const task = this._fetchOneNow(id).finally(() => {
+        delete this._inflightOne[id]
+      })
+      this._inflightOne[id] = task
+      return task
+    },
+
+    async _fetchOneNow(id) {
       this.loading = true
       const seq = this._fetchSeq
       try {
@@ -126,9 +144,7 @@ export const useInstancesStore = defineStore("instances", {
     startPolling() {
       this._subscribers++
       if (this._pollInterval === null) {
-        this._pollInterval = createVisibilityInterval(() => {
-          this.fetchAll()
-        }, 5000)
+        this._pollInterval = createVisibilityInterval(() => this.fetchAll(), 5000)
         this._pollInterval.start()
       }
     },

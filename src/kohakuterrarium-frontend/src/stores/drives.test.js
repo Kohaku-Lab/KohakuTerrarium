@@ -101,6 +101,106 @@ describe("drives store", () => {
     expect(store.order).toEqual(["d1"])
   })
 
+  it("reconcile coalesces overlapping callers onto one in-flight request plus one trailing pass", async () => {
+    drivesAPI.list.mockResolvedValue([])
+    const store = freshStore()
+    await store.load("s1")
+    drivesAPI.list.mockClear()
+
+    let resolveList
+    drivesAPI.list
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveList = resolve
+          }),
+      )
+      .mockResolvedValueOnce([_rec("d1"), _rec("d2")])
+
+    // The 6 s panel poller, the 8 s badge poller, and an event-scheduled
+    // reconcile can all fire while one listing is unanswered — they must
+    // share it, not stack three identical requests.
+    const calls = [store.reconcile(), store.reconcile(), store.reconcile()]
+    expect(drivesAPI.list).toHaveBeenCalledTimes(1)
+
+    resolveList([_rec("d1")])
+    await Promise.all(calls)
+    // The coalesced callers' reasons to reconcile postdate the first
+    // request's snapshot, so exactly one trailing pass runs after it.
+    expect(drivesAPI.list).toHaveBeenCalledTimes(2)
+    expect(store.order).toEqual(["d1", "d2"])
+
+    // Settled with no joiner pending: a fresh reconcile issues a new
+    // request, and no trailing pass follows it.
+    drivesAPI.list.mockResolvedValue([_rec("d1")])
+    await store.reconcile()
+    expect(drivesAPI.list).toHaveBeenCalledTimes(3)
+    expect(store.order).toEqual(["d1"])
+  })
+
+  it("a coalesced event-triggered reconcile still refreshes past the in-flight snapshot", async () => {
+    drivesAPI.list.mockResolvedValue([])
+    const store = freshStore()
+    await store.load("s1")
+    drivesAPI.list.mockClear()
+
+    // Codex-review scenario: drive_registration_changed carries no
+    // embedded view and only schedules a reconcile. If that reconcile
+    // joined a listing whose snapshot predates the event, the refresh
+    // would be lost until the next poll.
+    let resolveStale
+    drivesAPI.list
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveStale = resolve
+          }),
+      )
+      .mockResolvedValueOnce([_rec("d1"), _rec("new-drive")])
+
+    const periodic = store.reconcile()
+    const eventTriggered = store.reconcile() // scheduled 200 ms after the event
+    resolveStale([_rec("d1")]) // snapshot taken before the event
+    await Promise.all([periodic, eventTriggered])
+
+    expect(drivesAPI.list).toHaveBeenCalledTimes(2)
+    expect(store.order).toEqual(["d1", "new-drive"])
+  })
+
+  it("a session switch releases the shared in-flight reconcile", async () => {
+    const store = freshStore()
+    let resolveLoad
+    drivesAPI.list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveLoad = resolve
+        }),
+    )
+    const firstLoad = store.load("s1")
+
+    // Old session's reconcile hangs; the new session's load must detach
+    // from it so its own reconciles never wait on stale work.
+    let resolveReconcile
+    drivesAPI.list.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveReconcile = resolve
+        }),
+    )
+    const staleReconcile = store.reconcile()
+
+    drivesAPI.list.mockResolvedValue([_rec("n1")])
+    const secondLoad = await store.load("s2")
+    expect(secondLoad).toHaveLength(1)
+
+    resolveLoad([])
+    resolveReconcile([_rec("d1")])
+    await Promise.all([firstLoad, staleReconcile])
+    // The stale responses arrived after the switch: discarded, not merged.
+    expect(store.records.n1).toBeDefined()
+    expect(store.records.d1).toBeUndefined()
+  })
+
   it("applyEvent upserts an embedded view and guards older revisions", async () => {
     drivesAPI.list.mockResolvedValue([_rec("d1", { revision: 4 })])
     const store = freshStore()

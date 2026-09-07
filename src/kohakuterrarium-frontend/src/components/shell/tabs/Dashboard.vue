@@ -73,6 +73,7 @@ import AdvancedStartModal from "@/components/shell/modals/AdvancedStartModal.vue
 import { useInstancesStore } from "@/stores/instances"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 
 const { t } = useI18n()
 
@@ -107,12 +108,15 @@ async function refresh() {
 function startTimer() {
   stopTimer()
   if (refreshIntervalMs.value > 0) {
-    timer = setInterval(refresh, refreshIntervalMs.value)
+    // refresh() is async: returning it lets the interval skip ticks
+    // while a slow listing is in flight instead of stacking requests.
+    timer = createVisibilityInterval(() => refresh(), refreshIntervalMs.value)
+    timer.start()
   }
 }
 function stopTimer() {
   if (timer) {
-    clearInterval(timer)
+    timer.stop()
     timer = null
   }
 }

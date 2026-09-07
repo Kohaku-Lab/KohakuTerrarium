@@ -56,6 +56,7 @@ import { useInstancesStore } from "@/stores/instances"
 import { useTabsStore } from "@/stores/tabs"
 import { settingsAPI, statsAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 
 const { t } = useI18n()
 
@@ -105,11 +106,14 @@ onMounted(async () => {
   ])
   // 5 s refresh — same cadence as the rest of the dashboard so the
   // user feels one heartbeat, not a flicker of independent updates.
-  metricsTimer = setInterval(loadMetrics, 5000)
+  // Returning the promise from loadMetrics lets the interval skip
+  // ticks while a slow snapshot request is still in flight.
+  metricsTimer = createVisibilityInterval(() => loadMetrics(), 5000)
+  metricsTimer.start()
 })
 
 onUnmounted(() => {
-  if (metricsTimer) clearInterval(metricsTimer)
+  if (metricsTimer) metricsTimer.stop()
 })
 
 const running = computed(() => instances.list.filter((i) => i.status === "running").length)

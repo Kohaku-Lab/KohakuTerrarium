@@ -12,6 +12,20 @@
  * reactive updates in Vue. Gating on `document.visibilityState`
  * eliminates both costs.
  *
+ * Slow-backend back-pressure: when a callback returns a promise, ticks
+ * fired before that promise settles are skipped. A backend answering
+ * slower than the poll period must not turn the fixed interval into a
+ * pile of overlapping duplicate requests — without the skip, one more
+ * request stacks per tick and the load makes the backend slower
+ * still. Synchronous callbacks (returning undefined) are never
+ * skipped; only return a promise from the callback when overlapping
+ * ticks are unsafe.
+ *
+ * The visibility-resume catch-up tick obeys the same skip: if a
+ * request was still in flight when the tab was hidden, the first tick
+ * after returning may be dropped and data can sit up to one poll
+ * window stale until the next tick lands.
+ *
  * Usage inside a component:
  *
  *   import { useVisibilityInterval } from "@/composables/useVisibilityInterval"
@@ -34,7 +48,9 @@ import { onBeforeUnmount } from "vue"
 /**
  * Create a visibility-aware interval controller.
  *
- * @param {() => void} callback   Fired on each tick AND once on resume.
+ * @param {() => void | Promise<unknown>} callback
+ *   Fired on each tick AND once on resume. A returned promise arms the
+ *   in-flight skip; see the module docstring.
  * @param {number} intervalMs     Tick interval in milliseconds.
  * @param {object} [opts]
  * @param {boolean} [opts.immediate=false]
@@ -46,12 +62,23 @@ export function createVisibilityInterval(callback, intervalMs, opts = {}) {
   let timer = null
   let started = false
   let onVisibility = null
+  let pending = null
 
   function tick() {
+    if (pending !== null) return
+    let result
     try {
-      callback()
+      result = callback()
     } catch (err) {
       console.error("[useVisibilityInterval] callback threw:", err)
+      return
+    }
+    if (result && typeof result.then === "function") {
+      pending = result
+      const settled = () => {
+        if (pending === result) pending = null
+      }
+      result.then(settled, settled)
     }
   }
 
@@ -90,6 +117,9 @@ export function createVisibilityInterval(callback, intervalMs, opts = {}) {
     if (!started) return
     started = false
     disarmTimer()
+    // A request left in flight by the previous run must not suppress
+    // the first ticks after a restart.
+    pending = null
     if (onVisibility) {
       document.removeEventListener("visibilitychange", onVisibility)
       onVisibility = null

@@ -382,7 +382,7 @@ Query params:
 | `limit` | int | `20` | Max sessions. |
 | `offset` | int | `0` | Skip N. |
 | `search` | str | (none) | Filter by name, config, agents, preview (case-insensitive). |
-| `refresh` | bool | `false` | Force rebuild of the session index. |
+| `refresh` | bool | `false` | Reconcile the index against disk before listing (incremental, fingerprint-diffed). Concurrent refreshes are single-flighted: a burst costs at most two scans, and each refresh reflects changes up to its own arrival. |
 
 Response:
 

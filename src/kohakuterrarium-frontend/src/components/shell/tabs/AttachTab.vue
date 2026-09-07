@@ -200,7 +200,9 @@ onMounted(async () => {
   document.addEventListener("visibilitychange", markVisibleConversationRead)
   await loadInstance()
   refreshTimer = createVisibilityInterval(() => {
-    loadInstance().catch((err) => console.error("Instance refresh failed:", err))
+    // Return the promise so the interval skips ticks while a slow
+    // refresh is still in flight instead of stacking requests.
+    return loadInstance().catch((err) => console.error("Instance refresh failed:", err))
   }, 5000)
   refreshTimer.start()
 })

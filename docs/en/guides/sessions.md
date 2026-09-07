@@ -335,7 +335,12 @@ How the index stays in sync without manual refresh:
   every file (the *bootstrap* step) and remembers it succeeded.
 - **`?refresh=true`.** Trigger the same incremental reconcile on
   demand; useful right after copying a backup `.kohakutr` into the
-  session directory.
+  session directory. Refreshes are single-flighted: a request that
+  arrives while a scan is already running queues behind it and skips
+  its own pass only once a scan started *after* the request arrived,
+  so a burst of refreshes costs at most two scans and every refresh
+  still reflects the changes that made the client ask.
+  `?full_rescan=true` keeps its force-reread intent and never skips.
 
 The sidecar is safe to delete: the next listing rebuilds it from
 the `.kohakutr` files. Nothing inside the index is unique state.

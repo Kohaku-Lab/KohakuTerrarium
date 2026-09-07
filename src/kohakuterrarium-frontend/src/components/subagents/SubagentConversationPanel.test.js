@@ -1,8 +1,8 @@
 import { flushPromises, mount } from "@vue/test-utils"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import SubagentConversationPanel from "./SubagentConversationPanel.vue"
-import { sessionAPI } from "@/utils/api"
+import { sessionAPI, terrariumAPI } from "@/utils/api"
 
 vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: (key) => key }) }))
 
@@ -305,5 +305,60 @@ describe("SubagentConversationPanel ambiguity selector", () => {
     expect(wrapper.text()).toContain("ambiguous across members")
     expect(wrapper.find("[data-test='subagent-run-0']").exists()).toBe(false)
     vi.restoreAllMocks()
+  })
+})
+
+describe("SubagentConversationPanel live polling", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+  })
+
+  it("does not stack conversation reads while the previous one is in flight", async () => {
+    let resolveSlow
+    const slowRead = new Promise((resolve) => {
+      resolveSlow = resolve
+    })
+    const getLive = vi
+      .spyOn(terrariumAPI, "getSubagentConversation")
+      // Mount-time load resolves; every poll read then hangs until the
+      // test releases it, standing in for a backend slower than 1.5 s.
+      .mockResolvedValueOnce({ can_receive: true, messages: [] })
+      .mockImplementation(() => slowRead)
+
+    const wrapper = mount(SubagentConversationPanel, {
+      props: {
+        sessionId: "session-a",
+        parent: "root",
+        name: "explore",
+        live: true,
+        status: "running",
+      },
+      global: {
+        stubs: {
+          MarkdownRenderer: { props: ["content"], template: "<div>{{ content }}</div>" },
+          ToolCallBlock: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    // Three poll ticks land while the first read is unanswered — only
+    // one request may be outstanding, the rest must be skipped.
+    vi.advanceTimersByTime(4500)
+    expect(getLive).toHaveBeenCalledTimes(2) // mount load + first poll
+
+    resolveSlow({ can_receive: true, messages: [] })
+    await flushPromises()
+    vi.advanceTimersByTime(1500)
+    expect(getLive).toHaveBeenCalledTimes(3)
+
+    wrapper.unmount()
+    getLive.mockRestore()
   })
 })
