@@ -64,7 +64,7 @@ test('ws.send emits a correlated result only after the socket write callback acc
     })
   }
 
-  const pending = host.handle({ type: 'ws.send', socketId: 7, sendId: 42, data: 'frame' })
+  const pending = host.handle({ type: 'ws.send', readyId: 'ready-B', socketId: 7, sendId: 42, data: 'frame' })
   await Promise.resolve()
   assert.equal(posts.length, 0)
   accept(true)
@@ -83,7 +83,7 @@ test('ws.send rejection throws without emitting a success result', async () => {
   const { host, posts, sockets } = harness()
   sockets.send = async () => false
 
-  await assert.rejects(host.handle({ type: 'ws.send', socketId: 7, sendId: 43, data: 'frame' }), /not open/)
+  await assert.rejects(host.handle({ type: 'ws.send', readyId: 'ready-B', socketId: 7, sendId: 43, data: 'frame' }), /not open/)
   assert.equal(
     posts.some((post) => post.type === 'ws.send.result'),
     false,
@@ -100,7 +100,7 @@ test('ws.open omits the token subprotocol for loopback-bypass mode', async () =>
   }
   host.token = ''
 
-  await host.handle({ type: 'ws.open', socketId: 7 })
+  await host.handle({ type: 'ws.open', readyId: 'ready-B', socketId: 7 })
 
   assert.deepEqual(socketCalls[0].socket.protocols, [])
 })
@@ -115,7 +115,7 @@ test('ws.open constructs the authenticated selected-creature route on the Host',
   }
   host.generation = 4
 
-  await host.handle({ type: 'ws.open', socketId: 9 })
+  await host.handle({ type: 'ws.open', readyId: 'ready-B', socketId: 9 })
 
   assert.equal(socketCalls[0].generation, 4)
   assert.equal(socketCalls[0].socketId, 9)

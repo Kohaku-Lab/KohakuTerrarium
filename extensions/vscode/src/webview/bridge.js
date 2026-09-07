@@ -9,14 +9,16 @@ export class BridgeWebSocket {
   static confirmationTimeout = 30000
   static capture = null
   static post = () => {}
+  static getReadyId = () => null
 
   constructor(url) {
     this.url = url
+    this.readyId = BridgeWebSocket.getReadyId()
     this.readyState = BridgeWebSocket.CONNECTING
     this.id = BridgeWebSocket.nextId++
     this.pendingSends = new Map()
     BridgeWebSocket.sockets.set(this.id, this)
-    BridgeWebSocket.post({ type: 'ws.open', socketId: this.id })
+    BridgeWebSocket.post({ type: 'ws.open', socketId: this.id, ...(this.readyId == null ? {} : { readyId: this.readyId }) })
   }
 
   send(data) {
@@ -36,14 +38,14 @@ export class BridgeWebSocket {
       frame: data,
       cancel: (error) => BridgeWebSocket.cancelSend(this, sendId, error),
     })
-    BridgeWebSocket.post({ type: 'ws.send', socketId: this.id, sendId, data })
+    BridgeWebSocket.post({ type: 'ws.send', socketId: this.id, sendId, data, ...(this.readyId == null ? {} : { readyId: this.readyId }) })
   }
 
   close() {
     if (this.readyState >= BridgeWebSocket.CLOSING) return
     this.readyState = BridgeWebSocket.CLOSING
     this.rejectPending(Error('Chat socket closed'))
-    BridgeWebSocket.post({ type: 'ws.close', socketId: this.id })
+    BridgeWebSocket.post({ type: 'ws.close', socketId: this.id, ...(this.readyId == null ? {} : { readyId: this.readyId }) })
   }
 
   rejectPending(error) {
