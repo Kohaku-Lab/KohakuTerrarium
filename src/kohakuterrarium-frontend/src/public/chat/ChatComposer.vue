@@ -91,7 +91,7 @@ const active = computed(() => focused.value || props.modelValue.length > 0)
 const canSubmit = computed(() => props.modelValue.trim().length > 0 || props.attachments.length > 0)
 function label(key, values = {}, fallback = key) {
   let value = props.labels[key] || fallback
-  for (const [name, replacement] of Object.entries(values)) value = value.replace(`{${name}}`, replacement)
+  for (const [name, replacement] of Object.entries(values)) value = value.replace(`{${name}}`, () => replacement)
   return value
 }
 function resize() {

@@ -98,6 +98,18 @@ describe("ChatComposer", () => {
     })
   })
 
+  it("renders removal labels with literal dollar sequences and ordinary filenames", async () => {
+    const wrapper = mountComposer({
+      attachments: [
+        { file: file("weird.txt", "text/plain"), name: "a$&b$$c$'d$`e.txt" },
+        { file: file("notes.txt", "text/plain"), name: "notes.txt" },
+      ],
+    })
+    const removeButtons = wrapper.findAll(".kt-chat-composer__chip button")
+    expect(removeButtons[0].attributes("aria-label")).toBe("Remove a$&b$$c$'d$`e.txt")
+    expect(removeButtons[1].attributes("aria-label")).toBe("Remove notes.txt")
+  })
+
   it("awaits host attachment transforms and silently discards superseded work", async () => {
     let resolve
     const transformed = new Promise((done) => (resolve = done))
