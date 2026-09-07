@@ -140,6 +140,38 @@ def content_parts_to_dicts(parts: list[ContentPart]) -> list[dict[str, Any]]:
     return [part if isinstance(part, dict) else part.to_dict() for part in parts]
 
 
+def content_display_text(
+    content: str | list[ContentPart | RawContentPart] | None,
+) -> str:
+    """Render content as display text, replacing non-text parts with short labels.
+
+    String content passes through untouched. Multimodal content-part lists
+    (e.g. web submissions persisted by ``create_user_input_event``) become
+    plain text: text parts are joined with newlines, images render as
+    ``[image]``-style descriptions, and files as ``[file: <name>]``.
+    """
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+
+    parts = normalize_content_parts(content)
+    if not isinstance(parts, list):
+        return ""
+
+    lines: list[str] = []
+    for part in parts:
+        if isinstance(part, TextPart):
+            if part.text:
+                lines.append(part.text)
+        elif isinstance(part, ImagePart):
+            lines.append(part.get_description())
+        elif isinstance(part, FilePart):
+            label = part.name or part.path or "file"
+            lines.append(f"[file: {label}]")
+    return "\n".join(lines)
+
+
 # Non-standard fields are preserved separately so provider state survives round-trips.
 _STANDARD_MESSAGE_KEYS = frozenset(
     {"role", "content", "name", "tool_call_id", "tool_calls"}

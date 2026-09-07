@@ -3,6 +3,7 @@
 import sys
 from typing import TextIO
 
+from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.session.history import (
     dedupe_adjacent_duplicate_events,
@@ -42,8 +43,9 @@ def _group_resume_events(events: list[dict]) -> list[dict]:
         if etype == "user_input":
             if current["user"] or current["text"]:
                 turns.append(current)
+            # Multimodal content lists render as display text, not Python repr.
             current = {
-                "user": evt.get("content", ""),
+                "user": content_display_text(evt.get("content", "")),
                 "text": "",
                 "tools": [],
             }
