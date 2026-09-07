@@ -2,7 +2,8 @@ import { onBeforeUnmount, onMounted, watch } from "vue"
 
 import { subscribeAttention, subscribeAttentionEdges, totalAttention } from "@/stores/attention"
 import { useAttentionPrefs } from "@/stores/attentionPrefs"
-import { navigateToAttention } from "@/utils/attentionNavigation"
+import { attentionTargetLabel, navigateToAttention } from "@/utils/attentionNavigation"
+import { useI18n } from "@/utils/i18n"
 
 const DESKTOP_PROTOCOL = 1
 const AUDIO_UNLOCK_EVENT = "kt:attention-audio-unlock"
@@ -22,6 +23,7 @@ export async function requestNotificationPermission() {
 
 export function useAttentionEffects() {
   const prefs = useAttentionPrefs()
+  const { t } = useI18n()
   let unsubscribeEdges
   let unsubscribeAttention
   let desktopSurface = Boolean(window.pywebview?.api)
@@ -84,6 +86,23 @@ export function useAttentionEffects() {
     }
   }
 
+  function notificationContent(event) {
+    const waiting = event.kind === "waiting-input"
+    const target = attentionTargetLabel(event)
+    const title = waiting
+      ? t("attention.notify.waitingTitle")
+      : t("attention.notify.completedTitle")
+    const summary = event.summary && prefs.state.notificationPreview ? event.summary : ""
+    const body = waiting
+      ? summary
+        ? t("attention.notify.waitingBodySummary", { target, summary })
+        : t("attention.notify.waitingBody", { target })
+      : summary
+        ? t("attention.notify.completedBodySummary", { target, summary })
+        : t("attention.notify.completedBody", { target })
+    return { title, body }
+  }
+
   function notifyBrowser(event) {
     if (
       desktopSurface ||
@@ -99,15 +118,8 @@ export function useAttentionEffects() {
       (event.kind === "completed" && prefs.state.notifyCompletion)
     if (!enabled) return
 
-    const notification = new Notification(
-      event.kind === "waiting-input" ? "KohakuTerrarium needs input" : "KohakuTerrarium completed",
-      {
-        body:
-          event.kind === "waiting-input"
-            ? "A response is waiting for you."
-            : "A response is ready.",
-      },
-    )
+    const { title, body } = notificationContent(event)
+    const notification = new Notification(title, { body })
     notification.onclick = () => {
       window.focus()
       navigateToAttention(event)

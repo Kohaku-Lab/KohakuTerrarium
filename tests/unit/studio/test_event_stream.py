@@ -472,3 +472,57 @@ def test_event_log_ring_buffer_bounds_replay_history():
         assert log[0]["content"] == "c50"
     finally:
         mod._event_logs.pop(key, None)
+
+
+class TestStreamOutputAwaitingBackground:
+    """A turn that ends only to wait for deliverable background jobs is not
+    a completion for attention purposes. The processing_end frame must carry
+    ``awaiting_background`` so the client suppresses its completed edge."""
+
+    async def test_processing_end_flags_awaiting_background(self):
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=1, branch=1)
+        agent._turn_dispatched_bg = {"job_1"}
+        so = StreamOutput("src", q, [], agent=agent)
+        await so.on_processing_end()
+        msg = q.get_nowait()
+        assert msg["type"] == "processing_end"
+        assert msg["awaiting_background"] is True
+
+    async def test_processing_end_without_bg_jobs_has_no_flag(self):
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=1, branch=1)
+        agent._turn_dispatched_bg = set()
+        so = StreamOutput("src", q, [], agent=agent)
+        await so.on_processing_end()
+        msg = q.get_nowait()
+        assert "awaiting_background" not in msg
+
+    async def test_processing_end_without_agent_has_no_flag(self):
+        # Legacy construction without an agent must stay flag-free.
+        q = asyncio.Queue()
+        so = StreamOutput("src", q, [])
+        await so.on_processing_end()
+        assert "awaiting_background" not in q.get_nowait()
+
+    async def test_processing_end_via_emit_carries_the_flag(self):
+        # The typed-emit arm must produce the same annotated frame as the
+        # hook path — a direct emit must not bypass awaiting_background.
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=1, branch=1)
+        agent._turn_dispatched_bg = {"job_1"}
+        so = StreamOutput("src", q, [], agent=agent)
+        await so.emit(_evt("processing_end"))
+        msg = q.get_nowait()
+        assert msg["type"] == "processing_end"
+        assert msg["awaiting_background"] is True
+
+    async def test_processing_start_never_flagged(self):
+        q = asyncio.Queue()
+        agent = _StubAgent(turn=1, branch=1)
+        agent._turn_dispatched_bg = {"job_1"}
+        so = StreamOutput("src", q, [], agent=agent)
+        await so.on_processing_start()
+        msg = q.get_nowait()
+        assert msg["type"] == "processing_start"
+        assert "awaiting_background" not in msg

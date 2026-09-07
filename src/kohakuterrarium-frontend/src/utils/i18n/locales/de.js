@@ -315,6 +315,15 @@ export default {
   "settings.prefs.notifyCompletion": "Bei Abschluss benachrichtigen",
   "settings.prefs.notifyCompletionHint":
     "Benachrichtigt auch bei gewöhnlich abgeschlossenen Antworten.",
+  "settings.prefs.notificationPreview": "Benachrichtigungsdetails",
+  "settings.prefs.notificationPreviewHint":
+    "Systembenachrichtigungen enthalten eine kurze Vorschau des Inhalts.",
+  "attention.notify.waitingTitle": "KohakuTerrarium wartet auf Eingabe",
+  "attention.notify.waitingBody": "{target} wartet auf eine Antwort von Ihnen.",
+  "attention.notify.waitingBodySummary": "{target} wartet auf eine Antwort von Ihnen: {summary}",
+  "attention.notify.completedTitle": "KohakuTerrarium hat geantwortet",
+  "attention.notify.completedBody": "{target} hat eine neue Antwort bereit.",
+  "attention.notify.completedBodySummary": "{target} hat eine neue Antwort bereit: {summary}",
   "settings.prefs.attentionSound": "Hinweistöne",
   "settings.prefs.attentionSoundHint": "Spielt nach der Audiofreigabe einen kurzen lokalen Ton.",
   "settings.prefs.soundWaiting": "Ton bei erforderlicher Eingabe",

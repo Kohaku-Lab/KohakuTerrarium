@@ -120,7 +120,14 @@ class StreamOutput(OutputModule):
         self._put({"type": "processing_start"})
 
     async def on_processing_end(self) -> None:
-        self._put({"type": "processing_end"})
+        frame = {"type": "processing_end"}
+        # A turn that ended only to wait for deliverable background jobs is not
+        # a completion for attention purposes; tell the client so it does not
+        # raise a user-attention edge. Mirrors the agent-private reads in
+        # ``_current_turn_branch``.
+        if getattr(self._agent, "_turn_dispatched_bg", None):
+            frame["awaiting_background"] = True
+        self._put(frame)
 
     def on_activity(self, activity_type: str, detail: str) -> None:
         name, info = _parse_detail(detail)
@@ -227,7 +234,9 @@ class StreamOutput(OutputModule):
                     frame["request_id"] = event.payload["request_id"]
                 self._put(frame)
             case "processing_end":
-                self._put({"type": "processing_end"})
+                # Same annotated frame as the hook path; a direct emit must
+                # not bypass the awaiting_background flag.
+                await self.on_processing_end()
             case "user_input":
                 # User input is echoed by the attachment loop to avoid duplicate frames.
                 pass

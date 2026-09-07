@@ -66,7 +66,10 @@ export function reduceAttention(state, event) {
   }
 
   if (event.type === "processing_end") {
-    if (next.processing) next.completed += 1
+    // A turn that ended only to wait for deliverable background jobs is not
+    // a completion: no counter, no attention edge. The auto-wake turn that
+    // reports the result raises its own genuine edge later.
+    if (next.processing && !event.awaiting_background) next.completed += 1
     next.processing = false
     return next
   }
@@ -106,6 +109,7 @@ export function reduceAttentionEdge(state, event, target = {}) {
         tab: target.tab ?? event.tab,
         kind,
         ...(eventId ? { eventId } : {}),
+        ...(target.summary ? { summary: target.summary } : {}),
       }
     : null
   if (edge?.scope && edge?.tab) {
