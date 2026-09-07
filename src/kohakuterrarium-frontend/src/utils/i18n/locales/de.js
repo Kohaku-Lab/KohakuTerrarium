@@ -317,7 +317,7 @@ export default {
     "Benachrichtigt auch bei gewöhnlich abgeschlossenen Antworten.",
   "settings.prefs.notificationPreview": "Benachrichtigungsdetails",
   "settings.prefs.notificationPreviewHint":
-    "Systembenachrichtigungen enthalten den Unterhaltungsnamen und eine kurze Vorschau.",
+    "Systembenachrichtigungen enthalten eine kurze Vorschau des Inhalts.",
   "attention.notify.waitingTitle": "KohakuTerrarium wartet auf Eingabe",
   "attention.notify.waitingBody": "{target} wartet auf eine Antwort von Ihnen.",
   "attention.notify.waitingBodySummary": "{target} wartet auf eine Antwort von Ihnen: {summary}",

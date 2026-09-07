@@ -303,8 +303,7 @@ export default {
   "settings.prefs.notifyCompletion": "응답 완료 시 알림",
   "settings.prefs.notifyCompletionHint": "일반 응답 완료에도 알림을 보냅니다.",
   "settings.prefs.notificationPreview": "알림 상세",
-  "settings.prefs.notificationPreviewHint":
-    "시스템 알림에 세션 이름과 짧은 메시지 요약을 표시합니다.",
+  "settings.prefs.notificationPreviewHint": "시스템 알림에 짧은 메시지 요약을 표시합니다.",
   "attention.notify.waitingTitle": "KohakuTerrarium 입력 대기 중",
   "attention.notify.waitingBody": "{target}이(가) 응답을 기다리고 있습니다.",
   "attention.notify.waitingBodySummary": "{target}이(가) 응답을 기다리고 있습니다: {summary}",

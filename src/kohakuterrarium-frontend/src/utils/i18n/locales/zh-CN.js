@@ -322,7 +322,7 @@ export default {
   "settings.prefs.notifyCompletion": "回答完成时通知",
   "settings.prefs.notifyCompletionHint": "普通回答完成时也发送通知。",
   "settings.prefs.notificationPreview": "通知详情",
-  "settings.prefs.notificationPreviewHint": "系统通知中包含会话名称和简短的消息摘要。",
+  "settings.prefs.notificationPreviewHint": "系统通知中包含简短的消息摘要。",
   "attention.notify.waitingTitle": "KohakuTerrarium 等待你的输入",
   "attention.notify.waitingBody": "{target} 正在等待你的回复。",
   "attention.notify.waitingBodySummary": "{target} 正在等待你的回复：{summary}",

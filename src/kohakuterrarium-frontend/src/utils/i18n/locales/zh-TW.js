@@ -295,7 +295,7 @@ export default {
   "settings.prefs.notifyCompletion": "回答完成時通知",
   "settings.prefs.notifyCompletionHint": "一般回答完成時也傳送通知。",
   "settings.prefs.notificationPreview": "通知詳情",
-  "settings.prefs.notificationPreviewHint": "系統通知中包含會話名稱與簡短訊息摘要。",
+  "settings.prefs.notificationPreviewHint": "系統通知中包含簡短訊息摘要。",
   "attention.notify.waitingTitle": "KohakuTerrarium 等待你的輸入",
   "attention.notify.waitingBody": "{target} 正在等待你的回覆。",
   "attention.notify.waitingBodySummary": "{target} 正在等待你的回覆：{summary}",

@@ -328,7 +328,7 @@ export default {
   "settings.prefs.notifyCompletionHint": "Also notify for ordinary completed responses.",
   "settings.prefs.notificationPreview": "Notification details",
   "settings.prefs.notificationPreviewHint":
-    "Include the conversation name and a short message preview in system notifications.",
+    "Include a short message preview in system notifications.",
   "attention.notify.waitingTitle": "KohakuTerrarium needs input",
   "attention.notify.waitingBody": "{target} is waiting for your reply.",
   "attention.notify.waitingBodySummary": "{target} is waiting for your reply: {summary}",

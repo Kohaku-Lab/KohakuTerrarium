@@ -306,8 +306,7 @@ export default {
   "settings.prefs.notifyCompletion": "完了を通知",
   "settings.prefs.notifyCompletionHint": "通常の応答完了も通知します。",
   "settings.prefs.notificationPreview": "通知の詳細",
-  "settings.prefs.notificationPreviewHint":
-    "システム通知にセッション名と短いメッセージ概要を含めます。",
+  "settings.prefs.notificationPreviewHint": "システム通知に短いメッセージ概要を含めます。",
   "attention.notify.waitingTitle": "KohakuTerrarium が入力を待っています",
   "attention.notify.waitingBody": "{target} が返信を待っています。",
   "attention.notify.waitingBodySummary": "{target} が返信を待っています: {summary}",
