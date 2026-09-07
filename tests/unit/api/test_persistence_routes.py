@@ -3,10 +3,14 @@
 import threading
 import time
 
+import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.persistence import saved as saved_mod
+from kohakuterrarium.studio.persistence.session_index.reconcile import (
+    ReconcileReport,
+)
 
 
 def _app(*routers) -> FastAPI:
@@ -306,3 +310,84 @@ class TestReconcileSingleFlight:
         self._call()
         self._call(search="alice")
         assert calls == []
+
+    def test_aborted_scans_do_not_entitle_queued_waiters_to_skip(
+        self, monkeypatch, tmp_path
+    ):
+        calls = []
+        self._install(monkeypatch, tmp_path, calls)
+        # First two scans block then report aborted (directory-walk
+        # failure); any later scan succeeds.
+        gates = [threading.Event(), threading.Event()]
+
+        def aborting_twice(index, session_dir, full=False):
+            calls.append({"full": full})
+            n = len(calls)
+            if n <= 2:
+                gates[n - 1].wait(timeout=5)
+                return ReconcileReport(
+                    read=0, deleted=0, total=0, elapsed_ms=0.0, aborted=True
+                )
+            return ReconcileReport(read=0, deleted=0, total=0, elapsed_ms=0.0)
+
+        monkeypatch.setattr(saved_mod, "reconcile", aborting_twice)
+
+        def refresh_once():
+            self._call(refresh=True)
+
+        first = threading.Thread(target=refresh_once)
+        first.start()
+        deadline = 5.0
+        while not calls and deadline > 0:
+            time.sleep(0.01)
+            deadline -= 0.01
+        assert calls, "first refresh never reached reconcile"
+
+        # Two waiters queue while the first (aborting) scan runs.
+        waiters = [threading.Thread(target=refresh_once) for _ in range(2)]
+        for t in waiters:
+            t.start()
+        time.sleep(0.2)
+        gates[0].set()
+        deadline = 5.0
+        while len(calls) < 2 and deadline > 0:
+            time.sleep(0.01)
+            deadline -= 0.01
+        assert len(calls) == 2, "waiter never started its trailing scan"
+        gates[1].set()
+        first.join(timeout=5)
+        for t in waiters:
+            t.join(timeout=5)
+
+        # Copilot-review scenario: an aborted scan leaves the index
+        # untouched, so its start must not let the second waiter skip.
+        # With the rollback both waiters attempt their own scan (3
+        # calls); without it the second waiter skips on the aborted
+        # start (2 calls) and is served a stale index.
+        assert (
+            len(calls) == 3
+        ), "an aborted scan must not count as freshness for queued waiters"
+
+    def test_raised_scan_rolls_back_its_start_count(self, monkeypatch, tmp_path):
+        calls = []
+        self._install(monkeypatch, tmp_path, calls)
+
+        def raising_once(index, session_dir, full=False):
+            calls.append({"full": full})
+            if len(calls) == 1:
+                raise RuntimeError("sqlite exploded")
+            return ReconcileReport(read=0, deleted=0, total=0, elapsed_ms=0.0)
+
+        monkeypatch.setattr(saved_mod, "reconcile", raising_once)
+
+        with pytest.raises(RuntimeError):
+            self._call(refresh=True)
+
+        key = saved_mod.os.path.normcase(str(tmp_path))
+        assert (
+            saved_mod._RECONCILE_STARTED.get(key, 0) == 0
+        ), "a scan that raised must roll back its start count"
+
+        # The next refresh still scans (it was not entitled to a skip).
+        self._call(refresh=True)
+        assert len(calls) == 2

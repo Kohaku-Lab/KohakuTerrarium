@@ -75,6 +75,11 @@ def _reconcile_guarded(session_dir, index, *, full_rescan: bool) -> None:
     still always reflects the changes that made the client ask. A refresh
     that arrives while no scan is running always scans. ``full_rescan``
     keeps its explicit reread-everything intent and never skips.
+
+    A scan that produced no index update — ``reconcile`` reporting
+    ``aborted`` (directory-walk failure) or raising — does not count as
+    that fresher scan: the start is rolled back so queued waiters run
+    their own pass instead of skipping on a start that reflected no work.
     """
     key = os.path.normcase(str(session_dir))
     lock = _reconcile_lock_for(key)
@@ -87,7 +92,13 @@ def _reconcile_guarded(session_dir, index, *, full_rescan: bool) -> None:
         # Mark the start before scanning so waiters compare against this
         # scan, not against a count that lags the work being done.
         _RECONCILE_STARTED[key] = _RECONCILE_STARTED.get(key, 0) + 1
-        reconcile(index, session_dir, full=full_rescan)
+        try:
+            report = reconcile(index, session_dir, full=full_rescan)
+        except BaseException:
+            _RECONCILE_STARTED[key] -= 1
+            raise
+        if getattr(report, "aborted", False):
+            _RECONCILE_STARTED[key] -= 1
 
 
 @router.get("/disk-usage")
