@@ -2,6 +2,8 @@ const assert = require('node:assert/strict')
 const test = require('node:test')
 const Module = require('node:module')
 const path = require('node:path')
+const { RuntimeHost } = require('../src/host/runtime.cjs')
+const { SocketOwners } = require('../src/host/sockets.cjs')
 
 function deferred() {
   let resolve
@@ -123,16 +125,30 @@ for (const staleOutcome of ['resolve', 'reject']) {
         return { applied: true, value: this.value }
       }
     }
-    class RuntimeHost {
-      async reconcileSelection() {
-        return { selection: null }
+    const runtimes = []
+    let clientCount = 0
+    let topologyStarts = 0
+    let topologyCloses = 0
+    let listCount = 0
+    const client = {
+      listOpen: async () => {
+        listCount++
+        return []
+      },
+    }
+    class ObservedRuntime extends RuntimeHost {
+      constructor(options) {
+        super(options)
+        runtimes.push(this)
       }
-      dispose() {}
-      async handle() {}
     }
     class TopologyWatcher {
-      start() {}
-      close() {}
+      start() {
+        topologyStarts++
+      }
+      close() {
+        topologyCloses++
+      }
     }
     const originalLoad = Module._load
     Module._load = function (request, parent, isMain) {
@@ -148,9 +164,15 @@ for (const staleOutcome of ['resolve', 'reject']) {
           },
           probeCapabilities: async () => ({}),
         },
-        './host/client.cjs': { createClient: () => ({}), validateCapabilities: (value) => value },
-        './host/runtime.cjs': { RuntimeHost },
-        './host/sockets.cjs': { SocketOwners: class {} },
+        './host/client.cjs': {
+          createClient: () => {
+            clientCount++
+            return client
+          },
+          validateCapabilities: (value) => value,
+        },
+        './host/runtime.cjs': { RuntimeHost: ObservedRuntime },
+        './host/sockets.cjs': { SocketOwners },
         './host/state.cjs': { ConnectionStateWriter: StateWriter },
         './host/topology.cjs': { TopologyWatcher },
       }
@@ -209,14 +231,46 @@ for (const staleOutcome of ['resolve', 'reject']) {
     const connectionId = posted.find((message) => message.type === 'ready.result' && message.data.available)?.data.connectionId
     assert.equal(typeof connectionId, 'string')
     assert.doesNotMatch(connectionId, /127\.0\.0\.1|8001|http/)
+    const counts = { clientCount, topologyStarts, topologyCloses, listCount }
+    const retained = runtimes.at(-1)
     const refreshed = receiveMessage({ type: 'ready', requestId: 4 })
-    builds[2].resolve({ endpoint: 'http://127.0.0.1:8001', token: '', source: 'automatic' })
+    assert.equal(builds.length, 2, 'healthy Refresh reuses the established connection')
     await refreshed
     assert.equal(posted.at(-1).data.connectionId, connectionId)
+    assert.equal(posted.at(-1).data.readyId, 4)
+    assert.equal(runtimes.at(-1), retained)
+    assert.equal(clientCount, counts.clientCount)
+    assert.equal(topologyStarts, counts.topologyStarts)
+    assert.equal(topologyCloses, counts.topologyCloses)
+    assert.equal(listCount, counts.listCount + 1)
+    await commands.get('kohakuterrarium.useAutomaticDiscovery')()
     const switched = receiveMessage({ type: 'ready', requestId: 5 })
-    builds[3].resolve({ endpoint: 'http://127.0.0.1:8002', token: '', source: 'automatic' })
+    builds[2].resolve({ endpoint: 'http://127.0.0.1:8002', token: '', source: 'automatic' })
     await switched
     assert.notEqual(posted.at(-1).data.connectionId, connectionId)
+    const live = runtimes.at(-1)
+    const blocked = deferred()
+    client.listOpen = () => blocked.promise
+    const interrupted = receiveMessage({ type: 'ready', requestId: 6 })
+    await new Promise((resolve) => setImmediate(resolve))
+    const selectIntent = receiveMessage({ type: 'session.clearSelection', requestId: 7, readyId: 6 })
+    blocked.resolve([])
+    await Promise.all([interrupted, selectIntent])
+    assert.equal(live.disposed, false, 'superseding selection does not destroy a healthy runtime')
+    assert.equal(builds.length, 3)
+    client.listOpen = () => new Promise(() => {})
+    live.topologyTimeoutMs = 5
+    await receiveMessage({ type: 'ready', requestId: 8 })
+    assert.equal(live.disposed, true)
+    assert.equal(builds.length, 3, 'failed Refresh does not rediscover or retry')
+    await receiveMessage({ type: 'session.list', requestId: 9 })
+    assert.equal(builds.length, 3, 'ordinary stale requests cannot discover after failure')
+    client.listOpen = async () => []
+    const retry = receiveMessage({ type: 'ready', requestId: 10 })
+    assert.equal(builds.length, 4)
+    builds[3].resolve({ endpoint: 'http://127.0.0.1:8002', token: '', source: 'automatic' })
+    await retry
+    assert.equal(posted.at(-1).data.readyId, 10)
     disposeView()
   })
 }

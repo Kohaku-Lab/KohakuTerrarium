@@ -39,6 +39,10 @@ If the local service has host-token auth enabled and `loopback_bypass = false`, 
 
 When daemon state is unavailable or stale, automatic port discovery lists strict-auth candidates for you to select before reading or sending a stored token. Select only an endpoint you trust: public capabilities advertise an auth policy, not a verified service identity. The extension verifies authenticated KT diagnostics and the session connection before saving a new token. Canceling the selector sends no credentials and does not fall back to an old endpoint. No manual endpoint entry is required.
 
+### Refresh lifecycle
+
+Refresh reuses a healthy Host connection, runtime, and topology watcher, reconciling Sessions through the existing authenticated client instead of repeating discovery or token prompts. Each Refresh still starts a new operation epoch: old chat sockets, pending commands and image reads lose ownership. Reconciliation has a bounded deadline. Configuration changes or current-runtime failure release the connection; the next explicit Refresh discovers again. Backend mutations are never retried automatically.
+
 ### Unsent composer state
 
 Within an open Webview, Refresh preserves text and files for the same runtime and Creature ID, including while the request is pending. Draft and attachment caches each retain up to 32 recently used conversations; older inactive buffers are evicted. This bounds retained conversation entries, not aggregate attachment bytes. Changing the service endpoint, changing connection configuration, or closing the Webview clears the caches. Unsent files are not persisted to disk.

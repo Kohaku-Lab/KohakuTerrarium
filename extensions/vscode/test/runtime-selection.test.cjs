@@ -381,7 +381,7 @@ test('disposed runtime rejects a queued context command before backend execution
 
   host.dispose()
   activated.resolve({ session_id: 'graph-b', creatures: [{ creature_id: 'creature-beta', name: 'beta' }] })
-  await selecting
+  await assert.rejects(selecting, /ownership changed/)
   await assert.rejects(context, /ownership changed/)
   assert.equal(client.commandCalls.length, 0)
 })

@@ -1,5 +1,6 @@
 const { normalizeSession } = require('./client.cjs')
 const { executeGoal } = require('./goalCommand.cjs')
+const { beginReady, reconcileReady } = require('./readyRuntime.cjs')
 const { allowedMessage, validateEndpoint } = require('./protocol.cjs')
 const { ArtifactRegistry, artifactNamespaceOf, canonicalArtifactPath } = require('./artifactRegistry.cjs')
 const { ArtifactReader, httpBaseFromWebSocket } = require('./artifactRead.cjs')
@@ -60,6 +61,7 @@ class RuntimeHost {
     this.disposed = false
     this.topologyControllers = new Set()
     this.pendingGoals = new Set()
+    this.readyControllers = new Set()
     this.goalTimeoutMs = 25_000
     this.artifacts = artifactRegistry || new ArtifactRegistry()
     // Artifact fetches use the loopback HTTP form of the validated ws base.
@@ -84,6 +86,14 @@ class RuntimeHost {
     this.generation = this.sockets.begin()
   }
 
+  beginReady(readyId) {
+    return beginReady(this, readyId)
+  }
+
+  reconcileReady(readyId) {
+    return reconcileReady(this, readyId)
+  }
+
   rotateGeneration() {
     this.generation = this.sockets.begin()
     this.cancelArtifactReads()
@@ -104,7 +114,11 @@ class RuntimeHost {
   }
 
   enqueueSelectionOperation(operation) {
-    const result = this.selectionOperationTail.then(operation)
+    const readyId = this.runtimeEpoch
+    const result = this.selectionOperationTail.then(() => {
+      if (this.disposed || readyId !== this.runtimeEpoch) throw Error('Runtime ownership changed')
+      return operation()
+    })
     this.selectionOperationTail = result.catch(() => {})
     return result
   }
@@ -126,7 +140,9 @@ class RuntimeHost {
     if (!this.state.selection) {
       return { selection: null, changed: false, selectionVersion: this.selectionVersion }
     }
+    const readyId = this.runtimeEpoch
     await this.state.updateSelection(null)
+    if (readyId !== this.runtimeEpoch || this.disposed) throw Error('Runtime ownership changed')
     this.rotateGeneration()
     this.selectionVersion++
     return { selection: null, changed: true, selectionVersion: this.selectionVersion }
@@ -210,7 +226,9 @@ class RuntimeHost {
     if (!current?.targetCreatureId) {
       return { selection: null, changed: false, selectionVersion: this.selectionVersion }
     }
+    const readyId = this.runtimeEpoch
     const sessions = await this.client.listOpen()
+    if (readyId !== this.runtimeEpoch || this.disposed) throw Error('Runtime ownership changed')
     return this.applyReconciledSelection(current, sessions)
   }
 
@@ -238,14 +256,18 @@ class RuntimeHost {
   async applyReconciledSelection(current, sessions) {
     const result = this.reconciledSelection(current, sessions)
     if (!result.changed) return result
+    const readyId = this.runtimeEpoch
     await this.state.updateSelection(result.selection)
+    if (readyId !== this.runtimeEpoch || this.disposed) throw Error('Runtime ownership changed')
     this.rotateGeneration()
     this.selectionVersion++
     return { ...result, selectionVersion: this.selectionVersion }
   }
 
   async selectOwned(message) {
+    const readyId = this.runtimeEpoch
     const active = await this.client.active(message.session)
+    if (readyId !== this.runtimeEpoch || this.disposed) throw Error('Runtime ownership changed')
     const selected = active.creatures?.find((creature) => String(creature.creature_id ?? creature.id) === message.creatureId)
     if (!selected?.name) throw Error('Selected Creature is not in the active Session')
     const selection = {
@@ -261,6 +283,7 @@ class RuntimeHost {
       this.state.selection.targetCreatureId !== selection.targetCreatureId
     if (changed) {
       await this.state.updateSelection(selection)
+      if (readyId !== this.runtimeEpoch || this.disposed) throw Error('Runtime ownership changed')
       this.rotateGeneration()
       this.selectionVersion++
     }
@@ -306,24 +329,30 @@ class RuntimeHost {
     if (!selected || selected.session !== message.session || selected.targetCreatureId !== message.creatureId) {
       throw Error('Session ownership changed')
     }
+    const readyId = this.runtimeEpoch
     await this.client.stop(selected.session)
+    if (readyId !== this.runtimeEpoch || this.disposed) throw Error('Runtime ownership changed; stop outcome may be unknown')
     return this.clearSelectionOwned()
   }
 
   async handle(message) {
+    const readyId = this.runtimeEpoch
+    if (this.disposed) throw Error('Runtime disposed')
+    if (message.type.startsWith('ws.') && this.runtimeEpoch != null && message.readyId !== this.runtimeEpoch)
+      throw Error('Socket ready ownership changed')
     switch (message.type) {
       case 'session.clearSelection': {
         const result = await this.clearSelection()
         this.post({
           type: 'session.clearSelection.result',
           requestId: message.requestId,
-          data: { ok: true, selectionVersion: result.selectionVersion, readyId: this.runtimeEpoch },
+          data: { ok: true, selectionVersion: result.selectionVersion, readyId },
         })
         return
       }
       case 'session.reconcile': {
         const data = await this.reconcileSelection()
-        this.post({ type: 'session.reconcile.result', requestId: message.requestId, data: { ...data, readyId: this.runtimeEpoch } })
+        this.post({ type: 'session.reconcile.result', requestId: message.requestId, data: { ...data, readyId } })
         return
       }
       case 'session.list': {
@@ -349,6 +378,7 @@ class RuntimeHost {
         if (!open.some((session) => !session.isLive && session.savedName === message.savedName)) {
           throw Error('Saved session is not an open dormant Session')
         }
+        if (readyId !== this.runtimeEpoch || this.disposed) throw Error('Runtime ownership changed')
         const resumed = await this.client.resume(message.savedName)
         const data = normalizeActive({
           ...resumed.session,
@@ -365,7 +395,7 @@ class RuntimeHost {
         this.post({
           type: 'session.select.result',
           requestId: message.requestId,
-          data: { ...result.selection, selectionVersion: result.selectionVersion, readyId: this.runtimeEpoch },
+          data: { ...result.selection, selectionVersion: result.selectionVersion, readyId },
         })
         return
       }
@@ -374,7 +404,7 @@ class RuntimeHost {
         this.post({
           type: 'session.stop.result',
           requestId: message.requestId,
-          data: { ok: true, selectionVersion: result.selectionVersion, readyId: this.runtimeEpoch },
+          data: { ok: true, selectionVersion: result.selectionVersion, readyId },
         })
         return
       }
@@ -442,7 +472,7 @@ class RuntimeHost {
           type: 'ws.send.result',
           socketId: message.socketId,
           sendId: message.sendId,
-          readyId: this.runtimeEpoch,
+          readyId,
         })
         return
       case 'ws.close':
@@ -524,6 +554,8 @@ class RuntimeHost {
     this.topologyReconcileVersion++
     for (const controller of this.topologyControllers) controller.abort()
     this.topologyControllers.clear()
+    for (const controller of this.readyControllers) controller.abort()
+    this.readyControllers.clear()
     for (const cancel of this.pendingGoals) cancel(Error('Goal runtime disposed; execution outcome may be unknown'))
     this.pendingGoals.clear()
     this.cancelArtifactReads()

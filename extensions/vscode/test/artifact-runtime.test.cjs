@@ -354,7 +354,7 @@ test('frames register refs on the Host post path before the frame reaches the we
   const { host, posts } = harness()
   await host.handle({ type: 'session.select', requestId: 1, session: 'graph-live', creatureId: 'creature-beta' })
   const frame = { type: 'ws.frame', socketId: 1, data: JSON.stringify({ parts: [{ image_url: { url: IMG } }] }) }
-  await host.handle({ type: 'ws.open', socketId: 1 })
+  await host.handle({ type: 'ws.open', socketId: 1, readyId: host.runtimeEpoch })
   const view = host.sockets.views.get(1)
   view.postMessage(frame)
   assert.equal(host.artifacts.allowed(IMG), true)

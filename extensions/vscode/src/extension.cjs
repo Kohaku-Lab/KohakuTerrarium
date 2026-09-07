@@ -282,11 +282,19 @@ function activate(context) {
           token: connection.token,
           onInvalidate: async () => {
             if (runtimeEpoch !== epoch || runtime !== createdRuntime) return
-            const result = await createdRuntime.reconcileTopologySelection()
-            if (runtimeEpoch !== epoch || runtime !== createdRuntime || result.superseded) return
+            const ownedReady = createdRuntime.runtimeEpoch
+            let result
+            try {
+              result = await createdRuntime.reconcileTopologySelection()
+            } catch (error) {
+              if (ownedReady !== createdRuntime.runtimeEpoch || runtime !== createdRuntime) return
+              throw error
+            }
+            if (runtimeEpoch !== epoch || runtime !== createdRuntime || ownedReady !== createdRuntime.runtimeEpoch || result.superseded)
+              return
             await webview.postMessage({
               type: 'selection.changed',
-              readyId: createdRuntime.runtimeEpoch,
+              readyId: ownedReady,
               connectionId: composerConnection.id,
               data: result,
             })
@@ -316,15 +324,16 @@ function activate(context) {
         if (!allowedMessage(message)) return
         try {
           if (message.type === 'ready') {
-            if (runtime) entry.disposeRuntime()
             const attempt = connectionAttempts.begin()
             try {
+              runtime?.beginReady(message.requestId)
               const current = await ensureRuntime(message.requestId)
               if (!attempt.isCurrent()) {
                 webview.postMessage({ type: 'ready.result', requestId: message.requestId, data: { superseded: true } })
                 return
               }
-              const reconciled = await current.reconcileSelection()
+              current.beginReady(message.requestId)
+              const reconciled = await current.reconcileReady(message.requestId)
               if (!attempt.isCurrent() || reconciled.superseded) {
                 webview.postMessage({ type: 'ready.result', requestId: message.requestId, data: { superseded: true } })
                 return
@@ -361,7 +370,14 @@ function activate(context) {
             })
             return
           }
-          await (await ensureRuntime()).handle(message)
+          const current = runtime
+          if (!current) throw Error('Refresh the Session before sending requests')
+          if (
+            ['session.select', 'session.stop', 'session.clearSelection', 'session.reconcile'].includes(message.type) &&
+            message.readyId !== current.runtimeEpoch
+          )
+            throw Error('Session ready ownership changed')
+          await current.handle(message)
           if (message.type === 'session.reconcile') topology?.start()
         } catch (error) {
           sendError(message, error)

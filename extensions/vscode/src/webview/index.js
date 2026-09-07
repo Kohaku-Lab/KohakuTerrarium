@@ -98,15 +98,15 @@ const App = {
     let contextOperation = 0
     const selectionVersions = createSelectionVersionOwner()
     let activeSelectionReadyId = null
+    BridgeWebSocket.getReadyId = () => activeSelectionReadyId
+    onBeforeUnmount(() => {
+      BridgeWebSocket.getReadyId = () => null
+    })
     const currentConversationOwnership = () => ({ ...composerOwner(), name: currentSession.value?.target })
     const conversationOwnership = createConversationOwnership(currentConversationOwnership)
     const submitGate = createSubmitGate()
     const submitRevision = ref(0)
-    const submitBusy = computed(() => {
-      submitRevision.value
-      attachmentRevision.value
-      return submitGate.busy(currentConversationOwnership())
-    })
+    const submitBusy = computed(() => (submitRevision.value, attachmentRevision.value, submitGate.busy(currentConversationOwnership())))
     const attachmentTransform = conversationOwnership.transform((file) => file)
     const getReadFence = () =>
       activeSelectionReadyId === latestReadyRequestId && available.value
@@ -123,8 +123,9 @@ const App = {
       }),
     )
     const selectionRequest = async (type, data) => {
-      const result = await request(type, data)
-      if (result.readyId !== latestReadyRequestId && result.readyId !== activeSelectionReadyId) return result
+      if (activeSelectionReadyId !== latestReadyRequestId) throw Error('Wait for Session refresh')
+      const result = await request(type, { ...data, readyId: activeSelectionReadyId })
+      if (result.readyId !== latestReadyRequestId) return result
       selectionVersions.acceptResult(result.readyId, result.selectionVersion, result.readyId === latestReadyRequestId)
       activeSelectionReadyId = result.readyId
       return result
@@ -136,17 +137,15 @@ const App = {
       resume: (savedName) => request('session.resume', { savedName }),
       stop: ({ session, creatureId }) => selectionRequest('session.stop', { session, creatureId }),
       clearSelection: () => selectionRequest('session.clearSelection'),
-      reconcile: () => request('session.reconcile'),
+      reconcile: () => selectionRequest('session.reconcile'),
       select: ({ session, creatureId }) => selectionRequest('session.select', { session, creatureId }),
     }
     const shell = createSessionShell({ api, chat })
     const tab = computed(() => currentSession.value?.target || '')
     const messages = computed(() => chat.messagesByTab[tab.value] || [])
-    const scrollIdentity = computed(() => {
-      const session = currentSession.value?.session?.runtimeId
-      const creature = currentSession.value?.targetCreatureId
-      return session && creature ? `${session}:${creature}` : ''
-    })
+    const scrollIdentity = computed(() =>
+      JSON.stringify([currentSession.value?.session?.runtimeId, currentSession.value?.targetCreatureId]),
+    )
     watch(scrollIdentity, () => {
       attachmentRevision.value += 1
       draftRevision.value += 1
@@ -246,6 +245,7 @@ const App = {
           draftRevision.value += 1
         }),
       async applyReady(result, isCurrent) {
+        if (result.superseded) return
         if (result.available === true) {
           acceptComposerConnection(result.connectionId)
           activeSelectionReadyId = result.readyId
