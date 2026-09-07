@@ -1,0 +1,59 @@
+.kt-notifications {
+  position: fixed;
+  inset: 0.5rem 0.5rem auto;
+  z-index: 1000;
+  display: grid;
+  gap: 0.5rem;
+  max-height: 50vh;
+  overflow-y: auto;
+  pointer-events: none;
+}
+
+.kt-notification {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  padding: 0.65rem;
+  color: var(--vscode-notifications-foreground, var(--vscode-foreground));
+  background: var(--vscode-notifications-background, var(--vscode-editor-background));
+  border: 1px solid var(--vscode-notifications-border, var(--vscode-panel-border));
+  border-left: 3px solid var(--vscode-notificationsInfoIcon-foreground, #3794ff);
+  border-radius: 4px;
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, #0005);
+  pointer-events: auto;
+}
+
+.kt-notification > span {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.kt-notification-warning {
+  border-left-color: var(--vscode-notificationsWarningIcon-foreground, #cca700);
+}
+
+.kt-notification-error {
+  border-left-color: var(--vscode-notificationsErrorIcon-foreground, #f14c4c);
+}
+
+.kt-notification-success {
+  border-left-color: var(--vscode-testing-iconPassed, #73c991);
+}
+
+.kt-notification > button {
+  flex: none;
+  min-width: 24px;
+  min-height: 24px;
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.kt-notification > button:focus-visible {
+  outline: 2px solid var(--vscode-focusBorder, #007fd4);
+  outline-offset: 1px;
+}
