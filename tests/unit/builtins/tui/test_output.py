@@ -1,8 +1,10 @@
+import pytest
 from textual.widgets import Label
 from textual.widgets._markdown import MarkdownFence
 
 from kohakuterrarium.builtins.tui.output import TUIOutput
 from kohakuterrarium.builtins.tui.session import TUISession
+from kohakuterrarium.builtins.tui.widgets import UserMessage
 from kohakuterrarium.builtins.tui.widgets.blocks import ToolBlock
 
 
@@ -143,3 +145,72 @@ async def test_live_tool_start_mounts_complete_safe_arguments():
         )
         assert "hidden content" not in tool._args_widget.render().plain
         assert "hidden internal" not in tool._args_widget.render().plain
+
+
+async def test_resume_renders_multimodal_user_input_as_text():
+    session = TUISession()
+    await session.start()
+    assert session._app is not None
+    output = TUIOutput()
+    output._tui = session
+
+    events = [
+        {
+            "type": "user_input",
+            "content": [{"text": "hello from web", "type": "text"}],
+        },
+        {"type": "text", "content": "hi there"},
+    ]
+
+    async with session._app.run_test(size=(60, 20)) as pilot:
+        await output.on_resume(events)
+        await pilot.pause()
+
+        user = session._app.query_one(UserMessage)
+        assert "hello from web" in user.render().plain
+
+
+async def test_resume_buffers_events_until_tui_session_wired():
+    session = TUISession()
+    await session.start()
+    assert session._app is not None
+    output = TUIOutput()
+    events = [{"type": "user_input", "content": "early history"}]
+
+    async with session._app.run_test(size=(60, 20)) as pilot:
+        # The resume_batch arrives before the TUI session is wired; the
+        # agent clears its pending copy right after emitting, so losing
+        # the buffer here loses the history permanently.
+        await output.on_resume(events)
+        await pilot.pause()
+        assert not list(session._app.query(UserMessage))
+
+        output._tui = session
+        for _ in range(3):
+            await pilot.pause()
+
+        user = session._app.query_one(UserMessage)
+        assert "early history" in user.render().plain
+
+
+async def test_resume_survives_slow_mount_without_raising(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    session = TUISession()
+    await session.start()
+    assert session._app is not None
+    output = TUIOutput()
+    output._tui = session
+
+    monkeypatch.setattr(
+        "kohakuterrarium.builtins.tui.output.RESUME_MOUNT_TIMEOUT", 0.05
+    )
+
+    async with session._app.run_test(size=(60, 20)) as pilot:
+        original_call_later = session._app.call_later
+        # A mount task that never signals completion must not propagate a
+        # timeout into the agent's input loop.
+        monkeypatch.setattr(session._app, "call_later", lambda *a, **k: None)
+        await output.on_resume([{"type": "user_input", "content": "turn"}])
+        monkeypatch.setattr(session._app, "call_later", original_call_later)
+        await pilot.pause()

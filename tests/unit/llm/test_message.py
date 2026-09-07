@@ -17,6 +17,7 @@ from kohakuterrarium.llm.message import (
     TextPart,
     ToolMessage,
     UserMessage,
+    content_display_text,
     content_part_from_dict,
     content_parts_to_dicts,
     create_message,
@@ -461,3 +462,65 @@ class TestConversionHelpers:
 
     def test_make_multimodal_content_empty_image_list_returns_string(self):
         assert make_multimodal_content("text", []) == "text"
+
+
+# ---------------------------------------------------------------------------
+# content_display_text — replay-facing display normalization
+# ---------------------------------------------------------------------------
+
+
+class TestContentDisplayText:
+    def test_string_passthrough(self):
+        assert content_display_text("hello") == "hello"
+
+    def test_none_is_empty(self):
+        assert content_display_text(None) == ""
+
+    def test_empty_part_list_is_empty_string(self):
+        assert content_display_text([]) == ""
+
+    def test_web_submission_text_part_dict(self):
+        content = [{"text": "hello from web", "type": "text"}]
+        assert content_display_text(content) == "hello from web"
+
+    def test_multiple_text_parts_join_with_newline(self):
+        content = [{"type": "text", "text": "a"}, {"type": "text", "text": "b"}]
+        assert content_display_text(content) == "a\nb"
+
+    def test_empty_text_parts_are_dropped(self):
+        content = [{"type": "text", "text": ""}, {"type": "text", "text": "kept"}]
+        assert content_display_text(content) == "kept"
+
+    def test_image_part_without_source_shows_placeholder(self):
+        content = [{"type": "image_url", "image_url": {"url": "https://x/y.png"}}]
+        assert content_display_text(content) == "[image]"
+
+    def test_image_part_with_source_names_it(self):
+        content = [
+            {
+                "type": "image_url",
+                "image_url": {"url": "https://x/y.png"},
+                "meta": {"source_type": "attachment", "source_name": "cat.png"},
+            }
+        ]
+        assert content_display_text(content) == "[attachment: cat.png]"
+
+    def test_file_part_shows_name_placeholder(self):
+        content = [{"type": "file", "file": {"name": "notes.txt", "content": "body"}}]
+        assert content_display_text(content) == "[file: notes.txt]"
+
+    def test_mixed_parts_render_text_and_placeholder(self):
+        content = [
+            {"type": "text", "text": "look"},
+            {"type": "image_url", "image_url": {"url": "u"}},
+            {"type": "text", "text": "nice"},
+        ]
+        assert content_display_text(content) == "look\n[image]\nnice"
+
+    def test_typed_parts_accepted(self):
+        content = [TextPart(text="t"), ImagePart(url="u")]
+        assert content_display_text(content) == "t\n[image]"
+
+    def test_unknown_part_dicts_are_ignored(self):
+        content = [{"type": "mystery", "payload": "x"}]
+        assert content_display_text(content) == ""
