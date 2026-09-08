@@ -125,11 +125,15 @@ describe("ChatPanel paged live history scrolling", () => {
     return wrapper.findAll(".chat-message-stub").map((el) => el.text())
   }
 
-  function stubGeometry(wrapper, { scrollHeight = 10000, clientHeight = 200 } = {}) {
+  function stubGeometry(wrapper, { clientHeight = 200 } = {}) {
     const viewport = wrapper.find(".chat-messages-viewport").element
+    // Track the rendered row count so scrollHeight moves like a real
+    // scrollbar would: narrowing the window must visibly shrink it.
     Object.defineProperty(viewport, "scrollHeight", {
       configurable: true,
-      value: scrollHeight,
+      get() {
+        return wrapper.findAll(".chat-message-stub").length * 30
+      },
     })
     Object.defineProperty(viewport, "clientHeight", {
       configurable: true,
@@ -190,24 +194,27 @@ describe("ChatPanel paged live history scrolling", () => {
     const calls = spyLoadOlder(chat, { pages: 2 })
     const wrapper = mountPanel(chat)
     await flushPromises()
-    const viewport = stubGeometry(wrapper, { scrollHeight: 40000 })
+    const viewport = stubGeometry(wrapper)
 
-    scrollViewport(viewport, 39800)
+    scrollViewport(viewport, 9800)
     scrollViewport(viewport, 0)
     await flushPromises()
     scrollViewport(viewport, 0)
     await flushPromises()
     const expandedCount = renderedIds(wrapper).length
+    const expandedHeight = viewport.scrollHeight
     expect(expandedCount).toBe(3 * PAGE)
 
     // Scroll back to the bottom: history mode must close and the render
-    // window must narrow back to the live tail.
+    // window must narrow back to the live tail. The scrollbar-visible
+    // signal is the scrollHeight drop.
     scrollViewport(viewport, 40000)
     await flushPromises()
 
     const narrowedCount = renderedIds(wrapper).length
     expect(narrowedCount).toBeLessThan(expandedCount)
     expect(narrowedCount).toBeLessThanOrEqual(200)
+    expect(viewport.scrollHeight).toBeLessThan(expandedHeight * 0.75)
     wrapper.unmount()
   })
 })

@@ -274,6 +274,24 @@ const activePaging = computed(() => {
   return t ? chat.historyPagingByTab[t] : null
 })
 const canLoadOlderLive = computed(() => !props.readOnly && !!activePaging.value?.hasMore && !viewProcessing.value)
+// Mirrors the render window's idle lookahead for persisted pages: after a
+// fetch, keep at most one page ahead of the reader while they stay within
+// roughly a viewport of the top of the loaded log, so upward scrolling
+// never hits an unloaded wall. The condition drops out once a prepend has
+// pushed the reading position away from the top, so this never chains
+// through the whole history on its own.
+let pagedPrefetchTimer = null
+function schedulePagedPrefetch() {
+  if (!canLoadOlderLive.value || pagedPrefetchTimer !== null) return
+  pagedPrefetchTimer = setTimeout(() => {
+    pagedPrefetchTimer = null
+    const el = messagesEl.value
+    if (!el || loadingOlder.value || !canLoadOlderLive.value) return
+    if (el.scrollTop > el.clientHeight) return
+    loadOlderLive()
+  }, 250)
+}
+
 async function loadOlderLive() {
   const tab = viewActiveTab.value
   if (!tab || loadingOlder.value) return
@@ -288,6 +306,7 @@ async function loadOlderLive() {
     if (viewMessages.value.length) enterHistoryAt(0)
     await nextTick()
     restoreViewportAnchor(() => messagesEl.value, anchor)
+    schedulePagedPrefetch()
   } catch (err) {
     console.warn("Failed to load older history:", err)
   } finally {
@@ -653,6 +672,11 @@ function onMessagesScroll() {
     // persisted-page fetch (the button remains as a manual entry).
     if (el && !isNearBottom.value && el.scrollTop <= CHAT_AUTO_EXPAND_TOP_PX && canLoadOlderLive.value) {
       loadOlderLive()
+    } else if (el && !isNearBottom.value && el.scrollTop <= el.clientHeight) {
+      // Idle lookahead: arm a persisted-page prefetch one viewport before
+      // the wall so upward scrolling stays seamless (mirrors the render
+      // window's scheduleIdleExpand).
+      schedulePagedPrefetch()
     }
     saveScrollPosition()
   })
