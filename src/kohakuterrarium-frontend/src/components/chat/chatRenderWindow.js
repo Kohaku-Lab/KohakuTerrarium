@@ -50,10 +50,77 @@ export function findRenderWindowStart(
   return start
 }
 
+export function isTailRenderBudgetFull(messages) {
+  if (findRenderWindowStart(messages) > 0 || messages.length >= CHAT_RENDER_MESSAGE_LIMIT)
+    return true
+  return (
+    messages.length >= CHAT_RENDER_MIN_MESSAGES &&
+    messages.reduce((units, message) => units + messageRenderUnits(message), 0) >=
+      CHAT_RENDER_UNIT_BUDGET
+  )
+}
+
+// A projected row's stable semantic anchor. The window boundary is keyed
+// by a physical record identity (``_historyKeys``), not the positional
+// ``id``, so a row whose id changes when older text/tool events merge in
+// still resolves to the same DOM position after a page materializes.
+export function semanticKey(message) {
+  if (!message) return null
+  if (Array.isArray(message._historyKeys) && message._historyKeys.length) {
+    return String(message._historyKeys[0])
+  }
+  if (Array.isArray(message._historyKey) && message._historyKey.length) {
+    return String(message._historyKey[0])
+  }
+  return message.id != null ? String(message.id) : null
+}
+
+// Resolve a semantic key to the current array index. A row is found by
+// exact ``id`` match OR by key containment (a merged row whose
+// ``_historyKeys`` include the recorded boundary key).
+export function indexOfSemanticKey(messages, key) {
+  if (key == null) return -1
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const message = messages[i]
+    if (message?.id === key) return i
+    const keys = Array.isArray(message?._historyKeys)
+      ? message._historyKeys
+      : Array.isArray(message?._historyKey)
+        ? message._historyKey
+        : []
+    if (keys.includes(key)) return i
+  }
+  return -1
+}
+
 export function useChatRenderWindow(messages, getScopeKey) {
   const activeAnchorId = ref(null)
   const windowStarts = new Map()
   const tailWindowStart = computed(() => findRenderWindowStart(messages.value))
+
+  // Resolve an anchor to a row index. The anchor is a stable semantic key
+  // (a physical ``_history_key``) so a row that survives page-boundary
+  // merging or cross-page duplicate collapse is still found by key
+  // containment, even when its generated ``id`` changed. Falls back to the
+  // legacy stable ``id`` match for rows without a physical key.
+  function findAnchorIndex(anchor) {
+    const list = messages.value
+    if (anchor == null) return -1
+    const byId = list.findIndex((message) => message.id === anchor)
+    if (byId >= 0) return byId
+    return list.findIndex((message) => {
+      const keys = Array.isArray(message?._historyKeys)
+        ? message._historyKeys
+        : Array.isArray(message?._historyKey)
+          ? message._historyKey
+          : []
+      return keys.includes(anchor)
+    })
+  }
+
+  function rowAnchorKey(message) {
+    return semanticKey(message)
+  }
 
   function leaveHistory(key = getScopeKey()) {
     activeAnchorId.value = null
@@ -62,7 +129,7 @@ export function useChatRenderWindow(messages, getScopeKey) {
 
   const windowStart = computed(() => {
     if (!activeAnchorId.value) return tailWindowStart.value
-    const index = messages.value.findIndex((message) => message.id === activeAnchorId.value)
+    const index = findAnchorIndex(activeAnchorId.value)
     if (index < 0) {
       leaveHistory()
       return tailWindowStart.value
@@ -73,14 +140,15 @@ export function useChatRenderWindow(messages, getScopeKey) {
   const isHistoryMode = computed(() => activeAnchorId.value != null)
 
   function enterHistoryAt(index) {
-    const messageId = messages.value[index]?.id
-    if (!messageId) {
+    const message = messages.value[index]
+    const anchor = rowAnchorKey(message)
+    if (!anchor) {
       leaveHistory()
       return
     }
-    activeAnchorId.value = messageId
+    activeAnchorId.value = anchor
     const key = getScopeKey()
-    if (key) windowStarts.set(key, messageId)
+    if (key) windowStarts.set(key, anchor)
   }
 
   function expandHistory(step = {}) {
@@ -88,17 +156,17 @@ export function useChatRenderWindow(messages, getScopeKey) {
   }
 
   function restoreHistory(key = getScopeKey()) {
-    const messageId = windowStarts.get(key)
-    if (!messageId) {
+    const anchor = windowStarts.get(key)
+    if (!anchor) {
       activeAnchorId.value = null
       return false
     }
-    if (!messages.value.some((message) => message.id === messageId)) {
+    if (findAnchorIndex(anchor) < 0) {
       windowStarts.delete(key)
       activeAnchorId.value = null
       return false
     }
-    activeAnchorId.value = messageId
+    activeAnchorId.value = anchor
     return true
   }
 

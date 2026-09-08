@@ -60,10 +60,9 @@
 <script setup>
 import ChatPanel from "@/components/chat/ChatPanel.vue"
 import { useDensity } from "@/composables/useDensity"
-import { useChatStore, _convertHistory, _replayEvents } from "@/stores/chat"
+import { useChatStore } from "@/stores/chat"
 import { useSessionDetailStore } from "@/stores/sessionDetail"
 import { sessionAPI } from "@/utils/api"
-import { extractReasoning } from "@/utils/chatReasoning"
 
 const props = defineProps({
   embedded: { type: Boolean, default: false },
@@ -128,9 +127,8 @@ const loading = ref(false)
 const error = ref("")
 const viewerMeta = ref(null)
 const historyTargets = ref([])
-const reasoningEntriesByTab = reactive({})
 const showReasoning = ref(false)
-const activeReasoningEntries = computed(() => reasoningEntriesByTab[chat.activeTab] || [])
+const activeReasoningEntries = computed(() => (chat.messagesByTab?.[chat.activeTab] || []).flatMap((message, messageIndex) => (message._fallbackReasoning || []).map((entry) => ({ messageIndex, ...entry }))))
 
 const viewerInstance = computed(() => {
   const meta = viewerMeta.value || {}
@@ -149,9 +147,6 @@ function goBack() {
 }
 
 function resetViewer() {
-  for (const key of Object.keys(reasoningEntriesByTab)) {
-    delete reasoningEntriesByTab[key]
-  }
   showReasoning.value = false
   chat._cleanup()
   chat._instanceId = `session:${sessionName.value}`
@@ -180,33 +175,21 @@ function ensureTabs(tabs) {
 
 async function loadTarget(tab) {
   if (!tab) return
-  const entries = []
-  const data = await sessionAPI.getHistory(sessionName.value, tab)
-  for (const [messageIndex, message] of (data.messages || []).entries()) {
-    // New sessions render segments inline through ChatMessage; the
-    // fallback panel only serves old snapshots without ordered segments.
-    if (Array.isArray(message?._kt_assistant_segments)) continue
-    for (const entry of extractReasoning(message)) {
-      entries.push({ messageIndex, ...entry })
-    }
-  }
-  reasoningEntriesByTab[tab] = entries
-  if (data.events?.length) {
-    // Read-only saved history: never populate ``runningJobs`` — a frozen
-    // session has no live work, and its unfinished jobs already replay as
-    // ``interrupted`` via the backend's synthetic terminals (UXI-04).
-    const { messages } = _replayEvents(data.messages || [], data.events)
-    chat.messagesByTab[tab] = messages
-  } else {
-    chat.messagesByTab[tab] = _convertHistory(data.messages || [])
-  }
+  const store = _chatStoreRef.value
+  const name = sessionName.value
+  const result = store.historyPageByTab[tab]?.historyId ? await store.refreshHistoryHead(tab) : await store.initHistoryPage(tab, { kind: "saved", sessionName: name })
+  if (!result.applied || store !== _chatStoreRef.value || name !== sessionName.value) return
 }
 
+let loadSequence = 0
 async function loadSession() {
+  const sequence = ++loadSequence
+  const name = sessionName.value
   loading.value = true
   error.value = ""
   try {
-    const index = await sessionAPI.getHistoryIndex(sessionName.value)
+    const index = await sessionAPI.getHistoryIndex(name)
+    if (sequence !== loadSequence || name !== sessionName.value) return
     viewerMeta.value = index.meta || {}
     historyTargets.value = index.targets || []
     resetViewer()
@@ -215,9 +198,9 @@ async function loadSession() {
       await loadTarget(chat.activeTab)
     }
   } catch (err) {
-    error.value = err?.response?.data?.detail || err?.message || String(err)
+    if (sequence === loadSequence && name === sessionName.value) error.value = err?.response?.data?.detail || err?.message || String(err)
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -265,6 +248,7 @@ watch(
 // the previous session's frozen history while ``initForInstance`` is
 // still awaiting its ``fetchOne`` round-trip.
 onUnmounted(() => {
+  loadSequence += 1
   chat.resetForRouteSwitch()
 })
 </script>

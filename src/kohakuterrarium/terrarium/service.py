@@ -69,6 +69,10 @@ from kohakuterrarium.terrarium.creature_ops import (
     session_attach_policies_for as _session_attach_policies_for,
     wire_creature_on_engine as _wire_creature_on_engine,
 )
+from kohakuterrarium.terrarium.history_service import (
+    HistoryServiceProtocol,
+    LocalHistoryServiceMixin,
+)
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
@@ -100,7 +104,7 @@ def _completed_branch_result(
 
 
 @runtime_checkable
-class TerrariumService(DriveServiceProtocol, Protocol):
+class TerrariumService(HistoryServiceProtocol, DriveServiceProtocol, Protocol):
     """Operations Studio needs from a terrarium runtime.
 
     Method semantics match the underlying
@@ -470,7 +474,9 @@ class TerrariumService(DriveServiceProtocol, Protocol):
     ) -> AsyncIterator[EngineEvent]: ...
 
 
-class LocalTerrariumService(LocalCommandServiceMixin, DriveServiceMixin):
+class LocalTerrariumService(
+    LocalHistoryServiceMixin, LocalCommandServiceMixin, DriveServiceMixin
+):
     """Direct in-process implementation backed by a :class:`Terrarium`.
 
     Every method delegates to the underlying engine with at most a

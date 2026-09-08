@@ -38,6 +38,7 @@ from kohakuterrarium.terrarium.drive.multi_node_ops import MultiNodeDriveService
 from kohakuterrarium.terrarium.drive.service_protocol import (
     DriveServiceUnsupportedMixin,
 )
+from kohakuterrarium.terrarium.history_remote import MultiNodeHistoryServiceMixin
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.events import (
     ConnectionResult,
@@ -97,6 +98,7 @@ class CrossNodeNotSupportedError(RuntimeError):
 
 
 class MultiNodeTerrariumService(
+    MultiNodeHistoryServiceMixin,
     MultiNodeDriveServiceMixin,
     MultiNodeRuntimeOptionsMixin,
     DriveServiceUnsupportedMixin,
@@ -575,6 +577,28 @@ class MultiNodeTerrariumService(
     async def chat_history(self, creature_id: str) -> dict[str, Any]:
         return await self._route_per_creature(
             creature_id, lambda svc: svc.chat_history(creature_id)
+        )
+
+    async def chat_history_page(
+        self,
+        creature_id: str,
+        *,
+        stream: str = "events",
+        limit: int = 400,
+        before: str | None = None,
+        after: str | None = None,
+        history_id: str | None = None,
+    ) -> dict[str, Any]:
+        return await self._route_per_creature(
+            creature_id,
+            lambda svc: svc.chat_history_page(
+                creature_id,
+                stream=stream,
+                limit=limit,
+                before=before,
+                after=after,
+                history_id=history_id,
+            ),
         )
 
     async def chat_branches(self, creature_id: str) -> list[dict[str, Any]]:

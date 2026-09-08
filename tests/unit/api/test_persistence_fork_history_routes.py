@@ -127,6 +127,20 @@ class TestForkRoute:
 
 
 class TestHistoryRoutes:
+    def test_saved_paging_invalid_limit_returns_400(self, monkeypatch, tmp_path):
+        path = tmp_path / "paged-validation.kohakutr"
+        store = SessionStore(path)
+        store.append_event("alice", "user_input", {"content": "hello"})
+        store.close(update_status=False)
+        monkeypatch.setattr(history_mod, "resolve_session_path_default", lambda _: path)
+        client = TestClient(_app(history_mod.router))
+        response = client.get(
+            "/api/paged-validation/history/alice",
+            params={"paged": "true", "limit": 0},
+        )
+        assert response.status_code == 400
+        assert "limit" in response.json()["detail"]
+
     def test_index_missing(self, monkeypatch):
         monkeypatch.setattr(history_mod, "resolve_session_path_default", lambda n: None)
         client = TestClient(_app(history_mod.router))

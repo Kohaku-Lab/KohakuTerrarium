@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.sessions_v2 import creatures_chat as chat_mod
-from kohakuterrarium.terrarium.service import CreatureInfo
+from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.service import CreatureInfo, LocalTerrariumService
 
 
 def _info(cid="cid", name="alice"):
@@ -117,6 +118,26 @@ def _client(service):
     app.dependency_overrides[get_service] = lambda: service
     app.include_router(chat_mod.router, prefix="/sessions")
     return TestClient(app)
+
+
+class TestPagedChannelValidation:
+    def test_invalid_limit_returns_client_error(self):
+        client = _client(LocalTerrariumService(Terrarium()))
+        response = client.get(
+            "/sessions/g/creatures/ch:general/history",
+            params={"paged": "true", "limit": 0},
+        )
+        assert response.status_code == 400
+        assert "limit" in response.json()["detail"]
+
+    def test_numeric_incremental_cursor_is_rejected(self):
+        client = _client(LocalTerrariumService(Terrarium()))
+        response = client.get(
+            "/sessions/g/creatures/ch:general/history",
+            params={"paged": "true", "since_event_id": 0},
+        )
+        assert response.status_code == 400
+        assert "since_event_id" in response.json()["detail"]
 
 
 # ── chat ───────────────────────────────────────────────────────

@@ -1392,6 +1392,194 @@ class TestApiIntegration:
         assert resp.status_code == 200
         assert "persist this turn" in str(resp.json())
 
+        # ── History paging (bounded, cursor-driven pages) ─────────────
+        # The dashboard opts into ``paged=true``; legacy full reads above
+        # are unchanged. Live event pages carry raw event records with a
+        # physical ``_history_key`` and NEVER embed the conversation
+        # snapshot (no snapshot giant on an event page). Cursors are
+        # opaque exclusive record tokens; ``history_id`` is the
+        # session-and-target scoped history identity.
+        resp = client.get(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+            params={"paged": "true", "limit": 3, "stream": "events"},
+        )
+        assert resp.status_code == 200
+        live_page = resp.json()
+        live_hp = live_page["history_page"]
+        assert live_hp["version"] == 1
+        assert live_hp["stream"] == "events"
+        assert live_hp["history_id"] and len(live_hp["history_id"]) == 16
+        assert isinstance(live_hp["has_older"], bool)
+        assert isinstance(live_hp["has_newer"], bool)
+        assert live_hp["reset_required"] is False
+        assert live_hp["before"] and live_hp["after"]
+        assert live_page["messages"] == []
+        assert live_page["events"] and isinstance(live_page["events"], list)
+        assert live_page["is_processing"] is False
+        assert live_page["live_job_ids"] == []
+        live_keys = [e["_history_key"] for e in live_page["events"]]
+        assert all(k.startswith("events:") for k in live_keys)
+
+        # ``before`` walks to the next OLDER page; ``after`` walks back to
+        # the next NEWER page. Together they prove bounded pages stitch into
+        # a contiguous history without holes or duplicates.
+        older = client.get(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+            params={
+                "paged": "true",
+                "limit": 3,
+                "stream": "events",
+                "before": live_hp["before"],
+                "history_id": live_hp["history_id"],
+            },
+        ).json()
+        assert older["history_page"]["history_id"] == live_hp["history_id"]
+        assert older["history_page"]["has_newer"] is True
+        older_keys = [e["_history_key"] for e in older["events"]]
+        assert older_keys and older_keys != live_keys
+        assert set(older_keys).isdisjoint(set(live_keys))
+
+        back = client.get(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+            params={
+                "paged": "true",
+                "limit": 3,
+                "stream": "events",
+                "after": older["history_page"]["after"],
+                "history_id": older["history_page"]["history_id"],
+            },
+        ).json()
+        assert [e["_history_key"] for e in back["events"]] == live_keys
+        assert back["history_page"]["history_id"] == live_hp["history_id"]
+
+        # A stale / cross-session ``history_id`` forces a reset signal rather
+        # than a wrong payload — the client must discard the cached page.
+        stale = client.get(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+            params={
+                "paged": "true",
+                "limit": 3,
+                "stream": "events",
+                "before": live_hp["before"],
+                "history_id": "0000000000000000",
+            },
+        ).json()
+        assert stale["history_page"]["reset_required"] is True
+        assert stale["events"] == []
+
+        # Malformed / wrong-target cursors are rejected as 400, never merged.
+        assert (
+            client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+                params={
+                    "paged": "true",
+                    "limit": 3,
+                    "stream": "events",
+                    "after": "not-a-cursor",
+                },
+            ).status_code
+            == 400
+        )
+
+        # Saved (on-disk) paging reuses the same bounded pager over the
+        # persisted store, with the same envelope + cursor semantics. The
+        # saved event page also omits the conversation snapshot.
+        resp = client.get(
+            f"/api/sessions/{saved_name}/history/alice",
+            params={"paged": "true", "limit": 3, "stream": "events"},
+        )
+        assert resp.status_code == 200
+        saved_page = resp.json()
+        assert saved_page["target"] == "alice"
+        saved_hp = saved_page["history_page"]
+        assert saved_hp["version"] == 1
+        assert saved_hp["stream"] == "events"
+        assert saved_hp["history_id"] and len(saved_hp["history_id"]) == 16
+        assert saved_page["messages"] == []
+        assert saved_page["events"]
+        saved_keys = [e["_history_key"] for e in saved_page["events"]]
+        assert all(k.startswith("events:") for k in saved_keys)
+        saved_older = client.get(
+            f"/api/sessions/{saved_name}/history/alice",
+            params={
+                "paged": "true",
+                "limit": 3,
+                "stream": "events",
+                "before": saved_hp["before"],
+                "history_id": saved_hp["history_id"],
+            },
+        ).json()
+        assert saved_older["history_page"]["history_id"] == saved_hp["history_id"]
+        assert saved_older["events"] and saved_older["events"] != saved_page["events"]
+
+        # ── History detail (full raw record behind a page) ────────────
+        # The opaque ref token addresses one physical record; the detail
+        # endpoint returns the complete raw record with the identical
+        # ``_history_key`` carried on the paged item. ``history_page.after``
+        # is an opaque record cursor for the page's newest event.
+        live_detail = client.get(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/history/detail",
+            params={
+                "stream": "events",
+                "ref": live_hp["after"],
+                "history_id": live_hp["history_id"],
+            },
+        )
+        assert live_detail.status_code == 200
+        live_body = live_detail.json()
+        assert live_body["record"]["_history_key"] == live_keys[-1]
+        assert live_body["history_page"]["version"] == 1
+        assert live_body["history_page"]["stream"] == "events"
+        assert live_body["history_page"]["history_id"] == live_hp["history_id"]
+
+        saved_detail = client.get(
+            f"/api/sessions/{saved_name}/history/alice/detail",
+            params={
+                "stream": "events",
+                "ref": saved_hp["after"],
+                "history_id": saved_hp["history_id"],
+            },
+        )
+        assert saved_detail.status_code == 200
+        assert saved_detail.json()["record"]["_history_key"] == saved_keys[-1]
+        assert saved_detail.json()["history_page"]["stream"] == "events"
+
+        # Detail validation: malformed refs are 400 and a changed/foreign
+        # history identity is 409 (stale) — never a silently wrong record.
+        assert (
+            client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history/detail",
+                params={
+                    "stream": "events",
+                    "ref": "not-a-cursor",
+                    "history_id": live_hp["history_id"],
+                },
+            ).status_code
+            == 400
+        )
+        assert (
+            client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history/detail",
+                params={
+                    "stream": "events",
+                    "ref": live_hp["after"],
+                    "history_id": "0000000000000000",
+                },
+            ).status_code
+            == 409
+        )
+        assert (
+            client.get(
+                f"/api/sessions/{saved_name}/history/alice/detail",
+                params={
+                    "stream": "events",
+                    "ref": "not-a-cursor",
+                    "history_id": saved_hp["history_id"],
+                },
+            ).status_code
+            == 400
+        )
+
         # Artifacts route — the session has no artifacts directory, so
         # any file path 404s (the path-resolution guard rejects it
         # before a FileResponse is built).

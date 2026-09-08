@@ -49,6 +49,7 @@ from kohakuterrarium.terrarium.events import (
     EngineEvent,
     EventFilter,
 )
+from kohakuterrarium.terrarium.history_remote import RemoteHistoryServiceMixin
 from kohakuterrarium.terrarium.remote_recipe import RemoteRecipeServiceMixin
 from kohakuterrarium.terrarium.service import CreatureInfo
 from kohakuterrarium.terrarium.service_dto import BranchMutationResult
@@ -159,6 +160,7 @@ def _branch_mutation_result(body: dict[str, Any]) -> BranchMutationResult:
 
 
 class RemoteTerrariumService(
+    RemoteHistoryServiceMixin,
     RemoteRecipeServiceMixin,
     RemoteDriveServiceMixin,
     DriveServiceUnsupportedMixin,
@@ -351,6 +353,9 @@ class RemoteTerrariumService(
             await self._req("chat_history", {"creature_id": creature_id})
         )
         return body.get("history", {})
+
+    async def _history_request(self, verb: str, payload: dict) -> dict:
+        return _maybe_raise(await self._req(verb, payload))["history"]
 
     async def chat_branches(self, creature_id: str) -> list[dict[str, Any]]:
         body = _maybe_raise(
