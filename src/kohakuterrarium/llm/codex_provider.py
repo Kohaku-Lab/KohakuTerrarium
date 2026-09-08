@@ -108,6 +108,7 @@ class CodexOAuthProvider(BaseLLMProvider):
         self._websocket_mode = bool(websocket_mode)
         self._ws_session: ResponsesWSSession | None = None
         self._tokens: CodexTokens | None = None
+        self._token_lock = asyncio.Lock()
         self._client: Any = None  # AsyncOpenAI
         self._last_tool_calls: list[NativeToolCall] = []
         self._last_usage: dict[str, int] = {}
@@ -159,16 +160,30 @@ class CodexOAuthProvider(BaseLLMProvider):
         )
 
     async def _ensure_valid_token(self) -> None:
-        """Refresh token if expired and rebuild client (OAuth mode only)."""
+        """Adopt a newer on-disk login or refresh the expired access token."""
         if self._api_key:
             if not self._client:
                 self._rebuild_client()
             return
-        if not self._tokens:
-            await self.ensure_authenticated()
-            return
-        if self._tokens.is_expired():
-            self._tokens = await refresh_tokens(self._tokens)
+        async with self._token_lock:
+            if not self._tokens:
+                await self.ensure_authenticated()
+                await self._reset_ws_session()
+                return
+            if not self._tokens.is_expired():
+                return
+            reloaded = CodexTokens.load()
+            if reloaded is not None and not reloaded.is_expired():
+                self._tokens = reloaded
+            else:
+                try:
+                    self._tokens = await refresh_tokens(self._tokens)
+                except Exception:
+                    reloaded = CodexTokens.load()
+                    if reloaded is None or reloaded.is_expired():
+                        raise
+                    self._tokens = reloaded
+            await self._reset_ws_session()
             self._rebuild_client()
 
     @property
@@ -201,6 +216,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             websocket_mode=self._websocket_mode,
         )
         clone._tokens = self._tokens
+        clone._token_lock = self._token_lock
         clone._client = self._client
         clone._retry_policy = self._retry_policy
         clone._emergency_drop_callbacks = list(self._emergency_drop_callbacks)
@@ -506,11 +522,16 @@ class CodexOAuthProvider(BaseLLMProvider):
         if part is not None:
             self._last_assistant_parts.append(part)
 
+    async def _reset_ws_session(self) -> None:
+        """Drop the WebSocket session so the next turn reconnects with fresh auth."""
+        session = self._ws_session
+        self._ws_session = None
+        if session is not None:
+            await session.close()
+
     async def close(self) -> None:
         """Close the WebSocket session and the underlying SDK client."""
-        if self._ws_session is not None:
-            await self._ws_session.close()
-            self._ws_session = None
+        await self._reset_ws_session()
         if self._client:
             await self._client.close()
         self._client = None

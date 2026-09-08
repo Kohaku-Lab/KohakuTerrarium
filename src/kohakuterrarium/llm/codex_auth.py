@@ -38,7 +38,7 @@ CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 REDIRECT_PORT = 1455
 REDIRECT_URI = f"http://localhost:{REDIRECT_PORT}/auth/callback"
 DEVICE_REDIRECT_URI = f"{ISSUER}/deviceauth/callback"
-SCOPE = "openid email profile"
+SCOPE = "openid email profile offline_access"
 AUDIENCE = "https://api.openai.com/v1"
 
 CODEX_CLI_TOKEN_PATH = Path.home() / ".codex" / "auth.json"

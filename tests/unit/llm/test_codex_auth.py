@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urlparse
 from kohakuterrarium.llm.codex_auth import (
     CLIENT_ID,
     REDIRECT_URI,
+    SCOPE,
     CodexTokens,
     _build_auth_url,
     _generate_pkce,
@@ -130,6 +131,8 @@ class TestBuildAuthURL:
         assert qs["state"] == ["state456"]
         assert qs["redirect_uri"] == [REDIRECT_URI]
         assert qs["response_type"] == ["code"]
+        assert qs["scope"] == [SCOPE]
+        assert "offline_access" in SCOPE
 
 
 class TestIsHeadless:
