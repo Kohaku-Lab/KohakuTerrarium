@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
 from kohakuterrarium.llm.grok_media import GrokMediaClient
 from kohakuterrarium.llm.message import ImagePart
 
@@ -39,6 +40,10 @@ class GrokImageClient:
             raise ValueError("prompt is required")
         if not image_url:
             raise ValueError("image_url is required for editing")
+        if image_url.startswith(("file://", "/api/sessions/")):
+            image_url = resolve_artifact_url(image_url)
+            if not image_url.startswith("data:image/"):
+                raise ValueError("image_url could not be resolved to a local image")
         payload = _generation_payload(args, prompt)
         payload["image"] = {"url": image_url, "type": "image_url"}
         response = await self.media.request_json(

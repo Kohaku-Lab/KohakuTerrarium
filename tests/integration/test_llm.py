@@ -29,12 +29,21 @@ Why these collaborators are real:
     reset so resolution is deterministic with no installed packages.
 """
 
+import base64
+import io
+import json
 from typing import Any
 
+import httpx
 import pytest
+from PIL import Image
 
+from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
+from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.core.registry import Registry
+from kohakuterrarium.core.tool_output import normalize_tool_result
 from kohakuterrarium.llm import api_keys as ak
+from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm import backends as backends_mod
 from kohakuterrarium.llm import presets as presets_mod
 from kohakuterrarium.llm.backends import (
@@ -50,6 +59,9 @@ from kohakuterrarium.llm.base import (
     ToolSchema,
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.grok_auth import GrokToken, GrokTokens
+from kohakuterrarium.llm.grok_image_gen import GrokImageClient
+from kohakuterrarium.llm.grok_media import GrokMediaClient
 from kohakuterrarium.llm.message import (
     AssistantMessage,
     FilePart,
@@ -88,7 +100,13 @@ from kohakuterrarium.llm.variations import (
     normalize_variation_selections,
     parse_variation_selector,
 )
-from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.tool.base import (
+    BaseTool,
+    ExecutionMode,
+    ToolContext,
+    ToolResult,
+)
+from kohakuterrarium.session.store import SessionStore
 
 pytestmark = pytest.mark.timeout(30)
 
@@ -963,7 +981,7 @@ class TestLlmIntegration:
         bad_call = NativeToolCall(id="c2", name="read", arguments="{not json")
         assert bad_call.parsed_arguments() == {"_raw": "{not json"}
 
-    async def test_multimodal_message_round_trip_workflow(self):
+    async def test_multimodal_message_round_trip_workflow(self, tmp_path, monkeypatch):
         """Build a full multimodal conversation and assert exact wire shape.
 
         The controller assembles ``Message`` objects (system + multimodal
@@ -1226,6 +1244,63 @@ class TestLlmIntegration:
         # The provider-native metadata the agent-start validator reads.
         assert provider.provider_name == "minimal"
         assert provider.provider_native_tools == frozenset({"image_gen"})
+
+        image_buffer = io.BytesIO()
+        Image.new("RGB", (2, 2), "red").save(image_buffer, format="PNG")
+        image_bytes = image_buffer.getvalue()
+        encoded = base64.b64encode(image_bytes).decode("ascii")
+        source = tmp_path / "image%20name.png"
+        source.write_bytes(image_bytes)
+        (tmp_path / "image name.png").write_bytes(b"wrong file")
+        context = ToolContext(agent_name="vision", session=None, working_dir=tmp_path)
+        read_result = await ReadTool().execute({"path": source.name}, context=context)
+        assert read_result.success
+        file_reference = read_result.output[1].url
+        assert file_reference == source.resolve().as_uri()
+
+        requests = []
+
+        def respond(request):
+            requests.append((request.url.path, json.loads(request.content)))
+            return httpx.Response(
+                200, json={"data": [{"b64_json": encoded, "mime_type": "image/png"}]}
+            )
+
+        async def no_refresh(**kwargs):
+            return None
+
+        monkeypatch.setattr(GrokTokens, "ensure_fresh_cli", no_refresh)
+        monkeypatch.setattr(
+            GrokTokens,
+            "load_candidates",
+            lambda: [GrokToken(access_token="test", source="test")],
+        )
+        monkeypatch.setattr(artifact_resolve, "_session_dir", lambda: tmp_path)
+        media = GrokMediaClient(transport=httpx.MockTransport(respond))
+        tool = GrokImageGenTool(client=GrokImageClient(media=media))
+        generated = await tool.execute({"prompt": "a red square"})
+        assert generated.success
+        store = SessionStore(tmp_path / "media.kohakutr")
+        try:
+            normalized, _ = normalize_tool_result(
+                tool, generated, max_output=0, artifact_store=store
+            )
+            artifact_reference = normalized.output[0].url
+            assert artifact_reference.startswith("/api/sessions/media/artifacts/")
+            for reference in (file_reference, artifact_reference):
+                edited = await tool.execute(
+                    {"prompt": "add a border", "action": "edit", "image_url": reference}
+                )
+                assert edited.success
+                assert edited.output[0].url == f"data:image/png;base64,{encoded}"
+                assert requests[-1][0] == "/v1/images/edits"
+                assert requests[-1][1]["image"] == {
+                    "url": f"data:image/png;base64,{encoded}",
+                    "type": "image_url",
+                }
+        finally:
+            store.close()
+        assert len(requests) == 3
 
     def test_api_key_storage_and_resolution_workflow(self):
         """Store + retrieve an API key, then assert the resolver override.
