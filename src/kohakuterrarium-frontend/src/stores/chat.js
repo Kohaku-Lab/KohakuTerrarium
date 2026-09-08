@@ -1,5 +1,5 @@
 import { ElMessage } from "element-plus"
-import { getCurrentInstance, markRaw } from "vue"
+import { getCurrentInstance, markRaw, toRaw } from "vue"
 import { extractReasoning } from "@/utils/chatReasoning"
 
 import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
@@ -216,11 +216,19 @@ function contentSignature(content) {
 // after the user switched tab, session, or mutated history is discarded.
 const _historyPageControllers = new WeakMap()
 
+// Pinia's devtools plugin invokes every action with a fresh Proxy of the
+// store as ``this``, so a receiver must never be used as a persistent
+// key. ``toRaw`` resolves any wrapper to the one store instance.
+function _storeKey(store) {
+  return toRaw(store)
+}
+
 function _historyPageMap(store) {
-  let map = _historyPageControllers.get(store)
+  const key = _storeKey(store)
+  let map = _historyPageControllers.get(key)
   if (!map) {
     map = new Map()
-    _historyPageControllers.set(store, map)
+    _historyPageControllers.set(key, map)
   }
   return map
 }
@@ -228,10 +236,11 @@ function _historyPageMap(store) {
 const _indexesByStore = new WeakMap()
 
 function _tabIndexes(store, tab) {
-  let byTab = _indexesByStore.get(store)
+  const key = _storeKey(store)
+  let byTab = _indexesByStore.get(key)
   if (!byTab) {
     byTab = new Map()
-    _indexesByStore.set(store, byTab)
+    _indexesByStore.set(key, byTab)
   }
   let idx = byTab.get(tab)
   if (!idx) {
@@ -722,6 +731,23 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
     if (!target._historyKeys.includes(k)) target._historyKeys.push(k)
   }
 
+  // A rendered row owns the parts it holds. Tool and sub-agent updates
+  // arrive on later events and must key the owning row, which is not
+  // always ``cur`` (the row may already be closed).
+  const _rowOfPart = new WeakMap()
+
+  function pushKeyed(row, evt) {
+    addHistoryKey(row, evt)
+    result.push(row)
+    return row
+  }
+
+  function keyOwningRow(part, evt) {
+    const owner = (part && _rowOfPart.get(part)) || cur
+    if (owner) addHistoryKey(owner, evt)
+    return owner
+  }
+
   function ensureCur() {
     if (!cur) {
       cur = {
@@ -732,6 +758,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         _historyKeys: [],
       }
       result.push(cur)
+      _rowOfPart.set(cur, cur)
     }
     return cur
   }
@@ -791,6 +818,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
     // must not reset the visible elapsed timer to 0.
     if (startedTs) tool.startedAt = startedTs
     c.parts.push(tool)
+    _rowOfPart.set(tool, c)
     if (jobId) startedJobs[jobId] = tool
     return tool
   }
@@ -848,6 +876,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       }
       if (!sa.children) sa.children = []
       sa.children.push(tool)
+      _rowOfPart.set(tool, _rowOfPart.get(sa) || cur)
       return tool
     }
     return addTool(name, "tool", args)
@@ -863,10 +892,10 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         tc.resultParts = payload.resultParts
         tc.resultMeta = payload.resultMeta
         if (opts?.error) tc.status = "error"
-        return
+        return tc
       }
     }
-    updateTool(name, result, opts)
+    return updateTool(name, result, opts)
   }
 
   function findToolByJobId(jobId) {
@@ -927,6 +956,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       if (tc.jobId) completedJobs.add(tc.jobId)
       if (jobId) completedJobs.add(jobId)
     }
+    return tc
   }
 
   function findCompactMessage(round, preferRunning = false) {
@@ -1078,6 +1108,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         repliedActionId: "",
         repliedValues: null,
       }
+      addHistoryKey(message, evt)
       result.push(message)
       interactiveMessages.set(uiEventId, message)
     } else if (t === "ui_supersede" || t === "timeout") {
@@ -1099,6 +1130,8 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         _historyKeys: [],
       }
       result.push(cur)
+      _rowOfPart.set(cur, cur)
+      addHistoryKey(cur, evt)
     } else if (t === "text" || t === "text_chunk") {
       // text_chunk is the Wave C per-chunk streaming format; replay
       // collapses consecutive chunks into one assistant text part.
@@ -1121,39 +1154,48 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         cur = null
         const ch = evt.channel || ""
         const sender = evt.sender || ""
-        result.push({
-          id: stableId("h_"),
-          role: "trigger",
-          content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : evt.name,
-          triggerContent: evt.content || "",
-          channel: ch,
-          sender,
-          timestamp: "",
-        })
+        pushKeyed(
+          {
+            id: stableId("h_"),
+            role: "trigger",
+            content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : evt.name,
+            triggerContent: evt.content || "",
+            channel: ch,
+            sender,
+            timestamp: "",
+          },
+          evt,
+        )
       } else if (at === "drive_turn") {
         cur = null
-        result.push(_driveTurnMessage(evt, stableId("drv_"), ""))
+        pushKeyed(_driveTurnMessage(evt, stableId("drv_"), ""), evt)
       } else if (at === "token_usage") {
         if (cur) cur._pendingReasoningCursor = cur.parts.length
       } else if (at === "processing_complete") {
         // skip
       } else if (at === "context_cleared") {
         cur = null
-        result.push({
-          id: stableId("clear_"),
-          role: "clear",
-          messagesCleared: evt.messages_cleared || 0,
-          timestamp: "",
-        })
+        pushKeyed(
+          {
+            id: stableId("clear_"),
+            role: "clear",
+            messagesCleared: evt.messages_cleared || 0,
+            timestamp: "",
+          },
+          evt,
+        )
       } else if (at === "processing_error") {
         cur = null
-        result.push({
-          id: stableId("err_"),
-          role: "error",
-          errorType: evt.error_type || "Error",
-          content: evt.error || evt.detail || "Unknown error",
-          timestamp: "",
-        })
+        pushKeyed(
+          {
+            id: stableId("err_"),
+            role: "error",
+            errorType: evt.error_type || "Error",
+            content: evt.error || evt.detail || "Unknown error",
+            timestamp: "",
+          },
+          evt,
+        )
       } else if (at === "subagent_start") {
         const tool = addTool(
           evt.name,
@@ -1164,24 +1206,28 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         )
         tool.llm_name = evt.llm_name || ""
         tool.model = evt.model || ""
+        keyOwningRow(tool, evt)
       } else if (at === "subagent_done") {
         const tool =
           findSubagent(evt.name, evt.job_id) ||
           addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
         tool.llm_name = evt.llm_name || tool.llm_name || ""
         tool.model = evt.model || tool.model || ""
-        updateTool(
-          evt.name,
-          evt.result || evt.detail,
-          {
-            tools_used: evt.tools_used,
-            turns: evt.turns,
-            duration: evt.duration,
-            total_tokens: evt.total_tokens,
-            prompt_tokens: evt.prompt_tokens,
-            completion_tokens: evt.completion_tokens,
-          },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.detail,
+            {
+              tools_used: evt.tools_used,
+              turns: evt.turns,
+              duration: evt.duration,
+              total_tokens: evt.total_tokens,
+              prompt_tokens: evt.prompt_tokens,
+              completion_tokens: evt.completion_tokens,
+            },
+            evt.job_id,
+          ) || tool,
+          evt,
         )
       } else if (at === "subagent_error") {
         const tool =
@@ -1189,41 +1235,59 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
           addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
         tool.llm_name = evt.llm_name || tool.llm_name || ""
         tool.model = evt.model || tool.model || ""
-        updateTool(
-          evt.name,
-          evt.result || evt.error || evt.detail,
-          {
-            error: true,
-            interrupted: !!evt.interrupted,
-            finalState: evt.final_state,
-            tools_used: evt.tools_used,
-            turns: evt.turns,
-            duration: evt.duration,
-            total_tokens: evt.total_tokens,
-            prompt_tokens: evt.prompt_tokens,
-            completion_tokens: evt.completion_tokens,
-          },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.error || evt.detail,
+            {
+              error: true,
+              interrupted: !!evt.interrupted,
+              finalState: evt.final_state,
+              tools_used: evt.tools_used,
+              turns: evt.turns,
+              duration: evt.duration,
+              total_tokens: evt.total_tokens,
+              prompt_tokens: evt.prompt_tokens,
+              completion_tokens: evt.completion_tokens,
+            },
+            evt.job_id,
+          ) || tool,
+          evt,
         )
       } else if (at === "tool_start") {
-        addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id, _evtStartedTs(evt))
+        keyOwningRow(
+          addTool(
+            evt.name,
+            "tool",
+            evt.args || { info: evt.detail },
+            evt.job_id,
+            _evtStartedTs(evt),
+          ),
+          evt,
+        )
       } else if (at === "tool_done") {
-        updateTool(
-          evt.name,
-          evt.result || evt.output || evt.detail,
-          { tools_used: evt.tools_used, canvas_preview: evt.canvas_preview },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.output || evt.detail,
+            { tools_used: evt.tools_used, canvas_preview: evt.canvas_preview },
+            evt.job_id,
+          ),
+          evt,
         )
       } else if (at === "tool_error") {
-        updateTool(
-          evt.name,
-          evt.result || evt.error || evt.detail,
-          {
-            error: true,
-            interrupted: !!evt.interrupted,
-            finalState: evt.final_state,
-          },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.error || evt.detail,
+            {
+              error: true,
+              interrupted: !!evt.interrupted,
+              finalState: evt.final_state,
+            },
+            evt.job_id,
+          ),
+          evt,
         )
       } else if (at?.startsWith("subagent_tool_")) {
         const subAct = at.replace("subagent_", "")
@@ -1231,11 +1295,14 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         const saName = evt.subagent || ""
         const saJobId = evt.job_id || ""
         if (subAct === "tool_start") {
-          addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId)
+          keyOwningRow(addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId), evt)
         } else if (subAct === "tool_done") {
-          updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId)
+          keyOwningRow(updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId), evt)
         } else if (subAct === "tool_error") {
-          updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId)
+          keyOwningRow(
+            updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId),
+            evt,
+          )
         }
       }
 
@@ -1246,33 +1313,39 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       // live, instead of a mystery "B started processing" with no
       // explanation.
       cur = null
-      result.push({
-        id: stableId("h_"),
-        role: "wire_inbound",
-        from: evt.from || evt.detail || "",
-        to: evt.to || "",
-        preview: evt.content_preview || "",
-        withContent: evt.with_content !== false,
-        turnIndex: evt.source_turn_index || 0,
-        // Cross-site delivery flag — backend sets metadata.cross_node
-        // on remote forwards via terrarium.broadcast.  The frontend
-        // chips the entry with a "cross-site" badge.
-        crossNode: !!(evt.cross_node || evt.metadata?.cross_node),
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("h_"),
+          role: "wire_inbound",
+          from: evt.from || evt.detail || "",
+          to: evt.to || "",
+          preview: evt.content_preview || "",
+          withContent: evt.with_content !== false,
+          turnIndex: evt.source_turn_index || 0,
+          // Cross-site delivery flag — backend sets metadata.cross_node
+          // on remote forwards via terrarium.broadcast.  The frontend
+          // chips the entry with a "cross-site" badge.
+          crossNode: !!(evt.cross_node || evt.metadata?.cross_node),
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "trigger_fired") {
       cur = null
       const ch = evt.channel || ""
       const sender = evt.sender || ""
-      result.push({
-        id: stableId("h_"),
-        role: "trigger",
-        content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : "",
-        triggerContent: evt.content || "",
-        channel: ch,
-        sender,
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("h_"),
+          role: "trigger",
+          content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : "",
+          triggerContent: evt.content || "",
+          channel: ch,
+          sender,
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "tool_call") {
       addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id, _evtStartedTs(evt))
       if (cur) addHistoryKey(cur, evt)
@@ -1320,32 +1393,38 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
       tool.llm_name = evt.llm_name || tool.llm_name || ""
       tool.model = evt.model || tool.model || ""
-      updateTool(
-        evt.name,
-        evt.output || evt.error || "",
-        {
-          error: evt.error ? true : false,
-          interrupted: !!evt.interrupted,
-          finalState: evt.final_state,
-          tools_used: evt.tools_used,
-          turns: evt.turns,
-          duration: evt.duration,
-          total_tokens: evt.total_tokens,
-          prompt_tokens: evt.prompt_tokens,
-          completion_tokens: evt.completion_tokens,
-        },
-        evt.job_id,
+      keyOwningRow(
+        updateTool(
+          evt.name,
+          evt.output || evt.error || "",
+          {
+            error: evt.error ? true : false,
+            interrupted: !!evt.interrupted,
+            finalState: evt.final_state,
+            tools_used: evt.tools_used,
+            turns: evt.turns,
+            duration: evt.duration,
+            total_tokens: evt.total_tokens,
+            prompt_tokens: evt.prompt_tokens,
+            completion_tokens: evt.completion_tokens,
+          },
+          evt.job_id,
+        ) || tool,
+        evt,
       )
     } else if (t === "subagent_tool") {
       const toolName = evt.tool_name || ""
       const saName = evt.subagent || ""
       const saJobId = evt.job_id || ""
       if (evt.activity === "tool_start") {
-        addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId)
+        keyOwningRow(addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId), evt)
       } else if (evt.activity === "tool_done") {
-        updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId)
+        keyOwningRow(updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId), evt)
       } else if (evt.activity === "tool_error") {
-        updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId)
+        keyOwningRow(
+          updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId),
+          evt,
+        )
       }
     } else if (t === "channel_message") {
       const normalized = normalizeMessageContent(evt.content)
@@ -1361,11 +1440,14 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       result.push(channelMessage)
     } else if (t === "compact_summary" || t === "compact_complete") {
       cur = null
-      upsertCompactMessage(
-        evt.compact_round || evt.round || 0,
-        evt.summary || "",
-        "done",
-        evt.messages_compacted || 0,
+      addHistoryKey(
+        upsertCompactMessage(
+          evt.compact_round || evt.round || 0,
+          evt.summary || "",
+          "done",
+          evt.messages_compacted || 0,
+        ),
+        evt,
       )
     } else if (t === "compact_replace") {
       // Wave C state-bearing event. Used by replay_conversation and
@@ -1373,27 +1455,37 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       // history was replaced with a summary. Render as a compact
       // bubble — NOT as a plain assistant message.
       cur = null
-      upsertCompactMessage(
-        evt.round || 0,
-        evt.summary_text || evt.summary || "",
-        "done",
-        evt.messages_compacted || 0,
+      addHistoryKey(
+        upsertCompactMessage(
+          evt.round || 0,
+          evt.summary_text || evt.summary || "",
+          "done",
+          evt.messages_compacted || 0,
+        ),
+        evt,
       )
     } else if (t === "compact_start") {
       cur = null
-      upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0)
+      addHistoryKey(
+        upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0),
+        evt,
+      )
     } else if (t === "background_result") {
       cur = null
       // A combined delivery banner carries `labels` (one per folded
       // completion); older single-event frames carry only `label`.
-      result.push({
-        id: stableId("bgres_"),
-        role: "bg_result",
-        label: (Array.isArray(evt.labels) ? evt.labels.join(", ") : evt.label) || evt.job_id || "",
-        kind: evt.kind || "tool",
-        jobId: evt.job_id || "",
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("bgres_"),
+          role: "bg_result",
+          label:
+            (Array.isArray(evt.labels) ? evt.labels.join(", ") : evt.label) || evt.job_id || "",
+          kind: evt.kind || "tool",
+          jobId: evt.job_id || "",
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "compact_skipped") {
       // Terminal for a started round that didn't complete — without it
       // the bubble from compact_start spins forever on replay.
@@ -1405,21 +1497,27 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       }
     } else if (t === "processing_error") {
       cur = null
-      result.push({
-        id: stableId("err_"),
-        role: "error",
-        errorType: evt.error_type || "Error",
-        content: evt.error || "",
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("err_"),
+          role: "error",
+          errorType: evt.error_type || "Error",
+          content: evt.error || "",
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "context_cleared") {
       cur = null
-      result.push({
-        id: stableId("clear_"),
-        role: "clear",
-        messagesCleared: evt.messages_cleared || 0,
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("clear_"),
+          role: "clear",
+          messagesCleared: evt.messages_cleared || 0,
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "assistant_image") {
       // Replay the image into the current assistant message so resumed
       // sessions (and plain history reloads) show it in place. Mirrors
@@ -1442,6 +1540,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
           revised_prompt: evt.revised_prompt,
         },
       })
+      addHistoryKey(c, evt)
     } else if (t === "assistant_reasoning") {
       const c = ensureCur()
       _insertReasoningSegments(
@@ -1450,6 +1549,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         typeof evt.event_id === "number" ? `h_${evt.event_id}_r` : "h_reasoning_",
       )
       c._pendingReasoningCursor = undefined
+      addHistoryKey(c, evt)
     } else if (t === "token_usage") {
       if (cur) cur._pendingReasoningCursor = cur.parts.length
     } else if (t === "processing_complete") {
@@ -6048,7 +6148,7 @@ const _chatStoreOptions = {
 
     /** Dispose every paged controller for this store. */
     _disposeHistoryPageControllers() {
-      const map = _historyPageControllers.get(this)
+      const map = _historyPageControllers.get(_storeKey(this))
       if (!map) return
       for (const controller of map.values()) controller.dispose()
       map.clear()

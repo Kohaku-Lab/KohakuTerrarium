@@ -200,7 +200,7 @@ import { inject } from "vue"
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
 import { isTailRenderBudgetFull, useChatRenderWindow, CHAT_RENDER_EXPAND_MESSAGE_LIMIT, CHAT_RENDER_EXPAND_UNIT_BUDGET, CHAT_RENDER_MESSAGE_LIMIT, CHAT_RENDER_UNIT_BUDGET } from "@/components/chat/chatRenderWindow"
-import { createChatHistoryExpander, captureSemanticAnchor } from "@/components/chat/chatHistoryExpand"
+import { createChatHistoryExpander, captureSemanticAnchor, CHAT_AUTO_EXPAND_TOP_PX } from "@/components/chat/chatHistoryExpand"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
@@ -686,18 +686,35 @@ function restoreScrollPosition(instanceId = props.instance?.id || chat._instance
 let scrollStateFrame = null
 let scrolledUp = false
 let touchY = null
+// An expansion whose anchor cannot be restored leaves the viewport pinned
+// at the top, where no further scroll delta arrives. The gesture itself
+// must still be able to ask for the next batch.
+function nudgeHistoryAtTop() {
+  const el = messagesEl.value
+  if (!el || !isHistoryMode.value || el.scrollTop > CHAT_AUTO_EXPAND_TOP_PX) return
+  historyExpander.maybeExpandAtTop(el.scrollTop)
+}
 function onMessagesWheel(event) {
-  if (event.deltaY < 0) historyExpander.cancelInitialFill(true)
+  if (event.deltaY < 0) {
+    historyExpander.cancelInitialFill(true)
+    nudgeHistoryAtTop()
+  }
 }
 function onMessagesKeydown(event) {
-  if (["ArrowUp", "PageUp", "Home"].includes(event.key)) historyExpander.cancelInitialFill(true)
+  if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+    historyExpander.cancelInitialFill(true)
+    nudgeHistoryAtTop()
+  }
 }
 function onMessagesTouchStart(event) {
   touchY = event.touches[0]?.clientY ?? null
 }
 function onMessagesTouchMove(event) {
   const y = event.touches[0]?.clientY
-  if (touchY != null && y > touchY) historyExpander.cancelInitialFill(true)
+  if (touchY != null && y > touchY) {
+    historyExpander.cancelInitialFill(true)
+    nudgeHistoryAtTop()
+  }
   touchY = y
 }
 function onMessagesScroll() {

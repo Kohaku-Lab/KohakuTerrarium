@@ -1,6 +1,7 @@
 import { createPinia, setActivePinia } from "pinia"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatStore } from "./chat"
+import { indexOfSemanticKey, semanticKey } from "@/components/chat/chatRenderWindow"
 import { sessionAPI, terrariumAPI } from "@/utils/api"
 
 function event(id, type = "user_message", extra = {}) {
@@ -196,6 +197,33 @@ describe("paged history consumers", () => {
     )
     await chat.initHistoryPage("root")
     expect(chat.messagesByTab.root[0]._historyKeys).toEqual(["e:30", "e:31"])
+    vi.mocked(terrariumAPI.getHistoryPage)
+      .mockResolvedValueOnce(
+        page([
+          event(40, "processing_start"),
+          event(41, "subagent_tool", {
+            activity: "tool_start",
+            tool_name: "bash",
+            subagent: "worker",
+            job_id: "sa",
+            detail: "cmd",
+          }),
+          event(42, "background_result", { job_id: "sa", label: "worker" }),
+          event(43, "processing_error", { error: "boom" }),
+        ]),
+      )
+      .mockResolvedValueOnce(
+        page([event(39, "user_input", { content: "older" })], { older: false }),
+      )
+    await chat.initHistoryPage("root")
+    expect(chat.messagesByTab.root.map((m) => m.role)).toEqual(["assistant", "bg_result", "error"])
+    expect(chat.messagesByTab.root.every((m) => m._historyKeys?.length)).toBe(true)
+    const anchors = chat.messagesByTab.root.map((m) => semanticKey(m))
+    expect(anchors).toEqual(["e:40", "e:42", "e:43"])
+    await chat.prefetchOlderHistory("root")
+    expect(chat.materializeOlderHistory("root").applied).toBe(true)
+    expect(content(chat)[0]).toBe("older")
+    expect(anchors.map((key) => indexOfSemanticKey(chat.messagesByTab.root, key))).not.toContain(-1)
   })
 
   it("treats live job ids as authoritative and retains result-first tools across page boundaries", async () => {

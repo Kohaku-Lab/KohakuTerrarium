@@ -535,6 +535,18 @@ describe("connected paged history and reset", () => {
     await scroll(vp.scrollHeight - 120)
     expect(ids()).toHaveLength(200)
     expect(idle.size).toBe(0)
+    // A viewport pinned at the top receives no further scroll delta, so the
+    // gesture itself must still be able to request the next batch.
+    await scroll(0)
+    expect(ids()).toHaveLength(300)
+    vp.scrollTop = 0
+    vp.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }))
+    await flushPromises()
+    expect(ids()).toHaveLength(400)
+    vp.scrollTop = vp.scrollHeight - 120
+    vp.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }))
+    await flushPromises()
+    expect(ids()).toHaveLength(400)
   })
 
   it.each(["tail", "switch", "unmount"])(
