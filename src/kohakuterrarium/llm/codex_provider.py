@@ -186,6 +186,37 @@ class CodexOAuthProvider(BaseLLMProvider):
             await self._reset_ws_session()
             self._rebuild_client()
 
+    @staticmethod
+    def _is_unauthorized_error(exc: BaseException) -> bool:
+        """Return whether the server rejected the cached access token."""
+        return getattr(exc, "status_code", None) == 401
+
+    async def _recover_unauthorized(self) -> bool:
+        """Reload or refresh credentials after a server 401, then rebuild the client."""
+        async with self._token_lock:
+            if self._tokens is None:
+                return False
+            previous_access = self._tokens.access_token
+            reloaded = CodexTokens.load()
+            if reloaded is not None:
+                self._tokens = reloaded
+            if (
+                self._tokens.is_expired()
+                or self._tokens.access_token == previous_access
+            ):
+                try:
+                    self._tokens = await refresh_tokens(self._tokens)
+                except Exception:
+                    recovered = CodexTokens.load()
+                    if recovered is None or recovered.access_token == previous_access:
+                        return False
+                    self._tokens = recovered
+            if self._tokens.access_token == previous_access:
+                return False
+            await self._reset_ws_session()
+            self._rebuild_client()
+            return True
+
     @property
     def last_tool_calls(self) -> list[NativeToolCall]:
         return self._last_tool_calls
@@ -238,8 +269,10 @@ class CodexOAuthProvider(BaseLLMProvider):
         """Stream with classified retries and two-stage overflow recovery."""
         current = messages
         attempt = 0
+        auth_retry = False
         overflow_state = OverflowRecoveryState()
         while True:
+            emitted = False
             try:
                 async for chunk in self._raw_stream_chat(
                     current,
@@ -247,10 +280,24 @@ class CodexOAuthProvider(BaseLLMProvider):
                     provider_native_tools=provider_native_tools,
                     **kwargs,
                 ):
+                    emitted = True
                     yield chunk
                 return
             except Exception as exc:
                 cls = classify_openai_error(exc)
+                if (
+                    not auth_retry
+                    and not emitted
+                    and not self._api_key
+                    and self._is_unauthorized_error(exc)
+                ):
+                    auth_retry = True
+                    if await self._recover_unauthorized():
+                        logger.warning(
+                            "Codex credential rejected; retrying with refreshed token",
+                            error_class=cls.value,
+                        )
+                        continue
                 if cls is ErrorClass.OVERFLOW:
                     replacement = await self._recover_from_overflow(
                         current, overflow_state

@@ -221,13 +221,6 @@ class TestTokenReload:
             access_token="fresh", refresh_token="new", expires_at=time.time() + 3600
         )
 
-        class _FakeWSSession:
-            def __init__(self):
-                self.closed = False
-
-            async def close(self):
-                self.closed = True
-
         p = CodexOAuthProvider(model="gpt-x", websocket_mode=True)
         p._tokens = stale
         p._rebuild_client = lambda: None
@@ -261,6 +254,209 @@ class _FakeResponses:
 class _FakeClient:
     def __init__(self):
         self.responses = _FakeResponses()
+
+
+class _TokenExpiredError(Exception):
+    def __init__(self):
+        super().__init__("Error code: 401 - Provided authentication token is expired.")
+        self.status_code = 401
+        self.body = {
+            "error": {
+                "code": "token_expired",
+                "message": "Provided authentication token is expired.",
+            }
+        }
+
+
+async def _empty_stream():
+    if False:  # pragma: no cover - make this an async generator
+        yield
+
+
+class _ScriptedResponses:
+    def __init__(self, outcomes):
+        self._outcomes = list(outcomes)
+        self.calls = 0
+
+    async def create(self, **kwargs):
+        self.calls += 1
+        outcome = self._outcomes.pop(0)
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome()
+
+
+class _ScriptedClient:
+    def __init__(self, outcomes):
+        self.responses = _ScriptedResponses(outcomes)
+
+
+class _FakeWSSession:
+    def __init__(self):
+        self.closed = False
+
+    def invalidate(self):
+        pass
+
+    async def close(self):
+        self.closed = True
+
+
+class TestUnauthorizedRecovery:
+    async def _drive(self, provider):
+        return [
+            chunk
+            async for chunk in provider._stream_chat(
+                [{"role": "user", "content": "hi"}]
+            )
+        ]
+
+    async def test_server_401_reloads_disk_login_and_retries(self, monkeypatch):
+        stale = CodexTokens(
+            access_token="stale", refresh_token="old", expires_at=time.time() + 3600
+        )
+        fresh = CodexTokens(
+            access_token="fresh", refresh_token="new", expires_at=time.time() + 3600
+        )
+        p = CodexOAuthProvider(model="gpt-x")
+        p._tokens = stale
+        p._rebuild_client = lambda: None
+        p._client = _ScriptedClient([_TokenExpiredError(), _empty_stream])
+        session = _FakeWSSession()
+        p._ws_session = session
+
+        async def _boom(*args, **kwargs):
+            raise AssertionError(
+                "refresh_tokens must not run when disk has a fresh login"
+            )
+
+        monkeypatch.setattr(
+            cp.CodexTokens, "load", classmethod(lambda cls, path=None: fresh)
+        )
+        monkeypatch.setattr(cp, "refresh_tokens", _boom)
+
+        chunks = await self._drive(p)
+
+        assert chunks == []
+        assert p._tokens is fresh
+        assert p._client.responses.calls == 2
+        assert session.closed is True
+        assert p._ws_session is None
+
+    async def test_server_401_refreshes_cached_token_and_retries(self, monkeypatch):
+        stale = CodexTokens(
+            access_token="stale", refresh_token="old", expires_at=time.time() + 3600
+        )
+        fresh = CodexTokens(
+            access_token="fresh", refresh_token="new", expires_at=time.time() + 3600
+        )
+        p = CodexOAuthProvider(model="gpt-x")
+        p._tokens = stale
+        p._rebuild_client = lambda: None
+        p._client = _ScriptedClient([_TokenExpiredError(), _empty_stream])
+        refresh_calls: list[CodexTokens] = []
+
+        async def _refresh(tokens):
+            refresh_calls.append(tokens)
+            return fresh
+
+        monkeypatch.setattr(
+            cp.CodexTokens, "load", classmethod(lambda cls, path=None: stale)
+        )
+        monkeypatch.setattr(cp, "refresh_tokens", _refresh)
+
+        chunks = await self._drive(p)
+
+        assert chunks == []
+        assert p._tokens is fresh
+        assert refresh_calls == [stale]
+        assert p._client.responses.calls == 2
+
+    async def test_server_401_retries_credentials_once(self, monkeypatch):
+        stale = CodexTokens(
+            access_token="stale", refresh_token="old", expires_at=time.time() + 3600
+        )
+        fresh = CodexTokens(
+            access_token="fresh", refresh_token="new", expires_at=time.time() + 3600
+        )
+        p = CodexOAuthProvider(model="gpt-x")
+        p._tokens = stale
+        p._rebuild_client = lambda: None
+        p._client = _ScriptedClient([_TokenExpiredError(), _TokenExpiredError()])
+        refresh_calls = 0
+
+        async def _refresh(tokens):
+            nonlocal refresh_calls
+            refresh_calls += 1
+            return fresh
+
+        monkeypatch.setattr(
+            cp.CodexTokens, "load", classmethod(lambda cls, path=None: stale)
+        )
+        monkeypatch.setattr(cp, "refresh_tokens", _refresh)
+
+        with pytest.raises(_TokenExpiredError):
+            await self._drive(p)
+
+        assert p._client.responses.calls == 2
+        assert refresh_calls == 1
+
+    async def test_server_401_without_recoverable_credentials_reraises(
+        self, monkeypatch
+    ):
+        stale = CodexTokens(
+            access_token="stale", refresh_token="old", expires_at=time.time() + 3600
+        )
+        p = CodexOAuthProvider(model="gpt-x")
+        p._tokens = stale
+        p._rebuild_client = lambda: None
+        p._client = _ScriptedClient([_TokenExpiredError()])
+        refresh_calls: list[CodexTokens] = []
+
+        async def _refresh(tokens):
+            refresh_calls.append(tokens)
+            raise RuntimeError("invalid_grant")
+
+        monkeypatch.setattr(
+            cp.CodexTokens, "load", classmethod(lambda cls, path=None: stale)
+        )
+        monkeypatch.setattr(cp, "refresh_tokens", _refresh)
+
+        with pytest.raises(_TokenExpiredError):
+            await self._drive(p)
+
+        assert p._client.responses.calls == 1
+        assert refresh_calls == [stale]
+
+    async def test_server_401_after_output_does_not_retry(self, monkeypatch):
+        stale = CodexTokens(
+            access_token="stale", refresh_token="old", expires_at=time.time() + 3600
+        )
+
+        async def _chunk_then_401():
+            yield _Ev(type="response.output_text.delta", delta="hello")
+            raise _TokenExpiredError()
+
+        p = CodexOAuthProvider(model="gpt-x")
+        p._tokens = stale
+        p._rebuild_client = lambda: None
+        p._client = _ScriptedClient([_chunk_then_401])
+
+        async def _boom(*args, **kwargs):
+            raise AssertionError("recovery must not run after output was emitted")
+
+        monkeypatch.setattr(
+            cp.CodexTokens, "load", classmethod(lambda cls, path=None: stale)
+        )
+        monkeypatch.setattr(cp, "refresh_tokens", _boom)
+
+        chunks: list[str] = []
+        with pytest.raises(_TokenExpiredError):
+            async for chunk in p._stream_chat([{"role": "user", "content": "hi"}]):
+                chunks.append(chunk)
+
+        assert chunks == ["hello"]
+        assert p._client.responses.calls == 1
 
 
 class TestSessionIdHeaderGating:
