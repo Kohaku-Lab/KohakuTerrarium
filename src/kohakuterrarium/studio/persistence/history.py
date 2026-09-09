@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import NotFoundError, SessionError, SessionNotFoundError
+from kohakuterrarium.session.history_paging import physical_refs
 from kohakuterrarium.session.history_records import history_page
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.store import (
@@ -124,6 +125,12 @@ def history_page_from_store(
     Callers that only want the legacy full read keep using ``history_from_store``
     / ``history_payload`` unchanged.
     """
+    meta = store.load_meta()
+    known = target in set(session_targets(store, meta))
+    if not known and target.startswith("ch:"):
+        known = bool(physical_refs(store.channels, target[3:], "m"))
+    if not known:
+        raise NotFoundError(f"Target not found in session: {target}")
     return history_page(
         store,
         target,

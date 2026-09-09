@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from kohakuterrarium.errors import NotFoundError
 from kohakuterrarium.session.history_paging import HistoryPagingError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.history import history_page_from_store
@@ -94,6 +95,7 @@ def test_saved_channel_target_uses_channel_stream(store):
 
 
 def test_saved_channel_stream_without_ch_target_rejected(store):
+    _events(store, ["c0"])
     with pytest.raises(HistoryPagingError):
         history_page_from_store(
             store,
@@ -106,6 +108,7 @@ def test_saved_channel_stream_without_ch_target_rejected(store):
 
 
 def test_saved_unsupported_stream_is_explicit(store):
+    _events(store, ["c0"])
     with pytest.raises(HistoryPagingError):
         history_page_from_store(
             store,
@@ -118,6 +121,7 @@ def test_saved_unsupported_stream_is_explicit(store):
 
 
 def test_saved_nonpositive_limit_rejected(store):
+    _events(store, ["c0"])
     with pytest.raises(HistoryPagingError):
         history_page_from_store(
             store,
@@ -126,4 +130,16 @@ def test_saved_nonpositive_limit_rejected(store):
             target="ag",
             stream="events",
             limit=0,
+        )
+
+
+def test_saved_unknown_target_is_not_an_empty_page(store):
+    _events(store, ["c0"])
+    with pytest.raises(NotFoundError):
+        history_page_from_store(
+            store, session_id="s", session_name="s", target="missing", limit=5
+        )
+    with pytest.raises(NotFoundError):
+        history_page_from_store(
+            store, session_id="s", session_name="s", target="ch:missing", limit=5
         )

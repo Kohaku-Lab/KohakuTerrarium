@@ -72,10 +72,12 @@ describe("paged history consumers", () => {
       event(2, "subagent_result", { job_id: "old-agent", total_tokens: 300 }),
     ])
     expect(chat.historyPageByTab.root.hasOlder).toBe(true)
+    chat.processingByTab.root = true
     await chat.prefetchOlderHistory("root")
     expect(content(chat)).toEqual(["20", "21"])
     expect(chat.materializeOlderHistory("root").applied).toBe(true)
     expect(content(chat)).toEqual(["10", "20", "21"])
+    expect(chat.processingByTab.root).toBe(true)
     expect(chat.tokenUsage.root.total).toBe(900)
     expect(chat.tokenUsage.root.partial).toBeUndefined()
     chat._appendStreamChunk("root", "live")
@@ -85,7 +87,9 @@ describe("paged history consumers", () => {
     expect(content(chat)).toEqual(["10", "20", "21", "22"])
     expect(chat.historyPageByTab.root.hasOlder).toBe(false)
     full.mockResolvedValueOnce({ events: [event(40)] })
+    chat.tokenUsage.root.partial = true
     await chat._resyncHistory("root", { full: true })
+    expect(chat.tokenUsage.root.partial).toBe(false)
     expect(full).toHaveBeenCalledTimes(1)
     api.mockResolvedValueOnce(page([event(50)]))
     await chat._resyncHistory("root")

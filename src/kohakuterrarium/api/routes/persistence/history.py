@@ -17,7 +17,6 @@ from urllib.parse import unquote
 from fastapi import APIRouter, Depends, HTTPException
 
 from kohakuterrarium.api.deps import get_service
-from kohakuterrarium.session.history_paging import HistoryPagingError
 from kohakuterrarium.api.routes.persistence.live_paths import live_store_entry
 from kohakuterrarium.errors import (
     ConflictError,
@@ -25,6 +24,7 @@ from kohakuterrarium.errors import (
     SessionError,
     SessionNotFoundError,
 )
+from kohakuterrarium.session.history_paging import HistoryPagingError
 from kohakuterrarium.session.history_records import history_detail
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
@@ -135,7 +135,7 @@ def _saved_history_page(
         store = SessionStore(path)
         return history_page_from_store(
             store,
-            session_id=path.stem,
+            session_id=store.session_id,
             session_name=path.stem,
             target=target,
             stream=stream,
@@ -160,7 +160,7 @@ def _saved_history_detail(path: Path, target: str, **kwargs) -> dict:
         raise SessionNotFoundError(str(path))
     store = SessionStore(path)
     try:
-        return history_detail(store, target, session_id=path.stem, **kwargs)
+        return history_detail(store, target, session_id=store.session_id, **kwargs)
     finally:
         store.close(update_status=False)
 

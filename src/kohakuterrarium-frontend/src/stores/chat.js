@@ -4793,6 +4793,7 @@ const _chatStoreOptions = {
         const prepared = _prepareReplayEvents(data.events, this.branchViewByTab[tab])
         this._setEvents(tab, prepared.events)
         this._restoreTokenUsage(tab, prepared.events, true)
+        if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
         this._rebuildMessages(tab, fetchedAt, prepared)
         const scope = scopeOfStoreId(this.$id) || "default"
         this.attentionByTab[tab] = restoreAttentionFromHistory(
@@ -6045,7 +6046,12 @@ const _chatStoreOptions = {
       }
     },
 
-    _applyHistoryPageRecords(tab, controller, records, { payload = {}, fetchedAt, legacy } = {}) {
+    _applyHistoryPageRecords(
+      tab,
+      controller,
+      records,
+      { payload = {}, fetchedAt, legacy, merged } = {},
+    ) {
       const stream = controller.getState().stream
       if (legacy) {
         const replay = _replayEvents(
@@ -6072,7 +6078,11 @@ const _chatStoreOptions = {
       this.historyPageByTab[tab] = {
         ...controller.getState(),
       }
-      this.processingByTab[tab] = controller.kind !== "saved" && payload.is_processing === true
+      // An older-page merge must not clear a flag a live WS event raised:
+      // its payload is the last head read, not a fresh processing state.
+      this.processingByTab[tab] =
+        controller.kind !== "saved" &&
+        (merged === true ? this.processingByTab[tab] === true : payload.is_processing === true)
       if (stream === "snapshot") {
         const branchSelection = new Map()
         adoptLocalCommandResultSelections(
