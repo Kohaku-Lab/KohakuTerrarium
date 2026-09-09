@@ -994,7 +994,7 @@ class TestInitMetaTerrariumFields:
 # -- discover_attached_agents key filtering -----------------------
 
 
-class TestDiscoverAttachedAgents:
+class TestDiscoverAttachedAgentsNamespaceShapes:
     def test_well_formed_attached_namespace_discovered(self, tmp_path):
         s = _store(tmp_path)
         try:
