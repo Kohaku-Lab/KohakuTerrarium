@@ -81,9 +81,10 @@
               <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ resolvedEmptySubtitle }}</p>
             </div>
           </template>
-          <button v-if="windowStart > 0 || hasOlderHistory" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
+          <button v-if="!historyFetchBlocked && (windowStart > 0 || hasOlderHistory)" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
             {{ windowStart ? t("chat.showEarlier", { count: windowStart }) : t("sessionViewer.trace.turn.loadMore") }}
           </button>
+          <p v-else-if="historyFetchBlocked" data-history-generating class="self-center text-xs text-warm-400 dark:text-warm-500">{{ t("chat.loadEarlierGenerating") }}</p>
           <p v-if="historyDetailError" role="alert" class="text-xs text-coral">{{ historyDetailError }}</p>
           <div v-for="(msg, idx) in windowMessages" :key="msg.id" :data-message-id="msg.id" class="flex flex-col">
             <button v-for="key in msg._historyDetails || []" :key="key" :data-history-detail="key" :disabled="historyDetailPending !== null" class="self-start text-xs text-iolite hover:underline" @click="loadHistoryDetail(key)">{{ t("sessionViewer.detail.title") }}</button>
@@ -561,6 +562,11 @@ const hasOlderHistory = computed(() => {
   return tab ? !!chat.historyPageByTab?.[tab]?.hasOlder : false
 })
 
+// A live turn keeps mutating the projected range, so an older page cannot be
+// merged until it finishes. Surface that instead of spending a request that
+// the source would discard.
+const historyFetchBlocked = computed(() => viewProcessing.value && windowStart.value === 0 && hasOlderHistory.value)
+
 // The single shared viewport/history coordinator. The "show earlier"
 // button (manual) and continuous upward scrolling (automatic) both run
 // through one expansion transaction: consume local unrendered rows first,
@@ -598,6 +604,7 @@ const historyExpander = createChatHistoryExpander({
     // the source reports older data. The store fetches/caches but does not
     // replay or touch the DOM until the synchronous materialize.
     if (!hasOlderHistory.value) return false
+    if (viewProcessing.value) return false
     const context = getScrollKey()
     const epoch = readingEpoch
     const prefetched = await chat.prefetchOlderHistory(tab)

@@ -503,7 +503,8 @@ describe("connected paged history and reset", () => {
       .spyOn(terrariumAPI, "getHistoryPage")
       .mockResolvedValueOnce(page(800, 200))
       .mockResolvedValueOnce(page(400, 400))
-      .mockResolvedValueOnce(page(0, 400, false))
+      .mockResolvedValueOnce(page(0, 400, true))
+      .mockResolvedValueOnce(page(-400, 400, false))
     await mountPage()
     const vp = wrapper.get(".chat-messages-viewport").element
     const top = vp.scrollTop
@@ -547,6 +548,32 @@ describe("connected paged history and reset", () => {
     vp.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }))
     await flushPromises()
     expect(ids()).toHaveLength(400)
+    // Render every loaded row, so the next upward step needs a fetch.
+    for (let step = 0; step < 6 && ids().length < chat.messagesByTab.root.length; step += 1) {
+      vp.scrollTop = 0
+      vp.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }))
+      await flushPromises()
+    }
+    expect(ids()).toHaveLength(chat.messagesByTab.root.length)
+    const calls = api.mock.calls.length
+    const loaded = chat.messagesByTab.root.length
+    // A live turn refuses the fetch instead of spending a discarded request.
+    chat.processingByTab.root = true
+    await flushPromises()
+    expect(wrapper.find("[data-history-generating]").exists()).toBe(true)
+    vp.scrollTop = 0
+    vp.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }))
+    await flushPromises()
+    expect(api).toHaveBeenCalledTimes(calls)
+    expect(chat.messagesByTab.root).toHaveLength(loaded)
+    chat.processingByTab.root = false
+    await flushPromises()
+    expect(wrapper.find("[data-history-generating]").exists()).toBe(false)
+    vp.scrollTop = 0
+    vp.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }))
+    await flushPromises()
+    expect(api).toHaveBeenCalledTimes(calls + 1)
+    expect(chat.messagesByTab.root.length).toBeGreaterThan(loaded)
   })
 
   it.each(["tail", "switch", "unmount"])(

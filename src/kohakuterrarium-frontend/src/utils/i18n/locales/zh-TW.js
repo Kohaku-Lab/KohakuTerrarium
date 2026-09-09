@@ -409,6 +409,7 @@ export default {
   "chat.slash.empty": "沒有符合的命令或技能",
   "chat.slash.commands": "命令",
   "chat.slash.skills": "技能",
+  "chat.loadEarlierGenerating": "生成中——本回合結束後可載入更早的訊息",
   "chat.slash.noDescription": "暫無說明",
   "chat.command.completed": "命令已完成。",
   "chat.getStarted": "傳送訊息開始使用",
