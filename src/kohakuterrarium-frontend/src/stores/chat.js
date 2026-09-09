@@ -2485,6 +2485,7 @@ const _chatStoreOptions = {
     closeTab(tab) {
       const idx = this.tabs.indexOf(tab)
       if (idx === -1) return
+      this._dropHistoryController(tab)
       this.tabs = this.tabs.filter((_, i) => i !== idx)
       if (this.activeTab === tab) {
         this.setActiveTab(this.tabs[Math.min(idx, this.tabs.length - 1)] || null)
@@ -4643,10 +4644,11 @@ const _chatStoreOptions = {
         const controller = _historyPageMap(this).get(tab)
         const branchPending = !!this._branchResyncPendingByTab[tab]?.active
         if (!branchPending && !options.full && (options.initialLoad || controller)) {
-          const result =
-            options.initialLoad || !controller?.getState().historyId
-              ? await this.initHistoryPage(tab)
-              : await this.refreshHistoryHead(tab)
+          // Reconnect keeps an established paged range: only a tab with no
+          // range yet needs the reset that a fresh initialize performs.
+          const result = !controller?.getState().historyId
+            ? await this.initHistoryPage(tab)
+            : await this.refreshHistoryHead(tab)
           if (result.resetRequired) return (await this.initHistoryPage(tab)).applied
           return result.applied
         }
@@ -5933,6 +5935,7 @@ const _chatStoreOptions = {
      *  emptied as a result collapse. */
     pruneTab(tab) {
       if (!tab) return
+      this._dropHistoryController(tab)
       // Legacy tabs
       const legacyIdx = this.tabs.indexOf(tab)
       if (legacyIdx !== -1) {
@@ -6075,6 +6078,8 @@ const _chatStoreOptions = {
         )
         if (controller.kind !== "saved")
           this._reconcileRunningJobs(tab, replay.pendingJobs, fetchedAt)
+        if (controller.kind !== "saved" && payload.is_processing === true)
+          this.processingByTab[tab] = true
         return
       }
       this.historyPageByTab[tab] = {
@@ -6108,7 +6113,11 @@ const _chatStoreOptions = {
       this._setEvents(tab, prepared.events)
       if (!this.tokenUsage[tab] || this.tokenUsage[tab].partial) {
         this._restoreTokenUsage(tab, prepared.events, true)
-        this.tokenUsage[tab].partial = true
+      }
+      if (this.tokenUsage[tab]) {
+        this.tokenUsage[tab].partial = !!(
+          this.historyPageByTab[tab]?.hasOlder || this.historyPageByTab[tab]?.hasNewer
+        )
       }
       this._rebuildMessages(tab, fetchedAt, prepared, payload.live_job_ids)
       if (controller.kind !== "saved") {
@@ -6156,6 +6165,16 @@ const _chatStoreOptions = {
     resetHistoryPage(tab) {
       const controller = _historyPageMap(this).get(tab)
       if (controller) controller.reset()
+    },
+
+    /** Dispose the paged controller for ``tab`` (cached pages, in-flight fences). */
+    _dropHistoryController(tab) {
+      const map = _historyPageControllers.get(_storeKey(this))
+      const controller = map?.get(tab)
+      if (!controller) return
+      controller.dispose()
+      map.delete(tab)
+      delete this.historyPageByTab[tab]
     },
 
     /** Dispose every paged controller for this store. */

@@ -30,7 +30,7 @@ def _events(store, content):
         store.append_event("ag", "text", {"content": text})
 
 
-def _fake_engine(store, env=None):
+def _fake_engine(store):
     agent = SimpleNamespace(
         session_store=store,
         conversation_history=[{"role": "user", "content": "snap"}],
@@ -43,7 +43,6 @@ def _fake_engine(store, env=None):
     return SimpleNamespace(
         get_creature=lambda cid: creature,
         _session_stores={"g": store},
-        _environments={"g": env} if env is not None else {},
     )
 
 
@@ -91,9 +90,8 @@ async def test_service_channel_page_reads_stored_records(store):
     assert page["history_page"]["stream"] == "channel"
 
 
-async def test_service_live_empty_channel_pages_without_error(store):
-    env = SimpleNamespace(shared_channels={"room": object()})
-    service = LocalTerrariumService(_fake_engine(store, env=env))
-    page = await service.channel_history_page("g", "room", limit=5)
+async def test_service_unknown_channel_page_is_an_empty_page(store):
+    service = LocalTerrariumService(_fake_engine(store))
+    page = await service.channel_history_page("g", "missing", limit=5)
     assert page["messages"] == []
     assert page["history_page"]["has_older"] is False

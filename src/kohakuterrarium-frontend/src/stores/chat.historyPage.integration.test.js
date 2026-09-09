@@ -79,7 +79,8 @@ describe("paged history consumers", () => {
     expect(content(chat)).toEqual(["10", "20", "21"])
     expect(chat.processingByTab.root).toBe(true)
     expect(chat.tokenUsage.root.total).toBe(900)
-    expect(chat.tokenUsage.root.partial).toBeUndefined()
+    // The oldest page is loaded, so the totals are no longer partial.
+    expect(chat.tokenUsage.root.partial).toBe(false)
     chat._appendStreamChunk("root", "live")
     await chat._resyncHistory("root")
     expect(full).not.toHaveBeenCalled()
@@ -104,6 +105,16 @@ describe("paged history consumers", () => {
     expect(full).toHaveBeenCalledTimes(3)
     expect(content(chat)).toEqual(["50"])
     expect(chat.historyPageByTab.root.hasOlder).toBe(true)
+    // A reconnect resync keeps the materialized older range instead of
+    // resetting to the newest page.
+    vi.mocked(terrariumAPI.getHistoryPage).mockResolvedValueOnce(page([event(60)]))
+    await chat.prefetchOlderHistory("root")
+    expect(chat.materializeOlderHistory("root").applied).toBe(true)
+    const merged = chat.messagesByTab.root.length
+    expect(merged).toBeGreaterThan(1)
+    vi.mocked(terrariumAPI.getHistoryPage).mockResolvedValueOnce(page([], { after: "a60" }))
+    await chat._resyncHistory("root", { initialLoad: true })
+    expect(chat.messagesByTab.root.length).toBe(merged)
   })
 
   it("keeps a delayed older response cache-only and rejects materialization after history mutation", async () => {
@@ -253,6 +264,13 @@ describe("paged history consumers", () => {
     await chat.initHistoryPage("root")
     chat.processingByTab.root = true
     expect((await chat.loadHistoryRecord("root", "e:81")).applied).toBe(true)
+    expect(chat.processingByTab.root).toBe(true)
+    vi.mocked(terrariumAPI.getHistoryPage).mockResolvedValueOnce({
+      events: [event(90, "user_message")],
+      is_processing: true,
+    })
+    chat.processingByTab.root = false
+    await chat.initHistoryPage("root")
     expect(chat.processingByTab.root).toBe(true)
   })
 

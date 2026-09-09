@@ -801,14 +801,6 @@ watch(
   },
 )
 
-// The refused older-page fetch resumes on its own once the turn ends, so a
-// reader parked at the top does not have to gesture again.
-watch(viewProcessing, (processing) => {
-  if (processing || !isHistoryMode.value) return
-  const el = messagesEl.value
-  if (el && el.scrollTop <= CHAT_AUTO_EXPAND_TOP_PX) historyExpander.maybeExpandAtTop(el.scrollTop)
-})
-
 watch(
   scrollScope,
   (scope, previousScope) => {
@@ -835,6 +827,14 @@ watch(
   },
   { immediate: true },
 )
+
+// The refused older-page fetch resumes on its own once the turn ends, so a
+// reader parked at the top does not have to gesture again.
+watch(viewProcessing, (processing) => {
+  if (processing || !isHistoryMode.value) return
+  const el = messagesEl.value
+  if (el && el.scrollTop <= CHAT_AUTO_EXPAND_TOP_PX) historyExpander.maybeExpandAtTop(el.scrollTop)
+})
 
 watch(
   () => [scrollScope.value, chat._instanceGeneration, chat.historyPageByTab?.[viewActiveTab.value]?.historyId],

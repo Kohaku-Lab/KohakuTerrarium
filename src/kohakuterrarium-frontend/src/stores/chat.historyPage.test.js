@@ -46,6 +46,19 @@ describe("per-store maps keyed by the store, not the action receiver", () => {
     chat._cleanup()
   })
 
+  it("drops a closed tab's paged controller and its published state", () => {
+    setActivePinia(createPinia())
+    const chat = useChatStore("drop")
+    chat.tabs = ["a", "b"]
+    chat.activeTab = "a"
+    const first = chat._controllerForTab("a", { kind: "saved", sessionName: "saved" })
+    chat.historyPageByTab.a = { historyId: "h1" }
+    chat.closeTab("a")
+    expect(chat.historyPageByTab.a).toBeUndefined()
+    expect(chat._controllerForTab("a", { kind: "saved", sessionName: "saved" })).not.toBe(first)
+    chat._cleanup()
+  })
+
   it("keeps the tool index visible to later actions", () => {
     setActivePinia(createPinia())
     const chat = useChatStore("tool-index")

@@ -178,7 +178,8 @@ async function loadTarget(tab) {
   const store = _chatStoreRef.value
   const name = sessionName.value
   const result = store.historyPageByTab[tab]?.historyId ? await store.refreshHistoryHead(tab) : await store.initHistoryPage(tab, { kind: "saved", sessionName: name })
-  if (!result.applied || store !== _chatStoreRef.value || name !== sessionName.value) return
+  if (store !== _chatStoreRef.value || name !== sessionName.value) return
+  if (!result.applied) error.value = "History changed on disk — reopen the session"
 }
 
 let loadSequence = 0

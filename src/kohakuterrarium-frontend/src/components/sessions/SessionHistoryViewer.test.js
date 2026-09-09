@@ -107,6 +107,14 @@ it("loads saved history through its scoped bounded source and refreshes without 
   await flushPromises()
   expect(current.tabs).toEqual(["root"])
   expect(current.messagesByTab.root[0].content).toBe("keep current")
+  // A refresh that cannot apply (history changed on disk) must surface.
+  api.mockResolvedValueOnce({
+    messages: [],
+    history_page: { ...metadata, reset_required: true },
+  })
+  useSessionDetailStore().reloadKey += 1
+  await flushPromises()
+  expect(wrapper.text()).toContain("History changed on disk")
 })
 
 it("re-derives the fallback reasoning panel across a materialized older page", async () => {
