@@ -86,8 +86,8 @@ export function createHistoryPageSource({
       resetRequired: false,
     }
   }
-  function applied() {
-    return { discarded: false, applied: true, records: [...suffix], ...metadata }
+  function applied(head = false) {
+    return { discarded: false, applied: true, records: [...suffix], head, ...metadata }
   }
   const source = {
     getWindow: () => (window ? { ...window } : null),
@@ -124,7 +124,7 @@ export function createHistoryPageSource({
       suffixFence = result.fence
       metadata = { payload: result.payload, fetchedAt: result.fetchedAt }
       setWindow(result.page)
-      return applied()
+      return applied(true)
     },
     async prefetchOlder() {
       if (window && isCurrent(suffixFence, false) && !isCurrent(suffixFence)) {
@@ -209,7 +209,7 @@ export function createHistoryPageSource({
         window.after = after
         window.hasNewer = !!result.page.has_newer
         metadata = { payload: result.payload, fetchedAt: result.fetchedAt }
-        return applied()
+        return applied(true)
       })()
       pendingHead = promise
       try {

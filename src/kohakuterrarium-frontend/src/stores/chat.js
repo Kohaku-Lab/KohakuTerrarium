@@ -4679,6 +4679,7 @@ const _chatStoreOptions = {
             )
           }
           if (data?.is_processing) this.processingByTab[tab] = true
+          if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
           return true
         }
         if (options.initialLoad && data.events.length === 0 && !data.messages?.length) {
@@ -4700,6 +4701,7 @@ const _chatStoreOptions = {
             ),
           )
           if (data?.is_processing) this.processingByTab[tab] = true
+          if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
           return true
         }
 
@@ -6050,7 +6052,7 @@ const _chatStoreOptions = {
       tab,
       controller,
       records,
-      { payload = {}, fetchedAt, legacy, merged } = {},
+      { payload = {}, fetchedAt, legacy, head } = {},
     ) {
       const stream = controller.getState().stream
       if (legacy) {
@@ -6078,11 +6080,11 @@ const _chatStoreOptions = {
       this.historyPageByTab[tab] = {
         ...controller.getState(),
       }
-      // An older-page merge must not clear a flag a live WS event raised:
-      // its payload is the last head read, not a fresh processing state.
+      // Only a head read carries a fresh processing state; an older-page
+      // merge or a detail read reuses the last head payload.
       this.processingByTab[tab] =
         controller.kind !== "saved" &&
-        (merged === true ? this.processingByTab[tab] === true : payload.is_processing === true)
+        (head === true ? payload.is_processing === true : this.processingByTab[tab] === true)
       if (stream === "snapshot") {
         const branchSelection = new Map()
         adoptLocalCommandResultSelections(

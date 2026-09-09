@@ -91,9 +91,17 @@ describe("paged history consumers", () => {
     await chat._resyncHistory("root", { full: true })
     expect(chat.tokenUsage.root.partial).toBe(false)
     expect(full).toHaveBeenCalledTimes(1)
+    full.mockResolvedValueOnce({ messages: [{ role: "user", content: "snapshot only" }] })
+    chat.tokenUsage.root.partial = true
+    await chat._resyncHistory("root", { full: true })
+    expect(chat.tokenUsage.root.partial).toBe(false)
+    full.mockResolvedValueOnce({ events: [] })
+    chat.tokenUsage.root.partial = true
+    await chat._resyncHistory("root", { full: true, initialLoad: true })
+    expect(chat.tokenUsage.root.partial).toBe(false)
     api.mockResolvedValueOnce(page([event(50)]))
     await chat._resyncHistory("root")
-    expect(full).toHaveBeenCalledTimes(1)
+    expect(full).toHaveBeenCalledTimes(3)
     expect(content(chat)).toEqual(["50"])
     expect(chat.historyPageByTab.root.hasOlder).toBe(true)
   })
@@ -228,6 +236,24 @@ describe("paged history consumers", () => {
     expect(chat.materializeOlderHistory("root").applied).toBe(true)
     expect(content(chat)[0]).toBe("older")
     expect(anchors.map((key) => indexOfSemanticKey(chat.messagesByTab.root, key))).not.toContain(-1)
+    vi.mocked(terrariumAPI.getHistoryPage).mockResolvedValueOnce(
+      page([
+        event(80, "user_message"),
+        event(81, "text", {
+          content: "preview",
+          _history_truncated: true,
+          _history_detail: "opaque",
+        }),
+      ]),
+    )
+    vi.spyOn(terrariumAPI, "getHistoryDetail").mockResolvedValueOnce({
+      record: { _history_key: "e:81", _history_truncated: false, content: "full" },
+      history_page: { version: 1, stream: "events", history_id: "h1" },
+    })
+    await chat.initHistoryPage("root")
+    chat.processingByTab.root = true
+    expect((await chat.loadHistoryRecord("root", "e:81")).applied).toBe(true)
+    expect(chat.processingByTab.root).toBe(true)
   })
 
   it("treats live job ids as authoritative and retains result-first tools across page boundaries", async () => {

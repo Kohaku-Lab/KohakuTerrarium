@@ -569,9 +569,7 @@ describe("connected paged history and reset", () => {
     chat.processingByTab.root = false
     await flushPromises()
     expect(wrapper.find("[data-history-generating]").exists()).toBe(false)
-    vp.scrollTop = 0
-    vp.dispatchEvent(new WheelEvent("wheel", { deltaY: -120 }))
-    await flushPromises()
+    // The refused fetch resumes on its own once the turn ends.
     expect(api).toHaveBeenCalledTimes(calls + 1)
     expect(chat.messagesByTab.root.length).toBeGreaterThan(loaded)
   })

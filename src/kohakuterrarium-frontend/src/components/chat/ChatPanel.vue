@@ -562,9 +562,8 @@ const hasOlderHistory = computed(() => {
   return tab ? !!chat.historyPageByTab?.[tab]?.hasOlder : false
 })
 
-// A live turn keeps mutating the projected range, so an older page cannot be
-// merged until it finishes. Surface that instead of spending a request that
-// the source would discard.
+// A live turn mutates the projected range, so an older page cannot merge
+// until it finishes; say so instead of spending a request it would discard.
 const historyFetchBlocked = computed(() => viewProcessing.value && windowStart.value === 0 && hasOlderHistory.value)
 
 // The single shared viewport/history coordinator. The "show earlier"
@@ -801,6 +800,14 @@ watch(
     if (scope === previous?.[0] && val) scheduleScrollToBottom()
   },
 )
+
+// The refused older-page fetch resumes on its own once the turn ends, so a
+// reader parked at the top does not have to gesture again.
+watch(viewProcessing, (processing) => {
+  if (processing || !isHistoryMode.value) return
+  const el = messagesEl.value
+  if (el && el.scrollTop <= CHAT_AUTO_EXPAND_TOP_PX) historyExpander.maybeExpandAtTop(el.scrollTop)
+})
 
 watch(
   scrollScope,

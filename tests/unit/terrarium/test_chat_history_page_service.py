@@ -83,12 +83,6 @@ async def test_service_nonpositive_limit_rejected(store):
         await service.chat_history_page("ag", stream="events", limit=0)
 
 
-async def test_service_unknown_channel_page_is_not_an_empty_page(store):
-    service = LocalTerrariumService(_fake_engine(store))
-    with pytest.raises(KeyError):
-        await service.channel_history_page("g", "missing", limit=5)
-
-
 async def test_service_channel_page_reads_stored_records(store):
     store.save_channel_message("room", {"sender": "a", "content": "hello"})
     service = LocalTerrariumService(_fake_engine(store))

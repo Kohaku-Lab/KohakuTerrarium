@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from kohakuterrarium.session.history_paging import page_channels, physical_refs
+from kohakuterrarium.session.history_paging import page_channels
 from kohakuterrarium.session.history_records import history_detail, history_page
 from kohakuterrarium.terrarium.creature_ops import agent_live_job_ids
 
@@ -58,11 +58,6 @@ class LocalHistoryServiceMixin:
         envelope = {"session_id": graph_id, "creature_id": f"ch:{name}"}
         store = self._engine._session_stores.get(graph_id)
         if store is not None:
-            envs = getattr(self._engine, "_environments", None) or {}
-            env = envs.get(graph_id)
-            live = env is not None and env.shared_channels.get(name) is not None
-            if not live and not physical_refs(store.channels, name, "m"):
-                raise KeyError(f"channel {name!r} not in graph {graph_id!r}")
             return history_page(
                 store, f"ch:{name}", session_id=graph_id, envelope=envelope, **kwargs
             )
