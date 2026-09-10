@@ -18,6 +18,7 @@ from kohakuterrarium.modules.input.base import InputModule
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.session.history import (
+    dedupe_adjacent_duplicate_events,
     index_parent_paths,
     normalize_resumable_events,
     replay_conversation,
@@ -74,15 +75,29 @@ def _create_io_modules(
 
 
 def _load_conversation_with_replay_fallback(
-    store: SessionStore, agent_name: str
+    store: SessionStore,
+    agent_name: str,
+    events: list[dict] | None = None,
 ) -> list[dict] | None:
     """Load the conversation snapshot and replay events when it is stale.
 
     Post-snapshot events are appended when branch ancestry is unchanged; new
     branch forks require a full replay to preserve coherent selection.
+    ``events`` (when given) is the caller's single raw read of the event
+    log, shared across the resume helpers so one scan serves them all;
+    without it the store is read here.
+
+    Deliberately NO counter-based freshness shortcut: the persisted event
+    counter is NOT an upper bound of the event table. ``append_event``
+    flushes the events cache BEFORE ``persist_event_counter`` runs, and
+    that persist swallows failures (session/store.py), so the stored
+    counter can lag the table by any amount. A snapshot watermarked at a
+    lagging counter would then pass a ``cached_up_to >= counter`` check
+    while newer events exist, silently dropping the tail replay.
     """
     snapshot = store.load_conversation(agent_name)
-    events = store.get_events(agent_name)
+    if events is None:
+        events = store.get_events(agent_name)
     if not events:
         return snapshot
     last_event_id = 0
@@ -176,23 +191,30 @@ def _load_conversation_with_replay_fallback(
     return snapshot
 
 
-def _restore_turn_branch_state(agent, store: SessionStore, agent_name: str) -> None:
+def _restore_turn_branch_state(
+    agent,
+    store: SessionStore,
+    agent_name: str,
+    events: list[dict] | None = None,
+) -> None:
     """Set turn / branch / parent-path state on the agent from saved events.
 
     Picks the latest live subtree on resume (parent path = the latest
     branch of every prior turn). This matches ``replay_conversation``
     default selection so the in-memory conversation, the saved
-    snapshot, and the agent's branch counters all agree.
+    snapshot, and the agent's branch counters all agree. ``events`` is
+    the caller's shared raw read; omit it to read the store here.
     """
-    try:
-        events = store.get_events(agent_name)
-    except Exception as e:
-        logger.warning(
-            "Failed to read events for turn/branch restore",
-            error=str(e),
-            exc_info=True,
-        )
-        return
+    if events is None:
+        try:
+            events = store.get_events(agent_name)
+        except Exception as e:
+            logger.warning(
+                "Failed to read events for turn/branch restore",
+                error=str(e),
+                exc_info=True,
+            )
+            return
     # Use replay's path-aware selector so restored branch ancestry actually existed.
     events_list = list(events)
     parent_paths = index_parent_paths(events_list)
@@ -280,7 +302,10 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     queued for the rebuilt agent's resume flow.
     """
     align_agent_name(agent, agent_name)
-    saved_messages = _load_conversation_with_replay_fallback(store, agent_name)
+    # ONE raw read of the event log feeds every consumer below (conversation
+    # replay, branch restore, mismatch replay) — not the old 3-4 scans.
+    events = store.get_events(agent_name)
+    saved_messages = _load_conversation_with_replay_fallback(store, agent_name, events)
     if saved_messages:
         agent.controller.conversation = _build_conversation(saved_messages)
         _apply_restore_elision(agent)
@@ -288,7 +313,7 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
             "Conversation restored", agent=agent_name, messages=len(saved_messages)
         )
 
-    _restore_turn_branch_state(agent, store, agent_name)
+    _restore_turn_branch_state(agent, store, agent_name, events)
 
     # A snapshot saved on a DIFFERENT branch (a sibling path) is stale for
     # the restored target branch: discard it and rebuild via the branch-aware
@@ -298,7 +323,7 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
             "Snapshot belongs to another branch — replaying target branch",
             agent=agent_name,
         )
-        replayed = replayed_messages_for(store, agent_name)
+        replayed = replayed_messages_for(store, agent_name, events)
         if replayed:
             agent.controller.conversation = _build_conversation(replayed)
             _apply_restore_elision(agent)
@@ -321,7 +346,9 @@ def inject_saved_state(agent, store: SessionStore, agent_name: str) -> None:
     _reapply_options(agent, agent_name, "native_tool_options")
     _reapply_options(agent, agent_name, "tool_options")
 
-    resume_events = store.get_resumable_events(agent_name)
+    # Same dedupe→normalize pipeline as SessionStore.get_resumable_events,
+    # computed from the shared read instead of a second full table scan.
+    resume_events = normalize_resumable_events(dedupe_adjacent_duplicate_events(events))
     if resume_events:
         agent._pending_resume_events = resume_events
         logger.info("Resume events loaded", agent=agent_name, count=len(resume_events))

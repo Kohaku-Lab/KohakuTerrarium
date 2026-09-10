@@ -205,15 +205,22 @@ def snapshot_mismatches_branch(store: Any, agent: Any, agent_name: str) -> bool:
     return not is_path_prefix(snapshot_path, agent_path)
 
 
-def replayed_messages_for(store: Any, agent_name: str) -> list[dict]:
+def replayed_messages_for(
+    store: Any,
+    agent_name: str,
+    events: list[dict] | None = None,
+) -> list[dict]:
     """Replay the latest live subtree from the event log (branch-aware).
 
     Used by resume when the saved snapshot belongs to a different branch.
+    ``events`` is the caller's shared raw read; without it the store is
+    read here.
     """
-    try:
-        events = list(store.get_events(agent_name))
-    except Exception:  # pragma: no cover - defensive
-        return []
+    if events is None:
+        try:
+            events = list(store.get_events(agent_name))
+        except Exception:  # pragma: no cover - defensive
+            return []
     if not events:
         return []
     return replay_conversation(

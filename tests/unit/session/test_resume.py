@@ -62,6 +62,33 @@ def _write_agent_config(config_dir) -> None:
     )
 
 
+class _CountingStore:
+    """Proxy that counts EVERY ``get_events`` call on the wrapped store.
+
+    The resume scan-budget metric: conversation replay, branch restore,
+    and pending resume events must share a single full read of the event
+    table. The count is installed on the INNER store's ``get_events`` so
+    reads hidden behind ``__getattr__`` delegation (e.g. a
+    ``get_resumable_events`` re-read reaching the real store) are counted
+    too — a regression back to a second full scan turns the budget
+    assertions red instead of silently passing.
+    """
+
+    def __init__(self, store):
+        self._store = store
+        self.get_events_calls = 0
+        inner = store.get_events
+
+        def _counted_get_events(agent, since_event_id=None):
+            self.get_events_calls += 1
+            return inner(agent, since_event_id=since_event_id)
+
+        store.get_events = _counted_get_events
+
+    def __getattr__(self, name):
+        return getattr(self._store, name)
+
+
 # ── _create_io_modules ────────────────────────────────────────────
 
 
@@ -359,6 +386,52 @@ class TestRestoreTurnBranchState:
             assert agent._turn_index == 0
             assert agent._branch_id == 0
             assert agent._parent_branch_path == []
+        finally:
+            store.close()
+
+    def test_accepts_preloaded_events_without_reread(self, tmp_path):
+        # The caller's single raw read must serve the restore entirely:
+        # branch state comes from the passed list with zero store reads.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            for ti in (1, 2, 3):
+                store.append_event(
+                    "alice", "user_message", {}, turn_index=ti, branch_id=1
+                )
+            store.flush()
+            events = store.get_events("alice")
+            counting = _CountingStore(store)
+            agent = _FakeAgent()
+            _restore_turn_branch_state(agent, counting, "alice", events=events)
+            assert agent._turn_index == 3
+            assert agent._parent_branch_path == [(1, 1), (2, 1)]
+            assert counting.get_events_calls == 0
+        finally:
+            store.close()
+
+    def test_preloaded_truncated_events_select_truncated_tail(self, tmp_path):
+        # Negative case proving the helper consumes the caller's list: a
+        # list missing the later turns must restore THAT state (turn 1),
+        # not the store's real latest turn (3). A hidden re-read would
+        # restore turn 3 and fail here.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            for ti in (1, 2, 3):
+                store.append_event(
+                    "alice",
+                    "user_message",
+                    {"content": f"t{ti}"},
+                    turn_index=ti,
+                    branch_id=1,
+                )
+            store.flush()
+            truncated = store.get_events("alice")[:1]
+            counting = _CountingStore(store)
+            agent = _FakeAgent()
+            _restore_turn_branch_state(agent, counting, "alice", events=truncated)
+            assert agent._turn_index == 1
+            assert agent._branch_id == 1
+            assert counting.get_events_calls == 0
         finally:
             store.close()
 
@@ -698,6 +771,174 @@ class TestLoadConversationFallback:
             assert out[0]["metadata"]["turn_index"] == 1
         finally:
             store.close()
+
+    def test_lagging_persisted_counter_cannot_skip_tail(self, tmp_path):
+        # P1 regression (reviewer-confirmed on production data): the
+        # persisted counter can LAG the event table — append_event flushes
+        # the events cache BEFORE persist_event_counter runs, and that
+        # persist swallows failures (session/store.py). A production file
+        # measured counter=75699 vs true max=75700. When the snapshot
+        # watermark sits at the lagging counter, a counter-based
+        # freshness check would return the snapshot and silently drop the
+        # tail; the helper must ignore the counter and scan.
+        from kohakuvault import KVault
+
+        path = tmp_path / "lag.kohakutr"
+        store = SessionStore(str(path))
+        _, eid = store.append_event(
+            "alice",
+            "user_message",
+            {"content": "kept"},
+            turn_index=1,
+            branch_id=1,
+        )
+        store.save_conversation(
+            "alice",
+            [
+                {
+                    "role": "user",
+                    "content": "snap",
+                    "metadata": {"turn_index": 1, "branch_id": 1},
+                }
+            ],
+        )
+        store.state["alice:snapshot_event_id"] = eid
+        store.append_event("alice", "user_message", {"content": "dropped"})
+        store.close()
+
+        # Simulate the crash window: the counter persisted BEHIND the
+        # table's true max.
+        state = KVault(str(path), table="state")
+        try:
+            state["counters:max_event_id"] = eid
+        finally:
+            state.close()
+
+        reopened = SessionStore(str(path))
+        try:
+            assert reopened.max_event_id("alice") == eid  # lagging counter
+            true_max = max(evt["event_id"] for evt in reopened.get_events("alice"))
+            assert true_max == eid + 1  # table holds a newer event
+            counting = _CountingStore(reopened)
+            out = _load_conversation_with_replay_fallback(counting, "alice")
+            contents = [m["content"] for m in out if m["role"] == "user"]
+            assert contents == [
+                "snap",
+                "dropped",
+            ], "a tail past the LAGGING counter watermark must still replay"
+            assert counting.get_events_calls == 1
+        finally:
+            reopened.close(update_status=False)
+
+    def test_stale_watermark_scans_and_replays_tail(self, tmp_path):
+        # When the watermark is behind the event table, the tail MUST be
+        # appended (the snapshot alone would lose post-snapshot turns).
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "fresh"})
+            store.save_conversation(
+                "alice",
+                [
+                    {
+                        "role": "user",
+                        "content": "snap",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    }
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = 0
+            store.flush()
+            counting = _CountingStore(store)
+            out = _load_conversation_with_replay_fallback(counting, "alice")
+            contents = [m["content"] for m in out if m["role"] == "user"]
+            assert contents == ["snap", "fresh"]
+            assert counting.get_events_calls == 1
+        finally:
+            store.close()
+
+    def test_preloaded_events_drive_replay_without_reread(self, tmp_path):
+        # Passing the caller's single raw read must serve the tail replay
+        # AND skip the helper's own store read entirely.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "fresh"})
+            store.append_event("alice", "user_message", {"content": "newer"})
+            store.save_conversation("alice", [{"role": "user", "content": "stale"}])
+            store.state["alice:snapshot_event_id"] = 1
+            store.flush()
+            events = store.get_events("alice")
+            counting = _CountingStore(store)
+            out = _load_conversation_with_replay_fallback(
+                counting, "alice", events=events
+            )
+            contents = [m["content"] for m in out if m["role"] == "user"]
+            assert contents == ["stale", "newer"]
+            assert counting.get_events_calls == 0
+        finally:
+            store.close()
+
+    def test_preloaded_truncated_events_prove_data_source(self, tmp_path):
+        # Negative case: a truncated caller list must produce the truncated
+        # result ("newer" dropped with the cut). An implementation that
+        # ignores the passed list and quietly re-reads the store would
+        # resurrect the tail and fail here.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "fresh"})
+            store.append_event("alice", "user_message", {"content": "newer"})
+            store.save_conversation("alice", [{"role": "user", "content": "stale"}])
+            store.state["alice:snapshot_event_id"] = 0
+            store.flush()
+            truncated = store.get_events("alice")[:1]
+            counting = _CountingStore(store)
+            out = _load_conversation_with_replay_fallback(
+                counting, "alice", events=truncated
+            )
+            contents = [m["content"] for m in out if m["role"] == "user"]
+            assert contents == ["stale", "fresh"]
+            assert "newer" not in contents
+            assert counting.get_events_calls == 0
+        finally:
+            store.close()
+
+    def test_legacy_store_without_counter_slot_keeps_tail(self, tmp_path):
+        # Old session files carry no counters:max_event_id slot. The reopen
+        # fallback must full-scan the values (returning the true max, never
+        # a silent 0) — max_event_id stamps snapshot watermarks
+        # (session/output.py), and this file shape must keep replaying the
+        # stale-watermark tail regardless.
+        from kohakuvault import KVault
+
+        path = tmp_path / "legacy.kohakutr"
+        store = SessionStore(str(path))
+        store.append_event(
+            "alice",
+            "user_message",
+            {"content": "old"},
+            turn_index=1,
+            branch_id=1,
+        )
+        store.close()
+        state = KVault(str(path), table="state")
+        try:
+            state.delete("counters:max_event_id")
+        finally:
+            state.close()
+
+        reopened = SessionStore(str(path))
+        try:
+            # Scanned fallback reports the true max, not 0.
+            assert reopened.max_event_id("alice") == 1
+            reopened.save_conversation("alice", [{"role": "user", "content": "snap"}])
+            reopened.state["alice:snapshot_event_id"] = 0
+            reopened.flush()
+            counting = _CountingStore(reopened)
+            out = _load_conversation_with_replay_fallback(counting, "alice")
+            contents = [m["content"] for m in out if m["role"] == "user"]
+            assert contents == ["snap", "old"]
+            assert counting.get_events_calls == 1
+        finally:
+            reopened.close(update_status=False)
 
 
 # ── detect_session_type ──────────────────────────────────────────
@@ -1575,6 +1816,226 @@ class TestInjectSavedState:
                 if m.role == "user"
             ]
             assert contents == ["U1", "U2a"]
+        finally:
+            store.close()
+
+    def test_event_table_scanned_once_tail_path(self, tmp_path):
+        # Scan-budget regression guard: conversation replay, branch
+        # restore, and pending resume events must share ONE raw read of
+        # the event table (previously three full scans on resume).
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "q"})
+            store.save_conversation("alice", [{"role": "user", "content": "q"}])
+            store.state["alice:snapshot_event_id"] = 1
+            store.append_event("alice", "user_message", {"content": "newer"})
+            store.flush()
+            counting = _CountingStore(store)
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, counting, "alice")
+            contents = [
+                m.get("content")
+                for m in agent.controller.conversation.to_messages()
+                if m.get("role") == "user"
+            ]
+            assert contents == ["q", "newer"]
+            assert counting.get_events_calls == 1
+        finally:
+            store.close()
+
+    def test_event_table_scanned_once_fresh_snapshot(self, tmp_path):
+        # The fresh-snapshot conversation path needs no event read of its
+        # own; the single remaining read feeds branch restore + pending
+        # resume events (which cannot be derived without the log).
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            _, eid = store.append_event(
+                "alice",
+                "user_message",
+                {"content": "q"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation(
+                "alice",
+                [
+                    {
+                        "role": "user",
+                        "content": "snap",
+                        "metadata": {"turn_index": 1, "branch_id": 1},
+                    }
+                ],
+            )
+            store.state["alice:snapshot_event_id"] = eid
+            store.flush()
+            counting = _CountingStore(store)
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, counting, "alice")
+            contents = [
+                m.get("content")
+                for m in agent.controller.conversation.to_messages()
+                if m.get("role") == "user"
+            ]
+            assert contents == ["snap"]
+            assert counting.get_events_calls == 1
+        finally:
+            store.close()
+
+    def test_event_table_scanned_once_fork_tail(self, tmp_path):
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "original"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation("alice", [{"role": "user", "content": "original"}])
+            store.state["alice:snapshot_event_id"] = 1
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "edited"},
+                turn_index=1,
+                branch_id=2,
+            )
+            store.flush()
+            counting = _CountingStore(store)
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, counting, "alice")
+            contents = [
+                m.get("content")
+                for m in agent.controller.conversation.to_messages()
+                if m.get("role") == "user"
+            ]
+            assert contents == ["edited"]
+            assert counting.get_events_calls == 1
+        finally:
+            store.close()
+
+    def test_event_table_scanned_once_branch_mismatch_replay(self, tmp_path):
+        # Snapshot tagged on a sibling branch: the mismatch rebuild must
+        # reuse the same single raw read (the mismatch replay used to be
+        # an additional full scan).
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "a1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "a2"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_conversation("alice", [{"role": "user", "content": "stale"}])
+            store.state["alice:snapshot_event_id"] = 2
+            store.state["alice:snapshot_branch"] = {
+                "turn_index": 2,
+                "branch_id": 1,
+                "parent_branch_path": [(1, 1)],
+            }
+            # The agent lands on a SIBLING of the snapshot branch.
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "b1"},
+                turn_index=1,
+                branch_id=2,
+            )
+            store.flush()
+            counting = _CountingStore(store)
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, counting, "alice")
+            contents = [
+                m.get("content")
+                for m in agent.controller.conversation.to_messages()
+                if m.get("role") == "user"
+            ]
+            assert "b1" in contents
+            assert "a2" not in contents
+            assert counting.get_events_calls == 1
+        finally:
+            store.close()
+
+    def test_counting_proxy_sees_reads_hidden_behind_public_api(self, tmp_path):
+        # Negative case guarding the scan-budget metric itself: a read
+        # made behind __getattr__ delegation (get_resumable_events reaching
+        # the inner store's get_events) must be counted. If it were not,
+        # reverting inject_saved_state to a second full scan via the store
+        # API would pass the ==1 assertions while doing 2 scans.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "q"})
+            store.flush()
+            counting = _CountingStore(store)
+            assert counting.get_events_calls == 0
+            counting.get_events("alice")
+            assert counting.get_events_calls == 1
+            counting.get_resumable_events("alice")
+            assert (
+                counting.get_events_calls == 2
+            ), "a get_resumable_events re-read must be visible to the count"
+        finally:
+            store.close()
+
+    def test_pending_resume_events_match_store_public_api(self, tmp_path):
+        # The inlined dedupe+normalize must stay byte-identical to the
+        # untouched public SessionStore.get_resumable_events — an
+        # independent oracle computed straight from the store.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event("alice", "user_message", {"content": "q"})
+            store.append_event("alice", "tool_call", {"call_id": "c9", "name": "bash"})
+            store.flush()
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, store, "alice")
+            assert agent._pending_resume_events == store.get_resumable_events("alice")
+        finally:
+            store.close()
+
+    def test_inject_matches_self_reading_helpers(self, tmp_path):
+        # The single-read path (inject passing one shared list) and the
+        # backward-compatible self-reading helpers must produce identical
+        # conversation and branch state for the same store.
+        store = SessionStore(str(tmp_path / "x.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U1"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.save_conversation("alice", [{"role": "user", "content": "U1"}])
+            store.state["alice:snapshot_event_id"] = 1
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "U2"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.append_event("alice", "tool_call", {"call_id": "cx", "name": "bash"})
+            store.flush()
+            agent = _FakeAgentForInject()
+            inject_saved_state(agent, store, "alice")
+            rebuilt = agent.controller.conversation.to_messages()
+            via_helper = _load_conversation_with_replay_fallback(store, "alice")
+            assert rebuilt == _build_conversation(via_helper).to_messages()
+            branch_agent = _FakeAgent()
+            _restore_turn_branch_state(branch_agent, store, "alice")
+            assert agent._turn_index == branch_agent._turn_index
+            assert agent._branch_id == branch_agent._branch_id
+            assert agent._parent_branch_path == branch_agent._parent_branch_path
         finally:
             store.close()
 

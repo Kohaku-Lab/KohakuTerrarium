@@ -70,6 +70,32 @@ def test_max_event_id_matches_full_scan(tmp_path):
         store.close()
 
 
+def test_max_event_id_survives_legacy_missing_counter_slot(tmp_path):
+    # Old session files carry no counters:max_event_id. The reopen
+    # fallback must full-scan event VALUES and report the true max — a
+    # silent 0 would let the resume fast path skip a stale tail.
+    from kohakuvault import KVault
+
+    path = tmp_path / "legacy.kohakutr"
+    store = SessionStore(str(path))
+    store.append_event("a", "text", {"content": "one"})
+    store.append_event("a", "text", {"content": "two"})
+    store.close()
+    state = KVault(str(path), table="state")
+    try:
+        state.delete("counters:max_event_id")
+    finally:
+        state.close()
+
+    reopened = SessionStore(str(path))
+    try:
+        expected = max(e["event_id"] for e in reopened.get_events("a"))
+        assert expected == 2
+        assert reopened.max_event_id("a") == 2
+    finally:
+        reopened.close()
+
+
 def test_append_persists_event_counter_for_reopen(tmp_path):
     path = tmp_path / "sess.kohakutr"
     store = SessionStore(str(path))
