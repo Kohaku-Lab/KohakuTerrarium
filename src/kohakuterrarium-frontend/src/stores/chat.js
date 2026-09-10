@@ -1,5 +1,6 @@
 import { ElMessage } from "element-plus"
-import { getCurrentInstance, markRaw } from "vue"
+import { getCurrentInstance, markRaw, toRaw } from "vue"
+import { extractReasoning } from "@/utils/chatReasoning"
 
 import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
@@ -27,7 +28,8 @@ import { useLocaleStore } from "@/stores/locale"
 import { useMessagesStore } from "@/stores/messages"
 import { useNotificationsStore } from "@/stores/notifications"
 import { useStatusStore } from "@/stores/status"
-import { agentAPI, terrariumAPI } from "@/utils/api"
+import { agentAPI, sessionAPI, terrariumAPI } from "@/utils/api"
+import { createHistoryPageController } from "@/stores/historyPageController"
 import { translate } from "@/utils/i18n"
 import { readLocalJsonPref, writeLocalJsonPref } from "@/utils/uiPrefs"
 import { wsUrl } from "@/utils/wsUrl"
@@ -206,13 +208,39 @@ function contentSignature(content) {
 // rebuilt on every wholesale replacement (``_setMessages``), so they
 // stay out of Pinia state — reactive, devtools-visible copies would
 // cost more than the scans they replace.
+// Per-store paged-history controllers. One controller per (store, tab);
+// a WeakMap keyed by the store instance keeps this out of reactive state
+// and lets the per-scope disposer free it on tab/store teardown. The
+// source it wraps already fences every async step by source-key /
+// instance-generation / mutation-generation, so a response that returns
+// after the user switched tab, session, or mutated history is discarded.
+const _historyPageControllers = new WeakMap()
+
+// Pinia's devtools plugin invokes every action with a fresh Proxy of the
+// store as ``this``, so a receiver must never be used as a persistent
+// key. ``toRaw`` resolves any wrapper to the one store instance.
+function _storeKey(store) {
+  return toRaw(store)
+}
+
+function _historyPageMap(store) {
+  const key = _storeKey(store)
+  let map = _historyPageControllers.get(key)
+  if (!map) {
+    map = new Map()
+    _historyPageControllers.set(key, map)
+  }
+  return map
+}
+
 const _indexesByStore = new WeakMap()
 
 function _tabIndexes(store, tab) {
-  let byTab = _indexesByStore.get(store)
+  const key = _storeKey(store)
+  let byTab = _indexesByStore.get(key)
   if (!byTab) {
     byTab = new Map()
-    _indexesByStore.set(store, byTab)
+    _indexesByStore.set(key, byTab)
   }
   let idx = byTab.get(tab)
   if (!idx) {
@@ -314,9 +342,18 @@ function toolResultPayload(result, data = {}) {
 /**
  * Convert OpenAI-format conversation history to frontend messages.
  */
-export function _convertHistory(messages) {
+export function _convertHistory(messages, options = {}) {
   const result = []
   const toolResults = {}
+  // A paged snapshot keys each rendered row by its stable physical
+  // identity so prepending another page does not shift every id. Legacy
+  // full-read conversion keeps the positional ``h_<index>`` ids.
+  const paged = !!options.paged
+  const stableId = (msg) => {
+    const key = msg?._history_key ?? msg?.message_id ?? msg?.id
+    return key != null ? String(key) : null
+  }
+  const rowId = (msg) => (paged ? (stableId(msg) ?? `abs_${result.length}`) : `h_${result.length}`)
   for (const msg of messages) {
     if (msg.role === "tool") toolResults[msg.tool_call_id] = msg.content
   }
@@ -324,12 +361,14 @@ export function _convertHistory(messages) {
     if (msg.role === "system" || msg.role === "tool") continue
     if (msg.role === "user") {
       const normalized = normalizeMessageContent(msg.content)
+      const id = rowId(msg)
       result.push({
-        id: "h_" + result.length,
+        id,
         role: "user",
         content: normalized.content,
         contentParts: normalized.contentParts,
         timestamp: "",
+        ...(paged ? { _historyKey: [id], _historyKeys: [id] } : {}),
       })
     } else if (msg.role === "assistant") {
       const tcs = (msg.tool_calls || []).map((tc) => ({
@@ -341,13 +380,16 @@ export function _convertHistory(messages) {
         result: toolResults[tc.id] || "",
       }))
       const normalized = normalizeMessageContent(msg.content)
+      const id = rowId(msg)
       const message = {
-        id: "h_" + result.length,
+        id,
         role: "assistant",
+        _fallbackReasoning: !Array.isArray(msg._kt_assistant_segments) ? extractReasoning(msg) : [],
         content: normalized.content,
         contentParts: normalized.contentParts,
         timestamp: "",
         tool_calls: tcs.length ? tcs : undefined,
+        ...(paged ? { _historyKey: [id], _historyKeys: [id] } : {}),
       }
       if (Array.isArray(msg._kt_assistant_segments) && msg._kt_assistant_segments.length) {
         const tcById = new Map(tcs.map((tc) => [tc.id, tc]))
@@ -677,6 +719,35 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
     return prefix + (curEventKey ?? String(result.length))
   }
 
+  // Record the physical ``_history_key`` of an event that contributed to a
+  // rendered row so a surviving row can be found by key after page-bounded
+  // materialization merges or re-keys it (page-boundary text merge, cross-
+  // page duplicate collapse). The fallback is the row's stable ``id``; the
+  // viewport anchor resolves by key containment first.
+  function addHistoryKey(target, evt) {
+    const k = evt?._history_key != null ? String(evt._history_key) : null
+    if (k == null) return
+    if (!target._historyKeys) target._historyKeys = []
+    if (!target._historyKeys.includes(k)) target._historyKeys.push(k)
+  }
+
+  // A rendered row owns the parts it holds. Tool and sub-agent updates
+  // arrive on later events and must key the owning row, which is not
+  // always ``cur`` (the row may already be closed).
+  const _rowOfPart = new WeakMap()
+
+  function pushKeyed(row, evt) {
+    addHistoryKey(row, evt)
+    result.push(row)
+    return row
+  }
+
+  function keyOwningRow(part, evt) {
+    const owner = (part && _rowOfPart.get(part)) || cur
+    if (owner) addHistoryKey(owner, evt)
+    return owner
+  }
+
   function ensureCur() {
     if (!cur) {
       cur = {
@@ -684,8 +755,10 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         role: "assistant",
         parts: [],
         timestamp: "",
+        _historyKeys: [],
       }
       result.push(cur)
+      _rowOfPart.set(cur, cur)
     }
     return cur
   }
@@ -745,6 +818,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
     // must not reset the visible elapsed timer to 0.
     if (startedTs) tool.startedAt = startedTs
     c.parts.push(tool)
+    _rowOfPart.set(tool, c)
     if (jobId) startedJobs[jobId] = tool
     return tool
   }
@@ -802,6 +876,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       }
       if (!sa.children) sa.children = []
       sa.children.push(tool)
+      _rowOfPart.set(tool, _rowOfPart.get(sa) || cur)
       return tool
     }
     return addTool(name, "tool", args)
@@ -817,10 +892,10 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         tc.resultParts = payload.resultParts
         tc.resultMeta = payload.resultMeta
         if (opts?.error) tc.status = "error"
-        return
+        return tc
       }
     }
-    updateTool(name, result, opts)
+    return updateTool(name, result, opts)
   }
 
   function findToolByJobId(jobId) {
@@ -881,6 +956,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       if (tc.jobId) completedJobs.add(tc.jobId)
       if (jobId) completedJobs.add(jobId)
     }
+    return tc
   }
 
   function findCompactMessage(round, preferRunning = false) {
@@ -924,7 +1000,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
 
   for (const evt of events) {
     const t = evt.type
-    curEventKey = typeof evt.event_id === "number" ? `e${evt.event_id}` : null
+    curEventKey = evt._history_key ?? (typeof evt.event_id === "number" ? `e${evt.event_id}` : null)
 
     // Skip events on a non-selected branch of their turn (siblings of
     // regen / edit+rerun stay on disk for the <1/N> navigator but
@@ -955,6 +1031,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       const key = typeof ti === "number" && typeof bi === "number" ? `${ti}/${bi}` : null
       if (key && _seenUserRender.has(key)) {
         const prior = _seenUserRender.get(key)
+        addHistoryKey(prior, evt)
         if (prior && typeof evt.pending_id === "string") {
           prior.eventId = evt.pending_id
         }
@@ -977,6 +1054,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
             ? { eventId: evt.event_id, turnIndex: ti, branchId: bi }
             : null,
       }
+      addHistoryKey(userMessage, evt)
       result.push(userMessage)
       if (key) _seenUserRender.set(key, userMessage)
     } else if (t === "user_input_injected") {
@@ -998,7 +1076,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       }
       cur = null
       const normalized = normalizeMessageContent(evt.content)
-      result.push({
+      const injected = {
         id: stableId("h_"),
         role: "user",
         content: normalized.content,
@@ -1007,7 +1085,9 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         turnIndex: typeof evt?.turn_index === "number" ? evt.turn_index : null,
         injectedMidTurn: true,
         timestamp: "",
-      })
+      }
+      addHistoryKey(injected, evt)
+      result.push(injected)
     } else if (["ask_text", "confirm", "selection", "card"].includes(t)) {
       const uiEventId = evt.ui_event_id ?? evt.payload?.event_id
       if (!uiEventId) continue
@@ -1028,6 +1108,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         repliedActionId: "",
         repliedValues: null,
       }
+      addHistoryKey(message, evt)
       result.push(message)
       interactiveMessages.set(uiEventId, message)
     } else if (t === "ui_supersede" || t === "timeout") {
@@ -1046,12 +1127,16 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         role: "assistant",
         parts: [],
         timestamp: "",
+        _historyKeys: [],
       }
       result.push(cur)
+      _rowOfPart.set(cur, cur)
+      addHistoryKey(cur, evt)
     } else if (t === "text" || t === "text_chunk") {
       // text_chunk is the Wave C per-chunk streaming format; replay
       // collapses consecutive chunks into one assistant text part.
       appendText(evt.content || "")
+      if (cur) addHistoryKey(cur, evt)
     } else if (t === "processing_end" || t === "idle") {
       // Do NOT clear cur if sub-agents might still be adding tools to this message
       // But mark text as done
@@ -1069,39 +1154,48 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         cur = null
         const ch = evt.channel || ""
         const sender = evt.sender || ""
-        result.push({
-          id: stableId("h_"),
-          role: "trigger",
-          content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : evt.name,
-          triggerContent: evt.content || "",
-          channel: ch,
-          sender,
-          timestamp: "",
-        })
+        pushKeyed(
+          {
+            id: stableId("h_"),
+            role: "trigger",
+            content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : evt.name,
+            triggerContent: evt.content || "",
+            channel: ch,
+            sender,
+            timestamp: "",
+          },
+          evt,
+        )
       } else if (at === "drive_turn") {
         cur = null
-        result.push(_driveTurnMessage(evt, stableId("drv_"), ""))
+        pushKeyed(_driveTurnMessage(evt, stableId("drv_"), ""), evt)
       } else if (at === "token_usage") {
         if (cur) cur._pendingReasoningCursor = cur.parts.length
       } else if (at === "processing_complete") {
         // skip
       } else if (at === "context_cleared") {
         cur = null
-        result.push({
-          id: stableId("clear_"),
-          role: "clear",
-          messagesCleared: evt.messages_cleared || 0,
-          timestamp: "",
-        })
+        pushKeyed(
+          {
+            id: stableId("clear_"),
+            role: "clear",
+            messagesCleared: evt.messages_cleared || 0,
+            timestamp: "",
+          },
+          evt,
+        )
       } else if (at === "processing_error") {
         cur = null
-        result.push({
-          id: stableId("err_"),
-          role: "error",
-          errorType: evt.error_type || "Error",
-          content: evt.error || evt.detail || "Unknown error",
-          timestamp: "",
-        })
+        pushKeyed(
+          {
+            id: stableId("err_"),
+            role: "error",
+            errorType: evt.error_type || "Error",
+            content: evt.error || evt.detail || "Unknown error",
+            timestamp: "",
+          },
+          evt,
+        )
       } else if (at === "subagent_start") {
         const tool = addTool(
           evt.name,
@@ -1112,24 +1206,28 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         )
         tool.llm_name = evt.llm_name || ""
         tool.model = evt.model || ""
+        keyOwningRow(tool, evt)
       } else if (at === "subagent_done") {
         const tool =
           findSubagent(evt.name, evt.job_id) ||
           addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
         tool.llm_name = evt.llm_name || tool.llm_name || ""
         tool.model = evt.model || tool.model || ""
-        updateTool(
-          evt.name,
-          evt.result || evt.detail,
-          {
-            tools_used: evt.tools_used,
-            turns: evt.turns,
-            duration: evt.duration,
-            total_tokens: evt.total_tokens,
-            prompt_tokens: evt.prompt_tokens,
-            completion_tokens: evt.completion_tokens,
-          },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.detail,
+            {
+              tools_used: evt.tools_used,
+              turns: evt.turns,
+              duration: evt.duration,
+              total_tokens: evt.total_tokens,
+              prompt_tokens: evt.prompt_tokens,
+              completion_tokens: evt.completion_tokens,
+            },
+            evt.job_id,
+          ) || tool,
+          evt,
         )
       } else if (at === "subagent_error") {
         const tool =
@@ -1137,41 +1235,59 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
           addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
         tool.llm_name = evt.llm_name || tool.llm_name || ""
         tool.model = evt.model || tool.model || ""
-        updateTool(
-          evt.name,
-          evt.result || evt.error || evt.detail,
-          {
-            error: true,
-            interrupted: !!evt.interrupted,
-            finalState: evt.final_state,
-            tools_used: evt.tools_used,
-            turns: evt.turns,
-            duration: evt.duration,
-            total_tokens: evt.total_tokens,
-            prompt_tokens: evt.prompt_tokens,
-            completion_tokens: evt.completion_tokens,
-          },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.error || evt.detail,
+            {
+              error: true,
+              interrupted: !!evt.interrupted,
+              finalState: evt.final_state,
+              tools_used: evt.tools_used,
+              turns: evt.turns,
+              duration: evt.duration,
+              total_tokens: evt.total_tokens,
+              prompt_tokens: evt.prompt_tokens,
+              completion_tokens: evt.completion_tokens,
+            },
+            evt.job_id,
+          ) || tool,
+          evt,
         )
       } else if (at === "tool_start") {
-        addTool(evt.name, "tool", evt.args || { info: evt.detail }, evt.job_id, _evtStartedTs(evt))
+        keyOwningRow(
+          addTool(
+            evt.name,
+            "tool",
+            evt.args || { info: evt.detail },
+            evt.job_id,
+            _evtStartedTs(evt),
+          ),
+          evt,
+        )
       } else if (at === "tool_done") {
-        updateTool(
-          evt.name,
-          evt.result || evt.output || evt.detail,
-          { tools_used: evt.tools_used, canvas_preview: evt.canvas_preview },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.output || evt.detail,
+            { tools_used: evt.tools_used, canvas_preview: evt.canvas_preview },
+            evt.job_id,
+          ),
+          evt,
         )
       } else if (at === "tool_error") {
-        updateTool(
-          evt.name,
-          evt.result || evt.error || evt.detail,
-          {
-            error: true,
-            interrupted: !!evt.interrupted,
-            finalState: evt.final_state,
-          },
-          evt.job_id,
+        keyOwningRow(
+          updateTool(
+            evt.name,
+            evt.result || evt.error || evt.detail,
+            {
+              error: true,
+              interrupted: !!evt.interrupted,
+              finalState: evt.final_state,
+            },
+            evt.job_id,
+          ),
+          evt,
         )
       } else if (at?.startsWith("subagent_tool_")) {
         const subAct = at.replace("subagent_", "")
@@ -1179,11 +1295,14 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         const saName = evt.subagent || ""
         const saJobId = evt.job_id || ""
         if (subAct === "tool_start") {
-          addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId)
+          keyOwningRow(addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId), evt)
         } else if (subAct === "tool_done") {
-          updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId)
+          keyOwningRow(updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId), evt)
         } else if (subAct === "tool_error") {
-          updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId)
+          keyOwningRow(
+            updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId),
+            evt,
+          )
         }
       }
 
@@ -1194,36 +1313,47 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       // live, instead of a mystery "B started processing" with no
       // explanation.
       cur = null
-      result.push({
-        id: stableId("h_"),
-        role: "wire_inbound",
-        from: evt.from || evt.detail || "",
-        to: evt.to || "",
-        preview: evt.content_preview || "",
-        withContent: evt.with_content !== false,
-        turnIndex: evt.source_turn_index || 0,
-        // Cross-site delivery flag — backend sets metadata.cross_node
-        // on remote forwards via terrarium.broadcast.  The frontend
-        // chips the entry with a "cross-site" badge.
-        crossNode: !!(evt.cross_node || evt.metadata?.cross_node),
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("h_"),
+          role: "wire_inbound",
+          from: evt.from || evt.detail || "",
+          to: evt.to || "",
+          preview: evt.content_preview || "",
+          withContent: evt.with_content !== false,
+          turnIndex: evt.source_turn_index || 0,
+          // Cross-site delivery flag — backend sets metadata.cross_node
+          // on remote forwards via terrarium.broadcast.  The frontend
+          // chips the entry with a "cross-site" badge.
+          crossNode: !!(evt.cross_node || evt.metadata?.cross_node),
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "trigger_fired") {
       cur = null
       const ch = evt.channel || ""
       const sender = evt.sender || ""
-      result.push({
-        id: stableId("h_"),
-        role: "trigger",
-        content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : "",
-        triggerContent: evt.content || "",
-        channel: ch,
-        sender,
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("h_"),
+          role: "trigger",
+          content: ch ? `channel: ${ch}${sender ? ` from ${sender}` : ""}` : "",
+          triggerContent: evt.content || "",
+          channel: ch,
+          sender,
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "tool_call") {
       addTool(evt.name, "tool", evt.args || {}, evt.call_id || evt.job_id, _evtStartedTs(evt))
+      if (cur) addHistoryKey(cur, evt)
     } else if (t === "tool_result") {
+      const jobId = evt.call_id || evt.job_id
+      if (evt._history_key && jobId && !findToolByJobId(jobId)) {
+        addTool(evt.name, "tool", {}, jobId)
+      }
       updateTool(
         evt.name,
         evt.output || evt.error || "",
@@ -1243,6 +1373,9 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         },
         evt.call_id || evt.job_id,
       )
+      const tool = jobId ? findToolByJobId(jobId) : null
+      const owner = tool ? result.find((message) => message.parts?.includes(tool)) : cur
+      if (owner) addHistoryKey(owner, evt)
     } else if (t === "subagent_call") {
       const tool = addTool(
         evt.name,
@@ -1253,56 +1386,68 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       )
       tool.llm_name = evt.llm_name || ""
       tool.model = evt.model || ""
+      if (cur) addHistoryKey(cur, evt)
     } else if (t === "subagent_result") {
       const tool =
         findSubagent(evt.name, evt.job_id) ||
         addTool(evt.name, "subagent", {}, evt.job_id, _evtStartedTs(evt))
       tool.llm_name = evt.llm_name || tool.llm_name || ""
       tool.model = evt.model || tool.model || ""
-      updateTool(
-        evt.name,
-        evt.output || evt.error || "",
-        {
-          error: evt.error ? true : false,
-          interrupted: !!evt.interrupted,
-          finalState: evt.final_state,
-          tools_used: evt.tools_used,
-          turns: evt.turns,
-          duration: evt.duration,
-          total_tokens: evt.total_tokens,
-          prompt_tokens: evt.prompt_tokens,
-          completion_tokens: evt.completion_tokens,
-        },
-        evt.job_id,
+      keyOwningRow(
+        updateTool(
+          evt.name,
+          evt.output || evt.error || "",
+          {
+            error: evt.error ? true : false,
+            interrupted: !!evt.interrupted,
+            finalState: evt.final_state,
+            tools_used: evt.tools_used,
+            turns: evt.turns,
+            duration: evt.duration,
+            total_tokens: evt.total_tokens,
+            prompt_tokens: evt.prompt_tokens,
+            completion_tokens: evt.completion_tokens,
+          },
+          evt.job_id,
+        ) || tool,
+        evt,
       )
     } else if (t === "subagent_tool") {
       const toolName = evt.tool_name || ""
       const saName = evt.subagent || ""
       const saJobId = evt.job_id || ""
       if (evt.activity === "tool_start") {
-        addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId)
+        keyOwningRow(addSubagentTool(toolName, { info: evt.detail || "" }, saName, saJobId), evt)
       } else if (evt.activity === "tool_done") {
-        updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId)
+        keyOwningRow(updateSubagentTool(toolName, evt.detail || "", null, saName, saJobId), evt)
       } else if (evt.activity === "tool_error") {
-        updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId)
+        keyOwningRow(
+          updateSubagentTool(toolName, evt.detail || "", { error: true }, saName, saJobId),
+          evt,
+        )
       }
     } else if (t === "channel_message") {
       const normalized = normalizeMessageContent(evt.content)
-      result.push({
+      const channelMessage = {
         id: stableId("ch_"),
         role: "channel",
         sender: evt.sender || "",
         content: normalized.content,
         contentParts: normalized.contentParts,
         timestamp: "",
-      })
+      }
+      addHistoryKey(channelMessage, evt)
+      result.push(channelMessage)
     } else if (t === "compact_summary" || t === "compact_complete") {
       cur = null
-      upsertCompactMessage(
-        evt.compact_round || evt.round || 0,
-        evt.summary || "",
-        "done",
-        evt.messages_compacted || 0,
+      addHistoryKey(
+        upsertCompactMessage(
+          evt.compact_round || evt.round || 0,
+          evt.summary || "",
+          "done",
+          evt.messages_compacted || 0,
+        ),
+        evt,
       )
     } else if (t === "compact_replace") {
       // Wave C state-bearing event. Used by replay_conversation and
@@ -1310,27 +1455,37 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       // history was replaced with a summary. Render as a compact
       // bubble — NOT as a plain assistant message.
       cur = null
-      upsertCompactMessage(
-        evt.round || 0,
-        evt.summary_text || evt.summary || "",
-        "done",
-        evt.messages_compacted || 0,
+      addHistoryKey(
+        upsertCompactMessage(
+          evt.round || 0,
+          evt.summary_text || evt.summary || "",
+          "done",
+          evt.messages_compacted || 0,
+        ),
+        evt,
       )
     } else if (t === "compact_start") {
       cur = null
-      upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0)
+      addHistoryKey(
+        upsertCompactMessage(evt.compact_round || evt.round || 0, "", "running", 0),
+        evt,
+      )
     } else if (t === "background_result") {
       cur = null
       // A combined delivery banner carries `labels` (one per folded
       // completion); older single-event frames carry only `label`.
-      result.push({
-        id: stableId("bgres_"),
-        role: "bg_result",
-        label: (Array.isArray(evt.labels) ? evt.labels.join(", ") : evt.label) || evt.job_id || "",
-        kind: evt.kind || "tool",
-        jobId: evt.job_id || "",
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("bgres_"),
+          role: "bg_result",
+          label:
+            (Array.isArray(evt.labels) ? evt.labels.join(", ") : evt.label) || evt.job_id || "",
+          kind: evt.kind || "tool",
+          jobId: evt.job_id || "",
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "compact_skipped") {
       // Terminal for a started round that didn't complete — without it
       // the bubble from compact_start spins forever on replay.
@@ -1342,21 +1497,27 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
       }
     } else if (t === "processing_error") {
       cur = null
-      result.push({
-        id: stableId("err_"),
-        role: "error",
-        errorType: evt.error_type || "Error",
-        content: evt.error || "",
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("err_"),
+          role: "error",
+          errorType: evt.error_type || "Error",
+          content: evt.error || "",
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "context_cleared") {
       cur = null
-      result.push({
-        id: stableId("clear_"),
-        role: "clear",
-        messagesCleared: evt.messages_cleared || 0,
-        timestamp: "",
-      })
+      pushKeyed(
+        {
+          id: stableId("clear_"),
+          role: "clear",
+          messagesCleared: evt.messages_cleared || 0,
+          timestamp: "",
+        },
+        evt,
+      )
     } else if (t === "assistant_image") {
       // Replay the image into the current assistant message so resumed
       // sessions (and plain history reloads) show it in place. Mirrors
@@ -1379,6 +1540,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
           revised_prompt: evt.revised_prompt,
         },
       })
+      addHistoryKey(c, evt)
     } else if (t === "assistant_reasoning") {
       const c = ensureCur()
       _insertReasoningSegments(
@@ -1387,6 +1549,7 @@ function _replayPreparedEvents(messages, prepared, tab = "") {
         typeof evt.event_id === "number" ? `h_${evt.event_id}_r` : "h_reasoning_",
       )
       c._pendingReasoningCursor = undefined
+      addHistoryKey(c, evt)
     } else if (t === "token_usage") {
       if (cur) cur._pendingReasoningCursor = cur.parts.length
     } else if (t === "processing_complete") {
@@ -1873,6 +2036,7 @@ const _chatStoreOptions = {
     _historyRequestSeqByTab: {},
     /** @type {Record<string, number>} Per-tab live/optimistic mutation generation invalidating in-flight snapshots */
     _historyMutationSeqByTab: {},
+    historyPageByTab: {},
     /**
      * Per-tab raw text seen on the current turn's WS stream. Deliberately
      * branch-agnostic — notification summaries describe the turn that just
@@ -2321,6 +2485,7 @@ const _chatStoreOptions = {
     closeTab(tab) {
       const idx = this.tabs.indexOf(tab)
       if (idx === -1) return
+      this._dropHistoryController(tab)
       this.tabs = this.tabs.filter((_, i) => i !== idx)
       if (this.activeTab === tab) {
         this.setActiveTab(this.tabs[Math.min(idx, this.tabs.length - 1)] || null)
@@ -3262,6 +3427,7 @@ const _chatStoreOptions = {
           lastPrompt: 0,
         }
         this.tokenUsage[source] = {
+          ...(prev.partial ? { partial: true } : {}),
           prompt: prev.prompt + (data.prompt_tokens || 0),
           completion: prev.completion + (data.completion_tokens || 0),
           total: prev.total + (data.total_tokens || 0),
@@ -4475,6 +4641,18 @@ const _chatStoreOptions = {
         // this request is in flight is newer than the history it
         // returns, so job-reconciliation must not prune it.
         const fetchedAt = Date.now()
+        const controller = _historyPageMap(this).get(tab)
+        const branchPending = !!this._branchResyncPendingByTab[tab]?.active
+        if (!branchPending && !options.full && (options.initialLoad || controller)) {
+          // Reconnect keeps an established paged range: only a tab with no
+          // range yet needs the reset that a fresh initialize performs.
+          const result = !controller?.getState().historyId
+            ? await this.initHistoryPage(tab)
+            : await this.refreshHistoryHead(tab)
+          if (result.resetRequired) return (await this.initHistoryPage(tab)).applied
+          return result.applied
+        }
+        if (controller) controller.reset()
         const data = await terrariumAPI.getHistory(this._instanceGraphId, tab)
         if (
           requestId !== this._historyRequestSeqByTab[tab] ||
@@ -4503,6 +4681,7 @@ const _chatStoreOptions = {
             )
           }
           if (data?.is_processing) this.processingByTab[tab] = true
+          if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
           return true
         }
         if (options.initialLoad && data.events.length === 0 && !data.messages?.length) {
@@ -4524,6 +4703,7 @@ const _chatStoreOptions = {
             ),
           )
           if (data?.is_processing) this.processingByTab[tab] = true
+          if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
           return true
         }
 
@@ -4617,6 +4797,7 @@ const _chatStoreOptions = {
         const prepared = _prepareReplayEvents(data.events, this.branchViewByTab[tab])
         this._setEvents(tab, prepared.events)
         this._restoreTokenUsage(tab, prepared.events, true)
+        if (this.tokenUsage[tab]) this.tokenUsage[tab].partial = false
         this._rebuildMessages(tab, fetchedAt, prepared)
         const scope = scopeOfStoreId(this.$id) || "default"
         this.attentionByTab[tab] = restoreAttentionFromHistory(
@@ -4643,7 +4824,7 @@ const _chatStoreOptions = {
      * Rebuild ``messagesByTab[tab]`` from the cached event log,
      * applying the current ``branchViewByTab[tab]`` override.
      */
-    _rebuildMessages(tab, fetchedAt = null, prepared = null) {
+    _rebuildMessages(tab, fetchedAt = null, prepared = null, liveJobIds = null) {
       const events = this.eventsByTab[tab]
       if (!events) return
       const branchView = this.branchViewByTab[tab] || null
@@ -4654,6 +4835,40 @@ const _chatStoreOptions = {
         ? _replayPreparedEvents([], prepared, tab)
         : _replayEvents([], events, branchView, tab)
       const { messages, pendingJobs } = replay
+      if (liveJobIds == null && _historyPageMap(this).has(tab)) {
+        for (const message of messages) {
+          for (const part of message.parts || []) {
+            if (
+              part.type === "tool" &&
+              part.status === "running" &&
+              part.jobId &&
+              this._findToolPart(tab, this.messagesByTab[tab] || [], part.name, part.jobId)
+                ?.status === "interrupted"
+            ) {
+              part.status = "interrupted"
+              delete pendingJobs[part.jobId]
+            }
+          }
+        }
+      }
+      if (_historyPageMap(this).get(tab)?.kind === "saved") liveJobIds = []
+      if (Array.isArray(liveJobIds)) {
+        const live = new Set(liveJobIds)
+        for (const message of messages) {
+          for (const part of message.parts || []) {
+            if (part.type === "tool" && part.status === "running" && !live.has(part.jobId)) {
+              part.status = "interrupted"
+              delete pendingJobs[part.jobId]
+              if (
+                fetchedAt != null &&
+                this.runningJobs[part.jobId]?.tab === tab &&
+                this.runningJobs[part.jobId].startedAt <= fetchedAt
+              )
+                delete this.runningJobs[part.jobId]
+            }
+          }
+        }
+      }
       const branchSelection = replay.branchMetadata.branchSelection
       adoptLocalCommandResultSelections(
         this._pendingCommandResultContextsByTab[tab],
@@ -5344,6 +5559,7 @@ const _chatStoreOptions = {
       this._historyRequestSeqByTab = {}
       this._pendingCommandResultContextsByTab = {}
       this._appliedMaxEventIdByTab = {}
+      this._disposeHistoryPageControllers()
       this._clearBranchResyncTimers()
       if (this._reconnectTimer) {
         clearTimeout(this._reconnectTimer)
@@ -5719,6 +5935,7 @@ const _chatStoreOptions = {
      *  emptied as a result collapse. */
     pruneTab(tab) {
       if (!tab) return
+      this._dropHistoryController(tab)
       // Legacy tabs
       const legacyIdx = this.tabs.indexOf(tab)
       if (legacyIdx !== -1) {
@@ -5741,6 +5958,232 @@ const _chatStoreOptions = {
       }
       this._syncLegacyFromGroups()
       this._persistGroupState()
+    },
+
+    // ─── Paged-history vertical slice (frontend store integration) ─────
+    //
+    // These actions bind a per-tab ``createHistoryPageController`` (which
+    // wraps a ``createHistoryPageSource``) to this store and drive the
+    // materialize/replay/render flow. Live (``terrariumAPI``) and saved
+    // (``sessionAPI``) viewers use the SAME actions with a different
+    // ``kind``, so one viewport coordinator serves both.
+
+    /** Get (or create) the paged controller for ``tab``. ``kind`` is
+     *  ``"live"`` (terrarium / active session) or ``"saved"`` (v1 saved
+     *  session reader). A switch of kind for the same tab tears the old
+     *  controller down so no cached range leaks across viewers. */
+    _controllerForTab(tab, opts = {}) {
+      if (!tab) return null
+      const map = _historyPageMap(this)
+      let controller = map.get(tab)
+      const kind = opts.kind || controller?.kind || "live"
+      if (
+        controller &&
+        (controller.kind !== kind ||
+          (opts.sessionName && controller.sessionName !== opts.sessionName))
+      ) {
+        controller.dispose()
+        map.delete(tab)
+        controller = null
+      }
+      if (controller) return controller
+      const graphId = this._instanceGraphId
+      controller = createHistoryPageController({
+        kind,
+        fetchPage:
+          kind === "saved"
+            ? (params) => sessionAPI.getHistoryPage(opts.sessionName, tab, params)
+            : (params) => terrariumAPI.getHistoryPage(graphId, tab, params),
+        getSourceKey: () =>
+          kind === "saved"
+            ? `saved:${opts.sessionName}:${tab}:${this._instanceId}`
+            : `live:${this._instanceGraphId}:${tab}:${this._instanceId}`,
+        getInstanceGeneration: () => this._instanceGeneration,
+        getMutationGeneration: () => this._historyMutationSeqByTab[tab] || 0,
+        pageSize: opts.pageSize || 400,
+        fetchDetail:
+          kind === "saved"
+            ? (params) => sessionAPI.getHistoryDetail(opts.sessionName, tab, params)
+            : (params) => terrariumAPI.getHistoryDetail(graphId, tab, params),
+        onChange: (state) => {
+          this.historyPageByTab[tab] = { ...this.historyPageByTab[tab], ...state }
+        },
+        applyReplay: (records, run) => this._applyHistoryPageRecords(tab, controller, records, run),
+        onResetRequired: () => this.resetHistoryPage(tab),
+      })
+      controller.sessionName = opts.sessionName
+      map.set(tab, controller)
+      return controller
+    },
+
+    /** Map raw backend records for a paged stream into replay events.
+     *  The events stream is already event rows; the channel stream is
+     *  delivered in ``payload.messages`` and becomes ``channel_message``
+     *  events preserving sender/content/ts/message_id/_history_key. */
+    _projectHistoryPageRecords(records, stream) {
+      if (stream !== "channel") return records
+      return (records || []).map((record) =>
+        record?.type === "channel_message"
+          ? record
+          : {
+              ...record,
+              type: "channel_message",
+              sender: record?.sender || "",
+              content: record?.content ?? "",
+              channel: record?.channel || "",
+              message_id: record?.message_id,
+              _history_key: record?._history_key,
+            },
+      )
+    },
+
+    /** Render a freshly-materialized raw page range into the store. The
+     *  snapshot stream is a pre-rendered message list (``_convertHistory``
+     *  with paged keys); every other stream is replayed as events. */
+    _setHistoryDetails(tab, records) {
+      const previews = new Set(
+        (records || [])
+          .filter((record) => record._history_truncated && record._history_detail)
+          .map((record) => record._history_key),
+      )
+      for (const message of this.messagesByTab[tab] || []) {
+        message._historyDetails = (message._historyKeys || []).filter((key) => previews.has(key))
+      }
+    },
+
+    _applyHistoryPageRecords(
+      tab,
+      controller,
+      records,
+      { payload = {}, fetchedAt, legacy, head } = {},
+    ) {
+      const stream = controller.getState().stream
+      if (legacy) {
+        const replay = _replayEvents(
+          payload.messages || [],
+          payload.events || [],
+          this.branchViewByTab[tab],
+          tab,
+        )
+        this._setEvents(tab, payload.events || [])
+        const selection = replay.branchMetadata?.branchSelection || new Map()
+        adoptLocalCommandResultSelections(
+          this._pendingCommandResultContextsByTab[tab],
+          this._localCommandResultsByTab[tab],
+          selection,
+        )
+        this._setMessages(
+          tab,
+          mergeLocalCommandResults(replay.messages, this._localCommandResultsByTab[tab], selection),
+        )
+        if (controller.kind !== "saved")
+          this._reconcileRunningJobs(tab, replay.pendingJobs, fetchedAt)
+        if (controller.kind !== "saved" && payload.is_processing === true)
+          this.processingByTab[tab] = true
+        return
+      }
+      this.historyPageByTab[tab] = {
+        ...controller.getState(),
+      }
+      // Only a head read carries a fresh processing state; an older-page
+      // merge or a detail read reuses the last head payload.
+      this.processingByTab[tab] =
+        controller.kind !== "saved" &&
+        (head === true ? payload.is_processing === true : this.processingByTab[tab] === true)
+      if (stream === "snapshot") {
+        const branchSelection = new Map()
+        adoptLocalCommandResultSelections(
+          this._pendingCommandResultContextsByTab[tab],
+          this._localCommandResultsByTab[tab],
+          branchSelection,
+        )
+        this._setMessages(
+          tab,
+          mergeLocalCommandResults(
+            _convertHistory(records || [], { paged: true }),
+            this._localCommandResultsByTab[tab],
+            branchSelection,
+          ),
+        )
+        this._setHistoryDetails(tab, records)
+        return
+      }
+      const events = this._projectHistoryPageRecords(records || [], stream)
+      const prepared = _prepareReplayEvents(events, this.branchViewByTab[tab] || null)
+      this._setEvents(tab, prepared.events)
+      if (!this.tokenUsage[tab] || this.tokenUsage[tab].partial) {
+        this._restoreTokenUsage(tab, prepared.events, true)
+      }
+      if (this.tokenUsage[tab]) {
+        this.tokenUsage[tab].partial = !!(
+          this.historyPageByTab[tab]?.hasOlder || this.historyPageByTab[tab]?.hasNewer
+        )
+      }
+      this._rebuildMessages(tab, fetchedAt, prepared, payload.live_job_ids)
+      if (controller.kind !== "saved") {
+        this.attentionByTab[tab] = restoreAttentionFromHistory(
+          events,
+          this.attentionByTab[tab] || createAttentionState(),
+        )
+        publishAttention(scopeOfStoreId(this.$id) || "default", tab, this.attentionByTab[tab])
+      }
+      const maxEventId = this._maxEventId(events)
+      if (maxEventId != null) this._appliedMaxEventIdByTab[tab] = maxEventId
+      this._setHistoryDetails(tab, records)
+    },
+
+    /** Establish the bounded newest page for ``tab``. Idempotent: the
+     *  source rejects a stale continuation, and re-running just refetches
+     *  the current head. */
+    async initHistoryPage(tab, opts = {}) {
+      if (!tab) return { applied: false }
+      const controller = this._controllerForTab(tab, opts)
+      return controller.initialize()
+    },
+
+    async prefetchOlderHistory(tab) {
+      return _historyPageMap(this).get(tab)?.prefetchOlder() ?? { discarded: false, cached: false }
+    },
+
+    materializeOlderHistory(tab, beforeApply) {
+      return _historyPageMap(this).get(tab)?.materializeOlder(beforeApply) ?? { applied: false }
+    },
+
+    async loadHistoryRecord(tab, key) {
+      return _historyPageMap(this).get(tab)?.loadRecord(key) ?? { applied: false }
+    },
+
+    /** Refresh the newest side of the paged range (no older-range change). */
+    async refreshHistoryHead(tab, opts = {}) {
+      if (!tab) return { applied: false }
+      const controller = this._controllerForTab(tab, opts)
+      return controller.refreshHead()
+    },
+
+    /** Drop the paged controller for ``tab`` (clears its cached raw range
+     *  and invalidates in-flight requests). */
+    resetHistoryPage(tab) {
+      const controller = _historyPageMap(this).get(tab)
+      if (controller) controller.reset()
+    },
+
+    /** Dispose the paged controller for ``tab`` (cached pages, in-flight fences). */
+    _dropHistoryController(tab) {
+      const map = _historyPageControllers.get(_storeKey(this))
+      const controller = map?.get(tab)
+      if (!controller) return
+      controller.dispose()
+      map.delete(tab)
+      delete this.historyPageByTab[tab]
+    },
+
+    /** Dispose every paged controller for this store. */
+    _disposeHistoryPageControllers() {
+      const map = _historyPageControllers.get(_storeKey(this))
+      if (!map) return
+      for (const controller of map.values()) controller.dispose()
+      map.clear()
+      this.historyPageByTab = {}
     },
   },
 }

@@ -67,8 +67,11 @@
         <div class="px-4 py-2 rounded-lg bg-white dark:bg-warm-900 border border-iolite/40 shadow-lg text-sm text-iolite dark:text-iolite-light font-medium"><span class="i-carbon-upload mr-1" /> {{ t("chat.dropToAttach") }}</div>
       </div>
 
-      <div ref="messagesEl" class="chat-messages-viewport flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll">
+      <div ref="messagesEl" class="chat-messages-viewport flex-1 overflow-y-auto px-5 py-4" @scroll="onMessagesScroll" @wheel.passive="onMessagesWheel" @keydown="onMessagesKeydown" @touchstart.passive="onMessagesTouchStart" @touchmove.passive="onMessagesTouchMove">
         <div class="flex flex-col gap-3">
+          <p v-if="chat.tokenUsage[viewActiveTab]?.partial" data-history-partial class="text-xs text-warm-400">{{ viewActiveTab }} — Loaded history / partial statistics (including loaded sub-agent usage)</p>
+          <button v-if="chat.historyPageByTab[viewActiveTab]?.hasNewer" data-history-newer class="self-center text-xs text-iolite" @click="reloadHistoryPage">Newer messages pending — {{ t("common.refresh") }}</button>
+          <button v-if="chat.historyPageByTab[viewActiveTab]?.resetRequired" data-history-reset class="self-center text-xs text-iolite" @click="reloadHistoryPage">{{ t("common.refresh") }}</button>
           <template v-if="viewMessages.length === 0">
             <div class="text-center py-16">
               <div class="w-12 h-12 rounded-2xl bg-gradient-to-br from-iolite/10 to-amber/10 dark:from-iolite/5 dark:to-amber/5 flex items-center justify-center mx-auto mb-3">
@@ -78,10 +81,13 @@
               <p class="text-warm-300 dark:text-warm-600 text-xs mt-1">{{ resolvedEmptySubtitle }}</p>
             </div>
           </template>
-          <button v-if="windowStart > 0" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
-            {{ t("chat.showEarlier", { count: windowStart }) }}
+          <button v-if="!historyFetchBlocked && (windowStart > 0 || hasOlderHistory)" class="self-center text-xs text-iolite dark:text-iolite-light hover:underline" @click="loadEarlierMessages">
+            {{ windowStart ? t("chat.showEarlier", { count: windowStart }) : t("sessionViewer.trace.turn.loadMore") }}
           </button>
+          <p v-else-if="historyFetchBlocked" data-history-generating class="self-center text-xs text-warm-400 dark:text-warm-500">{{ t("chat.loadEarlierGenerating") }}</p>
+          <p v-if="historyDetailError" role="alert" class="text-xs text-coral">{{ historyDetailError }}</p>
           <div v-for="(msg, idx) in windowMessages" :key="msg.id" :data-message-id="msg.id" class="flex flex-col">
+            <button v-for="key in msg._historyDetails || []" :key="key" :data-history-detail="key" :disabled="historyDetailPending !== null" class="self-start text-xs text-iolite hover:underline" @click="loadHistoryDetail(key)">{{ t("sessionViewer.detail.title") }}</button>
             <ChatMessage :message="msg" :prev-message="windowStart + idx > 0 ? viewMessages[windowStart + idx - 1] : null" :is-first="windowStart + idx === 0" :message-idx="windowStart + idx" :is-last-assistant="msg.role === 'assistant' && windowStart + idx === viewMessages.length - 1" :tab-id="viewActiveTab" />
           </div>
           <div v-if="showKohakUwUingIndicator" class="flex items-center gap-2.5 py-2 pl-1">
@@ -194,8 +200,8 @@ import { inject } from "vue"
 
 import StatusDot from "@/components/common/StatusDot.vue"
 import ChatMessage from "@/components/chat/ChatMessage.vue"
-import { useChatRenderWindow, CHAT_RENDER_EXPAND_MESSAGE_LIMIT, CHAT_RENDER_EXPAND_UNIT_BUDGET } from "@/components/chat/chatRenderWindow"
-import { createChatHistoryExpander, captureViewportAnchor, restoreViewportAnchor } from "@/components/chat/chatHistoryExpand"
+import { isTailRenderBudgetFull, useChatRenderWindow, CHAT_RENDER_EXPAND_MESSAGE_LIMIT, CHAT_RENDER_EXPAND_UNIT_BUDGET, CHAT_RENDER_MESSAGE_LIMIT, CHAT_RENDER_UNIT_BUDGET } from "@/components/chat/chatRenderWindow"
+import { createChatHistoryExpander, captureSemanticAnchor, CHAT_AUTO_EXPAND_TOP_PX } from "@/components/chat/chatHistoryExpand"
 import { createChatScrollScheduler } from "@/components/chat/chatScrollScheduler"
 import SlashCommandMenu from "@/components/chat/SlashCommandMenu.vue"
 import ModelSwitcher from "@/components/chrome/ModelSwitcher.vue"
@@ -538,23 +544,119 @@ function getScrollKey(instanceId = props.instance?.id || chat._instanceId, tab =
 // Live tail is selected by an estimated render-unit budget. An explicit
 // start marks history-reading mode: its top stays fixed while the open
 // end keeps newly arriving messages reachable.
-const { enterHistoryAt, expandHistory, isHistoryMode, leaveHistory, restoreHistory, windowMessages, windowStart } = useChatRenderWindow(viewMessages, () => getScrollKey())
+// A monotonically-increasing reading epoch invalidates a pending page
+// fetch when the reading intent changes: return-to-tail, scope switch, or
+// unmount. The store's source already fences request data by
+// source-key/instance/mutation generation; this guards the viewport
+// continuation (no stale scroll/replay) against those same transitions.
+let readingEpoch = 0
+const { enterHistoryAt, expandHistory, isHistoryMode, leaveHistory: _leaveHistory, restoreHistory, windowMessages, windowStart } = useChatRenderWindow(viewMessages, () => getScrollKey())
+const leaveHistory = () => {
+  readingEpoch += 1
+  historyExpander.cancelIdleExpand()
+  _leaveHistory()
+}
 
-// Continuous upward scrolling: reaching the top of the rendered window
-// expands it one small step, and an idle lookahead pre-mounts the next
-// step so back-to-back expansions never stall the scroll interaction.
+const hasOlderHistory = computed(() => {
+  const tab = viewActiveTab.value
+  return tab ? !!chat.historyPageByTab?.[tab]?.hasOlder : false
+})
+
+// A live turn mutates the projected range, so an older page cannot merge
+// until it finishes; say so instead of spending a request it would discard.
+const historyFetchBlocked = computed(() => viewProcessing.value && windowStart.value === 0 && hasOlderHistory.value)
+
+// The single shared viewport/history coordinator. The "show earlier"
+// button (manual) and continuous upward scrolling (automatic) both run
+// through one expansion transaction: consume local unrendered rows first,
+// fetch an older raw page only when those are exhausted. A scope switch,
+// return-to-tail, or unmount invalidates the continuation.
+let isPanelDisposed = false
 const historyExpander = createChatHistoryExpander({
-  canExpand: () => isHistoryMode.value && windowStart.value > 0,
-  expand: () => expandHistory({ unitBudget: CHAT_RENDER_EXPAND_UNIT_BUDGET, messageLimit: CHAT_RENDER_EXPAND_MESSAGE_LIMIT }),
+  initialFill: {
+    owner: () => chat,
+    generation: () => chat._instanceGeneration,
+    key: () => viewActiveTab.value,
+    ready: () => !!messagesEl.value && !!chat.historyPageByTab?.[viewActiveTab.value]?.historyId,
+    atTail: () => isNearBottom.value && !isHistoryMode.value,
+    needsMore: () => {
+      const state = chat.historyPageByTab?.[viewActiveTab.value]
+      return state?.hasOlder && !state.pending && !state.hasNewer && chat._controllerForTab(viewActiveTab.value)?.isCurrent() && !isTailRenderBudgetFull(viewMessages.value)
+    },
+    prefetch: () => chat.prefetchOlderHistory(viewActiveTab.value),
+    materialize: () => chat.materializeOlderHistory(viewActiveTab.value),
+    scroll: () => scrollToBottom(),
+  },
+  onCompensated: () => {
+    lastObservedScrollTop = messagesEl.value?.scrollTop || 0
+  },
+  canExpand: () => isHistoryMode.value && (windowStart.value > 0 || hasOlderHistory.value),
+  expand: async (step, { idle = false } = {}) => {
+    const tab = viewActiveTab.value
+    if (!tab) return false
+    // Local unrendered rows exist: expand the render window, no fetch.
+    if (windowStart.value > 0) {
+      expandHistory(step)
+      return true
+    }
+    // Local unrendered rows exhausted: fetch/cache an older page only when
+    // the source reports older data. The store fetches/caches but does not
+    // replay or touch the DOM until the synchronous materialize.
+    if (!hasOlderHistory.value) return false
+    if (viewProcessing.value) return false
+    const context = getScrollKey()
+    const epoch = readingEpoch
+    const prefetched = await chat.prefetchOlderHistory(tab)
+    // Validate scope/reading intent before the synchronous apply: a valid
+    // cache response does not authorize a stale scroll/replay. Returning to
+    // the tail (leaveHistory), a scope switch, or an unmount all bump the
+    // reading epoch and must discard this continuation.
+    if (isPanelDisposed || readingEpoch !== epoch || getScrollKey() !== context || prefetched?.discarded || idle) return false
+    const anchor = captureSemanticAnchor(
+      () => messagesEl.value,
+      () => viewMessages.value,
+    )
+    const applied = chat.materializeOlderHistory(tab, () => enterHistoryAt(windowStart.value))
+    if (!applied?.applied) return false
+    expandHistory(step)
+    return anchor || true
+  },
   getViewportEl: () => messagesEl.value,
-  getContext: () => getScrollKey(),
+  getMessages: () => viewMessages.value,
+  getContext: () => `${getScrollKey()}:${readingEpoch}`,
+  autoStep: { unitBudget: CHAT_RENDER_EXPAND_UNIT_BUDGET, messageLimit: CHAT_RENDER_EXPAND_MESSAGE_LIMIT },
+  manualStep: { unitBudget: CHAT_RENDER_UNIT_BUDGET, messageLimit: CHAT_RENDER_MESSAGE_LIMIT },
 })
 
 async function loadEarlierMessages() {
-  const anchor = captureViewportAnchor(() => messagesEl.value)
-  expandHistory()
-  await nextTick()
-  restoreViewportAnchor(() => messagesEl.value, anchor)
+  await historyExpander.expandManual()
+}
+
+async function reloadHistoryPage() {
+  historyExpander.cancelInitialFill(true)
+  try {
+    if (chat.historyPageByTab[viewActiveTab.value]?.hasNewer) await chat.refreshHistoryHead(viewActiveTab.value)
+    else await chat.initHistoryPage(viewActiveTab.value)
+  } catch (error) {
+    historyDetailError.value = error.message
+  }
+}
+
+const historyDetailPending = ref(null)
+const historyDetailError = ref("")
+async function loadHistoryDetail(key) {
+  if (historyDetailPending.value !== null) return
+  const context = getScrollKey()
+  historyDetailPending.value = key
+  historyDetailError.value = ""
+  try {
+    const result = await chat.loadHistoryRecord(viewActiveTab.value, key)
+    if (!result.applied && context === getScrollKey()) historyDetailError.value = t("common.refresh")
+  } catch (error) {
+    if (context === getScrollKey()) historyDetailError.value = error?.response?.data?.detail || error.message || t("common.status.error")
+  } finally {
+    historyDetailPending.value = null
+  }
 }
 
 let lastObservedScrollTop = 0
@@ -588,9 +690,44 @@ function restoreScrollPosition(instanceId = props.instance?.id || chat._instance
 }
 
 let scrollStateFrame = null
+let scrolledUp = false
+let touchY = null
+// An expansion whose anchor cannot be restored leaves the viewport pinned
+// at the top, where no further scroll delta arrives. The gesture itself
+// must still be able to ask for the next batch.
+function nudgeHistoryAtTop() {
+  const el = messagesEl.value
+  if (!el || !isHistoryMode.value || el.scrollTop > CHAT_AUTO_EXPAND_TOP_PX) return
+  historyExpander.maybeExpandAtTop(el.scrollTop)
+}
+function onMessagesWheel(event) {
+  if (event.deltaY < 0) {
+    historyExpander.cancelInitialFill(true)
+    nudgeHistoryAtTop()
+  }
+}
+function onMessagesKeydown(event) {
+  if (["ArrowUp", "PageUp", "Home"].includes(event.key)) {
+    historyExpander.cancelInitialFill(true)
+    nudgeHistoryAtTop()
+  }
+}
+function onMessagesTouchStart(event) {
+  touchY = event.touches[0]?.clientY ?? null
+}
+function onMessagesTouchMove(event) {
+  const y = event.touches[0]?.clientY
+  if (touchY != null && y > touchY) {
+    historyExpander.cancelInitialFill(true)
+    nudgeHistoryAtTop()
+  }
+  touchY = y
+}
 function onMessagesScroll() {
   const el = messagesEl.value
   if (el && el.scrollTop < lastObservedScrollTop) {
+    scrolledUp = true
+    historyExpander.cancelInitialFill(true)
     if (!isHistoryMode.value) enterHistoryAt(windowStart.value)
     isNearBottom.value = false
     scrollScheduler.suppress()
@@ -603,9 +740,10 @@ function onMessagesScroll() {
     if (isNearBottom.value) {
       leaveHistory()
       scrollScheduler.resume()
-    } else if (el) {
+    } else if (el && scrolledUp) {
       historyExpander.maybeExpandAtTop(el.scrollTop)
     }
+    scrolledUp = false
     saveScrollPosition()
   })
 }
@@ -666,6 +804,9 @@ watch(
 watch(
   scrollScope,
   (scope, previousScope) => {
+    readingEpoch += 1
+    historyExpander.cancelInitialFill()
+    scrolledUp = false
     scrollScheduler.invalidate()
     scrollScheduler.resume()
     historyExpander.cancelIdleExpand()
@@ -685,6 +826,23 @@ watch(
     })
   },
   { immediate: true },
+)
+
+// The refused older-page fetch resumes on its own once the turn ends, so a
+// reader parked at the top does not have to gesture again.
+watch(viewProcessing, (processing) => {
+  if (processing || !isHistoryMode.value) return
+  const el = messagesEl.value
+  if (el && el.scrollTop <= CHAT_AUTO_EXPAND_TOP_PX) historyExpander.maybeExpandAtTop(el.scrollTop)
+})
+
+watch(
+  () => [scrollScope.value, chat._instanceGeneration, chat.historyPageByTab?.[viewActiveTab.value]?.historyId],
+  () => {
+    if (!chat.historyPageByTab?.[viewActiveTab.value]?.historyId) historyExpander.cancelInitialFill()
+    else nextTick(() => historyExpander.startInitialFill())
+  },
+  { flush: "post" },
 )
 
 watch(inputText, () => {
@@ -999,8 +1157,13 @@ function onGlobalKeydown(e) {
     chat.interrupt(viewActiveTab.value)
   }
 }
-onMounted(() => window.addEventListener("keydown", onGlobalKeydown))
+onMounted(() => {
+  window.addEventListener("keydown", onGlobalKeydown)
+  nextTick(() => historyExpander.startInitialFill())
+})
 onUnmounted(() => {
+  isPanelDisposed = true
+  readingEpoch += 1
   window.removeEventListener("keydown", onGlobalKeydown)
   scrollScheduler.dispose()
   historyExpander.dispose()

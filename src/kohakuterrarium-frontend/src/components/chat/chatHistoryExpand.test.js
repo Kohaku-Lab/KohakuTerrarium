@@ -1,9 +1,66 @@
 import { flushPromises } from "@vue/test-utils"
 import { describe, expect, it, vi } from "vitest"
 
-import { CHAT_AUTO_EXPAND_TOP_PX, createChatHistoryExpander } from "./chatHistoryExpand"
+import {
+  CHAT_AUTO_EXPAND_TOP_PX,
+  createChatHistoryExpander,
+  restoreSemanticAnchor,
+} from "./chatHistoryExpand"
 
-describe("chat history auto expansion", () => {
+describe("chat history auto expansion and initial-fill lifecycle", () => {
+  it("isolates generation claims from disposal of an older panel", async () => {
+    const owner = {}
+    let generation = 0
+    const initialFill = {
+      owner: () => owner,
+      generation: () => generation,
+      key: () => "root",
+      ready: () => true,
+      atTail: () => true,
+      needsMore: () => true,
+      prefetch: vi.fn(async () => ({ cached: true })),
+      materialize: vi.fn(() => ({ applied: false })),
+      scroll: vi.fn(),
+    }
+    const old = createExpander({ initialFill })
+    old.expander.startInitialFill()
+    generation++
+    const current = createExpander({ initialFill })
+    current.expander.startInitialFill()
+    old.expander.startInitialFill()
+    old.expander.dispose()
+    current.idle.runNext()
+    await flushPromises()
+    expect(initialFill.prefetch).toHaveBeenCalledTimes(1)
+    expect(initialFill.materialize).toHaveBeenCalledTimes(1)
+    current.expander.dispose()
+  })
+
+  it("resolves semantic identity instead of a connected recycled node", () => {
+    const stale = { isConnected: true, getBoundingClientRect: () => ({ top: 500 }) }
+    const row = { getAttribute: () => "merged", getBoundingClientRect: () => ({ top: 80 }) }
+    const viewport = {
+      scrollTop: 10,
+      getBoundingClientRect: () => ({ top: 0 }),
+      querySelectorAll: () => [row],
+    }
+    restoreSemanticAnchor(
+      () => viewport,
+      () => [{ id: "merged", _historyKeys: ["old", "new"] }],
+      { element: stale, key: "old", offset: 20 },
+    )
+    expect(viewport.scrollTop).toBe(70)
+  })
+
+  it("passes idle intent separately from interactive expansion", async () => {
+    const expand = vi.fn()
+    const { idle, expander } = createExpander({ expand })
+    expander.scheduleIdleExpand()
+    idle.runNext()
+    await flushPromises()
+    expect(expand).toHaveBeenCalledWith(expect.any(Object), { idle: true })
+  })
+
   function createIdleHarness() {
     const scheduled = []
     const cancelled = new Set()

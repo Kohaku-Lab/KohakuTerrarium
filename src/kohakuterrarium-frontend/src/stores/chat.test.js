@@ -1,12 +1,20 @@
-import { createPinia, setActivePinia } from "pinia"
+import { createPinia, getActivePinia, setActivePinia } from "pinia"
 import { computed, isReactive, toRaw } from "vue"
-import { beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { terrariumAPI } from "@/utils/api"
 import { subscribeAttentionEdges } from "./attention"
 import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  vi.spyOn(terrariumAPI, "getHistoryPage").mockImplementation((id, tab) =>
+    terrariumAPI.getHistory(id, tab),
+  )
+})
+afterEach(() => {
+  for (const store of getActivePinia()._s.values()) store._cleanup?.()
+  vi.restoreAllMocks()
 })
 
 describe("chat store — slash commands", () => {

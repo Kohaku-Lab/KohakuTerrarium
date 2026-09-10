@@ -294,6 +294,42 @@ class TestLaboratoryMultiNodeService:
             alpha_info = await service.add_creature(a_cfg, on_node="w1", start=True)
             assert alpha_info.creature_id
             assert alpha_info.is_running is True
+            alpha = w1_engine.get_creature(alpha_info.creature_id)
+            paging_store = w1_engine._session_stores[alpha.graph_id]
+            for index in range(4):
+                paging_store.append_event(
+                    alpha.name, "text", {"content": f"page-{index}"}
+                )
+            tail = await service.chat_history_page(alpha_info.creature_id, limit=2)
+            assert [row["content"] for row in tail["events"]] == ["page-2", "page-3"]
+            assert tail["messages"] == []
+            older = await service.chat_history_page(
+                alpha_info.creature_id,
+                limit=2,
+                before=tail["history_page"]["before"],
+                history_id=tail["history_page"]["history_id"],
+                stream="events",
+            )
+            assert [row["content"] for row in older["events"]] == ["page-0", "page-1"]
+            newer = await service.chat_history_page(
+                alpha_info.creature_id,
+                limit=2,
+                after=older["history_page"]["after"],
+                history_id=older["history_page"]["history_id"],
+                stream="events",
+            )
+            assert newer["events"] == tail["events"]
+            detail = await service.chat_history_detail(
+                alpha_info.creature_id,
+                stream="events",
+                ref=tail["history_page"]["after"],
+                history_id=tail["history_page"]["history_id"],
+            )
+            assert detail["record"] == tail["events"][-1]
+            with pytest.raises(ValueError):
+                await service.chat_history_page(
+                    alpha_info.creature_id, before="malformed"
+                )
 
             b_cfg = load_agent_config(cfg_bravo)
             bravo_info = await service.add_creature(b_cfg, on_node="w2", start=True)

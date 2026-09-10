@@ -9,6 +9,8 @@ from pathlib import Path
 from typing import Any
 
 from kohakuterrarium.errors import NotFoundError, SessionError, SessionNotFoundError
+from kohakuterrarium.session.history_paging import physical_refs
+from kohakuterrarium.session.history_records import history_page
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.store import (
     session_history_payload,
@@ -98,3 +100,47 @@ def history_payload(
         # file handles that block deletion.
         if store is not None:
             store.close(update_status=False)
+
+
+def history_page_from_store(
+    store: SessionStore,
+    session_id: str,
+    session_name: str,
+    target: str,
+    *,
+    stream: str = "events",
+    limit: int = 400,
+    before: str | None = None,
+    after: str | None = None,
+    history_id: str | None = None,
+    live_job_ids: set[str] | None = None,
+    is_processing: bool = False,
+) -> dict[str, Any]:
+    """Build a bounded paged history slice from an open session store.
+
+    Channels are addressed by the ``ch:`` prefix on ``target`` and are always
+    paged as the ``channel`` stream; agent/root targets page the ``events``
+    (default) or ``snapshot`` stream. Reuses the shared session pager, so
+    cursors, history identity, and byte bounds are identical to the live route.
+    Callers that only want the legacy full read keep using ``history_from_store``
+    / ``history_payload`` unchanged.
+    """
+    meta = store.load_meta()
+    known = target in set(session_targets(store, meta))
+    if not known and target.startswith("ch:"):
+        known = bool(physical_refs(store.channels, target[3:], "m"))
+    if not known:
+        raise NotFoundError(f"Target not found in session: {target}")
+    return history_page(
+        store,
+        target,
+        session_id=session_id,
+        stream=stream,
+        limit=limit,
+        before=before,
+        after=after,
+        history_id=history_id,
+        live_job_ids=tuple(sorted(live_job_ids or ())),
+        is_processing=is_processing,
+        envelope={"target": target, "session_name": session_name},
+    )

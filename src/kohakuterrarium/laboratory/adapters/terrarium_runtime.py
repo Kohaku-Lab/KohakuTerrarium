@@ -529,6 +529,24 @@ class TerrariumRuntimeAdapter:
                 self._require_hosted(cid)
                 return {"history": chat_history_for(self._engine, cid)}
 
+            case (
+                "chat_history_detail"
+                | "chat_history_page"
+                | "channel_history_page"
+                | "channel_history_detail"
+            ):
+                body = dict(msg.body)
+                service = LocalTerrariumService(self._engine)
+                if msg.type in ("chat_history_page", "chat_history_detail"):
+                    cid = body.pop("creature_id")
+                    self._require_hosted(cid)
+                    result = await getattr(service, msg.type)(cid, **body)
+                else:
+                    graph_id, name = body.pop("graph_id"), body.pop("name")
+                    operation = getattr(service, msg.type)
+                    result = await operation(graph_id, name, **body)
+                return {"history": result}
+
             case "chat_branches":
                 cid = msg.body["creature_id"]
                 self._require_hosted(cid)
