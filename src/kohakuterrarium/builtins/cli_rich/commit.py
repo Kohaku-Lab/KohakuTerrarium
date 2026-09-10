@@ -20,6 +20,7 @@ from kohakuterrarium.builtins.cli_rich.live_region import render_to_ansi
 from kohakuterrarium.builtins.cli_rich.runtime import spawn
 from kohakuterrarium.builtins.cli_rich.theme import COLOR_USER, ICON_USER
 from kohakuterrarium.builtins.outputs.stdout import _write_safe
+from kohakuterrarium.llm.message import content_display_text
 from kohakuterrarium.session.history import (
     dedupe_adjacent_duplicate_events,
     select_live_event_ids,
@@ -250,7 +251,9 @@ class SessionReplay:
         data = event.get("data", event)
 
         if etype == "user_input":
-            content = data.get("content", "")
+            # Web sessions persist multimodal content-part lists; Rich Text
+            # only accepts str, so render display text first.
+            content = content_display_text(data.get("content", ""))
             if content:
                 self._committer.user_message(content)
                 self._committer.blank_line()

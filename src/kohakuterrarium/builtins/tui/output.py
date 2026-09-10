@@ -4,25 +4,22 @@ import asyncio
 from typing import Any
 
 from textual.containers import VerticalScroll
-from textual.widgets import Markdown
 
 from kohakuterrarium.builtins.tui import attention
 from kohakuterrarium.builtins.tui._injection import handle_user_input_injected
 from kohakuterrarium.builtins.tui.model_info import handle_session_info
 from kohakuterrarium.builtins.tui.reply_submit import submit_reply
+from kohakuterrarium.builtins.tui.resume import (
+    _build_resume_widgets,
+    _group_into_turns,
+    _iter_all_steps,
+)
 from kohakuterrarium.builtins.tui.session import CULL_KEEP, TUISession
 from kohakuterrarium.builtins.tui.tool_args import (
     format_args_detail,
     format_args_preview,
 )
-from kohakuterrarium.builtins.tui.widgets import (
-    CompactSummaryBlock,
-    LoadOlderButton,
-    SubAgentBlock,
-    ToolBlock,
-    TriggerMessage,
-    UserMessage,
-)
+from kohakuterrarium.builtins.tui.widgets import LoadOlderButton
 from kohakuterrarium.builtins.tui.widgets.ui_event_modals import (
     BusAskTextModal,
     BusConfirmModal,
@@ -31,13 +28,13 @@ from kohakuterrarium.builtins.tui.widgets.ui_event_modals import (
 from kohakuterrarium.core.session import get_session
 from kohakuterrarium.modules.output.base import BaseOutputModule
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
-from kohakuterrarium.session.history import (
-    dedupe_adjacent_duplicate_events,
-    select_live_event_ids,
-)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+# Bounded wait for the resume widget mount; the mount itself finishes in the
+# background when this fires so a slow mount cannot kill the input loop.
+RESUME_MOUNT_TIMEOUT = 10.0
 
 
 class TUIOutput(BaseOutputModule):
@@ -46,14 +43,29 @@ class TUIOutput(BaseOutputModule):
     def __init__(self, session_key: str | None = None, **options: Any):
         super().__init__()
         self._session_key = session_key
-        self._tui = None
+        self._tui_session: TUISession | None = None
+        # Resume events that arrived before the TUI session was wired; the
+        # agent clears its pending copy right after emitting, so losing this
+        # buffer loses the history permanently.
+        self._buffered_resume_events: list[dict] = []
+        # In-flight replay of the buffer, scheduled by the wiring flush;
+        # live rendering awaits it so history mounts before newer output.
+        self._pending_resume_task: asyncio.Task | None = None
         self._turn_started = False
         self._default_target: str = ""
         self._interactive_screens: dict[str, Any] = {}
 
     @property
-    def _target(self) -> str:
-        return self._default_target
+    def _tui(self) -> TUISession | None:
+        return self._tui_session
+
+    @_tui.setter
+    def _tui(self, session: TUISession | None) -> None:
+        # Engine surfaces (terrarium.engine_cli*) bind the session directly
+        # onto started outputs; replay any resume batch buffered until now.
+        self._tui_session = session
+        if session is not None:
+            self._flush_buffered_resume()
 
     async def _on_start(self) -> None:
         # Engine-managed sessions are wired before startup and must remain the
@@ -63,6 +75,7 @@ class TUIOutput(BaseOutputModule):
                 "TUI output reusing externally-wired session",
                 session_key=self._session_key,
             )
+            self._flush_buffered_resume()
             return
         session = get_session(self._session_key)
         if session.tui is None:
@@ -71,6 +84,46 @@ class TUIOutput(BaseOutputModule):
             )
         self._tui = session.tui
         logger.debug("TUI output started", session_key=self._session_key)
+
+    def _flush_buffered_resume(self) -> None:
+        """Replay resume events buffered before the TUI session was wired."""
+        buffered, self._buffered_resume_events = self._buffered_resume_events, []
+        if not buffered or self._tui_session is None:
+            return
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            # Binding outside a running loop cannot render yet; restore so a
+            # later bind or module start replays the history.
+            self._buffered_resume_events = buffered
+            return
+        self._pending_resume_task = asyncio.ensure_future(self.on_resume(buffered))
+
+    async def _await_resume_replay(self) -> None:
+        """Serialize rendering behind an in-flight buffered resume replay.
+
+        The wiring flush cannot await (a property setter is sync), so the
+        replay runs as a task. Live events must not interleave with it —
+        widgets mounted after newer output would render the transcript out
+        of order — so every rendering entry point except ``resume_batch``
+        itself drains the pending task first.
+        """
+        task = self._pending_resume_task
+        if task is None:
+            return
+        try:
+            await task
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.warning("Buffered resume replay failed", exc_info=True)
+        finally:
+            if self._pending_resume_task is task:
+                self._pending_resume_task = None
+
+    @property
+    def _target(self) -> str:
+        return self._default_target
 
     async def _on_stop(self) -> None:
         if self._tui:
@@ -137,6 +190,10 @@ class TUIOutput(BaseOutputModule):
 
     async def emit(self, event: OutputEvent) -> None:
         """Render an output event or collect its interactive reply."""
+        # ``resume_batch`` IS the replay path; everything else must wait for
+        # an in-flight buffered replay so history mounts before newer output.
+        if event.type != "resume_batch":
+            await self._await_resume_replay()
         match event.type:
             case "text":
                 content = event.content
@@ -604,7 +661,15 @@ class TUIOutput(BaseOutputModule):
 
     async def on_resume(self, events: list[dict]) -> None:
         """Render session history in one race-free widget batch."""
-        if not self._tui or not events:
+        if not events:
+            return
+        if self._tui is None:
+            # The resume_batch can race creature startup before the engine
+            # wires this output; the agent clears its pending copy right
+            # after emitting, so buffer for replay on bind instead of
+            # silently dropping the history.
+            logger.debug("TUI not wired; buffering resume events", count=len(events))
+            self._buffered_resume_events.extend(events)
             return
 
         await self._tui.wait_ready()
@@ -660,8 +725,17 @@ class TUIOutput(BaseOutputModule):
                 asyncio.ensure_future(_inner())
 
             app.call_later(_do_build_and_mount)
-            # Resume must not race subsequent output against an incomplete mount.
-            await asyncio.wait_for(done_event.wait(), timeout=10.0)
+            try:
+                # Resume must not race subsequent output against an incomplete
+                # mount, but a slow mount must not kill the input loop either.
+                await asyncio.wait_for(done_event.wait(), timeout=RESUME_MOUNT_TIMEOUT)
+            except asyncio.TimeoutError:
+                # The mount task finishes in the background regardless.
+                logger.debug(
+                    "Resume mount wait timed out",
+                    session_key=self._session_key,
+                    scroll_id=scroll_id,
+                )
 
 
 # -- Helpers ---------------------------------------------------------------
@@ -689,310 +763,3 @@ def _command_name(metadata: dict) -> str:
         return "command"
     name = raw.lstrip("/").split(None, 1)[0]
     return name or "command"
-
-
-# -- Resume rendering ------------------------------------------------------
-
-
-def _group_into_turns(events: list[dict]) -> list[dict]:
-    """Group events into turns while preserving step order."""
-    events = dedupe_adjacent_duplicate_events(events)
-    live_ids = select_live_event_ids(events)
-    turns: list[dict] = []
-    current: dict | None = None
-
-    for evt in events:
-        etype = evt.get("type", "")
-        eid = evt.get("event_id")
-        if isinstance(eid, int) and eid not in live_ids:
-            continue
-        if etype == "user_input":
-            if current:
-                turns.append(current)
-            current = {
-                "input_type": "user_input",
-                "input": evt.get("content", ""),
-                "steps": [],
-            }
-        elif etype == "trigger_fired":
-            if current:
-                turns.append(current)
-            ch = evt.get("channel", "")
-            sender = evt.get("sender", "")
-            content = evt.get("content", "")
-            current = {
-                "input_type": "trigger",
-                "input": f"[{ch}] {sender}",
-                "trigger_content": content,
-                "steps": [],
-            }
-        elif etype in ("compact_start", "compact_complete", "compact_skipped"):
-            # Background compaction belongs to the nearest active or prior turn.
-            target = current if current else (turns[-1] if turns else None)
-            if target:
-                target["steps"].append((etype, evt))
-        elif current is not None:
-            if etype in ("text", "text_chunk"):
-                # Replay treats streamed chunks and complete text identically.
-                if current["steps"] and current["steps"][-1][0] == "text":
-                    current["steps"][-1] = (
-                        "text",
-                        current["steps"][-1][1] + evt.get("content", ""),
-                    )
-                else:
-                    current["steps"].append(("text", evt.get("content", "")))
-            elif etype in (
-                "tool_call",
-                "tool_result",
-                "subagent_call",
-                "subagent_result",
-                "subagent_tool",
-                "processing_start",
-                "processing_end",
-                "token_usage",
-            ):
-                current["steps"].append((etype, evt))
-
-    if current:
-        turns.append(current)
-    return turns
-
-
-def _iter_all_steps(turns: list[dict]):
-    """Yield each step across all turns."""
-    for turn in turns:
-        for step in turn.get("steps", []):
-            yield step
-
-
-def _build_resume_widgets(turns: list[dict]) -> list:
-    """Build resume widgets synchronously without mounting them."""
-    widgets: list = []
-    current_subagent: SubAgentBlock | None = None
-    pending_tools: dict[str, str] = {}
-    sa_pending_tools: dict[str, str] = {}
-
-    for turn in turns:
-        turn_ws, current_subagent, sa_pending_tools = _build_turn_widgets(
-            turn, current_subagent, pending_tools, sa_pending_tools
-        )
-        widgets.extend(turn_ws)
-
-    if current_subagent:
-        current_subagent.mark_interrupted()
-
-    # A restored session cannot retain live tool executions.
-    for w in widgets:
-        if isinstance(w, ToolBlock) and w.state == "running":
-            w.mark_done("")
-
-    return widgets
-
-
-def _find_matching_block(
-    widgets: list, tool_name: str, call_id: str
-) -> "ToolBlock | None":
-    """Find the newest matching tool block, preferring its call ID."""
-    if call_id:
-        for w in reversed(widgets):
-            if isinstance(w, ToolBlock) and w.tool_id == call_id:
-                return w
-    # Older histories may lack call IDs, so fall back to the newest running name.
-    for w in reversed(widgets):
-        if (
-            isinstance(w, ToolBlock)
-            and w.tool_name == tool_name
-            and w.state == "running"
-        ):
-            return w
-    return None
-
-
-def _build_turn_widgets(
-    turn: dict,
-    current_subagent: SubAgentBlock | None,
-    pending_tools: dict[str, str],
-    sa_pending_tools: dict[str, str],
-) -> tuple[list, SubAgentBlock | None, dict[str, str]]:
-    """Build one turn's widgets and return its carried sub-agent state."""
-    widgets: list = []
-
-    # User/trigger message
-    if turn["input_type"] == "user_input":
-        widgets.append(UserMessage(turn["input"]))
-    else:
-        widgets.append(TriggerMessage(turn["input"], turn.get("trigger_content", "")))
-
-    for step_type, data in turn.get("steps", []):
-        if step_type == "text":
-            text = data if isinstance(data, str) else str(data)
-            if text.strip():
-                # Markdown preserves selectable rendered history instead of a stream widget.
-                widgets.append(Markdown(text))
-
-        elif step_type == "tool_call":
-            raw_name = data.get("name", "tool")
-            name = _clean_name(raw_name)
-            call_id = data.get("call_id", "")
-            args = data.get("args", {})
-            preview = format_args_preview(name, args)
-            detail = format_args_detail(name, args)
-
-            if current_subagent:
-                current_subagent.add_tool_line(name, preview)
-            else:
-                block = ToolBlock(name, preview, call_id, args_detail=detail)
-                widgets.append(block)
-            if call_id:
-                pending_tools[call_id] = name
-
-        elif step_type == "tool_result":
-            call_id = data.get("call_id", "")
-            name = pending_tools.pop(call_id, _clean_name(data.get("name", "tool")))
-            error = data.get("error")
-            output = data.get("output", "")
-            if output.strip() in ("OK", ""):
-                output = ""
-
-            if current_subagent:
-                current_subagent.update_tool_line(
-                    name, done=not error, error=bool(error)
-                )
-            else:
-                matched = _find_matching_block(widgets, name, call_id)
-                if matched is not None:
-                    if error:
-                        matched.mark_error(str(error))
-                    else:
-                        matched.mark_done(output)
-
-        elif step_type == "subagent_call":
-            # Finalize any leftover sub-agent tools from previous sub-agent
-            if current_subagent:
-                for tn in list(sa_pending_tools):
-                    current_subagent.update_tool_line(tn, done=True)
-                sa_pending_tools.clear()
-            raw_name = data.get("name", "subagent")
-            name = _clean_name(raw_name)
-            task = data.get("task", "")
-            block = SubAgentBlock(name, sa_task=task)
-            current_subagent = block
-            widgets.append(block)
-
-        elif step_type == "subagent_result":
-            # Mark any remaining sub-agent tools as done
-            if current_subagent:
-                for tn in list(sa_pending_tools):
-                    current_subagent.update_tool_line(tn, done=True)
-                sa_pending_tools.clear()
-            if current_subagent:
-                current_subagent.mark_done(
-                    output=data.get("output", ""),
-                    tools_used=data.get("tools_used"),
-                    turns=data.get("turns", 0),
-                    duration=data.get("duration", 0),
-                )
-                current_subagent = None
-
-        elif step_type == "subagent_tool":
-            tool_name = data.get("tool_name", "")
-            activity = data.get("activity", "")
-            detail = data.get("detail", "")
-            if current_subagent:
-                if activity == "tool_start":
-                    # Pre-mount widgets receive their current state directly.
-                    sa_pending_tools[tool_name] = detail[:50]
-                    current_subagent.add_tool_line(tool_name, detail[:50])
-                elif activity == "tool_done":
-                    sa_pending_tools.pop(tool_name, None)
-                    current_subagent.update_tool_line(tool_name, done=True)
-                elif activity == "tool_error":
-                    sa_pending_tools.pop(tool_name, None)
-                    current_subagent.update_tool_line(tool_name, done=False, error=True)
-
-        elif step_type == "compact_complete":
-            summary = data.get("summary", "") if isinstance(data, dict) else ""
-            widgets.append(CompactSummaryBlock(summary, done=True))
-
-        elif step_type == "compact_skipped":
-            reason = data.get("reason", "skipped") if isinstance(data, dict) else ""
-            widgets.append(
-                CompactSummaryBlock(f"(skipped: {reason or 'skipped'})", done=True)
-            )
-
-    return widgets, current_subagent, sa_pending_tools
-
-
-def _clean_name(raw: str) -> str:
-    """Remove stored job ID and sub-agent prefixes from a name."""
-    if "[" in raw:
-        return raw[: raw.index("[")]
-    if raw.startswith("agent_"):
-        return raw[6:]
-    return raw
-
-
-def _render_turn_to_tui(tui, turn: dict) -> None:
-    """Render one historical turn as TUI widgets, preserving interleaving."""
-    if turn["input_type"] == "user_input":
-        tui.add_user_message(turn["input"])
-    else:
-        tui.add_trigger_message(turn["input"], turn.get("trigger_content", ""))
-
-    pending_tools: dict[str, str] = {}
-
-    for step_type, data in turn["steps"]:
-        if step_type == "text":
-            tui.begin_streaming()
-            tui.append_stream(data)
-            tui.end_streaming()
-
-        elif step_type == "tool_call":
-            raw_name = data.get("name", "tool")
-            name = _clean_name(raw_name)
-            call_id = data.get("call_id", "")
-            args = data.get("args", {})
-            preview = format_args_preview(name, args)
-            tui.add_tool_block(
-                name,
-                preview,
-                call_id,
-                args_detail=format_args_detail(name, args),
-            )
-            if call_id:
-                pending_tools[call_id] = name
-
-        elif step_type == "tool_result":
-            call_id = data.get("call_id", "")
-            name = pending_tools.pop(call_id, _clean_name(data.get("name", "tool")))
-            error = data.get("error")
-            output = data.get("output", "")
-            if output.strip() in ("OK", ""):
-                output = ""
-            tui.update_tool_block(name, output=output, error=error, tool_id=call_id)
-
-        elif step_type == "subagent_call":
-            raw_name = data.get("name", "subagent")
-            name = _clean_name(raw_name)
-            task = data.get("task", "")
-            tui.add_subagent_block(name, task)
-
-        elif step_type == "subagent_result":
-            tui.end_subagent_block(
-                output=data.get("output", ""),
-                tools_used=data.get("tools_used"),
-                turns=data.get("turns", 0),
-                duration=data.get("duration", 0),
-            )
-
-        elif step_type == "subagent_tool":
-            tool_name = data.get("tool_name", "")
-            activity = data.get("activity", "")
-            detail = data.get("detail", "")
-            if activity == "tool_start":
-                tui.add_tool_block(tool_name, detail[:50])
-            elif activity == "tool_done":
-                tui.update_tool_block(tool_name)
-            elif activity == "tool_error":
-                tui.update_tool_block(tool_name, error="error")
-        tui.end_streaming()
