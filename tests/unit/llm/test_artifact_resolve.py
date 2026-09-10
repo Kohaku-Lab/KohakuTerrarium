@@ -9,6 +9,8 @@ identity no-op when nothing needs resolving (the common hot path).
 
 import base64
 
+import pytest
+
 from kohakuterrarium.llm import artifact_resolve
 from kohakuterrarium.llm.artifact_resolve import (
     file_reference_path,
@@ -54,6 +56,35 @@ class TestResolveArtifactUrl:
 
 
 class TestFileReferences:
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "image%20name.png",
+            "image%25name.png",
+            "image%2Fname.png",
+            "a b.png",
+            "图片.png",
+        ],
+    )
+    def test_file_reference_preserves_exact_filename(self, tmp_path, name):
+        pic = tmp_path / name
+        pic.write_bytes(b"expected image")
+        url = pic.resolve().as_uri()
+
+        assert file_reference_path(url) == pic.resolve()
+        assert resolve_artifact_url(url) == (
+            "data:image/png;base64," + base64.b64encode(b"expected image").decode()
+        )
+
+    def test_file_reference_does_not_read_decoded_neighbor(self, tmp_path):
+        pic = tmp_path / "image%20name.png"
+        pic.write_bytes(b"expected image")
+        (tmp_path / "image name.png").write_bytes(b"wrong image")
+
+        assert resolve_artifact_url(pic.resolve().as_uri()) == (
+            "data:image/png;base64," + base64.b64encode(b"expected image").decode()
+        )
+
     def test_file_reference_inlined_from_disk(self, tmp_path):
         pic = tmp_path / "a b.png"
         pic.write_bytes(b"PNGDATA")

@@ -9,7 +9,7 @@ import base64
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 from kohakuterrarium.studio.persistence.artifacts import (
@@ -47,7 +47,7 @@ def file_reference_path(url: str) -> Path | None:
     parsed = urlparse(url)
     if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
         return None
-    return Path(url2pathname(unquote(parsed.path)))
+    return Path(url2pathname(parsed.path))
 
 
 def _local_media_path(url: str) -> Path | None:
