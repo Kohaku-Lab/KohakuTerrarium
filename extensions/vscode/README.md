@@ -12,6 +12,7 @@ First-party VS Code workspace extension for creating and operating KohakuTerrari
 - Create a Session from `kohakuterrarium.defaultCreature` and the current workspace folder.
 - Select a Creature by stable Creature ID.
 - Reuse the production KohakuTerrarium chat store for history, streaming text, tool activity, interactive replies, and Stop Turn.
+- Page bounded history (load earlier messages) with an explicit reload when the backend source resets, and read a truncated row's full body on demand.
 - Stop Session and resume Sessions.
 - Relocate the selected Creature after graph merge/split events and fail closed when it disappears.
 - Recover explicitly with Refresh after the KT service restarts; the extension does not run an infinite reconnect loop.
@@ -42,6 +43,10 @@ When daemon state is unavailable or stale, automatic port discovery lists strict
 ### Refresh lifecycle
 
 Refresh reuses a healthy Host connection, runtime, and topology watcher, reconciling Sessions through the existing authenticated client instead of repeating discovery or token prompts. Each Refresh still starts a new operation epoch: old chat sockets, pending commands and image reads lose ownership. Reconciliation has a bounded deadline. Configuration changes or current-runtime failure release the connection; the next explicit Refresh discovers again. Backend mutations are never retried automatically.
+
+### History paging
+
+The transcript loads a bounded newest page and loads earlier messages from the top. Paged reads stay pinned to the selected Session/Creature ownership; a selection switch, reconnect, or backend source reset discards in-flight pages. When the backend reports that the head needs a reset, an explicit reload control re-reads a fresh bounded head instead of silently merging stale ranges. A row the backend truncated exposes a **Show full message** control that performs an ownership-fenced detail read.
 
 ### Unsent composer state
 

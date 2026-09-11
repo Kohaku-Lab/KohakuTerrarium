@@ -14,6 +14,7 @@ const consumers = [
   path.join(frontendSource, 'components', 'chat', 'ChatPanel.vue'),
   path.join(frontendSource, 'components', 'chat', 'ToolCallBatch.vue'),
   path.join(root, 'src', 'webview', 'index.js'),
+  path.join(root, 'src', 'webview', 'transcriptPaging.mjs'),
 ]
 const read = (file) => fs.readFileSync(file, 'utf8')
 

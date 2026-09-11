@@ -11,7 +11,7 @@ import { installGoalBridge } from './goalBridge.mjs'
 import { installHistoryBridge } from './historyBridge.mjs'
 import { applyContextCommandOutcome } from './contextCommandResult.mjs'
 import { createHostAcceptedChat, createObservedWebSocket } from './hostAcceptedChat.mjs'
-import { createConversationMessageOrchestrator, createConversationScrollController } from './conversationScroll.mjs'
+import { createConversationScrollController, isNearBottom } from './conversationScroll.mjs'
 import {
   createConversationAttachments,
   createConversationDrafts,
@@ -24,13 +24,8 @@ import { createSelectionVersionOwner } from './selectionVersion.mjs'
 import { createSessionShell } from './sessionShell.js'
 import { createSubmitGate, isComposerSubmitDisabled } from './submitGate.mjs'
 import { applyTopologySelection } from './topologySelection.mjs'
-import {
-  createMessageSequence,
-  createMessageTailSignature,
-  createTranscriptBindings,
-  createTranscriptWindow,
-  messageSequenceKey,
-} from './transcriptWindow.mjs'
+import { createTranscriptBindings } from './transcriptWindow.mjs'
+import { useTranscriptPaging } from './transcriptPaging.mjs'
 import { createViewRenderers } from './viewRenderers.mjs'
 import './style.css'
 import { installNotificationSurface } from './notifications.mjs'
@@ -100,9 +95,7 @@ const App = {
     const selectionVersions = createSelectionVersionOwner()
     let activeSelectionReadyId = null
     BridgeWebSocket.getReadyId = () => activeSelectionReadyId
-    onBeforeUnmount(() => {
-      BridgeWebSocket.getReadyId = () => null
-    })
+    onBeforeUnmount(() => (BridgeWebSocket.getReadyId = () => null))
     const currentConversationOwnership = () => ({ ...composerOwner(), name: currentSession.value?.target })
     const conversationOwnership = createConversationOwnership(currentConversationOwnership)
     const submitGate = createSubmitGate()
@@ -152,45 +145,22 @@ const App = {
       draftRevision.value += 1
     })
     const scroll = createConversationScrollController({ schedule: nextTick })
-    const messageChanges = createConversationMessageOrchestrator(scroll)
-    const transcriptWindow = createTranscriptWindow()
-    const transcriptRevision = ref(0)
-
-    const messageSequence = computed(() => createMessageSequence(messages.value))
-    const messageTail = computed(() => createMessageTailSignature(messages.value))
-    const messageStructure = computed(() => messageSequenceKey(messageSequence.value))
-    const transcriptView = computed(() => {
-      transcriptRevision.value
-      return transcriptWindow.view(messages.value, scrollIdentity.value, messageSequence.value)
+    let transcriptViewport = null
+    const paging = useTranscriptPaging({
+      chat,
+      tab,
+      messages,
+      getIdentity: () => scrollIdentity.value,
+      getViewport: () => transcriptViewport,
+      isNearBottom: () => isNearBottom(transcriptViewport),
     })
 
     watch([scrollIdentity, () => messages.value.length], ([identity, count]) => scroll.setIdentity(identity, { hasMessages: count > 0 }), {
       immediate: true,
     })
     watch(
-      () => ({
-        identity: scrollIdentity.value,
-        sequence: messageSequence.value,
-      }),
-      (current, previous) => {
-        if (!previous || (current.sequence.length === 0 && previous.sequence.length === 0)) return
-        messageChanges.beforeMessagesChange(previous.identity, previous.sequence, current.identity, current.sequence)
-      },
-      { flush: 'sync' },
-    )
-    watch(
-      () => ({
-        identity: scrollIdentity.value,
-        structure: messageStructure.value,
-        tail: messageTail.value,
-      }),
-      (current, previous) => {
-        if (
-          previous &&
-          (current.structure !== previous.structure || current.tail !== previous.tail || current.identity !== previous.identity)
-        )
-          messageChanges.afterMessagesChange(current.identity, messageSequence.value)
-      },
+      () => messages.value.length,
+      (count) => scroll.onMessagesUpdated({ hasMessages: count > 0 }),
       { flush: 'post' },
     )
     watch(
@@ -199,7 +169,18 @@ const App = {
         if (processing) scroll.onMessagesUpdated({ hasMessages: messages.value.length > 0 })
       },
     )
-    onBeforeUnmount(() => scroll.dispose())
+    watch(
+      () => [scrollIdentity.value, chat._instanceGeneration, chat.historyPageByTab?.[tab.value]?.historyId],
+      () => {
+        if (!chat.historyPageByTab?.[tab.value]?.historyId) paging.leaveHistory()
+        else nextTick(() => paging.start())
+      },
+      { flush: 'post' },
+    )
+    onBeforeUnmount(() => {
+      scroll.dispose()
+      paging.dispose()
+    })
 
     onBeforeUnmount(installHistoryBridge({ request }))
 
@@ -408,18 +389,22 @@ const App = {
     }
 
     const transcriptBindings = createTranscriptBindings({
-      onViewportReady: (viewport, identity) => scroll.onViewportReady(viewport, identity),
-      onScroll: (event, identity) => scroll.onScroll(event, identity),
+      onViewportReady: (viewport, identity) => {
+        transcriptViewport = viewport
+        scroll.onViewportReady(viewport, identity)
+        paging.start()
+      },
+      onScroll: (event, identity) => {
+        scroll.onScroll(event, identity)
+        paging.onScroll()
+      },
+      onWheel: (event) => paging.onWheel(event),
+      onKeydown: (event) => paging.onKeydown(event),
+      onTouchStart: (event) => paging.onTouchStart(event),
+      onTouchMove: (event) => paging.onTouchMove(event),
       onReply: ({ message, actionId, values }) => submitReply(message, actionId, values),
     })
     const transcriptCallbacks = computed(() => transcriptBindings.forIdentity(scrollIdentity.value))
-    function loadEarlierMessages() {
-      const complete = scroll.beforePrepend()
-      if (!transcriptWindow.expandEarlier(messages.value, scrollIdentity.value, messageSequence.value)) return
-      transcriptRevision.value += 1
-      nextTick(complete)
-      messageChanges.afterMessagesChange(scrollIdentity.value, messageSequence.value)
-    }
 
     const { actionButton, icon, renderSession, renderSharedText, renderTranscriptMessage } = createViewRenderers({
       ConversationMessage,
@@ -430,6 +415,7 @@ const App = {
       currentSession,
       openSession,
       resumeSession,
+      historyDetail: { pending: paging.detailPending, load: paging.loadDetail },
     })
 
     const receiveHostMessage = ({ data: message }) => {
@@ -535,16 +521,28 @@ const App = {
         status.value ? h('p', { class: 'status', role: 'status', 'aria-live': 'polite' }, status.value) : null,
         h('section', { class: 'chat-region' }, [
           h(ChatTranscriptSection, {
-            ...transcriptView.value,
-            earlierLabel: `Load ${Math.min(transcriptView.value.earlierCount, 400)} earlier messages`,
+            ...paging.view.value,
+            earlierLabel: paging.view.value.earlierCount
+              ? `Load ${Math.min(paging.view.value.earlierCount, 400)} earlier messages`
+              : 'Load earlier messages',
             emptyTitle: 'No messages yet',
             emptySubtitle: 'Choose a Session and send a message',
             processing: chat.processingByTab[tab.value],
             processingLabel: 'Kohaku is working',
             reconnecting: chat.wsStatus === 'reconnecting',
             reconnectLabel: 'Reconnecting',
+            partial: paging.partial.value,
+            partialLabel: 'Loaded history / partial statistics (including loaded sub-agent usage)',
+            hasNewer: paging.hasNewer.value,
+            newerLabel: 'Newer messages pending — Reload',
+            resetRequired: paging.resetRequired.value,
+            resetLabel: 'Reload history',
+            historyBlocked: paging.historyBlocked.value,
+            historyBlockedLabel: 'History is loading — finish generation to load earlier messages',
+            canLoadEarlier: paging.canLoadEarlier.value,
             renderMessage: renderTranscriptMessage,
-            onLoadEarlier: loadEarlierMessages,
+            onLoadEarlier: () => paging.loadEarlier(),
+            onReload: () => paging.reload(),
             ...transcriptCallbacks.value,
           }),
         ]),

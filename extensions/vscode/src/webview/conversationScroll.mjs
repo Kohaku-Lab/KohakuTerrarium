@@ -2,38 +2,10 @@
 
 export const NEAR_BOTTOM_THRESHOLD = 80
 
-function messageKey(message) {
-  if (message?.id != null) return `id:${message.id}`
-  if (message?.eventId != null) return `event:${message.eventId}`
-  return null
-}
-
-function isTruePrepend(previous, next) {
-  if (!previous.length || next.length <= previous.length) return false
-  const offset = next.length - previous.length
-  const previousKeys = previous.map(messageKey)
-  const nextKeys = next.map(messageKey)
-  return previousKeys.every((key, index) => key != null && key === nextKeys[index + offset])
-}
-
-export function createConversationMessageOrchestrator(controller) {
-  let pendingPrepend = null
-
-  return {
-    beforeMessagesChange(previousIdentity, previous, identity, next) {
-      pendingPrepend = null
-      if (identity && identity === previousIdentity && isTruePrepend(previous, next)) {
-        pendingPrepend = { identity, complete: controller.beforePrepend() }
-      }
-    },
-
-    afterMessagesChange(identity, messages) {
-      const prepend = pendingPrepend
-      pendingPrepend = null
-      if (prepend?.identity === identity) prepend.complete()
-      else controller.onMessagesUpdated({ hasMessages: messages.length > 0 })
-    },
-  }
+// Shared near-bottom probe so the scroll controller, the paging expander, and
+// the live-follow tail all agree on one threshold.
+export function isNearBottom(element) {
+  return !element || element.scrollHeight - element.scrollTop - element.clientHeight < NEAR_BOTTOM_THRESHOLD
 }
 
 export function createConversationScrollController({ schedule = (callback) => callback() } = {}) {

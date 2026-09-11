@@ -1,11 +1,7 @@
 const assert = require('node:assert/strict')
 const test = require('node:test')
 
-const {
-  createConversationMessageOrchestrator,
-  createConversationScrollController,
-  NEAR_BOTTOM_THRESHOLD,
-} = require('../src/webview/conversationScroll.mjs')
+const { createConversationScrollController, NEAR_BOTTOM_THRESHOLD } = require('../src/webview/conversationScroll.mjs')
 
 function viewport({ scrollTop = 0, scrollHeight = 1000, clientHeight = 200 } = {}) {
   return { scrollTop, scrollHeight, clientHeight }
@@ -117,41 +113,6 @@ test('preserves the reading anchor when earlier history is prepended', () => {
   complete()
   flush()
   assert.equal(el.scrollTop, 620)
-})
-
-test('message orchestration captures prepend before render and preserves append follow policy', () => {
-  const { controller, flush } = harness()
-  const orchestrator = createConversationMessageOrchestrator(controller)
-  const el = viewport({ scrollTop: 240, scrollHeight: 1000 })
-  const current = [{ id: 'b' }, { id: 'c' }]
-  controller.setIdentity('same', { hasMessages: true })
-  controller.onViewportReady(el)
-  flush()
-  el.scrollTop = 240
-  controller.onScroll({ target: el })
-
-  orchestrator.beforeMessagesChange('same', current, 'same', [{ id: 'a' }, ...current])
-  el.scrollHeight = 1380 // Vue renders only after the synchronous watcher captured 1000.
-  orchestrator.afterMessagesChange('same', [{ id: 'a' }, ...current])
-  assert.equal(el.scrollTop, 240)
-  flush()
-  assert.equal(el.scrollTop, 620)
-
-  el.scrollTop = 1200
-  controller.onScroll({ target: el })
-  orchestrator.beforeMessagesChange('same', current, 'same', [...current, { id: 'd' }])
-  el.scrollHeight = 1500
-  orchestrator.afterMessagesChange('same', [...current, { id: 'd' }])
-  flush()
-  assert.equal(el.scrollTop, 1500)
-
-  el.scrollTop = 400
-  controller.onScroll({ target: el })
-  orchestrator.beforeMessagesChange('old', current, 'current', [{ id: 'a' }, ...current])
-  el.scrollHeight = 1700
-  orchestrator.afterMessagesChange('current', [{ id: 'a' }, ...current])
-  flush()
-  assert.equal(el.scrollTop, 400)
 })
 
 test('identity-bound viewport and scroll callbacks cannot affect a later identity', () => {

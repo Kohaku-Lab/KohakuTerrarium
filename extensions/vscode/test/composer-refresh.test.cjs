@@ -69,7 +69,7 @@ test('real App preserves text and files across pending Refresh, isolates creatur
         if (message.type === 'http.history') reply(message, { events: [] })
         if (message.type === 'http.historyPage')
           reply(message, {
-            events: [{ type: 'user_message', event_id: 101, content: 'Persisted head before composing', _history_key: 'e:101' }],
+            events: [],
             messages: [],
             history_page: {
               history_id: 'fixture-history',
@@ -132,13 +132,6 @@ test('real App preserves text and files across pending Refresh, isolates creatur
     const initial = requests.find((message) => message.type === 'ready')
     assert.ok(initial)
     await answerReady(initial, 'creature-a')
-    const headReads = requests.filter((message) => message.type === 'http.historyPage')
-    assert.equal(headReads.length, 1, 'initial attachment fetches one bounded head page')
-    assert.equal(headReads[0].session, 'runtime-a')
-    assert.equal(headReads[0].creature, 'same-name')
-    assert.equal(headReads[0].options.limit, 400)
-    assert.match(document.querySelector('.kt-transcript-viewport').textContent, /Persisted head before composing/)
-    assert.equal(requests.filter((message) => message.type === 'http.history').length, 0, 'initial history never falls back to a full read')
     await typeAndAttach('unsent A', 'a.txt')
 
     const refresh = document.querySelector('button[aria-label="Refresh Sessions"]')

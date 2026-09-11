@@ -17,9 +17,32 @@ export function createViewRenderers({
   currentSession,
   openSession,
   resumeSession,
+  historyDetail,
 }) {
   function renderSharedText(content, breaks = false) {
     return h(MarkdownRenderer, { content, breaks })
+  }
+
+  // A truncated channel/record row carries opaque detail keys. The full-body
+  // read is a safe, ownership-fenced store action; only render the control
+  // when the store marked the row truncated, so a preview never silently
+  // pretends to be complete.
+  function renderDetailControls(message) {
+    if (!historyDetail) return []
+    return (message._historyDetails || []).map((key) =>
+      h(
+        'button',
+        {
+          key: `history-detail:${key}`,
+          type: 'button',
+          class: 'history-detail self-center',
+          'data-history-detail': key,
+          disabled: historyDetail.pending.value !== null,
+          onClick: () => historyDetail.load(key),
+        },
+        'Show full message',
+      ),
+    )
   }
 
   function renderTranscriptMessage(message, { reply }) {
@@ -29,7 +52,13 @@ export function createViewRenderers({
         renderText: renderSharedText,
         onReply: ({ actionId, values }) => reply(actionId, values),
       })
-    return ArtifactScope ? h(ArtifactScope, null, { default: render }) : render()
+    const body = ArtifactScope ? h(ArtifactScope, null, { default: render }) : render()
+    const details = renderDetailControls(message)
+    // Preserve the rendered message as the row root so the paging row
+    // selector keeps the message as its target; only wrap when a detail
+    // control is attached.
+    if (!details.length) return body
+    return h('div', { class: 'transcript-row' }, [...details, body])
   }
 
   function icon(name) {
