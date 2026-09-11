@@ -93,6 +93,7 @@ function harness(options = {}) {
     token: 'host-secret',
     runtimeEpoch: 'ready-B',
     topologyTimeoutMs: options.topologyTimeoutMs,
+    ...(options.artifactReader ? { artifactReader: options.artifactReader } : {}),
   })
   return { client, host, posts, socketCalls, sockets, state, updates }
 }

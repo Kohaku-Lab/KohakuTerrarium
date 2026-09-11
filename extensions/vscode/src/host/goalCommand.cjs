@@ -5,13 +5,16 @@ async function executeGoal(host, message) {
   const selected = host.state.selection
   const intent = host.selectionIntentVersion
   const controller = new AbortController()
+  // Admission is the stable target identity plus the explicit-intent fence, not the
+  // notification-ordering selectionVersion: an unchanged-target topology refresh may
+  // advance selectionVersion yet must not reject this goal. The envelope still carries
+  // selectionVersion for the Webview's ordering, and the Protocol validates its shape.
   const owns = () =>
     !controller.signal.aborted &&
     !host.disposed &&
     selected?.targetCreatureId &&
     selected === host.state.selection &&
     message.readyId === host.runtimeEpoch &&
-    message.selectionVersion === host.selectionVersion &&
     intent === host.selectionIntentVersion &&
     host.pendingSelectionMutations === 0
   if (!owns()) throw Error('Selected Creature ownership changed')

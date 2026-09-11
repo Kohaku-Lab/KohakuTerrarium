@@ -302,19 +302,25 @@ class RuntimeHost {
       runtime: this,
       runtimeEpoch: this.runtimeEpoch,
       selected,
-      selectionVersion: this.selectionVersion,
+      selectionIntentVersion: this.selectionIntentVersion,
     })
     return capability
   }
 
   ownsContextCommand(capability) {
+    // Admission is the stable target identity + ready epoch + explicit-intent fence, not
+    // the notification-ordering selectionVersion: an unchanged-target topology refresh
+    // advances selectionVersion yet must not reject a command captured before the clear
+    // confirmation or while compacting. Explicit reselect/switch and ready resets still
+    // bump the intent/epoch and are rejected.
     const owned = contextCapabilities.get(capability)
     return (
       !this.disposed &&
       owned?.runtime === this &&
       owned.runtimeEpoch === this.runtimeEpoch &&
       owned.selected === this.state.selection &&
-      owned.selectionVersion === this.selectionVersion
+      owned.selectionIntentVersion === this.selectionIntentVersion &&
+      this.pendingSelectionMutations === 0
     )
   }
 
@@ -503,12 +509,14 @@ class RuntimeHost {
   }
 
   ownsArtifactRead(selected, message) {
+    // Ownership is the stable target identity, ready epoch, and the explicit-intent
+    // fence captured in readArtifactOwned. selectionVersion is ordering-only for the
+    // Webview, so an unchanged-target topology refresh must not reject a pending read.
     return (
       !this.disposed &&
       !!selected &&
       selected === this.state.selection &&
       message.readyId === this.runtimeEpoch &&
-      message.selectionVersion === this.selectionVersion &&
       this.artifacts.allowed(message.path)
     )
   }

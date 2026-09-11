@@ -150,13 +150,19 @@ test('a read for a ref observed in the selected history returns a data URL', asy
   })
 })
 
-test('artifact reads reject version zero bypass and mixed fields before fetching', async () => {
+test('artifact reads admit the current selection while rejecting unknown fields and unadmitted refs', async () => {
   const { host, fetchCalls } = harness()
   await host.handle({ type: 'session.select', requestId: 1, session: 'graph-live', creatureId: 'creature-beta' })
   host.artifacts.admit(IMG)
-  await assert.rejects(host.handle(readMessage(IMG, { selectionVersion: 0 })))
-  await assert.rejects(host.handle(readMessage(IMG, { selectionVersion: 1, target: 'foreign' })))
-  assert.equal(fetchCalls.length, 0)
+  // The notification-ordering selectionVersion is not an admission gate: the stable
+  // target identity + explicit-intent fence are. A previously captured version reads.
+  await host.handle(readMessage(IMG, { selectionVersion: 0 }))
+  assert.equal(fetchCalls.length, 1)
+  // Unknown envelope fields are rejected by the Protocol before any work.
+  await assert.rejects(host.handle(readMessage(IMG, { selectionVersion: 1, target: 'foreign' })), /Invalid artifact request/)
+  // A ref that was never admitted for this selection never reaches the backend.
+  await assert.rejects(host.handle(readMessage('/api/sessions/graph_1/artifacts/other.png', { selectionVersion: 1 })), /ownership changed/)
+  assert.equal(fetchCalls.length, 1)
 })
 
 test('unknown refs, foreign URLs, and traversal paths never reach the backend', async () => {

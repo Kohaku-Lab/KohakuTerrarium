@@ -42,6 +42,12 @@ function publicError(type) {
         code: 'interrupt_failed',
         message: 'Could not stop the current turn.',
       }
+    case 'context.compact':
+    case 'context.clear':
+      return {
+        code: 'context_command_failed',
+        message: 'Could not manage the selected Creature context. Refresh the Session and try again.',
+      }
     case 'goal.execute':
       return {
         code: 'goal_command_failed',

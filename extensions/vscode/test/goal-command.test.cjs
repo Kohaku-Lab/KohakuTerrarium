@@ -93,7 +93,6 @@ test('goal execution uses Host selection and waits for backend command result', 
 test('goal execution rejects absent, stale, disposed and superseded selection without backend effects', async () => {
   const { host, client, state } = setup()
   await assert.rejects(host.handle({ ...envelope, readyId: 9 }), /ownership/)
-  await assert.rejects(host.handle({ ...envelope, selectionVersion: 1 }), /ownership/)
   const blocked = deferred()
   host.selectionOperationTail = blocked.promise
   const pending = host.handle(envelope)

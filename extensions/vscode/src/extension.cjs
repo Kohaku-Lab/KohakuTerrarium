@@ -365,9 +365,14 @@ function activate(context) {
             return
           }
           if (message.type === 'context.clear' || message.type === 'context.compact') {
+            // Context management is a user command, not an automatic retry: it admits
+            // against the current runtime only. A missing runtime follows the explicit
+            // Refresh recovery contract instead of silently rediscovering a connection.
+            const ownedForContext = runtime
+            if (!ownedForContext) throw Error('Refresh the Session before sending requests')
             await dispatchContextCommand({
               message,
-              getRuntime: ensureRuntime,
+              getRuntime: async () => ownedForContext,
               isCurrent: (candidate) => runtime === candidate,
               confirmClear: confirmContextClear,
               post: (response) => webview.postMessage(response),

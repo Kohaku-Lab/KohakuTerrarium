@@ -216,8 +216,8 @@ test('history admission drives an authenticated artifact read through the saved-
   assert.equal(artifactHits().length, 1)
   assert.equal(artifactHits()[0].token, TOKEN)
 
-  // Wrong fences reject before any HTTP happens.
-  await assert.rejects(host.handle(read(4, REF, version + 1)), /ownership changed/)
+  // A stale ready fence rejects before any HTTP happens. The ordering selectionVersion is
+  // not an admission fence: the stable target identity + explicit-intent fence are.
   await assert.rejects(host.handle(read(5, REF, version, 6)), /ownership changed/)
   assert.equal(artifactHits().length, 1)
 
