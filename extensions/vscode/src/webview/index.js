@@ -10,6 +10,7 @@ import { renderCarbonIcon } from './carbonIcons.mjs'
 import { bindComposerBuffer } from './composerBuffer.mjs'
 import { installGoalBridge } from './goalBridge.mjs'
 import { installHistoryBridge } from './historyBridge.mjs'
+import { installHostMediaResolver } from './mediaHostBridge.mjs'
 import { applyContextCommandOutcome } from './contextCommandResult.mjs'
 import { createHostAcceptedChat, createObservedWebSocket } from './hostAcceptedChat.mjs'
 import { createConversationScrollController, isNearBottom } from './conversationScroll.mjs'
@@ -33,8 +34,6 @@ import { installNotificationSurface } from './notifications.mjs'
 import './notifications.css'
 import QueuedMessages from './QueuedMessages.vue'
 import { composerLabels } from './composerLabels.mjs'
-import ArtifactScope from './ArtifactScope.vue'
-import { useArtifactImages } from './useArtifactImages.mjs'
 
 const vscode = acquireVsCodeApi()
 const pending = new Map()
@@ -75,8 +74,10 @@ const App = {
     const automatic = ref(true)
     const sessions = ref([])
     const currentSession = ref(null)
+    // Reactive ready epoch: the fetch fence AND the media generation a leaf re-resolves against.
+    const latestReadyRequestId = ref(null)
     const composerOwner = () => ({
-      readyId: latestReadyRequestId,
+      readyId: latestReadyRequestId.value,
       runtimeId: currentSession.value?.session?.runtimeId,
       creatureId: currentSession.value?.targetCreatureId,
     })
@@ -104,7 +105,7 @@ const App = {
     const submitBusy = computed(() => (submitRevision.value, attachmentRevision.value, submitGate.busy(currentConversationOwnership())))
     const attachmentTransform = conversationOwnership.transform((file) => file)
     const getReadFence = () =>
-      activeSelectionReadyId === latestReadyRequestId && available.value
+      activeSelectionReadyId === latestReadyRequestId.value && available.value
         ? { readyId: activeSelectionReadyId, selectionVersion: selectionVersions.highest() }
         : null
     onBeforeUnmount(
@@ -118,10 +119,10 @@ const App = {
       }),
     )
     const selectionRequest = async (type, data) => {
-      if (activeSelectionReadyId !== latestReadyRequestId) throw Error('Wait for Session refresh')
+      if (activeSelectionReadyId !== latestReadyRequestId.value) throw Error('Wait for Session refresh')
       const result = await request(type, { ...data, readyId: activeSelectionReadyId })
-      if (result.readyId !== latestReadyRequestId) return result
-      selectionVersions.acceptResult(result.readyId, result.selectionVersion, result.readyId === latestReadyRequestId)
+      if (result.readyId !== latestReadyRequestId.value) return result
+      selectionVersions.acceptResult(result.readyId, result.selectionVersion, result.readyId === latestReadyRequestId.value)
       activeSelectionReadyId = result.readyId
       return result
     }
@@ -199,13 +200,12 @@ const App = {
         isCurrent,
       })
 
-    let latestReadyRequestId = null
     let composerConnectionId = null
     let selectionOperationEpoch = 0
     let notificationReadyId = null
-    const artifactLoader = useArtifactImages(request, getReadFence, () => JSON.stringify(composerOwner()))
+    // Shared media leaves resolve through the Host (media.prepare -> spooled URI).
+    installHostMediaResolver({ request, getFence: getReadFence, getOwner: composerOwner, error })
     function clearComposerBuckets() {
-      artifactLoader.reset()
       notifications.clear()
       draftBuckets.clearAll()
       attachmentBuckets.clearAll()
@@ -219,8 +219,7 @@ const App = {
     const readyCoordinator = createReadyCoordinator({
       requestReady: () =>
         request('ready', {}, (id) => {
-          artifactLoader.reset()
-          latestReadyRequestId = id
+          latestReadyRequestId.value = id
           notificationReadyId = id
           selectionOperationEpoch++
           attachmentRevision.value += 1
@@ -410,7 +409,6 @@ const App = {
     const { actionButton, icon, renderSession, renderSharedText, renderTranscriptMessage } = createViewRenderers({
       ConversationMessage,
       MarkdownRenderer,
-      ArtifactScope,
       available,
       busy,
       currentSession,
@@ -434,7 +432,7 @@ const App = {
       }
       if (message?.type === 'selection.changed') {
         const eventReadyId = message.readyId ?? activeSelectionReadyId
-        const pendingRuntime = eventReadyId === latestReadyRequestId
+        const pendingRuntime = eventReadyId === latestReadyRequestId.value
         if (notificationReadyId === null || eventReadyId !== notificationReadyId) return
         const notification = selectionVersions.beginNotification(eventReadyId, message.data.selectionVersion, pendingRuntime)
         if (!notification) return
@@ -551,7 +549,7 @@ const App = {
           ? h(QueuedMessages, {
               key: JSON.stringify(composerOwner()),
               items: chat.queuedMessagesByTab[tab.value] || [],
-              connected: chat.wsStatus === 'open' && available.value && activeSelectionReadyId === latestReadyRequestId,
+              connected: chat.wsStatus === 'open' && available.value && activeSelectionReadyId === latestReadyRequestId.value,
               edit: (item, parts) => hostAcceptedChat.queued.edit(tab.value, item, parts),
               cancel: (item) => hostAcceptedChat.queued.cancel(tab.value, item),
             })

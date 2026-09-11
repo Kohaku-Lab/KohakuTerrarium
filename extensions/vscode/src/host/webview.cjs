@@ -10,7 +10,7 @@ function hostLanguage() {
   }
 }
 
-function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', locale = hostLanguage(), nonce }) {
+function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', locale = hostLanguage(), nonce, mediaSrc = '' }) {
   const policy = [
     "default-src 'none'",
     `script-src 'nonce-${nonce}'`,
@@ -18,6 +18,10 @@ function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', loca
     "style-src-attr 'unsafe-inline'",
     `font-src ${cspSource} data:`,
     `img-src ${cspSource} data:`,
+    // The media surface is only the Host-spooled file exposed through
+    // asWebviewUri, so it is granted only when the Host wires a media source and
+    // never a remote URL.
+    ...(mediaSrc ? [`media-src ${mediaSrc}`] : []),
     "connect-src 'none'",
   ].join('; ')
 

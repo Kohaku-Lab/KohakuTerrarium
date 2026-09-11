@@ -13,9 +13,13 @@ const { SocketOwners } = require('./host/sockets.cjs')
 const { ConnectionStateWriter } = require('./host/state.cjs')
 const { TopologyWatcher } = require('./host/topology.cjs')
 const { renderWebviewHtml } = require('./host/webview.cjs')
+const { createMediaView } = require('./host/mediaView.cjs')
 
 const CONFIG_KEY = 'kohakuterrarium.connection'
 const TOKEN_KEY = 'kohakuterrarium.hostToken'
+// Every View keeps its own spool root; the entire set is reclaimed only when the
+// extension itself deactivates, so an open editor tab is never pulled out from under.
+const mediaViews = new Set()
 
 function tokenRequired(capabilities) {
   const policy = capabilities.auth?.host_token || {}
@@ -174,15 +178,30 @@ function activate(context) {
   const provider = {
     resolveWebviewView(view) {
       const webview = view.webview
+      // The media spool lives under the extension's own storage. Without a workspace
+      // folder ``storageUri`` is undefined, so fall back to global storage rather than
+      // silently dropping the media surface; the fallback is still a Host-owned path.
+      const storageUri = context.storageUri || context.globalStorageUri
+      const storageDir = storageUri ? vscode.Uri.joinPath(storageUri, 'media').fsPath : null
+      const media = createMediaView({ vscode, webview, storageDir })
+      if (media) {
+        mediaViews.add(media)
+        media.start().catch(() => {})
+      }
       webview.options = {
         enableScripts: true,
-        localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'dist'), vscode.Uri.joinPath(context.extensionUri, 'media')],
+        localResourceRoots: [
+          vscode.Uri.joinPath(context.extensionUri, 'dist'),
+          vscode.Uri.joinPath(context.extensionUri, 'media'),
+          ...(media ? [media.resourceRoot] : []),
+        ],
       }
       webview.html = renderWebviewHtml({
         cspSource: webview.cspSource,
         scriptUri: String(webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview.js'))),
         styleUri: String(webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'dist', 'webview.css'))),
         brandUri: String(webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'media', 'kohaku-icon.png'))),
+        mediaSrc: media ? webview.cspSource : '',
         nonce: crypto.randomBytes(16).toString('base64'),
       })
 
@@ -241,6 +260,9 @@ function activate(context) {
         })
         if (runtimeEpoch !== epoch || !stored.applied) throw Error('Runtime ownership changed')
         activeConnection = connection
+        // Point the View's spool at the resolved loopback backend + host token. The
+        // webview never learns either; only the spooled asWebviewUri crosses over.
+        media?.setBackend(connection.endpoint, connection.token)
         if (composerConnection.endpoint !== connection.endpoint) {
           composerConnection = { endpoint: connection.endpoint, id: crypto.randomUUID() }
         }
@@ -279,6 +301,7 @@ function activate(context) {
           webSocketBase: webSocketBase(connection.endpoint),
           token: connection.token,
           runtimeEpoch: readyId,
+          mediaHost: media?.mediaHost || null,
         })
         topology = new TopologyWatcher({
           socketFactory: (url, protocols) => new WebSocket(url, protocols),
@@ -396,6 +419,9 @@ function activate(context) {
       view.onDidDispose(() => {
         disposable.dispose()
         entry.disposeRuntime()
+        // Abort in-flight media and drop the webview lease surface, but keep any
+        // file an open editor tab still holds until the extension deactivates.
+        media?.releaseView()
         liveViews.delete(entry)
       })
     },
@@ -404,7 +430,11 @@ function activate(context) {
   context.subscriptions.push(vscode.window.registerWebviewViewProvider('kohakuterrarium.chat', provider))
 }
 
-function deactivate() {}
+async function deactivate() {
+  const views = [...mediaViews]
+  mediaViews.clear()
+  await Promise.all(views.map((media) => media.dispose().catch(() => {})))
+}
 
 module.exports = {
   activate,

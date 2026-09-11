@@ -19,6 +19,11 @@ export { default as ConversationMessage } from "../../components/chat/shared/Con
 // the VS Code webview through this package boundary; it keeps importing the
 // host i18n seam so each build graph supplies the real dictionary provider.
 export { default as CommandResultMessage } from "../../components/chat/CommandResultMessage.vue"
+// The single production video leaf. Both hosts render this exact component (the
+// Dashboard directly, the VS Code webview through the shared ConversationMessage
+// that imports it by relative path), so there is no second video renderer to
+// drift. It is resolved host-neutrally through the injected media resolver.
+export { default as VideoFilePreview } from "../../components/chat/VideoFilePreview.vue"
 export { default as ChatTranscriptSection } from "../../components/chat/shared/ChatTranscriptSection.js"
 export {
   DEFAULT_TOOL_BATCH_THRESHOLD,
@@ -49,3 +54,21 @@ export {
   semanticKey,
   useChatRenderWindow,
 } from "../../components/chat/chatRenderWindow.js"
+
+// Host-neutral media resolution seam: one resolver contract installed by each
+// host (Dashboard = direct same-origin browser URL, VS Code = Host-spooled
+// webview URI) and consumed by the shared media leaves below.
+export {
+  MEDIA_RESOLVER_KEY,
+  createBrowserMediaResolver,
+  createMarkdownMediaResolver,
+  fileReferencePath,
+  mediaSourceUrl,
+  provideMediaResolver,
+  safeArtifactUrl,
+  safeImageUrl,
+  safeMediaParts,
+  useMediaResolver,
+  useMediaResource,
+} from "./mediaResolver.js"
+export { MediaImage } from "./MediaPreview.js"

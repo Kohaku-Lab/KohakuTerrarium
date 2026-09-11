@@ -6,7 +6,6 @@ import { createSessionRenderers } from './sessionRenderers.mjs'
 export function createViewRenderers({
   ConversationMessage,
   MarkdownRenderer,
-  ArtifactScope,
   available,
   busy,
   currentSession,
@@ -44,13 +43,14 @@ export function createViewRenderers({
 
   function renderTranscriptMessage(message, { reply }) {
     if (message?.role === 'command_result') return h(CommandResultMessage, { message })
-    const render = () =>
-      h(ConversationMessage, {
-        message,
-        renderText: renderSharedText,
-        onReply: ({ actionId, values }) => reply(actionId, values),
-      })
-    const body = ArtifactScope ? h(ArtifactScope, null, { default: render }) : render()
+    // Media inside a shared message resolves through the injected media resolver
+    // (browser direct URL or Host-spooled webview URI); no observer wrapper is
+    // needed here anymore.
+    const body = h(ConversationMessage, {
+      message,
+      renderText: renderSharedText,
+      onReply: ({ actionId, values }) => reply(actionId, values),
+    })
     const details = renderDetailControls(message)
     // Preserve the rendered message as the row root so the paging row
     // selector keeps the message as its target; only wrap when a detail

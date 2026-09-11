@@ -297,19 +297,19 @@ describe("ChatMessage branch operations", () => {
     ])
 
     const img = wrapper.get("img")
-    expect(img.classes()).toContain("chat-inline-image")
+    expect(img.classes()).toContain("kt-conversation-image")
     expect(img.attributes("src")).toBe(
       `/api/files/raw?path=${encodeURIComponent("/tmp/looked at.png")}`,
     )
   })
 
-  it("keeps session artifact image refs on the host inline-image layout", () => {
+  it("keeps session artifact image refs on the shared inline-image layout", () => {
     const wrapper = mountAssistantParts(useChatStore(), pinia, [
       { type: "image_url", id: "img2", image_url: { url: "/api/sessions/s1/artifacts/pic.png" } },
     ])
 
     const img = wrapper.get("img")
-    expect(img.classes()).toContain("chat-inline-image")
+    expect(img.classes()).toContain("kt-conversation-image")
     expect(img.attributes("src")).toBe("/api/sessions/s1/artifacts/pic.png")
   })
 

@@ -1,9 +1,14 @@
 import { mount } from "@vue/test-utils"
-import { describe, expect, it } from "vitest"
+import { createPinia, setActivePinia } from "pinia"
+import { beforeEach, describe, expect, it } from "vitest"
 
 import VideoFilePreview from "./VideoFilePreview.vue"
 
 describe("VideoFilePreview", () => {
+  // ``useI18n`` resolves the shared locale store, so the component needs an
+  // active pinia; the default ``en`` dictionary supplies the production labels.
+  beforeEach(() => setActivePinia(createPinia()))
+
   it("renders a playable and downloadable artifact URL", () => {
     const path = "/api/sessions/s1/artifacts/generated_videos/grok.mp4"
     const wrapper = mount(VideoFilePreview, {

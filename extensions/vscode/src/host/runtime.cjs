@@ -1,9 +1,8 @@
 const { normalizeSession } = require('./client.cjs')
 const { executeGoal } = require('./goalCommand.cjs')
 const { beginReady, reconcileReady } = require('./readyRuntime.cjs')
-const { allowedMessage, validateEndpoint } = require('./protocol.cjs')
-const { ArtifactRegistry, artifactNamespaceOf, canonicalArtifactPath } = require('./artifactRegistry.cjs')
-const { ArtifactReader, httpBaseFromWebSocket } = require('./artifactRead.cjs')
+const { allowedMessage } = require('./protocol.cjs')
+const { MEDIA_TYPES, dispatchMedia } = require('./mediaHost.cjs')
 
 const contextCapabilities = new WeakMap()
 
@@ -35,12 +34,7 @@ class RuntimeHost {
     token,
     runtimeEpoch = null,
     topologyTimeoutMs = 30_000,
-    fetchImpl = null,
-    artifactReader = null,
-    artifactRegistry = null,
-    artifactTimeoutMs = 10_000,
-    artifactMaxBytes = 8 * 1024 * 1024,
-    artifactMaxConcurrent = 4,
+    mediaHost = null,
   }) {
     this.client = client
     this.state = state
@@ -63,26 +57,9 @@ class RuntimeHost {
     this.pendingGoals = new Set()
     this.readyControllers = new Set()
     this.goalTimeoutMs = 25_000
-    this.artifacts = artifactRegistry || new ArtifactRegistry()
-    // Artifact fetches use the loopback HTTP form of the validated ws base.
-    const artifactBase = validateEndpoint(httpBaseFromWebSocket(webSocketBase))
-    this.artifactReader =
-      artifactReader ||
-      new ArtifactReader({
-        base: artifactBase,
-        token,
-        ...(fetchImpl ? { fetchImpl } : {}),
-        limits: { timeoutMs: artifactTimeoutMs, maxBytes: artifactMaxBytes, maxConcurrent: artifactMaxConcurrent },
-      })
-    this.artifactTimeoutMs = artifactTimeoutMs
-    this.artifactMaxConcurrent = artifactMaxConcurrent
-    this.artifactControllers = new Set()
-    const postToView = post
-    // Register artifact refs from ws frames before the frame reaches the webview.
-    this.post = (message) => {
-      if (message?.type === 'ws.frame') this.artifacts.observeFrameText(message.data)
-      return postToView(message)
-    }
+    // The extension injects a per-view media coordinator; the runtime owns its fence.
+    this.mediaHost = mediaHost
+    this.post = post
     this.generation = this.sockets.begin()
   }
 
@@ -96,13 +73,6 @@ class RuntimeHost {
 
   rotateGeneration() {
     this.generation = this.sockets.begin()
-    this.cancelArtifactReads()
-    this.artifacts.invalidate()
-  }
-
-  cancelArtifactReads() {
-    for (const controller of this.artifactControllers) controller.abort()
-    this.artifactControllers.clear()
   }
 
   requireSelection(message) {
@@ -128,11 +98,10 @@ class RuntimeHost {
   }
 
   enqueueSelectionMutation(operation) {
-    // Explicit intent supersedes in-flight artifact reads and previously admitted refs.
+    // Explicit intent supersedes in-flight media reads.
     this.selectionIntentVersion++
     this.pendingSelectionMutations++
-    this.cancelArtifactReads()
-    this.artifacts.invalidate()
+    this.mediaHost?.abortAll()
     return this.enqueueSelectionOperation(operation).finally(() => this.pendingSelectionMutations--)
   }
 
@@ -350,6 +319,9 @@ class RuntimeHost {
     if (this.disposed) throw Error('Runtime disposed')
     if (message.type.startsWith('ws.') && this.runtimeEpoch != null && message.readyId !== this.runtimeEpoch)
       throw Error('Socket ready ownership changed')
+    // Every media request is a single fixed dispatch (see mediaHost.dispatchMedia);
+    // it is handled before the lifecycle switch so this class stays host-shaped.
+    if (MEDIA_TYPES.has(message.type)) return dispatchMedia(this, message)
     switch (message.type) {
       case 'session.clearSelection': {
         const result = await this.clearSelection()
@@ -420,14 +392,7 @@ class RuntimeHost {
       }
       case 'http.history': {
         const selected = this.requireSelection(message)
-        // Capture the intent version before the async read: an explicit selection intent
-        // during the fetch supersedes admission even if the selection pointer is unchanged.
-        const selectionIntentVersion = this.selectionIntentVersion
         const data = await this.client.history(selected.session, selected.creature)
-        // Admit refs only while the fetching selection still owns the runtime.
-        if (!this.disposed && this.state.selection === selected && selectionIntentVersion === this.selectionIntentVersion) {
-          this.artifacts.observe(data)
-        }
         this.post({
           type: 'http.history.result',
           requestId: message.requestId,
@@ -446,7 +411,6 @@ class RuntimeHost {
             ? await this.client.historyPage(selected.session, selected.creature, message.options || {})
             : await this.client.historyDetail(selected.session, selected.creature, message.params || {})
         if (!this.ownsHistoryRead(selected, readyId, intent)) throw Error('Selected Creature ownership changed')
-        this.artifacts.observe(data)
         this.post({ type: `${message.type}.result`, requestId: message.requestId, data })
         return
       }
@@ -462,11 +426,6 @@ class RuntimeHost {
       case 'goal.execute': {
         const data = await executeGoal(this, message)
         this.post({ type: 'goal.execute.result', requestId: message.requestId, data })
-        return
-      }
-      case 'artifact.read': {
-        const data = await this.readArtifactOwned(message)
-        this.post({ type: 'artifact.read.result', requestId: message.requestId, data })
         return
       }
       case 'context.compact':
@@ -509,70 +468,10 @@ class RuntimeHost {
   }
 
   ownsArtifactRead(selected, message) {
-    // Ownership is the stable target identity, ready epoch, and the explicit-intent
-    // fence captured in readArtifactOwned. selectionVersion is ordering-only for the
-    // Webview, so an unchanged-target topology refresh must not reject a pending read.
-    return (
-      !this.disposed &&
-      !!selected &&
-      selected === this.state.selection &&
-      message.readyId === this.runtimeEpoch &&
-      this.artifacts.allowed(message.path)
-    )
-  }
-
-  async readArtifactOwned(message) {
-    if (!allowedMessage(message)) throw Error('Invalid artifact request')
-    const selected = this.state.selection
-    if (!selected) throw Error('Select a Creature before reading artifacts')
-    if (!this.ownsArtifactRead(selected, message)) throw Error('Selected Creature ownership changed')
-    // A queued explicit selection intent supersedes new reads before any HTTP happens.
-    if (this.pendingSelectionMutations > 0) throw Error('Selected Creature ownership changed')
-    const canonical = canonicalArtifactPath(message.path)
-    if (!canonical || !this.artifacts.allowsCanonical(canonical)) throw Error('Unknown artifact reference')
-    // The cap covers the whole operation: namespace listing plus artifact read.
-    if (this.artifactControllers.size >= this.artifactMaxConcurrent) throw Error('Artifact read limit reached')
-    const controller = new AbortController()
-    this.artifactControllers.add(controller)
-    const selectionIntentVersion = this.selectionIntentVersion
-    const owned = () => selectionIntentVersion === this.selectionIntentVersion && this.ownsArtifactRead(selected, message)
-    let timedOut = false
-    const timer = setTimeout(() => {
-      timedOut = true
-      controller.abort()
-    }, this.artifactTimeoutMs)
-    const aborted = new Promise((_, reject) => {
-      controller.signal.addEventListener('abort', () => reject(Error(timedOut ? 'Artifact read timed out' : 'Artifact read aborted')), {
-        once: true,
-      })
-    })
-    aborted.catch(() => {})
-    const guard = (promise) => Promise.race([promise, aborted])
-    try {
-      // The trusted namespace comes from a fresh listing per read; it is never cached.
-      const sessions = await guard(this.client.listOpen({ signal: controller.signal }))
-      if (!owned()) throw Error('Selected Creature ownership changed')
-      const row = sessions.find((candidate) => candidate.isLive && candidate.runtimeId === selected.session)
-      const savedName = row?.savedName
-      if (typeof savedName !== 'string' || savedName.length === 0 || artifactNamespaceOf(canonical) !== savedName) {
-        throw Error('Unknown artifact reference')
-      }
-      const data = await this.artifactReader.read(canonical, { signal: controller.signal })
-      // Re-check ownership at delivery so a mid-read change never yields bytes.
-      if (!owned()) throw Error('Selected Creature ownership changed')
-      return { dataUrl: data }
-    } catch (error) {
-      if (timedOut) throw Error('Artifact read timed out')
-      if (!owned()) throw Error('Selected Creature ownership changed')
-      const messageText = error instanceof Error ? error.message : String(error)
-      if (messageText === 'Unknown artifact reference' || messageText.startsWith('Artifact ')) throw error
-      throw Error('Artifact request failed')
-    } finally {
-      clearTimeout(timer)
-      // Abort the op controller on every exit: it disposes the listing request and response body.
-      controller.abort()
-      this.artifactControllers.delete(controller)
-    }
+    // Ownership is the stable target identity and ready epoch; selectionVersion is
+    // ordering-only for the Webview, so an unchanged-target topology refresh must not
+    // reject a media read captured under the previous ordering.
+    return !this.disposed && !!selected && selected === this.state.selection && message.readyId === this.runtimeEpoch
   }
 
   dispose() {
@@ -585,8 +484,7 @@ class RuntimeHost {
     this.readyControllers.clear()
     for (const cancel of this.pendingGoals) cancel(Error('Goal runtime disposed; execution outcome may be unknown'))
     this.pendingGoals.clear()
-    this.cancelArtifactReads()
-    this.artifacts.invalidate()
+    this.mediaHost?.abortAll()
     this.sockets.closeGeneration(this.generation)
   }
 }

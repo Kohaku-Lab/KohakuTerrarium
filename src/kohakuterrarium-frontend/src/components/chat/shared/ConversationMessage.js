@@ -2,7 +2,9 @@ import { computed, defineComponent, h, reactive, ref } from "vue"
 
 import "./conversation-message.css"
 
+import { MediaImage } from "../../../public/chat/MediaPreview.js"
 import { computeRenderGroups } from "../../../public/chat/chatToolGrouping.js"
+import VideoFilePreview from "../VideoFilePreview.vue"
 
 function plainText(content) {
   return h("div", { class: "kt-conversation-text" }, content || "")
@@ -20,14 +22,6 @@ function safeExternalUrl(value) {
   } catch {
     return ""
   }
-}
-
-function safeImageUrl(value) {
-  if (typeof value !== "string") return ""
-  if (value.startsWith("data:image/") || value.startsWith("blob:")) return value
-  if (value.startsWith("/") && !value.startsWith("//")) return value
-  if (!/^[a-z][a-z\d+.-]*:/i.test(value) && !value.startsWith("//")) return value
-  return safeExternalUrl(value)
 }
 
 function toolResult(tool) {
@@ -388,20 +382,23 @@ export default defineComponent({
       else if (!content && part.type === "tool-batch") {
         content = h(NativeToolBatch, { tools: part.tools || [] })
       } else if (!content && part.type === "image_url" && part.image_url?.url) {
-        const src = safeImageUrl(part.image_url.url)
-        if (src) {
-          content = h("img", {
-            class: "kt-conversation-image",
-            src,
-            alt: part.meta?.source_name || "generated image",
-          })
-        }
+        // Media resolution is a host seam: the shared leaf consumes the injected
+        // resolver (browser direct URL or Host-spooled webview URI).
+        content = h(MediaImage, {
+          src: part.image_url.url,
+          alt: part.meta?.source_name || "generated image",
+          name: part.meta?.source_name || part.file?.name || "",
+        })
       } else if (!content && part.type === "file") {
-        content = h(
-          "div",
-          { class: "kt-conversation-file" },
-          part.file?.name || part.file?.path || "file",
-        )
+        // The single production video leaf is shared with the Dashboard; the
+        // host-neutral resolver decides direct URL vs Host-spooled URI.
+        content = part.file?.mime?.startsWith("video/")
+          ? h(VideoFilePreview, { file: part.file })
+          : h(
+              "div",
+              { class: "kt-conversation-file" },
+              part.file?.name || part.file?.path || "file",
+            )
       }
       return content
         ? h("div", { class: `kt-conversation-part is-${part.type}`, key: part.id || index }, [

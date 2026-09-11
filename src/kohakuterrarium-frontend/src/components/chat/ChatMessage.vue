@@ -190,7 +190,7 @@
         <div class="flex flex-col gap-2">
           <template v-for="(part, i) in message.contentParts" :key="i">
             <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" :origin="markdownOrigin" />
-            <img v-else-if="part.type === 'image_url'" :src="part.image_url?.url" class="chat-inline-image" />
+            <MediaImage v-else-if="part.type === 'image_url'" :src="part.image_url?.url" :name="part.meta?.source_name || part.file?.name || ''" :alt="part.meta?.source_name || 'generated image'" />
             <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
             <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
               <span class="i-carbon-document mr-1 text-aquamarine" />
@@ -211,7 +211,7 @@
 import { ElMessage } from "element-plus"
 import { h, inject } from "vue"
 
-import { CommandResultMessage, MarkdownRenderer } from "@kohakuterrarium/chat-ui"
+import { CommandResultMessage, MarkdownRenderer, MediaImage } from "@kohakuterrarium/chat-ui"
 import ToolCallBatch from "@/components/chat/ToolCallBatch.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
@@ -220,7 +220,6 @@ import { ConversationMessage } from "@kohakuterrarium/chat-ui"
 import SiteChip from "@/components/cluster/SiteChip.vue"
 import { useChatStore } from "@/stores/chat"
 import { useInstancesStore } from "@/stores/instances"
-import { mediaSourceUrl } from "@/utils/artifacts"
 import { GEM } from "@/utils/colors"
 import { buildMessageParts, contentToEditableDraft, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
 import { useI18n } from "@/utils/i18n"
@@ -319,18 +318,16 @@ function renderSharedUIEvent(message, reply) {
 }
 
 function renderSharedContentPart(part) {
-  // Host-owned media resolution (session artifact route or a local
-  // ``file://`` reference) happens here so the shared renderer stays
-  // host-neutral: no backend routes or URL helpers inside ``public``.
+  // Media resolution is a host seam: the shared leaves consume the injected
+  // resolver (browser direct URL or Host-spooled webview URI). The Dashboard
+  // installs no resolver, so the default browser resolver keeps direct URLs;
+  // the VS Code webview's ConversationMessage renders them without this hook.
   if (part.type === "image_url") {
-    const url = mediaSourceUrl(part.image_url?.url)
-    return url
-      ? h("img", {
-          class: "chat-inline-image",
-          src: url,
-          alt: part.meta?.source_name || "generated image",
-        })
-      : null
+    return h(MediaImage, {
+      src: part.image_url?.url,
+      alt: part.meta?.source_name || "generated image",
+      name: part.meta?.source_name || part.file?.name || "",
+    })
   }
   if (part.type === "file" && part.file?.mime?.startsWith("video/")) {
     return h(VideoFilePreview, { file: part.file })
@@ -535,28 +532,6 @@ function goToNextAssistantBranch() {
 </script>
 
 <style scoped>
-.chat-inline-image {
-  display: block;
-  max-width: min(65%, 42vw);
-  max-height: 35vh;
-  width: auto;
-  height: auto;
-  object-fit: contain;
-  border-radius: 0.5rem;
-  border: 1px solid rgb(231 223 211 / 1);
-}
-
-@supports (max-width: 65cqw) {
-  .chat-inline-image {
-    max-width: 65cqw;
-    max-height: 50cqh;
-  }
-}
-
-.dark .chat-inline-image {
-  border-color: rgb(89 75 61 / 1);
-}
-
 .message-edit-textarea {
   width: 100%;
   min-height: 160px;

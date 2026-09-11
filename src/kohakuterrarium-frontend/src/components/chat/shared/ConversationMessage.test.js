@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs"
 
 import { mount } from "@vue/test-utils"
+import { createPinia, setActivePinia } from "pinia"
 import { defineComponent, h } from "vue"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
@@ -30,6 +31,9 @@ const ToolRenderer = defineComponent({
 
 describe("ConversationMessage", () => {
   beforeEach(() => {
+    // The shared media leaves resolve labels through the locale store, so an
+    // active pinia is required when image parts mount.
+    setActivePinia(createPinia())
     computeRenderGroupsSpy.mockClear()
   })
 

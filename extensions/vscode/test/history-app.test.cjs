@@ -194,8 +194,6 @@ test('paged/detail delivery is suppressed when readiness or target changes after
   const posts = []
   const { host, request } = makeHost(fixture.origin, posts)
   await host.handle({ type: 'session.select', requestId: 1, session: RUNTIME, creatureId: 'creature-beta' })
-  const observed = []
-  host.artifacts.observe = (data) => observed.push(data)
 
   // An old-ready switch after dispatch keeps the names but loses the runtime
   // epoch, so the in-flight page must not be delivered.
@@ -230,6 +228,5 @@ test('paged/detail delivery is suppressed when readiness or target changes after
     false,
     'no stale detail post',
   )
-  assert.deepEqual(observed, [], 'page/detail refs are not admitted')
   host.dispose()
 })

@@ -2,6 +2,35 @@ const assert = require('node:assert/strict')
 const test = require('node:test')
 
 const { deferred, harness } = require('./runtimeHarness.cjs')
+const { MediaHost } = require('../src/host/mediaHost.cjs')
+
+// A spool stand-in: only the surface the media coordinator drives for a prepare.
+function mediaSpool(overrides = {}) {
+  return {
+    async prepare(route, { name } = {}) {
+      return {
+        resourceId: 'r1',
+        uri: 'vscode-webview://spool/r1',
+        bytes: 3,
+        mime: 'video/mp4',
+        sha256: 'a'.repeat(64),
+        name: name || 'r1',
+        state: 'exposed',
+      }
+    },
+    discard: () => true,
+    release: () => true,
+    acquire: () => true,
+    releaseAll() {},
+    async start() {
+      return '/spool-root'
+    },
+    async dispose() {},
+    ...overrides,
+  }
+}
+
+const mediaPrepare = (overrides = {}) => ({ type: 'media.prepare', requestId: 2, path: IMG, readyId: 7, selectionVersion: 0, ...overrides })
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
 const IMG = '/api/sessions/graph_1/artifacts/img.png'
@@ -45,29 +74,30 @@ test('an unchanged-target topology refresh is delivered and does not reject a qu
   assert.deepEqual(client.commandCalls, [{ session: 'graph-a', creature: 'id-alpha', command: 'goal', args: 'list' }])
 })
 
-test('an unchanged-target topology refresh does not reject an in-flight artifact read', async () => {
-  const readGate = deferred()
-  const artifactReader = {
-    read: async () => {
-      await readGate.promise
-      return 'data:image/png;base64,AAAA'
-    },
-  }
-  const { client, host, state, posts } = harness({ artifactReader })
+test('an unchanged-target topology refresh does not reject an in-flight media prepare', async () => {
+  const gate = deferred()
+  const mediaHost = new MediaHost({
+    spool: mediaSpool({
+      prepare: async () => {
+        await gate.promise
+        return { resourceId: 'r1', uri: 'vscode-webview://spool/r1', state: 'exposed' }
+      },
+    }),
+  })
+  const { client, host, state, posts } = harness({ mediaHost })
   host.runtimeEpoch = 7
   state.selection = selected
   client.listOpen = async () => unchangedListing()
-  host.artifacts.admit(IMG)
 
-  const reading = host.handle({ type: 'artifact.read', requestId: 2, path: IMG, readyId: 7, selectionVersion: 0 })
+  const preparing = host.handle(mediaPrepare())
   await flush()
   const topology = await host.reconcileTopologySelection()
   assert.equal(topology.changed, false)
 
-  readGate.resolve()
-  await reading
-  assert.equal(posts.at(-1).type, 'artifact.read.result')
-  assert.equal(posts.at(-1).data.dataUrl, 'data:image/png;base64,AAAA')
+  gate.resolve()
+  await preparing
+  assert.equal(posts.at(-1).type, 'media.prepare.result')
+  assert.equal(posts.at(-1).data.resourceId, 'r1')
 })
 
 test('an unchanged-target topology refresh does not reject an in-flight history read', async () => {
@@ -123,29 +153,26 @@ test('a ready reset rejects a queued goal', async () => {
   assert.equal(client.commandCalls.length, 0)
 })
 
-test('an actual target change rejects an in-flight artifact read', async () => {
-  const readGate = deferred()
-  const artifactReader = {
-    read: async () => {
-      await readGate.promise
-      return 'data:image/png;base64,AAAA'
-    },
-  }
-  const { client, host, state, posts } = harness({ artifactReader })
+test('an explicit target change aborts an in-flight media prepare without posting a result', async () => {
+  const mediaHost = new MediaHost({
+    spool: mediaSpool({
+      prepare: (route, { signal }) =>
+        new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(Error('Media request cancelled')), { once: true })
+        }),
+    }),
+  })
+  const { client, host, state, posts } = harness({ mediaHost })
   host.runtimeEpoch = 7
   state.selection = selected
   client.listOpen = async () => unchangedListing()
-  host.artifacts.admit(IMG)
 
-  const reading = host.handle({ type: 'artifact.read', requestId: 2, path: IMG, readyId: 7, selectionVersion: 0 })
-  const rejected = assert.rejects(reading, /ownership changed/)
+  const preparing = host.handle(mediaPrepare())
   await flush()
-  state.selection = { session: 'graph-other', graph: 'graph-other', creature: 'gamma', targetCreatureId: 'creature-gamma' }
-  readGate.resolve()
-
-  await rejected
+  await host.handle({ type: 'session.clearSelection', requestId: 3 })
+  await assert.rejects(() => preparing, /cancelled/)
   assert.equal(
-    posts.some((post) => post.type === 'artifact.read.result'),
+    posts.some((post) => post.type === 'media.prepare.result'),
     false,
   )
 })

@@ -4,13 +4,14 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, ref, shallowRef, watch } from "vue"
+import { nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue"
 import MarkdownIt from "markdown-it"
 import markdownItKatex from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
 
 import { applyExternalLinkRule } from "./externalLinks.js"
 import { IncrementalMarkdownRenderer } from "./markdownIncremental.js"
+import { createMarkdownMediaResolver, useMediaResolver } from "./mediaResolver.js"
 
 const props = defineProps({
   content: { type: String, default: "" },
@@ -23,6 +24,16 @@ const props = defineProps({
 })
 
 const rootEl = ref(null)
+
+// Artifact images inside markdown resolve through the same host-neutral media
+// resolver the shared leaves use: the browser keeps the direct same-origin URL
+// (a no-op swap), while the VS Code webview replaces the route with a
+// Host-spooled URI. This is a post-render pass on the shared renderer, not an
+// Extension-only DOM MutationObserver, so both hosts share one implementation.
+const mediaImages = createMarkdownMediaResolver(useMediaResolver())
+function syncMedia() {
+  nextTick(() => mediaImages.resolve(rootEl.value))
+}
 
 function codeBlockHtml(lang, fenceHtml) {
   const displayLang = md.utils.escapeHtml(lang || "text")
@@ -275,10 +286,12 @@ function doRender(content) {
   if (!content) {
     rendered.value = ""
     incremental.reset()
+    mediaImages.dispose()
     return
   }
   rendered.value = incremental.render(preprocessLatex(content))
   lastRenderAt = performance.now()
+  syncMedia()
 }
 
 function scheduleRender(content) {
@@ -314,6 +327,7 @@ onBeforeUnmount(() => {
     clearTimeout(pendingTimer)
     pendingTimer = null
   }
+  mediaImages.dispose()
 })
 </script>
 
