@@ -15,6 +15,10 @@ export {
   validateAttachments,
 } from "./chatAttachments.js"
 export { default as ConversationMessage } from "../../components/chat/shared/ConversationMessage.js"
+// The production command-result leaf is reused verbatim by the Dashboard and
+// the VS Code webview through this package boundary; it keeps importing the
+// host i18n seam so each build graph supplies the real dictionary provider.
+export { default as CommandResultMessage } from "../../components/chat/CommandResultMessage.vue"
 export { default as ChatTranscriptSection } from "../../components/chat/shared/ChatTranscriptSection.js"
 export {
   DEFAULT_TOOL_BATCH_THRESHOLD,

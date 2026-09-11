@@ -211,8 +211,7 @@
 import { ElMessage } from "element-plus"
 import { h, inject } from "vue"
 
-import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
-import CommandResultMessage from "@/components/chat/CommandResultMessage.vue"
+import { CommandResultMessage, MarkdownRenderer } from "@kohakuterrarium/chat-ui"
 import ToolCallBatch from "@/components/chat/ToolCallBatch.vue"
 import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
 import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"

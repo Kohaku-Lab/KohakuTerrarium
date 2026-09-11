@@ -1,9 +1,10 @@
 import { buildMessageParts, ChatComposer, ChatTranscriptSection, ConversationMessage, MarkdownRenderer } from '@kohakuterrarium/chat-ui'
-import { createPinia } from 'pinia'
-import { computed, createApp, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import 'virtual:uno.css'
+import { computed, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import { useChatStore } from '@/stores/chat'
 
+import { bootWebview } from './boot.mjs'
 import { BridgeWebSocket } from './bridge.js'
 import { renderCarbonIcon } from './carbonIcons.mjs'
 import { bindComposerBuffer } from './composerBuffer.mjs'
@@ -595,4 +596,4 @@ const App = {
   },
 }
 
-createApp(App).use(createPinia()).mount('#app')
+bootWebview(App)

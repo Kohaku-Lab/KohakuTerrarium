@@ -36,6 +36,16 @@ describe("locale store", () => {
     expect(store.locale).toBe("en")
   })
 
+  it("normalises case-insensitive BCP-47 host tags to a supported locale", () => {
+    const store = useLocaleStore()
+    store.setLocale("ZH-cn")
+    expect(store.locale).toBe("zh-CN")
+    store.setLocale("en-US")
+    expect(store.locale).toBe("en")
+    store.setLocale("  JA  ")
+    expect(store.locale).toBe("ja")
+  })
+
   it("setLocale persists to localStorage", () => {
     const store = useLocaleStore()
     store.setLocale("ja")

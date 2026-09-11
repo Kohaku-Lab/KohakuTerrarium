@@ -1,4 +1,16 @@
-function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', nonce }) {
+function hostLanguage() {
+  // The host language is the locale seam every webview inherits. Read it here
+  // so the renderer defaults to ``vscode.env.language`` without the caller
+  // threading it through; tests without the ``vscode`` module fall back to English.
+  try {
+    const vscode = require('vscode')
+    return vscode?.env?.language || 'en'
+  } catch {
+    return 'en'
+  }
+}
+
+function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', locale = hostLanguage(), nonce }) {
   const policy = [
     "default-src 'none'",
     `script-src 'nonce-${nonce}'`,
@@ -9,8 +21,11 @@ function renderWebviewHtml({ cspSource, scriptUri, styleUri, brandUri = '', nonc
     "connect-src 'none'",
   ].join('; ')
 
+  // Keep ``lang`` to a language-tag shape so it can never break out of the attribute.
+  const lang = String(locale || 'en').replace(/[^A-Za-z0-9_-]/g, '') || 'en'
+
   return `<!doctype html>
-<html lang="en">
+<html lang="${lang}">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="${policy}">

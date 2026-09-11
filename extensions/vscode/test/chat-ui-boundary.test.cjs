@@ -53,7 +53,11 @@ test('Chat UI production consumers use only the public package-style boundary', 
   for (const file of consumers) {
     const source = read(file)
     assert.match(source, /from ['"]@kohakuterrarium\/chat-ui['"]/, file)
-    assert.doesNotMatch(source, /components\/chat\/shared|utils\/chatToolGrouping|shared\/.+\.css/, file)
+    assert.doesNotMatch(
+      source,
+      /components\/chat\/shared|components\/chat\/CommandResultMessage\.vue|utils\/chatToolGrouping|shared\/.+\.css/,
+      file,
+    )
   }
 })
 
@@ -61,6 +65,7 @@ test('public entry owns the required API and component CSS', () => {
   assert.equal(fs.existsSync(publicEntry), true)
   const entry = read(publicEntry)
   for (const symbol of [
+    'CommandResultMessage',
     'ConversationMessage',
     'ChatTranscriptSection',
     'MarkdownRenderer',
@@ -69,6 +74,11 @@ test('public entry owns the required API and component CSS', () => {
     'summarizeBatch',
   ])
     assert.match(entry, new RegExp(`\\b${symbol}\\b`))
+
+  // Identity: the entry re-exports the one production command-result leaf, so
+  // the Dashboard and the VS Code webview render the same component instead of
+  // forking a second copy behind a private path.
+  assert.match(entry, /export \{ default as CommandResultMessage \} from "\.\.\/\.\.\/components\/chat\/CommandResultMessage\.vue"/)
 
   const message = read(path.join(frontendSource, 'components/chat/shared/ConversationMessage.js'))
   const transcript = read(path.join(frontendSource, 'components/chat/shared/ChatTranscriptSection.js'))

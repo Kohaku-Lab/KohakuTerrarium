@@ -3,11 +3,17 @@ import { fileURLToPath } from 'node:url'
 
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
+import UnoCSS from 'unocss/vite'
 import AutoImport from 'unplugin-auto-import/vite'
 
 const here = path.dirname(fileURLToPath(import.meta.url))
-const frontend = path.resolve(here, '../../src/kohakuterrarium-frontend/src')
+const frontendRoot = path.resolve(here, '../../src/kohakuterrarium-frontend')
+const frontend = path.resolve(frontendRoot, 'src')
 const webview = path.resolve(here, 'src/webview')
+
+// Exact-match so ``@/utils/i18n/locales`` falls through to the generic ``@``
+// alias and resolves the real dictionary tables instead of the local shim.
+const i18nModule = new RegExp('^@/utils/i18n$')
 
 export default defineConfig({
   root: webview,
@@ -17,7 +23,14 @@ export default defineConfig({
     __VUE_PROD_DEVTOOLS__: false,
     __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
   },
-  plugins: [vue(), AutoImport({ imports: ['vue', 'pinia'] })],
+  plugins: [
+    vue(),
+    // Reuse the Dashboard's real utility + Carbon icon atoms so shared
+    // components (CommandResultMessage, ConversationMessage) keep their
+    // production styling instead of a second hand-rolled stylesheet.
+    UnoCSS({ configFile: path.join(frontendRoot, 'uno.config.js') }),
+    AutoImport({ imports: ['vue', 'pinia'] }),
+  ],
   resolve: {
     dedupe: ['vue', 'pinia'],
     alias: [
@@ -66,8 +79,11 @@ export default defineConfig({
         replacement: path.join(webview, 'shims/stores.js'),
       },
       {
+        // Locale selection authority: reuse the Dashboard store so the webview
+        // shares one supported-locale list and dictionary provider. Only its
+        // preference source (the host language) is supplied by the shim below.
         find: '@/stores/locale',
-        replacement: path.join(webview, 'shims/stores.js'),
+        replacement: path.join(frontend, 'stores/locale.js'),
       },
       {
         find: '@/stores/messages',
@@ -83,8 +99,10 @@ export default defineConfig({
       },
       { find: '@/utils/api', replacement: path.join(webview, 'shims/api.js') },
       {
-        find: '@/utils/i18n',
-        replacement: path.join(webview, 'shims/misc.js'),
+        // Shared i18n provider seam: resolve the production module so shared
+        // components localize through the real dictionary tables in both hosts.
+        find: i18nModule,
+        replacement: path.join(frontend, 'utils/i18n.js'),
       },
       {
         find: '@/utils/uiPrefs',

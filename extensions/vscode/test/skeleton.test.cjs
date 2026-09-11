@@ -203,3 +203,23 @@ test('build script is self-contained inside the formal extension package', () =>
   assert.doesNotMatch(build, /vscode-chat-sidebar-tracer/)
   assert.doesNotMatch(build, /kohakuterrarium-frontend[\\/]node_modules/)
 })
+
+test('webview host locale is flattened to a bare language tag', () => {
+  const { renderWebviewHtml } = require('../src/host/webview.cjs')
+  // Source verification: the renderer keeps only language-tag characters, so a
+  // hostile host locale can never break out of the <html lang> attribute.
+  const source = read('src/host/webview.cjs')
+  assert.ok(source.includes("String(locale || 'en').replace(/[^A-Za-z0-9_-]/g, '')"))
+  assert.ok(source.includes('locale = hostLanguage()'))
+
+  const html = renderWebviewHtml({
+    cspSource: 'vscode-webview://origin',
+    scriptUri: 'vscode-webview://origin/dist/webview.js',
+    styleUri: 'vscode-webview://origin/dist/webview.css',
+    nonce: 'n',
+    locale: '"><script>alert(1)</script>',
+  })
+  const lang = html.match(/<html lang="([^"]*)"/)?.[1]
+  assert.equal(lang, 'scriptalert1script')
+  assert.doesNotMatch(html, /<script>alert/, 'the hostile payload never reaches the markup')
+})

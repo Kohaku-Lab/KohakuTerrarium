@@ -10,10 +10,10 @@ function ref(value) {
 }
 
 async function renderers(overrides = {}) {
-  const { createViewRenderers } = await import(pathToFileURL(path.join(root, 'src', 'webview', 'viewRenderers.mjs')))
-  return createViewRenderers({
-    ConversationMessage: { name: 'ConversationMessage' },
-    MarkdownRenderer: { name: 'MarkdownRenderer' },
+  // Session-shell renderers stay dependency-light: the transcript components
+  // (which pull the shared chat-ui package) live in viewRenderers.mjs.
+  const { createSessionRenderers } = await import(pathToFileURL(path.join(root, 'src', 'webview', 'sessionRenderers.mjs')))
+  return createSessionRenderers({
     available: ref(true),
     busy: ref(false),
     currentSession: ref(null),

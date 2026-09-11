@@ -18,7 +18,11 @@ async function buildWebview() {
     ...config,
     configFile: false,
     logLevel: 'silent',
-    plugins: [vue(), autoImport({ imports: ['vue', 'pinia'], dts: false })],
+    plugins: [
+      vue(),
+      ...config.plugins.filter((plugin) => plugin?.name !== 'vite:vue' && plugin?.name !== 'unplugin-auto-import'),
+      autoImport({ imports: ['vue', 'pinia'], dts: false }),
+    ],
     build: { ...config.build, write: false, sourcemap: false, minify: false },
   })
   const outputs = (Array.isArray(result) ? result : [result]).flatMap((item) => item.output)
