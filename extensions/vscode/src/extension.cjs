@@ -302,6 +302,10 @@ function activate(context) {
           token: connection.token,
           runtimeEpoch: readyId,
           mediaHost: media?.mediaHost || null,
+          // A user-clicked platform link resolves against the resolved backend
+          // origin (never the host token) and opens through the real VS Code host.
+          backendBase: connection.endpoint,
+          openExternal: (url) => vscode.env.openExternal(vscode.Uri.parse(url)),
         })
         topology = new TopologyWatcher({
           socketFactory: (url, protocols) => new WebSocket(url, protocols),

@@ -34,8 +34,12 @@
           <span v-if="isResolved" class="text-[10px] text-warm-400 ml-auto">{{ resolvedLabel }}</span>
         </div>
         <div v-if="message.payload?.prompt" class="text-sm py-2 px-1">{{ message.payload.prompt }}</div>
-        <div v-if="!isResolved" class="flex gap-2 items-stretch">
-          <el-input v-model="textValue" :placeholder="message.payload?.placeholder || 'Type your reply…'" :type="message.payload?.multiline ? 'textarea' : 'text'" :autosize="message.payload?.multiline ? { minRows: 3, maxRows: 12 } : false" autofocus class="flex-1" @keydown.enter.exact.prevent="onSubmitText" />
+        <!-- At a narrow sidebar width the input + Send + Cancel cannot share a
+             row; ``flex-wrap`` drops the buttons below the input instead of
+             overflowing the card, and the min-width floor stops the flex-1
+             input from collapsing to 0px. -->
+        <div v-if="!isResolved" class="flex gap-2 items-stretch flex-wrap">
+          <el-input v-model="textValue" :placeholder="message.payload?.placeholder || 'Type your reply…'" :type="message.payload?.multiline ? 'textarea' : 'text'" :autosize="message.payload?.multiline ? { minRows: 3, maxRows: 12 } : false" autofocus class="flex-1 !min-w-[4rem]" @keydown.enter.exact.prevent="onSubmitText" />
           <el-button type="primary" :disabled="!textValue.trim()" @click="onSubmitText">Send</el-button>
           <el-button @click="onCancel">Cancel</el-button>
         </div>
@@ -82,7 +86,9 @@
               </div>
             </el-radio-group>
           </template>
-          <div class="flex gap-2 mt-2">
+          <!-- The Submit/Cancel pair wraps below the options at a narrow width
+               instead of overflowing the card, like the confirm row. -->
+          <div class="flex gap-2 flex-wrap mt-2">
             <el-button type="primary" :disabled="!hasSelection" @click="onSubmitSelection">Submit</el-button>
             <el-button @click="onCancel">Cancel</el-button>
           </div>
@@ -136,13 +142,24 @@
         </div>
         <div v-if="message.payload?.footer" class="text-[10px] text-warm-400 mt-2 px-1 italic">{{ message.payload.footer }}</div>
         <div v-if="hasActions && !isResolved" class="flex gap-2 flex-wrap mt-2 items-center">
-          <template v-for="a in message.payload.actions" :key="a.id">
-            <el-link v-if="a.style === 'link'" :href="a.url" target="_blank" rel="noopener" type="primary" :underline="true" class="card-link">
+          <template v-for="entry in resolvedActions" :key="entry.action.id">
+            <el-link v-if="entry.kind === 'link'" :href="entry.href" target="_blank" rel="noopener" type="primary" underline="hover" class="card-link">
               <span class="i-carbon-launch text-xs mr-1" />
-              {{ a.label || a.id }}
+              {{ entry.action.label || entry.action.id }}
             </el-link>
-            <el-button v-else :type="confirmButtonType(a.style)" @click="onConfirmChoice(a.id)">
-              {{ a.label || a.id }}
+            <!-- A host that owns a backend URL installs a platform link opener:
+                 a relative/external card link is resolved Host-side and opened
+                 only on this user click, never by navigating the webview. -->
+            <el-link v-else-if="entry.kind === 'host'" :href="entry.href" target="_blank" rel="noopener" type="primary" underline="hover" class="card-link" @click="onOpenHostLink($event, entry.action.url)">
+              <span class="i-carbon-launch text-xs mr-1" />
+              {{ entry.action.label || entry.action.id }}
+            </el-link>
+            <span v-else-if="entry.kind === 'unavailable'" class="card-link card-link-unavailable" :title="entry.action.url" role="status">
+              <span class="i-carbon-warning-alt text-xs mr-1" />
+              {{ entry.action.label || entry.action.id }} ({{ t("chat.link.unavailable") }})
+            </span>
+            <el-button v-else-if="entry.kind === 'button'" :type="confirmButtonType(entry.action.style)" @click="onConfirmChoice(entry.action.id)">
+              {{ entry.action.label || entry.action.id }}
             </el-button>
           </template>
         </div>
@@ -156,14 +173,51 @@
 import { computed, ref } from "vue"
 import { ElButton, ElCheckbox, ElCheckboxGroup, ElInput, ElLink, ElProgress, ElRadio, ElRadioGroup } from "element-plus"
 
-import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
+import { resolvePlatformLink, shouldOpenThroughHost } from "../../public/chat/externalLinks.js"
+import MarkdownRenderer from "../../public/chat/MarkdownRenderer.vue"
+import { usePlatformLinkOpener } from "../../public/chat/platformLink.js"
+import { usePlatformOrigin } from "../../public/chat/platformOrigin.js"
+import { useI18n } from "../../utils/i18n"
 
 const props = defineProps({
   message: { type: Object, required: true },
+  // Explicit override; when omitted the host-installed platform origin (or, in
+  // the browser, ``window.location.origin``) resolves card Markdown links.
+  origin: { type: String, default: null },
 })
 
 const emit = defineEmits(["reply"])
-const markdownOrigin = window.location.origin
+const { t } = useI18n()
+const platformOrigin = usePlatformOrigin()
+const platformLinkOpener = usePlatformLinkOpener()
+// A host that installed an opener owns relative/external card links; without one
+// the browser keeps native navigation (and a genuinely unknown origin shows the
+// visible unavailable affordance).
+const hostOpensLinks = typeof platformLinkOpener === "function"
+const markdownOrigin = computed(() => {
+  if (props.origin) return props.origin
+  if (platformOrigin !== undefined) return platformOrigin
+  return typeof window !== "undefined" ? window.location.origin : null
+})
+
+// Resolve every card action through the one shared link policy. A link action
+// the installed platform opener must handle (a relative reference or an
+// absolute http(s) URL) is routed to the opener on click so the raw target is
+// resolved Host-side; otherwise a safely resolvable target is an anchor, a
+// relative target with a genuinely unknown origin renders a VISIBLE unavailable
+// affordance rather than being silently dropped, and a `javascript:`/`data:`
+// target is dropped entirely. Non-link actions stay buttons.
+const resolvedActions = computed(() =>
+  (props.message.payload?.actions || []).map((action) => {
+    if (action.style !== "link") return { action, kind: "button" }
+    const resolved = resolvePlatformLink(action.url, markdownOrigin.value)
+    if (hostOpensLinks && shouldOpenThroughHost(action.url)) {
+      return { action, kind: "host", href: resolved.href || String(action.url ?? "") }
+    }
+    if (resolved.href) return { action, kind: "link", href: resolved.href }
+    return { action, kind: resolved.unavailable ? "unavailable" : "drop" }
+  }),
+)
 
 // ── Local form state (per-event) ────────────────────────────────
 const textValue = ref(props.message.payload?.default || "")
@@ -297,6 +351,14 @@ function onSubmitSelection() {
 function onCancel() {
   emit("reply", { actionId: "cancel", values: {} })
 }
+
+// A host-owned card link: suppress the webview's own navigation and hand the
+// raw model-authored target to the installed opener, which resolves it against
+// the live backend URL. The opener surfaces a localized failure itself.
+function onOpenHostLink(event, target) {
+  event?.preventDefault?.()
+  if (typeof platformLinkOpener === "function") platformLinkOpener(target)
+}
 </script>
 
 <style scoped>
@@ -379,6 +441,15 @@ function onCancel() {
 .ui-event-card.accent-error {
   border-color: rgba(231, 76, 60, 0.4);
   background: rgba(231, 76, 60, 0.06);
+}
+/* A card link action whose target the host cannot resolve: shown, not hidden. */
+.card-link-unavailable {
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-text-muted, rgba(160, 160, 160, 0.9));
+  font-size: 0.8125rem;
+  cursor: default;
+  opacity: 0.85;
 }
 .ui-event-progress {
   padding-bottom: 0.5rem;

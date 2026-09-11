@@ -147,7 +147,7 @@ describe("ConversationMessage", () => {
     ])
   })
 
-  it("emits the production UI reply shape from native ask_text controls", async () => {
+  it("emits the production UI reply shape from the shared default UIEventBlock", async () => {
     const wrapper = mount(ConversationMessage, {
       props: {
         message: {
@@ -160,7 +160,10 @@ describe("ConversationMessage", () => {
     })
 
     await wrapper.get("input").setValue("Terrarium")
-    await wrapper.get("form").trigger("submit")
+    await wrapper
+      .findAll("button")
+      .find((button) => button.text() === "Send")
+      .trigger("click")
 
     expect(wrapper.emitted("reply")).toEqual([
       [{ actionId: "submit", values: { text: "Terrarium" } }],
@@ -265,9 +268,9 @@ describe("ConversationMessage", () => {
   })
 
   it.each([
-    [false, "select"],
+    [false, 'input[type="radio"]'],
     [true, 'input[type="checkbox"]'],
-  ])("cancels native %s selection prompts without requiring a choice", async (multi, selector) => {
+  ])("cancels shared %s selection prompts without requiring a choice", async (multi, selector) => {
     const selection = mount(ConversationMessage, {
       props: {
         message: {
@@ -285,7 +288,7 @@ describe("ConversationMessage", () => {
       },
     })
 
-    expect(selection.findAll(selector)).toHaveLength(multi ? 2 : 1)
+    expect(selection.findAll(selector)).toHaveLength(2)
     await selection
       .findAll("button")
       .find((button) => button.text() === "Cancel")

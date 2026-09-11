@@ -3,6 +3,7 @@ const { executeGoal } = require('./goalCommand.cjs')
 const { beginReady, reconcileReady } = require('./readyRuntime.cjs')
 const { allowedMessage } = require('./protocol.cjs')
 const { MEDIA_TYPES, dispatchMedia } = require('./mediaHost.cjs')
+const { openPlatformLink } = require('./openLink.cjs')
 
 const contextCapabilities = new WeakMap()
 
@@ -35,6 +36,8 @@ class RuntimeHost {
     runtimeEpoch = null,
     topologyTimeoutMs = 30_000,
     mediaHost = null,
+    backendBase = null,
+    openExternal = null,
   }) {
     this.client = client
     this.state = state
@@ -59,6 +62,10 @@ class RuntimeHost {
     this.goalTimeoutMs = 25_000
     // The extension injects a per-view media coordinator; the runtime owns its fence.
     this.mediaHost = mediaHost
+    // The platform link opener resolves a user-clicked reference against the live
+    // backend base (never the token) and calls the injected host ``openExternal``.
+    this.backendBase = backendBase
+    this.openExternal = openExternal
     this.post = post
     this.generation = this.sockets.begin()
   }
@@ -462,6 +469,14 @@ class RuntimeHost {
       case 'ws.close':
         this.sockets.closeSocket(this.generation, message.socketId, { postMessage: this.post })
         return
+      case 'platform.openLink': {
+        const data = await openPlatformLink(this, message)
+        // A result suppressed after the await (stale ready/selection) is
+        // intentionally not posted; the open, if it happened, cannot be undone.
+        if (data.suppressed) return
+        this.post({ type: 'platform.openLink.result', requestId: message.requestId, data })
+        return
+      }
       default:
         throw Error(`Unsupported message: ${message.type}`)
     }

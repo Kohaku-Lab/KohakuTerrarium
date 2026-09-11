@@ -5,6 +5,7 @@ import "./conversation-message.css"
 import { MediaImage } from "../../../public/chat/MediaPreview.js"
 import { computeRenderGroups } from "../../../public/chat/chatToolGrouping.js"
 import VideoFilePreview from "../VideoFilePreview.vue"
+import UIEventBlock from "../UIEventBlock.vue"
 
 function plainText(content) {
   return h("div", { class: "kt-conversation-text" }, content || "")
@@ -12,16 +13,6 @@ function plainText(content) {
 
 function renderedText(renderer, content, breaks = false) {
   return renderer ? renderer(content || "", breaks) : plainText(content)
-}
-
-function safeExternalUrl(value) {
-  if (typeof value !== "string") return ""
-  try {
-    const url = new URL(value)
-    return url.protocol === "http:" || url.protocol === "https:" ? url.href : ""
-  } catch {
-    return ""
-  }
 }
 
 function toolResult(tool) {
@@ -105,184 +96,6 @@ const NativeToolBatch = defineComponent({
             )
           : null,
       ])
-  },
-})
-
-const NativeUIEvent = defineComponent({
-  name: "NativeConversationUIEvent",
-  props: { message: { type: Object, required: true } },
-  emits: ["reply"],
-  setup(props, { emit }) {
-    const text = ref(props.message.payload?.default || "")
-    const selected = ref(props.message.payload?.default || "")
-    const multiSelected = ref(
-      Array.isArray(props.message.payload?.default) ? [...props.message.payload.default] : [],
-    )
-    const payload = () => props.message.payload || {}
-    const resolved = () =>
-      props.message.replied || props.message.superseded || props.message.timedOut
-    const reply = (actionId, values = {}) => emit("reply", { actionId, values })
-
-    return () => {
-      const type = props.message.uiEventType
-      const body = []
-      if (payload().prompt)
-        body.push(h("p", { class: "kt-conversation-event__prompt" }, payload().prompt))
-      if (payload().detail)
-        body.push(h("pre", { class: "kt-conversation-event__detail" }, payload().detail))
-      if (type === "notification" && payload().text)
-        body.push(h("p", { class: "kt-conversation-event__prompt" }, payload().text))
-      if (type === "card") {
-        if (payload().body)
-          body.push(h("div", { class: "kt-conversation-event__body" }, payload().body))
-        if (payload().fields?.length)
-          body.push(
-            h(
-              "dl",
-              { class: "kt-conversation-event__fields" },
-              payload().fields.flatMap((field) => [
-                h("dt", field.label || ""),
-                h("dd", field.value || ""),
-              ]),
-            ),
-          )
-        if (payload().footer)
-          body.push(h("footer", { class: "kt-conversation-event__footer" }, payload().footer))
-      }
-      if (type === "ask_text" && !resolved()) {
-        body.push(
-          h(
-            "form",
-            {
-              class: "kt-conversation-event__form",
-              onSubmit: (event) => {
-                event.preventDefault()
-                if (text.value.trim()) reply("submit", { text: text.value.trim() })
-              },
-            },
-            [
-              payload().multiline
-                ? h("textarea", {
-                    value: text.value,
-                    "aria-label": payload().prompt || "Reply",
-                    placeholder: payload().placeholder || "Type your reply…",
-                    onInput: (event) => (text.value = event.target.value),
-                  })
-                : h("input", {
-                    value: text.value,
-                    "aria-label": payload().prompt || "Reply",
-                    placeholder: payload().placeholder || "Type your reply…",
-                    onInput: (event) => (text.value = event.target.value),
-                  }),
-              h("button", { type: "submit", disabled: !text.value.trim() }, "Send"),
-              h("button", { type: "button", onClick: () => reply("cancel") }, "Cancel"),
-            ],
-          ),
-        )
-      } else if (
-        (type === "confirm" || type === "card" || type === "notification") &&
-        !resolved()
-      ) {
-        body.push(
-          h(
-            "div",
-            { class: "kt-conversation-event__actions" },
-            (payload().options || payload().actions || (payload().action ? [payload().action] : []))
-              .map((option) => {
-                if (option.style !== "link") {
-                  return h(
-                    "button",
-                    { type: "button", onClick: () => reply(option.id, {}) },
-                    option.label || option.id,
-                  )
-                }
-                const href = safeExternalUrl(option.url)
-                return href
-                  ? h(
-                      "a",
-                      { href, target: "_blank", rel: "noopener noreferrer" },
-                      option.label || option.id,
-                    )
-                  : null
-              })
-              .filter(Boolean),
-          ),
-        )
-      } else if (type === "selection" && !resolved()) {
-        const options = payload().options || []
-        const controls = payload().multi
-          ? h(
-              "div",
-              { class: "kt-conversation-event__choices" },
-              options.map((option) => {
-                const value = option.id ?? option.value
-                return h("label", { class: "kt-conversation-event__choice" }, [
-                  h("input", {
-                    type: "checkbox",
-                    value,
-                    checked: multiSelected.value.includes(value),
-                    onChange: (event) => {
-                      multiSelected.value = event.target.checked
-                        ? [...multiSelected.value, value]
-                        : multiSelected.value.filter((item) => item !== value)
-                    },
-                  }),
-                  h("span", option.label ?? option.value),
-                ])
-              }),
-            )
-          : h(
-              "select",
-              {
-                "aria-label": payload().prompt || "Select an option",
-                value: selected.value,
-                onChange: (event) => (selected.value = event.target.value),
-              },
-              [
-                h("option", { value: "" }, "Choose…"),
-                ...options.map((option) =>
-                  h("option", { value: option.id ?? option.value }, option.label ?? option.value),
-                ),
-              ],
-            )
-        const chosen = () => (payload().multi ? multiSelected.value : selected.value)
-        body.push(
-          h("div", { class: "kt-conversation-event__form" }, [
-            controls,
-            h(
-              "button",
-              {
-                type: "button",
-                disabled: payload().multi ? multiSelected.value.length === 0 : !selected.value,
-                onClick: () => reply("submit", { selected: chosen() }),
-              },
-              "Submit",
-            ),
-            h("button", { type: "button", onClick: () => reply("cancel", {}) }, "Cancel"),
-          ]),
-        )
-      } else if (type === "progress") {
-        const max = Number(payload().max || 0)
-        const value = Number(payload().value || 0)
-        body.push(
-          payload().indeterminate
-            ? h("span", { class: "kt-conversation-event__status" }, "working…")
-            : h("progress", { max: max || 100, value }),
-        )
-      }
-      return h(
-        "section",
-        { class: `kt-conversation-event is-${type || "info"} ${resolved() ? "is-resolved" : ""}` },
-        [
-          h(
-            "header",
-            { class: "kt-conversation-event__header" },
-            payload().title || payload().label || type?.replaceAll("_", " ") || "Event",
-          ),
-          ...body,
-        ],
-      )
-    }
   },
 })
 
@@ -414,9 +227,14 @@ export default defineComponent({
       let content
 
       if (role === "ui_event") {
+        // The one production UI-event widget (ask_text/confirm/selection/
+        // progress/notification/card) is the shared default, so both hosts
+        // render the same interactive surfaces instead of a reduced fallback.
+        // A host may still override via ``renderUiEvent`` (the Dashboard does),
+        // but the fallback is no longer a second, partial implementation.
         content = props.renderUiEvent
           ? props.renderUiEvent(message, (reply) => emit("reply", reply))
-          : h(NativeUIEvent, {
+          : h(UIEventBlock, {
               message,
               onReply: (reply) => emit("reply", reply),
             })

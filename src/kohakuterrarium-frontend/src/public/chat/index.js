@@ -24,6 +24,12 @@ export { default as CommandResultMessage } from "../../components/chat/CommandRe
 // that imports it by relative path), so there is no second video renderer to
 // drift. It is resolved host-neutrally through the injected media resolver.
 export { default as VideoFilePreview } from "../../components/chat/VideoFilePreview.vue"
+// The one production UI-event widget (ask_text/confirm/selection/progress/
+// notification/card). The shared ConversationMessage renders it as the default
+// for every ``ui_event`` role, so the Dashboard and the VS Code webview share
+// the real interactive surfaces — Element Plus widgets, card Markdown, field
+// defaults, progress and safe link actions — instead of a reduced fallback.
+export { default as UIEventBlock } from "../../components/chat/UIEventBlock.vue"
 export { default as ChatTranscriptSection } from "../../components/chat/shared/ChatTranscriptSection.js"
 export {
   DEFAULT_TOOL_BATCH_THRESHOLD,
@@ -71,4 +77,24 @@ export {
   useMediaResolver,
   useMediaResource,
 } from "./mediaResolver.js"
+// Host-neutral platform-origin seam: the origin same-origin backend URLs resolve
+// against. The Dashboard leaves it uninstalled (browser origin); the VS Code
+// webview installs an explicit value so its ``vscode-webview://`` document origin
+// is never mistaken for the backend origin when a card renders Markdown links.
+export { PLATFORM_ORIGIN_KEY, providePlatformOrigin, usePlatformOrigin } from "./platformOrigin.js"
+// Host-neutral platform link opener: the one seam a host installs to resolve a
+// card/Markdown link the page itself cannot (the VS Code webview forwards it to
+// the Host's ``platform.openLink`` operation). The Dashboard installs none and
+// keeps native browser navigation.
+export {
+  PLATFORM_LINK_OPENER_KEY,
+  providePlatformLinkOpener,
+  usePlatformLinkOpener,
+} from "./platformLink.js"
+// Shared link policy: the single safe resolver for model-authored card/link
+// targets. Both hosts (Dashboard and the VS Code webview) resolve a link through
+// this so relative-URL, hash, `javascript:` and unknown-origin handling can never
+// drift between them. ``shouldOpenThroughHost`` is the matching decision for
+// when the installed platform opener (not the page) owns the click.
+export { isExternalUrl, resolvePlatformLink, shouldOpenThroughHost } from "./externalLinks.js"
 export { MediaImage } from "./MediaPreview.js"

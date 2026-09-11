@@ -1,6 +1,7 @@
-import { CommandResultMessage } from '@kohakuterrarium/chat-ui'
+import { CommandResultMessage, providePlatformOrigin } from '@kohakuterrarium/chat-ui'
 import { h } from 'vue'
 
+import { installPlatformLinkOpener } from './platformLinkOpener.mjs'
 import { createSessionRenderers } from './sessionRenderers.mjs'
 
 export function createViewRenderers({
@@ -12,7 +13,20 @@ export function createViewRenderers({
   openSession,
   resumeSession,
   historyDetail,
+  request,
+  getReadyId,
 }) {
+  // Explicit, host-neutral platform origin for the shared UI-event Markdown
+  // links. The webview's document origin is the opaque ``vscode-webview://`` and
+  // there is no backend HTTP origin behind the bridge, so an explicit ``null`` is
+  // installed: a card link must be treated as external, never rewritten against
+  // the fake webview origin. Installed here because ``createViewRenderers`` runs
+  // inside the App setup, so descendants (the shared ConversationMessage and its
+  // UIEventBlock) receive it.
+  providePlatformOrigin(null)
+  // The matching link-opener seam: a card/Markdown link click is forwarded to the
+  // Host's ``platform.openLink`` operation and never navigates the webview.
+  installPlatformLinkOpener({ request, getReadyId })
   const { actionButton, icon, renderSession } = createSessionRenderers({ available, busy, currentSession, openSession, resumeSession })
 
   function renderSharedText(content, breaks = false) {
@@ -45,7 +59,8 @@ export function createViewRenderers({
     if (message?.role === 'command_result') return h(CommandResultMessage, { message })
     // Media inside a shared message resolves through the injected media resolver
     // (browser direct URL or Host-spooled webview URI); no observer wrapper is
-    // needed here anymore.
+    // needed here anymore. UI events render through the one shared production
+    // UIEventBlock (ConversationMessage's default) — no reduced fallback.
     const body = h(ConversationMessage, {
       message,
       renderText: renderSharedText,

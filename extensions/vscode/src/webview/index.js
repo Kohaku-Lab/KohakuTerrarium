@@ -415,6 +415,8 @@ const App = {
       openSession,
       resumeSession,
       historyDetail: { pending: paging.detailPending, load: paging.loadDetail },
+      request,
+      getReadyId: () => BridgeWebSocket.getReadyId(),
     })
 
     const receiveHostMessage = ({ data: message }) => {

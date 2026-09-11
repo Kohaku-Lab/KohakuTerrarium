@@ -91,9 +91,11 @@ function harness(options = {}) {
     socketFactory: (url, protocols) => ({ url, protocols }),
     webSocketBase: 'ws://127.0.0.1:8000',
     token: 'host-secret',
-    runtimeEpoch: 'ready-B',
+    runtimeEpoch: options.runtimeEpoch ?? 'ready-B',
     topologyTimeoutMs: options.topologyTimeoutMs,
     ...(options.mediaHost ? { mediaHost: options.mediaHost } : {}),
+    ...(options.backendBase ? { backendBase: options.backendBase } : {}),
+    ...(options.openExternal ? { openExternal: options.openExternal } : {}),
   })
   return { client, host, posts, socketCalls, sockets, state, updates }
 }

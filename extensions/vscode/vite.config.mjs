@@ -10,10 +10,34 @@ const here = path.dirname(fileURLToPath(import.meta.url))
 const frontendRoot = path.resolve(here, '../../src/kohakuterrarium-frontend')
 const frontend = path.resolve(frontendRoot, 'src')
 const webview = path.resolve(here, 'src/webview')
+// The Extension's OWN installed packages. The shared production UIEventBlock
+// renders real Element Plus widgets and Vue, so the Extension declares those
+// dependencies directly (see package.json) instead of reaching into the
+// Dashboard's node_modules. Element Plus (and its whole runtime closure) is
+// installed here, so there is no hand-maintained alias list of arbitrary
+// transitive packages: Node resolves each dependency from the package that
+// imports it.
+const selfModules = path.join(here, 'node_modules')
 
 // Exact-match so ``@/utils/i18n/locales`` falls through to the generic ``@``
 // alias and resolves the real dictionary tables instead of the local shim.
 const i18nModule = new RegExp('^@/utils/i18n$')
+
+// One coherent element-plus scope: every subpath (component CSS, the real
+// package entry the shim re-exports) resolves from the Extension's own copy.
+const elementPlusPackage = {
+  find: /^element-plus\/(.*)$/,
+  replacement: path.join(selfModules, 'element-plus') + '/$1',
+}
+// One coherent Vue closure: the bare ``vue`` root, its subpaths, and the whole
+// ``@vue/*`` scope all resolve to the SINGLE installed copy in the Extension.
+// Element Plus' peer dependency on ``vue`` therefore lands on the same
+// runtime-core/runtime-dom/reactivity the webview itself uses (no split
+// 3.5.x/3.5.y closure).
+const vueScope = {
+  find: /^@vue\/(.*)$/,
+  replacement: path.join(selfModules, '@vue') + '/$1',
+}
 
 export default defineConfig({
   root: webview,
@@ -26,8 +50,8 @@ export default defineConfig({
   plugins: [
     vue(),
     // Reuse the Dashboard's real utility + Carbon icon atoms so shared
-    // components (CommandResultMessage, ConversationMessage) keep their
-    // production styling instead of a second hand-rolled stylesheet.
+    // components (CommandResultMessage, ConversationMessage, UIEventBlock) keep
+    // their production styling instead of a second hand-rolled stylesheet.
     UnoCSS({ configFile: path.join(frontendRoot, 'uno.config.js') }),
     AutoImport({ imports: ['vue', 'pinia'] }),
   ],
@@ -50,12 +74,14 @@ export default defineConfig({
         find: /^katex\/dist\/katex\.min\.css$/,
         replacement: fileURLToPath(import.meta.resolve('katex/dist/katex.min.css')),
       },
+      // Exact-match the bare ``vue``/``pinia`` roots so ``vue/jsx-runtime`` and
+      // package subpaths still resolve through Node instead of being mangled.
       {
-        find: 'vue',
+        find: /^vue$/,
         replacement: path.join(here, 'node_modules/vue/dist/vue.runtime.esm-bundler.js'),
       },
       {
-        find: 'pinia',
+        find: /^pinia$/,
         replacement: path.join(here, 'node_modules/pinia/dist/pinia.mjs'),
       },
       {
@@ -66,10 +92,16 @@ export default defineConfig({
         find: '@/stores/chat',
         replacement: path.join(frontend, 'stores/chat.js'),
       },
+      // The bare ``element-plus`` root resolves to the host integration shim
+      // (real components + the webview notification surface for ElMessage); any
+      // subpath (component CSS, the real package entry) resolves straight from
+      // the Extension's installed package.
       {
-        find: 'element-plus',
+        find: /^element-plus$/,
         replacement: path.join(webview, 'shims/element.js'),
       },
+      elementPlusPackage,
+      vueScope,
       {
         find: '@/stores/cluster',
         replacement: path.join(webview, 'shims/stores.js'),

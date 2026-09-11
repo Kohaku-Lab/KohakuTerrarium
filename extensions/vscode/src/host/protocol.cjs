@@ -14,6 +14,7 @@ const ALLOWED = new Set([
   'context.compact',
   'context.clear',
   'goal.execute',
+  'platform.openLink',
   'media.prepare',
   'media.release',
   'media.cancel',
@@ -167,6 +168,10 @@ function allowedMessage(message) {
         Number.isSafeInteger(message.selectionVersion) &&
         message.selectionVersion >= 0 &&
         hasOnlyFields(message, ['type', 'requestId', 'args', 'readyId', 'selectionVersion'])
+      )
+    case 'platform.openLink':
+      return (
+        hasText(message.target) && validPositiveInt(message.readyId) && hasOnlyFields(message, ['type', 'requestId', 'target', 'readyId'])
       )
     case 'context.compact':
     case 'context.clear':

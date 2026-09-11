@@ -53,6 +53,11 @@ function publicError(type) {
         code: 'goal_command_failed',
         message: 'Goal command could not be confirmed and may have executed. Check goal status before retrying a mutation.',
       }
+    case 'platform.openLink':
+      return {
+        code: 'open_link_failed',
+        message: 'Could not open that link.',
+      }
     case 'ws.open':
     case 'ws.send':
     case 'ws.close':
