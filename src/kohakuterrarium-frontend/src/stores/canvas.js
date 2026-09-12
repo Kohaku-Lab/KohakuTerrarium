@@ -20,8 +20,12 @@ import { defineStore } from "pinia"
 import { computed, getCurrentInstance, ref } from "vue"
 
 import { injectScope, registerScopeDisposer } from "@/composables/useScope"
+import { mediaSourceUrl } from "@/utils/artifacts"
 
 const MIN_LINES_FOR_HEURISTIC = 15
+/** Soft cap on the strip. Oldest tiles are hidden (and stay hidden on
+ *  rescan) so a long attach does not grow an unbounded tab list. */
+export const MAX_CANVAS_ARTIFACTS = 12
 // Match fenced code blocks: opening ```lang\n ... closing ```
 // Uses \n``` on its own line (not $ anchor which is fragile with \r\n).
 const CODE_FENCE = /```(\w*)\n([\s\S]*?)\n```/g
@@ -60,6 +64,7 @@ function _setupCanvasStore() {
     const artifacts = ref([])
     const activeId = ref(null)
     const dismissed = ref(false)
+    const hiddenSourceIds = ref(new Set())
 
     const activeArtifact = computed(
       () => artifacts.value.find((a) => a.id === activeId.value) || null,
@@ -67,9 +72,31 @@ function _setupCanvasStore() {
     // Back-compat alias kept for any caller that imported ``activeVersion``.
     const activeVersion = activeArtifact
 
-    /** Upsert an artifact. If a sourceId already exists, refresh it in
-     *  place; otherwise append. */
+    function _hideSource(sourceId) {
+      const next = new Set(hiddenSourceIds.value)
+      next.add(sourceId)
+      hiddenSourceIds.value = next
+    }
+
+    function _selectNewest() {
+      const last = artifacts.value[artifacts.value.length - 1]
+      activeId.value = last ? last.id : null
+    }
+
+    function _evictOverflow() {
+      while (artifacts.value.length > MAX_CANVAS_ARTIFACTS) {
+        const oldest = artifacts.value[0]
+        _hideSource(oldest.sourceId)
+        artifacts.value = artifacts.value.slice(1)
+        if (activeId.value === oldest.id) _selectNewest()
+      }
+    }
+
+    /** Upsert an artifact. Same sourceId refreshes in place without
+     *  changing selection. A new sourceId appends and becomes active.
+     *  Hidden sourceIds (closed or evicted) stay off the strip. */
     function upsertArtifact({ sourceId, content, lang, type, seedName }) {
+      if (hiddenSourceIds.value.has(sourceId)) return null
       const existing = artifacts.value.find((a) => a.sourceId === sourceId)
       if (existing) {
         if (existing.content === content) return existing
@@ -77,7 +104,6 @@ function _setupCanvasStore() {
         existing.lang = lang || existing.lang
         existing.type = type || existing.type
         existing.name = _artifactName(seedName || content)
-        activeId.value = existing.id
         return existing
       }
       const id = `artifact_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`
@@ -91,6 +117,7 @@ function _setupCanvasStore() {
       }
       artifacts.value = [...artifacts.value, a]
       activeId.value = id
+      _evictOverflow()
       return a
     }
 
@@ -124,11 +151,10 @@ function _setupCanvasStore() {
         }
       }
 
-      // Feat 1 — tool parts carrying a ``canvas_preview`` payload (from
-      // write / edit / multi_edit) become code artifacts keyed by
-      // file path. Re-editing the same file refreshes the existing
-      // artifact in place; the canvas latches onto the latest one
-      // because ``upsertArtifact`` updates ``activeId`` on touch.
+      // Tool parts carrying ``canvas_preview`` become artifacts keyed by
+      // file path. write / edit / multi_edit emit text previews; canvas_image
+      // emits ``kind: "image"`` whose ``content`` is a displayable URL.
+      // Re-touching the same path refreshes the existing artifact in place.
       // ``content === null`` means the file exceeded the preview cap;
       // skip those so the canvas doesn't show an empty bubble.
       if (msg.parts && Array.isArray(msg.parts)) {
@@ -137,14 +163,13 @@ function _setupCanvasStore() {
           const preview = p.resultMeta?.canvas_preview
           if (!preview || preview.content == null) continue
           if (!preview.file_path) continue
+          const isImage = preview.kind === "image"
+          const raw = preview.content
           upsertArtifact({
-            // Key by file path — the artifact tracks the file, not the
-            // tool call. Two write calls to the same path produce ONE
-            // artifact with the latest content.
             sourceId: `file:${preview.file_path}`,
-            content: preview.content,
-            lang: preview.lang || "text",
-            type: _guessTypeFromLang(preview.lang),
+            content: isImage ? mediaSourceUrl(raw) || raw : raw,
+            lang: preview.lang || (isImage ? "png" : "text"),
+            type: isImage ? "image" : _guessTypeFromLang(preview.lang),
             seedName: preview.file_path,
           })
         }
@@ -206,10 +231,26 @@ function _setupCanvasStore() {
       dismissed.value = true
     }
 
+    function dismissArtifact(id) {
+      const art = artifacts.value.find((a) => a.id === id)
+      if (!art) return
+      _hideSource(art.sourceId)
+      const wasActive = activeId.value === id
+      artifacts.value = artifacts.value.filter((a) => a.id !== id)
+      if (wasActive) _selectNewest()
+    }
+
+    function clearArtifacts() {
+      for (const a of artifacts.value) _hideSource(a.sourceId)
+      artifacts.value = []
+      activeId.value = null
+    }
+
     function reset() {
       artifacts.value = []
       activeId.value = null
       dismissed.value = false
+      hiddenSourceIds.value = new Set()
     }
 
     return {
@@ -222,6 +263,8 @@ function _setupCanvasStore() {
       scanMessage,
       setActive,
       dismiss,
+      dismissArtifact,
+      clearArtifacts,
       reset,
     }
   }

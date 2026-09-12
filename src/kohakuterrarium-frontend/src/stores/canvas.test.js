@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 
-import { useCanvasStore } from "./canvas.js"
+import { MAX_CANVAS_ARTIFACTS, useCanvasStore } from "./canvas.js"
 
 beforeEach(() => {
   setActivePinia(createPinia())
@@ -62,6 +62,26 @@ describe("canvas store — artifact detection", () => {
     expect(store.artifacts[0].content).toBe("v2 body")
     expect(store.artifacts[0].name).toBe("v2 body")
     expect(store.activeId).toBe(art.id)
+  })
+
+  it("does not steal selection when an older artifact's content refreshes", () => {
+    const store = useCanvasStore()
+    const first = store.upsertArtifact({ sourceId: "old", content: "file://a.png", type: "image" })
+    const second = store.upsertArtifact({ sourceId: "new", content: "file://b.png", type: "image" })
+    expect(store.activeId).toBe(second.id)
+    store.upsertArtifact({ sourceId: "old", content: "/api/files/raw?path=a.png", type: "image" })
+    expect(store.activeId).toBe(second.id)
+    expect(first.content).toBe("/api/files/raw?path=a.png")
+  })
+
+  it("a new publish becomes active even after the user clicked an older tab", () => {
+    const store = useCanvasStore()
+    const first = store.upsertArtifact({ sourceId: "a", content: "one", lang: "js" })
+    store.upsertArtifact({ sourceId: "b", content: "two", lang: "js" })
+    store.setActive(first.id)
+    const third = store.upsertArtifact({ sourceId: "c", content: "three", lang: "js" })
+    expect(store.activeId).toBe(third.id)
+    expect(store.artifacts).toHaveLength(3)
   })
 
   it("auto-activates newly detected artifacts after an activation catch-up scan", () => {
@@ -271,8 +291,7 @@ describe("canvas store — write / edit canvas_preview (Feat 1)", () => {
   it("tool parts without canvas_preview are ignored", () => {
     // Regression: non-file tools (bash, glob, etc.) must NOT spawn
     // canvas artifacts. The detector only fires when the tool result
-    // carries a ``canvas_preview`` dict — which only write / edit /
-    // multi_edit produce today.
+    // carries a ``canvas_preview`` dict.
     const store = useCanvasStore()
     const msg = {
       id: "m_bash",
@@ -281,5 +300,161 @@ describe("canvas store — write / edit canvas_preview (Feat 1)", () => {
     }
     store.scanMessage(msg)
     expect(store.artifacts).toHaveLength(0)
+  })
+})
+
+describe("canvas store — canvas_image preview", () => {
+  it("picks up kind image as an image artifact, not code", () => {
+    const store = useCanvasStore()
+    const msg = {
+      id: "m_img",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "canvas_image",
+          status: "done",
+          resultMeta: {
+            canvas_preview: {
+              kind: "image",
+              file_path: "/Users/me/out.png",
+              lang: "png",
+              content: "file:///Users/me/out.png",
+              bytes: 1200,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(1)
+    const a = store.artifacts[0]
+    expect(a.type).toBe("image")
+    expect(a.lang).toBe("png")
+    expect(a.sourceId).toBe("file:/Users/me/out.png")
+    expect(a.content).toBe(`/api/files/raw?path=${encodeURIComponent("/Users/me/out.png")}`)
+  })
+
+  it("keeps a session artifact URL as the image content", () => {
+    const store = useCanvasStore()
+    const url = "/api/sessions/abc/artifacts/canvas_images/shot.png"
+    const msg = {
+      id: "m_art",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "canvas_image",
+          resultMeta: {
+            canvas_preview: {
+              kind: "image",
+              file_path: "/work/shot.png",
+              lang: "png",
+              content: url,
+              bytes: 80,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts[0].type).toBe("image")
+    expect(store.artifacts[0].content).toBe(url)
+  })
+
+  it("re-promoting the same path updates the existing image", () => {
+    const store = useCanvasStore()
+    const make = (id, content) => ({
+      id,
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "canvas_image",
+          resultMeta: {
+            canvas_preview: {
+              kind: "image",
+              file_path: "/work/out.png",
+              lang: "png",
+              content,
+              bytes: 10,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    })
+    store.scanMessage(make("m1", "/api/sessions/s/artifacts/canvas_images/a.png"))
+    store.scanMessage(make("m2", "/api/sessions/s/artifacts/canvas_images/b.png"))
+    expect(store.artifacts).toHaveLength(1)
+    expect(store.artifacts[0].content).toBe("/api/sessions/s/artifacts/canvas_images/b.png")
+    expect(store.activeArtifact?.content).toBe("/api/sessions/s/artifacts/canvas_images/b.png")
+  })
+})
+
+describe("canvas store — dismiss and cap", () => {
+  it("dismissArtifact removes a tile and a later upsert of that source stays gone", () => {
+    const store = useCanvasStore()
+    const first = store.upsertArtifact({ sourceId: "keep", content: "a", lang: "js" })
+    const gone = store.upsertArtifact({ sourceId: "drop", content: "b", lang: "js" })
+    store.dismissArtifact(gone.id)
+    expect(store.artifacts.map((a) => a.sourceId)).toEqual(["keep"])
+    expect(store.activeId).toBe(first.id)
+    store.upsertArtifact({ sourceId: "drop", content: "b2", lang: "js" })
+    expect(store.artifacts.map((a) => a.sourceId)).toEqual(["keep"])
+  })
+
+  it("scanMessage does not restore a dismissed file preview", () => {
+    const store = useCanvasStore()
+    const msg = {
+      id: "m_drop",
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "canvas_image",
+          resultMeta: {
+            canvas_preview: {
+              kind: "image",
+              file_path: "/work/gone.png",
+              lang: "png",
+              content: "/api/files/raw?path=gone.png",
+              bytes: 10,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    }
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(1)
+    store.dismissArtifact(store.artifacts[0].id)
+    store.scanMessage(msg)
+    expect(store.artifacts).toHaveLength(0)
+  })
+
+  it("clearArtifacts hides every current tile from later scans", () => {
+    const store = useCanvasStore()
+    store.upsertArtifact({ sourceId: "a", content: "1", lang: "js" })
+    store.upsertArtifact({ sourceId: "b", content: "2", lang: "js" })
+    store.clearArtifacts()
+    expect(store.artifacts).toHaveLength(0)
+    expect(store.activeId).toBeNull()
+    store.upsertArtifact({ sourceId: "a", content: "1", lang: "js" })
+    expect(store.artifacts).toHaveLength(0)
+  })
+
+  it("evicts the oldest tile once the cap is exceeded", () => {
+    const store = useCanvasStore()
+    for (let i = 0; i < MAX_CANVAS_ARTIFACTS + 1; i++) {
+      store.upsertArtifact({ sourceId: `n${i}`, content: String(i), lang: "js" })
+    }
+    expect(store.artifacts).toHaveLength(MAX_CANVAS_ARTIFACTS)
+    expect(store.artifacts[0].sourceId).toBe("n1")
+    expect(store.artifacts.at(-1).sourceId).toBe(`n${MAX_CANVAS_ARTIFACTS}`)
+    store.upsertArtifact({ sourceId: "n0", content: "again", lang: "js" })
+    expect(store.artifacts.some((a) => a.sourceId === "n0")).toBe(false)
   })
 })
