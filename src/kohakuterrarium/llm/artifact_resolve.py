@@ -9,6 +9,7 @@ import base64
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from kohakuterrarium.studio.persistence.artifacts import (
     resolve_artifact_file,
@@ -44,6 +45,8 @@ def file_reference_path(url: str) -> Path | None:
     if not isinstance(url, str) or not url.startswith(_FILE_SCHEME):
         return None
     try:
+        if urlparse(url).netloc.lower() not in ("", "localhost"):
+            return None
         return coerce_fs_path(url)
     except ValueError:
         return None
