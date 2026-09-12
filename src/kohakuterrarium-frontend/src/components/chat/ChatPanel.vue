@@ -96,7 +96,7 @@
           <button class="ml-auto text-amber hover:underline" @click="scrollToPending">{{ t("chat.pendingShow") }}</button>
         </div>
         <ChatComposer ref="composerEl" v-model="inputText" v-model:attachments="attachments" :processing="viewProcessing" :compact-mode="isCompact" :managed-submit="true" :max-attachment-bytes="MAX_ATTACHMENT_BYTES" :max-image-bytes="MAX_IMAGE_BYTES" :placeholder="inputPlaceholder" :labels="composerLabels" aria-autocomplete="list" :aria-expanded="slashMenuOpen" aria-controls="slash-command-menu" :aria-activedescendant="slashActiveDescendant" input-role="combobox" :attachment-transform="transformAttachment" @update:attachments="onComposerAttachmentsChanged" @submit="send" @interrupt="chat.interrupt(viewActiveTab)" @compact="triggerCompact" @clear="triggerClear" @error="onAttachmentError" @input="onInputChanged" @keydown="onInputKeydown" @focus="onInputFocus" @blur="onInputBlur" @drag-state="dragOver = $event">
-          <template #suggestions><SlashCommandMenu :open="slashMenuOpen" :loading="slashInventoryLoading" :entries="slashMatches" :selected-index="slashSelectedIndex" @choose="chooseSlashEntry" @select-index="slashSelectedIndex = $event" /></template>
+          <template #suggestions><SlashCommandMenu :open="slashMenuOpen" :loading="slashInventoryLoading" :error="slashInventoryError" :entries="slashMatches" :selected-index="slashSelectedIndex" @choose="chooseSlashEntry" @select-index="slashSelectedIndex = $event" /></template>
           <template #attachment-icon="{ attachment }"><span :class="attachment.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" /></template>
           <template #remove-icon><span class="i-carbon-close" /></template>
           <template #file-icon><span class="i-carbon-add" /></template>
@@ -135,6 +135,7 @@ import { terrariumAPI, agentAPI } from "@/utils/api"
 import { buildMessageParts, formatBytes, MAX_ATTACHMENT_BYTES, MAX_IMAGE_BYTES } from "@/utils/chatAttachments"
 import { readLocalPref, writeLocalPref } from "@/utils/uiPrefs"
 import { shouldSendOnEnter } from "@/utils/chatInput"
+import { handleSlashKeydown } from "@kohakuterrarium/chat-ui"
 const QUEUE_VISIBLE = 5
 
 const props = defineProps({
@@ -215,7 +216,7 @@ function onGroupFocus() {
   emit("focus-group", props.groupId)
 }
 
-const { activeDescendant: slashActiveDescendant, choose: chooseSlashEntry, dismiss: dismissSlashMenu, entries: slashMatches, loading: slashInventoryLoading, move: moveSlashSelection, open: slashMenuOpen, reopen: reopenSlashMenu, selectedIndex: slashSelectedIndex } = useSlashCommandCompletion({ chat, inputText, activeTabKey: viewActiveTab })
+const { activeDescendant: slashActiveDescendant, choose: chooseSlashEntry, dismiss: dismissSlashMenu, entries: slashMatches, error: slashInventoryError, loading: slashInventoryLoading, move: moveSlashSelection, open: slashMenuOpen, reopen: reopenSlashMenu, selectedIndex: slashSelectedIndex } = useSlashCommandCompletion({ chat, inputText, activeTabKey: viewActiveTab })
 
 const tabDrag = useChatTabDrag(chat)
 const tabDragHoverEdge = computed(() => (props.groupId ? tabDrag.isHoveringEdgeOf(props.groupId) : null))
@@ -464,27 +465,19 @@ function closeTab(tab) {
 
 function onInputKeydown(e) {
   if (props.readOnly) return
-  if (slashMenuOpen.value) {
-    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-      e.preventDefault()
-      moveSlashSelection(e.key === "ArrowDown" ? 1 : -1)
-      return
-    }
-    if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-      const selected = slashMatches.value[slashSelectedIndex.value]
-      if (selected) {
-        e.preventDefault()
-        chooseSlashEntry(selected)
-        return
-      }
-    }
-    if (e.key === "Escape") {
-      e.preventDefault()
-      e.stopPropagation()
-      dismissSlashMenu()
-      return
-    }
-  }
+  // The one shared slash-menu keyboard policy (extracted from this panel so the
+  // VS Code webview drives the exact same behavior instead of a fork).
+  if (
+    handleSlashKeydown(e, {
+      open: slashMenuOpen.value,
+      entries: slashMatches.value,
+      selectedIndex: slashSelectedIndex.value,
+      move: moveSlashSelection,
+      choose: chooseSlashEntry,
+      dismiss: dismissSlashMenu,
+    })
+  )
+    return
   if (shouldSendOnEnter(e, { isCompact: isCompact.value })) {
     e.preventDefault()
     send()

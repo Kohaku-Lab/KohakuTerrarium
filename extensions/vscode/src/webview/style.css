@@ -291,6 +291,16 @@ body.vscode-high-contrast .kt-conversation-host .code-block,
 body.vscode-high-contrast-light .kt-conversation-host .code-block {
   border: 1px solid var(--vscode-contrastBorder);
 }
+/* Narrow panes: wrap the model switcher onto its own header row instead of
+   squashing the pill, so the canonical provider/model stay readable. */
+@media (max-width: 560px) {
+  .app-header {
+    flex-wrap: wrap;
+  }
+  .header-model {
+    flex: 1 1 100%;
+  }
+}
 @media (max-width: 420px) {
   .kt-conversation-host .kt-conversation-message--user {
     width: 100%;

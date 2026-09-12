@@ -1,11 +1,19 @@
-import { computed, ref, watch } from "vue"
+import { computed, getCurrentScope, onScopeDispose, ref, watch } from "vue"
 
 const SLASH_QUERY_RE = /^\/([^\s]*)$/
 
 export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
   const loading = ref(false)
+  // A genuine load failure is surfaced, never folded into the empty state.
+  const error = ref(null)
   const selectedIndex = ref(0)
   const dismissed = ref(false)
+  // The exact {generation,key,marker} this composable last marked, so an edit
+  // releases only the marker object it owns and never a newer interaction's.
+  let ownedTarget = null
+  let loadToken = 0
+  let disposed = false
+  if (getCurrentScope()) onScopeDispose(() => (disposed = true))
   const tab = computed(() => {
     const key = activeTabKey.value
     return key ? { key, creature: key, type: key.startsWith("ch:") ? "channel" : "creature" } : null
@@ -61,13 +69,18 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
 
   async function ensureLoaded({ force = false } = {}) {
     if (!tab.value || tab.value.type === "channel") return
+    const token = ++loadToken
     loading.value = true
+    error.value = null
     try {
       await chat.loadCommandInventory(tab.value, { force })
-    } catch (error) {
-      console.warn("Failed to load command inventory", error)
+    } catch (cause) {
+      if (token === loadToken && !disposed) {
+        error.value = cause?.message || String(cause)
+        console.warn("Failed to load command inventory", cause)
+      }
     } finally {
-      loading.value = false
+      if (token === loadToken && !disposed) loading.value = false
     }
   }
 
@@ -75,6 +88,10 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
     if (!entry) return
     inputText.value = `/${entry.name} `
     chat.markSlashTarget(tab.value, entry)
+    const key = tab.value?.key
+    ownedTarget = key
+      ? { generation: chat._instanceGeneration, key, marker: chat._slashTargetByTab?.[key] ?? null }
+      : null
   }
 
   function move(delta) {
@@ -85,6 +102,16 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
 
   function clearTarget() {
     chat.markSlashTarget(tab.value, null)
+    ownedTarget = null
+  }
+
+  function releaseOwnedTarget() {
+    const owned = ownedTarget
+    ownedTarget = null
+    if (!owned?.marker) return
+    if (chat._instanceGeneration !== owned.generation) return
+    if (chat._slashTargetByTab?.[owned.key] !== owned.marker) return
+    chat.markSlashTarget(owned.key, null)
   }
 
   function dismiss() {
@@ -107,8 +134,19 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
   watch(activeTabKey, () => {
     dismissed.value = false
     selectedIndex.value = 0
+    error.value = null
+    ownedTarget = null
     if (query.value != null && activeTabKey.value) void ensureLoaded()
   })
+  watch(
+    () => chat._instanceGeneration,
+    () => {
+      dismissed.value = false
+      selectedIndex.value = 0
+      ownedTarget = null
+      if (query.value != null && activeTabKey.value) void ensureLoaded()
+    },
+  )
 
   return {
     activeDescendant,
@@ -117,9 +155,11 @@ export function useSlashCommandCompletion({ chat, inputText, activeTabKey }) {
     dismiss,
     ensureLoaded,
     entries,
+    error,
     loading,
     move,
     open,
+    releaseOwnedTarget,
     reopen,
     selectedIndex,
   }

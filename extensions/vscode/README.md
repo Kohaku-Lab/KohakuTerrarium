@@ -11,6 +11,8 @@ First-party VS Code workspace extension for creating and operating KohakuTerrari
 - List live and dormant Sessions.
 - Create a Session from `kohakuterrarium.defaultCreature` and the current workspace folder.
 - Select a Creature by stable Creature ID.
+- Use the Dashboard's model picker, provider search, and variation controls for the selected Creature.
+- Complete `/goal` and eligible skills from the live Creature inventory using the shared slash menu.
 - Reuse the production KohakuTerrarium chat store for history, streaming text, tool activity, interactive replies, and Stop Turn.
 - Page bounded history (load earlier messages) with an explicit reload when the backend source resets, and read a truncated row's full body on demand.
 - Stop Session and resume Sessions.
@@ -52,9 +54,17 @@ The transcript loads a bounded newest page and loads earlier messages from the t
 
 Within an open Webview, Refresh preserves text and files for the same runtime and Creature ID, including while the request is pending. Draft and attachment caches each retain up to 32 recently used conversations; older inactive buffers are evicted. This bounds retained conversation entries, not aggregate attachment bytes. Changing the service endpoint, changing connection configuration, or closing the Webview clears the caches. Unsent files are not persisted to disk.
 
-### Goal commands
+### Model and slash controls
 
-Pure-text `/goal ...` uses the selected Creature's command endpoint and shows the command result in the transcript. Text with attachments remains a normal chat message. No arbitrary command or target proxy is exposed. Drafts remain on failure; if a request times out or disconnects after dispatch, the command may still have executed. Check goal status before retrying a mutation.
+Click the current-model label to search the live model directory, choose a provider and variation, and switch the selected Creature. The displayed selector uses the backend's canonical response. If the switch succeeds but its metadata refresh fails, the accepted selector remains visible with a warning. Changing the Creature through this picker also rebinds the transcript and chat socket; late responses cannot replace the newer selection.
+
+Typing `/` opens the shared completion menu. Arrow keys move the selection; Tab or Enter completes the highlighted entry without sending it, and Escape dismisses the menu. Enter then submits the completed text. The VS Code composer keeps desktop Enter-to-send behavior in narrow sidebars; Shift+Enter inserts a newline. Attachment and context controls remain available through **More actions** in the compact layout.
+
+Only `/goal` is executed as a command by this frontend. Eligible skills and other text use the existing chat input path; displaying live inventory does not authorize more HTTP commands. An inventory error is shown in the menu, but manually entered text still uses the same fallback routing as the Dashboard.
+
+### Goal command outcomes
+
+A pure-text `/goal ...` uses the selected Creature's command endpoint and shows the command result in the transcript. Text with attachments remains a normal chat message. No arbitrary command or target proxy is exposed. Drafts remain on failure; if a request times out or disconnects after dispatch, the command may still have executed. Check goal status before retrying a mutation.
 
 ### Notifications
 
@@ -68,7 +78,7 @@ This is a view of locally observed queued input, not a server queue snapshot. Re
 
 ### Media (artifact images and video)
 
-PNG, JPEG, GIF and WebP artifact images plus video parts in message parts or Markdown load through the authenticated Workspace Host. Webview networking remains disabled (`connect-src 'none'`); neither endpoint nor token is sent to the Webview. The Host derives one fixed same-origin route per reference — the artifact route for a produced artifact, or the fixed raw-file route for a local `file://` path a tool observed — fetches it itself with the Host-only token, and streams the body to a private temporary spool on disk. The Webview is given a `webview.asWebviewUri` handle only after the whole body is spooled; the disk path, endpoint and token never cross to the Webview. Reads are fenced by the selected Creature's ownership; the backend remains the permission authority. Unknown references, traversal, redirects, SVG/HTML content types, and mismatched image signatures are rejected.
+Artifact images (including SVG) and video parts in messages or Markdown load through the Workspace Extension Host. Webview networking remains disabled (`connect-src 'none'`); credentials stay in the Host. Each reference maps to a fixed artifact route or the fixed raw-file route for a local `file://` path. The Host fetches the body with redirects disabled and streams it to a private temporary spool on disk. The Webview receives an `asWebviewUri` handle only after the whole body is spooled. Reads are fenced by the selected Creature's ownership; file permissions remain the backend's responsibility, without an additional observed-reference or saved-session namespace authorization gate. Playback support depends on VS Code's browser codecs; the extension does not transcode media.
 
 The body is streamed to disk with backpressure and there is no default per-file size cap; only the number of concurrent spool reads is bounded (four), with a per-chunk idle timeout. Identical references share one spooled file, which is deleted once every Webview and editor lease is released. Honest limits: the first preview appears only after the full body is spooled (no progressive first frame), the raw-file route's backend response is fully buffered by the backend rather than streamed, and only a same-host local KohakuTerrarium service has been exercised — remote endpoints are untested. This bridge does not provide arbitrary file downloads or remote media fetching.
 
@@ -76,12 +86,16 @@ The body is streamed to disk with backpressure and there is no default per-file 
 
 Use **KohakuTerrarium: Configure Local Connection Override** only for a nonstandard local port that cannot be discovered. Return to the normal behavior with **KohakuTerrarium: Use Automatic Local Discovery**.
 
-The Webview never receives the token, endpoint, Creature config reference, workspace path, or `pwd`. HTTP, WebSocket, filesystem-sensitive settings, discovery, and selection ownership stay in the Workspace Extension Host.
+Connection credentials, discovery, HTTP/WebSocket transport and filesystem-sensitive configuration stay in the Workspace Extension Host. Named operations expose only their required data and do not provide a generic URL, method or header proxy.
 
 ## Development
 
+Install both packages from their lockfiles before building the shared frontend:
+
 ```bash
-cd extensions/vscode
+cd src/kohakuterrarium-frontend
+npm ci
+cd ../../extensions/vscode
 npm ci
 npm test
 npm run build

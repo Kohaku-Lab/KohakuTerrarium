@@ -110,6 +110,31 @@ function createClient({ endpoint, token, fetchImpl = fetch }) {
     async active(session) {
       return (await request(`/api/sessions/active/${encode(session)}`)).json()
     },
+    // Host-global model directory (the catalogue of configured LLM profiles +
+    // their variation groups). No target identity is involved.
+    async modelDirectory() {
+      return (await request('/api/configs/models')).json()
+    },
+    // Live per-creature command/skill inventory, read-only on its fixed route.
+    async commandInventory(session, creature) {
+      return (await request(`/api/sessions/${encode(session)}/creatures/${encode(creature)}/command-inventory`)).json()
+    },
+    // Switch the running creature's model. The canonical ``provider/name@variations``
+    // identifier is the backend's answer; a mutation is never retried, so a
+    // transport failure cannot disguise whether the backend applied it.
+    async switchModel(session, creature, model) {
+      return (
+        await request(`/api/sessions/${encode(session)}/creatures/${encode(creature)}/model`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ model }),
+        })
+      ).json()
+    },
+    // Required instance/session metadata refresh (creature list, model, limits).
+    async instanceMetadata(session) {
+      return (await request(`/api/sessions/active/${encode(session)}`)).json()
+    },
     async resume(savedName) {
       return (await request(`/api/sessions/${encode(savedName)}/resume`, { method: 'POST' })).json()
     },

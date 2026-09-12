@@ -54,7 +54,7 @@ async function settle(n = 10) {
   for (let i = 0; i < n; i++) await new Promise((resolve) => setImmediate(resolve))
 }
 
-async function bootApp({ goalResult, lang = 'en', theme = '' }) {
+async function bootApp({ goalResult, lang = 'en', theme = '', viewportWidth = 0 }) {
   const { code } = await buildWebview()
   const errors = []
   const virtualConsole = new VirtualConsole()
@@ -68,6 +68,8 @@ async function bootApp({ goalResult, lang = 'en', theme = '' }) {
   })
   const { window } = dom
   const { document } = window
+  // The webview derives its production layout density from window.innerWidth.
+  if (viewportWidth) Object.defineProperty(window, 'innerWidth', { configurable: true, value: viewportWidth })
   // The extension stamps the active VS Code theme onto <body>; the webview mirrors it.
   if (theme) document.body.className = theme === 'dark' ? 'vscode-dark' : 'vscode-light'
   // The extension writes the host language (``vscode.env.language``) into the
@@ -122,7 +124,7 @@ async function bootApp({ goalResult, lang = 'en', theme = '' }) {
     await window.__ktVsCodeGoal(RUNTIME, TAB, args)
     await settle(12)
   }
-  return { window, document, transcriptText, runGoal, errors, close: () => window.close() }
+  return { window, document, requests, transcriptText, runGoal, errors, close: () => window.close() }
 }
 
 test('built App renders the shared command-result component for goal output', async () => {
@@ -227,11 +229,43 @@ test('built webview emits the shared warm surface and Carbon icon utility CSS', 
   assert.match(css, /\.dark \.dark\\:bg-warm-800/, 'the dark surface variant from uno.config.js is generated')
 })
 
+test('built webview bundles the genuine Element Plus dark theme provider', async () => {
+  const { css } = await buildWebview()
+  // The shared drawer/select/popper surfaces are Element Plus widgets: without
+  // the installed dark css-vars a dark host leaves them on the light defaults.
+  assert.match(css, /html\.dark\{[^}]*--el-bg-color/, 'the installed Element Plus dark css-vars are bundled')
+})
+
 test('built App mirrors the VS Code dark host theme onto <html>', async () => {
   const app = await bootApp({ goalResult: { success: true, output: '' }, theme: 'dark' })
   try {
     assert.equal(app.document.documentElement.classList.contains('dark'), true, 'the first paint is already themed')
     assert.deepEqual(app.errors, [], 'theming adds no runtime errors')
+  } finally {
+    app.close()
+  }
+})
+
+test('built App collapses the composer to the compact more-menu at narrow width and keeps Enter-to-send', async () => {
+  const app = await bootApp({ goalResult: { success: true, output: '' }, viewportWidth: 320 })
+  try {
+    const ta = app.document.querySelector('.composer-region textarea')
+    assert.ok(ta, 'the shared composer renders')
+    ta.focus()
+    ta.value = 'hello'
+    ta.dispatchEvent(new app.window.Event('input', { bubbles: true }))
+    await settle()
+    assert.ok(app.document.querySelector('[aria-label="More actions"]'), 'the compact more control renders at narrow density')
+    assert.equal(app.document.querySelector('[aria-label="Attach file"]'), null, 'standalone attach collapses into the menu')
+
+    // The host keeps the desktop Enter-to-send contract even though the chrome
+    // is compact: only the presentation collapses, not the submit key.
+    const sends = () => app.requests.filter((message) => message.type === 'ws.send' && /"type":"input"/.test(String(message.data)))
+    const before = sends().length
+    ta.dispatchEvent(new app.window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await settle()
+    assert.equal(sends().length, before + 1, 'plain Enter still submits a WS input frame at compact width')
+    assert.deepEqual(app.errors, [], 'the compact composer adds no runtime errors')
   } finally {
     app.close()
   }

@@ -3,6 +3,7 @@ const { executeGoal } = require('./goalCommand.cjs')
 const { beginReady, reconcileReady } = require('./readyRuntime.cjs')
 const { allowedMessage } = require('./protocol.cjs')
 const { MEDIA_TYPES, dispatchMedia } = require('./mediaHost.cjs')
+const { MODEL_TYPES, dispatchModel } = require('./modelHost.cjs')
 const { openPlatformLink } = require('./openLink.cjs')
 
 const contextCapabilities = new WeakMap()
@@ -347,6 +348,9 @@ class RuntimeHost {
     // Every media request is a single fixed dispatch (see mediaHost.dispatchMedia);
     // it is handled before the lifecycle switch so this class stays host-shaped.
     if (MEDIA_TYPES.has(message.type)) return dispatchMedia(this, message)
+    // Model/slash + instance-metadata ops are a single fixed dispatch too (see
+    // modelHost.dispatchModel), keeping this switch about session lifecycle only.
+    if (MODEL_TYPES.has(message.type)) return dispatchModel(this, message)
     switch (message.type) {
       case 'session.clearSelection': {
         const result = await this.clearSelection()

@@ -5,10 +5,13 @@
 // re-exports the REAL package instead of hand-rolling native replacements, and
 // pulls in the production component stylesheet so the widgets are styled inside
 // the webview (its bundled CSS is served under the webview CSP, never a CDN).
+// The installed dark css-vars are bundled too: without them a dark host leaves
+// the shared drawer/select/popper surfaces on Element Plus' light defaults.
 // The only host-specific override is ``ElMessage``: the chat store fires it for
 // toast notifications, and the webview surfaces those through its native
 // notification region (``notifications.mjs``) rather than silently no-op'ing.
 import 'element-plus/dist/index.css'
+import 'element-plus/theme-chalk/dark/css-vars.css'
 
 import * as RealElementPlus from 'element-plus/es/index.mjs'
 

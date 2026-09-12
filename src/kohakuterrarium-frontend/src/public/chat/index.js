@@ -112,3 +112,24 @@ export {
 // when the installed platform opener (not the page) owns the click.
 export { isExternalUrl, resolvePlatformLink, shouldOpenThroughHost } from "./externalLinks.js"
 export { MediaImage } from "./MediaPreview.js"
+// The one production model picker. Both hosts render this exact component: the
+// Dashboard binds it to the router/instance/hosts/chat stores in
+// ``components/chrome/ModelSwitcher.vue``; the VS Code webview binds it to its
+// topology/selection state and the Host model bridge. The narrow context seam
+// and the host-keyed inventory factory are exported so each host supplies its
+// own adapter without forking the component or the cache.
+export { default as ModelSwitcher } from "../../components/chrome/ModelSwitcherShared.vue"
+export {
+  MODEL_SWITCHER_CONTEXT,
+  provideModelSwitcherContext,
+  useModelSwitcherContext,
+} from "../../components/chrome/modelSwitcherContext.js"
+export { createModelInventory, MODEL_INVENTORY_FRESH_MS } from "../../composables/modelInventory.js"
+// The one production slash menu, its completion composable and its keyboard
+// policy. Both hosts (the Dashboard ChatPanel and the VS Code webview) consume
+// these through this seam, so the menu, the completion inventory filtering, the
+// marker lifecycle and the ArrowUp/Down/Tab/Enter/Escape handling can never
+// drift into a reduced native fallback.
+export { default as SlashCommandMenu } from "../../components/chat/SlashCommandMenu.vue"
+export { useSlashCommandCompletion } from "../../composables/useSlashCommandCompletion.js"
+export { handleSlashKeydown } from "./slashKeyboard.js"

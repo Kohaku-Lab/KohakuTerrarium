@@ -506,6 +506,7 @@ export default {
   "status.noTargetSelected": "尚未选取目标",
   "status.modelSwitchHint": "只有 Root 与智能体分页可切换模型。",
   "status.modelSwitchError": "切换模型失败",
+  "modelSwitcher.metadataUnconfirmed": "模型已切换，但无法确认更新后的配置：{message}",
   "status.promptIn": "提示词输入",
   "status.tokenUsage": "Token 使用量",
   "status.runningJobs": "运行中的作业",

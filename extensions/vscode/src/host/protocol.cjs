@@ -15,6 +15,10 @@ const ALLOWED = new Set([
   'http.subagentSavedConversation',
   'http.subagentSend',
   'http.promote',
+  'http.modelDirectory',
+  'http.commandInventory',
+  'http.switchModel',
+  'http.instanceMetadata',
   'http.interrupt',
   'context.compact',
   'context.clear',
@@ -194,6 +198,31 @@ function allowedMessage(message) {
         hasText(message.creature) &&
         hasText(message.jobId) &&
         hasOnlyFields(message, ['type', 'requestId', 'session', 'creature', 'jobId'])
+      )
+    // Model/slash + instance-metadata surfaces: each fixed host route carries the
+    // stable target identities, the canonical selector and the ready-ownership epoch.
+    case 'http.modelDirectory':
+      // Host-global read: only the ready epoch fences it, so no target identity
+      // may be smuggled into the envelope.
+      return validPositiveInt(message.readyId) && hasOnlyFields(message, ['type', 'requestId', 'readyId'])
+    case 'http.commandInventory':
+      return (
+        hasText(message.session) &&
+        hasText(message.creature) &&
+        validPositiveInt(message.readyId) &&
+        hasOnlyFields(message, ['type', 'requestId', 'session', 'creature', 'readyId'])
+      )
+    case 'http.switchModel':
+      return (
+        hasText(message.session) &&
+        hasText(message.creature) &&
+        hasText(message.model) &&
+        validPositiveInt(message.readyId) &&
+        hasOnlyFields(message, ['type', 'requestId', 'session', 'creature', 'model', 'readyId'])
+      )
+    case 'http.instanceMetadata':
+      return (
+        hasText(message.session) && validPositiveInt(message.readyId) && hasOnlyFields(message, ['type', 'requestId', 'session', 'readyId'])
       )
     case 'media.prepare':
       return (

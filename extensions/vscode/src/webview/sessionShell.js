@@ -17,7 +17,10 @@ function chatInstance(session) {
 }
 
 export function createSessionShell({ api, chat }) {
-  async function attach(session, creatureId) {
+  // ``isCurrent`` fences an in-flight attach against a newer selection: the
+  // Host may answer a superseded ``session.select`` late, so we never rebind a
+  // socket for a selection that has already moved on.
+  async function attach(session, creatureId, { isCurrent = () => true } = {}) {
     const selected = session.creatures.find((creature) => creature.id === creatureId)
     if (!selected?.id) throw Error('Unknown Creature target')
     const instance = chatInstance(session)
@@ -25,7 +28,9 @@ export function createSessionShell({ api, chat }) {
       session: session.runtimeId,
       creatureId: selected.id,
     })
+    if (!isCurrent()) return null
     chat.unbindFromInstance()
+    if (!isCurrent()) return null
     chat.initForInstance(instance, { initialTab: selected.name, autoReconnect: false })
     return {
       session,
@@ -68,6 +73,6 @@ export function createSessionShell({ api, chat }) {
       })
       chat.unbindFromInstance()
     },
-    open: (session, creatureId) => attach(session, creatureId),
+    open: (session, creatureId, options) => attach(session, creatureId, options),
   }
 }

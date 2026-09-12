@@ -52,6 +52,21 @@ describe("ChatComposer", () => {
     expect(touch.emitted("submit")).toBeUndefined()
   })
 
+  it("honors an explicit host send-on-enter override over the compact shell default", async () => {
+    // A host that pins Enter as the submit key keeps it even while the compact
+    // chrome collapses; only presentation changes, not the keyboard contract.
+    const pinned = mountComposer({ modelValue: "hello", compactMode: true, sendOnEnter: true })
+    await pinned.find("textarea").trigger("keydown", { key: "Enter" })
+    await flushPromises()
+    expect(pinned.emitted("submit")).toHaveLength(1)
+    await pinned.find("textarea").trigger("keydown", { key: "Enter", shiftKey: true })
+    expect(pinned.emitted("submit")).toHaveLength(1)
+
+    const newline = mountComposer({ modelValue: "hello", sendOnEnter: false })
+    await newline.find("textarea").trigger("keydown", { key: "Enter" })
+    expect(newline.emitted("submit")).toBeUndefined()
+  })
+
   it("uses one semantic action slot for send or stop and emits actions", async () => {
     const wrapper = mountComposer({ modelValue: "hello" })
     const send = wrapper.get('button[aria-label="Send message"]')

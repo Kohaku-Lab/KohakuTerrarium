@@ -1,4 +1,11 @@
-import { buildMessageParts, ChatComposer, ChatTranscriptSection, ConversationMessage, MarkdownRenderer } from '@kohakuterrarium/chat-ui'
+import {
+  buildMessageParts,
+  ChatComposer,
+  ChatTranscriptSection,
+  ConversationMessage,
+  MarkdownRenderer,
+  ModelSwitcher,
+} from '@kohakuterrarium/chat-ui'
 import 'virtual:uno.css'
 import { computed, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
@@ -8,10 +15,11 @@ import { bootWebview } from './boot.mjs'
 import { BridgeWebSocket } from './bridge.js'
 import { renderCarbonIcon } from './carbonIcons.mjs'
 import { bindComposerBuffer } from './composerBuffer.mjs'
+import { useComposerSlash } from './composerSlash.mjs'
 import { installGoalBridge } from './goalBridge.mjs'
-import { installHistoryBridge } from './historyBridge.mjs'
-import { installSubagentBridge } from './subagentBridge.mjs'
+import { installHostFacades } from './hostFacades.mjs'
 import { installHostMediaResolver } from './mediaHostBridge.mjs'
+import { installExtensionModelSwitcher } from './modelSwitcherHost.mjs'
 import { applyContextCommandOutcome } from './contextCommandResult.mjs'
 import { createHostAcceptedChat, createObservedWebSocket } from './hostAcceptedChat.mjs'
 import { createConversationScrollController, isNearBottom } from './conversationScroll.mjs'
@@ -25,6 +33,7 @@ import { createReadyCoordinator } from './readyCoordinator.mjs'
 import { settleRequestMessage } from './requestDemux.mjs'
 import { createSelectionVersionOwner } from './selectionVersion.mjs'
 import { createSessionShell } from './sessionShell.js'
+import { createSessionActions, createTargetSelector } from './sessionActions.mjs'
 import { createSubmitGate, isComposerSubmitDisabled } from './submitGate.mjs'
 import { applyTopologySelection } from './topologySelection.mjs'
 import { createTranscriptBindings } from './transcriptWindow.mjs'
@@ -75,13 +84,24 @@ const App = {
     const automatic = ref(true)
     const sessions = ref([])
     const currentSession = ref(null)
+    // Bumped on every backend/ready ownership change (new connection or reset);
+    // the shared model picker keys its directory cache and drawer invalidation
+    // on it, so a new host never leaks the previous host's models.
+    const hostEpoch = ref(0)
     // Reactive ready epoch: the fetch fence AND the media generation a leaf re-resolves against.
     const latestReadyRequestId = ref(null)
-    const composerOwner = () => ({
-      readyId: latestReadyRequestId.value,
-      runtimeId: currentSession.value?.session?.runtimeId,
-      creatureId: currentSession.value?.targetCreatureId,
-    })
+    const composerOwner = () => {
+      // ``admittedReadyId`` is the epoch whose selection is actually armed. The
+      // requested ``readyId`` advances before ``ready.result``; a model request
+      // must not dispatch on it while a new reconcile is still outstanding.
+      const admitted = available.value && activeSelectionReadyId !== null && activeSelectionReadyId === latestReadyRequestId.value
+      return {
+        readyId: latestReadyRequestId.value,
+        admittedReadyId: admitted ? activeSelectionReadyId : null,
+        runtimeId: currentSession.value?.session?.runtimeId,
+        creatureId: currentSession.value?.targetCreatureId,
+      }
+    }
     const draftBuckets = createConversationDrafts(composerOwner)
     const { model: draft, revision: draftRevision } = bindComposerBuffer(draftBuckets)
     const attachmentBuckets = createConversationAttachments(composerOwner)
@@ -99,6 +119,7 @@ const App = {
     let activeSelectionReadyId = null
     BridgeWebSocket.getReadyId = () => activeSelectionReadyId
     onBeforeUnmount(() => (BridgeWebSocket.getReadyId = () => null))
+
     const currentConversationOwnership = () => ({ ...composerOwner(), name: currentSession.value?.target })
     const conversationOwnership = createConversationOwnership(currentConversationOwnership)
     const submitGate = createSubmitGate()
@@ -138,7 +159,21 @@ const App = {
       select: ({ session, creatureId }) => selectionRequest('session.select', { session, creatureId }),
     }
     const shell = createSessionShell({ api, chat })
+    const selectTarget = createTargetSelector({
+      shell,
+      currentSession,
+      error,
+      getReadyId: () => activeSelectionReadyId,
+      getOperationEpoch: () => selectionOperationEpoch,
+    })
+    installExtensionModelSwitcher({
+      chat,
+      getSession: () => currentSession.value,
+      selectTarget,
+      getHostEpoch: () => hostEpoch.value,
+    })
     const tab = computed(() => currentSession.value?.target || '')
+    const slash = useComposerSlash({ chat, draft, tab })
     const messages = computed(() => chat.messagesByTab[tab.value] || [])
     const scrollIdentity = computed(() =>
       JSON.stringify([currentSession.value?.session?.runtimeId, currentSession.value?.targetCreatureId]),
@@ -184,8 +219,7 @@ const App = {
       scroll.dispose()
       paging.dispose()
     })
-    onBeforeUnmount(installHistoryBridge({ request }))
-    onBeforeUnmount(installSubagentBridge({ request }))
+    for (const uninstall of installHostFacades({ request, getOwner: composerOwner })) onBeforeUnmount(uninstall)
 
     const reloadSessions = async () => (sessions.value = await shell.list())
 
@@ -200,7 +234,6 @@ const App = {
         setSessions: (value) => (sessions.value = value),
         isCurrent,
       })
-
     let composerConnectionId = null
     let selectionOperationEpoch = 0
     let notificationReadyId = null
@@ -214,7 +247,10 @@ const App = {
       attachmentRevision.value += 1
     }
     function acceptComposerConnection(connectionId) {
-      if (composerConnectionId !== connectionId) clearComposerBuckets()
+      if (composerConnectionId !== connectionId) {
+        clearComposerBuckets()
+        hostEpoch.value += 1
+      }
       composerConnectionId = connectionId
     }
     const readyCoordinator = createReadyCoordinator({
@@ -245,6 +281,7 @@ const App = {
           selectionOperationEpoch++
           activeSelectionReadyId = null
           notificationReadyId = null
+          hostEpoch.value += 1
           chat.unbindFromInstance()
           currentSession.value = null
           sessions.value = []
@@ -256,6 +293,7 @@ const App = {
         selectionOperationEpoch++
         activeSelectionReadyId = null
         notificationReadyId = null
+        hostEpoch.value += 1
         available.value = false
         chat.unbindFromInstance()
         currentSession.value = null
@@ -266,61 +304,17 @@ const App = {
 
     const reconcileSessions = () => readyCoordinator.reconcile()
 
-    async function createSession() {
-      busy.value = true
-      error.value = ''
-      try {
-        currentSession.value = await shell.create()
-        await reloadSessions()
-      } catch (cause) {
-        error.value = cause.message
-      } finally {
-        busy.value = false
-      }
-    }
-
-    async function resumeSession(session) {
-      busy.value = true
-      error.value = ''
-      try {
-        currentSession.value = await shell.resume(session.savedName)
-        await reloadSessions()
-      } catch (cause) {
-        error.value = cause.message
-      } finally {
-        busy.value = false
-      }
-    }
-
-    async function stopSession() {
-      if (!currentSession.value?.targetCreatureId) return
-      busy.value = true
-      error.value = ''
-      try {
-        await shell.stop(currentSession.value)
-        currentSession.value = null
-        await reloadSessions()
-      } catch (cause) {
-        error.value = cause.message
-      } finally {
-        busy.value = false
-      }
-    }
-
-    async function openSession(session, creatureId) {
-      busy.value = true
-      error.value = ''
-      try {
-        currentSession.value = await shell.open(session, creatureId)
-      } catch (cause) {
-        error.value = cause.message
-      } finally {
-        busy.value = false
-      }
-    }
+    const { createSession, resumeSession, stopSession, openSession } = createSessionActions({
+      shell,
+      currentSession,
+      busy,
+      error,
+      reloadSessions,
+    })
 
     async function send({ text = draft.value, attachments: submittedAttachments = attachments.value } = {}) {
       if ((!text.trim() && submittedAttachments.length === 0) || !currentSession.value?.target) return
+      if (slash.chooseAtSubmit()) return
       const submitToken = submitGate.acquire(currentConversationOwnership())
       if (!submitToken) return
       submitRevision.value += 1
@@ -332,7 +326,7 @@ const App = {
         await conversationOwnership.dispatch(async (assertCurrent) => {
           const content = submitted.length ? await buildMessageParts(submittedText, submitted) : submittedText
           assertCurrent()
-          return hostAcceptedChat.send(content)
+          return slash.send(submittedText, assertCurrent, () => hostAcceptedChat.send(content))
         })
         if (draftBuckets.clearSubmitted(submittedText, submittedDraft)) draftRevision.value += 1
         attachmentBuckets.removeSubmitted(submitted, submittedOwner)
@@ -424,6 +418,7 @@ const App = {
       BridgeWebSocket.receive(message)
       if (message?.type === 'configuration.changed') {
         clearComposerBuckets()
+        hostEpoch.value += 1
         BridgeWebSocket.disposeAll(Error('KohakuTerrarium configuration changed'))
         rejectPending(Error('KohakuTerrarium configuration changed'))
         chat.unbindFromInstance()
@@ -480,6 +475,7 @@ const App = {
             h('h1', 'KohakuTerrarium'),
             h('p', available.value ? (automatic.value ? 'Connected locally' : 'Connected by override') : 'Waiting for local KT'),
           ]),
+          available.value && currentSession.value?.target ? h(ModelSwitcher, { class: 'header-model' }) : null,
         ]),
         h('section', { class: 'session-region', 'aria-label': 'Sessions' }, [
           h('div', { class: 'session-toolbar' }, [
@@ -562,6 +558,7 @@ const App = {
             ? h(
                 ChatComposer,
                 {
+                  ...slash.props.value,
                   modelValue: draft.value,
                   attachments: attachments.value,
                   processing: !!chat.processingByTab[tab.value],
@@ -586,6 +583,7 @@ const App = {
                   onError: onComposerError,
                 },
                 {
+                  suggestions: slash.suggestions,
                   'compact-icon': () => renderCarbonIcon('collapse-all'),
                   'clear-icon': () => renderCarbonIcon('clean'),
                 },

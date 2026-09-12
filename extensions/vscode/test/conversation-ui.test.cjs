@@ -100,7 +100,7 @@ test('VS Code composer uses managed attachment conversion and preserves state un
   assert.match(webview, /maxAttachmentBytes:\s*10 \* 1024 \* 1024/)
   assert.match(webview, /maxImageBytes:\s*5 \* 1024 \* 1024/)
   assert.match(webview, /createHostAcceptedChat\(\{ BridgeWebSocket, chat \}\)/)
-  assert.match(webview, /return hostAcceptedChat\.send\(content\)/)
+  assert.match(webview, /return slash\.send\(submittedText, assertCurrent, \(\) => hostAcceptedChat\.send\(content\)\)/)
   assert.match(webview, /hostAcceptedChat[\s\S]*\.submitUIReply\(tab\.value, message\.eventId/)
   assert.doesNotMatch(webview, /outcome\.(?:accepted|queued)/)
   assert.match(webview, /if \(conversationOwnership\.isCurrent\(submittedOwner\)\)[\s\S]*scroll\.forceFollow\(\)/)

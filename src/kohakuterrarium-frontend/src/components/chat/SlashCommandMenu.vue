@@ -1,6 +1,7 @@
 <template>
   <div v-if="open" id="slash-command-menu" class="absolute inset-x-0 bottom-full z-40 mb-2 max-h-80 overflow-y-auto rounded-xl border border-warm-200 bg-white shadow-xl dark:border-warm-700 dark:bg-warm-800" role="listbox" :aria-label="t('chat.slash.available')">
     <div v-if="loading" class="px-3 py-2 text-xs text-warm-500">{{ t("chat.slash.loading") }}</div>
+    <div v-else-if="error" class="px-3 py-2 text-xs text-red-600 dark:text-red-400" role="alert">{{ t("chat.slash.error") }}</div>
     <div v-else-if="!visualEntries.length" class="px-3 py-2 text-xs text-warm-500">{{ t("chat.slash.empty") }}</div>
     <template v-for="item in visualEntries" :key="item.key">
       <div v-if="item.heading" class="bg-warm-50 px-3 py-1 text-[10px] font-semibold uppercase tracking-wide text-warm-500 dark:bg-warm-900/60">
@@ -22,6 +23,7 @@ import { useI18n } from "@/utils/i18n"
 const props = defineProps({
   open: { type: Boolean, default: false },
   loading: { type: Boolean, default: false },
+  error: { type: String, default: "" },
   entries: { type: Array, default: () => [] },
   selectedIndex: { type: Number, default: 0 },
 })

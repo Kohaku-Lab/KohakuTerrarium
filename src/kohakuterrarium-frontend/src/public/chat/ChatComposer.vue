@@ -61,6 +61,8 @@ const props = defineProps({
   processing: { type: Boolean, default: false },
   disabled: { type: Boolean, default: false },
   compactMode: { type: Boolean, default: false },
+  // Null derives Enter behavior from compact/touch mode; a boolean overrides it.
+  sendOnEnter: { type: Boolean, default: null },
   showContextActions: { type: Boolean, default: true },
   contextActionsDisabled: { type: Boolean, default: false },
   showAttachmentActions: { type: Boolean, default: true },
@@ -120,7 +122,11 @@ function onBlur(event) {
 }
 function onKeydown(event) {
   emit("keydown", event)
-  if (!event.defaultPrevented && !props.disabled && shouldSendOnEnter(event, { isCompact: props.compactMode, isTouch: props.touch })) {
+  if (event.defaultPrevented || props.disabled) return
+  const pinned = props.sendOnEnter
+  const isCompact = pinned === null ? props.compactMode : !pinned
+  const isTouch = pinned === null ? props.touch : !pinned
+  if (shouldSendOnEnter(event, { isCompact, isTouch })) {
     event.preventDefault()
     submit()
   }

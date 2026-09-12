@@ -571,6 +571,8 @@ export default {
   "status.noTargetSelected": "No target selected",
   "status.modelSwitchHint": "Model switching is available on root and creature tabs.",
   "status.modelSwitchError": "Failed to switch model",
+  "modelSwitcher.metadataUnconfirmed":
+    "Model switched, but the updated configuration could not be confirmed: {message}",
   "status.promptIn": "Prompt in",
   "status.tokenUsage": "Token Usage",
   "status.runningJobs": "Running Jobs",

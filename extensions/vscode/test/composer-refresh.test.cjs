@@ -70,6 +70,7 @@ test('real App preserves text and files across pending Refresh, isolates creatur
       requests.push(message)
       queueMicrotask(() => {
         if (message.type === 'session.list' && !holdList) reply(message, [session])
+        if (message.type === 'http.commandInventory') reply(message, { commands: [{ name: 'goal', aliases: [] }], skills: [] })
         if (message.type === 'http.history') reply(message, { events: [] })
         if (message.type === 'http.historyPage')
           reply(message, {
@@ -318,6 +319,7 @@ test('real App preserves text and files across pending Refresh, isolates creatur
     }
     const firstGoal = await submitGoal('/goal list')
     assert.ok(firstGoal, 'pure goal reaches the Host rather than the no-op shim')
+    assert.ok(requests.some((message) => message.type === 'http.commandInventory' && message.readyId === readyId))
     assert.equal(firstGoal.args, 'list')
     assert.equal(firstGoal.readyId, readyId)
     assert.equal(firstGoal.selectionVersion, selectionVersion)
