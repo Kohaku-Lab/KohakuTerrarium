@@ -56,6 +56,7 @@ from kohakuterrarium.session.migrations import (
     migration_marker,
     path_for_version,
 )
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.resume import detect_session_type, resume_agent
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
@@ -558,6 +559,12 @@ class TestSessionIntegration:
         # ---- version probe + session-type detection on the closed file ----
         # detect_format_version reads the stamped version off disk.
         assert detect_format_version(session_path) == FORMAT_VERSION
+        source_bytes = session_path.read_bytes()
+        source_mtime = session_path.stat().st_mtime_ns
+        assert detect_format_version(session_path.as_uri()) == FORMAT_VERSION
+        assert read_session_meta(session_path.as_uri())["agents"] == ["scribe"]
+        assert session_path.read_bytes() == source_bytes
+        assert session_path.stat().st_mtime_ns == source_mtime
         # A missing path is a hard FileNotFoundError, not a silent 1.
         with pytest.raises(FileNotFoundError):
             detect_format_version(tmp_path / "nope.kohakutr.v2")

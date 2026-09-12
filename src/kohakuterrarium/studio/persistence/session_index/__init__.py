@@ -19,6 +19,7 @@ from kohakuterrarium.studio.persistence.session_index.entry import (
     SessionIndexEntry,
 )
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.studio.persistence.session_index.hooks import (
     SessionIndexHook,
     push_index_update,
@@ -84,7 +85,7 @@ def _default_session_dir() -> Path:
     """
     env = os.environ.get("KT_SESSION_DIR")
     if env:
-        return Path(env)
+        return coerce_fs_path(env)
     return config_dir() / "sessions"
 
 
@@ -99,7 +100,7 @@ def get_session_index_default(session_dir: Path | None = None) -> SessionIndex:
     """
     if session_dir is None:
         session_dir = _default_session_dir()
-    normalized_dir = Path(session_dir).expanduser().resolve(strict=False)
+    normalized_dir = coerce_fs_path(session_dir).expanduser().resolve(strict=False)
     cache_key = os.path.normcase(str(normalized_dir))
     with _singleton_lock:
         cached = _singletons.get(cache_key)

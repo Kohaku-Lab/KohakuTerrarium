@@ -7,6 +7,7 @@ versioned suffixes so original sources remain intact.
 from pathlib import Path
 
 from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -21,7 +22,7 @@ def detect_format_version(path: str | Path) -> int:
     Only metadata is opened. Missing or invalid version values resolve to version
     1, whose files predate the explicit field.
     """
-    p = Path(path)
+    p = coerce_fs_path(path)
     if not p.exists():
         raise FileNotFoundError(p)
     try:

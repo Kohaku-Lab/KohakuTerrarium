@@ -9,6 +9,7 @@ from typing import Any
 
 from kohakuvault import KVault
 
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -33,11 +34,7 @@ def _load_meta(path: str | Path) -> dict[str, Any]:
 
 def read_session_meta(path: str | Path) -> dict[str, Any]:
     """Return metadata without creating WAL, SHM, schema, or status writes."""
-    source = Path(path).expanduser().resolve(strict=True)
-    wal = Path(f"{source}-wal")
-    if not wal.exists():
-        return _load_meta(f"file:{source.as_posix()}?mode=ro&immutable=1")
-
+    source = coerce_fs_path(path).expanduser().resolve(strict=True)
     tmp = Path(tempfile.mkdtemp(prefix="kt-session-read-"))
     try:
         target = tmp / source.name
