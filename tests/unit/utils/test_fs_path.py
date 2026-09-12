@@ -1,5 +1,6 @@
 """Unit tests for :mod:`kohakuterrarium.utils.fs_path`."""
 
+import os
 from pathlib import Path
 
 import pytest
@@ -22,9 +23,25 @@ class TestCoerceFsPath:
         assert not mangled.startswith("file:///")
         assert coerce_fs_path(mangled) == target
 
-    def test_remote_file_uri_rejected(self):
-        with pytest.raises(ValueError, match="unsupported file URI"):
-            coerce_fs_path("file://host/share/x.png")
+    def test_windows_drive_triple_slash_uri(self):
+        got = coerce_fs_path("file:///C:/Users/me/x.png")
+        assert got.name == "x.png"
+        assert "Users" in got.parts
+        assert got.as_posix().endswith("C:/Users/me/x.png")
+
+    def test_windows_pathlib_mangled_backslash_form(self):
+        got = coerce_fs_path(r"file:\C:\Users\me\x.png")
+        assert got.name == "x.png"
+        assert "Users" in got.parts
+        assert got.as_posix().endswith("C:/Users/me/x.png")
+
+    def test_remote_file_uri(self):
+        raw = "file://host/share/x.png"
+        if os.name == "nt":
+            assert coerce_fs_path(raw) == Path(r"\\host\share\x.png")
+        else:
+            with pytest.raises(ValueError, match="unsupported file URI"):
+                coerce_fs_path(raw)
 
     def test_empty_rejected(self):
         with pytest.raises(ValueError, match="non-empty"):

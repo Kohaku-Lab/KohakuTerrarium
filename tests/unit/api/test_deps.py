@@ -36,6 +36,11 @@ class TestSessionDir:
         monkeypatch.setenv("KT_SESSION_DIR", "/custom/path")
         assert _session_dir() == "/custom/path"
 
+    def test_file_uri_env_override(self, tmp_path, monkeypatch):
+        target = (tmp_path / "sessions").resolve()
+        monkeypatch.setenv("KT_SESSION_DIR", target.as_uri())
+        assert _session_dir() == str(target)
+
     def test_kt_config_dir_overrides_default_subdir(self, tmp_path, monkeypatch):
         # When KT_SESSION_DIR is unset, KT_CONFIG_DIR drives the fallback
         # — pollution-safe by construction.
