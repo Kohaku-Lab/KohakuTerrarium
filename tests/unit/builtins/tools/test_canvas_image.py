@@ -7,11 +7,14 @@ Studio canvas actually keys on.
 """
 
 from pathlib import Path
+from urllib.parse import unquote
 
+import pytest
 from PIL import Image
 
-from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.llm.message import ImagePart
+from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.modules.tool.base import ToolContext
 
 
@@ -68,6 +71,48 @@ def _image_part(result) -> ImagePart:
 
 
 class TestCanvasImagePromotes:
+    @pytest.mark.parametrize("names", [("out.png", "out.png"), ("a b.png", "a_b.png")])
+    async def test_publications_preserve_prior_bytes(self, tmp_path, names):
+        store = SessionStore(str(tmp_path / "run.kohakutr"))
+        try:
+            paths = []
+            for folder, name, color in zip(("left", "right"), names, ("red", "blue")):
+                directory = tmp_path / folder
+                directory.mkdir()
+                path = directory / name
+                Image.new("RGB", (2, 2), color).save(path)
+                paths.append(path)
+            ctx = _ctx(tmp_path, agent=_Agent(store))
+            first = await CanvasImageTool()._execute({"path": str(paths[0])}, ctx)
+            second = await CanvasImageTool()._execute({"path": str(paths[1])}, ctx)
+            first_url = _image_part(first).url
+            second_url = _image_part(second).url
+            assert first_url != second_url
+            for url, source in ((first_url, paths[0]), (second_url, paths[1])):
+                relative = unquote(url.split("/artifacts/", 1)[1])
+                assert (
+                    store.artifacts_dir / relative
+                ).read_bytes() == source.read_bytes()
+
+            original = paths[0].read_bytes()
+            Image.new("RGB", (2, 2), "green").save(paths[0])
+            updated = await CanvasImageTool()._execute({"path": str(paths[0])}, ctx)
+            repeated = await CanvasImageTool()._execute({"path": str(paths[0])}, ctx)
+            assert _image_part(updated).url != first_url
+            assert _image_part(repeated).url == _image_part(updated).url
+            relative = unquote(first_url.split("/artifacts/", 1)[1])
+            assert (store.artifacts_dir / relative).read_bytes() == original
+        finally:
+            store.close()
+
+    async def test_rejects_unsupported_decoded_format(self, tmp_path):
+        path = tmp_path / "disguised.png"
+        Image.new("RGB", (2, 2), "red").save(path, "TIFF")
+        result = await CanvasImageTool()._execute({"path": str(path)}, _ctx(tmp_path))
+        assert result.error
+        assert "unsupported" in result.error
+        assert result.metadata.get("canvas_preview") is None
+
     async def test_missing_path_errors(self, tmp_path):
         result = await CanvasImageTool()._execute({}, _ctx(tmp_path))
         assert result.error

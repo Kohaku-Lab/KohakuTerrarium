@@ -29,11 +29,13 @@ import asyncio
 from typing import Any
 
 import pytest
+from PIL import Image
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
 from kohakuterrarium.builtins.tools import web_search
+from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
@@ -1494,7 +1496,9 @@ class TestModulesIntegration:
         finally:
             await agent.stop()
 
-    async def test_tool_executes_direct_mode_feeds_controller(self, make_agent):
+    async def test_tool_executes_direct_mode_feeds_controller(
+        self, make_agent, tmp_path
+    ):
         """tool protocol — a real DIRECT-mode tool is dispatched by the
         controller from a ``[/...]`` block, the executor runs it, and the
         result is fed back into the controller's conversation so the next
@@ -1523,11 +1527,28 @@ class TestModulesIntegration:
                     "[/recorder]@@msg=explode\n[recorder/]", match="trigger a failure"
                 ),
                 ScriptEntry("handled the failure", match="deliberate explosion"),
+                ScriptEntry(
+                    f"[/canvas_image]@@path={tmp_path / 'out.png'}\n[canvas_image/]",
+                    match="publish first image",
+                ),
+                ScriptEntry("first image published", match="Canvas:"),
+                ScriptEntry(
+                    f"[/canvas_image]@@path={tmp_path / 'out.png'}\n[canvas_image/]",
+                    match="publish updated image",
+                ),
+                ScriptEntry("updated image published", match="Canvas:"),
             ]
         )
         tool = RecordingTool()
         agent.registry.register_tool(tool)
         agent.executor.register_tool(tool)
+        canvas_tool = CanvasImageTool()
+        agent.registry.register_tool(canvas_tool)
+        agent.executor.register_tool(canvas_tool)
+        store = SessionStore(str(tmp_path / "canvas.kohakutr"))
+        store.init_meta("canvas", "agent", "", str(tmp_path), [agent.config.name])
+        agent.attach_session_store(store)
+        agent.workspace.set(tmp_path)
 
         await agent.start()
         try:
@@ -1578,8 +1599,31 @@ class TestModulesIntegration:
             assert "recorder failed: deliberate explosion" in convo_text
             last = agent.controller.conversation.get_last_assistant_message()
             assert "handled the failure" in last.get_text_content()
+            image_path = tmp_path / "out.png"
+            Image.new("RGB", (2, 2), "red").save(image_path)
+            original = image_path.read_bytes()
+            await agent._process_event(create_user_input_event("publish first image"))
+            artifacts = list((store.artifacts_dir / "canvas_images").rglob("*.png"))
+            assert len(artifacts) == 1, [
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()[-3:]
+            ]
+            first_artifact = artifacts[0]
+            assert first_artifact.read_bytes() == original
+            Image.new("RGB", (2, 2), "blue").save(image_path)
+            await agent._process_event(create_user_input_event("publish updated image"))
+            artifacts = list((store.artifacts_dir / "canvas_images").rglob("*.png"))
+            assert len(artifacts) == 2
+            assert first_artifact.read_bytes() == original
+            assert {p.read_bytes() for p in artifacts} == {
+                original,
+                image_path.read_bytes(),
+            }
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert last.get_text_content() == "updated image published"
         finally:
             await agent.stop()
+            store.close()
 
     async def test_web_search_backend_switch_executes_and_resumes(
         self, make_agent, monkeypatch, tmp_path

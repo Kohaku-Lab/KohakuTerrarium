@@ -1,5 +1,6 @@
 """Promote a local image file onto the Studio canvas."""
 
+import hashlib
 import io
 from pathlib import Path
 from typing import Any
@@ -100,7 +101,7 @@ class CanvasImageTool(BaseTool):
             return ToolResult(error=f"Failed to read image: {e}")
 
         verified = _verify_image(data)
-        if verified is None:
+        if verified not in _PIL_FORMAT_TO_EXT:
             return ToolResult(
                 error=(
                     f"File {path} is not a valid image, or its format "
@@ -108,7 +109,7 @@ class CanvasImageTool(BaseTool):
                 )
             )
 
-        lang = _PIL_FORMAT_TO_EXT.get(verified, suffix.lstrip(".") or "png")
+        lang = _PIL_FORMAT_TO_EXT[verified]
         url = _display_url(file_path, data, context)
         resolved = str(file_path.resolve())
 
@@ -144,7 +145,8 @@ class CanvasImageTool(BaseTool):
 def _display_url(file_path: Path, data: bytes, context: ToolContext | None) -> str:
     store = getattr(getattr(context, "agent", None), "session_store", None)
     if store is not None and hasattr(store, "write_artifact"):
-        rel = f"canvas_images/{_safe_filename(file_path.name)}"
+        digest = hashlib.sha256(data).hexdigest()
+        rel = f"canvas_images/{digest}/{_safe_filename(file_path.name)}"
         try:
             disk_path = store.write_artifact(rel, data)
             return artifact_served_url(store, rel, disk_path)
