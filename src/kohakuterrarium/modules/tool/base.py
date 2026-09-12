@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 from kohakuterrarium.builtin_skills import get_builtin_tool_doc
 from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.modules.tool.runtime_options import validate_tool_options
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -63,7 +64,7 @@ class ToolContext:
 
     def resolve_path(self, path_str: str) -> Path:
         """Resolve relative paths against the agent directory, not process cwd."""
-        p = Path(path_str).expanduser()
+        p = coerce_fs_path(path_str)
         if not p.is_absolute():
             return (self.working_dir / p).resolve()
         return p.resolve()
@@ -78,7 +79,7 @@ def resolve_tool_path(path_str: str, context: ToolContext | None = None) -> Path
     """Resolve a path against agent context when one is available."""
     if context:
         return context.resolve_path(path_str)
-    return Path(path_str).expanduser().resolve()
+    return coerce_fs_path(path_str).resolve()
 
 
 def has_interactive_responder(router: Any) -> bool:

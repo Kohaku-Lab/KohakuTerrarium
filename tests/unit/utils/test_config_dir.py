@@ -36,6 +36,17 @@ class TestConfigDir:
         assert out == override
         assert out.is_dir()
 
+    def test_file_uri_env_creates_the_named_directory(self, monkeypatch, tmp_path):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        named = tmp_path / "elsewhere"
+        monkeypatch.setenv("KT_CONFIG_DIR", named.resolve().as_uri())
+        out = config_dir()
+        assert out == named.resolve()
+        assert named.is_dir()
+        assert not (cwd / "file:").exists()
+
     def test_env_override_with_user_expansion(self, monkeypatch, tmp_path):
         # ``~/foo`` should expand to ``<home>/foo``.
         monkeypatch.setenv("KT_CONFIG_DIR", os.path.join("~", "kt-test-cd"))

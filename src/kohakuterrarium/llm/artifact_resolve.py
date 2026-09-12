@@ -9,14 +9,13 @@ import base64
 import re
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
-from urllib.request import url2pathname
 
 from kohakuterrarium.studio.persistence.artifacts import (
     resolve_artifact_file,
     resolve_artifacts_dir,
 )
 from kohakuterrarium.studio.persistence.store import _session_dir
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,10 +43,10 @@ def file_reference_path(url: str) -> Path | None:
     """Return the local path a ``file://`` reference names, or ``None``."""
     if not isinstance(url, str) or not url.startswith(_FILE_SCHEME):
         return None
-    parsed = urlparse(url)
-    if parsed.scheme != "file" or parsed.netloc not in ("", "localhost"):
+    try:
+        return coerce_fs_path(url)
+    except ValueError:
         return None
-    return Path(url2pathname(parsed.path))
 
 
 def _local_media_path(url: str) -> Path | None:

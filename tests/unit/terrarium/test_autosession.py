@@ -76,6 +76,21 @@ class TestAutosessionViaSessionDir:
         finally:
             reopened.close(update_status=False)
 
+    async def test_file_uri_session_dir_mints_into_the_named_directory(
+        self, tmp_path, monkeypatch
+    ):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        sess_dir = tmp_path / "runs"
+        t = Terrarium(session_dir=sess_dir.resolve().as_uri())
+        try:
+            c = await t.add_creature(_prebuilt("alice"), start=False)
+            assert (sess_dir / f"{c.creature_id}.kohakutr").exists()
+            assert not (cwd / "file:").exists()
+        finally:
+            await t.shutdown()
+
     async def test_shutdown_closes_owned_store_when_stop_cancelled(self, tmp_path):
         # The stop loop can be cancelled mid-await; store closure runs in
         # a ``finally`` so a leaked writer lock (which blocks any later
@@ -140,6 +155,21 @@ class TestSessionArg:
             assert reopened.load_meta()["status"] == "paused"
         finally:
             reopened.close(update_status=False)
+
+    async def test_explicit_file_uri_mints_the_named_store(self, tmp_path, monkeypatch):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        target = tmp_path / "sub" / "student-42.kohakutr"
+        t = Terrarium()
+        try:
+            await t.add_creature(
+                _prebuilt("grader"), start=False, session=target.resolve().as_uri()
+            )
+            assert target.exists()
+            assert not (cwd / "file:").exists()
+        finally:
+            await t.shutdown()
 
     async def test_true_uses_default_dir(self, tmp_path, monkeypatch):
         monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "envdir"))

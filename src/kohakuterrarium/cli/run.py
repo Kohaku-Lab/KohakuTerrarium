@@ -22,6 +22,7 @@ from kohakuterrarium.packages.resolve import resolve_any_path
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.utils.config_dir import config_dir
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import (
     configure_utf8_stdio,
     enable_stderr_logging,
@@ -43,7 +44,7 @@ def _session_dir() -> Path:
     """Resolve the CLI session root using the shared configuration rules."""
     explicit = os.environ.get("KT_SESSION_DIR")
     if explicit:
-        return Path(explicit).expanduser()
+        return coerce_fs_path(explicit)
     docs_default = Path.home() / ".kohakuterrarium" / "sessions"
     if _SESSION_DIR != docs_default:
         return _SESSION_DIR

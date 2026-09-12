@@ -23,6 +23,7 @@ from kohakuterrarium.api.auth.engine_pool import EnginePool, _user_session_dir
 from kohakuterrarium.api.auth.models import User
 from kohakuterrarium.studio.hooks import register_group_hooks
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -44,7 +45,7 @@ def _session_dir() -> str:
     """
     explicit = os.environ.get("KT_SESSION_DIR")
     if explicit:
-        return explicit
+        return str(coerce_fs_path(explicit))
     return str(config_dir() / "sessions")
 
 
