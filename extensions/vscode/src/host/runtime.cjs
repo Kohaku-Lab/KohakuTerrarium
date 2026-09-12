@@ -90,8 +90,26 @@ class RuntimeHost {
     return selection
   }
 
+  // Saved sub-agent routes address a session, not a creature. The stable target
+  // identity is the selected session; the exact selected object still fences the
+  // read so an explicit reselect or a ready reset invalidates it.
+  requireSelectedSession(message) {
+    const selection = this.state.selection
+    if (!selection || selection.session !== message.session) throw Error('Selected Creature ownership changed')
+    return selection
+  }
+
   ownsHistoryRead(selected, readyId, intent) {
     return !this.disposed && readyId === this.runtimeEpoch && this.state.selection === selected && intent === this.selectionIntentVersion
+  }
+
+  // The sub-agent read/mutation fence. Admission is the selected object identity,
+  // the ready epoch and the explicit-intent version; a notification-ordering
+  // ``selectionVersion`` advance from an unchanged-target topology refresh must
+  // not reject a read captured before the refresh, while a real reselect/switch
+  // (new selection object + intent bump) or a ready reset still invalidates it.
+  ownsSelectedRead(selected, readyId, intent) {
+    return this.ownsHistoryRead(selected, readyId, intent)
   }
 
   enqueueSelectionOperation(operation) {
@@ -419,6 +437,63 @@ class RuntimeHost {
             : await this.client.historyDetail(selected.session, selected.creature, message.params || {})
         if (!this.ownsHistoryRead(selected, readyId, intent)) throw Error('Selected Creature ownership changed')
         this.post({ type: `${message.type}.result`, requestId: message.requestId, data })
+        return
+      }
+      case 'http.subagentConversation': {
+        if (!allowedMessage(message)) throw Error('Invalid subagent conversation request')
+        const selected = this.requireSelection(message)
+        const intent = this.selectionIntentVersion
+        const data = await this.client.subagentConversation(selected.session, selected.creature, message.options || {})
+        if (!this.ownsSelectedRead(selected, readyId, intent)) throw Error('Selected Creature ownership changed')
+        this.post({ type: 'http.subagentConversation.result', requestId: message.requestId, data })
+        return
+      }
+      case 'http.subagentList':
+      case 'http.subagentSavedConversation': {
+        if (!allowedMessage(message))
+          throw Error(
+            message.type === 'http.subagentList' ? 'Invalid subagent runs request' : 'Invalid saved subagent conversation request',
+          )
+        const selected = this.requireSelectedSession(message)
+        const intent = this.selectionIntentVersion
+        const data =
+          message.type === 'http.subagentList'
+            ? await this.client.listSubagents(selected.session, message.options || {})
+            : await this.client.savedSubagentConversation(selected.session, message.options || {})
+        if (!this.ownsSelectedRead(selected, readyId, intent)) throw Error('Selected Creature ownership changed')
+        this.post({ type: `${message.type}.result`, requestId: message.requestId, data })
+        return
+      }
+      case 'http.subagentSend': {
+        if (!allowedMessage(message)) throw Error('Invalid subagent send request')
+        const selected = this.requireSelection(message)
+        const intent = this.selectionIntentVersion
+        // A send is a mutation: serialized with selection changes, admitted before
+        // and after the await, and never wrapped in a retry/timeout that would
+        // disguise whether the backend actually received it.
+        const data = await this.enqueueSelectionOperation(async () => {
+          if (this.disposed || this.state.selection !== selected || intent !== this.selectionIntentVersion)
+            throw Error('Selected Creature ownership changed')
+          return this.client.sendSubagentMessage(selected.session, selected.creature, message.name, {
+            content: message.content,
+            jobId: message.jobId,
+          })
+        })
+        if (!this.ownsSelectedRead(selected, readyId, intent)) throw Error('Selected Creature ownership changed')
+        this.post({ type: 'http.subagentSend.result', requestId: message.requestId, data })
+        return
+      }
+      case 'http.promote': {
+        if (!allowedMessage(message)) throw Error('Invalid promote request')
+        const selected = this.requireSelection(message)
+        const intent = this.selectionIntentVersion
+        const data = await this.enqueueSelectionOperation(async () => {
+          if (this.disposed || this.state.selection !== selected || intent !== this.selectionIntentVersion)
+            throw Error('Selected Creature ownership changed')
+          return this.client.promote(selected.session, selected.creature, message.jobId)
+        })
+        if (!this.ownsSelectedRead(selected, readyId, intent)) throw Error('Selected Creature ownership changed')
+        this.post({ type: 'http.promote.result', requestId: message.requestId, data })
         return
       }
       case 'http.interrupt': {

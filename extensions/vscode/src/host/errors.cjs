@@ -37,6 +37,23 @@ function publicError(type) {
         code: 'history_failed',
         message: 'Could not load chat history for the selected Creature.',
       }
+    case 'http.subagentConversation':
+    case 'http.subagentList':
+    case 'http.subagentSavedConversation':
+      return {
+        code: 'subagent_history_failed',
+        message: 'Could not load the sub-agent conversation.',
+      }
+    case 'http.subagentSend':
+      return {
+        code: 'subagent_send_failed',
+        message: 'Could not send to the sub-agent. It may no longer be live.',
+      }
+    case 'http.promote':
+      return {
+        code: 'promote_failed',
+        message: 'Could not move the task to the background.',
+      }
     case 'http.interrupt':
       return {
         code: 'interrupt_failed',

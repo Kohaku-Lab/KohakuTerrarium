@@ -10,6 +10,7 @@ import { renderCarbonIcon } from './carbonIcons.mjs'
 import { bindComposerBuffer } from './composerBuffer.mjs'
 import { installGoalBridge } from './goalBridge.mjs'
 import { installHistoryBridge } from './historyBridge.mjs'
+import { installSubagentBridge } from './subagentBridge.mjs'
 import { installHostMediaResolver } from './mediaHostBridge.mjs'
 import { applyContextCommandOutcome } from './contextCommandResult.mjs'
 import { createHostAcceptedChat, createObservedWebSocket } from './hostAcceptedChat.mjs'
@@ -183,8 +184,8 @@ const App = {
       scroll.dispose()
       paging.dispose()
     })
-
     onBeforeUnmount(installHistoryBridge({ request }))
+    onBeforeUnmount(installSubagentBridge({ request }))
 
     const reloadSessions = async () => (sessions.value = await shell.list())
 

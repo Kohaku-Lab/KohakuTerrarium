@@ -111,14 +111,16 @@
 </template>
 
 <script setup>
-import { inject } from "vue"
+import { computed, inject } from "vue"
 
-import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
-import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
-import SubagentConversationPanel from "@/components/subagents/SubagentConversationPanel.vue"
 import { useChatStore } from "@/stores/chat"
-import { safeArtifactUrl, safeMediaParts } from "@/utils/artifacts"
-import { useI18n } from "@/utils/i18n"
+
+import MarkdownRenderer from "../../public/chat/MarkdownRenderer.vue"
+import { safeArtifactUrl, safeMediaParts } from "../../public/chat/mediaRefs.js"
+import { usePlatformOrigin } from "../../public/chat/platformOrigin.js"
+import { useI18n } from "../../utils/i18n"
+import SubagentConversationPanel from "../subagents/SubagentConversationPanel.vue"
+import VideoFilePreview from "./VideoFilePreview.vue"
 
 const props = defineProps({
   tc: { type: Object, required: true },
@@ -129,7 +131,12 @@ const props = defineProps({
 const emit = defineEmits(["toggle"])
 const chat = inject("chatStore", null) || useChatStore()
 const { t } = useI18n()
-const markdownOrigin = window.location.origin
+// The shared platform-origin seam (installed by the host) owns the origin
+// tool-result Markdown links resolve against. It is left uninstalled by the
+// Dashboard, which keeps the browser origin; the VS Code webview installs an
+// explicit value so its opaque document origin is never treated as backend.
+const platformOrigin = usePlatformOrigin()
+const markdownOrigin = computed(() => (platformOrigin !== undefined ? platformOrigin : typeof window !== "undefined" ? window.location.origin : null))
 const mediaParts = computed(() => safeMediaParts(props.tc.resultParts))
 // The tool's media policy (``session_metadata.media``) decides whether its
 // media is pinned above the fold; absent metadata keeps the pinned default.

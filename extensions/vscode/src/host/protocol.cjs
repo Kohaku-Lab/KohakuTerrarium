@@ -10,6 +10,11 @@ const ALLOWED = new Set([
   'http.history',
   'http.historyPage',
   'http.historyDetail',
+  'http.subagentConversation',
+  'http.subagentList',
+  'http.subagentSavedConversation',
+  'http.subagentSend',
+  'http.promote',
   'http.interrupt',
   'context.compact',
   'context.clear',
@@ -47,6 +52,14 @@ function hasText(value) {
 const HISTORY_PAGE_FIELDS = ['limit', 'before', 'after', 'history_id', 'stream']
 const HISTORY_DETAIL_FIELDS = ['stream', 'ref', 'history_id']
 const HISTORY_STREAMS = new Set(['events', 'snapshot', 'channel'])
+
+// Sub-agent surfaces. ``run`` identifies a persisted run; ``jobId`` a live one;
+// ``name`` a sub-agent name; ``parent`` the owning creature. The Host owns each
+// fixed route, so a live read and a saved read are separate messages and the
+// saved surface has no send counterpart at all.
+const SUBAGENT_LIVE_FIELDS = ['jobId', 'name', 'run']
+const SUBAGENT_LIST_FIELDS = ['parent', 'jobId', 'name']
+const SUBAGENT_SAVED_FIELDS = ['parent', 'jobId', 'name', 'run']
 
 // Media envelopes are the exact closed surfaces the Webview may send. ``path`` may
 // be a canonical artifact route OR a raw file path: the Host's canonical route
@@ -97,6 +110,20 @@ function validHistoryOptions(value, fields) {
   return true
 }
 
+function validSubagentField(key, value) {
+  if (value == null) return true
+  if (key === 'run') return (typeof value === 'string' && value.length > 0) || Number.isSafeInteger(value)
+  return typeof value === 'string' && value.length > 0
+}
+
+function validSubagentOptions(value, fields) {
+  if (value === undefined) return true
+  if (!isPlainObject(value)) return false
+  const keys = Object.keys(value)
+  if (!keys.every((key) => fields.includes(key))) return false
+  return keys.every((key) => validSubagentField(key, value[key]))
+}
+
 function allowedMessage(message) {
   if (!message || typeof message !== 'object' || Array.isArray(message)) return false
   if (!ALLOWED.has(message.type) || Object.hasOwn(message, 'id')) return false
@@ -131,6 +158,42 @@ function allowedMessage(message) {
         hasText(message.params.stream) &&
         hasText(message.params.ref) &&
         hasText(message.params.history_id)
+      )
+    case 'http.subagentConversation':
+      return (
+        hasText(message.session) &&
+        hasText(message.creature) &&
+        hasOnlyFields(message, ['type', 'requestId', 'session', 'creature', 'options']) &&
+        validSubagentOptions(message.options, SUBAGENT_LIVE_FIELDS)
+      )
+    case 'http.subagentList':
+      return (
+        hasText(message.session) &&
+        hasOnlyFields(message, ['type', 'requestId', 'session', 'options']) &&
+        validSubagentOptions(message.options, SUBAGENT_LIST_FIELDS)
+      )
+    case 'http.subagentSavedConversation':
+      return (
+        hasText(message.session) &&
+        hasOnlyFields(message, ['type', 'requestId', 'session', 'options']) &&
+        validSubagentOptions(message.options, SUBAGENT_SAVED_FIELDS)
+      )
+    case 'http.subagentSend':
+      return (
+        hasText(message.session) &&
+        hasText(message.creature) &&
+        hasText(message.name) &&
+        typeof message.content === 'string' &&
+        message.content.length > 0 &&
+        (message.jobId === undefined || hasText(message.jobId)) &&
+        hasOnlyFields(message, ['type', 'requestId', 'session', 'creature', 'name', 'content', 'jobId'])
+      )
+    case 'http.promote':
+      return (
+        hasText(message.session) &&
+        hasText(message.creature) &&
+        hasText(message.jobId) &&
+        hasOnlyFields(message, ['type', 'requestId', 'session', 'creature', 'jobId'])
       )
     case 'media.prepare':
       return (

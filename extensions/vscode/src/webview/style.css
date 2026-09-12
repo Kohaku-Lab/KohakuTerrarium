@@ -36,7 +36,6 @@ p {
   --kt-conversation-surface-raised: var(--vscode-sideBar-background);
   --kt-conversation-border: var(--vscode-panel-border);
   --kt-conversation-accent: var(--vscode-textLink-foreground);
-  --kt-conversation-tool: var(--vscode-charts-blue);
   --kt-conversation-warning: var(--vscode-charts-yellow);
   --kt-conversation-error: var(--vscode-errorForeground);
   --kt-conversation-success: var(--vscode-testing-iconPassed);

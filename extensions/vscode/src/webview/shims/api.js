@@ -9,7 +9,9 @@ export const terrariumAPI = {
     return globalThis.__ktVsCodeGoal(graph, target, args)
   },
   sendToChannel: async () => {},
-  promoteCreatureTask: async () => {},
+  getSubagentConversation: subagentDelegate('__ktVsCodeSubagentConversation'),
+  sendSubagentMessage: subagentDelegate('__ktVsCodeSubagentSend'),
+  promoteCreatureTask: subagentDelegate('__ktVsCodePromote'),
 }
 
 // The shared chat store imports ``sessionAPI`` for saved (v1) session history,
@@ -22,13 +24,36 @@ function unsupportedSavedHistory(operation) {
   }
 }
 
+// Saved sub-agent discovery/conversation are read-only delegates; there is no
+// saved send. Each named delegate maps to exactly one fixed Host route.
 export const sessionAPI = {
   getHistoryPage: unsupportedSavedHistory('history paging'),
   getHistoryDetail: unsupportedSavedHistory('history detail'),
+  listSubagents: subagentDelegate('__ktVsCodeSubagentList'),
+  getSubagentConversation: subagentDelegate('__ktVsCodeSavedSubagentConversation'),
 }
 
 export const agentAPI = {
   regenerate: async () => {},
   editMessage: async () => {},
   rewindTo: async () => {},
+}
+
+// Resolve one Host facade installed by ``subagentBridge`` at webview setup. A
+// missing delegate rejects explicitly (never a silent no-op) and the Host's safe
+// HTTP status is presented in the ``error.response.status`` shape the shared
+// sub-agent leaf reads to tell a 409 conflict from a plain failure. No backend
+// body is synthesised; only the status the Host already forwarded crosses over.
+function subagentDelegate(name) {
+  return (...args) =>
+    Promise.resolve()
+      .then(() => {
+        const delegate = globalThis[name]
+        if (typeof delegate !== 'function') throw Error('Sub-agent bridge is unavailable')
+        return delegate(...args)
+      })
+      .catch((error) => {
+        if (error && Number.isSafeInteger(error.status) && error.response == null) error.response = { status: error.status }
+        throw error
+      })
 }

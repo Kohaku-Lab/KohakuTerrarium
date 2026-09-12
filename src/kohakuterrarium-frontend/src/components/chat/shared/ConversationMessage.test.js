@@ -230,7 +230,7 @@ describe("ConversationMessage", () => {
     expect(wrapper.find(".kt-conversation-compact__summary").exists()).toBe(false)
   })
 
-  it("preserves legacy assistant text before fallback tool calls", () => {
+  it("preserves legacy assistant text before the shared production tool block", () => {
     const wrapper = mount(ConversationMessage, {
       props: {
         message: {
@@ -244,10 +244,13 @@ describe("ConversationMessage", () => {
     })
 
     const parts = wrapper.findAll(".kt-conversation-part")
-    expect(parts.map((part) => part.text())).toEqual(["legacy answer", "readdone+"])
+    expect(parts[0].text()).toBe("legacy answer")
+    // The shared ToolCallBlock (not a native fallback) renders the tool call.
+    expect(parts[1].find('[role="button"]').exists()).toBe(true)
+    expect(parts[1].text()).toContain("read")
   })
 
-  it("batches consecutive plain tools and falls back to legacy tool calls when parts are empty", async () => {
+  it("batches consecutive plain tools into the shared production ToolCallBatch", async () => {
     const wrapper = mount(ConversationMessage, {
       props: {
         message: {
@@ -263,7 +266,7 @@ describe("ConversationMessage", () => {
       },
     })
 
-    expect(wrapper.find(".kt-conversation-tool-batch").exists()).toBe(true)
+    expect(wrapper.find(".kt-conversation-part.is-tool-batch").exists()).toBe(true)
     expect(wrapper.text()).toContain("3 tool calls")
   })
 
@@ -446,7 +449,7 @@ describe("ConversationMessage", () => {
     expect(wrapper.get(".reasoning-full").text()).toContain("streamed")
   })
 
-  it("renders tools with the native shared renderer when no host renderer is injected", async () => {
+  it("renders tool parts with the shared production ToolCallBlock when no host renderer is injected", async () => {
     const wrapper = mount(ConversationMessage, {
       props: {
         message: {
@@ -459,7 +462,7 @@ describe("ConversationMessage", () => {
 
     expect(wrapper.text()).toContain("bash")
     expect(wrapper.text()).not.toContain("ok")
-    await wrapper.get("button.kt-conversation-tool__header").trigger("click")
+    await wrapper.get('[role="button"]').trigger("click")
     expect(wrapper.text()).toContain("ok")
   })
 })

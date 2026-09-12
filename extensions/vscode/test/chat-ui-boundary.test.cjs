@@ -9,13 +9,17 @@ const root = path.resolve(__dirname, '..')
 const frontendRoot = path.resolve(root, '..', '..', 'src', 'kohakuterrarium-frontend')
 const frontendSource = path.join(frontendRoot, 'src')
 const publicEntry = path.join(frontendSource, 'public', 'chat', 'index.js')
+// Hosts consume the shared chat package through the one public boundary.
 const consumers = [
   path.join(frontendSource, 'components', 'chat', 'ChatMessage.vue'),
   path.join(frontendSource, 'components', 'chat', 'ChatPanel.vue'),
-  path.join(frontendSource, 'components', 'chat', 'ToolCallBatch.vue'),
   path.join(root, 'src', 'webview', 'index.js'),
   path.join(root, 'src', 'webview', 'transcriptPaging.mjs'),
 ]
+// Production chat leaves are themselves re-exported by the public entry, so they
+// must keep reaching their siblings RELATIVELY. Importing the package they are a
+// part of would be an import cycle through the very entry that re-exports them.
+const leafProducers = [path.join(frontendSource, 'components', 'chat', 'ToolCallBatch.vue')]
 const read = (file) => fs.readFileSync(file, 'utf8')
 
 test('Extension independently owns shared Markdown SFC build dependencies', async () => {
@@ -61,6 +65,23 @@ test('Chat UI production consumers use only the public package-style boundary', 
   }
 })
 
+test('Chat UI production leaves import their siblings relatively instead of the package', () => {
+  for (const file of leafProducers) {
+    const source = read(file)
+    // A leaf the entry re-exports must never import that entry: doing so closes
+    // an import cycle through the package root.
+    assert.doesNotMatch(
+      source,
+      /from ['"]@kohakuterrarium\/chat-ui['"]/,
+      `${file} must not import the entry that re-exports it (import cycle)`,
+    )
+    // The private ban still applies: a production leaf reaches its siblings by
+    // relative path, never through a private shared/internal module.
+    assert.doesNotMatch(source, /components\/chat\/shared|utils\/chatToolGrouping|shared\/.+\.css/, file)
+    assert.match(source, /from ['"]\.\.?\//, `${file} must import its siblings relatively`)
+  }
+})
+
 test('public entry owns the required API and component CSS', () => {
   assert.equal(fs.existsSync(publicEntry), true)
   const entry = read(publicEntry)
@@ -79,6 +100,13 @@ test('public entry owns the required API and component CSS', () => {
   // the Dashboard and the VS Code webview render the same component instead of
   // forking a second copy behind a private path.
   assert.match(entry, /export \{ default as CommandResultMessage \} from "\.\.\/\.\.\/components\/chat\/CommandResultMessage\.vue"/)
+
+  // The shared tool leaves and the nested sub-agent surface are the production
+  // components both hosts render; each is re-exported by the one public entry so
+  // neither host forks a second copy behind a private path.
+  for (const leaf of ['UIEventBlock', 'ToolCallBlock', 'ToolCallBatch', 'SubagentConversationPanel', 'VideoFilePreview']) {
+    assert.match(entry, new RegExp(`export \\{ default as ${leaf} \\}`), leaf)
+  }
 
   const message = read(path.join(frontendSource, 'components/chat/shared/ConversationMessage.js'))
   const transcript = read(path.join(frontendSource, 'components/chat/shared/ChatTranscriptSection.js'))

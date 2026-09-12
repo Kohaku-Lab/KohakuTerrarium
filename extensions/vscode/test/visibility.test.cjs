@@ -1,13 +1,20 @@
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
+const { pathToFileURL } = require('node:url')
 
-const sourcePath = path.resolve(__dirname, '..', 'src', 'webview', 'shims', 'visibility.js')
+// The alias boundary now re-exports the production pure helper, so this loads
+// the real `.mjs` (whose relative import Node resolves) rather than a data-URI
+// copy. A cache-busting query keeps each test on a fresh module instance.
+const sourcePath = path.resolve(__dirname, '..', 'src', 'webview', 'shims', 'visibility.mjs')
 
 async function loadShim() {
-  const source = fs.readFileSync(sourcePath, 'utf8')
-  return import(`data:text/javascript;base64,${Buffer.from(source).toString('base64')}#${Date.now()}-${Math.random()}`)
+  return import(`${pathToFileURL(sourcePath).href}?v=${Date.now()}-${Math.random()}`)
+}
+
+function flushMicrotasks() {
+  // Two rounds settle the callback promise and the settled-handler chained to it.
+  return Promise.resolve().then(() => Promise.resolve())
 }
 
 function fakeEnvironment(state = 'visible') {
@@ -40,6 +47,9 @@ function fakeEnvironment(state = 'visible') {
     timers,
     cleared,
     listeners,
+    lastTimer() {
+      return timers[timers.length - 1]
+    },
     setVisibility(next) {
       global.document.visibilityState = next
       for (const listener of [...listeners]) listener()
@@ -126,6 +136,169 @@ test('visibility interval started hidden waits and catches up when visible', asy
     env.setVisibility('visible')
     assert.equal(calls, 1)
     assert.equal(env.timers.length, 1)
+    controller.stop()
+  } finally {
+    env.restore()
+  }
+})
+
+// RED before the fix: the old shim dropped the callback's returned promise, so
+// a slow backend stacked one overlapping 1.5s transcript poll per tick. The
+// in-flight skip makes the second synchronous tick a no-op.
+test('skips ticks while the previous async callback is still in flight', async () => {
+  const env = fakeEnvironment()
+  try {
+    const { createVisibilityInterval } = await loadShim()
+    let resolveFirst
+    let calls = 0
+    const controller = createVisibilityInterval(() => {
+      calls++
+      return new Promise((resolve) => {
+        resolveFirst = resolve
+      })
+    }, 1500)
+
+    controller.start()
+    const timer = env.lastTimer()
+    timer.callback()
+    timer.callback()
+    assert.equal(calls, 1)
+
+    resolveFirst()
+    await flushMicrotasks()
+    timer.callback()
+    assert.equal(calls, 2)
+    controller.stop()
+  } finally {
+    env.restore()
+  }
+})
+
+test('keeps polling after the in-flight callback rejects', async () => {
+  const env = fakeEnvironment()
+  try {
+    const { createVisibilityInterval } = await loadShim()
+    let rejectFirst
+    let calls = 0
+    const controller = createVisibilityInterval(() => {
+      calls++
+      return new Promise((_resolve, reject) => {
+        rejectFirst = reject
+      })
+    }, 1500)
+
+    controller.start()
+    const timer = env.lastTimer()
+    timer.callback()
+    timer.callback()
+    assert.equal(calls, 1)
+
+    rejectFirst(new Error('boom'))
+    await flushMicrotasks()
+    timer.callback()
+    assert.equal(calls, 2)
+    controller.stop()
+  } finally {
+    env.restore()
+  }
+})
+
+test('stop() disposes the in-flight guard so a restart polls immediately', async () => {
+  const env = fakeEnvironment()
+  try {
+    const { createVisibilityInterval } = await loadShim()
+    let resolveFirst
+    let calls = 0
+    const controller = createVisibilityInterval(() => {
+      calls++
+      return new Promise((resolve) => {
+        resolveFirst = resolve
+      })
+    }, 1500)
+
+    controller.start()
+    env.timers[0].callback()
+    assert.equal(calls, 1)
+
+    controller.stop()
+    controller.start()
+    env.timers[1].callback()
+    assert.equal(calls, 2)
+
+    resolveFirst()
+    await flushMicrotasks()
+    controller.stop()
+  } finally {
+    env.restore()
+  }
+})
+
+test('a promise settling from a previous run never clears the current run guard', async () => {
+  const env = fakeEnvironment()
+  try {
+    const { createVisibilityInterval } = await loadShim()
+    const resolvers = []
+    let calls = 0
+    const controller = createVisibilityInterval(() => {
+      calls++
+      return new Promise((resolve) => {
+        resolvers.push(resolve)
+      })
+    }, 1500)
+
+    controller.start()
+    env.timers[0].callback()
+    assert.equal(calls, 1)
+
+    controller.stop()
+    controller.start()
+    env.timers[1].callback()
+    assert.equal(calls, 2)
+
+    // The stale first-run promise settles — it must not free the live guard.
+    resolvers[0]()
+    await flushMicrotasks()
+    env.timers[1].callback()
+    assert.equal(calls, 2)
+
+    resolvers[1]()
+    await flushMicrotasks()
+    env.timers[1].callback()
+    assert.equal(calls, 3)
+    controller.stop()
+  } finally {
+    env.restore()
+  }
+})
+
+test('visibility resume skips the catch-up tick while a request is in flight', async () => {
+  const env = fakeEnvironment()
+  try {
+    const { createVisibilityInterval } = await loadShim()
+    let resolveFirst
+    let calls = 0
+    const controller = createVisibilityInterval(() => {
+      calls++
+      return new Promise((resolve) => {
+        resolveFirst = resolve
+      })
+    }, 1500)
+
+    controller.start()
+    env.timers[0].callback()
+    assert.equal(calls, 1)
+
+    env.setVisibility('hidden')
+    env.setVisibility('visible')
+    // Resume fires a catch-up tick, but the in-flight request skips it and the
+    // interval is re-armed instead of stacking a duplicate.
+    assert.equal(calls, 1)
+    assert.equal(env.timers.length, 2)
+
+    resolveFirst()
+    await flushMicrotasks()
+    env.timers[1].callback()
+    assert.equal(calls, 2)
     controller.stop()
   } finally {
     env.restore()

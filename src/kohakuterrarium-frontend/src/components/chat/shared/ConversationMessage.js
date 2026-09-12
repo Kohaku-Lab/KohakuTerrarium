@@ -4,6 +4,8 @@ import "./conversation-message.css"
 
 import { MediaImage } from "../../../public/chat/MediaPreview.js"
 import { computeRenderGroups } from "../../../public/chat/chatToolGrouping.js"
+import ToolCallBatch from "../ToolCallBatch.vue"
+import ToolCallBlock from "../ToolCallBlock.vue"
 import VideoFilePreview from "../VideoFilePreview.vue"
 import UIEventBlock from "../UIEventBlock.vue"
 
@@ -12,12 +14,7 @@ function plainText(content) {
 }
 
 function renderedText(renderer, content, breaks = false) {
-  return renderer ? renderer(content || "", breaks) : plainText(content)
-}
-
-function toolResult(tool) {
-  if (tool.result == null) return ""
-  return typeof tool.result === "string" ? tool.result : JSON.stringify(tool.result, null, 2)
+  return renderer ? renderer(content, breaks) : plainText(content)
 }
 
 function compactLabel(message) {
@@ -29,75 +26,6 @@ function compactLabel(message) {
 }
 
 let compactSummaryId = 0
-
-const NativeTool = defineComponent({
-  name: "NativeConversationTool",
-  props: { tool: { type: Object, required: true } },
-  setup(props) {
-    const expanded = ref(false)
-    return () =>
-      h("section", { class: "kt-conversation-tool" }, [
-        h(
-          "button",
-          {
-            class: "kt-conversation-tool__header",
-            type: "button",
-            "aria-expanded": expanded.value,
-            onClick: () => (expanded.value = !expanded.value),
-          },
-          [
-            h("span", { class: `kt-conversation-tool__status is-${props.tool.status || "idle"}` }),
-            h("strong", props.tool.name || "tool"),
-            h("span", { class: "kt-conversation-tool__summary" }, props.tool.status || ""),
-            h("span", { class: "kt-conversation-tool__chevron" }, expanded.value ? "−" : "+"),
-          ],
-        ),
-        expanded.value
-          ? h(
-              "pre",
-              { class: "kt-conversation-tool__result" },
-              toolResult(props.tool) || "(no output)",
-            )
-          : null,
-      ])
-  },
-})
-
-const NativeToolBatch = defineComponent({
-  name: "NativeConversationToolBatch",
-  props: { tools: { type: Array, required: true } },
-  setup(props) {
-    const expanded = ref(false)
-    return () =>
-      h("section", { class: "kt-conversation-tool-batch" }, [
-        h(
-          "button",
-          {
-            type: "button",
-            class: "kt-conversation-tool__header",
-            "aria-expanded": expanded.value,
-            onClick: () => (expanded.value = !expanded.value),
-          },
-          [
-            h("strong", `${props.tools.length} tool calls`),
-            h(
-              "span",
-              { class: "kt-conversation-tool__summary" },
-              props.tools.map((tool) => tool.name || "tool").join(", "),
-            ),
-            h("span", { class: "kt-conversation-tool__chevron" }, expanded.value ? "−" : "+"),
-          ],
-        ),
-        expanded.value
-          ? h(
-              "div",
-              { class: "kt-conversation-tool-batch__items" },
-              props.tools.map((tool) => h(NativeTool, { key: tool.id || tool.name, tool })),
-            )
-          : null,
-      ])
-  },
-})
 
 export default defineComponent({
   name: "ConversationMessage",
@@ -113,6 +41,11 @@ export default defineComponent({
   setup(props, { emit }) {
     const compactExpanded = ref(false)
     const expandedReasoning = reactive(new Set())
+    // Per-message tool/batch disclosure. The Dashboard injects its own
+    // ``renderContentPart`` and keeps its ``expandedTools`` map; this state is
+    // the default for any host that renders the shared leaves directly (the
+    // VS Code webview), so the two hosts share one production tool surface.
+    const expandedTools = reactive({})
     const compactContentId = `kt-compact-summary-${++compactSummaryId}`
     const assistantParts = computed(() => {
       const message = props.message
@@ -129,16 +62,43 @@ export default defineComponent({
       )
     })
 
-    function renderTool(tool) {
-      return props.renderTool ? props.renderTool(tool) : h(NativeTool, { tool })
+    function toggleTool(key) {
+      expandedTools[key] = !expandedTools[key]
+    }
+
+    // Stable per-part disclosure key. A backend id is preserved verbatim so
+    // live expansion survives streaming appends; a part that arrives without
+    // one (an idless tool, or a batch whose leading tool has no id) falls back
+    // to its structural position within the message. Without the fallback every
+    // idless part collapsed onto the ``undefined`` key and one click expanded
+    // them all.
+    function expansionKey(part, index) {
+      if (part.type === "tool-batch") {
+        const firstId = part.tools?.[0]?.id
+        return firstId == null ? `tool-batch:${index}` : `batch_${firstId}`
+      }
+      return part.id == null ? `${part.type}:${index}` : part.id
+    }
+
+    // The one production tool leaf. The Dashboard overrides via ``renderTool``;
+    // every other host gets the same ToolCallBlock the Dashboard renders rather
+    // than a reduced native fallback.
+    function renderTool(tool, key) {
+      if (props.renderTool) return props.renderTool(tool)
+      return h(ToolCallBlock, {
+        tc: tool,
+        expanded: !!expandedTools[key],
+        onToggle: () => toggleTool(key),
+      })
     }
 
     function renderPart(part, index, textBreaks = false) {
+      const key = expansionKey(part, index)
       let content = props.renderContentPart ? props.renderContentPart(part) : null
       if (!content && part.type === "text")
         content = renderedText(props.renderText, part.content || part.text, textBreaks)
       else if (!content && part.type === "reasoning") {
-        const key = part.id ?? `reasoning_${index}`
+        const reasoningKey = part.id ?? `reasoning_${index}`
         const text = part.text || ""
         const previewSlice = text.slice(0, 240)
         const lastCodeUnit = previewSlice.charCodeAt(previewSlice.length - 1)
@@ -156,10 +116,10 @@ export default defineComponent({
           "details",
           {
             class: "kt-conversation-reasoning reasoning-details",
-            open: expandedReasoning.has(key),
+            open: expandedReasoning.has(reasoningKey),
             onToggle: (event) => {
-              if (event.currentTarget.open) expandedReasoning.add(key)
-              else expandedReasoning.delete(key)
+              if (event.currentTarget.open) expandedReasoning.add(reasoningKey)
+              else expandedReasoning.delete(reasoningKey)
             },
           },
           [
@@ -188,12 +148,25 @@ export default defineComponent({
                 ],
               ),
             ]),
-            expandedReasoning.has(key) ? h("pre", { class: "reasoning-full" }, fullText) : null,
+            expandedReasoning.has(reasoningKey)
+              ? h("pre", { class: "reasoning-full" }, fullText)
+              : null,
           ],
         )
-      } else if (!content && part.type === "tool") content = renderTool(part)
+      } else if (!content && part.type === "tool") content = renderTool(part, key)
       else if (!content && part.type === "tool-batch") {
-        content = h(NativeToolBatch, { tools: part.tools || [] })
+        // The shared ToolCallBatch the Dashboard also renders — its own header
+        // counters, media strip, and per-tool expand state — never a second
+        // native batch.
+        const tools = part.tools || []
+        content = h(ToolCallBatch, {
+          tools,
+          toolKeys: tools.map((tool, i) => (tool.id == null ? `${key}:tool:${i}` : tool.id)),
+          expanded: !!expandedTools[key],
+          toolExpanded: expandedTools,
+          onToggle: () => toggleTool(key),
+          onToolToggle: toggleTool,
+        })
       } else if (!content && part.type === "image_url" && part.image_url?.url) {
         // Media resolution is a host seam: the shared leaf consumes the injected
         // resolver (browser direct URL or Host-spooled webview URI).
@@ -214,9 +187,7 @@ export default defineComponent({
             )
       }
       return content
-        ? h("div", { class: `kt-conversation-part is-${part.type}`, key: part.id || index }, [
-            content,
-          ])
+        ? h("div", { class: `kt-conversation-part is-${part.type}`, key }, [content])
         : null
     }
 

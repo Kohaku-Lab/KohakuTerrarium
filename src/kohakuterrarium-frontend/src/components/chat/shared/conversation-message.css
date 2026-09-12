@@ -5,7 +5,6 @@
   --kt-conversation-surface-raised: #ffffff;
   --kt-conversation-border: #e0dbd4;
   --kt-conversation-accent: #5a4fcf;
-  --kt-conversation-tool: #0f52ba;
   --kt-conversation-warning: #d4920a;
   --kt-conversation-error: #d46b6b;
   --kt-conversation-success: #4c9989;
@@ -19,7 +18,6 @@
   --kt-conversation-surface-raised: #2a2724;
   --kt-conversation-border: #6a645f;
   --kt-conversation-accent: #ddd0f0;
-  --kt-conversation-tool: #d6e3f8;
   --kt-conversation-warning: #f5e6c8;
   --kt-conversation-error: #f5d5d5;
   --kt-conversation-success: #d4ede8;
@@ -93,7 +91,6 @@
 }
 
 .kt-conversation-reasoning pre,
-.kt-conversation-tool__result,
 .kt-conversation-banner pre {
   margin: 0.5rem 0 0;
   overflow: auto;
@@ -120,71 +117,6 @@
   font-family:
     ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
     monospace;
-  font-size: 0.75rem;
-}
-
-.kt-conversation-tool,
-.kt-conversation-tool-batch {
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--kt-conversation-tool) 24%, transparent);
-  border-radius: 0.5rem;
-}
-
-.kt-conversation-tool__header {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  padding: 0.4rem 0.65rem;
-  color: var(--kt-conversation-text);
-  background: color-mix(in srgb, var(--kt-conversation-tool) 8%, transparent);
-  border: 0;
-  cursor: pointer;
-  text-align: left;
-}
-
-.kt-conversation-tool__status {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 999px;
-  background: var(--kt-conversation-muted);
-}
-
-.kt-conversation-tool__status.is-running {
-  background: var(--kt-conversation-warning);
-}
-
-.kt-conversation-tool__status.is-done,
-.kt-conversation-tool__status.is-completed {
-  background: var(--kt-conversation-success);
-}
-
-.kt-conversation-tool__status.is-error {
-  background: var(--kt-conversation-error);
-}
-
-.kt-conversation-tool__summary {
-  flex: 1;
-  color: var(--kt-conversation-muted);
-  font-family: ui-monospace, monospace;
-  font-size: 0.75rem;
-}
-
-.kt-conversation-tool-batch__items {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.45rem;
-  border-top: 1px solid color-mix(in srgb, var(--kt-conversation-tool) 18%, transparent);
-}
-
-.kt-conversation-tool__result {
-  max-height: 16rem;
-  padding: 0.6rem 0.75rem;
-  color: var(--kt-conversation-text);
-  background: color-mix(in srgb, var(--kt-conversation-tool) 4%, transparent);
-  border-top: 1px solid color-mix(in srgb, var(--kt-conversation-tool) 18%, transparent);
-  font-family: ui-monospace, monospace;
   font-size: 0.75rem;
 }
 

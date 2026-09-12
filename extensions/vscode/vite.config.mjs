@@ -146,7 +146,7 @@ export default defineConfig({
       },
       {
         find: '@/composables/useVisibilityInterval',
-        replacement: path.join(webview, 'shims/visibility.js'),
+        replacement: path.join(webview, 'shims/visibility.mjs'),
       },
       { find: '@', replacement: frontend },
     ],

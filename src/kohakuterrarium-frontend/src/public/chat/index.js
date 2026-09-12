@@ -30,6 +30,20 @@ export { default as VideoFilePreview } from "../../components/chat/VideoFilePrev
 // the real interactive surfaces — Element Plus widgets, card Markdown, field
 // defaults, progress and safe link actions — instead of a reduced fallback.
 export { default as UIEventBlock } from "../../components/chat/UIEventBlock.vue"
+// The one production tool pair. The shared ConversationMessage renders these as
+// the default for every ``tool`` / ``tool-batch`` part, so both hosts show the
+// same ToolCallBlock/ToolCallBatch (args, result parts, media, truncation,
+// promotion, and the nested SubagentConversationPanel) instead of a reduced
+// native fallback.
+export { default as ToolCallBlock } from "../../components/chat/ToolCallBlock.vue"
+export { default as ToolCallBatch } from "../../components/chat/ToolCallBatch.vue"
+// The one production nested sub-agent conversation surface: read a persisted or
+// live run, disambiguate repeat runs through the runs selector, and send to a
+// live run. It resolves its Host API and visibility timer through the shared
+// seams (``@/utils/api`` / ``@/composables/useVisibilityInterval``), and is what
+// ToolCallBlock renders inside an expanded sub-agent. Exported so both hosts
+// consume the same instance-level poll state rather than forking a second one.
+export { default as SubagentConversationPanel } from "../../components/subagents/SubagentConversationPanel.vue"
 export { default as ChatTranscriptSection } from "../../components/chat/shared/ChatTranscriptSection.js"
 export {
   DEFAULT_TOOL_BATCH_THRESHOLD,

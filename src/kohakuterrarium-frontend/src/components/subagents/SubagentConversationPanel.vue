@@ -74,12 +74,14 @@
 <script setup>
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref, watch } from "vue"
 
-import { MarkdownRenderer } from "@kohakuterrarium/chat-ui"
-import { sessionAPI, terrariumAPI } from "@/utils/api"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import { sessionAPI, terrariumAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 
-const ToolCallBlock = defineAsyncComponent(() => import("@/components/chat/ToolCallBlock.vue"))
+import MarkdownRenderer from "../../public/chat/MarkdownRenderer.vue"
+import { usePlatformOrigin } from "../../public/chat/platformOrigin.js"
+
+const ToolCallBlock = defineAsyncComponent(() => import("../chat/ToolCallBlock.vue"))
 
 const props = defineProps({
   sessionId: { type: String, required: true },
@@ -97,7 +99,11 @@ const props = defineProps({
 defineEmits(["back"])
 
 const { t } = useI18n()
-const markdownOrigin = window.location.origin
+// The shared platform-origin seam (installed by the host) owns the origin the
+// panel's Markdown links resolve against; the Dashboard keeps the browser
+// origin, the VS Code webview installs an explicit value.
+const platformOrigin = usePlatformOrigin()
+const markdownOrigin = computed(() => (platformOrigin !== undefined ? platformOrigin : typeof window !== "undefined" ? window.location.origin : null))
 const loading = ref(false)
 const error = ref("")
 const messages = ref([])
@@ -256,7 +262,83 @@ async function selectCandidate(candidate) {
   }
 }
 
-async function loadConversation({ silent = false } = {}) {
+// Single-flight conversation reads, keyed to the panel's request generation.
+//
+// Why generation-aware rather than one global promise chain: when the target
+// changes (the props watcher) or the panel unmounts, the previous
+// generation's read may still be in flight. A single chain would make the new
+// target's read wait behind that abandoned read, so the panel would sit on its
+// spinner until the old request settles — or forever, if it never does. A read
+// is therefore only ever serialized behind another read of the SAME generation.
+//
+// Within one generation at most one read is outstanding. A silent poll tick
+// that overlaps an in-flight read is coalesced into it (the visibility poller
+// also skips its own pending tick). A NON-silent refresh — the mount/target
+// load, or the post-send refresh — is never dropped: it is held in a single
+// pending slot and issued as a fresh read once the in-flight read settles, so
+// it observes the state produced by the change that requested it. At most one
+// pending refresh is retained (a bounded slot, not an unbounded queue).
+let inflight = null // { generation, promise }
+let pendingRefresh = null // { generation, opts, promise, resolve, reject }
+
+function deferred() {
+  let resolve
+  let reject
+  const promise = new Promise((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
+function startRead(generation, opts) {
+  // Issue synchronously so an idle panel's first read (including the poller's
+  // visibility catch-up tick) is not pushed a microtask later.
+  const promise = Promise.resolve(doLoadConversation(opts))
+  const entry = { generation, promise }
+  inflight = entry
+  const clear = () => {
+    if (inflight === entry) inflight = null
+  }
+  promise.then(clear, clear)
+  return promise
+}
+
+function flushPendingRefresh() {
+  const pending = pendingRefresh
+  pendingRefresh = null
+  if (!pending) return
+  if (disposed || pending.generation !== requestGeneration) {
+    // Superseded by a newer target or a dispose: the newer load (or nothing)
+    // owns the next read, so this refresh must not fire late.
+    pending.resolve()
+    return
+  }
+  // Re-enter the single-flight entry point so the same-generation rules still
+  // apply (a poll tick may have started the next read meanwhile).
+  loadConversation(pending.opts).then(pending.resolve, pending.reject)
+}
+
+function loadConversation(opts = {}) {
+  if (disposed) return Promise.resolve()
+  const generation = requestGeneration
+  if (inflight && inflight.generation === generation) {
+    // A poll tick overlapping an in-flight read is skipped, matching the
+    // poller's own back-pressure — it must not fork a second request.
+    if (opts.silent) return inflight.promise
+    // A user-initiated refresh cannot be served by a read that began before
+    // the change it is refreshing for; hold one pending read that starts once
+    // the in-flight read settles. Repeated refreshes collapse into it.
+    if (!pendingRefresh) {
+      pendingRefresh = { generation, opts, ...deferred() }
+      inflight.promise.then(flushPendingRefresh, flushPendingRefresh)
+    }
+    return pendingRefresh.promise
+  }
+  return startRead(generation, opts)
+}
+
+async function doLoadConversation({ silent = false } = {}) {
   if (!props.sessionId || !props.parent) {
     if (!silent) error.value = t("chat.subagent.unavailable")
     return
@@ -368,5 +450,11 @@ onMounted(async () => {
 onUnmounted(() => {
   disposed = true
   stopPolling()
+  // Release anyone awaiting a queued refresh: it must never run after dispose.
+  if (pendingRefresh) {
+    const pending = pendingRefresh
+    pendingRefresh = null
+    pending.resolve()
+  }
 })
 </script>
