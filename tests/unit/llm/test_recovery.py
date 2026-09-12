@@ -49,6 +49,18 @@ class TestClassifyOpenAIError:
     def test_5xx_status_is_server(self):
         assert classify_openai_error(_HTTPError(status_code=503)) == ErrorClass.SERVER
 
+    def test_local_media_500_is_user_error_not_retried(self):
+        exc = _HTTPError(
+            "Cannot load local files without --allowed-local-media-path",
+            status_code=500,
+        )
+        assert classify_openai_error(exc) == ErrorClass.USER_ERROR
+        assert ErrorClass.USER_ERROR not in RetryPolicy().retry_classes
+
+    def test_cannot_load_local_files_500_is_user_error(self):
+        exc = _HTTPError("cannot load local files from file://", status_code=500)
+        assert classify_openai_error(exc) == ErrorClass.USER_ERROR
+
     def test_4xx_user_status_is_user_error(self):
         assert (
             classify_openai_error(_HTTPError(status_code=401)) == ErrorClass.USER_ERROR

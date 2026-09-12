@@ -91,6 +91,10 @@ _RATE_LIMIT_MARKERS = (
     "too many requests",
     "quota_exceeded",
 )
+_LOCAL_MEDIA_MARKERS = (
+    "allowed-local-media-path",
+    "cannot load local files",
+)
 _TRANSIENT_MARKERS = (
     "connection reset",
     "connection error",
@@ -136,6 +140,10 @@ def classify_openai_error(exc: BaseException) -> ErrorClass:
         or _contains_any(message, _RATE_LIMIT_MARKERS)
     ):
         return ErrorClass.RATE_LIMIT
+    if _contains_any(code, _LOCAL_MEDIA_MARKERS) or _contains_any(
+        message, _LOCAL_MEDIA_MARKERS
+    ):
+        return ErrorClass.USER_ERROR
     if isinstance(status, int) and 500 <= status <= 599:
         return ErrorClass.SERVER
     if isinstance(status, int) and status in {400, 401, 403, 404}:
