@@ -304,6 +304,40 @@ describe("canvas store — write / edit canvas_preview (Feat 1)", () => {
 })
 
 describe("canvas store — canvas_image preview", () => {
+  it("refreshes the live file fallback when the same image path is published again", () => {
+    const store = useCanvasStore()
+    const publish = (jobId) =>
+      store.scanMessage({
+        id: "same-message",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool",
+            jobId,
+            resultMeta: {
+              canvas_preview: {
+                kind: "image",
+                file_path: "/work/out.png",
+                lang: "png",
+                content: "file:///work/out.png",
+              },
+            },
+          },
+        ],
+      })
+    publish("first")
+    const firstId = store.activeId
+    const firstUrl = store.activeArtifact.content
+    publish("second")
+    expect(store.activeId).toBe(firstId)
+    expect(store.artifacts).toHaveLength(1)
+    expect(store.activeArtifact.content).not.toBe(firstUrl)
+    expect(store.activeArtifact.content).toContain("path=%2Fwork%2Fout.png")
+    const secondUrl = store.activeArtifact.content
+    publish("second")
+    expect(store.activeArtifact.content).toBe(secondUrl)
+  })
+
   it("picks up kind image as an image artifact, not code", () => {
     const store = useCanvasStore()
     const msg = {
@@ -333,7 +367,9 @@ describe("canvas store — canvas_image preview", () => {
     expect(a.type).toBe("image")
     expect(a.lang).toBe("png")
     expect(a.sourceId).toBe("file:/Users/me/out.png")
-    expect(a.content).toBe(`/api/files/raw?path=${encodeURIComponent("/Users/me/out.png")}`)
+    expect(a.content).toBe(
+      `/api/files/raw?path=${encodeURIComponent("/Users/me/out.png")}&canvas_revision=m_img%3Atool%3A0`,
+    )
   })
 
   it("keeps a session artifact URL as the image content", () => {

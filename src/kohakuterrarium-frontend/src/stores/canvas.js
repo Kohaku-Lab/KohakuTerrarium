@@ -186,10 +186,15 @@ function _setupCanvasStore() {
           if (!preview.file_path) continue
           const isImage = preview.kind === "image"
           const raw = preview.content
+          const revisionId = p.jobId || p.id || `${msg.id}:tool:${partIndex}`
+          let content = isImage ? mediaSourceUrl(raw) || raw : raw
+          if (isImage && raw.startsWith("file://") && content.startsWith("/api/files/raw?")) {
+            content += `&canvas_revision=${encodeURIComponent(revisionId)}`
+          }
           upsert({
             sourceId: `file:${preview.file_path}`,
-            revisionId: p.jobId || p.id || `${msg.id}:tool:${partIndex}`,
-            content: isImage ? mediaSourceUrl(raw) || raw : raw,
+            revisionId,
+            content,
             lang: preview.lang || (isImage ? "png" : "text"),
             type: isImage ? "image" : _guessTypeFromLang(preview.lang),
             seedName: preview.file_path,
