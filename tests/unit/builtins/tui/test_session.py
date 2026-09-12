@@ -212,19 +212,31 @@ async def test_background_tab_culling_keeps_target_history_count() -> None:
         assert session._culled_count == {"bob": 2}
 
 
-async def test_long_markdown_fence_keeps_content_and_has_visible_scrollbar() -> None:
+async def test_long_markdown_fence_keeps_content_and_has_visible_scrollbar(
+    monkeypatch,
+) -> None:
+    async def immediate_idle(_min_sleep=0):
+        return None
+
+    monkeypatch.setattr("textual.pilot.wait_for_idle", immediate_idle)
     long_path = "/" + "very-long-path-segment/" * 10 + "artifact.png"
     session = TUISession()
     await session.start()
     assert session._app is not None
 
-    async with session._app.run_test(size=(60, 20)) as pilot:
+    async with session._app.run_test(size=(60, 20)):
         session.begin_streaming()
         session.append_stream(f"```text\n{long_path}\n```")
         session.end_streaming()
-        await pilot.pause()
 
-        fence = session._app.query_one(MarkdownFence)
+        async def wait_for_fence_layout():
+            while True:
+                fence = next(iter(session._app.query(MarkdownFence)), None)
+                if fence is not None and fence.region and fence.virtual_size.width:
+                    return fence
+                await session._app.wait_for_refresh()
+
+        fence = await asyncio.wait_for(wait_for_fence_layout(), 2)
         assert fence.code == long_path
         assert long_path in fence.query_one("#code-content", Label).render().plain
         assert fence.max_scroll_x > 0
@@ -232,7 +244,7 @@ async def test_long_markdown_fence_keeps_content_and_has_visible_scrollbar() -> 
         assert fence.horizontal_scrollbar.region.height == 1
 
         fence.scroll_to(x=fence.max_scroll_x, animate=False)
-        await pilot.pause()
+        await fence.wait_for_refresh()
         assert fence.scroll_x == fence.max_scroll_x
 
 
