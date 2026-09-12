@@ -395,6 +395,25 @@ describe("canvas store — canvas_image preview", () => {
 })
 
 describe("canvas store — dismiss and cap", () => {
+  it("a new publication can restore previously seen content", () => {
+    const store = useCanvasStore()
+    const publish = (revisionId, content) =>
+      store.upsertArtifact({
+        sourceId: "file:/work/out.png",
+        revisionId,
+        content,
+        type: "image",
+      })
+    publish("call1", "a.png")
+    const latest = publish("call2", "b.png")
+    store.dismissArtifact(latest.id)
+    publish("call1", "a.png")
+    publish("call2", "b.png")
+    expect(store.artifacts).toHaveLength(0)
+    publish("call3", "a.png")
+    expect(store.activeArtifact.content).toBe("a.png")
+  })
+
   it("dismissArtifact removes a tile and a later upsert of that source stays gone", () => {
     const store = useCanvasStore()
     const first = store.upsertArtifact({ sourceId: "keep", content: "a", lang: "js" })

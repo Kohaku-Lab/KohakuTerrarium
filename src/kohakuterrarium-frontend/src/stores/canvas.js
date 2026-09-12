@@ -107,16 +107,17 @@ function _setupCanvasStore() {
     /** Upsert an artifact. Same sourceId refreshes in place without
      *  changing selection. A new sourceId appends and becomes active.
      *  A closed path stays hidden through rescan of known versions, then
-     *  reopens when content is something the strip has not seen. */
-    function upsertArtifact({ sourceId, content, lang, type, seedName }) {
+     *  reopens for a new publication or updated content. */
+    function upsertArtifact({ sourceId, content, lang, type, seedName, revisionId = null }) {
+      const revision = JSON.stringify([revisionId, content])
       if (hiddenSourceIds.value.has(sourceId)) {
         const seen = seenContentBySource.value.get(sourceId)
-        if (seen && seen.has(content)) return null
+        if (seen && seen.has(revision)) return null
         const next = new Set(hiddenSourceIds.value)
         next.delete(sourceId)
         hiddenSourceIds.value = next
       }
-      _noteSeen(sourceId, content)
+      _noteSeen(sourceId, revision)
       const existing = artifacts.value.find((a) => a.sourceId === sourceId)
       if (existing) {
         if (existing.content === content) return existing
@@ -145,7 +146,7 @@ function _setupCanvasStore() {
      *  edit tool previews, ``##canvas##`` markers, or long fenced code
      *  blocks, upserting one artifact per match. Idempotent — running
      *  twice on the same message produces the same set of artifacts. */
-    function scanMessage(msg) {
+    function scanMessage(msg, upsert = upsertArtifact) {
       if (!msg || msg.role !== "assistant") return
 
       // Image parts (provider-native ``image_gen`` outputs etc.) become
@@ -159,7 +160,7 @@ function _setupCanvasStore() {
           if (!url) continue
           const meta = p.meta || {}
           const lang = (meta.output_format || _extOfDataUrl(url) || "png").toLowerCase()
-          upsertArtifact({
+          upsert({
             sourceId: `${msg.id}:image:${imgIdx}`,
             content: url,
             lang,
@@ -178,15 +179,16 @@ function _setupCanvasStore() {
       // ``content === null`` means the file exceeded the preview cap;
       // skip those so the canvas doesn't show an empty bubble.
       if (msg.parts && Array.isArray(msg.parts)) {
-        for (const p of msg.parts) {
+        for (const [partIndex, p] of msg.parts.entries()) {
           if (p.type !== "tool") continue
           const preview = p.resultMeta?.canvas_preview
           if (!preview || preview.content == null) continue
           if (!preview.file_path) continue
           const isImage = preview.kind === "image"
           const raw = preview.content
-          upsertArtifact({
+          upsert({
             sourceId: `file:${preview.file_path}`,
+            revisionId: p.jobId || p.id || `${msg.id}:tool:${partIndex}`,
             content: isImage ? mediaSourceUrl(raw) || raw : raw,
             lang: preview.lang || (isImage ? "png" : "text"),
             type: isImage ? "image" : _guessTypeFromLang(preview.lang),
@@ -215,7 +217,7 @@ function _setupCanvasStore() {
         const body = m[2] || ""
         const lang = /lang=([\w-]+)/.exec(meta)?.[1] || "text"
         const name = /name=([^\s]+)/.exec(meta)?.[1] || null
-        upsertArtifact({
+        upsert({
           sourceId: `${msg.id}:marker:${m.index}`,
           content: body,
           lang,
@@ -232,12 +234,24 @@ function _setupCanvasStore() {
         const body = f[2] || ""
         const lines = body.split("\n").length
         if (lines < MIN_LINES_FOR_HEURISTIC) continue
-        upsertArtifact({
+        upsert({
           sourceId: `${msg.id}:fence:${f.index}`,
           content: body,
           lang,
           type: _guessTypeFromLang(lang),
         })
+      }
+    }
+
+    function scanMessages(messages) {
+      const latest = new Map()
+      for (const msg of messages) {
+        scanMessage(msg, (artifact) => {
+          latest.set(artifact.sourceId, artifact)
+        })
+      }
+      for (const artifact of latest.values()) {
+        upsertArtifact(artifact)
       }
     }
 
@@ -282,6 +296,7 @@ function _setupCanvasStore() {
       dismissed,
       upsertArtifact,
       scanMessage,
+      scanMessages,
       setActive,
       dismiss,
       dismissArtifact,
