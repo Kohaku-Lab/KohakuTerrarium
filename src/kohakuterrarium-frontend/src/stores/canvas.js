@@ -65,6 +65,7 @@ function _setupCanvasStore() {
     const activeId = ref(null)
     const dismissed = ref(false)
     const hiddenSourceIds = ref(new Set())
+    const seenContentBySource = ref(new Map())
 
     const activeArtifact = computed(
       () => artifacts.value.find((a) => a.id === activeId.value) || null,
@@ -76,6 +77,17 @@ function _setupCanvasStore() {
       const next = new Set(hiddenSourceIds.value)
       next.add(sourceId)
       hiddenSourceIds.value = next
+    }
+
+    function _noteSeen(sourceId, content) {
+      let set = seenContentBySource.value.get(sourceId)
+      if (!set) {
+        set = new Set()
+        const map = new Map(seenContentBySource.value)
+        map.set(sourceId, set)
+        seenContentBySource.value = map
+      }
+      set.add(content)
     }
 
     function _selectNewest() {
@@ -94,9 +106,17 @@ function _setupCanvasStore() {
 
     /** Upsert an artifact. Same sourceId refreshes in place without
      *  changing selection. A new sourceId appends and becomes active.
-     *  Hidden sourceIds (closed or evicted) stay off the strip. */
+     *  A closed path stays hidden through rescan of known versions, then
+     *  reopens when content is something the strip has not seen. */
     function upsertArtifact({ sourceId, content, lang, type, seedName }) {
-      if (hiddenSourceIds.value.has(sourceId)) return null
+      if (hiddenSourceIds.value.has(sourceId)) {
+        const seen = seenContentBySource.value.get(sourceId)
+        if (seen && seen.has(content)) return null
+        const next = new Set(hiddenSourceIds.value)
+        next.delete(sourceId)
+        hiddenSourceIds.value = next
+      }
+      _noteSeen(sourceId, content)
       const existing = artifacts.value.find((a) => a.sourceId === sourceId)
       if (existing) {
         if (existing.content === content) return existing
@@ -251,6 +271,7 @@ function _setupCanvasStore() {
       activeId.value = null
       dismissed.value = false
       hiddenSourceIds.value = new Set()
+      seenContentBySource.value = new Map()
     }
 
     return {

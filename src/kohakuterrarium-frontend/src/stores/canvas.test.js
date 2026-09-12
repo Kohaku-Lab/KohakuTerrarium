@@ -402,8 +402,30 @@ describe("canvas store — dismiss and cap", () => {
     store.dismissArtifact(gone.id)
     expect(store.artifacts.map((a) => a.sourceId)).toEqual(["keep"])
     expect(store.activeId).toBe(first.id)
-    store.upsertArtifact({ sourceId: "drop", content: "b2", lang: "js" })
+    store.upsertArtifact({ sourceId: "drop", content: "b", lang: "js" })
     expect(store.artifacts.map((a) => a.sourceId)).toEqual(["keep"])
+  })
+
+  it("an edit of a dismissed path puts the tile back and selects it", () => {
+    const store = useCanvasStore()
+    const gone = store.upsertArtifact({ sourceId: "file:/work/a.py", content: "v1", lang: "py" })
+    store.dismissArtifact(gone.id)
+    store.upsertArtifact({ sourceId: "file:/work/a.py", content: "v1", lang: "py" })
+    expect(store.artifacts).toHaveLength(0)
+    const back = store.upsertArtifact({ sourceId: "file:/work/a.py", content: "v2", lang: "py" })
+    expect(store.artifacts).toHaveLength(1)
+    expect(store.artifacts[0].content).toBe("v2")
+    expect(store.activeId).toBe(back.id)
+  })
+
+  it("rescan of an older version does not reopen a dismissed path", () => {
+    const store = useCanvasStore()
+    store.upsertArtifact({ sourceId: "file:/work/a.py", content: "v1", lang: "py" })
+    const latest = store.upsertArtifact({ sourceId: "file:/work/a.py", content: "v2", lang: "py" })
+    store.dismissArtifact(latest.id)
+    store.upsertArtifact({ sourceId: "file:/work/a.py", content: "v1", lang: "py" })
+    store.upsertArtifact({ sourceId: "file:/work/a.py", content: "v2", lang: "py" })
+    expect(store.artifacts).toHaveLength(0)
   })
 
   it("scanMessage does not restore a dismissed file preview", () => {
@@ -444,6 +466,9 @@ describe("canvas store — dismiss and cap", () => {
     expect(store.activeId).toBeNull()
     store.upsertArtifact({ sourceId: "a", content: "1", lang: "js" })
     expect(store.artifacts).toHaveLength(0)
+    const back = store.upsertArtifact({ sourceId: "a", content: "1-edited", lang: "js" })
+    expect(store.artifacts.map((a) => a.sourceId)).toEqual(["a"])
+    expect(store.activeId).toBe(back.id)
   })
 
   it("evicts the oldest tile once the cap is exceeded", () => {
@@ -454,7 +479,42 @@ describe("canvas store — dismiss and cap", () => {
     expect(store.artifacts).toHaveLength(MAX_CANVAS_ARTIFACTS)
     expect(store.artifacts[0].sourceId).toBe("n1")
     expect(store.artifacts.at(-1).sourceId).toBe(`n${MAX_CANVAS_ARTIFACTS}`)
-    store.upsertArtifact({ sourceId: "n0", content: "again", lang: "js" })
+    store.upsertArtifact({ sourceId: "n0", content: "0", lang: "js" })
     expect(store.artifacts.some((a) => a.sourceId === "n0")).toBe(false)
+    store.upsertArtifact({ sourceId: "n0", content: "again", lang: "js" })
+    expect(store.artifacts.at(-1).sourceId).toBe("n0")
+    expect(store.artifacts).toHaveLength(MAX_CANVAS_ARTIFACTS)
+    expect(store.artifacts.some((a) => a.sourceId === "n1")).toBe(false)
+  })
+
+  it("scanMessage reopens a dismissed file after a later edit preview", () => {
+    const store = useCanvasStore()
+    const preview = (id, content) => ({
+      id,
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          name: "edit",
+          resultMeta: {
+            canvas_preview: {
+              kind: "edit",
+              file_path: "/work/a.py",
+              lang: "py",
+              content,
+              bytes: content.length,
+              truncated: false,
+            },
+          },
+        },
+      ],
+    })
+    store.scanMessage(preview("m1", "v1"))
+    store.dismissArtifact(store.artifacts[0].id)
+    store.scanMessage(preview("m1", "v1"))
+    expect(store.artifacts).toHaveLength(0)
+    store.scanMessage(preview("m2", "v2"))
+    expect(store.artifacts).toHaveLength(1)
+    expect(store.artifacts[0].content).toBe("v2")
   })
 })
