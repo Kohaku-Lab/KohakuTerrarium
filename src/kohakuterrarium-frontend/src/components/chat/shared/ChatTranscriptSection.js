@@ -1,6 +1,7 @@
 import { cloneVNode, defineComponent, h } from "vue"
 
 import "./chat-transcript-section.css"
+import { provideMessageEditDrafts } from "./messageEditDrafts"
 
 const objectKeys = new WeakMap()
 let nextObjectKey = 0
@@ -78,6 +79,7 @@ export default defineComponent({
     "reply",
   ],
   setup(props, { emit }) {
+    provideMessageEditDrafts()
     let viewport = null
     let previousKeys = new WeakMap()
     const setViewport = (element) => {

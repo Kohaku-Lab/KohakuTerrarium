@@ -59,6 +59,12 @@ function publicError(type) {
         code: 'interrupt_failed',
         message: 'Could not stop the current turn.',
       }
+    case 'http.editMessage':
+    case 'http.regenerate':
+      return {
+        code: 'branch_mutation_failed',
+        message: 'The conversation change could not be confirmed. It may still be running; refresh before retrying.',
+      }
     case 'context.compact':
     case 'context.clear':
       return {
@@ -74,6 +80,11 @@ function publicError(type) {
       return {
         code: 'open_link_failed',
         message: 'Could not open that link.',
+      }
+    case 'platform.writeClipboard':
+      return {
+        code: 'clipboard_write_failed',
+        message: 'Could not copy the message to the clipboard.',
       }
     case 'ws.open':
     case 'ws.send':

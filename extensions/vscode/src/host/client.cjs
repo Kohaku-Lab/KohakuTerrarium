@@ -29,6 +29,24 @@ function subagentQuery(params) {
   return query ? `?${query}` : ''
 }
 
+// Branch-mutation body builder: only the nullable canonical options the shared
+// frontend sends are serialized. ``correlationId`` maps to the backend
+// ``request_id`` echo; a persisted locator expands to the durable target.
+function branchBody(options = {}) {
+  const body = {}
+  if (options.turnIndex != null) body.turn_index = options.turnIndex
+  if (options.branchView && Object.keys(options.branchView).length) body.branch_view = options.branchView
+  if (options.correlationId) body.request_id = options.correlationId
+  if (options.locator) {
+    body.target = {
+      event_id: options.locator.eventId,
+      turn_index: options.locator.turnIndex,
+      branch_id: options.locator.branchId,
+    }
+  }
+  return body
+}
+
 function titleFor(row, creatures) {
   const candidate = row.title || row.display_name || row.config_name || row.name || ''
   if (candidate && !/^graph_[A-Za-z0-9]+$/.test(candidate)) return String(candidate)
@@ -190,6 +208,33 @@ function createClient({ endpoint, token, fetchImpl = fetch }) {
     async promote(session, creature, jobId) {
       return (
         await request(`/api/sessions/${encode(session)}/creatures/${encode(creature)}/promote/${encode(jobId)}`, { method: 'POST' })
+      ).json()
+    },
+    // Regenerate a response on its fixed route. The POST blocks through the whole
+    // rerun turn, so no client timeout is applied and a long turn is never re-sent.
+    async regenerate(session, creature, options = {}) {
+      return (
+        await request(`/api/sessions/${encode(session)}/creatures/${encode(creature)}/regenerate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(branchBody(options)),
+          ...(options.signal ? { signal: options.signal } : {}),
+        })
+      ).json()
+    },
+    // Edit a persisted user message and re-run on its fixed route. ``content`` is
+    // already serialized by the webview (never a File object) and ``user_position``
+    // is the visible-user coordinate, alongside the same nullable branch options.
+    async editMessage(session, creature, msgIdx, content, target = {}) {
+      const body = { content, ...branchBody(target) }
+      if (target.userPosition != null) body.user_position = target.userPosition
+      return (
+        await request(`/api/sessions/${encode(session)}/creatures/${encode(creature)}/messages/${encode(msgIdx)}/edit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          ...(target.signal ? { signal: target.signal } : {}),
+        })
       ).json()
     },
     async interrupt(session, creature) {

@@ -15,6 +15,8 @@ export {
   validateAttachments,
 } from "./chatAttachments.js"
 export { default as ConversationMessage } from "../../components/chat/shared/ConversationMessage.js"
+// Shared message row with injected platform actions and site context.
+export { default as MessageRow } from "../../components/chat/shared/MessageRow.vue"
 // The production command-result leaf is reused verbatim by the Dashboard and
 // the VS Code webview through this package boundary; it keeps importing the
 // host i18n seam so each build graph supplies the real dictionary provider.
@@ -105,6 +107,8 @@ export {
   providePlatformLinkOpener,
   usePlatformLinkOpener,
 } from "./platformLink.js"
+// Platform and site context for the shared message row.
+export { MESSAGE_ACTIONS_KEY, provideMessageActions, useMessageActions } from "./messageActions.js"
 // Shared link policy: the single safe resolver for model-authored card/link
 // targets. Both hosts (Dashboard and the VS Code webview) resolve a link through
 // this so relative-URL, hash, `javascript:` and unknown-origin handling can never

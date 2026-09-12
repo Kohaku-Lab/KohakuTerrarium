@@ -34,9 +34,11 @@ test('VS Code conversation text uses the public shared Markdown renderer', () =>
     renderers,
     /function renderSharedText\(content, breaks = false\)\s*\{\s*return h\(MarkdownRenderer, \{ content, breaks \}\)\s*\}/,
   )
-  const messages = [...renderers.matchAll(/h\(ConversationMessage,\s*\{([\s\S]*?)\n\s*\}\)/g)]
-  assert.ok(messages.length > 0)
-  for (const message of messages) assert.match(message[1], /renderText:\s*renderSharedText/)
+  assert.match(renderers, /h\(MessageRow,\s*\{/)
+  const row = read(path.join(frontend, 'components', 'chat', 'shared', 'MessageRow.vue'))
+  assert.match(row, /import MarkdownRenderer from ['"].*public\/chat\/MarkdownRenderer\.vue['"]/)
+  assert.match(row, /return h\(MarkdownRenderer,\s*\{\s*content,\s*breaks,\s*origin:/)
+  assert.match(row, /:render-text="renderSharedText"/)
 })
 
 test('Dashboard and VS Code consume one host-neutral transcript section', () => {

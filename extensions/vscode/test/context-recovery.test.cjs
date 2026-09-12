@@ -79,7 +79,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve))
 // the current-runtime admission contract instead of silently rediscovering a connection;
 // only an explicit ready (Refresh) may build a runtime.
 
-test('a disconnected context action fails clearly without attempting rediscovery', async () => {
+test('disconnected context and branch actions reject without attempting rediscovery', async () => {
   let discoverCalls = 0
   const { vscode, captures } = fakeVscode()
   const extension = loadExtension(vscode, {
@@ -101,13 +101,109 @@ test('a disconnected context action fails clearly without attempting rediscovery
   assert.equal(errors[0].requestId, 1)
   assert.equal(errors[0].code, 'context_command_failed')
   assert.match(errors[0].error, /Refresh the Session/i)
+  for (const request of [
+    { type: 'http.regenerate', requestId: 21, session: 'g', creature: 'root', readyId: 1 },
+    { type: 'http.editMessage', requestId: 22, session: 'g', creature: 'root', readyId: 1, msgIdx: -1, content: 'invalid index' },
+    { type: 'http.regenerate', requestId: 23, session: 'g', creature: 'root', readyId: 1, url: 'https://forbidden.invalid' },
+  ]) {
+    await receive(request)
+    const failure = posts.find((post) => post.requestId === request.requestId)
+    assert.ok(failure, 'a correlatable branch refusal must settle a no-deadline request')
+    assert.equal(failure.type, 'error')
+    assert.equal(failure.mayHaveRun, false)
+    assert.equal(failure.status, undefined, 'pre-admission refusal is not an HTTP response')
+    assert.equal(failure.code, 'branch_mutation_failed')
+    assert.equal(discoverCalls, 0)
+  }
+  const beforeAmbiguous = posts.length
+  await receive({ type: 'http.editMessage', requestId: 24, socketId: 24 })
+  await receive({ type: 'http.regenerate', requestId: '25' })
+  assert.equal(posts.length, beforeAmbiguous, 'ambiguous or invalid request IDs remain ignored')
   assert.equal(
     posts.some((post) => post.type === 'context.compact.result'),
     false,
   )
 })
 
-test('only an explicit ready may attempt rediscovery', async () => {
+test('clipboard writes use the host without a runtime and acknowledge only the completed write', async (t) => {
+  const { allowedMessage } = require('../src/host/protocol.cjs')
+  const { vscode, captures } = fakeVscode()
+  const writes = []
+  const logs = []
+  t.mock.method(console, 'error', (...args) => logs.push(args.map(String).join(' ')))
+  let discoverCalls = 0
+  let finishWrite
+  let clipboard = 'previous'
+  const text = 'copied-only-secret\\n中文 🌱 <not html>'
+  vscode.env.clipboard = {
+    writeText(value) {
+      writes.push(value)
+      return new Promise((resolve) => {
+        finishWrite = () => {
+          clipboard = value
+          resolve()
+        }
+      })
+    },
+  }
+  const extension = loadExtension(vscode, {
+    discoverInstalledKt: async () => {
+      discoverCalls++
+      throw Error('clipboard must not discover a runtime')
+    },
+  })
+  extension.activate(fakeContext())
+  const { view, posts, receive } = fakeView()
+  captures.provider.resolveWebviewView(view)
+  const request = { type: 'platform.writeClipboard', requestId: 71, text }
+  assert.equal(allowedMessage(request), true)
+  const pending = receive(request)
+  try {
+    await flush()
+    assert.deepEqual(writes, [text])
+    assert.equal(clipboard, 'previous')
+    assert.deepEqual(posts, [])
+  } finally {
+    finishWrite?.()
+    await pending
+  }
+  assert.equal(clipboard, text)
+  assert.deepEqual(posts, [{ type: 'platform.writeClipboard.result', requestId: 71, data: { written: true } }])
+
+  for (const data of [{ text: 5 }, { text, format: 'html' }, { text, command: 'workbench.any' }, { text, endpoint: 'http://evil' }]) {
+    const invalid = { type: 'platform.writeClipboard', requestId: 72, ...data }
+    assert.equal(allowedMessage(invalid), false)
+    await receive(invalid)
+  }
+  await receive({ type: 'platform.readClipboard', requestId: 72 })
+  assert.deepEqual(writes, [text])
+  assert.equal(posts.length, 1)
+
+  vscode.env.clipboard.writeText = async (value) => {
+    writes.push(value)
+    clipboard = value
+  }
+  await receive({ type: 'platform.writeClipboard', requestId: 73, text: '' })
+  assert.equal(clipboard, '')
+  assert.deepEqual(posts.at(-1), { type: 'platform.writeClipboard.result', requestId: 73, data: { written: true } })
+
+  vscode.env.clipboard.writeText = async () => {
+    throw Object.assign(Error(text), { status: 403 })
+  }
+  await receive({ type: 'platform.writeClipboard', requestId: 74, text })
+  assert.equal(posts.at(-1).type, 'error')
+  assert.equal(posts.at(-1).code, 'clipboard_write_failed')
+  assert.equal(posts.at(-1).status, undefined)
+  assert.equal(posts.at(-1).mayHaveRun, undefined)
+  assert.equal(JSON.stringify(posts).includes('copied-only-secret'), false)
+  assert.equal(logs.join(' ').includes('copied-only-secret'), false)
+  delete vscode.env.clipboard
+  await receive({ type: 'platform.writeClipboard', requestId: 75, text })
+  assert.equal(posts.at(-1).code, 'clipboard_write_failed')
+  assert.equal(discoverCalls, 0)
+})
+
+test('explicit ready remains the only rediscovery entry point', async () => {
   let discoverCalls = 0
   const { vscode, captures } = fakeVscode()
   const extension = loadExtension(vscode, {

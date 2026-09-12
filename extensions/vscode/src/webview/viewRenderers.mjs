@@ -1,11 +1,11 @@
-import { CommandResultMessage, providePlatformOrigin } from '@kohakuterrarium/chat-ui'
+import { providePlatformOrigin } from '@kohakuterrarium/chat-ui'
 import { h } from 'vue'
 
 import { installPlatformLinkOpener } from './platformLinkOpener.mjs'
 import { createSessionRenderers } from './sessionRenderers.mjs'
 
 export function createViewRenderers({
-  ConversationMessage,
+  MessageRow,
   MarkdownRenderer,
   available,
   busy,
@@ -21,8 +21,8 @@ export function createViewRenderers({
   // there is no backend HTTP origin behind the bridge, so an explicit ``null`` is
   // installed: a card link must be treated as external, never rewritten against
   // the fake webview origin. Installed here because ``createViewRenderers`` runs
-  // inside the App setup, so descendants (the shared ConversationMessage and its
-  // UIEventBlock) receive it.
+  // inside the App setup, so descendants (the shared ConversationMessage/MessageRow
+  // and its UIEventBlock) receive it.
   providePlatformOrigin(null)
   // The matching link-opener seam: a card/Markdown link click is forwarded to the
   // Host's ``platform.openLink`` operation and never navigates the webview.
@@ -55,16 +55,15 @@ export function createViewRenderers({
     )
   }
 
-  function renderTranscriptMessage(message, { reply }) {
-    if (message?.role === 'command_result') return h(CommandResultMessage, { message })
-    // Media inside a shared message resolves through the injected media resolver
-    // (browser direct URL or Host-spooled webview URI); no observer wrapper is
-    // needed here anymore. UI events render through the one shared production
-    // UIEventBlock (ConversationMessage's default) — no reduced fallback.
-    const body = h(ConversationMessage, {
+  function renderTranscriptMessage(message, context = {}) {
+    // Message actions receive the full-projection index and the owning pane's tab.
+    const body = h(MessageRow, {
       message,
-      renderText: renderSharedText,
-      onReply: ({ actionId, values }) => reply(actionId, values),
+      prevMessage: context.previousMessage ?? null,
+      isFirst: !!context.isFirst,
+      messageIdx: context.absoluteIndex ?? null,
+      isLastAssistant: !!context.isLastAssistant,
+      tabId: currentSession.value?.target || '',
     })
     const details = renderDetailControls(message)
     // Preserve the rendered message as the row root so the paging row

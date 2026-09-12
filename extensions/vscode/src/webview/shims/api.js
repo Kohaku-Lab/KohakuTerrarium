@@ -36,10 +36,13 @@ export const sessionAPI = {
   getActive: modelDelegate('__ktVsCodeInstanceMetadata', 'Instance metadata'),
 }
 
+// Fixed branch delegates retain HTTP status and dispatch phase; rewind is unavailable.
 export const agentAPI = {
-  regenerate: async () => {},
-  editMessage: async () => {},
-  rewindTo: async () => {},
+  regenerate: branchDelegate('__ktVsCodeRegenerate', 'Regenerate'),
+  editMessage: branchDelegate('__ktVsCodeEditMessage', 'Message edit'),
+  rewindTo: async () => {
+    throw Error('Rewind is unavailable in the VS Code view')
+  },
 }
 
 // Model/slash + instance-metadata facade (the M vertical). The model directory and
@@ -80,6 +83,21 @@ function modelDelegate(name, label) {
       .then(() => {
         const delegate = globalThis[name]
         if (typeof delegate !== 'function') throw Error(`${label} bridge is unavailable`)
+        return delegate(...args)
+      })
+      .catch((error) => {
+        if (error && Number.isSafeInteger(error.status) && error.response == null) error.response = { status: error.status }
+        throw error
+      })
+}
+
+// Branch errors expose only actual HTTP responses as error.response.status.
+function branchDelegate(name, label) {
+  return (...args) =>
+    Promise.resolve()
+      .then(() => {
+        const delegate = globalThis[name]
+        if (typeof delegate !== 'function') throw Object.assign(Error(`${label} bridge is unavailable`), { mayHaveRun: false })
         return delegate(...args)
       })
       .catch((error) => {

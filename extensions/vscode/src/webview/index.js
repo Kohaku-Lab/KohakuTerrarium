@@ -2,9 +2,10 @@ import {
   buildMessageParts,
   ChatComposer,
   ChatTranscriptSection,
-  ConversationMessage,
   MarkdownRenderer,
+  MessageRow,
   ModelSwitcher,
+  provideMessageActions,
 } from '@kohakuterrarium/chat-ui'
 import 'virtual:uno.css'
 import { computed, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
@@ -30,7 +31,7 @@ import {
   isConversationSuperseded,
 } from './conversationOwnership.mjs'
 import { createReadyCoordinator } from './readyCoordinator.mjs'
-import { settleRequestMessage } from './requestDemux.mjs'
+import { createRequestLifecycle } from './requestLifecycle.mjs'
 import { createSelectionVersionOwner } from './selectionVersion.mjs'
 import { createSessionShell } from './sessionShell.js'
 import { createSessionActions, createTargetSelector } from './sessionActions.mjs'
@@ -46,29 +47,15 @@ import QueuedMessages from './QueuedMessages.vue'
 import { composerLabels } from './composerLabels.mjs'
 
 const vscode = acquireVsCodeApi()
-const pending = new Map()
-let nextRequestId = 1000
-
-function rejectPending(error) {
-  for (const request of pending.values()) {
-    clearTimeout(request.timer)
-    request.reject(error)
-  }
-  pending.clear()
-}
-
-function request(type, data = {}, onSend = () => {}) {
-  return new Promise((resolve, reject) => {
-    const id = nextRequestId++
-    onSend(id)
-    const timer = setTimeout(() => {
-      pending.delete(id)
-      reject(Error('KohakuTerrarium request timed out'))
-    }, 30000)
-    pending.set(id, { resolve, reject, timer, type })
-    vscode.postMessage({ type, requestId: id, ...data })
-  })
-}
+// The request lifecycle is a small real module; only branch-mutation requests
+// pass ``timeoutMs: 0`` (a long rerun POST is never abandoned by a client timer).
+const {
+  request,
+  rejectAll: rejectPending,
+  settle: settleRequest,
+} = createRequestLifecycle({
+  postMessage: (message) => vscode.postMessage(message),
+})
 
 BridgeWebSocket.post = (message) => vscode.postMessage(message)
 
@@ -383,6 +370,14 @@ const App = {
         .catch((cause) => (error.value = cause?.message || String(cause)))
     }
 
+    // Message actions use Host clipboard, accepted replies and current ready identity.
+    provideMessageActions({
+      markdownOrigin: null,
+      writeClipboard: (text) => request('platform.writeClipboard', { text }),
+      submitReply: (message, actionId, values) => submitReply(message, actionId, values),
+      getViewOwner: () => `${activeSelectionReadyId ?? ''}:${latestReadyRequestId.value ?? ''}`,
+    })
+
     const transcriptBindings = createTranscriptBindings({
       onViewportReady: (viewport, identity) => {
         transcriptViewport = viewport
@@ -402,7 +397,7 @@ const App = {
     const transcriptCallbacks = computed(() => transcriptBindings.forIdentity(scrollIdentity.value))
 
     const { actionButton, icon, renderSession, renderSharedText, renderTranscriptMessage } = createViewRenderers({
-      ConversationMessage,
+      MessageRow,
       MarkdownRenderer,
       available,
       busy,
@@ -447,7 +442,7 @@ const App = {
           .finally(() => pendingReconciliations--)
         return
       }
-      settleRequestMessage(pending, message)
+      settleRequest(message)
     }
     window.addEventListener('message', receiveHostMessage)
     onBeforeUnmount(() => {

@@ -2,6 +2,7 @@ const crypto = require('node:crypto')
 const vscode = require('vscode')
 const WebSocket = require('ws')
 
+const { BRANCH_TYPES } = require('./host/branchHost.cjs')
 const { createClient, validateCapabilities } = require('./host/client.cjs')
 const { resolveLocalConnection } = require('./host/connection.cjs')
 const { createConnectionAttemptOwner } = require('./host/connectionAttempt.cjs')
@@ -234,6 +235,10 @@ function activate(context) {
         // Preserve the safe HTTP status (never the body/URL) so shared
         // clients can distinguish a conflict/reset from a plain failure.
         const status = Number.isSafeInteger(error?.status) && error.status >= 400 && error.status < 600 ? error.status : undefined
+        // The branch transport phase crosses only as fixed fields: a boolean and a
+        // supersession marker. No backend detail, URL, token or stack is forwarded.
+        const mayHaveRun = typeof error?.mayHaveRun === 'boolean' ? error.mayHaveRun : undefined
+        const superseded = error?.superseded === true
         return webview.postMessage({
           type: webSocketType,
           ...(message.type.startsWith('ws.') ? { socketId: message.socketId } : { requestId: message.requestId }),
@@ -241,6 +246,8 @@ function activate(context) {
           error: safe.message,
           code: safe.code,
           ...(status === undefined ? {} : { status }),
+          ...(mayHaveRun === undefined ? {} : { mayHaveRun }),
+          ...(superseded ? { superseded: true } : {}),
         })
       }
 
@@ -352,8 +359,27 @@ function activate(context) {
       }
 
       const disposable = webview.onDidReceiveMessage(async (message) => {
-        if (!allowedMessage(message)) return
+        if (!allowedMessage(message)) {
+          if (
+            BRANCH_TYPES.has(message?.type) &&
+            !Array.isArray(message) &&
+            Number.isSafeInteger(message.requestId) &&
+            message.requestId > 0 &&
+            !['id', 'socketId', 'sendId'].some((field) => Object.hasOwn(message, field))
+          )
+            sendError(message, Object.assign(Error('Invalid branch mutation request'), { mayHaveRun: false }))
+          return
+        }
         try {
+          if (message.type === 'platform.writeClipboard') {
+            try {
+              await vscode.env.clipboard.writeText(message.text)
+              webview.postMessage({ type: 'platform.writeClipboard.result', requestId: message.requestId, data: { written: true } })
+            } catch {
+              sendError(message, Error('Clipboard write failed'))
+            }
+            return
+          }
           if (message.type === 'ready') {
             const attempt = connectionAttempts.begin()
             try {
@@ -407,7 +433,11 @@ function activate(context) {
             return
           }
           const current = runtime
-          if (!current) throw Error('Refresh the Session before sending requests')
+          if (!current) {
+            const error = Error('Refresh the Session before sending requests')
+            if (BRANCH_TYPES.has(message.type)) error.mayHaveRun = false
+            throw error
+          }
           if (
             ['session.select', 'session.stop', 'session.clearSelection', 'session.reconcile'].includes(message.type) &&
             message.readyId !== current.runtimeEpoch

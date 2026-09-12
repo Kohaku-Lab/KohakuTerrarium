@@ -14,6 +14,7 @@ First-party VS Code workspace extension for creating and operating KohakuTerrari
 - Use the Dashboard's model picker, provider search, and variation controls for the selected Creature.
 - Complete `/goal` and eligible skills from the live Creature inventory using the shared slash menu.
 - Reuse the production KohakuTerrarium chat store for history, streaming text, tool activity, interactive replies, and Stop Turn.
+- Use the Dashboard's message actions to copy text, edit and rerun a user message, regenerate a response, and navigate existing branches.
 - Page bounded history (load earlier messages) with an explicit reload when the backend source resets, and read a truncated row's full body on demand.
 - Stop Session and resume Sessions.
 - Relocate the selected Creature after graph merge/split events and fail closed when it disappears.
@@ -53,6 +54,16 @@ The transcript loads a bounded newest page and loads earlier messages from the t
 ### Unsent composer state
 
 Within an open Webview, Refresh preserves text and files for the same runtime and Creature ID, including while the request is pending. Draft and attachment caches each retain up to 32 recently used conversations; older inactive buffers are evicted. This bounds retained conversation entries, not aggregate attachment bytes. Changing the service endpoint, changing connection configuration, or closing the Webview clears the caches. Unsent files are not persisted to disk.
+
+### Message actions
+
+Message rows use the same production action component as the Dashboard. **Copy** writes the message text through the VS Code Extension Host; assistant copy excludes tool output. This operation does not require a running KT backend. It exposes no clipboard-read or arbitrary-command capability.
+
+Choose **Edit & rerun** on a persisted user message to change its text and attachments, or **Regenerate** on a response to rerun that historical turn. Ctrl/Cmd+Enter saves an inline edit; Escape cancels it when no save is pending. In narrow panes, attachment controls stack below the editor. The user and response branch arrows navigate existing alternatives without submitting another mutation.
+
+Edit and regenerate requests wait for the backend turn to finish; they do not use the ordinary 30-second request deadline. A definite rejection, such as HTTP 409 during an active turn, restores the inline draft and attachments for an explicit retry in the same view. An uncertain result, including a lost response or HTTP 502/504, retains the speculative branch while history is read back. The mutation itself is never retried automatically. Check history before manually retrying.
+
+Refresh, target changes, and closing the view invalidate its pending results, not the backend operation. A turn already started may continue and persist its reply. Inline-edit drafts are temporary view state, separate from the unsent composer buffers: they survive their own optimistic row replacement but are discarded when their target ownership changes. Persisted message locators guide reconciliation; request correlation IDs are not durable operation-status lookup keys.
 
 ### Model and slash controls
 
@@ -101,5 +112,7 @@ npm test
 npm run build
 npm run package
 ```
+
+Message-action validation includes same-host VS Code/backend runs with edit and regenerate requests lasting more than 30 seconds, busy-turn rejection, Refresh during a started request, and 320/480px editor layouts. OS clipboard content read-back and OS-level IME composition remain unverified in the automation environment; a Host write acknowledgement is not evidence of a clipboard round trip. The Node/jsdom tests do not measure browser layout.
 
 The VSIX contains only the bundled Extension Host, bundled Webview, stylesheet, manifest, icon, license, and README. Source files, tests, source maps, scripts, dependencies, and lockfiles are excluded.

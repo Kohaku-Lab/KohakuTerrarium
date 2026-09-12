@@ -2,7 +2,7 @@ function validMessage(message) {
   return message && typeof message === 'object' && !Array.isArray(message)
 }
 
-export function settleRequestMessage(pending, message) {
+export function settleRequestMessage(pending, message, clearTimer = clearTimeout) {
   if (!validMessage(message) || !Number.isSafeInteger(message.requestId) || message.requestId < 1) return false
   if (Object.hasOwn(message, 'socketId') || Object.hasOwn(message, 'sendId') || Object.hasOwn(message, 'id')) return false
   const request = pending.get(message.requestId)
@@ -12,10 +12,14 @@ export function settleRequestMessage(pending, message) {
   if (message.type === 'error' && typeof message.error !== 'string') return false
   if (message.type === expectedType && !Object.hasOwn(message, 'data')) return false
   pending.delete(message.requestId)
-  clearTimeout(request.timer)
+  clearTimer(request.timer)
   if (message.type === 'error') {
     const error = Error(message.error)
     if (Number.isSafeInteger(message.status)) error.status = message.status
+    // The branch transport phase (a fixed boolean plus the supersession marker)
+    // is the only extra field the shared store guard reads; nothing else crosses.
+    if (typeof message.mayHaveRun === 'boolean') error.mayHaveRun = message.mayHaveRun
+    if (message.superseded === true) error.superseded = true
     request.reject(error)
   } else request.resolve(message.data)
   return true

@@ -2036,6 +2036,8 @@ const _chatStoreOptions = {
     _branchResyncTimers: {},
     /** @type {Record<string, number>} Per-tab monotonic history-request id; a resync whose id is stale when it resolves has been superseded */
     _historyRequestSeqByTab: {},
+    /** @type {Record<string, string>} Latest branch request for each open target; retained across WS idle. */
+    _branchRequestIdByTab: {},
     /** @type {Record<string, number>} Per-tab live/optimistic mutation generation invalidating in-flight snapshots */
     _historyMutationSeqByTab: {},
     historyPageByTab: {},
@@ -2489,6 +2491,7 @@ const _chatStoreOptions = {
       const idx = this.tabs.indexOf(tab)
       if (idx === -1) return
       this._dropHistoryController(tab)
+      this._endTabLifetime(tab)
       this.tabs = this.tabs.filter((_, i) => i !== idx)
       if (this.activeTab === tab) {
         this.setActiveTab(this.tabs[Math.min(idx, this.tabs.length - 1)] || null)
@@ -3841,9 +3844,9 @@ const _chatStoreOptions = {
      *  with a dead WS count as never-dispatched. */
     _requestMayStillBeRunning(err) {
       const status = err?.response?.status
-      // 502/504: the proxy gave up while the backend kept going.
       if (status === 502 || status === 504) return true
       if (err?.response != null) return false
+      if (typeof err?.mayHaveRun === "boolean") return err.mayHaveRun
       if (err?.code === "ECONNABORTED" || err?.code === "ETIMEDOUT") return true
       return this.wsStatus === "open"
     },
@@ -3918,8 +3921,11 @@ const _chatStoreOptions = {
       // retry button can't tell the backend which turn was clicked
       // (it silently falls through to tail-regen — that was the
       // "retry only retries the last message" bug).
+      const owner = this._branchRequestIdByTab[tab] ? this._captureBranchOwner(tab) : null
+      const isCurrent = () => !owner || this._branchOpOwned(owner)
       if (this._branchResyncTimers[tab]) clearTimeout(this._branchResyncTimers[tab])
       this._branchResyncTimers[tab] = setTimeout(async () => {
+        if (!isCurrent()) return
         delete this._branchResyncTimers[tab]
         const pending = this._branchResyncPendingByTab[tab]
         if (pending?.active) {
@@ -3929,10 +3935,11 @@ const _chatStoreOptions = {
           }
         }
         try {
-          await this._resyncHistory(tab)
+          if (owner) await this._resyncHistory(tab, { branchOwner: owner })
+          else await this._resyncHistory(tab)
         } catch (e) {
-          // A failed fetch must not end the retry chain mid-branch-op.
-          if (this._branchResyncPendingByTab[tab]?.active) {
+          // Retry only within the branch request that scheduled this read.
+          if (isCurrent() && this._branchResyncPendingByTab[tab]?.active) {
             this._scheduleBranchResync(tab)
           }
         }
@@ -4119,8 +4126,45 @@ const _chatStoreOptions = {
       return true
     },
 
-    _branchOperationResult(ok, tab, operation = null, error = null) {
-      return { ok, tab, operation, error }
+    _branchOperationResult(ok, tab, operation = null, error = null, extra = null) {
+      return { ok, tab, operation, error, ...(extra || {}) }
+    },
+
+    /** Result for a settle whose view is already dead (superseded by an
+     *  instance/tab change or a newer op) — no mutation, no toast. */
+    _branchOpSuperseded(tab) {
+      return this._branchOperationResult(false, tab, null, null, { superseded: true })
+    },
+
+    /** Start a request owner for the selected instance and tab. */
+    _branchOpOwner(tab) {
+      this._branchRequestIdByTab[tab] = _newRequestId()
+      if (this._branchResyncTimers[tab]) clearTimeout(this._branchResyncTimers[tab])
+      delete this._branchResyncTimers[tab]
+      const pending = this._branchResyncPendingByTab[tab]
+      if (pending) this._branchResyncPendingByTab[tab] = { ...pending, retries: 0 }
+      return this._captureBranchOwner(tab)
+    },
+
+    /** Snapshot branch ownership without starting another request. */
+    _captureBranchOwner(tab) {
+      return {
+        instanceId: this._instanceId,
+        graphId: this._instanceGraphId,
+        generation: this._instanceGeneration,
+        tab,
+        requestId: this._branchRequestIdByTab[tab],
+      }
+    },
+
+    /** True while the captured owner still matches the live store. */
+    _branchOpOwned(owner) {
+      return (
+        this._instanceId === owner.instanceId &&
+        this._instanceGraphId === owner.graphId &&
+        this._instanceGeneration === owner.generation &&
+        this._branchRequestIdByTab[owner.tab] === owner.requestId
+      )
     },
 
     _setBranchOperation(tab, operation) {
@@ -4136,7 +4180,7 @@ const _chatStoreOptions = {
       return message
     },
 
-    _reconcileBranchOperation(tab, turnIndex, branchId, requestId = null) {
+    _reconcileBranchOperation(tab, turnIndex, branchId, requestId = null, prediction = null) {
       if (typeof turnIndex !== "number" || typeof branchId !== "number") return false
       const operation = this.branchOperationByTab[tab]
       if (
@@ -4144,9 +4188,10 @@ const _chatStoreOptions = {
         operation.instanceGeneration !== this._instanceGeneration
       )
         return false
-      if (requestId && requestId !== operation?.requestId) return false
-      const predictedTurn = operation?.turnIndex
-      const predictedBranch = operation?.predictedBranch
+      if (requestId && requestId !== (operation?.requestId ?? this._branchRequestIdByTab[tab]))
+        return false
+      const predictedTurn = operation?.turnIndex ?? prediction?.turnIndex
+      const predictedBranch = operation?.predictedBranch ?? prediction?.predictedBranch
       if (typeof predictedTurn === "number" && typeof predictedBranch === "number") {
         this._setEvents(
           tab,
@@ -4202,8 +4247,10 @@ const _chatStoreOptions = {
      * pulls the canonical event log including branch metadata so the
      * ``<1/N>`` navigator can flip back.
      */
-    async regenerateLastResponse({ turnIndex = null } = {}) {
-      const tab = this.activeTab
+    async regenerateLastResponse({ turnIndex = null, tabId = null } = {}) {
+      // ``tabId`` (optional) targets a specific pane's tab; absence keeps
+      // the legacy active-tab default. Never re-read activeTab after an await.
+      const tab = tabId || this.activeTab
       if (!this._instanceId)
         return this._branchOperationResult(false, tab, null, "No active instance")
       if (this.branchOperationByTab[tab]) {
@@ -4224,6 +4271,7 @@ const _chatStoreOptions = {
           "This tab cannot start a branch operation",
         )
       }
+      const owner = this._branchOpOwner(tab)
       this._markBranchResyncPending(tab, { baselineFromCache: true })
       const msgs = this.messagesByTab[tab] || []
       // Resolve the target user message + its turn so we can predict
@@ -4311,7 +4359,7 @@ const _chatStoreOptions = {
           })
         }
       }
-      const requestId = _newRequestId()
+      const requestId = owner.requestId
       this._setBranchOperation(tab, {
         type: "regenerate",
         phase: "starting",
@@ -4322,12 +4370,13 @@ const _chatStoreOptions = {
       })
       try {
         const { agentAPI } = await import("@/utils/api")
+        if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
         // For terrarium: session_id = the terrarium's id, creature_id =
         // the active sub-tab's creature name. For standalone: pass the
         // agent id as both (the API treats ``"_"`` as "any session").
         // Unified routing — every session has a graph_id and creatures
         // keyed by name. Solo sessions just have a 1-creature roster.
-        const [sid, cid] = [this._instanceGraphId, tab]
+        const [sid, cid] = [owner.graphId, tab]
         // Pass the user's ORIGINAL branch view (pre-optimistic) so the
         // backend reloads its in-memory conversation under the subtree
         // the user was actually viewing. The predicted-branch override
@@ -4343,13 +4392,15 @@ const _chatStoreOptions = {
             locator: targetUserMsg?.locator,
           })
         } catch (e) {
-          // No HTTP response ≠ rejected (this POST blocks through the
-          // whole rerun) — keep the optimistic branch; only a real HTTP
-          // error or a never-dispatched request rolls back.
+          // A dead view must not roll back or resync against new state.
+          if (!this._branchOpOwned(owner)) {
+            return this._branchOpSuperseded(tab)
+          }
+          // A lost response retains the speculative branch until history confirms it.
           if (optimisticApplied && tab && this._requestMayStillBeRunning(e)) {
             console.warn("Regenerate transport error; keeping optimistic branch:", e)
             this._scheduleBranchResync(tab)
-            return
+            return this._branchOperationResult(true, tab, this.branchOperationByTab[tab])
           }
           console.warn("Failed to regenerate:", e)
           delete this._branchResyncPendingByTab[tab]
@@ -4363,9 +4414,16 @@ const _chatStoreOptions = {
             this.processingByTab[tab] = previousProcessing
             this._rebuildMessages(tab)
           }
+          if (e?.superseded) {
+            this.branchOperationByTab[tab] = null
+            return this._branchOpSuperseded(tab)
+          }
           this._scheduleBranchResync(tab)
           const error = this._failBranchOperation(tab, e)
           return this._branchOperationResult(false, tab, null, error)
+        }
+        if (!this._branchOpOwned(owner)) {
+          return this._branchOpSuperseded(tab)
         }
         if (regenResponse?.branch_id != null && regenResponse?.turn_index != null) {
           // Trust the backend's exact branch_id over our prediction —
@@ -4374,7 +4432,10 @@ const _chatStoreOptions = {
           // select the navigator and the streaming target to match.
           const realTurn = regenResponse.turn_index
           const realBranch = regenResponse.branch_id
-          this._reconcileBranchOperation(tab, realTurn, realBranch)
+          this._reconcileBranchOperation(tab, realTurn, realBranch, requestId, {
+            turnIndex: resolvedTurnIndex,
+            predictedBranch,
+          })
           this._markBranchResyncPending(tab, {
             expectedBranchByTurn: { [realTurn]: realBranch },
           })
@@ -4382,12 +4443,15 @@ const _chatStoreOptions = {
         // The regen is committed server-side from here on — resync
         // failures must not roll it back.
         try {
-          await this._resyncHistory(tab)
+          await this._resyncHistory(tab, { branchOwner: owner })
         } catch (e) {
+          if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
           this._scheduleBranchResync(tab)
         }
+        if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
         return this._branchOperationResult(true, tab, this.branchOperationByTab[tab])
       } catch (e) {
+        if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
         console.warn("Failed to regenerate:", e)
         const error = this._failBranchOperation(tab, e)
         return this._branchOperationResult(false, tab, null, error)
@@ -4457,6 +4521,7 @@ const _chatStoreOptions = {
         delete this._branchResyncPendingByTab[tab]
         return this._branchOperationResult(false, tab, null, "The message has no editable turn")
       }
+      const owner = this._branchOpOwner(tab)
       const previousMessages = tab ? [...(this.messagesByTab[tab] || [])] : null
       const previousEvents = tab ? this.eventsByTab[tab] : null
       const previousBranchView =
@@ -4513,7 +4578,7 @@ const _chatStoreOptions = {
           optimisticApplied = true
         }
       }
-      const requestId = _newRequestId()
+      const requestId = owner.requestId
       this._setBranchOperation(tab, {
         type: "edit",
         phase: "starting",
@@ -4524,7 +4589,8 @@ const _chatStoreOptions = {
       })
       try {
         const { agentAPI } = await import("@/utils/api")
-        const [sid, cid] = [this._instanceGraphId, tab]
+        if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
+        const [sid, cid] = [owner.graphId, tab]
         // Pass the user's ORIGINAL branch selection (pre-optimistic)
         // so the backend reloads its in-memory conversation under the
         // subtree the user was viewing when they clicked Edit. The
@@ -4543,10 +4609,11 @@ const _chatStoreOptions = {
             locator,
           })
         } catch (e) {
-          // No HTTP response ≠ rejected: this POST blocks through the
-          // whole rerun, so the backend may still be running the edit.
-          // Keep the optimistic branch; the pending-resync loop
-          // reconciles once the new branch lands.
+          // A dead view must not roll back or resync against new state.
+          if (!this._branchOpOwned(owner)) {
+            return this._branchOpSuperseded(tab)
+          }
+          // A lost response retains the speculative branch until history confirms it.
           if (tab && (optimisticApplied || validTarget) && this._requestMayStillBeRunning(e)) {
             console.warn("Edit transport error; keeping optimistic branch:", e)
             this._scheduleBranchResync(tab)
@@ -4571,27 +4638,41 @@ const _chatStoreOptions = {
             }
             this.processingByTab[tab] = previousProcessing
           }
+          if (e?.superseded) {
+            this.branchOperationByTab[tab] = null
+            return this._branchOpSuperseded(tab)
+          }
           console.warn("Failed to edit message:", e)
           const error = this._failBranchOperation(tab, e)
           return this._branchOperationResult(false, tab, null, error)
+        }
+        if (!this._branchOpOwned(owner)) {
+          return this._branchOpSuperseded(tab)
         }
         if (turnIndex != null && editResponse?.branch_id != null) {
           const realTurn = editResponse.turn_index ?? turnIndex
           this._markBranchResyncPending(tab, {
             expectedBranchByTurn: { [realTurn]: editResponse.branch_id },
           })
-          this._reconcileBranchOperation(tab, realTurn, editResponse.branch_id)
+          this._reconcileBranchOperation(tab, realTurn, editResponse.branch_id, requestId, {
+            turnIndex,
+            predictedBranch,
+          })
         }
         // The edit is committed server-side from here on — resync
         // failures must not roll it back or reopen the editor.
         try {
-          const resynced = await this._resyncHistory(tab)
+          const resynced = await this._resyncHistory(tab, { branchOwner: owner })
+          if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
           if (resynced === false) this._scheduleBranchResync(tab)
         } catch (e) {
+          if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
           this._scheduleBranchResync(tab)
         }
+        if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
         return this._branchOperationResult(true, tab, this.branchOperationByTab[tab])
       } catch (e) {
+        if (!this._branchOpOwned(owner)) return this._branchOpSuperseded(tab)
         console.warn("Failed to edit message:", e)
         const error = this._failBranchOperation(tab, e)
         return this._branchOperationResult(false, tab, null, error)
@@ -4634,6 +4715,8 @@ const _chatStoreOptions = {
      */
     async _resyncHistory(tab = this.activeTab, options = {}) {
       if (!this._instanceId || !tab) return false
+      const branchOwned = () => !options.branchOwner || this._branchOpOwned(options.branchOwner)
+      if (!branchOwned()) return false
       // Per-tab request sequence. Two resyncs for the same tab can be in
       // flight at once (e.g. a processing_end resync racing a branch-op
       // retry); the one that STARTED LATER is authoritative. Capture our
@@ -4649,6 +4732,7 @@ const _chatStoreOptions = {
       const preFetchMessages = options.initialLoad ? this.messagesByTab[tab] || [] : null
       try {
         const { terrariumAPI } = await import("@/utils/api")
+        if (!branchOwned()) return false
         // Capture BEFORE the fetch: a tab-owned job that starts while
         // this request is in flight is newer than the history it
         // returns, so job-reconciliation must not prune it.
@@ -4667,6 +4751,7 @@ const _chatStoreOptions = {
         if (controller) controller.reset()
         const data = await terrariumAPI.getHistory(this._instanceGraphId, tab)
         if (
+          !branchOwned() ||
           requestId !== this._historyRequestSeqByTab[tab] ||
           this._instanceId !== requestedInstanceId ||
           this._instanceGeneration !== instanceGeneration ||
@@ -5528,6 +5613,7 @@ const _chatStoreOptions = {
       this._streamingBranchByTab = {}
       this._historyRequestSeqByTab = {}
       this._appliedMaxEventIdByTab = {}
+      this._branchRequestIdByTab = {}
       this._clearBranchResyncTimers()
       // Drop multi-group state along with the legacy buckets — the
       // next ``initForInstance`` runs for a different scope.
@@ -5568,6 +5654,7 @@ const _chatStoreOptions = {
       this._historyRequestSeqByTab = {}
       this._pendingCommandResultContextsByTab = {}
       this._appliedMaxEventIdByTab = {}
+      this._branchRequestIdByTab = {}
       this._disposeHistoryPageControllers()
       this._clearBranchResyncTimers()
       if (this._reconnectTimer) {
@@ -5946,6 +6033,7 @@ const _chatStoreOptions = {
     pruneTab(tab) {
       if (!tab) return
       this._dropHistoryController(tab)
+      this._endTabLifetime(tab)
       // Legacy tabs
       const legacyIdx = this.tabs.indexOf(tab)
       if (legacyIdx !== -1) {
@@ -6175,6 +6263,19 @@ const _chatStoreOptions = {
     resetHistoryPage(tab) {
       const controller = _historyPageMap(this).get(tab)
       if (controller) controller.reset()
+    },
+
+    /** Release branch ownership and resync state for a closed tab. */
+    _endTabLifetime(tab) {
+      if (!tab) return
+      delete this._branchRequestIdByTab[tab]
+      if (this._branchResyncTimers[tab]) {
+        clearTimeout(this._branchResyncTimers[tab])
+        delete this._branchResyncTimers[tab]
+      }
+      delete this.branchOperationByTab[tab]
+      delete this.branchOperationErrorByTab[tab]
+      delete this._branchResyncPendingByTab[tab]
     },
 
     /** Dispose the paged controller for ``tab`` (cached pages, in-flight fences). */

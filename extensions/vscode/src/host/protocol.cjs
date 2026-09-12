@@ -15,6 +15,8 @@ const ALLOWED = new Set([
   'http.subagentSavedConversation',
   'http.subagentSend',
   'http.promote',
+  'http.editMessage',
+  'http.regenerate',
   'http.modelDirectory',
   'http.commandInventory',
   'http.switchModel',
@@ -24,6 +26,7 @@ const ALLOWED = new Set([
   'context.clear',
   'goal.execute',
   'platform.openLink',
+  'platform.writeClipboard',
   'media.prepare',
   'media.release',
   'media.cancel',
@@ -64,6 +67,25 @@ const HISTORY_STREAMS = new Set(['events', 'snapshot', 'channel'])
 const SUBAGENT_LIVE_FIELDS = ['jobId', 'name', 'run']
 const SUBAGENT_LIST_FIELDS = ['parent', 'jobId', 'name']
 const SUBAGENT_SAVED_FIELDS = ['parent', 'jobId', 'name', 'run']
+
+// Branch-mutation surfaces. The Host owns the fixed route and canonical body
+// field names, so a compromised webview can smuggle neither a URL/method/header
+// nor an arbitrary field. The nullable shared options are turn_index /
+// user_position / branch_view; a persisted locator is the durable turn identity
+// and the correlation id is a DTO echo only, distinct from the transport id.
+const BRANCH_OPTION_FIELDS = ['turnIndex', 'branchView', 'correlationId', 'locator']
+const REGENERATE_FIELDS = ['type', 'requestId', 'session', 'creature', 'readyId', ...BRANCH_OPTION_FIELDS]
+const EDIT_MESSAGE_FIELDS = [
+  'type',
+  'requestId',
+  'session',
+  'creature',
+  'readyId',
+  'msgIdx',
+  'content',
+  'userPosition',
+  ...BRANCH_OPTION_FIELDS,
+]
 
 // Media envelopes are the exact closed surfaces the Webview may send. ``path`` may
 // be a canonical artifact route OR a raw file path: the Host's canonical route
@@ -126,6 +148,42 @@ function validSubagentOptions(value, fields) {
   const keys = Object.keys(value)
   if (!keys.every((key) => fields.includes(key))) return false
   return keys.every((key) => validSubagentField(key, value[key]))
+}
+
+// ``branch_view`` is a turn->branch map of non-negative integers; a non-numeric
+// key or value is refused so the body stays the canonical backend shape.
+function validBranchView(value) {
+  if (value == null) return true
+  if (!isPlainObject(value)) return false
+  return Object.entries(value).every(([key, branch]) => /^\d+$/.test(key) && Number.isSafeInteger(branch) && branch >= 0)
+}
+
+// The durable locator is the persisted turn identity: every id is a positive
+// integer and no other key may ride along.
+function validLocator(value) {
+  if (value == null) return true
+  if (!isPlainObject(value) || !hasOnlyFields(value, ['eventId', 'turnIndex', 'branchId'])) return false
+  return validPositiveInt(value.eventId) && validPositiveInt(value.turnIndex) && validPositiveInt(value.branchId)
+}
+
+function validOptionalCount(value) {
+  return value == null || (Number.isSafeInteger(value) && value >= 0)
+}
+
+function validCorrelation(value) {
+  return value == null || hasText(value)
+}
+
+// Edit content is text or an already-serialized parts array; a live File/Blob
+// (non-plain-prototype object) is refused so it can never cross the wire.
+function validContent(value) {
+  if (typeof value === 'string') return true
+  if (!Array.isArray(value)) return false
+  return value.every((part) => {
+    if (!isPlainObject(part)) return false
+    const proto = Object.getPrototypeOf(part)
+    return proto === Object.prototype || proto === null
+  })
 }
 
 function allowedMessage(message) {
@@ -199,6 +257,32 @@ function allowedMessage(message) {
         hasText(message.jobId) &&
         hasOnlyFields(message, ['type', 'requestId', 'session', 'creature', 'jobId'])
       )
+    case 'http.regenerate':
+      return (
+        hasText(message.session) &&
+        hasText(message.creature) &&
+        validPositiveInt(message.readyId) &&
+        validOptionalCount(message.turnIndex) &&
+        validBranchView(message.branchView) &&
+        validCorrelation(message.correlationId) &&
+        validLocator(message.locator) &&
+        hasOnlyFields(message, REGENERATE_FIELDS)
+      )
+    case 'http.editMessage':
+      return (
+        hasText(message.session) &&
+        hasText(message.creature) &&
+        validPositiveInt(message.readyId) &&
+        Number.isSafeInteger(message.msgIdx) &&
+        message.msgIdx >= 0 &&
+        validContent(message.content) &&
+        validOptionalCount(message.turnIndex) &&
+        validOptionalCount(message.userPosition) &&
+        validBranchView(message.branchView) &&
+        validCorrelation(message.correlationId) &&
+        validLocator(message.locator) &&
+        hasOnlyFields(message, EDIT_MESSAGE_FIELDS)
+      )
     // Model/slash + instance-metadata surfaces: each fixed host route carries the
     // stable target identities, the canonical selector and the ready-ownership epoch.
     case 'http.modelDirectory':
@@ -261,6 +345,8 @@ function allowedMessage(message) {
         message.selectionVersion >= 0 &&
         hasOnlyFields(message, ['type', 'requestId', 'args', 'readyId', 'selectionVersion'])
       )
+    case 'platform.writeClipboard':
+      return hasOnlyFields(message, ['type', 'requestId', 'text']) && typeof message.text === 'string'
     case 'platform.openLink':
       return (
         hasText(message.target) && validPositiveInt(message.readyId) && hasOnlyFields(message, ['type', 'requestId', 'target', 'readyId'])

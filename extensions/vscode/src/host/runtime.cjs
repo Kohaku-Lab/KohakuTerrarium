@@ -4,6 +4,7 @@ const { beginReady, reconcileReady } = require('./readyRuntime.cjs')
 const { allowedMessage } = require('./protocol.cjs')
 const { MEDIA_TYPES, dispatchMedia } = require('./mediaHost.cjs')
 const { MODEL_TYPES, dispatchModel } = require('./modelHost.cjs')
+const { BRANCH_TYPES, dispatchBranch } = require('./branchHost.cjs')
 const { openPlatformLink } = require('./openLink.cjs')
 
 const contextCapabilities = new WeakMap()
@@ -60,6 +61,9 @@ class RuntimeHost {
     this.topologyControllers = new Set()
     this.pendingGoals = new Set()
     this.readyControllers = new Set()
+    // Long branch POSTs own an abortable wait so dispose/ready can release it
+    // without sending a backend interrupt (cancel wait != cancel turn).
+    this.branchControllers = new Set()
     this.goalTimeoutMs = 25_000
     // The extension injects a per-view media coordinator; the runtime owns its fence.
     this.mediaHost = mediaHost
@@ -351,6 +355,10 @@ class RuntimeHost {
     // Model/slash + instance-metadata ops are a single fixed dispatch too (see
     // modelHost.dispatchModel), keeping this switch about session lifecycle only.
     if (MODEL_TYPES.has(message.type)) return dispatchModel(this, message)
+    // Branch mutations (regenerate/editMessage) are their own fixed dispatch (see
+    // branchHost.dispatchBranch): the long POST is admitted with selection/ready
+    // but never holds the selection queue for the whole turn.
+    if (BRANCH_TYPES.has(message.type)) return dispatchBranch(this, message)
     switch (message.type) {
       case 'session.clearSelection': {
         const result = await this.clearSelection()
@@ -576,6 +584,9 @@ class RuntimeHost {
     this.topologyControllers.clear()
     for (const controller of this.readyControllers) controller.abort()
     this.readyControllers.clear()
+    // Release the local branch waits; never send a backend interrupt from dispose.
+    for (const controller of this.branchControllers) controller.abort()
+    this.branchControllers.clear()
     for (const cancel of this.pendingGoals) cancel(Error('Goal runtime disposed; execution outcome may be unknown'))
     this.pendingGoals.clear()
     this.mediaHost?.abortAll()

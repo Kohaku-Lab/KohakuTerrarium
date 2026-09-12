@@ -7,6 +7,9 @@ function beginReady(host, readyId) {
   host.rotateGeneration()
   for (const controller of host.readyControllers) controller.abort()
   for (const controller of host.topologyControllers) controller.abort()
+  // A ready reset supersedes any in-flight branch wait; the backend turn is not
+  // cancelled (cancel wait != cancel turn).
+  for (const controller of host.branchControllers) controller.abort()
   for (const cancel of host.pendingGoals) cancel(Error('Ready ownership changed; execution outcome may be unknown'))
 }
 
