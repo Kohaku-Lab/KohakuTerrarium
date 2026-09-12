@@ -2,7 +2,7 @@
 
 import os
 from pathlib import Path
-from urllib.parse import unquote, urlparse
+from urllib.parse import urlparse
 from urllib.request import url2pathname
 
 
@@ -43,9 +43,9 @@ def _path_from_file_uri(text: str) -> Path:
     if parsed.netloc and parsed.netloc.lower() != "localhost":
         if os.name != "nt":
             raise ValueError(f"unsupported file URI: {text!r}")
-        share = url2pathname(unquote(parsed.path))
+        share = url2pathname(parsed.path)
         return Path(f"\\\\{parsed.netloc}{share}")
-    path = url2pathname(unquote(parsed.path))
+    path = url2pathname(parsed.path)
     if not path:
         raise ValueError(f"unsupported file URI: {text!r}")
     if len(path) >= 3 and path[0] in "/\\" and path[1].isalpha() and path[2] == ":":
@@ -55,6 +55,7 @@ def _path_from_file_uri(text: str) -> Path:
 
 def _from_windows_pathlib_form(rest: str) -> Path:
     """Recover ``file:\\C:\\Users\\...`` from ``str(Path(as_uri()))`` on Windows."""
+    normalized = rest.replace("\\", "/")
     if len(rest) >= 3 and rest[1].isalpha() and rest[2] == ":":
-        rest = rest[1:]
-    return Path(rest.replace("\\", "/"))
+        return _path_from_file_uri("file://" + normalized)
+    return _path_from_file_uri("file://" + normalized.lstrip("/"))

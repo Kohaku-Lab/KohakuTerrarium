@@ -1,7 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.utils.fs_path`."""
 
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -14,6 +14,21 @@ class TestCoerceFsPath:
 
     def test_local_file_uri(self, tmp_path):
         target = (tmp_path / "a b.txt").resolve()
+        assert coerce_fs_path(target.as_uri()) == target
+
+    @pytest.mark.parametrize(
+        "name", ["image%20name.png", "image%25name.png", "image%2Fname.png"]
+    )
+    def test_file_uri_preserves_literal_percent_escapes(self, tmp_path, name):
+        target = (tmp_path / name).resolve()
+        assert coerce_fs_path(target.as_uri()) == target
+
+    @pytest.mark.skipif(os.name != "nt", reason="UNC paths require Windows")
+    @pytest.mark.parametrize(
+        "name", ["image%20name.png", "image%25name.png", "image%2Fname.png"]
+    )
+    def test_remote_file_uri_preserves_literal_percent_escapes(self, name):
+        target = Path(r"\\host\share") / name
         assert coerce_fs_path(target.as_uri()) == target
 
     def test_recovers_pathlib_single_slash_form(self, tmp_path):
@@ -34,6 +49,17 @@ class TestCoerceFsPath:
         assert got.name == "x.png"
         assert "Users" in got.parts
         assert got.as_posix().endswith("C:/Users/me/x.png")
+
+    @pytest.mark.parametrize("name", ["a b.png", "日本語.png", "image%20name.png"])
+    def test_windows_pathlib_form_decodes_once(self, name):
+        target = PureWindowsPath("C:/Users/me") / name
+        mangled = str(PureWindowsPath(target.as_uri()))
+        assert coerce_fs_path(mangled).as_posix() == target.as_posix()
+
+    @pytest.mark.skipif(os.name != "nt", reason="UNC paths require Windows")
+    def test_windows_pathlib_form_preserves_unc_anchor(self):
+        target = Path(r"\\server\share\a b%20.png")
+        assert coerce_fs_path(Path(target.as_uri())) == target
 
     def test_remote_file_uri(self):
         raw = "file://host/share/x.png"
