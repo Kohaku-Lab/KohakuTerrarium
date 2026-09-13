@@ -1,10 +1,12 @@
 """Unit tests for ``session_index.hooks`` — every code path."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.persistence.session_index import hooks as hooks_mod
 from kohakuterrarium.studio.persistence.session_index.hooks import (
     SessionIndexHook,
     push_index_update,
@@ -115,20 +117,18 @@ class TestSessionIndexHook:
         assert row2["preview"] == "one"
 
     def test_event_flush_debounced_by_time(self, idx, tmp_path, monkeypatch):
-        # Use n=999 so count never fires; advance monotonic clock
-        # manually to trigger the time gate.
+        now = 100.0
+        monkeypatch.setattr(hooks_mod, "time", SimpleNamespace(monotonic=lambda: now))
         s = _make_store(tmp_path, "alice")
         try:
             hook = SessionIndexHook(
-                s, idx, flush_every_n_events=999, flush_every_seconds=0.001
+                s, idx, flush_every_n_events=999, flush_every_seconds=5
             )
-            # Default ``time.monotonic`` runs in real time; with our
-            # tiny ``flush_every_seconds``, the next ``append_event``
-            # almost certainly trips the gate.
-            import time as _time
-
-            _time.sleep(0.01)
+            now = 104.0
             s.append_event("alice", "user_input", {"content": "after gate"})
+            assert idx.get("alice.kohakutr")["preview"] == ""
+            now = 105.0
+            s.append_event("alice", "text", {"content": "gate reached"})
             hook.detach()
         finally:
             s.close()
