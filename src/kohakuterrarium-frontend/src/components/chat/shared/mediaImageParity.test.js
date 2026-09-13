@@ -1,10 +1,9 @@
 // Focused parity guard for the shared inline image + media status rules.
 //
-// The Dashboard renders ``SharedMediaImage`` (public/chat/MediaPreview.js) with
-// NO ``.kt-conversation-host`` ancestor, so the shared ``--kt-conversation-*``
-// tokens are undefined there and every declaration that leans on them must carry
-// the production fallback. The VS Code webview *does* set ``.kt-conversation-host``
-// (src/webview/index.js) and supplies ``--vscode-*`` tokens. Both hosts consume
+// The Dashboard supplies ``.kt-conversation-host`` on its transcript; the
+// VS Code webview supplies it on its root with ``--vscode-*`` tokens. Bare
+// ``SharedMediaImage`` and ``ConversationMessage`` consumers still use the
+// production fallbacks when no host supplies tokens. Both hosts consume
 // the single rule in ``conversation-message.css``, so this test reads that exact
 // production stylesheet (no duplicated CSS copy) and checks:
 //
@@ -144,10 +143,9 @@ describe("shared inline image parity", () => {
 
   it("drops the now-dead Dashboard scoped .chat-inline-image block exactly once", () => {
     expect(read(DASHBOARD_MESSAGE)).not.toMatch(/chat-inline-image/)
-    // The Dashboard never provides the host-variable scope, so the shared rule
-    // must stand on its own fallbacks (asserted above).
+    // The Dashboard supplies the token scope on the transcript, not each message.
     expect(read(DASHBOARD_MESSAGE)).not.toMatch(/kt-conversation-host/)
-    expect(read(DASHBOARD_PANEL)).not.toMatch(/kt-conversation-host/)
+    expect(read(DASHBOARD_PANEL)).toMatch(/<ChatTranscriptSection\s+class="kt-conversation-host"/)
   })
 
   it("resolves to a valid border colour in Dashboard (fallback) and Extension (token)", () => {
