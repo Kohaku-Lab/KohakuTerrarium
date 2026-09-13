@@ -89,10 +89,16 @@ def resolve_artifact_url(url: str) -> str:
     return f"data:{mime};base64,{b64}"
 
 
+def _is_unresolved_local_media(url: str) -> bool:
+    if url.startswith("data:"):
+        return False
+    return url.startswith(_FILE_SCHEME) or url.startswith("/api/sessions/")
+
+
 def resolve_message_image_urls(
     messages: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Inline local image parts while preserving object identity when unchanged."""
+    """Inline local image parts; omit refs that did not become a data URL."""
     any_changed = False
     out: list[dict[str, Any]] = []
     for msg in messages:
@@ -111,6 +117,13 @@ def resolve_message_image_urls(
                 iu = part["image_url"]
                 url = iu.get("url")
                 resolved = resolve_artifact_url(url) if isinstance(url, str) else url
+                if isinstance(resolved, str) and _is_unresolved_local_media(resolved):
+                    logger.warning(
+                        "Media reference unresolved — omitting image part",
+                        url=url,
+                    )
+                    msg_changed = True
+                    continue
                 if resolved is not url and resolved != url:
                     new_content.append({**part, "image_url": {**iu, "url": resolved}})
                     msg_changed = True

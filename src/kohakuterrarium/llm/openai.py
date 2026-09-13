@@ -42,8 +42,8 @@ from kohakuterrarium.llm.openai_ws import stream_ws_turn
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
     RetryPolicy,
-    backoff_delay,
     classify_openai_error,
+    retry_delay,
 )
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 from kohakuterrarium.utils.logging import get_logger
@@ -77,7 +77,7 @@ class OpenAIProvider(BaseLLMProvider):
         retry_policy: RetryPolicy | dict[str, Any] | None = None,
         websocket_mode: bool = False,
     ):
-        """Configure an OpenAI-compatible client and optional stateful reasoning echo."""
+        """Configure the client, using max_retries when retry_policy is omitted."""
         super().__init__(
             LLMConfig(
                 model=model,
@@ -93,12 +93,14 @@ class OpenAIProvider(BaseLLMProvider):
         )
         self._ws_session: ResponsesWSSession | None = None
         self.echo_reasoning = bool(echo_reasoning)
-        self._retry_policy = RetryPolicy.from_value(retry_policy)
+        self._retry_policy = RetryPolicy.from_value(
+            {"max_retries": max_retries} if retry_policy is None else retry_policy
+        )
         self._api_key = api_key
         self._base_url_input = base_url
         self._timeout = timeout
         self._extra_headers = extra_headers or {}
-        self._max_retries = max_retries
+        self._max_retries = 0
         self._last_usage: dict[str, int] = {}
         self._last_assistant_extra_fields: dict[str, Any] = {}
         self.prompt_cache_key: str | None = None
@@ -115,7 +117,7 @@ class OpenAIProvider(BaseLLMProvider):
             api_key=api_key,
             base_url=base_url,
             timeout=timeout,
-            max_retries=max_retries,
+            max_retries=self._max_retries,
             default_headers=extra_headers or {},
         )
 
@@ -289,7 +291,7 @@ class OpenAIProvider(BaseLLMProvider):
                     and attempt < self._retry_policy.max_retries
                 ):
                     attempt += 1
-                    delay = backoff_delay(attempt, self._retry_policy)
+                    delay = retry_delay(exc, attempt, self._retry_policy)
                     logger.warning(
                         "provider_retry",
                         attempt=attempt,
@@ -507,7 +509,7 @@ class OpenAIProvider(BaseLLMProvider):
                     and attempt < self._retry_policy.max_retries
                 ):
                     attempt += 1
-                    delay = backoff_delay(attempt, self._retry_policy)
+                    delay = retry_delay(exc, attempt, self._retry_policy)
                     logger.warning(
                         "provider_retry",
                         attempt=attempt,

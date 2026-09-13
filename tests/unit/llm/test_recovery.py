@@ -7,6 +7,12 @@ backoff math, and the emergency context-drop reducer's splice result
 """
 
 import asyncio
+from types import SimpleNamespace
+
+import httpx
+import pytest
+
+from kohakuterrarium.llm import recovery
 
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
@@ -48,6 +54,18 @@ class TestClassifyOpenAIError:
 
     def test_5xx_status_is_server(self):
         assert classify_openai_error(_HTTPError(status_code=503)) == ErrorClass.SERVER
+
+    def test_local_media_500_is_user_error_not_retried(self):
+        exc = _HTTPError(
+            "Cannot load local files without --allowed-local-media-path",
+            status_code=500,
+        )
+        assert classify_openai_error(exc) == ErrorClass.USER_ERROR
+        assert ErrorClass.USER_ERROR not in RetryPolicy().retry_classes
+
+    def test_cannot_load_local_files_500_is_user_error(self):
+        exc = _HTTPError("cannot load local files from file://", status_code=500)
+        assert classify_openai_error(exc) == ErrorClass.USER_ERROR
 
     def test_4xx_user_status_is_user_error(self):
         assert (
@@ -141,6 +159,45 @@ class TestBackoffDelay:
         policy = RetryPolicy(base_delay=0.01, max_delay=100.0, jitter=10.0)
         for _ in range(50):
             assert backoff_delay(1, policy) >= 0.0
+
+
+class TestRetryDelay:
+    @pytest.mark.parametrize(
+        ("headers", "expected"),
+        [
+            ({"retry-after-ms": "1500", "retry-after": "10"}, 1.5),
+            ({"retry-after-ms": "invalid", "retry-after": "10"}, 10.0),
+            ({"retry-after": "0.5"}, 0.5),
+            ({"retry-after": "60"}, 60.0),
+            ({"retry-after": "invalid"}, 4.0),
+            ({"retry-after": "0"}, 4.0),
+            ({"retry-after": "-1"}, 4.0),
+            ({"retry-after": "61"}, 4.0),
+            ({"retry-after": "nan"}, 4.0),
+            ({"retry-after": "inf"}, 4.0),
+            ({"retry-after": "Thu, 01 Jan 10000 00:00:00 GMT"}, 4.0),
+            ({"retry-after": "Thu, 01 Jan 100000000000 00:00:00 GMT"}, 4.0),
+            ({"retry-after-ms": "61000"}, 4.0),
+            ({}, 4.0),
+        ],
+    )
+    def test_server_delay_and_backoff_fallback(self, headers, expected):
+        exc = _HTTPError(status_code=429)
+        exc.response = httpx.Response(429, headers=headers)
+        policy = RetryPolicy(base_delay=2, jitter=0)
+        assert recovery.retry_delay(exc, 2, policy) == expected
+
+    def test_retry_after_http_date(self, monkeypatch):
+        monkeypatch.setattr(recovery, "time", SimpleNamespace(time=lambda: 0))
+        exc = _HTTPError(status_code=503)
+        exc.response = httpx.Response(
+            503, headers={"Retry-After": "Thu, 01 Jan 1970 00:00:30 GMT"}
+        )
+        assert recovery.retry_delay(exc, 1, RetryPolicy(jitter=0)) == 30.0
+
+    def test_transport_error_uses_backoff(self):
+        policy = RetryPolicy(base_delay=2, jitter=0)
+        assert recovery.retry_delay(TimeoutError(), 2, policy) == 4.0
 
 
 class TestFormatDropPlaceholder:
