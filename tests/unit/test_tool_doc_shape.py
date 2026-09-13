@@ -48,6 +48,7 @@ CONFUSABLE = {
     "web_fetch",
     "web_search",
     "info",
+    "canvas_image",
     "skill",
     "explore",
     "plan",

@@ -8,6 +8,7 @@ import pytest
 from kohakuterrarium.builtins.tools.canvas_preview import (
     PREVIEW_MAX_BYTES,
     build_canvas_preview,
+    build_image_canvas_preview,
     lang_for_path,
 )
 from kohakuterrarium.builtins.tools.edit import EditTool
@@ -63,6 +64,21 @@ class TestBuildCanvasPreview:
         assert out["content"] is None
         assert out["truncated"] is True
         assert out["bytes"] == PREVIEW_MAX_BYTES + 1
+
+    def test_image_preview_keeps_url_and_normalizes_jpeg(self):
+        out = build_image_canvas_preview(
+            "/repo/shot.jpeg",
+            "/api/sessions/s/artifacts/canvas_images/shot.jpeg",
+            nbytes=12,
+        )
+        assert out == {
+            "kind": "image",
+            "file_path": "/repo/shot.jpeg",
+            "lang": "jpg",
+            "content": "/api/sessions/s/artifacts/canvas_images/shot.jpeg",
+            "bytes": 12,
+            "truncated": False,
+        }
 
     def test_none_content_propagates(self):
         # Edge case for tools that mutate the file but don't know the

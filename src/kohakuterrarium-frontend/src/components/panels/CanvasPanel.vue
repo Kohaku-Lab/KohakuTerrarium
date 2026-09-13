@@ -6,6 +6,7 @@
       <button v-for="a in canvas.artifacts" :key="a.id" class="flex items-center gap-1 px-2 py-0.5 rounded transition-colors shrink-0" :class="canvas.activeId === a.id ? 'bg-iolite/15 text-iolite' : 'text-warm-500 hover:text-warm-700 dark:hover:text-warm-300 hover:bg-warm-100 dark:hover:bg-warm-800'" :title="`${a.name} · ${a.type}`" @click="canvas.setActive(a.id)">
         <span :class="typeIcon(a.type)" class="text-[11px]" />
         <span class="truncate max-w-32">{{ a.name }}</span>
+        <span class="i-carbon-close text-[10px] opacity-50 hover:opacity-100" title="Remove from canvas" @click.stop="canvas.dismissArtifact(a.id)" />
       </button>
 
       <div class="flex-1" />
@@ -19,6 +20,9 @@
           <div class="i-carbon-download text-[12px]" />
         </button>
       </template>
+      <button v-if="canvas.artifacts.length" class="w-6 h-6 flex items-center justify-center rounded text-warm-400 hover:text-warm-600 dark:hover:text-warm-300 transition-colors shrink-0" title="Clear canvas" @click="canvas.clearArtifacts()">
+        <div class="i-carbon-close-outline text-[12px]" />
+      </button>
     </div>
 
     <!-- Viewer -->

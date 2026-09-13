@@ -99,3 +99,25 @@ def build_canvas_preview(
         "bytes": len(encoded),
         "truncated": False,
     }
+
+
+def build_image_canvas_preview(
+    file_path: str | Path,
+    url: str,
+    *,
+    lang: str | None = None,
+    nbytes: int = 0,
+) -> dict[str, Any]:
+    """Build image preview metadata whose ``content`` is a displayable URL."""
+    path_str = str(file_path)
+    ext = (lang or Path(path_str).suffix.lower().lstrip(".") or "png").lower()
+    if ext == "jpeg":
+        ext = "jpg"
+    return {
+        "kind": "image",
+        "file_path": path_str,
+        "lang": ext,
+        "content": url,
+        "bytes": nbytes,
+        "truncated": False,
+    }

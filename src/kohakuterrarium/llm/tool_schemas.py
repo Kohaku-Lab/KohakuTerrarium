@@ -449,6 +449,16 @@ _BUILTIN_SCHEMAS: dict[str, dict] = {
         },
         "required": ["job_id"],
     },
+    "canvas_image": {
+        "type": "object",
+        "properties": {
+            "path": {
+                "type": "string",
+                "description": "Local image path to put on the Studio canvas",
+            },
+        },
+        "required": ["path"],
+    },
     "image_gen": {
         "type": "object",
         "properties": {

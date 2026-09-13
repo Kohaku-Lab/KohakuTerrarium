@@ -18,6 +18,52 @@ afterEach(() => {
 })
 
 describe("useArtifactDetector", () => {
+  it("keeps dismissal through older history but reopens for a new reverting edit", async () => {
+    const scope = "paged-dismissal"
+    const chat = useChatStore(scope)
+    const canvas = useCanvasStore(scope)
+    const preview = (id, content) => ({
+      id,
+      role: "assistant",
+      parts: [
+        {
+          type: "tool",
+          jobId: id,
+          resultMeta: {
+            canvas_preview: { kind: "edit", file_path: "/work/a.py", lang: "py", content },
+          },
+        },
+      ],
+    })
+    chat.activeTab = "agent"
+    chat.messagesByTab.agent = [preview("m2", "v2")]
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          useArtifactDetector(scope)
+          return () => null
+        },
+      }),
+    )
+    try {
+      await nextTick()
+      canvas.dismissArtifact(canvas.activeId)
+      chat.messagesByTab.agent.unshift(preview("m1", "v1"))
+      await nextTick()
+      expect(canvas.artifacts).toHaveLength(0)
+      chat.messagesByTab.agent.push(preview("m3", "v1"))
+      await nextTick()
+      expect(canvas.artifacts).toHaveLength(1)
+      expect(canvas.activeArtifact.content).toBe("v1")
+      canvas.dismissArtifact(canvas.activeId)
+      chat.messagesByTab.agent.push(preview("m4", "v2"))
+      await nextTick()
+      expect(canvas.activeArtifact.content).toBe("v2")
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it("rescans scoped chat content when the owning macro tab is activated", async () => {
     const active = ref(false)
     const scope = "instance-activation"
