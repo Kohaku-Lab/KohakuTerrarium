@@ -797,6 +797,31 @@ jobs only. Conversation and Inspector Trace rows record the model actually bound
 to each new job, preferring its canonical profile selector and falling back to
 the raw model id.
 
+### OpenAI-compatible retries
+
+`OpenAIProvider` uses the framework's `retry_policy` to retry rate limits,
+server errors, and transient failures, including HTTP 408/409 and responses
+with `x-should-retry: true`. The OpenAI SDK's automatic
+retries are disabled, so a retry budget of `N` allows at most `N + 1` HTTP
+attempts for a retryable failure. With the default retry classes, a local-media
+configuration error such as
+`Cannot load local files without --allowed-local-media-path` fails after one
+request. This applies to streaming and non-streaming chat and remains in
+effect after credential reloads and model switches.
+
+Retries honor `retry-after-ms` and `Retry-After` (seconds or an HTTP date)
+when the requested delay is positive and at most 60 seconds, matching the
+SDK's limit. Otherwise they use the policy's exponential backoff and jitter.
+
+When constructing `OpenAIProvider` directly, `max_retries` supplies the budget
+if `retry_policy` is omitted; an explicit policy takes precedence. Defaults
+allow three retries. `max_retries=0`, or `retry_policy={"max_retries": 0}`,
+disables retries. Overflow recovery remains separate: it may compact or drop
+a tool round before sending a smaller request.
+
+These controls describe `OpenAIProvider`; LiteLLM and native Anthropic clients
+have their own retry behavior.
+
 ### Adding a custom LLM backend provider
 
 For most providers you only need a backend entry plus a preset:

@@ -5,10 +5,9 @@ does NOT need a live network service: the profile / preset / backend
 config system, ``api_keys`` storage, the native tool-schema builder, and
 the multimodal ``Message`` / ``ContentPart`` types.
 
-The live provider clients (``openai.py``, ``anthropic_provider.py``,
-``codex_*.py``, ``litellm_provider.py``) are CARVED OUT — they require
-real endpoints. What is exercised here is the abstraction surface that
-``bootstrap/llm.py`` drives before it ever constructs a provider:
+Live endpoint checks are excluded. The multimodal workflow also exercises
+the real OpenAI SDK with an in-memory HTTP transport; the remaining workflows
+exercise the abstraction surface that ``bootstrap/llm.py`` drives:
 
     resolve_controller_llm()  -> LLMProfile
     get_api_key()             -> str
@@ -36,6 +35,7 @@ from typing import Any
 
 import httpx
 import pytest
+from openai import APIStatusError
 from PIL import Image
 
 from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
@@ -76,6 +76,7 @@ from kohakuterrarium.llm.message import (
     make_multimodal_content,
     messages_to_dicts,
 )
+from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.presets import iter_all_presets, resolve_alias
 from kohakuterrarium.llm.profile_types import LLMBackend, LLMPreset, LLMProfile
 from kohakuterrarium.llm.profiles import (
@@ -92,6 +93,7 @@ from kohakuterrarium.llm.profiles import (
     save_profile,
     set_default_model,
 )
+from kohakuterrarium.llm.recovery import RetryPolicy
 from kohakuterrarium.llm.tools import build_provider_native_tools, build_tool_schemas
 from kohakuterrarium.llm.variations import (
     apply_patch_map,
@@ -1298,6 +1300,80 @@ class TestLlmIntegration:
                     "url": f"data:image/png;base64,{encoded}",
                     "type": "image_url",
                 }
+
+            missing_reference = (tmp_path / "missing.png").as_uri()
+            chat_messages = [
+                UserMessage(
+                    [
+                        TextPart("Compare these images"),
+                        ImagePart(url=file_reference),
+                        ImagePart(url=artifact_reference),
+                        ImagePart(url=missing_reference),
+                    ]
+                )
+            ]
+            original_wire = messages_to_dicts(chat_messages)
+            chat_requests = []
+
+            def chat_response(request):
+                chat_requests.append(json.loads(request.content))
+                if len(chat_requests) <= 2:
+                    message = (
+                        "Cannot load local files without --allowed-local-media-path"
+                        if len(chat_requests) == 1
+                        else "temporary outage"
+                    )
+                    return httpx.Response(
+                        500 if len(chat_requests) == 1 else 503,
+                        json={"error": {"message": message}},
+                        headers={"retry-after-ms": "1"},
+                    )
+                return httpx.Response(
+                    200,
+                    json={
+                        "id": "comparison",
+                        "model": "test",
+                        "created": 0,
+                        "object": "chat.completion",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "message": {
+                                    "role": "assistant",
+                                    "content": "same red square",
+                                },
+                                "finish_reason": "stop",
+                            }
+                        ],
+                    },
+                )
+
+            async with OpenAIProvider(
+                api_key="test-key",
+                model="test",
+                retry_policy=RetryPolicy(max_retries=1, base_delay=0, jitter=0),
+            ) as chat_provider:
+                initial_client = chat_provider._client
+                chat_provider._client = initial_client.with_options(
+                    http_client=httpx.AsyncClient(
+                        transport=httpx.MockTransport(chat_response)
+                    )
+                )
+                await initial_client.close()
+                with pytest.raises(APIStatusError, match="allowed-local-media-path"):
+                    await chat_provider.chat_complete(chat_messages)
+                assert len(chat_requests) == 1
+                response = await chat_provider.chat_complete(chat_messages)
+                assert response.content == "same red square"
+                assert len(chat_requests) == 3
+                assert chat_requests[0] == chat_requests[1] == chat_requests[2]
+                sent_parts = chat_requests[0]["messages"][0]["content"]
+                assert len(sent_parts) == 3
+                assert [part["image_url"]["url"] for part in sent_parts[1:]] == [
+                    f"data:image/png;base64,{encoded}",
+                    f"data:image/png;base64,{encoded}",
+                ]
+                assert messages_to_dicts(chat_messages) == original_wire
         finally:
             store.close()
         assert len(requests) == 3

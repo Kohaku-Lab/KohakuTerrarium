@@ -5,7 +5,9 @@ Share retry policy, error classification, backoff, and overflow reduction.
 
 import asyncio
 import random
+import time
 from dataclasses import dataclass, field
+from email.utils import mktime_tz, parsedate_tz
 from enum import Enum
 from typing import Any
 
@@ -27,7 +29,7 @@ class ErrorClass(Enum):
 
 @dataclass(frozen=True)
 class RetryPolicy:
-    """Framework retry policy layered on provider SDK retries."""
+    """Framework retry policy for provider-boundary recovery."""
 
     max_retries: int = 3
     base_delay: float = 1.0
@@ -146,6 +148,10 @@ def classify_openai_error(exc: BaseException) -> ErrorClass:
         return ErrorClass.USER_ERROR
     if isinstance(status, int) and 500 <= status <= 599:
         return ErrorClass.SERVER
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {})
+    if status in {408, 409} or headers.get("x-should-retry") == "true":
+        return ErrorClass.TRANSIENT
     if isinstance(status, int) and status in {400, 401, 403, 404}:
         return ErrorClass.USER_ERROR
     if _contains_any(message, _TRANSIENT_MARKERS):
@@ -194,6 +200,30 @@ def backoff_delay(attempt: int, policy: RetryPolicy) -> float:
         return base
     spread = base * policy.jitter
     return max(0.0, base + random.uniform(-spread, spread))
+
+
+def retry_delay(exc: BaseException, attempt: int, policy: RetryPolicy) -> float:
+    """Honor OpenAI-compatible retry headers up to 60 seconds, else use backoff."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", {})
+    delay = None
+    try:
+        delay = float(headers.get("retry-after-ms")) / 1000
+    except (TypeError, ValueError):
+        value = headers.get("retry-after")
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            if value:
+                try:
+                    date = parsedate_tz(value)
+                    if date is not None:
+                        delay = mktime_tz(date) - time.time()
+                except (TypeError, ValueError, OverflowError):
+                    pass
+    if delay is not None and 0 < delay <= 60:
+        return delay
+    return backoff_delay(attempt, policy)
 
 
 def _message_text_bytes(message: dict[str, Any]) -> int:
