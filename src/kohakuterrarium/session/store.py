@@ -40,6 +40,7 @@ from kohakuterrarium.session.token_views import (
     token_usage_all_loops as _token_usage_all_loops_impl,
 )
 from kohakuterrarium.session.version import FORMAT_VERSION
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -84,7 +85,7 @@ class SessionStore:
         flush_every_n_seconds: float | None = None,
         writer_lock: bool = False,
     ) -> None:
-        self._path = str(Path(path).expanduser())
+        self._path = str(coerce_fs_path(path))
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         # Read-only consumers must not alter status or recency on close.
         self._readonly = False

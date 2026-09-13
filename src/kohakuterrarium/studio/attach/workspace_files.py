@@ -8,6 +8,8 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
+from kohakuterrarium.utils.fs_path import coerce_fs_path
+
 # Editor language IDs are derived from lowercase filename extensions.
 _EXT_LANG: dict[str, str] = {
     ".py": "python",
@@ -73,7 +75,7 @@ _SKIP_NAMES: set[str] = {
 def _validate_path(path_str: str) -> Path:
     """Resolve a filesystem path or raise an HTTP-friendly validation error."""
     try:
-        return Path(path_str).resolve()
+        return coerce_fs_path(path_str).resolve()
     except (ValueError, OSError) as e:
         raise HTTPException(400, f"Invalid path: {e}")
 

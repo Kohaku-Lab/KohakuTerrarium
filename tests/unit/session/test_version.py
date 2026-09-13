@@ -2,6 +2,7 @@
 
 import pytest
 
+from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
 
 
@@ -14,6 +15,17 @@ class TestFormatVersionConstant:
 
 
 class TestDetectFormatVersion:
+    def test_file_uri_preserves_exact_filename(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        path = tmp_path / "session %20 #.kohakutr"
+        store = SessionStore(str(path))
+        try:
+            store.init_meta("uri-session", "agent", "", "", ["alice"])
+        finally:
+            store.close()
+        assert detect_format_version(path.as_uri()) == FORMAT_VERSION
+        assert not (tmp_path / "file:").exists()
+
     def test_missing_file_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             detect_format_version(tmp_path / "nope.kohakutr")

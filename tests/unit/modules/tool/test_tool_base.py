@@ -190,6 +190,12 @@ class TestToolContextPathResolution:
         absolute = (tmp_path / "abs.txt").resolve()
         assert ctx.resolve_path(str(absolute)) == absolute
 
+    def test_file_uri_resolves_to_the_named_path(self, tmp_path):
+        ctx = ToolContext(agent_name="a", session=None, working_dir=tmp_path)
+        absolute = (tmp_path / "abs.txt").resolve()
+        assert ctx.resolve_path(absolute.as_uri()) == absolute
+        assert not (tmp_path / "file:").exists()
+
     def test_channels_and_scratchpad_proxy_session(self):
         class _Sess:
             channels = ["ch"]

@@ -16,6 +16,14 @@ class TestValidatePath:
         out = wf._validate_path(str(tmp_path))
         assert out == tmp_path.resolve()
 
+    def test_file_uri_is_the_named_path(self, tmp_path, monkeypatch):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        out = wf._validate_path(tmp_path.resolve().as_uri())
+        assert out == tmp_path.resolve()
+        assert not (cwd / "file:").exists()
+
 
 class TestParentDirectory:
     def test_normal(self, tmp_path):
@@ -203,6 +211,16 @@ class TestWriteFile:
         assert out["success"] is True
         assert target.read_text() == "hello"
 
+    async def test_file_uri_writes_to_the_named_path(self, tmp_path, monkeypatch):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        target = tmp_path / "real" / "x.txt"
+        out = await wf.write_file(target.resolve().as_uri(), "hello")
+        assert out["success"] is True
+        assert target.read_text() == "hello"
+        assert not (cwd / "file:").exists()
+
 
 class TestRenameFile:
     async def test_source_missing(self, tmp_path):
@@ -259,6 +277,16 @@ class TestMakeDirectory:
         out = await wf.make_directory(str(new_dir))
         assert out["success"]
         assert new_dir.is_dir()
+
+    async def test_file_uri_creates_the_named_directory(self, tmp_path, monkeypatch):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        new_dir = tmp_path / "real" / "sessions"
+        out = await wf.make_directory(new_dir.resolve().as_uri())
+        assert out["success"]
+        assert new_dir.is_dir()
+        assert not (cwd / "file:").exists()
 
 
 # ── _list_browse_roots ─────────────────────────────────────

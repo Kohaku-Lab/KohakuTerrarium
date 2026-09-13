@@ -102,6 +102,10 @@ class TestFileReferences:
         assert file_reference_path("https://example.com/x.png") is None
         assert file_reference_path(None) is None
 
+    @pytest.mark.parametrize("authority", ["host", "127.0.0.1", "user@localhost"])
+    def test_remote_authority_is_not_a_local_media_reference(self, authority):
+        assert file_reference_path(f"file://{authority}/share/x.png") is None
+
 
 class TestResolveMessageImageUrls:
     def test_identity_when_no_local_artifacts(self):

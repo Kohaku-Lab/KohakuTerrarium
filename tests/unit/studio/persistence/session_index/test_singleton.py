@@ -51,6 +51,16 @@ class TestSidecarPath:
 
 
 class TestSingleton:
+    def test_file_uri_and_path_share_index(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        sdir = tmp_path / "sessions %20"
+        sdir.mkdir()
+        _make_session(sdir, "alice", preview="indexed via URI")
+        uri_index = get_session_index_default(sdir.as_uri())
+        assert uri_index is get_session_index_default(sdir)
+        assert uri_index.get("alice.kohakutr")["preview"] == "indexed via URI"
+        assert not (tmp_path / "file:").exists()
+
     def test_first_open_bootstraps_from_disk(self, tmp_path, monkeypatch):
         sdir = tmp_path / "sessions"
         sdir.mkdir()
@@ -401,6 +411,19 @@ class TestDefaultSessionDirResolver:
     def test_env_var_wins(self, tmp_path, monkeypatch):
         monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "envdir"))
         assert pkg._default_session_dir() == tmp_path / "envdir"
+
+    def test_file_uri_env_does_not_mkdir_cwd_file_scheme(self, tmp_path, monkeypatch):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        named = tmp_path / "sessions"
+        named.mkdir()
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("KT_SESSION_DIR", named.resolve().as_uri())
+        assert pkg._default_session_dir() == named
+        idx = get_session_index_default(session_dir=None)
+        assert idx.path == str(sidecar_path_for(named))
+        assert not (cwd / "file:").exists()
+        close_session_index()
 
     def test_falls_back_to_config_dir(self, tmp_path, monkeypatch):
         monkeypatch.delenv("KT_SESSION_DIR", raising=False)

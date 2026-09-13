@@ -176,6 +176,19 @@ class TestSessionStoreConstruction:
         finally:
             s.close()
 
+    def test_file_uri_opens_the_named_store(self, tmp_path, monkeypatch):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        real = (tmp_path / "real" / "s.kohakutr").resolve()
+        s = SessionStore(real.as_uri())
+        try:
+            assert Path(s.path).resolve() == real
+            assert real.is_file()
+            assert not (cwd / "file:").exists()
+        finally:
+            s.close()
+
 
 # ── append_event / read paths ────────────────────────────────────
 

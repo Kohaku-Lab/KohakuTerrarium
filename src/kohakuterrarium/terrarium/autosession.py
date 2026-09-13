@@ -23,6 +23,7 @@ from kohakuterrarium.core.config import AgentConfig
 from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 if TYPE_CHECKING:
@@ -43,10 +44,10 @@ def default_session_dir(engine: "Terrarium") -> Path:
     """
     base = getattr(engine, "_session_dir", None)
     if base:
-        return Path(base).expanduser()
+        return coerce_fs_path(base)
     env = os.environ.get("KT_SESSION_DIR")
     if env:
-        return Path(env).expanduser()
+        return coerce_fs_path(env)
     return config_dir() / "sessions"
 
 
@@ -78,7 +79,7 @@ def mint_store(
         directory.mkdir(parents=True, exist_ok=True)
         path = directory / f"{graph_id}.kohakutr"
     else:
-        path = Path(path).expanduser()
+        path = coerce_fs_path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
 
     store = SessionStore(path, writer_lock=True)
@@ -293,7 +294,9 @@ def recipe_session_reuses_store(
     if not isinstance(session, (str, Path)):
         return False
     try:
-        return Path(existing.path).resolve() == Path(session).expanduser().resolve()
+        return (
+            coerce_fs_path(existing.path).resolve() == coerce_fs_path(session).resolve()
+        )
     except (OSError, RuntimeError, ValueError):
         return False
 

@@ -18,6 +18,7 @@ from kohakuterrarium.studio.sessions.registry import stores_for
 from kohakuterrarium.terrarium import TerrariumService
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fs_path import env_fs_path_text
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -26,7 +27,8 @@ logger = get_logger(__name__)
 def session_dir() -> str:
     """Return ``KT_SESSION_DIR`` or the config-local session directory."""
     # Deriving the fallback from config_dir keeps isolated config roots self-contained.
-    return os.environ.get("KT_SESSION_DIR") or str(config_dir() / "sessions")
+    raw = os.environ.get("KT_SESSION_DIR") or str(config_dir() / "sessions")
+    return env_fs_path_text(raw)
 
 
 def attach_session_store_for_creature(

@@ -17,6 +17,8 @@ paths under it.
 import os
 from pathlib import Path
 
+from kohakuterrarium.utils.fs_path import coerce_fs_path
+
 _DEFAULT = "~/.kohakuterrarium"
 
 
@@ -28,7 +30,7 @@ def config_dir() -> Path:
     the directory is created if it doesn't exist.
     """
     raw = os.environ.get("KT_CONFIG_DIR") or _DEFAULT
-    path = Path(raw).expanduser()
+    path = coerce_fs_path(raw)
     path.mkdir(parents=True, exist_ok=True)
     return path
 

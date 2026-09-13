@@ -28,6 +28,16 @@ class TestSessionDir:
         # Sessions live under the '<config home>/sessions' directory.
         assert out.name == "sessions"
 
+    def test_file_uri_env_is_the_named_directory(self, monkeypatch, tmp_path):
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+        named = tmp_path / "sessions"
+        monkeypatch.setenv("KT_SESSION_DIR", named.resolve().as_uri())
+        out = store_mod._session_dir()
+        assert out == named.resolve()
+        assert not (cwd / "file:").exists()
+
 
 # ── shared helper ────────────────────────────────────────────
 

@@ -31,6 +31,7 @@ from kohakuterrarium.studio.persistence.viewer.paths import (
 )
 from kohakuterrarium.utils import drive_migration_lock
 from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.utils.fs_path import coerce_fs_path
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -50,7 +51,7 @@ def _session_dir() -> Path:
     """
     env = os.environ.get("KT_SESSION_DIR")
     if env:
-        return Path(env)
+        return coerce_fs_path(env)
     # A replaced module default takes precedence; otherwise deriving from
     # ``config_dir`` keeps configuration-directory overrides isolated.
     _docs_default = Path.home() / ".kohakuterrarium" / "sessions"
