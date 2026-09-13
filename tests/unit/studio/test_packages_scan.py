@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from kohakuterrarium.packages import locations as loc_mod
+from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.studio.catalog import packages_scan as scan_mod
 
 
@@ -92,6 +93,52 @@ class TestToRef:
         path = tmp_path / "x"
         out = scan_mod.to_ref(path, roots)
         assert out == str(path)
+
+    def test_sibling_prefix_is_not_swallowed(self, tmp_path):
+        """``<pkg>`` must not claim paths under ``<pkg>-suffix``.
+
+        ``.../packages/kt-biome`` is a raw *string* prefix of
+        ``.../packages/kt-biome-extended/creatures/swe``, so the old
+        prefix test rendered the extended package's path as
+        ``@kt-biome/-extended/creatures/swe``.
+        """
+        short = tmp_path / "kt-biome"
+        long = tmp_path / "kt-biome-extended"
+        short.mkdir()
+        long.mkdir()
+        roots = {
+            str(short.resolve()): "kt-biome",
+            str(long.resolve()): "kt-biome-extended",
+        }
+
+        assert (
+            scan_mod.to_ref(long / "creatures" / "swe", roots)
+            == "@kt-biome-extended/creatures/swe"
+        )
+        assert (
+            scan_mod.to_ref(short / "creatures" / "swe", roots)
+            == "@kt-biome/creatures/swe"
+        )
+
+    @pytest.mark.parametrize("inner_first", [True, False])
+    def test_longest_root_wins_regardless_of_order(self, tmp_path, inner_first):
+        """A root nested inside another resolves to the innermost one."""
+        outer = tmp_path / "demo"
+        inner = outer / "vendor"
+        inner.mkdir(parents=True)
+        pairs = [(str(inner.resolve()), "inner"), (str(outer.resolve()), "outer")]
+        roots = dict(pairs if inner_first else pairs[::-1])
+
+        assert scan_mod.to_ref(inner / "creatures" / "x", roots) == (
+            "@inner/creatures/x"
+        )
+        assert scan_mod.to_ref(outer / "creatures" / "y", roots) == (
+            "@outer/creatures/y"
+        )
+
+    def test_package_root_renders_bare_ref(self, tmp_path):
+        roots = {str(tmp_path.resolve()): "demo"}
+        assert scan_mod.to_ref(tmp_path, roots) == "@demo"
 
 
 # ── _parse_creature_detail ──────────────────────────────────
@@ -643,6 +690,34 @@ class TestScanInDirs:
         monkeypatch.setattr(scan_mod, "_build_package_root_map", lambda: {})
 
         assert scan_mod.scan_creatures_in_dirs([]) == []
+
+    def test_sibling_package_prefix_keeps_its_own_ref(self, monkeypatch, tmp_path):
+        """Every emitted ref must resolve back to its own package.
+
+        With both ``kt-biome`` and ``kt-biome-extended`` installed, the
+        extended package's creatures used to be reported as
+        ``@kt-biome/-extended/creatures/swe`` — a ref that raises
+        ``PackagePathNotFoundError``.  This drives the real
+        ``list_packages`` / ``get_package_root`` path, not a stubbed root
+        map, so the prefix bug cannot hide behind a fixture again.
+        """
+        expected: dict[str, str] = {}
+        for pkg_name in ("kt-biome", "kt-biome-extended"):
+            pkg_root = tmp_path / pkg_name
+            creature = pkg_root / "creatures" / "swe"
+            creature.mkdir(parents=True)
+            (creature / "config.yaml").write_text(f"name: {pkg_name}-swe")
+            (pkg_root / "kohaku.yaml").write_text(
+                f"name: {pkg_name}\ncreatures:\n  - name: swe\n"
+            )
+            expected[f"{pkg_name}-swe"] = f"@{pkg_name}/creatures/swe"
+
+        monkeypatch.setattr(loc_mod, "PACKAGES_DIR", tmp_path)
+
+        out = scan_mod.scan_creatures_in_dirs([])
+        assert {c["name"]: c["path"] for c in out} == expected
+        for ref in expected.values():
+            assert resolve_package_path(ref).name == "swe"
 
 
 # ── dedupe_dirs ─────────────────────────────────────────────
