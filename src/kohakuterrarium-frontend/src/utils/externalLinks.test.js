@@ -19,6 +19,11 @@ describe("isExternalUrl", () => {
     expect(isExternalUrl(`${SAME_ORIGIN}/sessions/abc`)).toBe(false)
   })
 
+  it("keeps relative navigation internal when origin is unavailable", () => {
+    expect(isExternalUrl("/sessions/abc", null)).toBe(false)
+    expect(isExternalUrl("sessions/abc", null)).toBe(false)
+  })
+
   it("ignores schemes the webview already hands to the OS", () => {
     expect(isExternalUrl("mailto:kohaku@example.test")).toBe(false)
     expect(isExternalUrl("tel:+123")).toBe(false)

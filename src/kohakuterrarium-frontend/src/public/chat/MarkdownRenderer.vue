@@ -4,16 +4,19 @@
 </template>
 
 <script setup>
-import { onBeforeUnmount, ref, shallowRef, watch } from "vue"
+import { nextTick, onBeforeUnmount, ref, shallowRef, watch } from "vue"
 import MarkdownIt from "markdown-it"
 import markdownItKatex from "@vscode/markdown-it-katex"
 import hljs from "highlight.js"
 
-import { applyExternalLinkRule } from "@/utils/externalLinks"
-import { IncrementalMarkdownRenderer } from "@/utils/markdownIncremental"
+import { applyExternalLinkRule, resolvePlatformLink, shouldOpenThroughHost } from "./externalLinks.js"
+import { IncrementalMarkdownRenderer } from "./markdownIncremental.js"
+import { createMarkdownMediaResolver, useMediaResolver } from "./mediaResolver.js"
+import { usePlatformLinkOpener } from "./platformLink.js"
 
 const props = defineProps({
   content: { type: String, default: "" },
+  origin: { type: String, default: null },
   // ``breaks: true`` matches the chat-app convention: a single newline
   // becomes a ``<br>`` instead of CommonMark's soft-break-as-space, so
   // user-typed messages preserve their line breaks. Off by default to
@@ -22,6 +25,22 @@ const props = defineProps({
 })
 
 const rootEl = ref(null)
+
+// A host that owns a backend URL installs a platform link opener (see
+// ``platformLink.js``); a Markdown link click is then handed to it instead of
+// navigating the document. The Dashboard installs none, so links keep the
+// browser's native behavior.
+const platformLinkOpener = usePlatformLinkOpener()
+
+// Artifact images inside markdown resolve through the same host-neutral media
+// resolver the shared leaves use: the browser keeps the direct same-origin URL
+// (a no-op swap), while the VS Code webview replaces the route with a
+// Host-spooled URI. This is a post-render pass on the shared renderer, not an
+// Extension-only DOM MutationObserver, so both hosts share one implementation.
+const mediaImages = createMarkdownMediaResolver(useMediaResolver())
+function syncMedia() {
+  nextTick(() => mediaImages.resolve(rootEl.value))
+}
 
 function codeBlockHtml(lang, fenceHtml) {
   const displayLang = md.utils.escapeHtml(lang || "text")
@@ -135,21 +154,40 @@ if (typeof katexPlugin === "function") {
 }
 
 // Model-authored links must not navigate the shell away from the app.
-applyExternalLinkRule(md)
+applyExternalLinkRule(md, props.origin)
 
 function onClick(e) {
   const btn = e.target.closest(".code-copy-btn")
-  if (!btn) return
-  const code = btn.closest(".code-block")?.querySelector("pre code")
-  navigator.clipboard.writeText(code?.textContent || "").then(() => {
-    const orig = btn.textContent
-    btn.textContent = "Copied!"
-    btn.classList.add("copied")
-    setTimeout(() => {
-      btn.textContent = orig
-      btn.classList.remove("copied")
-    }, 1500)
-  })
+  if (btn) {
+    const code = btn.closest(".code-block")?.querySelector("pre code")
+    navigator.clipboard.writeText(code?.textContent || "").then(() => {
+      const orig = btn.textContent
+      btn.textContent = "Copied!"
+      btn.classList.add("copied")
+      setTimeout(() => {
+        btn.textContent = orig
+        btn.classList.remove("copied")
+      }, 1500)
+    })
+    return
+  }
+  // Shared Markdown link guard. When the host installed a platform opener, a
+  // relative/external link click is handed to it (resolved Host-side against the
+  // backend URL) and the document never navigates; `#hash` and `mailto:`/`tel:`
+  // keep their default handling. Without an opener, a relative link the host
+  // cannot resolve locally (no explicit origin) is swallowed here so it never
+  // destroys the app, while the browser host keeps its normal in-app navigation.
+  const anchor = e.target.closest?.("a[href]")
+  if (!anchor) return
+  const href = anchor.getAttribute("href")
+  if (typeof platformLinkOpener === "function" && shouldOpenThroughHost(href)) {
+    e.preventDefault()
+    platformLinkOpener(href)
+    return
+  }
+  if (resolvePlatformLink(href, props.origin).unavailable) {
+    e.preventDefault()
+  }
 }
 
 /*
@@ -274,10 +312,12 @@ function doRender(content) {
   if (!content) {
     rendered.value = ""
     incremental.reset()
+    mediaImages.dispose()
     return
   }
   rendered.value = incremental.render(preprocessLatex(content))
   lastRenderAt = performance.now()
+  syncMedia()
 }
 
 function scheduleRender(content) {
@@ -313,6 +353,7 @@ onBeforeUnmount(() => {
     clearTimeout(pendingTimer)
     pendingTimer = null
   }
+  mediaImages.dispose()
 })
 </script>
 

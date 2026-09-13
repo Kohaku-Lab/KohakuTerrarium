@@ -475,6 +475,7 @@ export default {
   "status.noTargetSelected": "尚未選取目標",
   "status.modelSwitchHint": "只有root與生物分頁可切換模型。",
   "status.modelSwitchError": "切換模型失敗",
+  "modelSwitcher.metadataUnconfirmed": "模型已切換，但無法確認更新後的設定：{message}",
   "status.promptIn": "提示詞輸入",
   "status.tokenUsage": "Token 使用量",
   "status.runningJobs": "執行中的作業",

@@ -18,7 +18,10 @@ beforeEach(() => {
 
 // Render MarkdownRenderer's content into a ``.md`` div so tests can tell
 // markdown-rendered text from raw monospace (tool / system) blocks.
-const MarkdownStub = { props: ["content"], template: `<div class="md">{{ content }}</div>` }
+const MarkdownStub = {
+  props: ["content", "origin"],
+  template: `<div class="md" :data-origin="origin">{{ content }}</div>`,
+}
 
 function mountBlock(tc, expanded = true) {
   const chat = useChatStore()
@@ -30,6 +33,20 @@ function mountBlock(tc, expanded = true) {
   })
   return wrapper
 }
+
+it("passes the Dashboard origin to tool-result Markdown", () => {
+  const href = `${window.location.origin}/sessions/tool-result`
+  const wrapper = mountBlock({
+    type: "tool",
+    id: "tool-origin",
+    name: "read",
+    kind: "tool",
+    status: "done",
+    resultParts: [{ type: "text", text: `[session](${href})` }],
+  })
+
+  expect(wrapper.get(".md").attributes("data-origin")).toBe(window.location.origin)
+})
 
 function convButton(wrapper) {
   return wrapper.findAll("button").find((b) => b.text().includes("Conversation"))

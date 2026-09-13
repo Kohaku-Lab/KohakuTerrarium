@@ -1,0 +1,330 @@
+import { computed, defineComponent, h, reactive, ref } from "vue"
+
+import "./conversation-message.css"
+
+import { MediaImage } from "../../../public/chat/MediaPreview.js"
+import { computeRenderGroups } from "../../../public/chat/chatToolGrouping.js"
+import ToolCallBatch from "../ToolCallBatch.vue"
+import ToolCallBlock from "../ToolCallBlock.vue"
+import VideoFilePreview from "../VideoFilePreview.vue"
+import UIEventBlock from "../UIEventBlock.vue"
+
+function plainText(content) {
+  return h("div", { class: "kt-conversation-text" }, content || "")
+}
+
+function renderedText(renderer, content, breaks = false) {
+  return renderer ? renderer(content, breaks) : plainText(content)
+}
+
+function compactLabel(message) {
+  if (message.status === "running") return "Compacting context..."
+  if (message.status === "skipped") {
+    return `Compaction skipped${message.reason ? ` (${message.reason})` : ""}`
+  }
+  return `Context Compacted (round ${message.round || "?"})`
+}
+
+let compactSummaryId = 0
+
+export default defineComponent({
+  name: "ConversationMessage",
+  props: {
+    message: { type: Object, required: true },
+    renderText: { type: Function, default: null },
+    renderTool: { type: Function, default: null },
+    renderUiEvent: { type: Function, default: null },
+    renderContentPart: { type: Function, default: null },
+    bare: { type: Boolean, default: false },
+  },
+  emits: ["reply"],
+  setup(props, { emit }) {
+    const compactExpanded = ref(false)
+    const expandedReasoning = reactive(new Set())
+    // Per-message tool/batch disclosure. The Dashboard injects its own
+    // ``renderContentPart`` and keeps its ``expandedTools`` map; this state is
+    // the default for any host that renders the shared leaves directly (the
+    // VS Code webview), so the two hosts share one production tool surface.
+    const expandedTools = reactive({})
+    const compactContentId = `kt-compact-summary-${++compactSummaryId}`
+    const assistantParts = computed(() => {
+      const message = props.message
+      const rawParts = message.parts?.length
+        ? message.parts
+        : [
+            ...(message.content ? [{ type: "text", content: message.content }] : []),
+            ...(message.tool_calls || []).map((tool) => ({ ...tool, type: "tool" })),
+          ]
+      return computeRenderGroups(rawParts).map((group) =>
+        group.type === "tool-batch"
+          ? { type: "tool-batch", id: group.id, tools: group.tools }
+          : group.part,
+      )
+    })
+
+    function toggleTool(key) {
+      expandedTools[key] = !expandedTools[key]
+    }
+
+    // Stable per-part disclosure key. A backend id is preserved verbatim so
+    // live expansion survives streaming appends; a part that arrives without
+    // one (an idless tool, or a batch whose leading tool has no id) falls back
+    // to its structural position within the message. Without the fallback every
+    // idless part collapsed onto the ``undefined`` key and one click expanded
+    // them all.
+    function expansionKey(part, index) {
+      if (part.type === "tool-batch") {
+        const firstId = part.tools?.[0]?.id
+        return firstId == null ? `tool-batch:${index}` : `batch_${firstId}`
+      }
+      return part.id == null ? `${part.type}:${index}` : part.id
+    }
+
+    // The one production tool leaf. The Dashboard overrides via ``renderTool``;
+    // every other host gets the same ToolCallBlock the Dashboard renders rather
+    // than a reduced native fallback.
+    function renderTool(tool, key) {
+      if (props.renderTool) return props.renderTool(tool)
+      return h(ToolCallBlock, {
+        tc: tool,
+        expanded: !!expandedTools[key],
+        onToggle: () => toggleTool(key),
+      })
+    }
+
+    function renderPart(part, index, textBreaks = false) {
+      const key = expansionKey(part, index)
+      let content = props.renderContentPart ? props.renderContentPart(part) : null
+      if (!content && part.type === "text")
+        content = renderedText(props.renderText, part.content || part.text, textBreaks)
+      else if (!content && part.type === "reasoning") {
+        const reasoningKey = part.id ?? `reasoning_${index}`
+        const text = part.text || ""
+        const previewSlice = text.slice(0, 240)
+        const lastCodeUnit = previewSlice.charCodeAt(previewSlice.length - 1)
+        const safeSlice =
+          lastCodeUnit >= 0xd800 && lastCodeUnit <= 0xdbff
+            ? previewSlice.slice(0, -1)
+            : previewSlice
+        const preview = text.length > 240 ? `${safeSlice}…` : text
+        const fullText = part.signature
+          ? text
+            ? `${text}\n[signature: ${part.signature}]`
+            : `[signature: ${part.signature}]`
+          : text
+        content = h(
+          "details",
+          {
+            class: "kt-conversation-reasoning reasoning-details",
+            open: expandedReasoning.has(reasoningKey),
+            onToggle: (event) => {
+              if (event.currentTarget.open) expandedReasoning.add(reasoningKey)
+              else expandedReasoning.delete(reasoningKey)
+            },
+          },
+          [
+            h("summary", [
+              h(
+                "span",
+                {
+                  class:
+                    "reasoning-summary-row inline-flex items-center gap-2 min-w-0 align-middle",
+                },
+                [
+                  h("span", [
+                    "Thinking",
+                    part.source
+                      ? h("span", { class: "reasoning-source" }, ` · ${part.source}`)
+                      : null,
+                  ]),
+                  h(
+                    "span",
+                    {
+                      class:
+                        "reasoning-preview truncate flex-1 min-w-0 text-warm-600 dark:text-warm-400 font-mono",
+                    },
+                    preview,
+                  ),
+                ],
+              ),
+            ]),
+            expandedReasoning.has(reasoningKey)
+              ? h("pre", { class: "reasoning-full" }, fullText)
+              : null,
+          ],
+        )
+      } else if (!content && part.type === "tool") content = renderTool(part, key)
+      else if (!content && part.type === "tool-batch") {
+        // The shared ToolCallBatch the Dashboard also renders — its own header
+        // counters, media strip, and per-tool expand state — never a second
+        // native batch.
+        const tools = part.tools || []
+        content = h(ToolCallBatch, {
+          tools,
+          toolKeys: tools.map((tool, i) => (tool.id == null ? `${key}:tool:${i}` : tool.id)),
+          expanded: !!expandedTools[key],
+          toolExpanded: expandedTools,
+          onToggle: () => toggleTool(key),
+          onToolToggle: toggleTool,
+        })
+      } else if (!content && part.type === "image_url" && part.image_url?.url) {
+        // Media resolution is a host seam: the shared leaf consumes the injected
+        // resolver (browser direct URL or Host-spooled webview URI).
+        content = h(MediaImage, {
+          src: part.image_url.url,
+          alt: part.meta?.source_name || "generated image",
+          name: part.meta?.source_name || part.file?.name || "",
+        })
+      } else if (!content && part.type === "file") {
+        // The single production video leaf is shared with the Dashboard; the
+        // host-neutral resolver decides direct URL vs Host-spooled URI.
+        content = part.file?.mime?.startsWith("video/")
+          ? h(VideoFilePreview, { file: part.file })
+          : h(
+              "div",
+              { class: "kt-conversation-file" },
+              part.file?.name || part.file?.path || "file",
+            )
+      }
+      return content
+        ? h("div", { class: `kt-conversation-part is-${part.type}`, key }, [content])
+        : null
+    }
+
+    return () => {
+      const message = props.message
+      const role = message.role || "unknown"
+      const rootClass = ["kt-conversation-message", `kt-conversation-message--${role}`]
+      let content
+
+      if (role === "ui_event") {
+        // The one production UI-event widget (ask_text/confirm/selection/
+        // progress/notification/card) is the shared default, so both hosts
+        // render the same interactive surfaces instead of a reduced fallback.
+        // A host may still override via ``renderUiEvent`` (the Dashboard does),
+        // but the fallback is no longer a second, partial implementation.
+        content = props.renderUiEvent
+          ? props.renderUiEvent(message, (reply) => emit("reply", reply))
+          : h(UIEventBlock, {
+              message,
+              onReply: (reply) => emit("reply", reply),
+            })
+      } else if (role === "assistant") {
+        const parts = assistantParts.value
+        content = parts.length
+          ? h(
+              "div",
+              { class: "kt-conversation-parts" },
+              parts.map((part, index) => renderPart(part, index)),
+            )
+          : renderedText(props.renderText, message.content)
+      } else if (role === "user") {
+        const userContent = message.contentParts?.length
+          ? h(
+              "div",
+              { class: "kt-conversation-parts" },
+              message.contentParts.map((part, index) => renderPart(part, index, true)),
+            )
+          : renderedText(props.renderText, message.content, true)
+        content = props.bare
+          ? userContent
+          : h("div", { class: "kt-conversation-user-bubble" }, [
+              h("div", { class: "kt-conversation-author" }, "You"),
+              userContent,
+            ])
+      } else if (role === "clear") {
+        content = h("div", { class: "kt-conversation-divider" }, [
+          h(
+            "span",
+            `Context Cleared${message.messagesCleared ? ` — ${message.messagesCleared} messages` : ""}`,
+          ),
+        ])
+      } else if (role === "compact") {
+        const hasSummary = Boolean(message.summary)
+        content = h("section", { class: "kt-conversation-banner is-compact" }, [
+          h(
+            "button",
+            {
+              type: "button",
+              class: "kt-conversation-compact__header",
+              "aria-expanded": hasSummary ? compactExpanded.value : false,
+              "aria-controls": hasSummary ? compactContentId : undefined,
+              disabled: !hasSummary,
+              onClick: () => {
+                if (hasSummary) compactExpanded.value = !compactExpanded.value
+              },
+            },
+            [
+              message.status === "running"
+                ? h("span", { class: "kt-conversation-compact__status", "aria-hidden": "true" })
+                : null,
+              h("strong", { class: "kt-conversation-compact__label" }, compactLabel(message)),
+              message.messagesCompacted
+                ? h(
+                    "span",
+                    { class: "kt-conversation-compact__metadata" },
+                    `${message.messagesCompacted} messages summarized`,
+                  )
+                : null,
+              h("span", { class: "kt-conversation-compact__spacer" }),
+              hasSummary
+                ? h("span", {
+                    class: [
+                      "kt-conversation-compact__chevron",
+                      compactExpanded.value ? "is-expanded" : "",
+                    ],
+                    "aria-hidden": "true",
+                  })
+                : null,
+            ],
+          ),
+          hasSummary && compactExpanded.value
+            ? h(
+                "div",
+                { id: compactContentId, class: "kt-conversation-compact__summary" },
+                renderedText(props.renderText, message.summary),
+              )
+            : null,
+        ])
+      } else if (role === "error") {
+        content = h("section", { class: "kt-conversation-banner is-error" }, [
+          h("strong", message.errorType || "Processing Error"),
+          h("pre", message.content || ""),
+        ])
+      } else if (role === "channel") {
+        const channelContent = message.contentParts?.length
+          ? h(
+              "div",
+              { class: "kt-conversation-parts" },
+              message.contentParts.map((part, index) => renderPart(part, index, true)),
+            )
+          : renderedText(props.renderText, message.content, true)
+        content = h("section", { class: "kt-conversation-channel" }, [
+          h("header", { class: "kt-conversation-author" }, message.sender || "channel"),
+          channelContent,
+        ])
+      } else if (role === "wire_inbound") {
+        content = h("section", { class: "kt-conversation-banner is-compact" }, [
+          h("strong", `Inbound from ${message.from || "another Creature"}`),
+          message.preview ? renderedText(props.renderText, message.preview) : null,
+        ])
+      } else if (role === "trigger") {
+        content = h("section", { class: "kt-conversation-banner is-compact" }, [
+          h("strong", `Triggered by ${message.content || "event"}`),
+          message.triggerContent ? renderedText(props.renderText, message.triggerContent) : null,
+        ])
+      } else if (role === "bg_result") {
+        content = h("div", { class: "kt-conversation-divider" }, [
+          h(
+            "span",
+            `${message.kind === "subagent" ? "Sub-agent" : "Tool"} result · ${message.label || "background"}`,
+          ),
+        ])
+      } else {
+        content = h("div", { class: "kt-conversation-system" }, message.content || "")
+      }
+
+      return props.bare ? content : h("article", { class: rootClass }, [content])
+    }
+  },
+})

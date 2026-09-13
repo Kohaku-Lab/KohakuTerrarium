@@ -1,0 +1,16 @@
+src/**
+test/**
+scripts/**
+node_modules/**
+*.vsix
+package-lock.json
+vite.config.mjs
+dist/*.map
+
+# Temp and log artifacts must never ship in the VSIX
+*.log
+**/*.log
+*.tmp
+**/*.tmp
+.tmp*
+**/.tmp*

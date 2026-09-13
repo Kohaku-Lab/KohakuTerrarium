@@ -1,0 +1,118 @@
+# KohakuTerrarium for VS Code
+
+First-party VS Code workspace extension for creating and operating KohakuTerrarium Sessions from a sidebar.
+
+## First-release scope
+
+- Automatically discover a same-host KohakuTerrarium daemon from `~/.kohakuterrarium/run/web.json`.
+- Fall back to a bounded probe of local KT ports when using foreground `kt web` or when daemon state is stale.
+- Use the default loopback auth bypass without reading, requesting, storing, or sending a host token.
+- Reuse a token from VS Code `SecretStorage` only when the local service explicitly disables loopback bypass; prompt once only when that strict service has no stored token.
+- List live and dormant Sessions.
+- Create a Session from `kohakuterrarium.defaultCreature` and the current workspace folder.
+- Select a Creature by stable Creature ID.
+- Use the Dashboard's model picker, provider search, and variation controls for the selected Creature.
+- Complete `/goal` and eligible skills from the live Creature inventory using the shared slash menu.
+- Reuse the production KohakuTerrarium chat store for history, streaming text, tool activity, interactive replies, and Stop Turn.
+- Use the Dashboard's message actions to copy text, edit and rerun a user message, regenerate a response, and navigate existing branches.
+- Page bounded history (load earlier messages) with an explicit reload when the backend source resets, and read a truncated row's full body on demand.
+- Stop Session and resume Sessions.
+- Relocate the selected Creature after graph merge/split events and fail closed when it disappears.
+- Recover explicitly with Refresh after the KT service restarts; the extension does not run an infinite reconnect loop.
+
+The first release supports Tunnel Browser plus a KohakuTerrarium service on the same host. Remote KT endpoints and multi-user auth are out of scope.
+
+## Use
+
+1. Start the local daemon:
+
+   ```bash
+   kt serve start
+   ```
+
+2. Set `kohakuterrarium.defaultCreature` to a trusted Creature path or installed `@package/...` reference if you want to create new Sessions. Existing Sessions can be viewed and resumed without this setting.
+3. Open the KohakuTerrarium Activity Bar view.
+
+The extension discovers the daemon URL and connects automatically. With the normal local KT defaults, there is no endpoint or token prompt.
+
+If no daemon is running, start it and press **Refresh**. A foreground `kt web` process is also discovered on the bounded default local port range.
+
+### Strict local auth
+
+If the local service has host-token auth enabled and `loopback_bypass = false`, the extension reuses the token from VS Code `SecretStorage`. It asks for a token when none is saved, or once to replace a token rejected with HTTP 401. Network errors do not trigger replacement prompts.
+
+When daemon state is unavailable or stale, automatic port discovery lists strict-auth candidates for you to select before reading or sending a stored token. Select only an endpoint you trust: public capabilities advertise an auth policy, not a verified service identity. The extension verifies authenticated KT diagnostics and the session connection before saving a new token. Canceling the selector sends no credentials and does not fall back to an old endpoint. No manual endpoint entry is required.
+
+### Refresh lifecycle
+
+Refresh reuses a healthy Host connection, runtime, and topology watcher, reconciling Sessions through the existing authenticated client instead of repeating discovery or token prompts. Each Refresh still starts a new operation epoch: old chat sockets, pending commands and image reads lose ownership. Reconciliation has a bounded deadline. Configuration changes or current-runtime failure release the connection; the next explicit Refresh discovers again. Backend mutations are never retried automatically.
+
+### History paging
+
+The transcript loads a bounded newest page and loads earlier messages from the top. Paged reads stay pinned to the selected Session/Creature ownership; a selection switch, reconnect, or backend source reset discards in-flight pages. When the backend reports that the head needs a reset, an explicit reload control re-reads a fresh bounded head instead of silently merging stale ranges. A row the backend truncated exposes a **Show full message** control that performs an ownership-fenced detail read.
+
+### Unsent composer state
+
+Within an open Webview, Refresh preserves text and files for the same runtime and Creature ID, including while the request is pending. Draft and attachment caches each retain up to 32 recently used conversations; older inactive buffers are evicted. This bounds retained conversation entries, not aggregate attachment bytes. Changing the service endpoint, changing connection configuration, or closing the Webview clears the caches. Unsent files are not persisted to disk.
+
+### Message actions
+
+Message rows use the same production action component as the Dashboard. **Copy** writes the message text through the VS Code Extension Host; assistant copy excludes tool output. This operation does not require a running KT backend. It exposes no clipboard-read or arbitrary-command capability.
+
+Choose **Edit & rerun** on a persisted user message to change its text and attachments, or **Regenerate** on a response to rerun that historical turn. Ctrl/Cmd+Enter saves an inline edit; Escape cancels it when no save is pending. In narrow panes, attachment controls stack below the editor. The user and response branch arrows navigate existing alternatives without submitting another mutation.
+
+Edit and regenerate requests wait for the backend turn to finish; they do not use the ordinary 30-second request deadline. A definite rejection, such as HTTP 409 during an active turn, restores the inline draft and attachments for an explicit retry in the same view. An uncertain result, including a lost response or HTTP 502/504, retains the speculative branch while history is read back. The mutation itself is never retried automatically. Check history before manually retrying.
+
+Refresh, target changes, and closing the view invalidate its pending results, not the backend operation. A turn already started may continue and persist its reply. Inline-edit drafts are temporary view state, separate from the unsent composer buffers: they survive their own optimistic row replacement but are discarded when their target ownership changes. Persisted message locators guide reconciliation; request correlation IDs are not durable operation-status lookup keys.
+
+### Model and slash controls
+
+Click the current-model label to search the live model directory, choose a provider and variation, and switch the selected Creature. The displayed selector uses the backend's canonical response. If the switch succeeds but its metadata refresh fails, the accepted selector remains visible with a warning. Changing the Creature through this picker also rebinds the transcript and chat socket; late responses cannot replace the newer selection.
+
+Typing `/` opens the shared completion menu. Arrow keys move the selection; Tab or Enter completes the highlighted entry without sending it, and Escape dismisses the menu. Enter then submits the completed text. The VS Code composer keeps desktop Enter-to-send behavior in narrow sidebars; Shift+Enter inserts a newline. Attachment and context controls remain available through **More actions** in the compact layout.
+
+Only `/goal` is executed as a command by this frontend. Eligible skills and other text use the existing chat input path; displaying live inventory does not authorize more HTTP commands. An inventory error is shown in the menu, but manually entered text still uses the same fallback routing as the Dashboard.
+
+### Goal command outcomes
+
+A pure-text `/goal ...` uses the selected Creature's command endpoint and shows the command result in the transcript. Text with attachments remains a normal chat message. No arbitrary command or target proxy is exposed. Drafts remain on failure; if a request times out or disconnects after dispatch, the command may still have executed. Check goal status before retrying a mutation.
+
+### Notifications
+
+Toast-surface events appear in the Webview with explicit severity text, a dismiss button, and ARIA status/alert semantics. Hover or keyboard focus suspends dismissal; leaving grants a full reading interval. Escape dismisses a focused notification. Up to five notifications are retained; configuration/endpoint changes and Webview disposal clear them. The existing shared store maps absent or zero `duration_ms` to four seconds, matching Dashboard behavior.
+
+### Queued messages
+
+Messages sent while a Creature is processing appear above the composer. The last three are shown initially, with a control to expand the rest. After the backend acknowledges queueing, edit the text (attachments are preserved) or cancel the message. Ctrl/Cmd+Enter saves an edit; Escape discards it. Changes require a connected socket and backend acknowledgement; a failed or timed-out write may have executed, so uncertain entries block retries until a matching acknowledgement arrives. A message that already entered processing cannot be changed.
+
+This is a view of locally observed queued input, not a server queue snapshot. Refreshing, switching Creature, or closing the Webview clears the shared store's queue view but does not cancel queued backend input. Check server state before resending or assuming cancellation.
+
+### Media (artifact images and video)
+
+Artifact images (including SVG) and video parts in messages or Markdown load through the Workspace Extension Host. Webview networking remains disabled (`connect-src 'none'`); credentials stay in the Host. Each reference maps to a fixed artifact route or the fixed raw-file route for a local `file://` path. The Host fetches the body with redirects disabled and streams it to a private temporary spool on disk. The Webview receives an `asWebviewUri` handle only after the whole body is spooled. Reads are fenced by the selected Creature's ownership; file permissions remain the backend's responsibility, without an additional observed-reference or saved-session namespace authorization gate. Playback support depends on VS Code's browser codecs; the extension does not transcode media.
+
+The body is streamed to disk with backpressure and there is no default per-file size cap; only the number of concurrent spool reads is bounded (four), with a per-chunk idle timeout. Identical references share one spooled file, which is deleted once every Webview and editor lease is released. Honest limits: the first preview appears only after the full body is spooled (no progressive first frame), the raw-file route's backend response is fully buffered by the backend rather than streamed, and only a same-host local KohakuTerrarium service has been exercised — remote endpoints are untested. This bridge does not provide arbitrary file downloads or remote media fetching.
+
+### Advanced override
+
+Use **KohakuTerrarium: Configure Local Connection Override** only for a nonstandard local port that cannot be discovered. Return to the normal behavior with **KohakuTerrarium: Use Automatic Local Discovery**.
+
+Connection credentials, discovery, HTTP/WebSocket transport and filesystem-sensitive configuration stay in the Workspace Extension Host. Named operations expose only their required data and do not provide a generic URL, method or header proxy.
+
+## Development
+
+Install both packages from their lockfiles before building the shared frontend:
+
+```bash
+cd src/kohakuterrarium-frontend
+npm ci
+cd ../../extensions/vscode
+npm ci
+npm test
+npm run build
+npm run package
+```
+
+Message-action validation includes same-host VS Code/backend runs with edit and regenerate requests lasting more than 30 seconds, busy-turn rejection, Refresh during a started request, and 320/480px editor layouts. OS clipboard content read-back and OS-level IME composition remain unverified in the automation environment; a Host write acknowledgement is not evidence of a clipboard round trip. The Node/jsdom tests do not measure browser layout.
+
+The VSIX contains only the bundled Extension Host, bundled Webview, stylesheet, manifest, icon, license, and README. Source files, tests, source maps, scripts, dependencies, and lockfiles are excluded.

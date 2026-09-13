@@ -22,7 +22,7 @@
 
     <!-- Expanded list: per-tool ToolCallBlock with its own expand state. -->
     <div v-if="expanded" class="px-2 py-1.5 space-y-1 bg-warm-100 dark:bg-warm-800/80 border-t border-sapphire/15 dark:border-sapphire/20 max-h-72 overflow-y-auto overflow-x-hidden min-w-0">
-      <ToolCallBlock v-for="tc in tools" :key="tc.id" :tc="tc" :expanded="!!toolExpanded[tc.id]" @toggle="$emit('tool-toggle', tc.id)" />
+      <ToolCallBlock v-for="(tc, i) in tools" :key="toolKey(tc, i)" :tc="tc" :expanded="!!toolExpanded[toolKey(tc, i)]" @toggle="$emit('tool-toggle', toolKey(tc, i))" />
     </div>
   </div>
 </template>
@@ -30,11 +30,11 @@
 <script setup>
 import { computed } from "vue"
 
-import ToolCallBlock from "@/components/chat/ToolCallBlock.vue"
-import VideoFilePreview from "@/components/chat/VideoFilePreview.vue"
-import { safeMediaParts } from "@/utils/artifacts"
-import { summarizeBatch } from "@/utils/chatToolGrouping"
-import { useI18n } from "@/utils/i18n"
+import { summarizeBatch } from "../../public/chat/chatToolGrouping.js"
+import { safeMediaParts } from "../../public/chat/mediaRefs.js"
+import { useI18n } from "../../utils/i18n"
+import ToolCallBlock from "./ToolCallBlock.vue"
+import VideoFilePreview from "./VideoFilePreview.vue"
 
 const { t } = useI18n()
 
@@ -42,9 +42,17 @@ const props = defineProps({
   tools: { type: Array, required: true },
   expanded: { type: Boolean, default: false },
   toolExpanded: { type: Object, default: () => ({}) },
+  // Optional caller-supplied disclosure keys aligned with ``tools``. Hosts that
+  // can see idless tools pass structural keys so those rows never collapse onto
+  // the shared ``undefined`` key; the Dashboard omits it and keeps ``tc.id``.
+  toolKeys: { type: Array, default: null },
 })
 
 defineEmits(["toggle", "tool-toggle"])
+
+function toolKey(tc, i) {
+  return props.toolKeys?.[i] ?? tc.id
+}
 
 const summary = computed(() => summarizeBatch(props.tools))
 // Only media a tool's policy pins stays above the fold; the rest lives in

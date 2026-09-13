@@ -13,8 +13,15 @@ export const LOCALE_DISPLAY_NAMES = {
 const LOCALE_PREF_KEY = "kt-locale"
 
 function normalizeLocale(value) {
-  if (SUPPORTED_LOCALES.includes(value)) return value
-  return DEFAULT_LOCALE
+  if (typeof value !== "string") return DEFAULT_LOCALE
+  const requested = value.trim().toLowerCase()
+  if (!requested) return DEFAULT_LOCALE
+  const exact = SUPPORTED_LOCALES.find((code) => code.toLowerCase() === requested)
+  if (exact) return exact
+  // Host languages arrive as BCP-47 tags (``zh-cn``, ``en-us``). Fall back to
+  // the primary subtag so ``zh-cn`` selects the shared ``zh-CN`` dictionary.
+  const primary = requested.split(/[-_]/)[0]
+  return SUPPORTED_LOCALES.find((code) => code.toLowerCase() === primary) ?? DEFAULT_LOCALE
 }
 
 export const useLocaleStore = defineStore("locale", {

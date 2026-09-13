@@ -22,6 +22,51 @@ describe("MarkdownRenderer streaming", () => {
     expect(renderedHtml(wrapper)).toContain("<strong>world</strong>")
   })
 
+  it("escapes raw HTML and preserves optional line breaks", () => {
+    const escaped = mount(MarkdownRenderer, { props: { content: "<script>x</script>" } })
+    expect(renderedHtml(escaped)).toContain("&lt;script&gt;x&lt;/script&gt;")
+    expect(escaped.find("script").exists()).toBe(false)
+
+    const broken = mount(MarkdownRenderer, { props: { content: "one\ntwo", breaks: true } })
+    expect(renderedHtml(broken)).toContain("<br>")
+  })
+
+  it("highlights known fences and safely falls back for unknown languages", () => {
+    const known = mount(MarkdownRenderer, { props: { content: "```js\nconst x = 1\n```" } })
+    expect(renderedHtml(known)).toContain("hljs-keyword")
+    const unknown = mount(MarkdownRenderer, {
+      props: { content: "```not-a-language\n<a>\n```" },
+    })
+    expect(renderedHtml(unknown)).toContain("&lt;a&gt;")
+  })
+
+  it("renders malicious fence language labels as text instead of markup", () => {
+    const maliciousLang =
+      "</span><a/href=https://evil.example>click</a><form></form><style>body{display:none}</style>"
+    const wrapper = mount(MarkdownRenderer, {
+      props: { content: `\`\`\`${maliciousLang}\ncontent\n\`\`\`` },
+    })
+
+    expect(wrapper.find(".code-lang").text()).toBe(maliciousLang)
+    expect(wrapper.find(".code-header a").exists()).toBe(false)
+    expect(wrapper.find(".code-header form").exists()).toBe(false)
+    expect(wrapper.find(".code-header style").exists()).toBe(false)
+  })
+
+  it("renders inline/display math and normalizes invisible characters", () => {
+    const wrapper = mount(MarkdownRenderer, {
+      props: { content: "$x^2$\n\n\\[\\i\u200Bnt_0^1 x dx\\]" },
+    })
+    expect(renderedHtml(wrapper)).toContain("katex")
+    expect(renderedHtml(wrapper)).toContain("katex-display")
+    expect(renderedHtml(wrapper)).not.toContain("katex-error")
+  })
+
+  it("falls back to raw LaTeX when math is malformed", () => {
+    const wrapper = mount(MarkdownRenderer, { props: { content: "$\\notacommand{$" } })
+    expect(renderedHtml(wrapper)).toContain("katex-fallback")
+  })
+
   it("re-renders appended content after the throttle window", async () => {
     const wrapper = mount(MarkdownRenderer, { props: { content: "first paragraph" } })
     expect(renderedHtml(wrapper)).toContain("first paragraph")
@@ -158,6 +203,23 @@ describe("MarkdownRenderer streaming", () => {
     expect(renderedHtml(wrapper)).not.toContain("<p>")
   })
 
+  it("copies fenced source and cleans pending work up on unmount", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    const wrapper = mount(MarkdownRenderer, { props: { content: "```text\na < b\n```" } })
+    await wrapper.find(".code-copy-btn").trigger("click")
+    expect(writeText).toHaveBeenCalledWith("a < b\n")
+
+    await vi.advanceTimersByTimeAsync(1600)
+    wrapper.unmount()
+
+    const pending = mount(MarkdownRenderer, { props: { content: "initial" } })
+    await pending.setProps({ content: "changed" })
+    expect(vi.getTimerCount()).toBe(1)
+    pending.unmount()
+    expect(vi.getTimerCount()).toBe(0)
+  })
+
   it("recovers when content is replaced wholesale", async () => {
     const wrapper = mount(MarkdownRenderer, { props: { content: "long\n\nstreaming\n\nanswer" } })
     expect(renderedHtml(wrapper)).toContain("streaming")
@@ -194,6 +256,29 @@ describe("MarkdownRenderer streaming", () => {
     const anchor = wrapper.find("a")
     expect(anchor.attributes("href")).toBe("/sessions/abc")
     expect(anchor.attributes("target")).toBeUndefined()
+  })
+
+  it("does not infer a host origin for absolute URLs", () => {
+    const href = `${window.location.origin}/sessions/unbound`
+    const wrapper = mount(MarkdownRenderer, {
+      props: { content: `open [the session](${href})` },
+    })
+
+    const anchor = wrapper.get("a")
+    expect(anchor.attributes("target")).toBe("_blank")
+    expect(anchor.attributes("rel")).toBe("noopener noreferrer")
+  })
+
+  it("keeps an absolute same-origin link navigating inside the app", () => {
+    const href = `${window.location.origin}/sessions/absolute`
+    const wrapper = mount(MarkdownRenderer, {
+      props: { content: `open [the session](${href})`, origin: window.location.origin },
+    })
+
+    const anchor = wrapper.get("a")
+    expect(anchor.attributes("href")).toBe(href)
+    expect(anchor.attributes("target")).toBeUndefined()
+    expect(anchor.attributes("rel")).toBeUndefined()
   })
 
   it("still renders inline math after the link rule is installed", () => {

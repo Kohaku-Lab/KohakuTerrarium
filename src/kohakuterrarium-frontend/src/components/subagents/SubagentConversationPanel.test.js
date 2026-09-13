@@ -6,6 +6,36 @@ import { sessionAPI, terrariumAPI } from "@/utils/api"
 
 vi.mock("@/utils/i18n", () => ({ useI18n: () => ({ t: (key) => key }) }))
 
+describe("SubagentConversationPanel Markdown links", () => {
+  it("passes the Dashboard origin to transcript Markdown", async () => {
+    vi.spyOn(sessionAPI, "getSubagentConversation").mockResolvedValue({
+      live: false,
+      can_receive: false,
+      messages: [
+        {
+          role: "assistant",
+          content: `[session](${window.location.origin}/sessions/subagent)`,
+        },
+      ],
+    })
+    const wrapper = mount(SubagentConversationPanel, {
+      props: { sessionId: "session-a", parent: "root", name: "explore", live: false },
+      global: {
+        stubs: {
+          MarkdownRenderer: {
+            props: ["content", "origin"],
+            template: `<div class="md" :data-origin="origin">{{ content }}</div>`,
+          },
+          ToolCallBlock: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get(".md").attributes("data-origin")).toBe(window.location.origin)
+  })
+})
+
 describe("SubagentConversationPanel ambiguity selector", () => {
   beforeEach(() => {
     // Individual tests also restore locally; this guards against an
@@ -190,6 +220,66 @@ describe("SubagentConversationPanel ambiguity selector", () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain("stale-a transcript")
     expect(wrapper.text()).toContain("target-b transcript")
+
+    wrapper.unmount()
+    vi.restoreAllMocks()
+  })
+
+  it("does not let a superseded target's late failure block or overwrite the new target", async () => {
+    let rejectStale
+    const staleLoad = new Promise((_resolve, reject) => {
+      rejectStale = reject
+    })
+    const getConversation = vi
+      .spyOn(sessionAPI, "getSubagentConversation")
+      .mockImplementationOnce(() => staleLoad)
+      .mockResolvedValueOnce({
+        live: false,
+        can_receive: false,
+        messages: [{ role: "assistant", content: "fresh-b transcript" }],
+      })
+
+    const wrapper = mount(SubagentConversationPanel, {
+      props: {
+        sessionId: "session-a",
+        parent: "root",
+        jobId: "job-a",
+        name: "explore",
+        live: false,
+      },
+      global: {
+        stubs: {
+          MarkdownRenderer: { props: ["content"], template: "<span>{{ content }}</span>" },
+          ToolCallBlock: true,
+        },
+      },
+    })
+    await flushPromises()
+
+    await wrapper.setProps({ jobId: "job-b" })
+    await flushPromises()
+
+    // The new target's read must be issued at once — not queued behind the
+    // abandoned job-a read — and its transcript must win.
+    expect(getConversation).toHaveBeenLastCalledWith("session-a", {
+      parent: "root",
+      jobId: "job-b",
+      name: "explore",
+    })
+    expect(wrapper.text()).toContain("fresh-b transcript")
+
+    // The abandoned read fails LAST: its late error must neither surface nor
+    // overwrite the fresh transcript, and it must not trigger another read.
+    rejectStale(
+      Object.assign(new Error("late failure"), {
+        response: { status: 500, data: { detail: "late boom" } },
+      }),
+    )
+    await flushPromises()
+    expect(wrapper.text()).toContain("fresh-b transcript")
+    expect(wrapper.text()).not.toContain("late boom")
+    expect(wrapper.text()).not.toContain("chat.subagent.unavailable")
+    expect(getConversation).toHaveBeenCalledTimes(2)
 
     wrapper.unmount()
     vi.restoreAllMocks()

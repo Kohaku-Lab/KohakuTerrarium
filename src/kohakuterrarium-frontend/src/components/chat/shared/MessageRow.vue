@@ -1,0 +1,474 @@
+<template>
+  <!-- System message -->
+  <ConversationMessage v-if="message.role === 'system'" :message="message" :render-text="renderSharedText" />
+
+  <CommandResultMessage v-else-if="message.role === 'command_result'" :message="message" />
+
+  <!-- Context cleared banner -->
+  <ConversationMessage v-else-if="message.role === 'clear'" :message="message" />
+
+  <ConversationMessage v-else-if="message.role === 'compact'" :message="message" :render-text="renderSharedText" />
+
+  <!-- Background result delivered -->
+  <div v-else-if="message.role === 'bg_result'" class="flex items-center gap-2 py-0.5">
+    <div class="flex-1 border-t border-iolite/20 dark:border-iolite/25 border-dashed" />
+    <span class="text-xs text-iolite/80 dark:text-iolite-light/80 shrink-0"> <span class="i-carbon-arrow-down-left text-[10px] mr-0.5" />{{ message.kind === "subagent" ? t("chat.bgResultSubagent", { label: message.label }) : t("chat.bgResultTool", { label: message.label }) }} </span>
+    <div class="flex-1 border-t border-iolite/20 dark:border-iolite/25 border-dashed" />
+  </div>
+
+  <!-- Processing error -->
+  <div v-else-if="message.role === 'error'" class="kt-conversation-banner is-error overflow-hidden chat-cv">
+    <div role="button" tabindex="0" :aria-expanded="errorExpanded" class="flex items-center gap-2 py-2 px-3 cursor-pointer select-none hover:bg-coral/12 dark:hover:bg-coral/18" @click="errorExpanded = !errorExpanded" @keydown.enter="errorExpanded = !errorExpanded" @keydown.space.prevent="errorExpanded = !errorExpanded">
+      <span class="text-coral font-bold text-sm">&#x2717;</span>
+      <span class="text-coral dark:text-coral-light font-semibold text-xs flex-1">
+        {{ message.errorType || "Processing Error" }}
+      </span>
+      <span v-if="errorFirstLine" class="text-xs text-coral-shadow dark:text-coral-light/70 font-mono truncate max-w-[60%]">
+        {{ errorFirstLine }}
+      </span>
+      <span class="i-carbon-chevron-down text-coral/60 transition-transform text-[10px]" :class="{ 'rotate-180': errorExpanded }" />
+    </div>
+    <div v-if="errorExpanded" class="px-3 pb-2 text-xs text-coral-shadow dark:text-coral-light/80 font-mono whitespace-pre-wrap border-t border-coral/20">
+      {{ message.content }}
+    </div>
+  </div>
+
+  <!-- Trigger fired (expandable if has message content) -->
+  <!-- Inbound output-wiring delivery — another creature's turn-end
+       fired this creature via output_wiring. Rendered as a compact
+       accordion so the user knows why this creature suddenly started
+       processing without typing anything in this tab. -->
+  <div v-else-if="message.role === 'wire_inbound'" class="rounded-lg bg-iolite/6 dark:bg-iolite/8 border border-iolite/15 dark:border-iolite/20 overflow-hidden">
+    <div :role="message.preview ? 'button' : undefined" :tabindex="message.preview ? 0 : undefined" :aria-expanded="message.preview ? !!expandedTools['wire_' + message.id] : undefined" class="flex items-center gap-2 py-1.5 px-3" :class="message.preview ? 'cursor-pointer select-none' : ''" @click="message.preview && toggleTool('wire_' + message.id)" @keydown.enter="message.preview && toggleTool('wire_' + message.id)" @keydown.space.prevent="message.preview && toggleTool('wire_' + message.id)">
+      <span class="i-carbon-connect text-iolite dark:text-iolite-light text-xs shrink-0" />
+      <span class="text-xs text-iolite-shadow dark:text-iolite-light flex-1">
+        Inbound from <span class="font-semibold">{{ message.from }}</span>
+        <span v-if="message.crossNode" class="ml-1 inline-flex items-center gap-0.5 px-1 py-px rounded text-[9px] uppercase tracking-wider bg-teal/20 text-teal-shadow dark:text-teal-light" :title="t('cluster.graphEditor.crossSiteEdge')">
+          <span class="i-carbon-network-3 w-2.5 h-2.5" />
+          {{ t("cluster.chat.crossSiteBadge") }}
+        </span>
+        <span v-if="!message.withContent" class="opacity-60"> · ping (no content)</span>
+      </span>
+      <span v-if="message.preview" class="i-carbon-chevron-down text-iolite/50 text-[10px] transition-transform" :class="{ 'rotate-180': expandedTools['wire_' + message.id] }" />
+    </div>
+    <div v-if="expandedTools['wire_' + message.id] && message.preview" class="px-3 py-2 border-t border-iolite/10 dark:border-iolite/15 text-xs max-h-32 overflow-y-auto">
+      <MarkdownRenderer :content="message.preview" :origin="markdownOrigin" />
+    </div>
+  </div>
+
+  <div v-else-if="message.role === 'trigger'" class="rounded-lg bg-amber/6 dark:bg-amber/8 border border-amber/15 dark:border-amber/20 overflow-hidden">
+    <div :role="message.triggerContent ? 'button' : undefined" :tabindex="message.triggerContent ? 0 : undefined" :aria-expanded="message.triggerContent ? !!expandedTools['trig_' + message.id] : undefined" class="flex items-center gap-2 py-1.5 px-3" :class="message.triggerContent ? 'cursor-pointer select-none' : ''" @click="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.enter="message.triggerContent && toggleTool('trig_' + message.id)" @keydown.space.prevent="message.triggerContent && toggleTool('trig_' + message.id)">
+      <span class="w-1.5 h-1.5 rounded-full bg-amber shrink-0" />
+      <span class="text-xs text-amber-shadow dark:text-amber-light flex-1">
+        Triggered by <span class="font-semibold">{{ message.content }}</span>
+      </span>
+      <span v-if="message.triggerContent" class="i-carbon-chevron-down text-amber/50 text-[10px] transition-transform" :class="{ 'rotate-180': expandedTools['trig_' + message.id] }" />
+    </div>
+    <div v-if="expandedTools['trig_' + message.id] && message.triggerContent" class="px-3 py-2 border-t border-amber/10 dark:border-amber/15 text-xs max-h-32 overflow-y-auto">
+      <MarkdownRenderer :content="message.triggerContent" :origin="markdownOrigin" />
+    </div>
+  </div>
+
+  <!-- User message -->
+  <div v-else-if="message.role === 'user'" class="ml-auto group relative" :class="editing ? 'w-[min(760px,92%)] max-w-[92%]' : 'max-w-[80%]'">
+    <div class="kt-conversation-user-bubble chat-cv" :class="{ 'opacity-70': message.queued, 'user-message-editing': editing }">
+      <div class="text-xs text-warm-400 mb-1 flex items-center gap-1.5">
+        <span>You</span>
+        <span v-if="message.queued" class="px-1.5 py-0.5 rounded text-[9px] font-medium bg-amber/15 text-amber leading-none">Queued</span>
+      </div>
+      <!-- Edit mode -->
+      <div v-if="editing" class="message-edit-form flex flex-col gap-2.5">
+        <div v-if="editAttachments.length" class="flex flex-wrap gap-2">
+          <div v-for="(attachment, idx) in editAttachments" :key="attachment.id || attachment.name + ':' + idx" class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-iolite/8 dark:bg-iolite/12 border border-iolite/20 text-xs">
+            <span :class="attachment.kind === 'image' ? 'i-carbon-image text-iolite dark:text-iolite-light' : 'i-carbon-document text-aquamarine'" />
+            <span class="text-warm-700 dark:text-warm-200 max-w-52 truncate">{{ attachment.name }}</span>
+            <button class="text-warm-400 hover:text-coral" :disabled="editSaving" @click="removeEditAttachment(idx)">
+              <span class="i-carbon-close" />
+            </button>
+          </div>
+        </div>
+        <div class="message-edit-input-row flex gap-2 pl-2 pr-3 py-2 rounded-xl bg-warm-50 dark:bg-warm-800 border border-warm-200 dark:border-warm-700 focus-within:border-iolite/40 dark:focus-within:border-iolite-light/30 transition-colors items-end">
+          <input ref="editImageInputEl" type="file" accept="image/*" class="hidden" @change="(e) => onEditFileChange(e, 'image')" />
+          <input ref="editFileInputEl" type="file" class="hidden" @change="(e) => onEditFileChange(e, 'file')" />
+          <div class="message-edit-attach flex items-center gap-0 shrink-0 mb-0.5">
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-aquamarine dark:hover:text-aquamarine hover:bg-aquamarine/10 disabled:opacity-50" title="Attach file" aria-label="Attach file" :disabled="editSaving" @click="editFileInputEl?.click()">
+              <span class="i-carbon-add text-sm sm:text-xs" />
+            </button>
+            <button class="w-10 h-10 sm:w-7 sm:h-7 flex items-center justify-center rounded-md transition-colors shrink-0 text-warm-400 hover:text-iolite dark:hover:text-iolite-light hover:bg-iolite/10 disabled:opacity-50" title="Attach image" aria-label="Attach image" :disabled="editSaving" @click="editImageInputEl?.click()">
+              <span class="i-carbon-image text-sm sm:text-xs" />
+            </button>
+          </div>
+          <textarea ref="editTextareaEl" v-model="editText" class="message-edit-textarea message-edit-inline" :rows="Math.min(16, Math.max(6, editText.split('\n').length))" :disabled="editSaving" @keydown.meta.enter="confirmEdit" @keydown.ctrl.enter="confirmEdit" @keydown.esc="cancelEdit" />
+        </div>
+        <div class="flex flex-wrap items-center gap-2 text-xs">
+          <span class="text-warm-400 dark:text-warm-500 mr-auto">Ctrl/Cmd+Enter to rerun · Esc to cancel</span>
+          <button class="px-2.5 py-1 rounded hover:bg-warm-100 dark:hover:bg-warm-800 disabled:opacity-50" :disabled="editSaving" @click="cancelEdit">Cancel</button>
+          <button class="px-2.5 py-1 rounded bg-sapphire text-white hover:bg-sapphire-dark disabled:opacity-60" aria-label="Save and rerun" :disabled="editSaving || branchOperationBusy || (!editText.trim() && editAttachments.length === 0)" @click="confirmEdit">
+            {{ editSaving ? "Starting..." : "Save & Rerun" }}
+          </button>
+        </div>
+      </div>
+      <ConversationMessage v-else :message="message" :render-text="renderSharedText" :render-content-part="renderSharedContentPart" bare />
+      <p v-if="editError || branchOperationError" class="mt-1 text-sm text-red-600 dark:text-red-400" role="alert">{{ editError || branchOperationError }}</p>
+    </div>
+    <!-- Hover actions for user messages -->
+    <div v-if="!editing && !message.queued && !message.injectedMidTurn && messageIdx != null" class="absolute -bottom-5 right-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--right">
+      <!-- Branch navigator on user message: shown only when this turn
+           has multiple distinct user contents (i.e. an edit produced
+           a sibling branch at this divergence point). -->
+      <div v-if="hasUserGroups" class="flex items-center gap-0.5 mr-1 select-none">
+        <button class="msg-action-btn" title="Previous edit" aria-label="Previous user edit" :disabled="branchOperationBusy || !hasPrevUserGroup" :aria-busy="branchOperationBusy" @click="goToPrevUserGroup">
+          <span class="i-carbon-chevron-left text-xs" />
+        </button>
+        <span class="text-[10px] tabular-nums text-warm-500 px-1">{{ message.currentUserGroupIdx + 1 }}/{{ message.userGroupCount }}</span>
+        <button class="msg-action-btn" title="Next edit" aria-label="Next user edit" :disabled="branchOperationBusy || !hasNextUserGroup" :aria-busy="branchOperationBusy" @click="goToNextUserGroup">
+          <span class="i-carbon-chevron-right text-xs" />
+        </button>
+      </div>
+      <button class="msg-action-btn" title="Copy" aria-label="Copy message" @click="copyMessage">
+        <span class="i-carbon-copy text-xs" />
+      </button>
+      <button class="msg-action-btn" title="Edit & rerun" aria-label="Edit and rerun message" :disabled="branchOperationBusy" :aria-busy="branchOperationBusy" @click="startEdit">
+        <span class="i-carbon-edit text-xs" />
+      </button>
+    </div>
+  </div>
+
+  <!-- Assistant message (parts-based: ordered text + tools + images).
+       Runs of ≥3 consecutive non-subagent tool calls collapse into a
+       single ToolCallBatch accordion (default collapsed). Sub-agent
+       parts, text, and images break the run — the batch identity is
+       keyed on the first tool's id so streaming new tools into an
+       in-progress batch doesn't reshuffle ``expandedTools`` state. -->
+  <div v-else-if="message.role === 'assistant' && message.parts" class="max-w-[90%] group relative">
+    <div class="chat-cv">
+      <ConversationMessage :message="message" :render-text="renderSharedText" :render-content-part="renderSharedAssistantPart" bare />
+    </div>
+    <!-- Hover actions -->
+    <div class="absolute -bottom-5 left-2 flex gap-1 items-center hover-only-action chat-msg-actions chat-msg-actions--left">
+      <!-- Branch navigator on the assistant bubble: shown only when
+           the current user-content group has more than one regen
+           alternative. Edit-only branching does NOT light this up —
+           that's the user-side navigator's job. -->
+      <div v-if="hasAssistantBranches" class="flex items-center gap-0.5 mr-1 select-none">
+        <button class="msg-action-btn" title="Previous regen" aria-label="Previous regen" :disabled="branchOperationBusy || !hasPrevAssistantBranch" :aria-busy="branchOperationBusy" @click="goToPrevAssistantBranch">
+          <span class="i-carbon-chevron-left text-xs" />
+        </button>
+        <span class="text-[10px] tabular-nums text-warm-500 px-1">{{ message.currentAssistantIdx + 1 }}/{{ message.assistantBranchCount }}</span>
+        <button class="msg-action-btn" title="Next regen" aria-label="Next regen" :disabled="branchOperationBusy || !hasNextAssistantBranch" :aria-busy="branchOperationBusy" @click="goToNextAssistantBranch">
+          <span class="i-carbon-chevron-right text-xs" />
+        </button>
+      </div>
+      <button class="msg-action-btn" title="Copy" aria-label="Copy response" @click="copyAssistantText">
+        <span class="i-carbon-copy text-xs" />
+      </button>
+      <!-- Regenerate: opens a new branch of this turn. Always visible
+           on assistant messages — the previous duplicate "Retry"
+           button was identical and only hid the affordance when an
+           interrupt left the turn in a non-"last" state. -->
+      <button class="msg-action-btn" title="Regenerate" aria-label="Regenerate response" :disabled="branchOperationBusy" :aria-busy="branchOperationBusy" @click="regenerate">
+        <span class="i-carbon-renew text-xs" />
+      </button>
+    </div>
+  </div>
+
+  <!-- Assistant message (legacy: content + tool_calls) -->
+  <ConversationMessage v-else-if="message.role === 'assistant'" :message="message" :render-text="renderSharedText" :render-content-part="renderSharedAssistantPart" />
+
+  <!-- Channel message (group chat style) -->
+  <div v-else-if="message.role === 'channel'" class="max-w-[90%] chat-cv">
+    <div v-if="showSenderHeader" class="flex items-center gap-2 mb-1" :class="{ 'mt-2': !isFirst }">
+      <span class="w-5 h-5 rounded-md flex items-center justify-center text-[10px] font-bold text-white" :style="{ background: senderGemColor }">
+        {{ message.sender.charAt(0).toUpperCase() }}
+      </span>
+      <span class="text-xs font-semibold" :style="{ color: senderGemColor }">{{ message.sender }}</span>
+      <component :is="siteChipNode" v-if="siteChipNode" />
+      <span class="text-[10px] text-warm-400">{{ message.timestamp }}</span>
+    </div>
+    <div class="pl-7 text-body">
+      <template v-if="message.contentParts?.length">
+        <div class="flex flex-col gap-2">
+          <template v-for="(part, i) in message.contentParts" :key="i">
+            <MarkdownRenderer v-if="part.type === 'text'" :content="part.text || ''" :breaks="true" :origin="markdownOrigin" />
+            <MediaImage v-else-if="part.type === 'image_url'" :src="part.image_url?.url" :name="part.meta?.source_name || part.file?.name || ''" :alt="part.meta?.source_name || 'generated image'" />
+            <VideoFilePreview v-else-if="part.type === 'file' && part.file?.mime?.startsWith('video/')" :file="part.file" />
+            <div v-else-if="part.type === 'file'" class="px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300">
+              <span class="i-carbon-document mr-1 text-aquamarine" />
+              {{ part.file?.name || part.file?.path || "file" }}
+            </div>
+          </template>
+        </div>
+      </template>
+      <MarkdownRenderer v-else :content="message.content" :breaks="true" :origin="markdownOrigin" />
+    </div>
+  </div>
+
+  <!-- Phase B output-event kinds (ask_text, confirm, selection, progress, notification, card) -->
+  <ConversationMessage v-else-if="message.role === 'ui_event'" :message="message" :render-ui-event="renderSharedUIEvent" @reply="onUIEventReply" />
+</template>
+
+<script setup>
+import { computed, h, inject, reactive, ref } from "vue"
+
+import CommandResultMessage from "../CommandResultMessage.vue"
+import ConversationMessage from "./ConversationMessage.js"
+import ToolCallBatch from "../ToolCallBatch.vue"
+import ToolCallBlock from "../ToolCallBlock.vue"
+import VideoFilePreview from "../VideoFilePreview.vue"
+import UIEventBlock from "../UIEventBlock.vue"
+import MarkdownRenderer from "../../../public/chat/MarkdownRenderer.vue"
+import { MediaImage } from "../../../public/chat/MediaPreview.js"
+import { useMessageActions } from "../../../public/chat/messageActions.js"
+import { contentToText, useMessageRowActions } from "../../../public/chat/useMessageRowActions.js"
+import { useChatStore } from "@/stores/chat"
+import { GEM } from "@/utils/colors"
+import { useI18n } from "@/utils/i18n"
+
+const { t } = useI18n()
+
+// Host seam: the pieces a host owns (copy platform, UI-event reply transport,
+// optional site adornment/home-node resolver, markdown origin). Absent =>
+// browser defaults, so the Dashboard leaves it uninstalled and the VS Code
+// webview installs the Host-backed implementations.
+const hostActions = useMessageActions()
+const writeClipboard = hostActions?.writeClipboard || ((text) => navigator.clipboard.writeText(text))
+const markdownOrigin = hostActions?.markdownOrigin ?? null
+const renderSiteChip = hostActions?.renderSiteChip || null
+const resolveHomeNode = hostActions?.resolveHomeNode || (() => "")
+
+// Module-scoped so colors are stable across all MessageRow instances.
+// If this were declared inside <script setup>, each message would have
+// its own cache and the same sender would cycle through colors.
+const SENDER_GEMS = [GEM.iolite.main, GEM.aquamarine.main, GEM.taaffeite.main, GEM.amber.main, GEM.sapphire.main]
+const _senderColorCache = {}
+let _nextColorIdx = 0
+
+function _gemForSender(name) {
+  if (!name) return GEM.iolite.main
+  if (!_senderColorCache[name]) {
+    _senderColorCache[name] = SENDER_GEMS[_nextColorIdx % SENDER_GEMS.length]
+    _nextColorIdx++
+  }
+  return _senderColorCache[name]
+}
+
+const props = defineProps({
+  message: { type: Object, required: true },
+  prevMessage: { type: Object, default: null },
+  isFirst: { type: Boolean, default: false },
+  messageIdx: { type: Number, default: null },
+  isLastAssistant: { type: Boolean, default: false },
+  tabId: { type: String, default: "" },
+})
+
+const expandedTools = reactive({})
+const errorExpanded = ref(false)
+
+const errorFirstLine = computed(() => {
+  if (props.message.role !== "error") return ""
+  const content = contentToText(props.message.content)
+  const firstLine = content.split("\n")[0] || ""
+  return firstLine.length > 80 ? firstLine.slice(0, 80) + "…" : firstLine
+})
+
+function toggleTool(id) {
+  expandedTools[id] = !expandedTools[id]
+}
+
+function renderSharedText(content, breaks = false) {
+  return h(MarkdownRenderer, { content, breaks, origin: markdownOrigin })
+}
+
+function renderSharedTool(tool) {
+  return h(ToolCallBlock, {
+    tc: tool,
+    expanded: !!expandedTools[tool.id],
+    onToggle: () => toggleTool(tool.id),
+  })
+}
+
+function renderSharedAssistantPart(part) {
+  if (part.type === "tool") return renderSharedTool(part)
+  if (part.type === "tool-batch") {
+    return h(ToolCallBatch, {
+      tools: part.tools,
+      expanded: !!expandedTools[part.id],
+      toolExpanded: expandedTools,
+      onToggle: () => toggleTool(part.id),
+      onToolToggle: toggleTool,
+    })
+  }
+  return renderSharedContentPart(part)
+}
+
+function renderSharedUIEvent(message, reply) {
+  return h(UIEventBlock, { message, onReply: reply })
+}
+
+function renderSharedContentPart(part) {
+  // Media resolution is a host seam: the shared leaves consume the injected
+  // resolver (browser direct URL or Host-spooled webview URI). The Dashboard
+  // layers its own media routing through the resolver seam; the VS Code
+  // webview's ConversationMessage renders them without this hook.
+  if (part.type === "image_url") {
+    return h(MediaImage, {
+      src: part.image_url?.url,
+      alt: part.meta?.source_name || "generated image",
+      name: part.meta?.source_name || part.file?.name || "",
+    })
+  }
+  if (part.type === "file" && part.file?.mime?.startsWith("video/")) {
+    return h(VideoFilePreview, { file: part.file })
+  }
+  if (part.type === "file") {
+    return h("div", { class: "px-3 py-2 rounded-lg border border-aquamarine/20 bg-aquamarine/5 text-xs text-warm-600 dark:text-warm-300" }, [h("span", { class: "i-carbon-document mr-1 text-aquamarine" }), part.file?.name || part.file?.path || "file"])
+  }
+  return null
+}
+
+const chat = inject("chatStore", null) || useChatStore()
+const messageTab = computed(() => props.tabId || chat.activeTab)
+
+// Phase B UI event reply: route through the host seam so the VS Code webview
+// keeps its accepted-reply transport (never a raw store bypass) while the
+// Dashboard keeps ``chat.submitUIReply``.
+function onUIEventReply({ actionId, values }) {
+  if (!props.message?.eventId) return
+  if (hostActions?.submitReply) {
+    hostActions.submitReply(props.message, actionId, values || {})
+    return
+  }
+  chat.submitUIReply(messageTab.value, props.message.eventId, actionId, values || {})
+}
+
+const showSenderHeader = computed(() => {
+  if (props.message.role !== "channel") return false
+  if (!props.prevMessage || props.prevMessage.role !== "channel") return true
+  return props.prevMessage.sender !== props.message.sender
+})
+
+const senderGemColor = computed(() => _gemForSender(props.message.sender))
+
+const senderHomeNode = computed(() => resolveHomeNode(props.message))
+const siteChipNode = computed(() => (renderSiteChip ? renderSiteChip(senderHomeNode.value) : null))
+
+// ── Message actions (copy / edit / regenerate / branch navigators) ──
+const { editing, editText, editAttachments, editTextareaEl, editImageInputEl, editFileInputEl, editSaving, editError, branchOperationBusy, branchOperationError, copyMessage, copyAssistantText, startEdit, cancelEdit, onEditFileChange, removeEditAttachment, confirmEdit, regenerate, hasUserGroups, hasPrevUserGroup, hasNextUserGroup, goToPrevUserGroup, goToNextUserGroup, hasAssistantBranches, hasPrevAssistantBranch, hasNextAssistantBranch, goToPrevAssistantBranch, goToNextAssistantBranch } = useMessageRowActions({ props, chat, messageTab, writeClipboard, t })
+</script>
+
+<style scoped>
+.message-edit-textarea {
+  width: 100%;
+  min-height: 160px;
+  max-height: 50vh;
+  padding: 0.75rem 0.85rem;
+  border-radius: 0.75rem;
+  border: 1px solid var(--color-border);
+  background: var(--color-card);
+  color: var(--color-text);
+  font-size: 0.92rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-shadow: inset 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.message-edit-inline {
+  min-height: 7rem;
+  max-height: 40vh;
+  border: none;
+  background: transparent;
+  padding: 0.25rem 0;
+  box-shadow: none;
+}
+
+.message-edit-textarea:focus {
+  border-color: rgb(124 103 184 / 0.55);
+  box-shadow:
+    0 0 0 2px rgb(124 103 184 / 0.12),
+    inset 0 1px 2px rgb(0 0 0 / 0.04);
+}
+
+.message-edit-inline:focus {
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.user-message-editing {
+  width: 100%;
+}
+
+/* Narrow inline editor. The edit form is its own size container, so the
+ * rule keys off the form's ACTUAL width, not the viewport (the Dashboard
+ * narrow pane and the Extension webview share this component). Below the
+ * width where the actions row starves the textarea, stack the attach
+ * actions under a full-width textarea. */
+.message-edit-form {
+  container-type: inline-size;
+}
+
+@container (max-width: 280px) {
+  .message-edit-input-row {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .message-edit-attach {
+    align-self: flex-start;
+    margin-bottom: 0;
+  }
+}
+
+.msg-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  background: var(--color-card);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.msg-action-btn:hover {
+  background: var(--color-card-hover);
+  color: var(--color-text);
+  border-color: var(--color-border-hover);
+}
+
+/* Mobile / touch fallback for the floating action rows.
+ *
+ * On fine pointers the rows sit ``-bottom-5`` (= -1.25rem) outside
+ * the bubble so they only appear on hover and don't take vertical
+ * space.  On coarse pointers ``hover-only-action`` is always
+ * visible, and that negative offset overlaps the next message —
+ * stealing tap targets the user is trying to hit.  Switch to inline
+ * flow with a small top margin so the actions sit in their own
+ * stacking slot below the bubble without overlap.
+ *
+ * Specificity: ``hover-only-action`` is the source class for the
+ * absolute positioning, but its style sits in the global stylesheet.
+ * ``!important`` here is the cleanest seam — anything fancier
+ * (e.g. duplicating the rule with a coarse-pointer media query in
+ * style.css) would split the layout intent across two files.
+ */
+@media (pointer: coarse) {
+  .chat-msg-actions {
+    position: static !important;
+    bottom: auto !important;
+    margin-top: 0.4rem;
+  }
+  .chat-msg-actions--right {
+    justify-content: flex-end;
+    width: 100%;
+  }
+  .chat-msg-actions--left {
+    justify-content: flex-start;
+    width: 100%;
+  }
+}
+</style>

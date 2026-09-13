@@ -108,3 +108,8 @@ dep/
 # inside the agent loop but never committed (binary screenshots +
 # rapidly-iterated notes).
 /audit/
+
+# VS Code extension build artifacts
+/extensions/vscode/node_modules/
+/extensions/vscode/dist/
+/extensions/vscode/*.vsix

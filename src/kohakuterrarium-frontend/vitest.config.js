@@ -14,9 +14,13 @@ export default defineConfig({
     }),
   ],
   resolve: {
-    alias: {
-      "@": fileURLToPath(new URL("./src", import.meta.url)),
-    },
+    alias: [
+      {
+        find: /^@kohakuterrarium\/chat-ui$/,
+        replacement: fileURLToPath(new URL("./src/public/chat/index.js", import.meta.url)),
+      },
+      { find: "@", replacement: fileURLToPath(new URL("./src", import.meta.url)) },
+    ],
   },
   test: {
     environment: "jsdom",

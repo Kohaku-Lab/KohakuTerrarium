@@ -1,0 +1,516 @@
+<template>
+  <div class="flex items-center gap-2 min-w-0">
+    <!-- Terrarium target (root vs creature) — only for terrarium instances -->
+    <el-select v-if="isTerrarium" :model-value="selectedTarget" size="small" class="status-select target-select" :disabled="!activeInstanceId" @change="onPickTarget">
+      <el-option v-for="target in targetOptions" :key="target.value" :label="target.label" :value="target.value" />
+    </el-select>
+
+    <!-- Current-model pill: click to open switcher drawer.  Drawer
+         (not popover) for both mobile and desktop — popper.js
+         positions teleported popovers using layout-coord math that
+         CSS ``zoom`` on ``<html>`` inflates relative to the visual
+         viewport, which pushed the popover off-screen at zoom > 1.
+         Drawer positions relative to the viewport itself. -->
+    <button type="button" class="model-pill" :class="{ 'is-disabled': !canPickModel }" :disabled="!canPickModel" @click="popoverVisible = !popoverVisible">
+      <span v-if="loading && !models.length" class="text-warm-400 text-[11px]">Loading models…</span>
+      <template v-else>
+        <span class="font-mono text-[11px] truncate max-w-[18rem]">{{ currentLabel || "No model" }}</span>
+        <span v-if="currentVariationSummary" class="model-pill-variation text-[10px] text-warm-400 shrink-0">
+          {{ currentVariationSummary }}
+        </span>
+        <el-icon class="shrink-0 text-warm-400"><ArrowDown /></el-icon>
+      </template>
+    </button>
+    <el-drawer v-model="popoverVisible" :direction="drawerDirection" :with-header="false" :size="drawerSize" :modal="true" :close-on-click-modal="true" :destroy-on-close="false" class="model-switcher-drawer">
+      <div class="flex flex-col gap-3 p-3 h-full overflow-hidden">
+        <!-- Search -->
+        <div class="flex items-center gap-2">
+          <el-input v-model="searchQuery" size="small" placeholder="Search model or provider…" clearable @keydown.esc="popoverVisible = false" />
+          <el-button size="small" :loading="refreshing" @click="refreshInventory">Refresh</el-button>
+        </div>
+
+        <!-- Three-pane on desktop (provider rail | model list |
+             variation column); stacked on mobile (provider chip
+             strip on top, then model, then variations). -->
+        <div class="flex flex-col sm:flex-row gap-3 min-h-0 flex-1">
+          <div class="model-switcher-providers sm:flex-col sm:w-32 sm:shrink-0 sm:overflow-y-auto sm:border-r sm:border-warm-100 sm:dark:border-warm-800 sm:pr-2">
+            <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1 sm:mb-1 hidden sm:block">Provider</div>
+            <div class="flex sm:flex-col gap-1 sm:gap-0 overflow-x-auto sm:overflow-x-visible scrollbar-none -mx-1 px-1 sm:mx-0 sm:px-0 pb-1 sm:pb-0">
+              <button v-for="provider in providerOptions" :key="provider.name" type="button" class="provider-tab shrink-0 sm:shrink" :class="{ 'is-active': draftProvider === provider.name, 'is-unavailable': !provider.available }" @click="selectProvider(provider.name)">
+                <span class="truncate">{{ provider.name }}</span>
+                <span class="text-[9px] text-warm-400 shrink-0">{{ provider.count }}</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="flex flex-col flex-1 min-w-0 min-h-0 overflow-y-auto sm:pr-2">
+            <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1">Model</div>
+            <button v-for="preset in filteredPresets" :key="preset.name" type="button" class="model-row" :class="{ 'is-active': draftPreset === preset.name, 'is-unavailable': !preset.available }" @click="selectPreset(preset.name)">
+              <div class="flex items-center gap-2 w-full">
+                <span class="font-medium text-[12px] truncate">{{ preset.name }}</span>
+                <span v-if="preset.is_default" class="text-[9px] px-1 rounded bg-iolite/20 text-iolite uppercase shrink-0"> default </span>
+                <span v-if="hasVariations(preset)" class="text-[9px] text-warm-400 shrink-0"> {{ Object.keys(preset.variation_groups).length }} opts </span>
+              </div>
+              <div class="text-[10px] text-warm-400 font-mono truncate w-full">
+                {{ preset.model }}
+              </div>
+            </button>
+            <div v-if="!filteredPresets.length" class="text-warm-400 text-[11px] italic p-2 text-center">No matching models.</div>
+          </div>
+
+          <div v-if="draftPresetData && hasVariations(draftPresetData)" class="flex flex-col sm:w-48 sm:shrink-0 max-h-[24vh] sm:max-h-none overflow-y-auto border-t sm:border-t-0 pt-2 sm:pt-0 border-warm-100 dark:border-warm-800">
+            <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1">Variations</div>
+            <div v-for="group in draftVariationGroups" :key="group.name" class="flex flex-col mb-3">
+              <div class="text-[10px] text-warm-500 font-medium mb-1">{{ group.name }}</div>
+              <div class="flex flex-wrap gap-1">
+                <button v-for="option in group.options" :key="option" type="button" class="variation-chip" :class="{ 'is-active': draftSelections[group.name] === option }" @click="toggleVariation(group.name, option)">
+                  {{ option }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Footer: selector preview + actions -->
+        <div class="flex flex-col sm:flex-row sm:items-center gap-2 pt-2 border-t border-warm-100 dark:border-warm-800">
+          <div class="flex-1 min-w-0">
+            <div class="text-[10px] text-warm-400">Selector</div>
+            <code class="font-mono text-[11px] text-warm-700 dark:text-warm-300 break-all sm:truncate block">
+              {{ draftSelector || "—" }}
+            </code>
+          </div>
+          <div class="flex items-center gap-2 justify-end shrink-0">
+            <el-button size="small" @click="popoverVisible = false">Cancel</el-button>
+            <el-button size="small" type="primary" :disabled="!draftSelector || draftSelector === currentModel" :loading="applying" @click="applySelection"> Switch </el-button>
+          </div>
+        </div>
+      </div>
+    </el-drawer>
+  </div>
+</template>
+
+<script setup>
+import { computed, ref, reactive, watch, onMounted, onUnmounted } from "vue"
+import { ElButton, ElDrawer, ElIcon, ElInput, ElMessage, ElOption, ElSelect } from "element-plus"
+import { ArrowDown } from "@element-plus/icons-vue"
+
+import { useDensity } from "@/composables/useDensity"
+
+import { useModelSwitcherContext } from "./modelSwitcherContext"
+
+// The one shared model picker. Every host-specific concern (which instance,
+// how a target/switch is dispatched, the host-keyed inventory, the open/host
+// subscriptions) is read from the narrow context, so the Dashboard, the
+// status bar, the settings tab and the VS Code webview render the same
+// template, search and variation logic. Element Plus widgets are imported
+// explicitly (not globally registered) so the same component resolves in the
+// VS Code webview build, which installs no component resolver.
+const ctx = useModelSwitcherContext()
+
+const { models, initialLoading: loading, refreshing, ensureLoaded: loadModels, revalidateIfStale, refresh: refreshModels } = ctx.inventory
+
+const isTerrarium = ctx.isTerrarium
+const targetOptions = ctx.targetOptions
+const selectedTarget = ctx.selectedTarget
+const currentModel = ctx.currentModel
+const activeInstanceId = computed(() => ctx.instance.value?.id || null)
+const canPickModel = computed(() => !!activeInstanceId.value && (!isTerrarium.value || !!selectedTarget.value))
+
+const applying = ref(false)
+const popoverVisible = ref(false)
+const searchQuery = ref("")
+
+// Mobile → bottom drawer (full-bleed sheet).  Desktop → right-side
+// drawer (sized to fit common widths without dominating the screen).
+// Drawer position is viewport-relative, so it stays correct under
+// CSS ``zoom`` on ``<html>`` regardless of zoom level.
+const { isCompact } = useDensity()
+
+const drawerDirection = computed(() => (isCompact.value ? "btt" : "rtl"))
+const drawerSize = computed(() => (isCompact.value ? "85%" : "min(640px, 90vw)"))
+
+const draftProvider = ref("")
+const draftPreset = ref("")
+const draftSelections = reactive({})
+
+const currentParsed = computed(() => parseSelector(currentModel.value))
+const currentLabel = computed(() => {
+  const { provider, name } = currentParsed.value
+  // Always show ``provider/name`` when both are known — matches the
+  // identifier the picker emits and the rich-CLI banner displays. Falls
+  // back to the bare name for pre-refactor session data that still
+  // stores just the model id.
+  if (provider && name) return `${provider}/${name}`
+  return name
+})
+const currentVariationSummary = computed(() => {
+  const entries = Object.entries(currentParsed.value.selections)
+  if (!entries.length) return ""
+  return entries.map(([g, o]) => `${g}=${o}`).join(", ")
+})
+
+// Provider tabs: group available models by provider, keep availability info
+const providerOptions = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  const map = new Map()
+  for (const model of models.value) {
+    const provider = model.provider || model.login_provider || "unknown"
+    if (query) {
+      const hay = `${model.name} ${model.model} ${provider}`.toLowerCase()
+      if (!hay.includes(query)) continue
+    }
+    if (!map.has(provider)) {
+      map.set(provider, { name: provider, count: 0, available: false })
+    }
+    const entry = map.get(provider)
+    entry.count += 1
+    if (model.available) entry.available = true
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    if (a.available !== b.available) return a.available ? -1 : 1
+    return a.name.localeCompare(b.name)
+  })
+})
+
+const filteredPresets = computed(() => {
+  const query = searchQuery.value.trim().toLowerCase()
+  return models.value
+    .filter((m) => (m.provider || m.login_provider) === draftProvider.value)
+    .filter((m) => {
+      if (!query) return true
+      return `${m.name} ${m.model}`.toLowerCase().includes(query)
+    })
+    .sort((a, b) => {
+      if (a.available !== b.available) return a.available ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
+})
+
+// Look up the draft preset's full record so the variation panel can
+// render its option groups.  ALWAYS match on (provider, name) — under
+// the (provider, name) hierarchy the same preset name (e.g. ``gpt-5.4``)
+// exists on multiple providers, and a name-only fallback would pull
+// variation metadata from whichever provider's row happens to come
+// first in ``models.value``.  When the active provider has no match
+// (in-flight filter / search edge cases), return null and skip the
+// variation panel instead of silently displaying the wrong provider's
+// data.
+const draftPresetData = computed(() => {
+  const provider = draftProvider.value
+  const name = draftPreset.value
+  if (!name) return null
+  return filteredPresets.value.find((m) => m.name === name) || models.value.find((m) => m.name === name && (m.provider || m.login_provider) === provider) || null
+})
+
+const draftVariationGroups = computed(() => {
+  const groups = draftPresetData.value?.variation_groups || {}
+  return Object.entries(groups).map(([name, options]) => ({
+    name,
+    options: Object.keys(options || {}),
+  }))
+})
+
+const draftSelector = computed(() => {
+  if (!draftPreset.value) return ""
+  // Under the (provider, name) hierarchy, bare names can be ambiguous
+  // across providers (``gpt-5.4`` exists on codex, openai, openrouter,
+  // and any custom backend the user added). Always emit ``provider/name``
+  // so the backend resolver can pick the exact entry without guessing.
+  const base = draftProvider.value ? `${draftProvider.value}/${draftPreset.value}` : draftPreset.value
+  const entries = Object.entries(draftSelections)
+    .filter(([, value]) => value)
+    .sort(([a], [b]) => a.localeCompare(b))
+  if (!entries.length) return base
+  return `${base}@${entries.map(([g, o]) => `${g}=${o}`).join(",")}`
+})
+
+function hasVariations(preset) {
+  return !!preset?.variation_groups && Object.keys(preset.variation_groups).length > 0
+}
+
+function parseSelector(value) {
+  const raw = String(value || "")
+  if (!raw) return { provider: "", name: "", selections: {} }
+  const [base, selector] = raw.split("@", 2)
+  let provider = ""
+  let name = base.trim()
+  if (name.includes("/")) {
+    const slash = name.indexOf("/")
+    provider = name.slice(0, slash).trim()
+    name = name.slice(slash + 1).trim()
+  }
+  const selections = {}
+  if (selector) {
+    selector.split(",").forEach((part) => {
+      const [group, option] = part.split("=", 2)
+      if (group && option) selections[group.trim()] = option.trim()
+    })
+  }
+  return { provider, name, selections }
+}
+
+function resetDraftFromCurrent() {
+  const { provider, name, selections } = currentParsed.value
+  // When the selector carried a ``provider/name`` prefix, look up by the
+  // full (provider, name) pair. Otherwise fall back to the bare name (for
+  // pre-refactor session data that still stores bare ids).
+  const matched = (provider && models.value.find((m) => (m.provider || m.login_provider) === provider && m.name === name)) || models.value.find((m) => m.name === name) || models.value.find((m) => m.model === name) || models.value[0]
+  if (!matched) {
+    draftProvider.value = providerOptions.value[0]?.name || ""
+    draftPreset.value = ""
+    Object.keys(draftSelections).forEach((k) => delete draftSelections[k])
+    return
+  }
+  draftProvider.value = matched.provider || matched.login_provider || ""
+  draftPreset.value = matched.name
+  Object.keys(draftSelections).forEach((k) => delete draftSelections[k])
+  Object.entries(selections).forEach(([g, o]) => (draftSelections[g] = o))
+}
+
+function selectProvider(provider) {
+  if (draftProvider.value === provider) return
+  draftProvider.value = provider
+  const first = filteredPresets.value[0]
+  if (first) {
+    draftPreset.value = first.name
+  } else {
+    draftPreset.value = ""
+  }
+  Object.keys(draftSelections).forEach((k) => delete draftSelections[k])
+}
+
+function selectPreset(name) {
+  if (draftPreset.value === name) return
+  draftPreset.value = name
+  Object.keys(draftSelections).forEach((k) => delete draftSelections[k])
+}
+
+function toggleVariation(group, option) {
+  if (draftSelections[group] === option) {
+    delete draftSelections[group]
+  } else {
+    draftSelections[group] = option
+  }
+}
+
+function reconcileDraft() {
+  if (!draftPreset.value) {
+    resetDraftFromCurrent()
+    return
+  }
+  const preset = models.value.find((model) => model.name === draftPreset.value && (model.provider || model.login_provider || "") === draftProvider.value)
+  if (!preset) {
+    resetDraftFromCurrent()
+    return
+  }
+  const groups = preset.variation_groups || {}
+  for (const [group, option] of Object.entries(draftSelections)) {
+    if (!groups[group]?.[option]) delete draftSelections[group]
+  }
+}
+
+async function refreshInventory() {
+  await refreshModels()
+  reconcileDraft()
+}
+
+function onPickTarget(target) {
+  if (!target || !isTerrarium.value) return
+  ctx.selectTarget(target)
+}
+
+async function applySelection() {
+  const modelName = draftSelector.value
+  if (!activeInstanceId.value || !modelName || modelName === currentModel.value) return
+  applying.value = true
+  try {
+    // The host context owns the route/session/target resolution and state
+    // update; it returns the canonical ``provider/name[@variations]`` the
+    // backend accepted so the pill matches what ``/model`` would show.
+    const canonical = await ctx.switchModel({ target: selectedTarget.value, selector: modelName })
+    const label = isTerrarium.value ? `Switched ${selectedTarget.value} to ${canonical}` : `Switched to ${canonical}`
+    ElMessage.success(label)
+    popoverVisible.value = false
+  } catch (err) {
+    ElMessage.error(`Model switch failed: ${err?.message || err}`)
+  } finally {
+    applying.value = false
+  }
+}
+
+watch(popoverVisible, (open) => {
+  if (!open) return
+  resetDraftFromCurrent()
+  revalidateIfStale().then(() => reconcileDraft())
+})
+
+watch(currentModel, () => {
+  if (!popoverVisible.value) resetDraftFromCurrent()
+})
+
+let _stopHostChange = null
+let _stopOpen = null
+onMounted(() => {
+  loadModels().then(() => reconcileDraft())
+  _stopHostChange = ctx.onHostChange(() => {
+    popoverVisible.value = false
+    resetDraftFromCurrent()
+  })
+  _stopOpen = ctx.onOpenRequest(() => (popoverVisible.value = true))
+})
+onUnmounted(() => {
+  if (_stopHostChange) _stopHostChange()
+  if (_stopOpen) _stopOpen()
+})
+</script>
+
+<style>
+.status-select {
+  --el-input-bg-color: transparent;
+  --el-fill-color-blank: transparent;
+  --el-border-color: rgba(120, 109, 98, 0.25);
+  --el-border-color-hover: rgba(120, 109, 98, 0.4);
+  --el-text-color-regular: currentColor;
+}
+
+.target-select {
+  width: 7rem;
+}
+@media (min-width: 768px) {
+  .target-select {
+    width: 8.5rem;
+  }
+}
+
+.model-pill {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.25rem 0.6rem;
+  min-height: 32px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 109, 98, 0.25);
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition:
+    border-color 0.1s ease,
+    background 0.1s ease;
+  min-width: 7rem;
+  max-width: 24rem;
+}
+@media (min-width: 768px) {
+  .model-pill {
+    min-width: 12rem;
+  }
+}
+.model-pill:hover:not(.is-disabled) {
+  border-color: rgba(120, 109, 98, 0.5);
+  background: rgba(120, 109, 98, 0.06);
+}
+.model-pill.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.provider-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  margin-bottom: 2px;
+  border-radius: 4px;
+  border: none;
+  background: transparent;
+  text-align: left;
+  font-size: 12px;
+  color: inherit;
+  cursor: pointer;
+}
+.provider-tab:hover {
+  background: rgba(120, 109, 98, 0.08);
+}
+.provider-tab.is-active {
+  background: rgba(90, 140, 200, 0.12);
+  color: var(--el-color-primary, #5a8cc8);
+  font-weight: 500;
+}
+.provider-tab.is-unavailable {
+  opacity: 0.5;
+}
+
+.model-row {
+  display: flex;
+  flex-direction: column;
+  padding: 0.4rem 0.5rem;
+  margin-bottom: 2px;
+  border-radius: 4px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  color: inherit;
+  cursor: pointer;
+}
+.model-row:hover {
+  background: rgba(120, 109, 98, 0.08);
+}
+.model-row.is-active {
+  background: rgba(90, 140, 200, 0.12);
+  border-color: rgba(90, 140, 200, 0.3);
+}
+.model-row.is-unavailable {
+  opacity: 0.4;
+}
+
+.variation-chip {
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  border: 1px solid rgba(120, 109, 98, 0.3);
+  background: transparent;
+  font-size: 11px;
+  color: inherit;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+.variation-chip:hover {
+  background: rgba(120, 109, 98, 0.1);
+}
+.variation-chip.is-active {
+  background: rgba(90, 140, 200, 0.18);
+  border-color: var(--el-color-primary, #5a8cc8);
+  color: var(--el-color-primary, #5a8cc8);
+  font-weight: 500;
+}
+
+/* Provider strip: column rail on desktop, horizontal chip strip on
+   mobile.  The base ``.model-switcher-providers`` switches the
+   wrapper from flex-row (mobile) → flex-col (desktop, via the
+   ``sm:flex-col`` utility on the element).  Chip-mode styling is
+   below; default rail-mode styling is overridden inside @media. */
+@media (max-width: 767px) {
+  .provider-tab {
+    /* Pill-shaped chips on mobile so the horizontal strip reads as
+       a tab bar rather than a stacked menu. */
+    border-radius: 9999px;
+    padding: 0.35rem 0.7rem;
+    margin-bottom: 0;
+    font-size: 12px;
+    border: 1px solid rgba(120, 109, 98, 0.25);
+  }
+  .provider-tab.is-active {
+    border-color: var(--el-color-primary, #5a8cc8);
+  }
+}
+
+/* Tap target bump for variation chips on touch devices. */
+@media (pointer: coarse) {
+  .variation-chip {
+    padding: 0.4rem 0.8rem;
+    font-size: 13px;
+  }
+  .model-row {
+    padding: 0.6rem 0.5rem;
+  }
+}
+</style>
