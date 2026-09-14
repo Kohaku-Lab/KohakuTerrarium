@@ -452,3 +452,90 @@ describe("SubagentConversationPanel live polling", () => {
     getLive.mockRestore()
   })
 })
+
+// The sub-agent transcript renders through the same production
+// ConversationMessage as the main chat, so provider reasoning, part ordering,
+// and non-text parts reach it instead of a reduced native fallback.
+describe("SubagentConversationPanel assistant parity", () => {
+  beforeEach(() => vi.restoreAllMocks())
+
+  const mdStub = { props: ["content"], template: "<div class='md'>{{ content }}</div>" }
+  const toolStub = { props: ["tc"], template: "<div class='tool-stub'>{{ tc.name }}</div>" }
+
+  async function mountTranscript(messages) {
+    vi.spyOn(sessionAPI, "getSubagentConversation").mockResolvedValue({
+      live: false,
+      can_receive: false,
+      messages,
+    })
+    const wrapper = mount(SubagentConversationPanel, {
+      props: { sessionId: "session-a", parent: "root", name: "explore", live: false },
+      global: { stubs: { MarkdownRenderer: mdStub, ToolCallBlock: toolStub } },
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  it("renders ordered reasoning segments in place", async () => {
+    const wrapper = await mountTranscript([
+      {
+        role: "assistant",
+        content: "the answer",
+        _kt_assistant_segments: [
+          { type: "reasoning", source: "reasoning_content", text: "PRIVATE_THOUGHT" },
+          { type: "text", text: "the answer" },
+        ],
+      },
+    ])
+
+    const text = wrapper.text()
+    expect(text).toContain("Thinking")
+    expect(text).toContain("PRIVATE_THOUGHT")
+    expect(text).toContain("the answer")
+    expect(text.indexOf("PRIVATE_THOUGHT")).toBeLessThan(text.indexOf("the answer"))
+  })
+
+  it("falls back to provider reasoning fields when no segments were recorded", async () => {
+    const wrapper = await mountTranscript([
+      { role: "assistant", content: "the answer", reasoning_content: "LEGACY_THOUGHT" },
+    ])
+
+    const text = wrapper.text()
+    expect(text).toContain("Thinking")
+    expect(text).toContain("LEGACY_THOUGHT")
+    expect(text.indexOf("LEGACY_THOUGHT")).toBeLessThan(text.indexOf("the answer"))
+  })
+
+  it("keeps a tool call that no segment references", async () => {
+    // Custom-format turns parse their calls out of text, so segments can carry
+    // reasoning without ever recording a tool_call_ref for them.
+    const wrapper = await mountTranscript([
+      {
+        role: "assistant",
+        content: "",
+        tool_calls: [{ id: "c1", function: { name: "read_file", arguments: '{"path":"a.py"}' } }],
+        _kt_assistant_segments: [
+          { type: "reasoning", source: "reasoning_content", text: "thinking" },
+          { type: "text", text: "let me read" },
+        ],
+      },
+    ])
+
+    expect(wrapper.text()).toContain("read_file")
+  })
+
+  it("renders an attached file part instead of dropping it", async () => {
+    const wrapper = await mountTranscript([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "look at this" },
+          { type: "file", file: { name: "notes.txt", mime: "text/plain" } },
+        ],
+      },
+    ])
+
+    expect(wrapper.text()).toContain("look at this")
+    expect(wrapper.text()).toContain("notes.txt")
+  })
+})
