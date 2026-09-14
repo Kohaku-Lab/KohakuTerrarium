@@ -47,6 +47,7 @@ from kohakuterrarium.api.routes.catalog import _deps as _catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core import agent_model as _agent_model
+from kohakuterrarium.packages.resolve import resolve_package_path
 from kohakuterrarium.session.embedding import NullEmbedder
 from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
 from kohakuterrarium.studio.sessions import lifecycle
@@ -336,6 +337,41 @@ class TestApiIntegration:
         assert resp.status_code == 200
         file_paths = {f["path"] for f in resp.json()}
         assert "kohaku.yaml" in file_paths
+
+        # ── Prefix-named sibling package ─────────────────────────────
+        # ``.../shorthand-pkg`` is a string prefix of this sibling's
+        # path; both refs below must round-trip through the resolver.
+        ext_src = tmp_path / "shorthand-pkg-extended"
+        (ext_src / "creatures" / "shorty-plus").mkdir(parents=True)
+        (ext_src / "kohaku.yaml").write_text(
+            "name: shorthand-pkg-extended\nversion: 1.0.0\n"
+            "creatures:\n  - name: shorty-plus\n",
+            encoding="utf-8",
+        )
+        (ext_src / "creatures" / "shorty-plus" / "config.yaml").write_text(
+            "name: shorty-plus\ndescription: sibling creature\nsystem_prompt: probe\n",
+            encoding="utf-8",
+        )
+        resp = client.post(
+            "/api/registry/install", json={"url": str(ext_src), "name": None}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["name"] == "shorthand-pkg-extended"
+
+        resp = client.get("/api/configs/creatures")
+        assert resp.status_code == 200
+        sibling_refs = {e["name"]: e["path"] for e in resp.json()}
+        assert sibling_refs["shorty"] == "@shorthand-pkg/creatures/shorty"
+        assert (
+            sibling_refs["shorty-plus"]
+            == "@shorthand-pkg-extended/creatures/shorty-plus"
+        )
+        assert resolve_package_path(sibling_refs["shorty-plus"]).is_dir()
+
+        resp = client.post(
+            "/api/registry/uninstall", json={"name": "shorthand-pkg-extended"}
+        )
+        assert resp.status_code == 200
 
         resp = client.post("/api/registry/uninstall", json={"name": "shorthand-pkg"})
         assert resp.status_code == 200
