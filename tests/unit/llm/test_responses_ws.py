@@ -102,6 +102,28 @@ USER2 = {"role": "user", "content": [{"type": "input_text", "text": "next"}]}
 
 
 class TestFullAndIncrementalTurns:
+    async def test_reasoning_echo_is_skipped_only_for_incremental_requests(self):
+        h = Harness()
+        h.conn.scripts = [
+            [completed("r1", call_ids=("c1",))],
+            [completed("r2")],
+            [completed("r3")],
+        ]
+        reasoning = {
+            "type": "reasoning",
+            "summary": [],
+            "content": [{"type": "reasoning_text", "text": "Inspect files"}],
+        }
+        await h.run([USER1])
+        history = [USER1, reasoning, ASSIST1, CALL1, OUT1]
+        await h.run(history)
+        assert h.conn.sent[1]["input"] == [OUT1]
+        assert h.conn.sent[1]["previous_response_id"] == "r1"
+        h.session.invalidate()
+        await h.run([*history, USER2])
+        assert h.conn.sent[2]["input"] == ["PAIRED", *history, USER2]
+        assert "previous_response_id" not in h.conn.sent[2]
+
     async def test_first_turn_sends_paired_full_input(self):
         h = Harness()
         h.conn.scripts = [[text("A"), completed("r1")]]

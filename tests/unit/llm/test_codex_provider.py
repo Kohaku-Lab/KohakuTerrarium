@@ -484,6 +484,39 @@ class TestSessionIdHeaderGating:
         assert "session_id" in kw["extra_headers"]
 
 
+class TestReasoningReplay:
+    @pytest.mark.parametrize(
+        "model", ["gpt-6-astra", "deepseek-flash", "deepseek/deepseek-flash"]
+    )
+    async def test_reasoning_replay_follows_target_model(self, model):
+        p = CodexOAuthProvider(model=model, api_key="sk", base_url="https://h/v1")
+        p._client = _FakeClient()
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Done",
+                "reasoning_content": "Inspect files",
+            }
+        ]
+        async for _ in p._raw_stream_chat(messages):
+            pass
+        items = p._client.responses.kwargs["input"]
+        expected = [
+            {"role": "assistant", "content": [{"type": "output_text", "text": "Done"}]}
+        ]
+        if model.startswith("deepseek"):
+            expected.insert(
+                0,
+                {
+                    "type": "reasoning",
+                    "summary": [],
+                    "content": [{"type": "reasoning_text", "text": "Inspect files"}],
+                },
+            )
+        assert items == expected
+        assert messages[0]["reasoning_content"] == "Inspect files"
+
+
 class _Ev:
     def __init__(self, **kwargs):
         self.__dict__.update(kwargs)

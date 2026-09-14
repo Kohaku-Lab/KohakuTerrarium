@@ -350,7 +350,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             else:
                 input_messages.append(msg)
 
-        api_input = to_responses_input(input_messages)
+        api_input = to_responses_input(input_messages, model=self.model)
 
         # Function tools precede provider-native tools in the outbound list.
         api_tools: list[dict[str, Any]] | None = None
@@ -445,7 +445,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             stream = await self._client.responses.create(
                 model=self.model,
                 instructions=instr_text,
-                # Codex requires each function call adjacent to its matching output.
+                # Keep parallel calls together with their matching outputs.
                 input=fix_tool_call_pairing(api_input),
                 tools=api_tools,
                 store=False,
