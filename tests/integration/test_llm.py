@@ -38,6 +38,7 @@ import pytest
 from openai import APIStatusError
 from PIL import Image
 
+from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
 from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.core.conversation import Conversation
@@ -676,6 +677,21 @@ class TestLlmIntegration:
         assert codex_profile.provider == "codex"
         assert codex_profile.backend_type == "codex"
         # bootstrap/llm.py branches on backend_type == "codex" -> CodexOAuthProvider.
+
+        daybreak_profile = resolve_controller_llm({}, llm="gpt-daybreak-blue-latest")
+        assert daybreak_profile is not None
+        assert daybreak_profile.name == "gpt-daybreak-blue-latest"
+        assert daybreak_profile.model == "gpt-daybreak-blue-latest"
+        assert daybreak_profile.provider == "codex"
+        assert daybreak_profile.backend_type == "codex"
+        assert daybreak_profile.max_context == 1_000_000
+        assert daybreak_profile.max_output == 128_000
+        assert daybreak_profile.reasoning_effort == "medium"
+        daybreak_provider = _create_from_profile(daybreak_profile)
+        assert isinstance(daybreak_provider, CodexOAuthProvider)
+        assert daybreak_provider.model == "gpt-daybreak-blue-latest"
+        assert daybreak_provider.reasoning_effort == "medium"
+        assert daybreak_provider._websocket_mode is False
 
         # 5. A built-in anthropic preset resolves to the anthropic backend.
         claude_profile = resolve_controller_llm({}, llm="anthropic/claude-opus-4.7")

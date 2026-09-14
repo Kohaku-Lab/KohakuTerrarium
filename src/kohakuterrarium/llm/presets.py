@@ -90,6 +90,17 @@ PRESETS: dict[str, dict[str, Any]] = {
             "speed": _CODEX_SPEED_GROUP,
         },
     },
+    "gpt-daybreak-blue-latest": {
+        "provider": "codex",
+        "model": "gpt-daybreak-blue-latest",
+        "max_context": 1000000,
+        "max_output": 128000,
+        "reasoning_effort": "medium",
+        "variation_groups": {
+            "context": _GPT5X_CONTEXT_GROUP,
+            "reasoning": _GPT56_REASONING_GROUP,
+        },
+    },
     "gpt-5.6-sol": {
         "provider": "codex",
         "model": "gpt-5.6-sol",
