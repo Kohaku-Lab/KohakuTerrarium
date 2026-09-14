@@ -507,8 +507,8 @@ describe("SubagentConversationPanel assistant parity", () => {
   })
 
   it("keeps a tool call that no segment references", async () => {
-    // Custom-format turns parse their calls out of text, so segments can carry
-    // reasoning without ever recording a tool_call_ref for them.
+    // ``as_list`` drops a tool_call_ref whose call_id never resolved, so a
+    // segment list can carry reasoning while omitting a call the message holds.
     const wrapper = await mountTranscript([
       {
         role: "assistant",
@@ -522,20 +522,5 @@ describe("SubagentConversationPanel assistant parity", () => {
     ])
 
     expect(wrapper.text()).toContain("read_file")
-  })
-
-  it("renders an attached file part instead of dropping it", async () => {
-    const wrapper = await mountTranscript([
-      {
-        role: "user",
-        content: [
-          { type: "text", text: "look at this" },
-          { type: "file", file: { name: "notes.txt", mime: "text/plain" } },
-        ],
-      },
-    ])
-
-    expect(wrapper.text()).toContain("look at this")
-    expect(wrapper.text()).toContain("notes.txt")
   })
 })

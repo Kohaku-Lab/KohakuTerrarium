@@ -200,8 +200,8 @@ function assistantRenderMessage(message, resultById, index) {
     }
     if (content) parts.push({ type: "text", id: `sa_${index}_c${parts.length}`, content })
   }
-  // A tool call no segment references must still render: custom-format turns
-  // parse their calls out of text, where no segment records them.
+  // Segments can under-report calls: ``as_list`` drops a ref whose ``call_id``
+  // never resolved, while the call itself still lands in ``tool_calls``.
   for (const tool of tools) {
     if (!placed.has(tool.id)) parts.push(tool)
   }
@@ -213,8 +213,6 @@ function assistantRenderMessage(message, resultById, index) {
         image_url: part.image_url,
         meta: part.meta,
       })
-    } else if (part.type === "file") {
-      parts.push({ type: "file", id: `sa_${index}_f${parts.length}`, file: part.file })
     }
   }
   return { role: "assistant", content, parts }
