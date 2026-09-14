@@ -177,6 +177,13 @@ const viewMessages = computed(() => {
   const t = viewActiveTab.value
   return t ? chat.messagesByTab[t] || [] : []
 })
+watch(
+  () => [viewActiveTab.value, props.readOnly, chat._instanceGeneration, chat.wsStatus, chat._historyLoaded],
+  () => {
+    if (!props.readOnly) void chat.ensureVisibleHistory(viewActiveTab.value)
+  },
+  { immediate: true },
+)
 const viewProcessing = computed(() => {
   const t = viewActiveTab.value
   return t ? !!chat.processingByTab[t] : false

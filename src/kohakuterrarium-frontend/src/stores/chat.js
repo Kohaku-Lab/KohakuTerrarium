@@ -2017,6 +2017,7 @@ const _chatStoreOptions = {
     /** Connection status for the single instance WS. Used by the UI to
      *  show "reconnecting" banners. "open" | "reconnecting" | "closed" */
     wsStatus: "closed",
+    _historyLoaded: false,
     /**
      * Per-tab user-message queue. Messages submitted while the target
      * tab is mid-stream sit here until ``_promoteQueuedMessages`` flushes
@@ -2283,10 +2284,7 @@ const _chatStoreOptions = {
         // passed (used by the graph editor's "open chat" on inner
         // creatures so the right sub-tab pops up without a reload).
         if (initialTab && initialTab !== this.activeTab) {
-          this._addTab(initialTab)
-          this.activeTab = initialTab
-          this._saveTabs()
-          this._loadHistory(initialTab)
+          this.openTab(initialTab)
         }
         // Same instance, WS already up. Nothing to do — the live WS
         // is already streaming any new events into ``messagesByTab``,
@@ -2449,10 +2447,7 @@ const _chatStoreOptions = {
       }
       this.activeTab = tabKey
       this._saveTabs()
-      // Always load history — the unified session endpoint handles
-      // both creature tabs (target=creature_name) and channel tabs
-      // (target=``ch:<channel>``).
-      this._loadHistory(tabKey)
+      this.ensureVisibleHistory(tabKey)
     },
 
     _addTab(key) {
@@ -2533,16 +2528,7 @@ const _chatStoreOptions = {
           this._persistGroupState()
         }
       }
-      // Lazy-load history for any newly-focused empty tab. The
-      // session endpoint accepts ``(session_id, creature_name)``
-      // for both solo and multi-creature sessions, so there's
-      // no need to fork by instance type here.
-      if (tab) {
-        const msgs = this.messagesByTab[tab]
-        if (msgs && msgs.length === 0) {
-          this._loadHistory(tab, this._instanceGeneration)
-        }
-      }
+      this.ensureVisibleHistory(tab)
     },
 
     /** Interrupt the active tab's agent. Also stops its streaming flag. */
@@ -2765,6 +2751,23 @@ const _chatStoreOptions = {
 
     async _loadHistory(target, generation = this._instanceGeneration) {
       return this._resyncHistory(target, { generation, suppressErrors: true, initialLoad: true })
+    },
+
+    async ensureVisibleHistory(tab) {
+      if (!tab || !this.tabs.includes(tab) || !this._instanceGraphId || !this._instanceId)
+        return false
+      if (this.wsStatus !== "open" || !this._historyLoaded) return false
+      const controller = _historyPageMap(this).get(tab)
+      if (controller?.kind === "saved" || controller?.getState().pending) return false
+      if (this.historyPageByTab[tab]?.initialized) return true
+      if (this.branchOperationByTab[tab] || this._branchResyncPendingByTab[tab]?.active)
+        return false
+      try {
+        return (await this.initHistoryPage(tab)).applied
+      } catch (err) {
+        console.error("Visible tab history load failed:", err)
+        return false
+      }
     },
 
     /** Connect single WS for terrarium.
@@ -6178,10 +6181,12 @@ const _chatStoreOptions = {
           this._reconcileRunningJobs(tab, replay.pendingJobs, fetchedAt)
         if (controller.kind !== "saved" && payload.is_processing === true)
           this.processingByTab[tab] = true
+        this.historyPageByTab[tab] = { ...controller.getState(), initialized: true }
         return
       }
       this.historyPageByTab[tab] = {
         ...controller.getState(),
+        initialized: true,
       }
       // Only a head read carries a fresh processing state; an older-page
       // merge or a detail read reuses the last head payload.
@@ -6263,6 +6268,7 @@ const _chatStoreOptions = {
     resetHistoryPage(tab) {
       const controller = _historyPageMap(this).get(tab)
       if (controller) controller.reset()
+      if (this.historyPageByTab[tab]) this.historyPageByTab[tab].initialized = false
     },
 
     /** Release branch ownership and resync state for a closed tab. */
