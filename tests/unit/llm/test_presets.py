@@ -187,6 +187,27 @@ class TestPresetsDataIntegrity:
         assert PRESETS["gpt-5.4"]["provider"] == "codex"
         assert PRESETS["gpt-5.5"]["provider"] == "codex"
         assert PRESETS["gpt-5.6-sol"]["provider"] == "codex"
+        assert PRESETS["gpt-daybreak-blue-latest"]["provider"] == "codex"
+
+    def test_daybreak_blue_uses_published_alias_metadata(self):
+        preset = PRESETS["gpt-daybreak-blue-latest"]
+        assert preset["provider"] == "codex"
+        assert preset["model"] == "gpt-daybreak-blue-latest"
+        assert preset["max_context"] == 1_000_000
+        assert preset["max_output"] == 128_000
+        assert preset["reasoning_effort"] == "medium"
+        assert set(preset["variation_groups"]) == {"context", "reasoning"}
+        assert "ultra" not in preset["variation_groups"]["reasoning"]
+        assert "max" in preset["variation_groups"]["reasoning"]
+        assert "websocket_mode" not in preset.get("extra_body", {})
+        assert "access_programs" not in preset.get("extra_body", {})
+
+        all_presets = get_all_presets()
+        assert ("codex", "gpt-daybreak-blue-latest") in all_presets
+        assert (
+            all_presets[("codex", "gpt-daybreak-blue-latest")]["model"]
+            == "gpt-daybreak-blue-latest"
+        )
 
     def test_codex_spark_uses_subscription_catalog_defaults(self):
         preset = PRESETS["gpt-5.3-codex-spark"]

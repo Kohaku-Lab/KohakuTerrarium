@@ -51,6 +51,22 @@ Or override at the command line for one run:
 kt run path/to/creature --llm gpt-5.4
 ```
 
+### Daybreak Blue through Codex OAuth
+
+Accounts provisioned for [Daybreak Blue](https://developers.openai.com/api/docs/models/gpt-daybreak-blue-latest)
+can select the built-in Codex OAuth preset directly:
+
+```yaml
+controller:
+  llm: gpt-daybreak-blue-latest
+```
+
+Run `kt login codex` before selecting the preset. Daybreak access is scoped to
+the approved identity, workspace, model, and product surface under
+[Trusted Access for Cyber](https://learn.chatgpt.com/docs/cyber-safety).
+The Daybreak Blue alias currently resolves to `gpt-5.6-sol`, so provider
+responses may report that resolved model name.
+
 If you want fully inline settings (no profile file), use `model` + `api_key_env` + `base_url`:
 
 ```yaml
