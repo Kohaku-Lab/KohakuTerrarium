@@ -62,6 +62,7 @@
     "vitest": "^4.1.4"
   },
   "allowScripts": {
-    "vue-demi@0.14.10": true
+    "vue-demi@0.14.10": true,
+    "fsevents@2.3.3": true
   }
 }
