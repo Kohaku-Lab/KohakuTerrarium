@@ -16,6 +16,8 @@ vi.mock("@/utils/api", () => {
   }
 })
 
+import { useHostsStore } from "./hosts"
+
 import { sessionAPI } from "@/utils/api"
 import { useInstancesStore } from "./instances"
 
@@ -245,3 +247,204 @@ function promiseWithResolvers() {
   })
   return { promise, resolve, reject }
 }
+
+describe("session summary/detail ownership", () => {
+  function detail(id = "a", names = ["alice"]) {
+    return {
+      session_id: id,
+      name: id,
+      pwd: "/workspace",
+      creatures: names.map((name) => ({ name, llm_name: "codex/current", model: "current" })),
+      channels: [],
+    }
+  }
+  function summary(id = "a", count = 1) {
+    return { session_id: id, name: `${id}-renamed`, creatures: count, node_id: "_host" }
+  }
+  it("preserves loaded details for every session through list polling", async () => {
+    const store = useInstancesStore()
+    sessionAPI.getActive.mockImplementation(async (id) => detail(id))
+    await store.fetchOne("a")
+    await store.fetchOne("b")
+    sessionAPI.listActive.mockResolvedValue([summary("a"), summary("b")])
+    await store.fetchAll()
+    expect(store.list.map((item) => item.creatures[0]?.name)).toEqual(["alice", "alice"])
+    expect(store.list[0].pwd).toBe("/workspace")
+    expect(store.list[0].session_name).toBe("a-renamed")
+    expect(store.current).toEqual(store.list[1])
+  })
+  it.each(["list-first", "detail-first"])(
+    "accepts valid detail across ordinary polling: %s",
+    async (order) => {
+      const store = useInstancesStore()
+      const list = promiseWithResolvers(),
+        full = promiseWithResolvers()
+      sessionAPI.getActive.mockReturnValue(full.promise)
+      sessionAPI.listActive.mockReturnValue(list.promise)
+      const pendingDetail = store.fetchOne("a")
+      const pendingList = store.fetchAll()
+      if (order === "list-first") {
+        list.resolve([summary()])
+        await pendingList
+        full.resolve(detail())
+      } else {
+        full.resolve(detail())
+        await pendingDetail
+        list.resolve([summary()])
+      }
+      await Promise.all([pendingDetail, pendingList])
+      expect((await pendingDetail).creatures[0]?.name).toBe("alice")
+      expect(store.current.creatures[0]?.name).toBe("alice")
+      expect(store.list[0].creatures[0]?.name).toBe("alice")
+    },
+  )
+  it("records a changed summary count without inventing a new roster; explicit empty detail clears it", async () => {
+    const store = useInstancesStore()
+    sessionAPI.getActive.mockResolvedValue(detail())
+    await store.fetchOne("a")
+    sessionAPI.listActive.mockResolvedValue([summary("a", 2)])
+    await store.fetchAll()
+    expect(store.current.creatures.map((c) => c.name)).toEqual(["alice"])
+    expect(store.current.creature_count).toBe(2)
+    sessionAPI.getActive.mockResolvedValue(detail("a", []))
+    await store.fetchOne("a")
+    sessionAPI.listActive.mockResolvedValue([summary("a", 0)])
+    await store.fetchAll()
+    expect(store.current.creatures).toEqual([])
+    expect(store.current.creature_count).toBe(0)
+  })
+  it("clears current when the session disappears from the listing", async () => {
+    const store = useInstancesStore()
+    sessionAPI.getActive.mockResolvedValue(detail())
+    await store.fetchOne("a")
+    sessionAPI.listActive.mockResolvedValue([])
+    await store.fetchAll()
+    expect(store.current).toBeNull()
+  })
+  it("does not rejoin an invalidated detail or let its cleanup remove the replacement", async () => {
+    const store = useInstancesStore()
+    const old = promiseWithResolvers(),
+      fresh = promiseWithResolvers()
+    sessionAPI.getActive.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise)
+    const oldRequest = store.fetchOne("a")
+    store.markRuntimeStopped("a")
+    const newRequest = store.fetchOne("a")
+    expect(sessionAPI.getActive).toHaveBeenCalledTimes(2)
+    old.resolve(detail())
+    expect(await oldRequest).toBeNull()
+    const joined = store.fetchOne("a")
+    expect(sessionAPI.getActive).toHaveBeenCalledTimes(2)
+    fresh.resolve(detail("a", ["new-alice"]))
+    expect((await newRequest).creatures[0].name).toBe("new-alice")
+    expect(await joined).toBe(await newRequest)
+  })
+  it.each(["stop", "404"])(
+    "keeps unrelated detail requests shared and valid after %s",
+    async (reason) => {
+      const store = useInstancesStore()
+      const alive = promiseWithResolvers()
+      sessionAPI.getActive.mockImplementation((id) =>
+        id === "a" ? alive.promise : Promise.reject({ response: { status: 404 } }),
+      )
+      const first = store.fetchOne("a")
+      if (reason === "stop") store.markRuntimeStopped("b")
+      else expect(await store.fetchOne("b")).toBeNull()
+      const joined = store.fetchOne("a")
+      expect(sessionAPI.getActive.mock.calls.filter(([id]) => id === "a")).toHaveLength(1)
+      alive.resolve(detail())
+      expect((await first).creatures[0].name).toBe("alice")
+      expect(await joined).toBe(await first)
+      expect(store.current.id).toBe("a")
+    },
+  )
+  it("rejects a late detail looked up by creature id after its canonical session stops", async () => {
+    const store = useInstancesStore()
+    const pending = promiseWithResolvers()
+    sessionAPI.getActive.mockReturnValue(pending.promise)
+    const request = store.fetchOne("alice-id")
+    store.markRuntimeStopped("a")
+    store.markRuntimeStopped("b")
+    pending.resolve(detail())
+    expect(await request).toBeNull()
+    expect(store.list).toEqual([])
+  })
+  it.each(["missing", "outdated"])(
+    "keeps newer detail when an older listing is %s",
+    async (state) => {
+      const store = useInstancesStore()
+      const list = promiseWithResolvers()
+      sessionAPI.listActive.mockReturnValueOnce(list.promise)
+      const pending = store.fetchAll()
+      sessionAPI.getActive.mockResolvedValue(detail("a", ["alice", "bob"]))
+      const loaded = await store.fetchOne("a")
+      list.resolve(state === "missing" ? [] : [summary("a", 1)])
+      await pending
+      expect(store.current).toEqual(loaded)
+      expect(store.list[0].creature_count).toBe(2)
+      expect(store.list[0].creatures.map((c) => c.name)).toEqual(["alice", "bob"])
+      expect(store.list).toHaveLength(1)
+      sessionAPI.listActive.mockResolvedValue([])
+      await store.fetchAll()
+      expect(store.list).toEqual([])
+      expect(store.current).toBeNull()
+    },
+  )
+  it("retains every refreshed session but removes unrefreshed sessions absent from an old list", async () => {
+    const store = useInstancesStore()
+    sessionAPI.getActive.mockImplementation(async (id) => detail(id))
+    await store.fetchOne("a")
+    await store.fetchOne("b")
+    await store.fetchOne("gone")
+    const list = promiseWithResolvers()
+    sessionAPI.listActive.mockReturnValue(list.promise)
+    const pending = store.fetchAll()
+    await store.fetchOne("a")
+    await store.fetchOne("b")
+    list.resolve([])
+    await pending
+    expect(store.list.map((item) => item.id).sort()).toEqual(["a", "b"])
+    expect(store.current.id).toBe("b")
+  })
+  it("updates summary-only classification as the graph grows and shrinks", async () => {
+    const store = useInstancesStore()
+    for (const count of [1, 2, 1]) {
+      sessionAPI.listActive.mockResolvedValue([summary("a", count)])
+      await store.fetchAll()
+      expect(store.list[0].type).toBe(count > 1 ? "terrarium" : "creature")
+      expect(store.list[0].creatures).toEqual([])
+    }
+  })
+  it("isolates pending detail and cached metadata across hosts with the same session id", async () => {
+    const store = useInstancesStore(),
+      hosts = useHostsStore()
+    const old = promiseWithResolvers()
+    sessionAPI.getActive.mockReturnValueOnce(old.promise)
+    const oldRequest = store.fetchOne("a")
+    hosts.activeHostId = "other-host"
+    sessionAPI.getActive.mockResolvedValue(detail("a", ["other-alice"]))
+    const otherRequest = store.fetchOne("a")
+    expect(sessionAPI.getActive).toHaveBeenCalledTimes(2)
+    expect((await otherRequest).creatures[0].name).toBe("other-alice")
+    old.resolve(detail())
+    expect(await oldRequest).toBeNull()
+    expect(store.current.creatures[0].name).toBe("other-alice")
+    hosts.activeHostId = null
+    sessionAPI.listActive.mockResolvedValue([summary()])
+    await store.fetchAll()
+    expect(store.current).toBeNull()
+    expect(store.list[0].creatures).toEqual([])
+  })
+})
+
+it("does not resurrect a missing session from a listing requested before its detail 404", async () => {
+  const store = useInstancesStore()
+  const list = promiseWithResolvers()
+  sessionAPI.listActive.mockReturnValue(list.promise)
+  const pending = store.fetchAll()
+  sessionAPI.getActive.mockRejectedValue({ response: { status: 404 } })
+  expect(await store.fetchOne("gone")).toBeNull()
+  list.resolve([{ session_id: "gone", name: "gone", creatures: 1 }])
+  await pending
+  expect(store.list).toEqual([])
+  expect(store.current).toBeNull()
+})
