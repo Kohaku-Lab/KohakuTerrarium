@@ -338,6 +338,82 @@ describe("session summary/detail ownership", () => {
     expect((await newRequest).creatures[0].name).toBe("new-alice")
     expect(await joined).toBe(await newRequest)
   })
+  it.each(["stop", "404"])(
+    "keeps unrelated detail requests shared and valid after %s",
+    async (reason) => {
+      const store = useInstancesStore()
+      const alive = promiseWithResolvers()
+      sessionAPI.getActive.mockImplementation((id) =>
+        id === "a" ? alive.promise : Promise.reject({ response: { status: 404 } }),
+      )
+      const first = store.fetchOne("a")
+      if (reason === "stop") store.markRuntimeStopped("b")
+      else expect(await store.fetchOne("b")).toBeNull()
+      const joined = store.fetchOne("a")
+      expect(sessionAPI.getActive.mock.calls.filter(([id]) => id === "a")).toHaveLength(1)
+      alive.resolve(detail())
+      expect((await first).creatures[0].name).toBe("alice")
+      expect(await joined).toBe(await first)
+      expect(store.current.id).toBe("a")
+    },
+  )
+  it("rejects a late detail looked up by creature id after its canonical session stops", async () => {
+    const store = useInstancesStore()
+    const pending = promiseWithResolvers()
+    sessionAPI.getActive.mockReturnValue(pending.promise)
+    const request = store.fetchOne("alice-id")
+    store.markRuntimeStopped("a")
+    store.markRuntimeStopped("b")
+    pending.resolve(detail())
+    expect(await request).toBeNull()
+    expect(store.list).toEqual([])
+  })
+  it.each(["missing", "outdated"])(
+    "keeps newer detail when an older listing is %s",
+    async (state) => {
+      const store = useInstancesStore()
+      const list = promiseWithResolvers()
+      sessionAPI.listActive.mockReturnValueOnce(list.promise)
+      const pending = store.fetchAll()
+      sessionAPI.getActive.mockResolvedValue(detail("a", ["alice", "bob"]))
+      const loaded = await store.fetchOne("a")
+      list.resolve(state === "missing" ? [] : [summary("a", 1)])
+      await pending
+      expect(store.current).toEqual(loaded)
+      expect(store.list[0].creature_count).toBe(2)
+      expect(store.list[0].creatures.map((c) => c.name)).toEqual(["alice", "bob"])
+      expect(store.list).toHaveLength(1)
+      sessionAPI.listActive.mockResolvedValue([])
+      await store.fetchAll()
+      expect(store.list).toEqual([])
+      expect(store.current).toBeNull()
+    },
+  )
+  it("retains every refreshed session but removes unrefreshed sessions absent from an old list", async () => {
+    const store = useInstancesStore()
+    sessionAPI.getActive.mockImplementation(async (id) => detail(id))
+    await store.fetchOne("a")
+    await store.fetchOne("b")
+    await store.fetchOne("gone")
+    const list = promiseWithResolvers()
+    sessionAPI.listActive.mockReturnValue(list.promise)
+    const pending = store.fetchAll()
+    await store.fetchOne("a")
+    await store.fetchOne("b")
+    list.resolve([])
+    await pending
+    expect(store.list.map((item) => item.id).sort()).toEqual(["a", "b"])
+    expect(store.current.id).toBe("b")
+  })
+  it("updates summary-only classification as the graph grows and shrinks", async () => {
+    const store = useInstancesStore()
+    for (const count of [1, 2, 1]) {
+      sessionAPI.listActive.mockResolvedValue([summary("a", count)])
+      await store.fetchAll()
+      expect(store.list[0].type).toBe(count > 1 ? "terrarium" : "creature")
+      expect(store.list[0].creatures).toEqual([])
+    }
+  })
   it("isolates pending detail and cached metadata across hosts with the same session id", async () => {
     const store = useInstancesStore(),
       hosts = useHostsStore()

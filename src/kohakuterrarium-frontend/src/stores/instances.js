@@ -25,7 +25,7 @@ export const useInstancesStore = defineStore("instances", {
     _pollInterval: null,
     _subscribers: 0,
     _inflightFetch: null,
-    /** id -> shared in-flight fetchOne promise. */
+    /** id -> shared detail request and stops observed while it is in flight. */
     _inflightOne: {},
     /** Runtime invalidation generation; ordinary reads do not advance it. */
     _fetchSeq: 0,
@@ -60,6 +60,7 @@ export const useInstancesStore = defineStore("instances", {
       if (this._inflightFetch) return this._inflightFetch
       this.loading = true
       const seq = this._fetchSeq
+      const before = new Map(this.list.map((item) => [item.id, item]))
       let task
       task = (async () => {
         try {
@@ -67,7 +68,13 @@ export const useInstancesStore = defineStore("instances", {
           if (scope !== this._syncHostScope() || seq !== this._fetchSeq) return
           const previous = new Map(this.list.map((item) => [item.id, item]))
           if (this.current) previous.set(this.current.id, this.current)
-          this.list = sessions.map((data) => _mergeSession(data, previous.get(data.session_id)))
+          const refreshed = new Map([...previous].filter(([id, item]) => item !== before.get(id)))
+          this.list = sessions.map((data) => {
+            const fresh = refreshed.get(data.session_id)
+            refreshed.delete(data.session_id)
+            return fresh || _mergeSession(data, previous.get(data.session_id))
+          })
+          this.list.push(...refreshed.values())
           if (this.current) {
             this.current = this.list.find((item) => item.id === this.current.id) || null
           }
@@ -93,22 +100,25 @@ export const useInstancesStore = defineStore("instances", {
       // caller's result or rejection — an error here is shared by
       // everyone joined on the request (every call site catches).
       const existing = this._inflightOne[id]
-      if (existing) return existing
-      const task = this._fetchOneNow(id).finally(() => {
-        if (this._inflightOne[id] === task) delete this._inflightOne[id]
+      if (existing) return existing.promise
+      const request = { promise: null, stopped: new Set() }
+      this._inflightOne[id] = request
+      const task = this._fetchOneNow(id, request).finally(() => {
+        if (this._inflightOne[id]?.promise === task) delete this._inflightOne[id]
       })
-      this._inflightOne[id] = task
+      request.promise = task
       return task
     },
 
-    async _fetchOneNow(id) {
+    async _fetchOneNow(id, request) {
       this.loading = true
-      const seq = this._fetchSeq
       const scope = this._hostScope
+      const isCurrent = () =>
+        scope === this._syncHostScope() && this._inflightOne[id]?.promise === request.promise
       try {
         const data = await sessionAPI.getActive(id)
         const loaded = _mapSession(data)
-        if (scope !== this._syncHostScope() || seq !== this._fetchSeq) return null
+        if (!isCurrent() || request.stopped.has(loaded.id)) return null
         this.current = loaded
         const idx = this.list.findIndex((item) => item.id === loaded.id)
         if (idx >= 0) {
@@ -118,7 +128,7 @@ export const useInstancesStore = defineStore("instances", {
         }
         return loaded
       } catch (err) {
-        if (scope !== this._syncHostScope() || seq !== this._fetchSeq) return null
+        if (!isCurrent()) return null
         if (err?.response?.status === 404) {
           this.markRuntimeStopped(id)
           return null
@@ -126,7 +136,7 @@ export const useInstancesStore = defineStore("instances", {
         console.error("Failed to fetch instance:", err)
         throw err
       } finally {
-        if (seq === this._fetchSeq) this.loading = false
+        if (isCurrent()) this.loading = false
       }
     },
 
@@ -155,7 +165,8 @@ export const useInstancesStore = defineStore("instances", {
     markRuntimeStopped(id) {
       ++this._fetchSeq
       this._inflightFetch = null
-      this._inflightOne = {}
+      for (const request of Object.values(this._inflightOne)) request.stopped.add(id)
+      delete this._inflightOne[id]
       this.loading = false
       this.list = this.list.filter((i) => i.id !== id)
       if (this.current?.id === id) this.current = null
@@ -184,6 +195,7 @@ function _mergeSession(data, previous) {
   if (!previous || Array.isArray(data.creatures)) return mapped
   return {
     ...previous,
+    type: mapped.type,
     session_name: mapped.session_name,
     config_name: mapped.config_name,
     home_node: mapped.home_node,
