@@ -1,4 +1,5 @@
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
+import { getRuntimeScope } from "@/stores/runtimeScope"
 import { agentAPI, sessionAPI, terrariumAPI } from "@/utils/api"
 
 /**
@@ -26,7 +27,9 @@ export const useInstancesStore = defineStore("instances", {
     _inflightFetch: null,
     /** id -> shared in-flight fetchOne promise. */
     _inflightOne: {},
+    /** Runtime invalidation generation; ordinary reads do not advance it. */
     _fetchSeq: 0,
+    _hostScope: null,
   }),
 
   getters: {
@@ -38,16 +41,36 @@ export const useInstancesStore = defineStore("instances", {
   },
 
   actions: {
+    _syncHostScope() {
+      const scope = getRuntimeScope()
+      if (this._hostScope !== scope) {
+        ++this._fetchSeq
+        this._inflightFetch = null
+        this._inflightOne = {}
+        this.current = null
+        this.list = []
+        this.loading = false
+        this._hostScope = scope
+      }
+      return scope
+    },
+
     async fetchAll() {
+      const scope = this._syncHostScope()
       if (this._inflightFetch) return this._inflightFetch
       this.loading = true
-      const seq = ++this._fetchSeq
+      const seq = this._fetchSeq
       let task
       task = (async () => {
         try {
           const sessions = await sessionAPI.listActive()
-          if (seq !== this._fetchSeq) return
-          this.list = sessions.map(_mapSession)
+          if (scope !== this._syncHostScope() || seq !== this._fetchSeq) return
+          const previous = new Map(this.list.map((item) => [item.id, item]))
+          if (this.current) previous.set(this.current.id, this.current)
+          this.list = sessions.map((data) => _mergeSession(data, previous.get(data.session_id)))
+          if (this.current) {
+            this.current = this.list.find((item) => item.id === this.current.id) || null
+          }
         } catch (err) {
           console.error("Failed to fetch instances:", err)
         } finally {
@@ -62,6 +85,7 @@ export const useInstancesStore = defineStore("instances", {
     },
 
     async fetchOne(id) {
+      this._syncHostScope()
       // Route navigation and the 5 s attach-tab poll can request the
       // same instance while a slow lookup is unanswered; share one
       // request instead of stacking duplicates. fetchAll already has
@@ -71,7 +95,7 @@ export const useInstancesStore = defineStore("instances", {
       const existing = this._inflightOne[id]
       if (existing) return existing
       const task = this._fetchOneNow(id).finally(() => {
-        delete this._inflightOne[id]
+        if (this._inflightOne[id] === task) delete this._inflightOne[id]
       })
       this._inflightOne[id] = task
       return task
@@ -80,15 +104,11 @@ export const useInstancesStore = defineStore("instances", {
     async _fetchOneNow(id) {
       this.loading = true
       const seq = this._fetchSeq
+      const scope = this._hostScope
       try {
         const data = await sessionAPI.getActive(id)
         const loaded = _mapSession(data)
-        if (seq !== this._fetchSeq) {
-          return (
-            this.list.find((item) => item.id === loaded.id) ??
-            (this.current?.id === loaded.id ? this.current : null)
-          )
-        }
+        if (scope !== this._syncHostScope() || seq !== this._fetchSeq) return null
         this.current = loaded
         const idx = this.list.findIndex((item) => item.id === loaded.id)
         if (idx >= 0) {
@@ -98,16 +118,15 @@ export const useInstancesStore = defineStore("instances", {
         }
         return loaded
       } catch (err) {
-        if (err?.response?.status === 404 && seq === this._fetchSeq) {
-          this.list = this.list.filter((i) => i.id !== id)
-          if (this.current?.id === id) this.current = null
+        if (scope !== this._syncHostScope() || seq !== this._fetchSeq) return null
+        if (err?.response?.status === 404) {
+          this.markRuntimeStopped(id)
           return null
         }
-        if (err?.response?.status === 404) return null
         console.error("Failed to fetch instance:", err)
         throw err
       } finally {
-        this.loading = false
+        if (seq === this._fetchSeq) this.loading = false
       }
     },
 
@@ -136,6 +155,7 @@ export const useInstancesStore = defineStore("instances", {
     markRuntimeStopped(id) {
       ++this._fetchSeq
       this._inflightFetch = null
+      this._inflightOne = {}
       this.loading = false
       this.list = this.list.filter((i) => i.id !== id)
       if (this.current?.id === id) this.current = null
@@ -159,17 +179,20 @@ export const useInstancesStore = defineStore("instances", {
   },
 })
 
-/** Map a unified Session payload to the frontend InstanceInfo shape.
- *
- * Single mapper. The wire shape comes from
- * ``GET /api/sessions/active`` and ``GET /api/sessions/active/{id}``,
- * both of which return ``Session.to_dict()`` (session_id, name,
- * creatures, channels, …).
- *
- * For backward compat with frontend code that read ``instance.type``,
- * we still derive ``type`` from creature count: ``terrarium`` when 2+,
- * ``creature`` when ≤1. New code should prefer
- * ``creatures.length > 1`` directly.
+function _mergeSession(data, previous) {
+  const mapped = _mapSession(data)
+  if (!previous || Array.isArray(data.creatures)) return mapped
+  return {
+    ...previous,
+    session_name: mapped.session_name,
+    config_name: mapped.config_name,
+    home_node: mapped.home_node,
+    creature_count: mapped.creature_count,
+  }
+}
+
+/** Map Session details or SessionListing summaries to InstanceInfo.
+ * Summary creature_count is independent of the last-known creatures array.
  */
 function _mapSession(data) {
   // ``GET /api/sessions/active`` returns ``SessionListing.to_dict()``
@@ -235,6 +258,7 @@ function _mapSession(data) {
     // Session-level home site for lab-host UI surfaces.
     home_node: sessionHome,
     creatures,
+    creature_count: creatureCount,
     channels,
   }
 }
