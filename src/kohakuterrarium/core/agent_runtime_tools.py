@@ -240,13 +240,13 @@ class AgentRuntimeToolsMixin:
                 "output_preview": content[:5000],
                 "exit_code": exit_code,
             }
-            session_metadata = (
-                result_metadata.get("session_metadata")
-                if isinstance(result_metadata, dict)
-                else None
-            )
-            if isinstance(session_metadata, dict):
-                metadata["tool_metadata"] = dict(session_metadata)
+            if isinstance(result_metadata, dict):
+                canvas_preview = result_metadata.get("canvas_preview")
+                if canvas_preview:
+                    metadata["canvas_preview"] = canvas_preview
+                session_metadata = result_metadata.get("session_metadata")
+                if isinstance(session_metadata, dict):
+                    metadata["tool_metadata"] = dict(session_metadata)
             self.output_router.notify_activity(
                 activity_done,
                 f"[{label}] DONE",
