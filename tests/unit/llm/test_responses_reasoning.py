@@ -9,6 +9,58 @@ class Ev:
 
 
 class TestResponsesReasoningCollector:
+    def test_completed_item_replaces_partial_text_without_text_done(self):
+        collector = ResponsesReasoningCollector()
+        collector.consume(
+            Ev(type="response.reasoning_text.delta", item_id="r1", delta="Inspect ")
+        )
+        collector.consume(
+            Ev(
+                type="response.output_item.done",
+                item=Ev(
+                    type="reasoning",
+                    id="r1",
+                    content=[{"type": "reasoning_text", "text": "Inspect files."}],
+                ),
+            )
+        )
+        assert collector.fields()["reasoning_content"] == "Inspect files."
+        assert collector.fields()["_kt_assistant_segments"] == [
+            {
+                "type": "reasoning",
+                "source": "responses_text",
+                "key": "r1",
+                "text": "Inspect files.",
+            }
+        ]
+
+    def test_done_events_preserve_all_reasoning_items(self):
+        collector = ResponsesReasoningCollector()
+        for item_id, text in [("r1", "First thought"), ("r2", "Second thought")]:
+            collector.consume(
+                Ev(
+                    type="response.reasoning_text.delta",
+                    item_id=item_id,
+                    delta="partial",
+                )
+            )
+            collector.consume(
+                Ev(type="response.reasoning_text.done", item_id=item_id, text=text)
+            )
+            collector.consume(
+                Ev(
+                    type="response.output_item.done",
+                    item=Ev(
+                        type="reasoning",
+                        id=item_id,
+                        content=[{"type": "reasoning_text", "text": text}],
+                    ),
+                )
+            )
+        assert (
+            collector.fields()["reasoning_content"] == "First thought\nSecond thought"
+        )
+
     def test_delta_events_are_accumulated(self):
         collector = ResponsesReasoningCollector()
         collector.consume(Ev(type="response.reasoning_text.delta", delta="think "))

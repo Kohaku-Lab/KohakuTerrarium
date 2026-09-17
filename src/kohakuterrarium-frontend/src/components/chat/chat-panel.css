@@ -86,8 +86,8 @@
   background: white;
 }
 
-:global(.dark) :deep(.kt-chat-composer__shell),
-:global(.dark) :deep(.kt-chat-composer__menu) {
+:global(html.dark .kt-chat-composer__shell),
+:global(html.dark .kt-chat-composer__menu) {
   border-color: rgb(87 83 78);
   background: rgb(41 37 36);
 }

@@ -38,8 +38,10 @@ import pytest
 from openai import APIStatusError
 from PIL import Image
 
+from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
 from kohakuterrarium.builtins.tools.read import ReadTool
+from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.tool_output import normalize_tool_result
 from kohakuterrarium.llm import api_keys as ak
@@ -59,6 +61,7 @@ from kohakuterrarium.llm.base import (
     ToolSchema,
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens
+from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.grok_auth import GrokToken, GrokTokens
 from kohakuterrarium.llm.grok_image_gen import GrokImageClient
 from kohakuterrarium.llm.grok_media import GrokMediaClient
@@ -674,6 +677,21 @@ class TestLlmIntegration:
         assert codex_profile.provider == "codex"
         assert codex_profile.backend_type == "codex"
         # bootstrap/llm.py branches on backend_type == "codex" -> CodexOAuthProvider.
+
+        daybreak_profile = resolve_controller_llm({}, llm="gpt-daybreak-blue-latest")
+        assert daybreak_profile is not None
+        assert daybreak_profile.name == "gpt-daybreak-blue-latest"
+        assert daybreak_profile.model == "gpt-daybreak-blue-latest"
+        assert daybreak_profile.provider == "codex"
+        assert daybreak_profile.backend_type == "codex"
+        assert daybreak_profile.max_context == 1_000_000
+        assert daybreak_profile.max_output == 128_000
+        assert daybreak_profile.reasoning_effort == "medium"
+        daybreak_provider = _create_from_profile(daybreak_profile)
+        assert isinstance(daybreak_provider, CodexOAuthProvider)
+        assert daybreak_provider.model == "gpt-daybreak-blue-latest"
+        assert daybreak_provider.reasoning_effort == "medium"
+        assert daybreak_provider._websocket_mode is False
 
         # 5. A built-in anthropic preset resolves to the anthropic backend.
         claude_profile = resolve_controller_llm({}, llm="anthropic/claude-opus-4.7")
@@ -1377,6 +1395,180 @@ class TestLlmIntegration:
         finally:
             store.close()
         assert len(requests) == 3
+
+        responses_requests = []
+        reasoning_item = {
+            "type": "reasoning",
+            "summary": [],
+            "content": [{"type": "reasoning_text", "text": "Inspect the file first."}],
+        }
+        call_item = {
+            "type": "function_call",
+            "call_id": "read1",
+            "name": "read",
+            "arguments": json.dumps({"path": source.name}),
+        }
+        call_items = [call_item, {**call_item, "call_id": "read2"}]
+
+        def responses_response(request):
+            body = json.loads(request.content)
+            assert request.url.path == "/v1/responses"
+            assert body["model"] in {"deepseek-flash", "gpt-6-astra"}
+            assert body["tools"][0]["name"] == "read"
+            responses_requests.append(body)
+            if len(responses_requests) == 1:
+                events = [
+                    {
+                        "type": "response.reasoning_text.delta",
+                        "item_id": "think1",
+                        "delta": "Inspect ",
+                    },
+                    {
+                        "type": "response.reasoning_text.done",
+                        "item_id": "think1",
+                        "text": "Inspect the file first.",
+                    },
+                    {
+                        "type": "response.output_item.done",
+                        "item": {"id": "think1", **reasoning_item},
+                    },
+                    *[
+                        {"type": "response.output_item.done", "item": item}
+                        for item in call_items
+                    ],
+                ]
+            else:
+                expected = (
+                    [reasoning_item, *call_items]
+                    if body["model"] == "deepseek-flash"
+                    else call_items
+                )
+                output_offset = 1 + len(expected)
+                assert body["input"][1:output_offset] == expected
+                for item, call_id in zip(
+                    body["input"][output_offset : output_offset + 2], ("read1", "read2")
+                ):
+                    assert item["type"] == "function_call_output"
+                    assert item["call_id"] == call_id
+                    assert (
+                        item["output"][1]["image_url"]
+                        == f"data:image/png;base64,{encoded}"
+                    )
+                events = [
+                    {"type": "response.output_text.delta", "delta": "A red square."}
+                ]
+            events.append(
+                {
+                    "type": "response.completed",
+                    "response": {"id": "response1", "output": []},
+                }
+            )
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content="".join(
+                    f"event: {event['type']}\ndata: {json.dumps(event)}\n\n"
+                    for event in events
+                ),
+            )
+
+        responses_provider = CodexOAuthProvider(
+            model="deepseek-flash",
+            api_key="test-key",
+            base_url="https://deepseek.test/v1",
+        )
+        await responses_provider.ensure_authenticated()
+        initial_client = responses_provider._client
+        responses_provider._client = initial_client.with_options(
+            http_client=httpx.AsyncClient(
+                transport=httpx.MockTransport(responses_response)
+            )
+        )
+        await initial_client.close()
+        try:
+            read_tool = ReadTool()
+            read_registry = Registry()
+            read_registry.register_tool(read_tool)
+            response_tools = build_tool_schemas(read_registry)
+            conversation = Conversation()
+            conversation.append("user", "Inspect the file")
+            first = await responses_provider.chat_complete(
+                conversation.to_messages(), tools=response_tools
+            )
+            assert first.content == ""
+            calls = responses_provider.last_tool_calls
+            assert [(call.id, call.name) for call in calls] == [
+                ("read1", "read"),
+                ("read2", "read"),
+            ]
+            conversation.append(
+                "assistant",
+                first.content,
+                extra_fields=responses_provider.last_assistant_extra_fields,
+                tool_calls=[
+                    {
+                        "id": call.id,
+                        "type": "function",
+                        "function": {
+                            "name": call.name,
+                            "arguments": call.arguments,
+                        },
+                    }
+                    for call in calls
+                ],
+            )
+            for call in calls:
+                result = await read_tool.execute(
+                    call.parsed_arguments(), context=context
+                )
+                assert result.success
+                conversation.append("tool", result.output, tool_call_id=call.id)
+            second = await responses_provider.chat_complete(
+                conversation.to_messages(), tools=response_tools
+            )
+            assert second.content == "A red square."
+            conversation.append("assistant", second.content)
+            session_path = tmp_path / "reasoning.kohakutr"
+            reasoning_store = SessionStore(session_path)
+            try:
+                reasoning_store.save_conversation("reader", conversation.to_messages())
+            finally:
+                reasoning_store.close()
+            reasoning_store = SessionStore(session_path)
+            try:
+                restored = Conversation()
+                for message in dicts_to_messages(
+                    reasoning_store.load_conversation("reader")
+                ):
+                    restored.append_message(message)
+            finally:
+                reasoning_store.close()
+            restored.append("user", "Continue")
+            third = await responses_provider.chat_complete(
+                restored.to_messages(), tools=response_tools
+            )
+            assert third.content == "A red square."
+            assert len(responses_requests) == 3
+            assert responses_requests[2]["input"][-1]["content"] == [
+                {"type": "input_text", "text": "Continue"}
+            ]
+            saved_history = restored.to_messages()
+            codex = responses_provider.with_model("gpt-6-astra")
+            switched = await codex.chat_complete(
+                restored.to_messages(), tools=response_tools
+            )
+            assert switched.content == "A red square."
+            assert restored.to_messages() == saved_history
+            switched_back = await responses_provider.chat_complete(
+                restored.to_messages(), tools=response_tools
+            )
+            assert switched_back.content == "A red square."
+            assert [request["model"] for request in responses_requests[-2:]] == [
+                "gpt-6-astra",
+                "deepseek-flash",
+            ]
+        finally:
+            await responses_provider.close()
 
     def test_api_key_storage_and_resolution_workflow(self):
         """Store + retrieve an API key, then assert the resolver override.

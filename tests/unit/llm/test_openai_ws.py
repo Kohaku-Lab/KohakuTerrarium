@@ -1,5 +1,7 @@
 """Unit tests for ``llm/openai_ws.py`` and OpenAIProvider websocket mode."""
 
+import pytest
+
 from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.openai_ws import build_ws_request
@@ -95,6 +97,44 @@ MESSAGES = [
 
 
 class TestBuildWsRequest:
+    @pytest.mark.parametrize(
+        "configured, override, expected_reasoning",
+        [
+            ("deepseek-flash", "gpt-6-astra", False),
+            ("gpt-6-astra", "deepseek-flash", True),
+            ("gpt-6-astra", None, False),
+            ("deepseek-flash", None, True),
+        ],
+    )
+    def test_reasoning_uses_effective_model(
+        self, configured, override, expected_reasoning
+    ):
+        provider = OpenAIProvider(api_key="sk-test", model=configured)
+        messages = [
+            {
+                "role": "assistant",
+                "content": "Done",
+                "reasoning_content": "Inspect files",
+            }
+        ]
+        event, items = build_ws_request(
+            provider, messages, None, {"model": override} if override else {}
+        )
+        assert event["model"] == (override or configured)
+        expected = [
+            {"role": "assistant", "content": [{"type": "output_text", "text": "Done"}]}
+        ]
+        if expected_reasoning:
+            expected.insert(
+                0,
+                {
+                    "type": "reasoning",
+                    "summary": [],
+                    "content": [{"type": "reasoning_text", "text": "Inspect files"}],
+                },
+            )
+        assert items == expected
+
     def test_splits_instructions_and_maps_fields(self):
         provider = make_provider(
             temperature=0.3,

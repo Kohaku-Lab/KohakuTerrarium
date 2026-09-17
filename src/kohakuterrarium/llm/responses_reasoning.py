@@ -38,10 +38,14 @@ class ResponsesReasoningCollector:
     """Accumulate Responses-API reasoning text and summary fragments."""
 
     def __init__(self) -> None:
-        self.text = ""
+        self._text_by_item: dict[str | None, str] = {}
         self.summary = ""
         self.segments = TurnSegmentsBuilder()
         self._seen_reasoning_item_ids: set[str] = set()
+
+    @property
+    def text(self) -> str:
+        return "\n".join(self._text_by_item.values())
 
     def consume(self, event: Any) -> None:
         """Fold one Responses stream event into the collector."""
@@ -49,7 +53,10 @@ class ResponsesReasoningCollector:
             case "response.reasoning_text.delta":
                 piece = getattr(event, "delta", None)
                 if isinstance(piece, str):
-                    self.text += piece
+                    item_id = getattr(event, "item_id", None)
+                    self._text_by_item[item_id] = (
+                        self._text_by_item.get(item_id, "") + piece
+                    )
                     self.segments.append_reasoning(
                         piece,
                         source="responses_text",
@@ -67,7 +74,7 @@ class ResponsesReasoningCollector:
             case "response.reasoning_text.done":
                 piece = getattr(event, "text", None) or getattr(event, "delta", None)
                 if isinstance(piece, str) and piece:
-                    self.text = piece
+                    self._text_by_item[getattr(event, "item_id", None)] = piece
                     self.segments.replace_reasoning(
                         piece,
                         source="responses_text",
@@ -96,22 +103,27 @@ class ResponsesReasoningCollector:
     def consume_item(self, item: Any) -> None:
         """Fold a completed ``reasoning`` output item into the collector."""
         item_id = getattr(item, "id", None)
+        seen = item_id in self._seen_reasoning_item_ids
         if isinstance(item_id, str) and item_id:
-            if item_id in self._seen_reasoning_item_ids:
-                return
             self._seen_reasoning_item_ids.add(item_id)
         summary = _parts_text(getattr(item, "summary", None))
         content = _parts_text(getattr(item, "content", None))
-        if summary:
+        if summary and not seen:
             self.summary = _join(self.summary, summary)
             self.segments.append_reasoning(
                 summary, source="responses_summary", key=getattr(item, "id", None)
             )
         if content:
-            self.text = _join(self.text, content)
-            self.segments.append_reasoning(
-                content, source="responses_text", key=getattr(item, "id", None)
-            )
+            if isinstance(item_id, str) and item_id:
+                self._text_by_item[item_id] = content
+                self.segments.replace_reasoning(
+                    content, source="responses_text", key=item_id
+                )
+            else:
+                self._text_by_item[None] = _join(
+                    self._text_by_item.get(None, ""), content
+                )
+                self.segments.append_reasoning(content, source="responses_text")
 
     def consume_output_text(self, piece: str) -> None:
         """Record visible output text in its arrival position."""

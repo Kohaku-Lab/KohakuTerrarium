@@ -214,7 +214,7 @@ class ResponsesWSSession:
             ):
                 delta.pop(0)
                 continue
-            if head.get("role") == "assistant":
+            if head.get("role") == "assistant" or head.get("type") == "reasoning":
                 delta.pop(0)
                 continue
             break

@@ -234,5 +234,16 @@ message IDs, so their dismissal across live-to-history rekeying is best effort.
 `useThemeStore().dark` reactively. CSS uses `html.dark` class for dark
 mode overrides. UnoCSS `dark:` prefix works throughout.
 
+Studio applies `kt-conversation-host` to its `ChatTranscriptSection` instance
+to supply the shared conversation palette. The shared transcript component
+inherits its host's tokens; it does not establish another palette scope.
+VS Code supplies its own scope and maps tokens to editor theme variables.
+
+For global dark selectors in scoped Vue styles, keep the complete selector
+inside `:global(...)`, for example
+`:global(html.dark .kt-chat-composer__shell)`. Combining
+`:global(.dark) :deep(...)` can compile to a bare `.dark` rule and lose the
+target component selector.
+
 Vditor and xterm.js have their own theme systems; both watch
 `themeStore.dark` and call their respective theme-switch APIs.

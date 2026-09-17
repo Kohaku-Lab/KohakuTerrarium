@@ -31,10 +31,11 @@ def build_ws_request(
             instructions = msg.get("content", "")
         else:
             input_messages.append(msg)
-    items = to_responses_input(input_messages)
+    model = kwargs.get("model", provider.config.model)
+    items = to_responses_input(input_messages, model=model)
 
     event: dict[str, Any] = {
-        "model": kwargs.get("model", provider.config.model),
+        "model": model,
         "store": False,
     }
     if instructions:

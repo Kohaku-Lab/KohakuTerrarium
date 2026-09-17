@@ -81,7 +81,7 @@
           </div>
           <div class="flex items-center gap-2 justify-end shrink-0">
             <el-button size="small" @click="popoverVisible = false">Cancel</el-button>
-            <el-button size="small" type="primary" :disabled="!draftSelector || draftSelector === currentModel" :loading="applying" @click="applySelection"> Switch </el-button>
+            <el-button size="small" type="primary" :disabled="!canPickModel || applying || !draftSelector || draftSelector === currentModel" :loading="applying" @click="applySelection"> Switch </el-button>
           </div>
         </div>
       </div>
@@ -114,7 +114,7 @@ const targetOptions = ctx.targetOptions
 const selectedTarget = ctx.selectedTarget
 const currentModel = ctx.currentModel
 const activeInstanceId = computed(() => ctx.instance.value?.id || null)
-const canPickModel = computed(() => !!activeInstanceId.value && (!isTerrarium.value || !!selectedTarget.value))
+const canPickModel = computed(() => !!activeInstanceId.value && !!selectedTarget.value)
 
 const applying = ref(false)
 const popoverVisible = ref(false)
@@ -321,14 +321,16 @@ function onPickTarget(target) {
 
 async function applySelection() {
   const modelName = draftSelector.value
-  if (!activeInstanceId.value || !modelName || modelName === currentModel.value) return
+  if (!canPickModel.value || applying.value || !modelName || modelName === currentModel.value) return
+  const target = selectedTarget.value
+  const wasTerrarium = isTerrarium.value
   applying.value = true
   try {
     // The host context owns the route/session/target resolution and state
     // update; it returns the canonical ``provider/name[@variations]`` the
     // backend accepted so the pill matches what ``/model`` would show.
-    const canonical = await ctx.switchModel({ target: selectedTarget.value, selector: modelName })
-    const label = isTerrarium.value ? `Switched ${selectedTarget.value} to ${canonical}` : `Switched to ${canonical}`
+    const canonical = await ctx.switchModel({ target, selector: modelName })
+    const label = wasTerrarium ? `Switched ${target} to ${canonical}` : `Switched to ${canonical}`
     ElMessage.success(label)
     popoverVisible.value = false
   } catch (err) {

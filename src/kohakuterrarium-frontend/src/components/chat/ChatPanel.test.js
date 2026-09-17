@@ -697,6 +697,70 @@ describe("ChatPanel render window", () => {
   })
 })
 
+describe("ChatPanel theme", () => {
+  it("compiles composer colors onto the shell and menu in both themes", () => {
+    const source = readFileSync(fileURLToPath(import.meta.resolve("./chat-panel.css")), "utf8")
+    const { errors, rawResult } = compileStyle({
+      filename: "ChatPanel.vue",
+      id: "data-v-chat-panel",
+      source,
+      scoped: true,
+    })
+    expect(errors).toEqual([])
+    const rules = new Map()
+    rawResult.root.walkRules((rule) => {
+      const declarations = Object.fromEntries(
+        rule.nodes.filter((node) => node.type === "decl").map(({ prop, value }) => [prop, value]),
+      )
+      for (const selector of rule.selectors) {
+        rules.set(selector, { ...rules.get(selector), ...declarations })
+      }
+    })
+    for (const target of ["shell", "menu"]) {
+      expect(rules.get(`html.dark .kt-chat-composer__${target}`)).toMatchObject({
+        background: "rgb(41 37 36)",
+        "border-color": "rgb(87 83 78)",
+      })
+    }
+    expect(rules.get("[data-v-chat-panel] .kt-chat-composer__shell").background).toBe(
+      "rgb(250 250 249)",
+    )
+    expect(rules.get("[data-v-chat-panel] .kt-chat-composer__menu").background).toBe("white")
+    expect(rules.get(".dark")?.background).not.toBe("rgb(41 37 36)")
+  })
+
+  it("applies light and dark conversation tokens at the Studio transcript boundary", () => {
+    const style = document.createElement("style")
+    style.textContent = readFileSync(
+      fileURLToPath(import.meta.resolve("./shared/conversation-message.css")),
+      "utf8",
+    )
+    document.head.append(style)
+    const wasDark = document.documentElement.classList.contains("dark")
+    const wrapper = mountChatPanel({ props: { readOnly: true }, attachTo: document.body })
+    try {
+      const transcript = wrapper.get(".kt-transcript-section").element
+      for (const dark of [false, true, false]) {
+        document.documentElement.classList.toggle("dark", dark)
+        const computed = getComputedStyle(transcript)
+        expect(computed.getPropertyValue("--kt-conversation-text")).toBe(
+          dark ? "#e0dbd4" : "#4a4540",
+        )
+        expect(computed.getPropertyValue("--kt-conversation-muted")).toBe(
+          dark ? "#a09a92" : "#8a8480",
+        )
+        expect(computed.getPropertyValue("--kt-conversation-surface")).toBe(
+          dark ? "#3a3632" : "#f7f5f2",
+        )
+      }
+    } finally {
+      wrapper.unmount()
+      style.remove()
+      document.documentElement.classList.toggle("dark", wasDark)
+    }
+  })
+})
+
 describe("ChatPanel command results", () => {
   it("keeps clear behind the existing composer button", async () => {
     const command = vi.spyOn(terrariumAPI, "executeCreatureCommand").mockResolvedValue({

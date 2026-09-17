@@ -11,8 +11,11 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Convert Chat Completions messages to Responses API flat input."""
+def to_responses_input(
+    messages: list[dict[str, Any]], *, model: str = ""
+) -> list[dict[str, Any]]:
+    """Convert chat messages to Responses input with model-specific reasoning."""
+    replay_reasoning = model.lower().startswith(("deepseek-", "deepseek/"))
     items: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.get("role")
@@ -22,6 +25,15 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             if item:
                 items.append(item)
         elif role == "assistant":
+            reasoning = msg.get("reasoning_content")
+            if replay_reasoning and isinstance(reasoning, str) and reasoning:
+                items.append(
+                    {
+                        "type": "reasoning",
+                        "summary": [],
+                        "content": [{"type": "reasoning_text", "text": reasoning}],
+                    }
+                )
             items.extend(_assistant_items(content, msg.get("tool_calls", [])))
         elif role == "tool":
             items.append(_tool_item(content, msg.get("tool_call_id", "")))
@@ -29,28 +41,32 @@ def to_responses_input(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def fix_tool_call_pairing(api_input: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Ensure each function_call is followed by matching output."""
+    """Place matching outputs after each contiguous function-call batch."""
     output_by_id: dict[str, dict[str, Any]] = {}
-    other_items: list[dict[str, Any]] = []
     for item in api_input:
         if item.get("type") == "function_call_output":
             output_by_id[item["call_id"]] = item
-        else:
-            other_items.append(item)
 
     result: list[dict[str, Any]] = []
+    pending_outputs: list[dict[str, Any]] = []
     used_ids: set[str] = set()
-    for item in other_items:
+    for item in api_input:
+        if item.get("type") != "function_call":
+            result.extend(pending_outputs)
+            pending_outputs.clear()
+        if item.get("type") == "function_call_output":
+            continue
         result.append(item)
         if item.get("type") != "function_call":
             continue
         call_id = item["call_id"]
         if call_id in output_by_id:
-            result.append(output_by_id[call_id])
+            pending_outputs.append(output_by_id[call_id])
         else:
-            result.append(_missing_output_item(item))
+            pending_outputs.append(_missing_output_item(item))
             logger.warning("Added missing function_call_output", call_id=call_id)
         used_ids.add(call_id)
+    result.extend(pending_outputs)
 
     orphan_ids = set(output_by_id) - used_ids
     if orphan_ids:
