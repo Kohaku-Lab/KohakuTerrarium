@@ -215,6 +215,19 @@ File system watcher (watchfiles). Messages:
 4. If the panel needs runtime props (like `instance`), add an entry to
    the route page's `panelProps` computed.
 
+## Canvas publications
+
+The canvas detector observes tool-result replacements as well as transcript
+growth, so a background completion can update an older message while the
+controller is idle. Tool jobs retain their `canvas_preview` metadata in live
+events and persisted history. For earlier records missing that metadata,
+successful `canvas_image` results supply the image and path directly.
+
+Canvas dismissal records are browser-local and scoped by attach target. Tool
+job IDs identify publications across live/replayed messages and relative versus
+resolved path spellings. Message-derived images and text blocks still use
+message IDs, so their dismissal across live-to-history rekeying is best effort.
+
 ## Theme
 
 `stores/theme.js` manages dark/light mode. Components use

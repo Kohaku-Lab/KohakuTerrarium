@@ -21,6 +21,7 @@ import { computed, getCurrentInstance, ref } from "vue"
 
 import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { mediaSourceUrl } from "@/utils/artifacts"
+import { readLocalJsonPref, writeLocalJsonPref } from "@/utils/uiPrefs"
 
 const MIN_LINES_FOR_HEURISTIC = 15
 /** Soft cap on the strip. Oldest tiles are hidden (and stay hidden on
@@ -59,12 +60,65 @@ function _artifactName(seed) {
   return trimmed.length > 60 ? trimmed.slice(0, 60) + "…" : trimmed
 }
 
-function _setupCanvasStore() {
+function _revisionFingerprint(revision) {
+  let first = 0x811c9dc5
+  let second = 0x9e3779b9
+  for (let i = 0; i < revision.length; i++) {
+    const code = revision.charCodeAt(i)
+    first = Math.imul(first ^ code, 0x01000193)
+    second = Math.imul(second ^ code, 0x85ebca6b)
+  }
+  return `${revision.length}:${(first >>> 0).toString(16)}:${(second >>> 0).toString(16)}`
+}
+
+function _readDismissals(key) {
+  try {
+    const saved = readLocalJsonPref(key, [])
+    if (!Array.isArray(saved)) return new Map()
+    return new Map(
+      saved
+        .filter(
+          (entry) =>
+            Array.isArray(entry) && typeof entry[0] === "string" && Array.isArray(entry[1]),
+        )
+        .map(([source, revisions]) => [
+          source,
+          new Set(revisions.filter((value) => typeof value === "string")),
+        ]),
+    )
+  } catch {
+    return new Map()
+  }
+}
+
+function _toolPreview(part) {
+  if (part.resultMeta?.canvas_preview) return part.resultMeta.canvas_preview
+  if (part.name !== "canvas_image" || part.status !== "done") return null
+  const parts = part.resultParts || (Array.isArray(part.result) ? part.result : [])
+  const image = parts.find(
+    (item) => item?.type === "image_url" && typeof item.image_url?.url === "string",
+  )
+  if (!image) return null
+  const description = parts.find((item) => item?.type === "text")?.text || ""
+  const summary = /^Canvas: ([\s\S]+) \(\d+KB, (png|jpg|jpeg|webp|gif)\)$/.exec(description)
+  const path = part.args?.path || summary?.[1] || image.meta?.source_name
+  if (typeof path !== "string" || !path) return null
+  return {
+    kind: "image",
+    file_path: path,
+    content: image.image_url.url,
+    lang: summary?.[2] || image.meta?.output_format || _extOfDataUrl(image.image_url.url) || "png",
+  }
+}
+
+function _setupCanvasStore(scope) {
   return () => {
+    const storageKey = `kt-canvas-dismissals:${scope || "default"}`
+    const dismissedRevisions = _readDismissals(storageKey)
     const artifacts = ref([])
     const activeId = ref(null)
     const dismissed = ref(false)
-    const hiddenSourceIds = ref(new Set())
+    const hiddenSourceIds = ref(new Set(dismissedRevisions.keys()))
     const seenContentBySource = ref(new Map())
 
     const activeArtifact = computed(
@@ -73,10 +127,29 @@ function _setupCanvasStore() {
     // Back-compat alias kept for any caller that imported ``activeVersion``.
     const activeVersion = activeArtifact
 
+    function persistDismissals() {
+      try {
+        writeLocalJsonPref(
+          storageKey,
+          dismissedRevisions.size
+            ? [...dismissedRevisions].map(([source, revisions]) => [source, [...revisions]])
+            : null,
+        )
+      } catch {
+        // Dismissals remain active in memory when browser storage is unavailable.
+      }
+    }
+
     function _hideSource(sourceId) {
       const next = new Set(hiddenSourceIds.value)
       next.add(sourceId)
       hiddenSourceIds.value = next
+      const revisions = new Set(dismissedRevisions.get(sourceId))
+      for (const revision of seenContentBySource.value.get(sourceId) || []) {
+        revisions.add(_revisionFingerprint(revision))
+      }
+      dismissedRevisions.set(sourceId, revisions)
+      persistDismissals()
     }
 
     function _noteSeen(sourceId, content) {
@@ -110,16 +183,35 @@ function _setupCanvasStore() {
      *  reopens for a new publication or updated content. */
     function upsertArtifact({ sourceId, content, lang, type, seedName, revisionId = null }) {
       const revision = JSON.stringify([revisionId, content])
+      if (revisionId != null && dismissedRevisions.size) {
+        const fingerprint = _revisionFingerprint(revision)
+        if ([...dismissedRevisions.values()].some((revisions) => revisions.has(fingerprint))) {
+          _noteSeen(sourceId, revision)
+          return null
+        }
+      }
       if (hiddenSourceIds.value.has(sourceId)) {
         const seen = seenContentBySource.value.get(sourceId)
-        if (seen && seen.has(revision)) return null
+        if (
+          seen?.has(revision) ||
+          dismissedRevisions.get(sourceId)?.has(_revisionFingerprint(revision))
+        ) {
+          _noteSeen(sourceId, revision)
+          return null
+        }
         const next = new Set(hiddenSourceIds.value)
         next.delete(sourceId)
         hiddenSourceIds.value = next
+        dismissedRevisions.delete(sourceId)
+        persistDismissals()
       }
       _noteSeen(sourceId, revision)
-      const existing = artifacts.value.find((a) => a.sourceId === sourceId)
+      const existing = artifacts.value.find(
+        (a) => a.sourceId === sourceId || (revisionId != null && a.revisionId === revisionId),
+      )
       if (existing) {
+        existing.sourceId = sourceId
+        existing.revisionId = revisionId
         if (existing.content === content) return existing
         existing.content = content
         existing.lang = lang || existing.lang
@@ -131,6 +223,7 @@ function _setupCanvasStore() {
       const a = {
         id,
         sourceId,
+        revisionId,
         name: _artifactName(seedName || content),
         type: type || _guessTypeFromLang(lang),
         content,
@@ -181,7 +274,7 @@ function _setupCanvasStore() {
       if (msg.parts && Array.isArray(msg.parts)) {
         for (const [partIndex, p] of msg.parts.entries()) {
           if (p.type !== "tool") continue
-          const preview = p.resultMeta?.canvas_preview
+          const preview = _toolPreview(p)
           if (!preview || preview.content == null) continue
           if (!preview.file_path) continue
           const isImage = preview.kind === "image"
@@ -291,6 +384,8 @@ function _setupCanvasStore() {
       dismissed.value = false
       hiddenSourceIds.value = new Set()
       seenContentBySource.value = new Map()
+      dismissedRevisions.clear()
+      persistDismissals()
     }
 
     return {
@@ -317,7 +412,7 @@ function _factoryFor(scope) {
   const key = scope || "default"
   let useFn = _canvasFactories.get(key)
   if (!useFn) {
-    useFn = defineStore(`canvas:${key}`, _setupCanvasStore())
+    useFn = defineStore(`canvas:${key}`, _setupCanvasStore(key))
     _canvasFactories.set(key, useFn)
     if (scope) {
       registerScopeDisposer(scope, () => {
