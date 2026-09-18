@@ -324,15 +324,24 @@ class TestOnBgComplete:
         a = _make_mixin()
         artifact_url = "/api/sessions/graph_1/artifacts/generated_images/image.jpeg"
         event_parts = [ImagePart(url=artifact_url, source_name="image.jpeg")]
+        canvas_preview = {
+            "kind": "image",
+            "file_path": "/work/image.jpeg",
+            "content": artifact_url,
+            "lang": "jpg",
+            "bytes": 123,
+            "truncated": False,
+        }
         evt = TriggerEvent(
             type=EventType.TOOL_COMPLETE,
             job_id="grok_image_gen_abc",
             content=event_parts,
             context={
                 "result_metadata": {
+                    "canvas_preview": canvas_preview,
                     "session_metadata": {
                         "artifacts": [{"kind": "image", "url": artifact_url}]
-                    }
+                    },
                 }
             },
         )
@@ -344,9 +353,49 @@ class TestOnBgComplete:
         assert artifact_url in metadata["output_preview"]
         assert metadata["result"] == [part.to_dict() for part in event_parts]
         assert metadata["output"] == event_parts
+        assert metadata["canvas_preview"] == canvas_preview
         assert metadata["tool_metadata"] == {
             "artifacts": [{"kind": "image", "url": artifact_url}]
         }
+
+    @pytest.mark.parametrize("result_metadata", [None, [], "invalid", {}])
+    async def test_tool_done_without_mapping_metadata(self, result_metadata):
+        a = _make_mixin()
+        a._bg_controller_notify["canvas_image_abc"] = False
+        evt = TriggerEvent(
+            type=EventType.TOOL_COMPLETE,
+            job_id="canvas_image_abc",
+            content="result text",
+            context={"result_metadata": result_metadata},
+        )
+
+        a._on_bg_complete(evt)
+
+        kind, _detail, metadata = a.output_router.activity_calls[0]
+        assert kind == "tool_done"
+        assert metadata["result"] == "result text"
+        assert "canvas_preview" not in metadata
+        assert "tool_metadata" not in metadata
+
+    @pytest.mark.parametrize("failure", [{"error": "failed"}, {"exit_code": 2}])
+    async def test_failed_tool_does_not_publish_canvas_preview(self, failure):
+        a = _make_mixin()
+        a._bg_controller_notify["canvas_image_abc"] = False
+        evt = TriggerEvent(
+            type=EventType.TOOL_COMPLETE,
+            job_id="canvas_image_abc",
+            content="partial output",
+            context={
+                "result_metadata": {"canvas_preview": {"kind": "image"}},
+                **failure,
+            },
+        )
+
+        a._on_bg_complete(evt)
+
+        kind, _detail, metadata = a.output_router.activity_calls[0]
+        assert kind == "tool_error"
+        assert "canvas_preview" not in metadata
 
     async def test_subagent_done(self):
         a = _make_mixin()

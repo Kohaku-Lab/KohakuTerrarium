@@ -9,6 +9,7 @@ import { useCanvasStore } from "@/stores/canvas"
 import { useChatStore } from "@/stores/chat"
 
 beforeEach(() => {
+  localStorage.clear()
   setActivePinia(createPinia())
   _resetForTests()
 })
@@ -18,6 +19,51 @@ afterEach(() => {
 })
 
 describe("useArtifactDetector", () => {
+  it("detects a background image completion in an older message while idle", async () => {
+    const scope = "late-canvas-image"
+    const chat = useChatStore(scope)
+    const canvas = useCanvasStore(scope)
+    chat.activeTab = "agent"
+    chat.processingByTab.agent = false
+    chat.messagesByTab.agent = [
+      {
+        id: "earlier",
+        role: "assistant",
+        parts: [
+          {
+            type: "tool",
+            name: "canvas_image",
+            jobId: "image-job",
+            status: "running",
+            args: { path: "/work/grid.png" },
+          },
+        ],
+      },
+      { id: "later", role: "assistant", parts: [{ type: "text", content: "The job is running." }] },
+    ]
+    const wrapper = mount(
+      defineComponent({
+        setup() {
+          useArtifactDetector(scope)
+          return () => null
+        },
+      }),
+    )
+    try {
+      await nextTick()
+      expect(canvas.artifacts).toHaveLength(0)
+      const tool = chat.messagesByTab.agent[0].parts[0]
+      tool.status = "done"
+      tool.resultParts = [
+        { type: "image_url", image_url: { url: "/api/sessions/s/artifacts/grid.png" } },
+      ]
+      await nextTick()
+      expect(canvas.activeArtifact?.content).toBe("/api/sessions/s/artifacts/grid.png")
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
   it("keeps dismissal through older history but reopens for a new reverting edit", async () => {
     const scope = "paged-dismissal"
     const chat = useChatStore(scope)

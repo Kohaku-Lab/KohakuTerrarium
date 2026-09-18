@@ -28,9 +28,11 @@ import re
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
+from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
 from kohakuterrarium.builtins.tools.stop_task import StopTaskTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
@@ -45,6 +47,7 @@ from kohakuterrarium.core.events import (
     create_tool_complete_event,
     create_user_input_event,
 )
+from kohakuterrarium.core.turn import TurnCapture
 from kohakuterrarium.llm.message import FilePart, ImagePart, TextPart
 from kohakuterrarium.llm.artifact_resolve import (
     file_reference_path,
@@ -53,6 +56,7 @@ from kohakuterrarium.llm.artifact_resolve import (
 from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.codex_format import to_responses_input
 from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.reader import SessionReader
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
@@ -512,7 +516,7 @@ class TestCoreIntegration:
     """Each method runs one complete ``core/`` feature workflow."""
 
     async def test_full_turn_cycle_with_direct_and_background_tools(
-        self, make_creature
+        self, make_creature, tmp_path
     ):
         """Engine-hosted creature: input -> controller loop -> DIRECT tool
         dispatch + result feedback -> a second turn dispatches a
@@ -852,8 +856,80 @@ class TestCoreIntegration:
             assert "ephemeral reply" in out_cb
             assert "ephemeral reply" in "".join(captured)
 
+            # Canvas previews must survive direct-to-background promotion,
+            # reach live output, and remain available after a session reload.
+            session_path = tmp_path / "canvas.kohakutr"
+            await engine.attach_session(creature.graph_id, session_path)
+            agent.workspace.set(tmp_path)
+            canvas_tool = CanvasImageTool()
+            agent.add_tool(canvas_tool)
+            canvas_events = TurnCapture()
+            agent.output_router.add_secondary(canvas_events)
+            expected_previews = []
+            for mode in ("direct", "background"):
+                image_path = tmp_path / f"{mode}.png"
+                Image.new("RGB", (2, 2), color="blue").save(image_path)
+                bg_arg = "@@run_in_background=true\n" if mode == "background" else ""
+                canvas_llm = ScriptedLLM(
+                    [
+                        f"[/canvas_image]@@path={image_path}\n{bg_arg}[canvas_image/]",
+                        f"{mode} canvas acknowledged",
+                    ]
+                )
+                agent.llm = agent.controller.llm = canvas_llm
+                await _drain_chat(creature, f"{mode} canvas")
+                for _ in range(100):
+                    if _assistant_text(agent) == f"{mode} canvas acknowledged":
+                        break
+                    await asyncio.sleep(0.02)
+                assert _assistant_text(agent) == f"{mode} canvas acknowledged"
+                completions = [
+                    event
+                    for event in canvas_events.activities
+                    if event.kind == "tool_done"
+                    and event.metadata.get("job_id", "").startswith("canvas_image_")
+                ]
+                assert (
+                    len(completions) == len(expected_previews) + 1
+                ), canvas_events.activities
+                completion = completions[-1].metadata
+                image_part = next(
+                    part for part in completion["result"] if part["type"] == "image_url"
+                )
+                url = image_part["image_url"]["url"]
+                expected = {
+                    "kind": "image",
+                    "file_path": str(image_path.resolve()),
+                    "lang": "png",
+                    "content": url,
+                    "bytes": image_path.stat().st_size,
+                    "truncated": False,
+                }
+                assert completion["canvas_preview"] == expected
+                expected_previews.append(expected)
+                artifact = (
+                    agent.session_store.artifacts_dir / url.split("/artifacts/", 1)[1]
+                )
+                assert artifact.read_bytes() == image_path.read_bytes()
+                start = next(
+                    event
+                    for event in canvas_events.activities
+                    if event.kind == "tool_start"
+                    and event.metadata.get("job_id") == completion["job_id"]
+                )
+                assert start.metadata["background"] is (mode == "background")
+
         # Engine __aexit__ stopped the creature.
         assert creature.is_running is False
+        with SessionReader(session_path) as reader:
+            canvas_results = [
+                event
+                for event in reader.events("solo")
+                if event["type"] == "tool_result" and event["name"] == "canvas_image"
+            ]
+            assert [
+                event["canvas_preview"] for event in canvas_results
+            ] == expected_previews
 
         # --- A separate EPHEMERAL creature: conversation resets per turn.
         # ``ephemeral=True`` flips ``ControllerConfig.ephemeral`` so the

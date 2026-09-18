@@ -154,6 +154,17 @@ assistant messages. Shows syntax-highlighted code with line numbers,
 rendered markdown, or sandboxed HTML. Copy and download buttons in the
 tab strip.
 
+Use the `canvas_image` tool to publish a local image file. Completed image
+publications appear even when the tool finishes in the background; older
+results can also be recovered from their image output when preview metadata
+is absent.
+
+Closing a file/tool preview with ×, or clearing the canvas, remembers the
+dismissed publications in this browser for that session across refreshes.
+A new tool publication can show the file again, including when its image
+contents are unchanged. Saved dismissal records contain compact revision
+fingerprints rather than image data or document bodies.
+
 ### Terminal
 xterm.js terminal connected to a PTY shell (bash/PowerShell) in the
 agent's working directory. Supports Nerd Font glyphs, resize, and
