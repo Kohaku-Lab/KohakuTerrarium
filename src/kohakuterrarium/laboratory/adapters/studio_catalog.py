@@ -10,6 +10,7 @@ from kohakuterrarium.studio.catalog.packages import (
     list_installed_packages,
     uninstall_package_op,
 )
+from kohakuterrarium.studio.catalog.packages_scan import scan_worker_creatures
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -53,6 +54,8 @@ class StudioCatalogAdapter:
 
     async def _handle(self, msg: AppMessage) -> dict[str, Any]:
         match msg.type:
+            case "creatures":
+                return {"creatures": await asyncio.to_thread(scan_worker_creatures)}
             case "list":
                 return {"packages": list_installed_packages()}
             case "install":

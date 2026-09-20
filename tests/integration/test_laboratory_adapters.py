@@ -29,6 +29,8 @@ import asyncio
 
 import pytest
 
+from kohakuterrarium.studio.catalog.packages_scan import invalidate_scan_caches
+
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
@@ -501,14 +503,33 @@ class TestStudioCatalogAdapter:
     per-node package inventory."""
 
     async def test_catalog_namespace_full_sweep(
-        self, tmp_path, _reset_inproc, scripted_llm
+        self, tmp_path, monkeypatch, _reset_inproc, scripted_llm
     ):
+        local_root = tmp_path / "worker-creatures"
+        local_config = local_root / "worker-local"
+        local_config.mkdir(parents=True)
+        (local_config / "config.yaml").write_text(
+            "name: worker-local\n", encoding="utf-8"
+        )
+        monkeypatch.setenv("KT_CREATURES_DIRS", str(local_root))
+        invalidate_scan_caches()
         host = await _start_host(port=4)
         try:
             client = await _start_client("w-cat", port=4)
             StudioCatalogAdapter(client)
             try:
                 await _wait_joined(host, "w-cat")
+
+                catalog = await host.request(
+                    to_node="w-cat",
+                    namespace="studio.catalog",
+                    type="creatures",
+                    body={},
+                    timeout=5.0,
+                )
+                assert {entry["name"]: entry["path"] for entry in catalog["creatures"]}[
+                    "worker-local"
+                ] == str(local_config)
 
                 # list — verb 1
                 resp = await host.request(

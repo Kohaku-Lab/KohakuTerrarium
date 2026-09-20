@@ -128,7 +128,14 @@ share Codex tokens with workers in a way that survives refresh.
 
 In the dashboard's "New creature" modal, the **Site** picker shows
 every connected worker plus `Host`. Pick a worker, configure as
-usual, click Spawn. The frontend posts:
+usual, click Spawn. Creature choices reload from the selected worker's installed
+packages and local configuration roots (`KT_CREATURES_DIRS`, `./creatures`, and
+`./agents` on that worker). Switching workers clears the previous choice.
+If discovery fails, the modal reports the error instead of showing host choices;
+older workers without the discovery operation need to be updated.
+
+The same list is available through `GET /api/configs/creatures?on_node=<worker>`.
+Omitting `on_node` preserves host-local discovery. The frontend posts:
 
 ```http
 POST /api/sessions/active/creature

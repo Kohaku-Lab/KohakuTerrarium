@@ -20,6 +20,40 @@ def _reset_caches():
 
 
 class TestCatalogEntry:
+    def test_worker_discovery_includes_packages_and_local_roots(
+        self, tmp_path, monkeypatch
+    ):
+        home = tmp_path / "home"
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.setenv("KT_CONFIG_DIR", str(home))
+        monkeypatch.chdir(project)
+        extra = tmp_path / "extra"
+        monkeypatch.setenv("KT_CREATURES_DIRS", str(extra))
+        package = home / "packages" / "worker-biome"
+        for root, name in (
+            (package / "creatures", "packaged"),
+            (project / "creatures", "local"),
+            (project / "agents", "legacy"),
+            (extra, "custom"),
+        ):
+            directory = root / name
+            directory.mkdir(parents=True)
+            (directory / "config.yaml").write_text(f"name: {name}\n", encoding="utf-8")
+        (package / "kohaku.yaml").write_text(
+            "name: worker-biome\nversion: 1.0.0\ncreatures: [packaged]\n",
+            encoding="utf-8",
+        )
+        found = {
+            entry["name"]: entry["path"] for entry in scan_mod.scan_worker_creatures()
+        }
+        assert found == {
+            "packaged": "@worker-biome/creatures/packaged",
+            "local": str(project / "creatures" / "local"),
+            "legacy": str(project / "agents" / "legacy"),
+            "custom": str(extra / "custom"),
+        }
+
     def test_creature_dict(self, tmp_path):
         e = scan_mod.CatalogEntry(
             name="alice",

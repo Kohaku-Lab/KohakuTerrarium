@@ -28,9 +28,11 @@
       <!-- Creature picker -->
       <div>
         <label class="block text-xs uppercase tracking-wider text-warm-500 mb-1"> Creature config </label>
-        <div v-if="configs.creatures.length === 0" class="text-warm-400 italic text-sm py-3 text-center">No creature configs available.</div>
+        <div v-if="loadingConfigs" class="text-warm-400 italic text-sm py-3 text-center">Loading creature configs…</div>
+        <div v-else-if="catalogError" class="text-coral text-xs" role="alert">{{ catalogError }}</div>
+        <div v-else-if="creatures.length === 0" class="text-warm-400 italic text-sm py-3 text-center">No creature configs available.</div>
         <div v-else class="max-h-72 overflow-y-auto space-y-1 pr-1">
-          <label v-for="cfg in configs.creatures" :key="cfg.path" class="flex items-start gap-3 px-3 py-2 rounded cursor-pointer transition-colors border border-transparent" :class="selectedConfig === cfg.path ? 'bg-iolite/10 border-iolite/40' : 'hover:bg-warm-100 dark:hover:bg-warm-900'">
+          <label v-for="cfg in creatures" :key="cfg.path" class="flex items-start gap-3 px-3 py-2 rounded cursor-pointer transition-colors border border-transparent" :class="selectedConfig === cfg.path ? 'bg-iolite/10 border-iolite/40' : 'hover:bg-warm-100 dark:hover:bg-warm-900'">
             <input v-model="selectedConfig" type="radio" :value="cfg.path" class="mt-1 accent-iolite" />
             <div class="flex-1 min-w-0">
               <div class="text-sm font-medium text-warm-800 dark:text-warm-200">
@@ -66,11 +68,10 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onUnmounted, ref, watch } from "vue"
 
 import ModalShell from "@/components/common/ModalShell.vue"
 import SitePicker from "@/components/cluster/SitePicker.vue"
-import { useConfigsStore } from "@/stores/configs"
 import { useTabsStore } from "@/stores/tabs"
 import { configAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
@@ -86,7 +87,10 @@ const props = defineProps({
 const emit = defineEmits(["close"])
 
 const tabs = useTabsStore()
-const configs = useConfigsStore()
+const creatures = ref([])
+const loadingConfigs = ref(false)
+const catalogError = ref("")
+let nodeRequest = 0
 const { t } = useI18n()
 
 const pwd = ref("")
@@ -112,30 +116,38 @@ function rerollName() {
   name.value = ""
 }
 
-async function refreshServerInfoDefault() {
+async function refreshNode() {
+  const request = ++nodeRequest
+  const node = onNode.value
+  selectedConfig.value = null
+  creatures.value = []
+  catalogError.value = ""
+  errorMsg.value = ""
+  loadingConfigs.value = true
+  if (!pwdUserTouched.value) pwd.value = ""
+  const directory = configAPI
+    .getServerInfo({ onNode: node })
+    .then((info) => {
+      if (request === nodeRequest && info.cwd && !pwdUserTouched.value) pwd.value = info.cwd
+    })
+    .catch(() => {})
   try {
-    const info = await configAPI.getServerInfo({ onNode: onNode.value })
-    if (info.cwd && !pwdUserTouched.value) pwd.value = info.cwd
-  } catch {
-    /* ignore */
+    const result = await configAPI.listCreatures({ onNode: node })
+    if (request === nodeRequest) creatures.value = result
+  } catch (err) {
+    if (request === nodeRequest) catalogError.value = err?.response?.data?.detail || err?.message || String(err)
+  } finally {
+    if (request === nodeRequest) loadingConfigs.value = false
   }
+  await directory
 }
 
-onMounted(() => {
-  configs.fetchAll()
-  refreshServerInfoDefault()
+watch(onNode, refreshNode, { immediate: true, flush: "sync" })
+onUnmounted(() => {
+  ++nodeRequest
 })
 
-// Re-fetch the per-node default working dir when the user picks a
-// different site. We skip the update if the user has typed a path.
-watch(
-  () => onNode.value,
-  () => {
-    refreshServerInfoDefault()
-  },
-)
-
-const canSubmit = computed(() => Boolean(pwd.value.trim() && selectedConfig.value && !starting.value))
+const canSubmit = computed(() => Boolean(pwd.value.trim() && creatures.value.some((cfg) => cfg.path === selectedConfig.value) && !loadingConfigs.value && !starting.value))
 
 async function onSubmit() {
   if (!canSubmit.value) return

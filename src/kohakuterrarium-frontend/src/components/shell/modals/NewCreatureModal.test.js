@@ -23,9 +23,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { mount, flushPromises } from "@vue/test-utils"
 import { createPinia, setActivePinia } from "pinia"
 
+const createSession = vi.hoisted(() => vi.fn())
+
 vi.mock("@/utils/api", () => ({
   configAPI: {
     getServerInfo: vi.fn(),
+    listCreatures: vi.fn(),
   },
 }))
 
@@ -38,7 +41,7 @@ vi.mock("@/stores/configs", () => ({
 }))
 
 vi.mock("@/stores/tabs", () => ({
-  useTabsStore: () => ({ createSession: vi.fn() }),
+  useTabsStore: () => ({ createSession }),
 }))
 
 // SitePicker is replaced by a tiny stub that exposes an input we can
@@ -78,6 +81,91 @@ import NewTerrariumModal from "./NewTerrariumModal.vue"
 beforeEach(() => {
   setActivePinia(createPinia())
   configAPI.getServerInfo.mockReset()
+  configAPI.listCreatures.mockReset().mockResolvedValue([])
+})
+
+describe("NewCreatureModal — execution-node catalog", () => {
+  const choice = (name) => ({ name, path: `@${name}/creatures/general` })
+  const deferred = () => {
+    let resolve, reject
+    const promise = new Promise((yes, no) => {
+      resolve = yes
+      reject = no
+    })
+    return { promise, resolve, reject }
+  }
+
+  it("loads the selected node and clears the previous choice", async () => {
+    configAPI.getServerInfo.mockResolvedValue({ cwd: "/work" })
+    configAPI.listCreatures
+      .mockResolvedValueOnce([choice("host-only")])
+      .mockResolvedValueOnce([choice("worker-only")])
+    const wrapper = mount(NewCreatureModal)
+    await flushPromises()
+    expect(configAPI.listCreatures).toHaveBeenCalledWith({ onNode: "_host" })
+    await wrapper.find('input[type="radio"]').setValue(true)
+    expect(wrapper.findAll("button").at(-1).element.disabled).toBe(false)
+    await wrapper.find('[data-testid="site-picker"]').setValue("worker-1")
+    expect(wrapper.findAll("button").at(-1).element.disabled).toBe(true)
+    await flushPromises()
+    expect(configAPI.listCreatures).toHaveBeenLastCalledWith({ onNode: "worker-1" })
+    expect(wrapper.text()).toContain("worker-only")
+    expect(wrapper.text()).not.toContain("host-only")
+    expect(wrapper.find('input[type="radio"]').element.checked).toBe(false)
+    await wrapper.find('input[type="radio"]').setValue(true)
+    await wrapper.findAll("button").at(-1).trigger("click")
+    await flushPromises()
+    expect(createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "creature",
+        configPath: "@worker-only/creatures/general",
+        onNode: "worker-1",
+      }),
+    )
+    wrapper.unmount()
+  })
+
+  it("shows a discovery failure without retaining another node's choices", async () => {
+    configAPI.getServerInfo.mockResolvedValue({ cwd: "/work" })
+    configAPI.listCreatures
+      .mockResolvedValueOnce([choice("host-only")])
+      .mockRejectedValueOnce(new Error("Worker catalog unavailable"))
+    const wrapper = mount(NewCreatureModal)
+    await flushPromises()
+    await wrapper.find('[data-testid="site-picker"]').setValue("worker-1")
+    await flushPromises()
+    expect(wrapper.find('[role="alert"]').text()).toBe("Worker catalog unavailable")
+    expect(wrapper.findAll('input[type="radio"]')).toHaveLength(0)
+    expect(wrapper.findAll("button").at(-1).element.disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it.each(["success", "failure"])(
+    "ignores an older catalog %s and working directory",
+    async (outcome) => {
+      const oldCatalog = deferred()
+      const oldDirectory = deferred()
+      configAPI.listCreatures
+        .mockReturnValueOnce(oldCatalog.promise)
+        .mockResolvedValueOnce([choice("worker-only")])
+      configAPI.getServerInfo
+        .mockReturnValueOnce(oldDirectory.promise)
+        .mockResolvedValueOnce({ cwd: "/worker" })
+      const wrapper = mount(NewCreatureModal)
+      await wrapper.find('[data-testid="site-picker"]').setValue("worker-1")
+      await flushPromises()
+      if (outcome === "success") oldCatalog.resolve([choice("stale-host")])
+      else oldCatalog.reject(new Error("stale failure"))
+      oldDirectory.resolve({ cwd: "/stale-host" })
+      await flushPromises()
+      expect(wrapper.text()).toContain("worker-only")
+      expect(wrapper.text()).not.toContain("stale")
+      expect(wrapper.find('input[placeholder="/home/user/my-project"]').element.value).toBe(
+        "/worker",
+      )
+      wrapper.unmount()
+    },
+  )
 })
 
 afterEach(() => {

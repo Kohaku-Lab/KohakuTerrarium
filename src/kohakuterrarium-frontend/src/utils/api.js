@@ -188,8 +188,9 @@ api.interceptors.response.use(
 /** Config discovery */
 export const configAPI = {
   /** @returns {Promise<ConfigItem[]>} */
-  async listCreatures() {
-    const { data } = await api.get("/configs/creatures")
+  async listCreatures(opts = {}) {
+    const params = opts.onNode ? { on_node: opts.onNode } : {}
+    const { data } = await api.get("/configs/creatures", { params })
     return data
   },
 
