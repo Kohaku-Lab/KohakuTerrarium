@@ -53,6 +53,7 @@ vi.mock("@/components/cluster/SitePicker.vue", () => ({
     props: ["modelValue", "label"],
     emits: ["update:modelValue"],
     template: `<select data-testid="site-picker" :value="modelValue" @change="$emit('update:modelValue', $event.target.value)">
+      <option value="">Select a site</option>
       <option value="_host">host</option>
       <option value="worker-1">worker-1</option>
     </select>`,
@@ -94,6 +95,26 @@ describe("NewCreatureModal — execution-node catalog", () => {
     })
     return { promise, resolve, reject }
   }
+
+  it("invalidates discovery and submission when the execution site disappears", async () => {
+    configAPI.getServerInfo.mockResolvedValue({ cwd: "/work" })
+    configAPI.listCreatures.mockResolvedValue([choice("worker-only")])
+    const wrapper = mount(NewCreatureModal)
+    await flushPromises()
+    await wrapper.find('[data-testid="site-picker"]').setValue("worker-1")
+    await flushPromises()
+    await wrapper.find('input[type="radio"]').setValue(true)
+    configAPI.listCreatures.mockClear()
+    configAPI.getServerInfo.mockClear()
+    await wrapper.find('[data-testid="site-picker"]').setValue("")
+    await flushPromises()
+    expect(configAPI.listCreatures).not.toHaveBeenCalled()
+    expect(configAPI.getServerInfo).not.toHaveBeenCalled()
+    expect(wrapper.findAll('input[type="radio"]')).toHaveLength(0)
+    expect(wrapper.find('[role="alert"]').text()).toBe("Select an execution site.")
+    expect(wrapper.findAll("button").at(-1).element.disabled).toBe(true)
+    wrapper.unmount()
+  })
 
   it("loads the selected node and clears the previous choice", async () => {
     configAPI.getServerInfo.mockResolvedValue({ cwd: "/work" })

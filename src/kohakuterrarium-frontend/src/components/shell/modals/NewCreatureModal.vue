@@ -13,11 +13,8 @@
         <div class="text-[10px] text-warm-400 mt-1">Leave blank to use the placeholder. We never call anyone "general → general".</div>
       </div>
 
-      <!-- Lab cluster site picker — only renders when ≥2 sites
-           connected. Backend defaults to host. Must precede the
-           working-dir input because the selected node decides which
-           filesystem the path resolves on. -->
-      <SitePicker v-model="onNode" :label="t('cluster.spawn.label')" />
+      <!-- Select the execution site before its directory and catalog. -->
+      <SitePicker v-model="onNode" :label="t('cluster.spawn.label')" execution-target />
 
       <!-- Working directory -->
       <div>
@@ -125,6 +122,11 @@ async function refreshNode() {
   errorMsg.value = ""
   loadingConfigs.value = true
   if (!pwdUserTouched.value) pwd.value = ""
+  if (!node) {
+    loadingConfigs.value = false
+    catalogError.value = "Select an execution site."
+    return
+  }
   const directory = configAPI
     .getServerInfo({ onNode: node })
     .then((info) => {
