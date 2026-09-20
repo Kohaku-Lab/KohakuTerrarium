@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 
+from kohakuterrarium.utils import file_walk
 from kohakuterrarium.utils.file_walk import (
     ALWAYS_SKIP_NAMES,
     _glob_match,
@@ -328,6 +329,37 @@ class TestWalkDirs:
 
 
 class TestIterMatchingFiles:
+    @pytest.mark.parametrize(
+        "pattern", [r"src\**\*.py", r"src/**\*.py", r"src\**/*.py"]
+    )
+    def test_recursive_backslash_prefix_matches_forward_slashes(
+        self, tmp_path, pattern
+    ):
+        _build_tree(
+            tmp_path,
+            {"src": {"a.py": "", "nested": {"b.py": ""}}, "other": {"c.py": ""}},
+        )
+        actual = list(iter_matching_files(tmp_path, pattern))
+        expected = list(iter_matching_files(tmp_path, "src/**/*.py"))
+        assert actual == expected
+        assert _rel_set(tmp_path, actual) == {"src/a.py", "src/nested/b.py"}
+        assert list(iter_matching_files(tmp_path, pattern, cap=1)) == expected[:1]
+
+    def test_recursive_matcher_is_reused_for_all_candidates(
+        self, tmp_path, monkeypatch
+    ):
+        _build_tree(tmp_path, {f"item{i}.py": "" for i in range(20)})
+        original = file_walk._glob_to_regex
+        translations = []
+
+        def observe(pattern):
+            translations.append(pattern)
+            return original(pattern)
+
+        monkeypatch.setattr(file_walk, "_glob_to_regex", observe)
+        assert len(list(iter_matching_files(tmp_path, "**/*.py"))) == 20
+        assert translations == ["**/*.py"]
+
     def test_non_recursive_glob(self, tmp_path):
         _build_tree(tmp_path, {"a.py": "", "b.py": "", "c.md": ""})
         rels = _rel_set(tmp_path, iter_matching_files(tmp_path, "*.py"))

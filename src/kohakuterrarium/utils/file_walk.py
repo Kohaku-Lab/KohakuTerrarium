@@ -214,10 +214,9 @@ def iter_matching_files(
 ) -> Iterator[Path]:
     """Yield files matching a glob *pattern* under *base*.
 
-    For recursive patterns (containing ``**``), uses :func:`walk_dirs`
-    to skip ignored subtrees, then runs a per-directory non-recursive
-    glob on the suffix.  Non-recursive patterns delegate to
-    ``Path.glob()`` directly.
+    Recursive patterns use :func:`walk_files` and match full relative
+    paths, with either slash style accepted as a separator. Non-recursive
+    patterns delegate to ``Path.glob()`` directly.
 
     Parameters
     ----------
@@ -256,6 +255,7 @@ def iter_matching_files(
     #     "**/c/**/*.py" must match "a/b/c/y.py" at any depth.
     #   * ``walk_files`` filters ignored *files* against .gitignore, not
     #     just ignored directories — ``Path.glob`` would leak them.
+    pattern = pattern.replace("\\", "/")
     parts = pattern.split("**/", 1)
     prefix = parts[0].rstrip("/").rstrip("\\")
 
@@ -263,6 +263,7 @@ def iter_matching_files(
     if not walk_root.is_dir():
         return
 
+    matcher = _glob_to_regex(pattern)
     count = 0
     for f in walk_files(walk_root, gitignore=gitignore):
         try:
@@ -270,7 +271,7 @@ def iter_matching_files(
         except ValueError:
             continue
         rel_str = str(rel).replace("\\", "/")
-        if _glob_match(rel_str, pattern):
+        if matcher.match(rel_str):
             yield f
             count += 1
             if cap and count >= cap:
