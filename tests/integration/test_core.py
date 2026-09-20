@@ -57,6 +57,7 @@ from kohakuterrarium.llm.base import NativeToolCall
 from kohakuterrarium.llm.codex_format import to_responses_input
 from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.session.reader import SessionReader
+from kohakuterrarium.skills.registry import Skill
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginBlockError
 from kohakuterrarium.modules.subagent.config import SubAgentConfig
@@ -543,6 +544,11 @@ class TestCoreIntegration:
             ]
         )
         agent = creature.agent
+        (tmp_path / "example.py").write_text("pass\n")
+        agent.executor._working_dir = tmp_path
+        agent.skills.add(
+            Skill("inspect", "Inspect Python", "Instructions", paths=["*.py"])
+        )
         echo, slowbg = _EchoTool(), _SlowBackgroundTool()
         fail_tool, boom_tool = _FailingTool(), _RaisingTool()
         snap_tool = _MultimodalTool()
@@ -578,6 +584,11 @@ class TestCoreIntegration:
             assert "echoed:ping-rewritten" in convo_text
             # The controller looped exactly twice for turn 1 (call, wrap-up).
             assert agent.llm.call_count == 2
+            hint = agent.skill_path_scanner.format_hint([agent.skills.get("inspect")])
+            assert [
+                [m["content"] for m in call if m.get("content") == hint]
+                for call in agent.llm.call_log
+            ] == [[hint], [hint]]
 
             # --- Turn 2 + 3: background tool promote + completion -------
             # A BACKGROUND tool is promoted immediately, so turn 2 is a
@@ -595,6 +606,11 @@ class TestCoreIntegration:
                     break
                 await asyncio.sleep(0.02)
             assert "background acknowledged" in _assistant_text(agent)
+            assert all(
+                sum(m.get("content") == hint for m in call) == 1
+                for call in agent.llm.call_log[:4]
+            )
+            agent.skills.disable("inspect")
             bg_convo = " ".join(
                 m.get_text_content()
                 for m in agent.controller.conversation.get_messages()
