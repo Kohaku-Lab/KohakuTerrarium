@@ -25,6 +25,58 @@ from kohakuterrarium.llm.codex_rate_limits import (
 
 
 class TestToResponsesInput:
+    @pytest.mark.parametrize("model", ["slurm/ds", "kimi-k2", "glm-5", "alias"])
+    def test_explicit_replay_preserves_reasoning_for_aliases(self, model):
+        messages = [
+            {"role": "assistant", "content": "Done", "reasoning_content": "Think"}
+        ]
+        items = to_responses_input(messages, model=model, replay_reasoning=True)
+        assert items[0] == {
+            "type": "reasoning",
+            "summary": [],
+            "content": [{"type": "reasoning_text", "text": "Think"}],
+        }
+        messages[0]["reasoning_content"] = "Edited"
+        assert (
+            to_responses_input(messages, model=model, replay_reasoning=True)[0][
+                "content"
+            ][0]["text"]
+            == "Edited"
+        )
+        assert items[0]["content"][0]["text"] == "Think"
+
+    def test_explicit_false_disables_legacy_replay(self):
+        assert (
+            to_responses_input(
+                [{"role": "assistant", "content": "", "reasoning_content": "Think"}],
+                model="deepseek-flash",
+                replay_reasoning=False,
+            )
+            == []
+        )
+
+    @pytest.mark.parametrize("flag", ["false", "true", 0, 1, [], {}])
+    def test_invalid_replay_capability_is_rejected(self, flag):
+        with pytest.raises(ValueError, match="responses_reasoning_replay"):
+            to_responses_input([], replay_reasoning=flag)
+
+    def test_opt_in_does_not_turn_summary_or_encrypted_state_into_plaintext(self):
+        assert (
+            to_responses_input(
+                [
+                    {
+                        "role": "assistant",
+                        "content": "",
+                        "reasoning_summary": "Summary",
+                        "encrypted_content": "opaque",
+                    }
+                ],
+                model="alias",
+                replay_reasoning=True,
+            )
+            == []
+        )
+
     @pytest.mark.parametrize(
         "model", ["", "gpt-6-astra", "other-model", "not-deepseek-flash"]
     )

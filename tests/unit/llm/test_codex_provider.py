@@ -486,6 +486,43 @@ class TestSessionIdHeaderGating:
 
 class TestReasoningReplay:
     @pytest.mark.parametrize(
+        "model, replay, expected",
+        [
+            ("slurm/ds", True, True),
+            ("kimi-k2", True, True),
+            ("glm-5", True, True),
+            ("deepseek-flash", False, False),
+        ],
+    )
+    @pytest.mark.parametrize("websocket", [False, True])
+    async def test_explicit_replay_capability_is_applied_and_not_sent(
+        self, model, replay, expected, websocket
+    ):
+        p = CodexOAuthProvider(
+            model=model,
+            api_key="sk",
+            extra_body={"responses_reasoning_replay": replay},
+            websocket_mode=websocket,
+        )
+        p._client = _FakeWSClient() if websocket else _FakeClient()
+        if websocket:
+            p._client.responses.connection.scripts = [[_ws_completed()]]
+        messages = [{"role": "assistant", "content": "", "reasoning_content": "Think"}]
+        _ = [chunk async for chunk in p._raw_stream_chat(messages)]
+        body = (
+            p._client.responses.connection.sent[-1]
+            if websocket
+            else p._client.responses.kwargs
+        )
+        assert bool(body["input"]) is expected
+        if expected:
+            assert body["input"][0]["content"] == [
+                {"type": "reasoning_text", "text": "Think"}
+            ]
+        assert "responses_reasoning_replay" not in body
+        assert "responses_reasoning_replay" not in body.get("extra_body", {})
+
+    @pytest.mark.parametrize(
         "model", ["gpt-6-astra", "deepseek-flash", "deepseek/deepseek-flash"]
     )
     async def test_reasoning_replay_follows_target_model(self, model):

@@ -350,7 +350,11 @@ class CodexOAuthProvider(BaseLLMProvider):
             else:
                 input_messages.append(msg)
 
-        api_input = to_responses_input(input_messages, model=self.model)
+        api_input = to_responses_input(
+            input_messages,
+            model=self.model,
+            replay_reasoning=self.extra_body.get("responses_reasoning_replay"),
+        )
 
         # Function tools precede provider-native tools in the outbound list.
         api_tools: list[dict[str, Any]] | None = None
@@ -494,7 +498,13 @@ class CodexOAuthProvider(BaseLLMProvider):
         return {
             k: v
             for k, v in self.extra_body.items()
-            if k not in ("reasoning", "websocket_mode", "disable_prompt_caching")
+            if k
+            not in (
+                "reasoning",
+                "websocket_mode",
+                "disable_prompt_caching",
+                "responses_reasoning_replay",
+            )
         }
 
     def _ws_session_for_turn(

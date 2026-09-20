@@ -1413,7 +1413,14 @@ class TestLlmIntegration:
         def responses_response(request):
             body = json.loads(request.content)
             assert request.url.path == "/v1/responses"
-            assert body["model"] in {"deepseek-flash", "gpt-6-astra"}
+            assert body["model"] in {
+                "slurm/ds",
+                "kimi-k2",
+                "glm-5",
+                "deepseek-flash",
+                "gpt-6-astra",
+            }
+            assert "responses_reasoning_replay" not in body
             assert body["tools"][0]["name"] == "read"
             responses_requests.append(body)
             if len(responses_requests) == 1:
@@ -1440,7 +1447,7 @@ class TestLlmIntegration:
             else:
                 expected = (
                     [reasoning_item, *call_items]
-                    if body["model"] == "deepseek-flash"
+                    if body["model"] != "gpt-6-astra"
                     else call_items
                 )
                 output_offset = 1 + len(expected)
@@ -1473,9 +1480,10 @@ class TestLlmIntegration:
             )
 
         responses_provider = CodexOAuthProvider(
-            model="deepseek-flash",
+            model="slurm/ds",
             api_key="test-key",
-            base_url="https://deepseek.test/v1",
+            base_url="https://responses.test/v1",
+            extra_body={"responses_reasoning_replay": True},
         )
         await responses_provider.ensure_authenticated()
         initial_client = responses_provider._client
@@ -1554,6 +1562,7 @@ class TestLlmIntegration:
             ]
             saved_history = restored.to_messages()
             codex = responses_provider.with_model("gpt-6-astra")
+            codex.extra_body["responses_reasoning_replay"] = False
             switched = await codex.chat_complete(
                 restored.to_messages(), tools=response_tools
             )
@@ -1565,8 +1574,19 @@ class TestLlmIntegration:
             assert switched_back.content == "A red square."
             assert [request["model"] for request in responses_requests[-2:]] == [
                 "gpt-6-astra",
-                "deepseek-flash",
+                "slurm/ds",
             ]
+            edited = restored.to_messages()
+            edited[1]["reasoning_content"] = "Recheck the saved image."
+            reasoning_item["content"][0]["text"] = "Recheck the saved image."
+            for target in ("slurm/ds", "kimi-k2", "glm-5", "deepseek-flash"):
+                alias = responses_provider.with_model(target)
+                if target == "deepseek-flash":
+                    alias.extra_body.pop("responses_reasoning_replay")
+                reply = await alias.chat_complete(edited, tools=response_tools)
+                assert reply.content == "A red square."
+                assert responses_requests[-1]["input"][1] == reasoning_item
+            assert restored.to_messages() == saved_history
         finally:
             await responses_provider.close()
 

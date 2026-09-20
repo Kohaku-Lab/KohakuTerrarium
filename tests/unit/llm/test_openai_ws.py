@@ -98,6 +98,33 @@ MESSAGES = [
 
 class TestBuildWsRequest:
     @pytest.mark.parametrize(
+        "model, configured, override, expected",
+        [
+            ("alias", True, {}, True),
+            ("alias", False, {"responses_reasoning_replay": True}, True),
+            ("alias", True, {"responses_reasoning_replay": False}, False),
+            ("gpt-x", True, {"responses_reasoning_replay": None}, False),
+            ("deepseek-flash", False, {"responses_reasoning_replay": None}, True),
+        ],
+    )
+    def test_replay_capability_uses_effective_options_and_stays_off_wire(
+        self, model, configured, override, expected
+    ):
+        provider = OpenAIProvider(
+            api_key="sk-test",
+            model=model,
+            extra_body={"responses_reasoning_replay": configured},
+        )
+        messages = [{"role": "assistant", "content": "", "reasoning_content": "Think"}]
+        kwargs = {"extra_body": override}
+        event, items = build_ws_request(provider, messages, None, kwargs)
+        assert bool(items) is expected
+        if expected:
+            assert items[0]["content"] == [{"type": "reasoning_text", "text": "Think"}]
+        assert "responses_reasoning_replay" not in event
+        assert provider.extra_body["responses_reasoning_replay"] is configured
+
+    @pytest.mark.parametrize(
         "configured, override, expected_reasoning",
         [
             ("deepseek-flash", "gpt-6-astra", False),
@@ -172,6 +199,50 @@ class TestBuildWsRequest:
 
 
 class TestProviderWebsocketMode:
+    async def test_replay_capability_is_removed_from_http_fallback(self):
+        provider = make_provider(
+            websocket_mode=True, extra_body={"responses_reasoning_replay": True}
+        )
+        provider._client.responses.connect_exc = ConnectionError("no ws upgrade")
+        _ = [chunk async for chunk in provider.chat(MESSAGES)]
+        assert (
+            "responses_reasoning_replay"
+            not in provider._client.chat.completions.kwargs.get("extra_body", {})
+        )
+
+    async def test_reconnect_replays_captured_and_edited_reasoning(self):
+        provider = make_provider(
+            websocket_mode=True, extra_body={"responses_reasoning_replay": True}
+        )
+        connection = provider._client.responses.connection
+        connection.scripts = [
+            [Ev(type="response.reasoning_text.delta", delta="Think"), completed()]
+        ]
+        _ = [chunk async for chunk in provider.chat(MESSAGES)]
+        history = [
+            *MESSAGES,
+            {
+                "role": "assistant",
+                "content": "",
+                **provider.last_assistant_extra_fields,
+            },
+            {"role": "user", "content": "Continue"},
+        ]
+        await provider._ws_session.close()
+        connection.scripts = [[completed("r2")], [completed("r3")]]
+        _ = [chunk async for chunk in provider.chat(history)]
+        sent = connection.sent[-1]
+        assert "previous_response_id" not in sent
+        assert sent["input"][1]["content"] == [
+            {"type": "reasoning_text", "text": "Think"}
+        ]
+        history[2]["reasoning_content"] = "Edited"
+        _ = [chunk async for chunk in provider.chat(history)]
+        assert "previous_response_id" not in connection.sent[-1]
+        assert connection.sent[-1]["input"][1]["content"] == [
+            {"type": "reasoning_text", "text": "Edited"}
+        ]
+
     async def _drive(self, provider):
         chunks = []
         async for chunk in provider._raw_stream_chat(MESSAGES):
