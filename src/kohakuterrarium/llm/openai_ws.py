@@ -5,6 +5,7 @@ and drives a persistent WebSocket session; the provider falls back to the
 HTTP Chat Completions path when a turn cannot start over the socket.
 """
 
+from contextlib import aclosing
 from typing import Any, AsyncIterator
 
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
@@ -73,6 +74,34 @@ def build_ws_request(
     return event, items
 
 
+def record_ws_assistant_echo(
+    session: ResponsesWSSession,
+    provider: Any,
+    text: str,
+    model: str | None = None,
+) -> None:
+    """Record the exact assistant projection shared by Responses providers."""
+    assistant = {
+        "role": "assistant",
+        "content": text,
+        **provider.last_assistant_extra_fields,
+    }
+    assistant["tool_calls"] = [
+        {
+            "id": c.id,
+            "type": "function",
+            "function": {
+                "name": c.name,
+                "arguments": c.arguments,
+            },
+        }
+        for c in provider.last_tool_calls
+    ]
+    session.record_assistant_echo(
+        to_responses_input([assistant], model=model or provider.model)
+    )
+
+
 async def stream_ws_turn(
     provider: Any,
     session: ResponsesWSSession,
@@ -83,36 +112,44 @@ async def stream_ws_turn(
     """Run one WebSocket turn, folding results into the provider state."""
     base_event, items = build_ws_request(provider, messages, tools, kwargs)
     collected: list[NativeToolCall] = []
+    output_text: list[str] = []
     reasoning = ResponsesReasoningCollector()
-    async for event in session.stream_turn(base_event, items, fix_tool_call_pairing):
-        reasoning.consume(event)
-        etype = getattr(event, "type", "")
-        if etype == "response.output_text.delta":
-            piece = strip_surrogates(event.delta)
-            reasoning.consume_output_text(piece)
-            yield piece
-        elif etype == "response.output_item.done":
-            item = event.item
-            if getattr(item, "type", "") == "function_call":
-                call_id = getattr(item, "call_id", "")
-                reasoning.consume_function_call(call_id)
-                collected.append(
-                    NativeToolCall(
-                        id=call_id,
-                        name=getattr(item, "name", "") or "",
-                        arguments=getattr(item, "arguments", ""),
+    async with aclosing(
+        session.stream_turn(base_event, items, fix_tool_call_pairing)
+    ) as stream:
+        async for event in stream:
+            reasoning.consume(event)
+            etype = getattr(event, "type", "")
+            if etype == "response.output_text.delta":
+                piece = strip_surrogates(event.delta)
+                output_text.append(piece)
+                reasoning.consume_output_text(piece)
+                yield piece
+            elif etype == "response.output_item.done":
+                item = event.item
+                if getattr(item, "type", "") == "function_call":
+                    call_id = getattr(item, "call_id", "")
+                    reasoning.consume_function_call(call_id)
+                    collected.append(
+                        NativeToolCall(
+                            id=call_id,
+                            name=getattr(item, "name", "") or "",
+                            arguments=getattr(item, "arguments", ""),
+                        )
                     )
-                )
-        elif etype == "response.completed":
-            usage = getattr(getattr(event, "response", None), "usage", None)
-            if usage:
-                details = getattr(usage, "input_tokens_details", None)
-                cached = getattr(details, "cached_tokens", 0) or 0 if details else 0
-                provider._last_usage = {
-                    "prompt_tokens": getattr(usage, "input_tokens", 0),
-                    "completion_tokens": getattr(usage, "output_tokens", 0),
-                    "total_tokens": getattr(usage, "total_tokens", 0),
-                    "cached_tokens": cached,
-                }
+            elif etype == "response.completed":
+                usage = getattr(getattr(event, "response", None), "usage", None)
+                if usage:
+                    details = getattr(usage, "input_tokens_details", None)
+                    cached = getattr(details, "cached_tokens", 0) or 0 if details else 0
+                    provider._last_usage = {
+                        "prompt_tokens": getattr(usage, "input_tokens", 0),
+                        "completion_tokens": getattr(usage, "output_tokens", 0),
+                        "total_tokens": getattr(usage, "total_tokens", 0),
+                        "cached_tokens": cached,
+                    }
     provider._last_tool_calls = collected
     provider._last_assistant_extra_fields = reasoning.fields()
+    record_ws_assistant_echo(
+        session, provider, "".join(output_text), base_event["model"]
+    )

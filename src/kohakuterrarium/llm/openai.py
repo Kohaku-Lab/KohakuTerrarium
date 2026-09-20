@@ -3,6 +3,7 @@ Provide streaming and complete chat access to OpenAI-compatible endpoints.
 """
 
 import asyncio
+from contextlib import aclosing
 from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
@@ -272,12 +273,17 @@ class OpenAIProvider(BaseLLMProvider):
         overflow_state = OverflowRecoveryState()
         while True:
             try:
-                async for chunk in self._raw_stream_chat(
-                    current, tools=tools, **kwargs
-                ):
-                    yield chunk
+                async with aclosing(
+                    self._raw_stream_chat(current, tools=tools, **kwargs)
+                ) as stream:
+                    async for chunk in stream:
+                        yield chunk
                 return
             except Exception as exc:
+                if isinstance(exc, ResponsesWSError) and (
+                    exc.submitted or exc.mid_stream
+                ):
+                    raise
                 cls = classify_openai_error(exc)
                 if cls is ErrorClass.OVERFLOW:
                     replacement = await self._recover_from_overflow(
@@ -318,13 +324,14 @@ class OpenAIProvider(BaseLLMProvider):
             session = self._ws_session_for_turn()
             if session is not None:
                 try:
-                    async for piece in stream_ws_turn(
-                        self, session, messages, tools, kwargs
-                    ):
-                        yield piece
+                    async with aclosing(
+                        stream_ws_turn(self, session, messages, tools, kwargs)
+                    ) as stream:
+                        async for piece in stream:
+                            yield piece
                     return
                 except ResponsesWSError as exc:
-                    if exc.mid_stream:
+                    if exc.mid_stream or exc.submitted:
                         raise
                     logger.warning(
                         "Responses WebSocket turn unavailable, using HTTP",

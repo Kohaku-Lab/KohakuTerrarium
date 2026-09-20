@@ -1,8 +1,7 @@
-"""
-Provide Responses API access through Codex OAuth or an explicit API key.
-"""
+"""Provide Responses API access through Codex OAuth or an explicit API key."""
 
 import asyncio
+from contextlib import aclosing
 import hashlib
 import json as _json
 from typing import Any, AsyncIterator
@@ -42,6 +41,7 @@ from kohakuterrarium.llm.codex_rate_limits import (
     set_cached,
 )
 from kohakuterrarium.llm.openai_sanitize import strip_surrogates
+from kohakuterrarium.llm.openai_ws import record_ws_assistant_echo
 from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.recovery import (
     ErrorClass,
@@ -274,16 +274,23 @@ class CodexOAuthProvider(BaseLLMProvider):
         while True:
             emitted = False
             try:
-                async for chunk in self._raw_stream_chat(
-                    current,
-                    tools=tools,
-                    provider_native_tools=provider_native_tools,
-                    **kwargs,
-                ):
-                    emitted = True
-                    yield chunk
+                async with aclosing(
+                    self._raw_stream_chat(
+                        current,
+                        tools=tools,
+                        provider_native_tools=provider_native_tools,
+                        **kwargs,
+                    )
+                ) as stream:
+                    async for chunk in stream:
+                        emitted = True
+                        yield chunk
                 return
             except Exception as exc:
+                if isinstance(exc, ResponsesWSError) and (
+                    exc.submitted or exc.mid_stream
+                ):
+                    raise
                 cls = classify_openai_error(exc)
                 if (
                     not auth_retry
@@ -415,18 +422,26 @@ class CodexOAuthProvider(BaseLLMProvider):
                 }
                 if api_tools:
                     base_event["tools"] = api_tools
+                output_text: list[str] = []
                 try:
-                    async for event in session.stream_turn(
-                        base_event, api_input, fix_tool_call_pairing
-                    ):
-                        piece = self._process_stream_event(event, collected_tool_calls)
-                        if piece is not None:
-                            yield piece
+                    async with aclosing(
+                        session.stream_turn(
+                            base_event, api_input, fix_tool_call_pairing
+                        )
+                    ) as stream:
+                        async for event in stream:
+                            piece = self._process_stream_event(
+                                event, collected_tool_calls
+                            )
+                            if piece is not None:
+                                output_text.append(piece)
+                                yield piece
                     self._last_assistant_extra_fields = self._reasoning.fields()
                     self._last_tool_calls = collected_tool_calls
+                    record_ws_assistant_echo(session, self, "".join(output_text))
                     return
                 except ResponsesWSError as exc:
-                    if exc.mid_stream:
+                    if exc.mid_stream or exc.submitted:
                         raise
                     logger.warning(
                         "Codex WebSocket turn unavailable, using HTTP",
