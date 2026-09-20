@@ -14,6 +14,7 @@ from kohakuterrarium.session.history_paging import (
     page_channels,
     page_events,
     page_snapshot,
+    require_bounded_history_page,
 )
 from kohakuterrarium.session.store import SessionStore
 
@@ -141,6 +142,14 @@ def test_wrong_history_id_triggers_reset(store):
     page = page_events(store, "ag", session_id="g", limit=5, history_id="stale")
     assert page["history_page"]["reset_required"] is True
     assert page["items"] == []
+
+
+def test_unbounded_history_flags_are_rejected():
+    with pytest.raises(HistoryPagingError, match="paged"):
+        require_bounded_history_page(paged=False, limit=400)
+    with pytest.raises(HistoryPagingError, match="limit"):
+        require_bounded_history_page(paged=True, limit=0)
+    require_bounded_history_page(paged=True, limit=400)
 
 
 def test_malformed_cursor_triggers_reset(store):

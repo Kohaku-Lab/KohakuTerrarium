@@ -1388,13 +1388,22 @@ class TestApiIntegration:
         assert resp.json()["total"] == 1
 
         # While the session is still live, its per-creature HTTP
-        # history carries both turns — and the ``ch:`` channel-history
-        # branch of the same route answers for a (here empty) channel.
+        # history is a bounded page (default) and still carries both
+        # turns. Unbounded ``paged=false`` is rejected. The ``ch:``
+        # channel-history branch of the same route answers for a
+        # (here empty) channel.
         resp = client.get(f"/api/sessions/{session_id}/creatures/{creature_id}/history")
         assert resp.status_code == 200
         live_blob = str(resp.json())
         assert "persist this turn" in live_blob
         assert "second turn please" in live_blob
+        assert (
+            client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+                params={"paged": "false"},
+            ).status_code
+            == 400
+        )
         resp = client.get(
             f"/api/sessions/{session_id}/creatures/ch:no-such-channel/history"
         )
@@ -1429,8 +1438,8 @@ class TestApiIntegration:
         assert "persist this turn" in str(resp.json())
 
         # ── History paging (bounded, cursor-driven pages) ─────────────
-        # The dashboard opts into ``paged=true``; legacy full reads above
-        # are unchanged. Live event pages carry raw event records with a
+        # Omitted ``paged`` and explicit ``paged=true`` both return a
+        # bounded page. Live event pages carry raw event records with a
         # physical ``_history_key`` and NEVER embed the conversation
         # snapshot (no snapshot giant on an event page). Cursors are
         # opaque exclusive record tokens; ``history_id`` is the

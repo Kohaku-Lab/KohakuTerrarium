@@ -16,6 +16,10 @@ from kohakuterrarium.api.schemas import (
     RegenerateRequest,
 )
 from kohakuterrarium.errors import ConflictError, NotFoundError
+from kohakuterrarium.session.history_paging import (
+    HistoryPagingError,
+    require_bounded_history_page,
+)
 from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.terrarium.service import TerrariumService
 
@@ -132,21 +136,12 @@ async def rewind_creature(
         raise HTTPException(409, str(exc)) from exc
 
 
-def _history_max_event_id(events: list) -> int:
-    out = 0
-    for evt in events:
-        eid = evt.get("event_id") if isinstance(evt, dict) else None
-        if isinstance(eid, int) and eid > out:
-            out = eid
-    return out
-
-
 @router.get("/{session_id}/creatures/{creature_id}/history")
 async def creature_history(
     session_id: str,
     creature_id: str,
     since_event_id: int | None = None,
-    paged: bool = False,
+    paged: bool = True,
     stream: str = "events",
     limit: int = 400,
     before: str | None = None,
@@ -154,76 +149,27 @@ async def creature_history(
     history_id: str | None = None,
     service: TerrariumService = Depends(get_service),
 ):
-    """History payload with an optional event cursor.
+    """Return one bounded history page for a creature or channel tab.
 
-    Legacy behaviour (``paged`` omitted / ``False``) is unchanged:
-    ``since_event_id`` trims ``events`` and ``max_event_id`` reports the
-    newest event. With ``paged=true`` the endpoint returns a bounded,
-    cursor-driven page via ``history_page``; the numeric cursor filter is
-    rejected in paged mode; use the opaque before/after cursors instead.
+    Unbounded full-log reads (``paged=false`` or ``limit=0``) are rejected.
+    Numeric ``since_event_id`` is rejected; use opaque before/after cursors.
     """
-    if paged:
-        if since_event_id is not None:
-            raise HTTPException(400, "paged history uses after, not since_event_id")
-        if limit <= 0:
-            raise HTTPException(400, "limit must be a positive integer")
-        return await _paged_history(
-            service,
-            session_id,
-            creature_id,
-            stream=stream,
-            limit=limit,
-            before=before,
-            after=after,
-            history_id=history_id,
-        )
-    # Channel tabs share this endpoint through the ``ch:`` prefix.
-    if creature_id.startswith("ch:"):
-        channel_name = creature_id[3:]
-        try:
-            messages = await service.channel_history(session_id, channel_name)
-        except KeyError:
-            messages = []
-        events = [
-            {
-                "type": "channel_message",
-                "channel": channel_name,
-                "sender": message.get("sender", ""),
-                "content": message.get("content", ""),
-                "ts": message.get("timestamp", message.get("ts", 0)),
-            }
-            for message in messages
-        ]
-        return {
-            "creature_id": creature_id,
-            "session_id": session_id,
-            "messages": [],
-            "events": events,
-            "is_processing": False,
-            # Channel events carry no event_id; report the contract field
-            # explicitly so clients can read it unconditionally.
-            "max_event_id": 0,
-        }
-    cid = await resolve_creature_id(service, creature_id, session_id)
     try:
-        payload = await service.chat_history(cid)
-    except KeyError:
-        raise HTTPException(404, f"creature {creature_id!r} not found")
-    events = payload.get("events") or []
-    max_eid = _history_max_event_id(events)
+        require_bounded_history_page(paged=paged, limit=limit)
+    except HistoryPagingError as exc:
+        raise HTTPException(400, str(exc)) from exc
     if since_event_id is not None:
-        payload["events"] = [
-            evt
-            for evt in events
-            if isinstance(evt, dict)
-            and isinstance(evt.get("event_id"), int)
-            and evt["event_id"] > since_event_id
-        ]
-        # Incremental payloads omit the conversation snapshot; it is only
-        # valid for the full log and would mislead an appending client.
-        payload.pop("messages", None)
-    payload["max_event_id"] = max_eid
-    return payload
+        raise HTTPException(400, "paged history uses after, not since_event_id")
+    return await _paged_history(
+        service,
+        session_id,
+        creature_id,
+        stream=stream,
+        limit=limit,
+        before=before,
+        after=after,
+        history_id=history_id,
+    )
 
 
 async def _paged_history(

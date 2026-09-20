@@ -46,6 +46,7 @@ class _FakeService:
         self._branches = branches_returns or [{"t": 1}]
         self._raise = raise_on or {}
         self.engine = object()
+        self.history_calls = 0
 
     async def list_creatures(self):
         return tuple(self._creatures)
@@ -98,9 +99,24 @@ class _FakeService:
             raise self._raise["rewind"]
 
     async def chat_history(self, cid):
+        self.history_calls += 1
         if "chat_history" in self._raise:
             raise self._raise["chat_history"]
         return self._history
+
+    async def chat_history_page(self, cid, **kwargs):
+        self.history_calls += 1
+        if "chat_history" in self._raise:
+            raise self._raise["chat_history"]
+        return {
+            "messages": self._history.get("messages", []),
+            "events": self._history.get("events", []),
+        }
+
+    async def channel_history_page(self, session_id, channel, **kwargs):
+        if "channel_history_page" in self._raise:
+            raise self._raise["channel_history_page"]
+        raise KeyError(channel)
 
     async def chat_event(self, cid, event_id):
         if "chat_event" in self._raise:
@@ -121,6 +137,26 @@ def _client(service):
 
 
 class TestPagedChannelValidation:
+    def test_unpaged_history_is_rejected_without_loading_events(self):
+        svc = _FakeService()
+        client = _client(svc)
+        response = client.get(
+            "/sessions/g/creatures/alice/history",
+            params={"paged": "false"},
+        )
+        assert response.status_code == 400
+        assert "paged" in response.json()["detail"]
+        assert svc.history_calls == 0
+
+    def test_unpaged_channel_history_is_rejected(self):
+        client = _client(LocalTerrariumService(Terrarium()))
+        response = client.get(
+            "/sessions/g/creatures/ch:general/history",
+            params={"paged": "false"},
+        )
+        assert response.status_code == 400
+        assert "paged" in response.json()["detail"]
+
     def test_invalid_limit_returns_client_error(self):
         client = _client(LocalTerrariumService(Terrarium()))
         response = client.get(
@@ -277,15 +313,18 @@ class TestHistoryBranches:
         assert resp.json()["messages"][0]["role"] == "user"
 
     def test_history_channel_route_uses_service(self):
-        async def fake_channel_history(gid, name):
+        async def fake_channel_history_page(gid, name, **kwargs):
             assert (gid, name) == ("g", "chat-ch")
-            return [
-                {"sender": "alpha", "content": "from-w1", "timestamp": 1.0},
-                {"sender": "bravo", "content": "from-w2", "timestamp": 2.0},
-            ]
+            assert kwargs.get("limit") == 400
+            return {
+                "events": [
+                    {"type": "channel_message", "content": "from-w1"},
+                    {"type": "channel_message", "content": "from-w2"},
+                ]
+            }
 
         svc = _FakeService()
-        svc.channel_history = fake_channel_history
+        svc.channel_history_page = fake_channel_history_page
         client = _client(svc)
         resp = client.get("/sessions/g/creatures/ch:chat-ch/history")
         assert resp.status_code == 200
@@ -301,27 +340,15 @@ class TestHistoryBranches:
         resp = client.get("/sessions/g/creatures/alice/history")
         assert resp.status_code == 404
 
-    def test_history_cursor_filters_events(self):
-        svc = _FakeService(
-            history_returns={
-                "messages": [{"role": "user"}],
-                "events": [
-                    {"event_id": 1, "type": "user_input"},
-                    {"event_id": 2, "type": "text"},
-                    {"event_id": 3, "type": "text"},
-                ],
-            }
-        )
+    def test_history_numeric_cursor_is_rejected(self):
+        svc = _FakeService()
         client = _client(svc)
         resp = client.get("/sessions/g/creatures/alice/history?since_event_id=1")
-        assert resp.status_code == 200
-        body = resp.json()
-        assert [e["event_id"] for e in body["events"]] == [2, 3]
-        assert body["max_event_id"] == 3
-        # Incremental payloads omit the full-log-only snapshot.
-        assert "messages" not in body
+        assert resp.status_code == 400
+        assert "since_event_id" in resp.json()["detail"]
+        assert svc.history_calls == 0
 
-    def test_history_full_payload_reports_max_event_id(self):
+    def test_history_page_returns_bounded_events(self):
         svc = _FakeService(
             history_returns={
                 "messages": [],
@@ -332,8 +359,8 @@ class TestHistoryBranches:
         resp = client.get("/sessions/g/creatures/alice/history")
         assert resp.status_code == 200
         body = resp.json()
-        assert body["max_event_id"] == 4
         assert [e["event_id"] for e in body["events"]] == [4]
+        assert svc.history_calls == 1
 
     def test_event_fetch(self):
         svc = _FakeService()

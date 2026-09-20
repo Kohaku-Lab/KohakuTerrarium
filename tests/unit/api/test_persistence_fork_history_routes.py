@@ -1,10 +1,13 @@
 """Unit tests for the persistence fork + history routes."""
 
+import asyncio
+import time
 import types
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from httpx import ASGITransport, AsyncClient
 
 from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.persistence import fork as fork_mod
@@ -127,6 +130,97 @@ class TestForkRoute:
 
 
 class TestHistoryRoutes:
+    def test_unpaged_saved_history_is_rejected_without_full_scan(self, monkeypatch):
+        scanned = []
+
+        def fake_payload(*_a, **_k):
+            scanned.append("payload")
+            return {"events": ["x"] * 10_000}
+
+        monkeypatch.setattr(history_mod, "live_store_entry", lambda *_a, **_k: None)
+        monkeypatch.setattr(
+            history_mod,
+            "resolve_session_path_default",
+            lambda _n: Path("/x/s.kohakutr"),
+        )
+        monkeypatch.setattr(history_mod, "_saved_history_page", fake_payload)
+        client = TestClient(_app(history_mod.router))
+        resp = client.get("/api/sess/history/alice", params={"paged": False})
+        assert resp.status_code == 400
+        assert "paged" in resp.json()["detail"]
+        assert scanned == []
+
+    def test_unpaged_live_history_is_rejected_without_full_scan(self, monkeypatch):
+        scanned = []
+
+        def fake_from_store(*_a, **_k):
+            scanned.append("from_store")
+            return {"events": ["x"] * 10_000}
+
+        fake_store = types.SimpleNamespace(_path="/x/live.kohakutr")
+        monkeypatch.setattr(
+            history_mod, "live_store_entry", lambda *_a, **_k: ("live_g", fake_store)
+        )
+        monkeypatch.setattr(history_mod, "history_page_from_store", fake_from_store)
+        engine = _FakeEngine(graph=_FakeGraph(["root"]), creatures={})
+        app = _app(history_mod.router)
+        app.dependency_overrides[get_service] = lambda: engine
+        resp = TestClient(app).get("/api/live_g/history/root", params={"paged": False})
+        assert resp.status_code == 400
+        assert "paged" in resp.json()["detail"]
+        assert scanned == []
+
+    def test_zero_limit_is_rejected_as_unbounded(self, monkeypatch):
+        monkeypatch.setattr(history_mod, "live_store_entry", lambda *_a, **_k: None)
+        monkeypatch.setattr(
+            history_mod,
+            "resolve_session_path_default",
+            lambda _n: Path("/x/s.kohakutr"),
+        )
+        monkeypatch.setattr(
+            history_mod,
+            "_saved_history_page",
+            lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("full scan")),
+        )
+        client = TestClient(_app(history_mod.router))
+        resp = client.get("/api/sess/history/alice", params={"limit": 0})
+        assert resp.status_code == 400
+        detail = resp.json()["detail"]
+        assert "paged" in detail or "limit" in detail
+
+    async def test_unpaged_reject_does_not_block_event_loop(self, monkeypatch):
+        def slow_full_scan(*_a, **_k):
+            time.sleep(0.3)
+            return {"events": []}
+
+        fake_store = types.SimpleNamespace(_path="/x/live.kohakutr")
+        monkeypatch.setattr(
+            history_mod, "live_store_entry", lambda *_a, **_k: ("live_g", fake_store)
+        )
+        monkeypatch.setattr(history_mod, "history_page_from_store", slow_full_scan)
+        engine = _FakeEngine(graph=_FakeGraph(["root"]), creatures={})
+        app = _app(history_mod.router)
+        app.dependency_overrides[get_service] = lambda: engine
+        loop_alive: list[float] = []
+
+        async def _ping():
+            for _ in range(5):
+                await asyncio.sleep(0.02)
+                loop_alive.append(time.monotonic())
+
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            req = asyncio.create_task(
+                client.get("/api/live_g/history/root", params={"paged": "false"})
+            )
+            ping = asyncio.create_task(_ping())
+            resp, _ = await asyncio.gather(req, ping)
+        assert resp.status_code == 400
+        gaps = [loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)]
+        assert (
+            max(gaps) < 0.15
+        ), f"unpaged reject stalled the loop; max gap={max(gaps):.3f}s"
+
     def test_saved_paging_invalid_limit_returns_400(self, monkeypatch, tmp_path):
         path = tmp_path / "paged-validation.kohakutr"
         store = SessionStore(path)
@@ -175,11 +269,11 @@ class TestHistoryRoutes:
             "resolve_session_path_default",
             lambda n: Path("/x/s.kohakutr"),
         )
-        monkeypatch.setattr(
-            history_mod,
-            "history_payload",
-            lambda p, t, j=None: {"target": t, "events": []},
-        )
+
+        def fake_page(path, target, **_k):
+            return {"target": target, "events": []}
+
+        monkeypatch.setattr(history_mod, "_saved_history_page", fake_page)
         client = TestClient(_app(history_mod.router))
         resp = client.get("/api/sess/history/alice")
         assert resp.status_code == 200
@@ -192,19 +286,17 @@ class TestHistoryRoutes:
             lambda n: Path("/x/s.kohakutr"),
         )
 
-        def fake_payload(p, t, j=None):
-            return {"target": t, "events": []}
+        def fake_page(path, target, **_k):
+            return {"target": target, "events": []}
 
-        monkeypatch.setattr(history_mod, "history_payload", fake_payload)
+        monkeypatch.setattr(history_mod, "_saved_history_page", fake_page)
         client = TestClient(_app(history_mod.router))
         # URL-encoded "a:b" → "a%3Ab"
         resp = client.get("/api/sess/history/a%3Ab")
         assert resp.status_code == 200
         assert resp.json()["target"] == "a:b"
 
-    def test_saved_target_passes_no_live_job_ids(self, monkeypatch):
-        # A genuinely saved session (no live store) threads ``None`` so
-        # the read-only interrupted-synthesis semantics are unchanged.
+    def test_saved_target_page_does_not_thread_live_job_ids(self, monkeypatch):
         monkeypatch.setattr(history_mod, "live_store_entry", lambda svc, n: None)
         monkeypatch.setattr(
             history_mod,
@@ -213,22 +305,20 @@ class TestHistoryRoutes:
         )
         captured = {}
 
-        def fake_payload(p, t, j=None):
-            captured["live"] = j
-            return {"target": t, "events": []}
+        def fake_page(path, target, **kwargs):
+            captured["kwargs"] = kwargs
+            return {"target": target, "events": []}
 
-        monkeypatch.setattr(history_mod, "history_payload", fake_payload)
+        monkeypatch.setattr(history_mod, "_saved_history_page", fake_page)
         client = TestClient(_app(history_mod.router))
         resp = client.get("/api/sess/history/root")
         assert resp.status_code == 200
-        assert captured["live"] is None
+        assert "live_job_ids" not in captured["kwargs"]
 
     def test_live_target_threads_running_job_ids(self, monkeypatch):
         # A live-resolved session gathers the still-running job ids from
-        # the host engine's live agents and threads them into the payload
-        # so an in-flight sub-agent isn't synthesised as interrupted
-        # (Bug 2). Uses the REAL ``_live_job_ids_for_graph`` gather and
-        # must build from the ENGINE'S store, named by its file stem.
+        # the host engine's live agents and threads them into the paged
+        # payload so an in-flight sub-agent isn't synthesised as interrupted.
         fake_store = types.SimpleNamespace(_path="/x/live.kohakutr")
         monkeypatch.setattr(
             history_mod, "live_store_entry", lambda svc, n: ("live_g", fake_store)
@@ -239,20 +329,20 @@ class TestHistoryRoutes:
         )
         captured = {}
 
-        def fake_from_store(store, name, target, j=None):
+        def fake_page(store, **kwargs):
             captured["store"] = store
-            captured["name"] = name
-            captured["live"] = j
-            return {"target": target, "events": []}
+            captured["session_name"] = kwargs.get("session_name")
+            captured["live"] = kwargs.get("live_job_ids")
+            return {"target": kwargs.get("target"), "events": []}
 
-        monkeypatch.setattr(history_mod, "history_from_store", fake_from_store)
+        monkeypatch.setattr(history_mod, "history_page_from_store", fake_page)
         app = _app(history_mod.router)
         app.dependency_overrides[get_service] = lambda: engine
         resp = TestClient(app).get("/api/live_g/history/root")
         assert resp.status_code == 200
         assert captured["live"] == {"job_abc"}
         assert captured["store"] is fake_store
-        assert captured["name"] == "live"
+        assert captured["session_name"] == "live"
 
     def test_live_history_never_reopens_the_store_file(self, monkeypatch, tmp_path):
         # THE CI bug (POSIX): a second SessionStore open of the live,
@@ -271,8 +361,8 @@ class TestHistoryRoutes:
             raise AssertionError("live history must not open the session file")
 
         monkeypatch.setattr(history_mod, "resolve_session_path_default", _bomb)
-        monkeypatch.setattr(history_mod, "history_index_payload", _bomb)
-        monkeypatch.setattr(history_mod, "history_payload", _bomb)
+        monkeypatch.setattr(history_mod, "history_index_payload", _bomb, raising=False)
+        monkeypatch.setattr(history_mod, "_saved_history_page", _bomb)
 
         app = _app(history_mod.router)
         app.dependency_overrides[get_service] = lambda: engine

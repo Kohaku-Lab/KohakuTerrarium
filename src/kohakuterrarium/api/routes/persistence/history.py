@@ -6,7 +6,8 @@ Paths use ``/{session_name}/history[/{target}]`` so mounting under
 Saved-session SQLite reads run in a worker thread. Live sessions reuse the
 engine-owned store on the event loop because a second connection to an actively
 written store can raise ``SQLITE_IOERR`` on POSIX; loop affinity also
-serializes reads with the writer.
+serializes reads with the writer. HTTP history target reads are always a
+bounded page; ``paged=false`` and ``limit=0`` return 400.
 """
 
 import asyncio
@@ -24,16 +25,17 @@ from kohakuterrarium.errors import (
     SessionError,
     SessionNotFoundError,
 )
-from kohakuterrarium.session.history_paging import HistoryPagingError
+from kohakuterrarium.session.history_paging import (
+    HistoryPagingError,
+    require_bounded_history_page,
+)
 from kohakuterrarium.session.history_records import history_detail
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence.history import (
-    history_from_store,
     history_index_from_store,
     history_index_payload,
     history_page_from_store,
-    history_payload,
 )
 from kohakuterrarium.studio.persistence.store import resolve_session_path_default
 from kohakuterrarium.terrarium.creature_ops import agent_live_job_ids
@@ -223,7 +225,7 @@ async def get_session_history_index(
 async def get_session_history(
     session_name: str,
     target: str,
-    paged: bool = False,
+    paged: bool = True,
     stream: str = "events",
     limit: int = 400,
     before: str | None = None,
@@ -231,52 +233,48 @@ async def get_session_history(
     history_id: str | None = None,
     service: TerrariumService = Depends(get_service),
 ) -> dict[str, Any]:
-    """Return history for an agent, root, or channel target.
+    """Return one bounded history page for an agent, root, or channel target.
 
-    Legacy (``paged`` omitted) returns the full history for live or saved
-    sessions. With ``paged=true`` it returns one bounded cursor-driven page via
-    ``history_page``, reusing the same session pager as the live creature
-    route. Channels are addressed by the ``ch:`` prefix and always page the
-    ``channel`` stream.
+    Unbounded full-log reads (``paged=false`` or ``limit=0``) are rejected.
+    Channels use the ``ch:`` prefix and page the ``channel`` stream.
     """
     target = unquote(target)
+    try:
+        require_bounded_history_page(paged=paged, limit=limit)
+    except HistoryPagingError as exc:
+        raise HTTPException(400, str(exc)) from exc
     entry = live_store_entry(service, session_name)
     if entry is not None:
         graph_id, store = entry
         live_session_name = _live_session_name(store, session_name)
-        if paged:
-            live_job_ids = _live_job_ids_for_graph(service, graph_id) or set()
-            try:
-                return history_page_from_store(
-                    store,
-                    session_id=graph_id,
-                    session_name=live_session_name,
-                    target=target,
-                    stream=stream,
-                    limit=limit,
-                    before=before,
-                    after=after,
-                    history_id=history_id,
-                    live_job_ids=live_job_ids,
-                    is_processing=_live_is_processing(service, graph_id, target),
-                )
-            except HistoryPagingError as exc:
-                raise HTTPException(400, str(exc)) from exc
-        live_job_ids = _live_job_ids_for_graph(service, graph_id)
-        return history_from_store(store, live_session_name, target, live_job_ids)
-    path = await _resolve_saved_path(session_name)
-    if paged:
+        live_job_ids = _live_job_ids_for_graph(service, graph_id) or set()
         try:
-            return await asyncio.to_thread(
-                _saved_history_page,
-                path,
-                target,
+            return history_page_from_store(
+                store,
+                session_id=graph_id,
+                session_name=live_session_name,
+                target=target,
                 stream=stream,
                 limit=limit,
                 before=before,
                 after=after,
                 history_id=history_id,
+                live_job_ids=live_job_ids,
+                is_processing=_live_is_processing(service, graph_id, target),
             )
         except HistoryPagingError as exc:
             raise HTTPException(400, str(exc)) from exc
-    return await asyncio.to_thread(history_payload, path, target, None)
+    path = await _resolve_saved_path(session_name)
+    try:
+        return await asyncio.to_thread(
+            _saved_history_page,
+            path,
+            target,
+            stream=stream,
+            limit=limit,
+            before=before,
+            after=after,
+            history_id=history_id,
+        )
+    except HistoryPagingError as exc:
+        raise HTTPException(400, str(exc)) from exc

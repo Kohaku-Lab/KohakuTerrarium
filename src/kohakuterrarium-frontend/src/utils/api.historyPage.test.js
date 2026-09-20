@@ -37,10 +37,11 @@ afterEach(() => {
 })
 
 describe("terrariumAPI.getHistoryPage", () => {
-  it("preserves legacy getHistory by leaving it on its own URL and params", async () => {
+  it("routes getHistory through the bounded page API", async () => {
     apiGet.mockResolvedValue({ data: { messages: [], events: [] } })
     await terrariumAPI.getHistory("graph-1", "root")
-    expect(apiGet).toHaveBeenCalledWith("/sessions/graph-1/creatures/root/history", {})
+    expect(apiGet.mock.calls[0][0]).toBe("/sessions/graph-1/creatures/root/history")
+    expect(apiGet.mock.calls[0][1].params).toMatchObject({ paged: true, limit: 400 })
   })
 
   it("opts in with paged=true and a default clamped limit", async () => {
@@ -88,12 +89,12 @@ describe("terrariumAPI.getHistoryPage", () => {
     expect(out.history_page.has_older).toBe(false)
   })
 
-  it("keeps existing calls without paged=true on the full legacy URL", async () => {
+  it("ignores a numeric incremental cursor on getHistory", async () => {
     apiGet.mockResolvedValue({ data: { messages: [], events: [] } })
     await terrariumAPI.getHistory("g", "root", 42)
     const [, config] = apiGet.mock.calls[0]
-    expect(config.params).toEqual({ since_event_id: 42 })
-    expect(config.params.paged).toBeUndefined()
+    expect(config.params).toMatchObject({ paged: true, limit: 400 })
+    expect(config.params.since_event_id).toBeUndefined()
   })
 })
 
@@ -119,10 +120,10 @@ describe("sessionAPI.getHistoryPage", () => {
     })
   })
 
-  it("does not alter the raw session getHistory contract", async () => {
+  it("routes session getHistory through the bounded page API", async () => {
     apiGet.mockResolvedValue({ data: { meta: {}, targets: [] } })
     await sessionAPI.getHistory("session-a", "root")
     expect(apiGet.mock.calls[0][0]).toBe("/sessions/session-a/history/root")
-    expect(apiGet.mock.calls[0][1]).toBeUndefined()
+    expect(apiGet.mock.calls[0][1].params).toMatchObject({ paged: true, limit: 400 })
   })
 })
