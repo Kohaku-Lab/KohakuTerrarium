@@ -288,13 +288,19 @@ class BaseLLMProvider:
         normalized = self._normalize_messages(messages)
 
         if stream:
-            async for chunk in self._stream_chat(
+            provider_stream = self._stream_chat(
                 normalized,
                 tools=tools,
                 provider_native_tools=provider_native_tools,
                 **kwargs,
-            ):
-                yield chunk
+            )
+            try:
+                async for chunk in provider_stream:
+                    yield chunk
+            finally:
+                close = getattr(provider_stream, "aclose", None)
+                if close is not None:
+                    await close()
         else:
             response = await self._complete_chat(normalized, **kwargs)
             yield response.content
