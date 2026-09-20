@@ -6,6 +6,7 @@ HTTP Chat Completions path when a turn cannot start over the socket.
 """
 
 from contextlib import aclosing
+from copy import deepcopy
 from typing import Any, AsyncIterator
 
 from kohakuterrarium.llm.base import NativeToolCall, ToolSchema
@@ -23,6 +24,8 @@ def build_ws_request(
     messages: list[dict[str, Any]],
     tools: list[ToolSchema] | None,
     kwargs: dict[str, Any],
+    *,
+    extra_body: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """Build the ``response.create`` base body and the full input item list."""
     instructions = ""
@@ -60,7 +63,11 @@ def build_ws_request(
     if provider.prompt_cache_key:
         event["prompt_cache_key"] = provider.prompt_cache_key
 
-    merged_extra = {**provider.extra_body, **(kwargs.get("extra_body") or {})}
+    merged_extra = (
+        extra_body
+        if extra_body is not None
+        else {**provider.extra_body, **(kwargs.get("extra_body") or {})}
+    )
     for key, value in merged_extra.items():
         if key in _FRAMEWORK_KNOBS:
             continue
@@ -78,7 +85,7 @@ def record_ws_assistant_echo(
     session: ResponsesWSSession,
     provider: Any,
     text: str,
-    model: str | None = None,
+    kwargs: dict[str, Any],
 ) -> None:
     """Record the exact assistant projection shared by Responses providers."""
     assistant = {
@@ -97,9 +104,10 @@ def record_ws_assistant_echo(
         }
         for c in provider.last_tool_calls
     ]
-    session.record_assistant_echo(
-        to_responses_input([assistant], model=model or provider.model)
+    _, items = build_ws_request(
+        provider, [assistant], None, kwargs, extra_body=kwargs["extra_body"]
     )
+    session.record_assistant_echo(items)
 
 
 async def stream_ws_turn(
@@ -110,7 +118,11 @@ async def stream_ws_turn(
     kwargs: dict[str, Any],
 ) -> AsyncIterator[str]:
     """Run one WebSocket turn, folding results into the provider state."""
-    base_event, items = build_ws_request(provider, messages, tools, kwargs)
+    model = kwargs.get("model", provider.config.model)
+    extra_body = deepcopy({**provider.extra_body, **(kwargs.get("extra_body") or {})})
+    base_event, items = build_ws_request(
+        provider, messages, tools, kwargs, extra_body=extra_body
+    )
     collected: list[NativeToolCall] = []
     output_text: list[str] = []
     reasoning = ResponsesReasoningCollector()
@@ -151,5 +163,8 @@ async def stream_ws_turn(
     provider._last_tool_calls = collected
     provider._last_assistant_extra_fields = reasoning.fields()
     record_ws_assistant_echo(
-        session, provider, "".join(output_text), base_event["model"]
+        session,
+        provider,
+        "".join(output_text),
+        {"model": model, "extra_body": extra_body},
     )

@@ -1,9 +1,10 @@
 """Provide Responses API access through Codex OAuth or an explicit API key."""
 
 import asyncio
-from contextlib import aclosing
 import hashlib
 import json as _json
+from contextlib import aclosing
+from copy import deepcopy
 from typing import Any, AsyncIterator
 
 import httpx
@@ -35,7 +36,7 @@ from kohakuterrarium.llm.codex_image_gen import (
     translate_image_gen_tool,
 )
 from kohakuterrarium.llm.codex_rate_limits import (
-    capture_from_headers,
+    capture_rate_limit_headers as _capture_rate_limit_headers,
     parse_rate_limit_event,
     UsageSnapshot,
     set_cached,
@@ -55,19 +56,6 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
-
-
-async def _capture_rate_limit_headers(response: Any) -> None:
-    """Cache rate-limit headers without allowing telemetry failures to break requests."""
-    try:
-        snap = capture_from_headers(response.headers)
-        set_cached(snap)
-    except Exception as exc:  # pragma: no cover - response hooks must be isolated
-        logger.warning(
-            "Codex rate-limit header capture failed",
-            error=str(exc),
-            exc_info=True,
-        )
 
 
 class CodexOAuthProvider(BaseLLMProvider):
@@ -357,6 +345,7 @@ class CodexOAuthProvider(BaseLLMProvider):
             else:
                 input_messages.append(msg)
 
+        echo_options = dict(model=self.model, extra_body=deepcopy(self.extra_body))
         api_input = to_responses_input(input_messages, model=self.model)
 
         # Function tools precede provider-native tools in the outbound list.
@@ -438,7 +427,9 @@ class CodexOAuthProvider(BaseLLMProvider):
                                 yield piece
                     self._last_assistant_extra_fields = self._reasoning.fields()
                     self._last_tool_calls = collected_tool_calls
-                    record_ws_assistant_echo(session, self, "".join(output_text))
+                    record_ws_assistant_echo(
+                        session, self, "".join(output_text), echo_options
+                    )
                     return
                 except ResponsesWSError as exc:
                     if exc.mid_stream or exc.submitted:

@@ -306,26 +306,39 @@ class TestProviderWebsocketMode:
         assert len(connection.sent) == 1
         assert provider._client.chat.completions.kwargs is None
 
-    @pytest.mark.parametrize("edited", [False, True])
-    async def test_assistant_echo_edit_controls_delta(self, edited):
+    @pytest.mark.parametrize("model", ["gpt-x", "deepseek-flash"])
+    @pytest.mark.parametrize("edit", [None, "text", "reasoning"])
+    async def test_assistant_echo_edit_controls_delta(self, model, edit):
         provider = make_provider(websocket_mode=True)
+        options = {"model": model}
         connection = provider._client.responses.connection
         connection.scripts = [
-            [Ev(type="response.output_text.delta", delta="original"), completed("r1")],
+            [
+                Ev(type="response.reasoning_text.delta", delta="plan"),
+                Ev(type="response.output_text.delta", delta="original"),
+                completed("r1"),
+            ],
             [completed("r2")],
         ]
-        await self._drive(provider)
+        async for _ in provider.chat(MESSAGES, **options):
+            pass
         history = [
             *MESSAGES,
-            {"role": "assistant", "content": "edited" if edited else "original"},
+            {
+                "role": "assistant",
+                "content": "edited" if edit == "text" else "original",
+                "reasoning_content": "edited" if edit == "reasoning" else "plan",
+            },
             {"role": "user", "content": "next"},
         ]
-        async for _ in provider._raw_stream_chat(history):
+        async for _ in provider.chat(history, **options):
             pass
         sent = connection.sent[1]
-        if edited:
+        if edit == "text" or (edit == "reasoning" and model == "deepseek-flash"):
             assert "previous_response_id" not in sent
-            assert sent["input"] == build_ws_request(provider, history, None, {})[1]
+            assert (
+                sent["input"] == build_ws_request(provider, history, None, options)[1]
+            )
         else:
             assert sent["previous_response_id"] == "r1"
             assert sent["input"] == [
@@ -336,6 +349,33 @@ class TestProviderWebsocketMode:
         provider = make_provider()
         await self._drive(provider)
         assert provider._client.chat.completions.kwargs is not None
+
+    async def test_echo_uses_model_at_submission_when_changed_during_stream(self):
+        provider = make_provider(websocket_mode=True)
+        provider.config.model = "deepseek-flash"
+        connection = provider._client.responses.connection
+        connection.scripts = [
+            [
+                Ev(type="response.reasoning_text.delta", delta="plan"),
+                Ev(type="response.output_text.delta", delta="answer"),
+                completed("r1"),
+            ],
+            [completed("r2")],
+        ]
+        async for _ in provider.chat(MESSAGES):
+            provider.config.model = "gpt-x"
+        history = [
+            *MESSAGES,
+            {"role": "assistant", "content": "answer", "reasoning_content": "plan"},
+            {"role": "user", "content": "next"},
+        ]
+        async for _ in provider.chat(history):
+            pass
+        assert "previous_response_id" not in connection.sent[-1]
+        assert (
+            connection.sent[-1]["input"]
+            == build_ws_request(provider, history, None, {})[1]
+        )
 
     def test_with_model_propagates_ws_mode_with_fresh_session(self):
         provider = make_provider(websocket_mode=True)

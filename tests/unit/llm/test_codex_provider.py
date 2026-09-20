@@ -796,7 +796,9 @@ class TestWebsocketMode:
         assert len(connection.sent) == 1
         assert p._client.responses.kwargs is None
 
-    @pytest.mark.parametrize("edit", [None, "text", "reasoning", "tool", "missing"])
+    @pytest.mark.parametrize(
+        "edit", [None, "text", "reasoning", "tool", "missing", "model"]
+    )
     async def test_continuation_requires_exact_assistant_echo(self, edit):
         p = self._provider()
         p.model = "deepseek-v4.1"
@@ -820,7 +822,8 @@ class TestWebsocketMode:
         ]
         messages = [{"role": "user", "content": "hi"}]
         async for _ in p._raw_stream_chat(messages):
-            pass
+            if edit == "model":
+                p.model = "gpt-x"
         assistant = {
             "role": "assistant",
             "content": "answer",
