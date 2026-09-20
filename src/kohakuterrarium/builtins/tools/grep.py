@@ -19,6 +19,8 @@ from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
+_READ_BATCH_SIZE = 64 * 1024
+
 
 @register_builtin("grep")
 class GrepTool(BaseTool):
@@ -58,7 +60,15 @@ class GrepTool(BaseTool):
             return ToolResult(error=f"Path not found: {base_path}")
 
         file_pattern = args.get("glob", "**/*")
-        limit = int(args.get("limit", 50))
+        limit_arg = args.get("limit", 50)
+        if isinstance(limit_arg, bool) or not isinstance(limit_arg, (int, str)):
+            return ToolResult(error="limit must be a positive integer")
+        try:
+            limit = int(limit_arg)
+        except ValueError:
+            return ToolResult(error="limit must be a positive integer")
+        if limit <= 0:
+            return ToolResult(error="limit must be a positive integer")
         case_insensitive = args.get("ignore_case", False)
         follow_gitignore = str(args.get("gitignore", "true")).lower() not in (
             "false",
@@ -141,37 +151,41 @@ class GrepTool(BaseTool):
 
 async def _search_single_file(
     path: Path,
-    regex: "re.Pattern",
+    regex: re.Pattern[str],
     base: Path,
     remaining_limit: int,
 ) -> list[dict[str, Any]]:
     """Return line-oriented regex matches from one text file."""
     matches: list[dict[str, Any]] = []
+    if remaining_limit <= 0:
+        return matches
     try:
+        try:
+            rel_path = path.relative_to(base)
+        except ValueError:
+            rel_path = path
+        display_path = str(rel_path)
         async with aiofiles.open(path, encoding="utf-8", errors="replace") as f:
             line_num = 0
-            async for line in f:
-                line_num += 1
-                if not regex.search(line):
-                    continue
+            while lines := await f.readlines(_READ_BATCH_SIZE):
+                for line in lines:
+                    line_num += 1
+                    if not regex.search(line):
+                        continue
 
-                # Individual lines are bounded independently of the result-count cap.
-                content = line.rstrip()
-                if len(content) > 2000:
-                    content = content[:2000] + " ... (truncated)"
+                    content = line.rstrip()
+                    if len(content) > 2000:
+                        content = content[:2000] + " ... (truncated)"
 
-                try:
-                    rel_path = path.relative_to(base)
-                except ValueError:
-                    rel_path = path
-
-                matches.append(
-                    {
-                        "file": str(rel_path),
-                        "line": line_num,
-                        "content": content,
-                    }
-                )
+                    matches.append(
+                        {
+                            "file": display_path,
+                            "line": line_num,
+                            "content": content,
+                        }
+                    )
+                    if len(matches) >= remaining_limit:
+                        return matches
     except Exception as e:
         logger.warning("Failed to search file for matches", error=str(e), exc_info=True)
     return matches
