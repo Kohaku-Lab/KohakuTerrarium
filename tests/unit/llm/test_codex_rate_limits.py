@@ -8,12 +8,15 @@ no-data → None rules, multi-family discovery, and the process cache's
 
 import json
 
+import httpx
+
 from kohakuterrarium.llm.codex_rate_limits import (
     CreditsSnapshot,
     RateLimitSnapshot,
     RateLimitWindow,
     UsageSnapshot,
     capture_from_headers,
+    capture_rate_limit_headers,
     clear_cache,
     get_cached,
     parse_all_rate_limits,
@@ -391,3 +394,18 @@ class TestSnapshotsFromUsageBody:
 
     def test_non_mapping_body_returns_empty(self):
         assert snapshots_from_usage_body([]) == []
+
+
+class TestResponseHeaderHook:
+    async def test_hook_updates_cache_and_isolates_invalid_headers(self):
+        clear_cache()
+        try:
+            await capture_rate_limit_headers(
+                httpx.Response(200, headers={"x-codex-primary-used-percent": "25"})
+            )
+            snapshot = get_cached()
+            assert snapshot.snapshots[0].primary.used_percent == 25.0
+            await capture_rate_limit_headers(object())
+            assert get_cached() is snapshot
+        finally:
+            clear_cache()

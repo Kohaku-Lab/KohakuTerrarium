@@ -17,6 +17,7 @@ import pytest
 from kohakuterrarium.llm import codex_provider as cp
 from kohakuterrarium.llm.codex_auth import CodexTokens
 from kohakuterrarium.llm.codex_provider import CODEX_BASE_URL, CodexOAuthProvider
+from kohakuterrarium.llm.responses_ws import ResponsesWSError
 
 pytestmark = pytest.mark.skipif(not cp.HAS_OPENAI, reason="openai SDK not installed")
 
@@ -609,6 +610,7 @@ class _FakeWSConnection:
     def __init__(self):
         self.sent = []
         self.scripts = []
+        self.closed = False
 
     async def send(self, event):
         self.sent.append(event)
@@ -618,12 +620,14 @@ class _FakeWSConnection:
 
         async def gen():
             for e in events:
+                if isinstance(e, BaseException):
+                    raise e
                 yield e
 
         return gen()
 
     async def close(self):
-        pass
+        self.closed = True
 
 
 class _FakeWSManager:
@@ -752,6 +756,108 @@ class TestWebsocketMode:
         kw = p._client.responses.kwargs
         assert kw is not None
         assert kw["model"] == "m"
+
+    @pytest.mark.parametrize("started", [False, True])
+    async def test_uncertain_submission_bypasses_all_retry_and_http_paths(
+        self, started
+    ):
+        p = self._provider()
+        connection = p._client.responses.connection
+        events = [_Ev(type="response.created")] if started else []
+        connection.scripts = [[*events, TimeoutError("upstream timeout")]]
+        with pytest.raises(ResponsesWSError):
+            async for _ in p.chat([{"role": "user", "content": "hi"}]):
+                pass
+        assert len(connection.sent) == 1
+        assert p._client.responses.kwargs is None
+        assert connection.closed
+
+    async def test_cancelled_provider_turn_closes_without_http_fallback(self):
+        p = self._provider()
+        connection = p._client.responses.connection
+        connection.scripts = [[asyncio.CancelledError()]]
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in p.chat([{"role": "user", "content": "hi"}]):
+                pass
+        assert connection.closed
+        assert len(connection.sent) == 1
+        assert p._client.responses.kwargs is None
+
+    async def test_closing_public_stream_closes_inflight_socket(self):
+        p = self._provider()
+        connection = p._client.responses.connection
+        connection.scripts = [[_Ev(type="response.output_text.delta", delta="partial")]]
+        stream = p.chat([{"role": "user", "content": "hi"}])
+        assert await anext(stream) == "partial"
+        session = p._ws_session
+        await stream.aclose()
+        assert connection.closed
+        assert not session.busy
+        assert len(connection.sent) == 1
+        assert p._client.responses.kwargs is None
+
+    @pytest.mark.parametrize(
+        "edit", [None, "text", "reasoning", "tool", "missing", "model"]
+    )
+    async def test_continuation_requires_exact_assistant_echo(self, edit):
+        p = self._provider()
+        p.model = "deepseek-v4.1"
+        connection = p._client.responses.connection
+        connection.scripts = [
+            [
+                _Ev(type="response.reasoning_text.delta", delta="plan"),
+                _Ev(type="response.output_text.delta", delta="answer"),
+                _Ev(
+                    type="response.output_item.done",
+                    item=_Ev(
+                        type="function_call",
+                        call_id="c1",
+                        name="lookup",
+                        arguments="{}",
+                    ),
+                ),
+                _ws_completed("r1"),
+            ],
+            [_ws_completed("r2")],
+        ]
+        messages = [{"role": "user", "content": "hi"}]
+        async for _ in p._raw_stream_chat(messages):
+            if edit == "model":
+                p.model = "gpt-x"
+        assistant = {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning_content": "plan",
+            "tool_calls": [
+                {
+                    "id": "c1",
+                    "type": "function",
+                    "function": {"name": "lookup", "arguments": "{}"},
+                }
+            ],
+        }
+        if edit == "text":
+            assistant["content"] = "edited"
+        elif edit == "reasoning":
+            assistant["reasoning_content"] = "edited"
+        elif edit == "tool":
+            assistant["tool_calls"][0]["function"]["arguments"] = '{"changed":true}'
+        suffix = [
+            {"role": "tool", "tool_call_id": "c1", "content": "result"},
+            {"role": "user", "content": "next"},
+        ]
+        history = messages + ([] if edit == "missing" else [assistant]) + suffix
+        async for _ in p._raw_stream_chat(history):
+            pass
+        sent = connection.sent[1]
+        if edit is None:
+            assert sent["previous_response_id"] == "r1"
+            assert sent["input"] == cp.to_responses_input(suffix, model=p.model)
+        else:
+            assert "previous_response_id" not in sent
+            assert sent["input"] == cp.fix_tool_call_pairing(
+                cp.to_responses_input(history, model=p.model)
+            )
 
     async def test_extra_body_reasoning_merges_on_http_path(self):
         p = CodexOAuthProvider(

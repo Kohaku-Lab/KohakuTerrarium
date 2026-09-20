@@ -1,6 +1,11 @@
 """Unit tests for ``llm/responses_ws.py`` incremental WebSocket sessions."""
 
+import asyncio
+import json
+
 import pytest
+from openai import AsyncOpenAI
+from websockets import serve as serve_websocket
 
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 
@@ -31,12 +36,14 @@ def error(code, message="boom"):
 class FakeConnection:
     def __init__(self):
         self.sent = []
+        self.send_attempts = 0
         self.scripts = []
         self.send_exc = None
         self.iter_exc = None
         self.closed = False
 
     async def send(self, event):
+        self.send_attempts += 1
         if self.send_exc is not None:
             exc, self.send_exc = self.send_exc, None
             raise exc
@@ -115,6 +122,7 @@ class TestFullAndIncrementalTurns:
             "content": [{"type": "reasoning_text", "text": "Inspect files"}],
         }
         await h.run([USER1])
+        h.session.record_assistant_echo([reasoning, ASSIST1, CALL1])
         history = [USER1, reasoning, ASSIST1, CALL1, OUT1]
         await h.run(history)
         assert h.conn.sent[1]["input"] == [OUT1]
@@ -146,7 +154,7 @@ class TestFullAndIncrementalTurns:
             [completed("r2")],
         ]
         await h.run([USER1])
-
+        h.session.record_assistant_echo([ASSIST1, CALL1])
         await h.run([USER1, ASSIST1, CALL1, OUT1, USER2])
 
         sent = h.conn.sent[1]
@@ -158,14 +166,16 @@ class TestFullAndIncrementalTurns:
     async def test_edited_history_falls_back_to_full_resend(self):
         h = Harness()
         h.conn.scripts = [[completed("r1")], [completed("r2")]]
-        await h.run([USER1])
+        user = {"role": "user", "content": [{"type": "input_text", "text": "hi"}]}
+        await h.run([user])
+        h.session.record_assistant_echo([ASSIST1])
 
-        edited = {"role": "user", "content": [{"type": "input_text", "text": "EDIT"}]}
-        await h.run([edited, USER2])
+        user["content"][0]["text"] = "EDIT"
+        await h.run([user, ASSIST1, USER2])
 
         sent = h.conn.sent[1]
         assert "previous_response_id" not in sent
-        assert sent["input"] == ["PAIRED", edited, USER2]
+        assert sent["input"] == ["PAIRED", user, ASSIST1, USER2]
 
     async def test_invalidate_forces_full_resend(self):
         h = Harness()
@@ -181,6 +191,45 @@ class TestFullAndIncrementalTurns:
 
 
 class TestFailureRecovery:
+    async def test_close_drains_buffered_frames_with_real_sdk(self):
+        submissions = []
+        burst_sent = asyncio.Event()
+
+        async def serve(socket):
+            submissions.append(json.loads(await socket.recv()))
+            await socket.send(
+                json.dumps({"type": "response.output_text.delta", "delta": "first"})
+            )
+            for _ in range(32):
+                await socket.send("discard during close")
+            burst_sent.set()
+            await socket.wait_closed()
+
+        async with serve_websocket(serve, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            client = AsyncOpenAI(api_key="test", base_url=f"http://127.0.0.1:{port}/v1")
+            if not hasattr(client.responses, "connect"):
+                await client.close()
+                pytest.skip("Installed OpenAI SDK has no Responses WebSocket support")
+            session = ResponsesWSSession(
+                lambda: client.responses.connect(
+                    websocket_connection_options={"max_queue": 1, "close_timeout": 0.25}
+                )
+            )
+            stream = session.stream_turn({"model": "m"}, [USER1], lambda x: x)
+            try:
+                assert (await anext(stream)).delta == "first"
+                await burst_sent.wait()
+                connection = session._connection
+                await stream.aclose()
+                assert connection._connection.close_code == 1000
+                assert not session.busy and session._connection is None
+                assert len(submissions) == 1
+            finally:
+                await stream.aclose()
+                await session.close()
+                await client.close()
+
     async def test_cache_miss_resends_full_on_same_connection(self):
         h = Harness()
         h.conn.scripts = [
@@ -189,7 +238,7 @@ class TestFailureRecovery:
             [text("B"), completed("r2")],
         ]
         await h.run([USER1])
-
+        h.session.record_assistant_echo([ASSIST1])
         events = await h.run([USER1, ASSIST1, USER2])
 
         assert h.conn.sent[1]["previous_response_id"] == "r1"
@@ -199,6 +248,20 @@ class TestFailureRecovery:
             "response.output_text.delta",
             "response.completed",
         ]
+
+    async def test_repeated_cache_miss_is_not_retried_again(self):
+        h = Harness()
+        h.conn.scripts = [
+            [completed("r1")],
+            [error("previous_response_not_found")],
+            [error("previous_response_not_found")],
+        ]
+        await h.run([USER1])
+        h.session.record_assistant_echo([ASSIST1])
+        with pytest.raises(ResponsesWSError):
+            await h.run([USER1, ASSIST1, USER2])
+        assert len(h.conn.sent) == 3
+        assert h.factory_calls == 1
 
     async def test_server_error_event_raises_and_invalidates(self):
         h = Harness()
@@ -217,7 +280,37 @@ class TestFailureRecovery:
         await h.run([USER1, ASSIST1, USER2])
         assert "previous_response_id" not in h.conn.sent[2]
 
-    async def test_dead_connection_retries_full_on_fresh_connection(self):
+    @pytest.mark.parametrize("kind", ["response.failed", "response.incomplete"])
+    async def test_unsuccessful_terminal_response_stops_without_waiting_for_eof(
+        self, kind
+    ):
+        h = Harness()
+        response = (
+            Ev(error=Ev(message="generation stopped"))
+            if kind == "response.failed"
+            else Ev(incomplete_details=Ev(reason="max_output_tokens"))
+        )
+        reason = (
+            "generation stopped" if kind == "response.failed" else "max_output_tokens"
+        )
+        h.conn.scripts = [
+            [completed("r1")],
+            [Ev(type=kind, response=response)],
+            [completed("r2")],
+        ]
+        await h.run([USER1])
+        h.session.record_assistant_echo([ASSIST1])
+        with pytest.raises(ResponsesWSError, match=reason) as exc:
+            await h.run([USER1, ASSIST1, USER2])
+        assert not exc.value.transport
+        assert exc.value.submitted
+        assert not h.conn.closed and not h.session.busy
+        assert h.session._prev_id is None
+        assert len(h.conn.sent) == 2
+        await h.run([USER1, ASSIST1, USER2])
+        assert "previous_response_id" not in h.conn.sent[2]
+
+    async def test_disconnect_after_send_does_not_retry(self):
         h = Harness()
         h.conn.scripts = [[completed("r1")]]
         await h.run([USER1])
@@ -227,16 +320,42 @@ class TestFailureRecovery:
         h.connections.append(FakeConnection())
         h.connections[1].scripts = [[text("C"), completed("r2")]]
 
-        events = await h.run([USER1, ASSIST1, USER2])
+        with pytest.raises(ResponsesWSError):
+            await h.run([USER1, ASSIST1, USER2])
 
-        assert h.factory_calls == 2
-        retry_sent = h.connections[1].sent[0]
-        assert "previous_response_id" not in retry_sent
-        assert retry_sent["input"] == ["PAIRED", USER1, ASSIST1, USER2]
-        assert [getattr(e, "type", "") for e in events] == [
-            "response.output_text.delta",
-            "response.completed",
-        ]
+        assert h.factory_calls == 1
+        assert h.connections[1].sent == []
+        assert h.conn.closed
+        assert h.session._prev_id is None
+
+    async def test_send_failure_does_not_retry_an_uncertain_submission(self):
+        h = Harness()
+        h.conn.send_exc = ConnectionError("write interrupted")
+        with pytest.raises(ResponsesWSError):
+            await h.run([USER1])
+        assert sum(c.send_attempts for c in h.connections) == 1
+        assert h.conn.closed
+
+    async def test_cancellation_closes_connection_and_clears_history(self):
+        h = Harness()
+        h.conn.scripts = [[completed("r1")], []]
+        await h.run([USER1])
+        h.conn.iter_exc = asyncio.CancelledError()
+        with pytest.raises(asyncio.CancelledError):
+            await h.run([USER1, ASSIST1, USER2])
+        assert h.conn.closed
+        assert h.session._prev_id is None
+        assert not h.session.busy
+
+    async def test_generator_close_drops_inflight_connection(self):
+        h = Harness()
+        h.conn.scripts = [[text("partial")]]
+        stream = h.session.stream_turn({"model": "m"}, [USER1], lambda x: x)
+        await anext(stream)
+        await stream.aclose()
+        assert h.conn.closed
+        assert h.session._prev_id is None
+        assert not h.session.busy
 
     async def test_mid_stream_failure_propagates_without_retry(self):
         h = Harness()

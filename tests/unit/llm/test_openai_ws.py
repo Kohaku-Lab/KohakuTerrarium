@@ -1,10 +1,13 @@
 """Unit tests for ``llm/openai_ws.py`` and OpenAIProvider websocket mode."""
 
+import asyncio
+
 import pytest
 
 from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.openai_ws import build_ws_request
+from kohakuterrarium.llm.responses_ws import ResponsesWSError
 
 
 class Ev:
@@ -16,6 +19,7 @@ class FakeWSConnection:
     def __init__(self):
         self.sent = []
         self.scripts = []
+        self.closed = False
 
     async def send(self, event):
         self.sent.append(event)
@@ -25,12 +29,14 @@ class FakeWSConnection:
 
         async def gen():
             for e in events:
+                if isinstance(e, BaseException):
+                    raise e
                 yield e
 
         return gen()
 
     async def close(self):
-        pass
+        self.closed = True
 
 
 class FakeWSManager:
@@ -264,10 +270,112 @@ class TestProviderWebsocketMode:
         # The framework knob never reaches the HTTP body either.
         assert "websocket_mode" not in kwargs.get("extra_body", {})
 
+    @pytest.mark.parametrize("started", [False, True])
+    async def test_uncertain_submission_bypasses_retry_and_http(self, started):
+        provider = make_provider(websocket_mode=True)
+        connection = provider._client.responses.connection
+        events = [Ev(type="response.created")] if started else []
+        connection.scripts = [[*events, TimeoutError("upstream timeout")]]
+        with pytest.raises(ResponsesWSError):
+            async for _ in provider.chat(MESSAGES):
+                pass
+        assert len(connection.sent) == 1
+        assert connection.closed
+        assert provider._client.chat.completions.kwargs is None
+
+    async def test_cancelled_provider_turn_closes_without_http_fallback(self):
+        provider = make_provider(websocket_mode=True)
+        connection = provider._client.responses.connection
+        connection.scripts = [[asyncio.CancelledError()]]
+        with pytest.raises(asyncio.CancelledError):
+            async for _ in provider.chat(MESSAGES):
+                pass
+        assert connection.closed
+        assert len(connection.sent) == 1
+        assert provider._client.chat.completions.kwargs is None
+
+    async def test_closing_public_stream_closes_inflight_socket(self):
+        provider = make_provider(websocket_mode=True)
+        connection = provider._client.responses.connection
+        connection.scripts = [[Ev(type="response.output_text.delta", delta="partial")]]
+        stream = provider.chat(MESSAGES)
+        assert await anext(stream) == "partial"
+        await stream.aclose()
+        assert connection.closed
+        assert not provider._ws_session.busy
+        assert len(connection.sent) == 1
+        assert provider._client.chat.completions.kwargs is None
+
+    @pytest.mark.parametrize("model", ["gpt-x", "deepseek-flash"])
+    @pytest.mark.parametrize("edit", [None, "text", "reasoning"])
+    async def test_assistant_echo_edit_controls_delta(self, model, edit):
+        provider = make_provider(websocket_mode=True)
+        options = {"model": model}
+        connection = provider._client.responses.connection
+        connection.scripts = [
+            [
+                Ev(type="response.reasoning_text.delta", delta="plan"),
+                Ev(type="response.output_text.delta", delta="original"),
+                completed("r1"),
+            ],
+            [completed("r2")],
+        ]
+        async for _ in provider.chat(MESSAGES, **options):
+            pass
+        history = [
+            *MESSAGES,
+            {
+                "role": "assistant",
+                "content": "edited" if edit == "text" else "original",
+                "reasoning_content": "edited" if edit == "reasoning" else "plan",
+            },
+            {"role": "user", "content": "next"},
+        ]
+        async for _ in provider.chat(history, **options):
+            pass
+        sent = connection.sent[1]
+        if edit == "text" or (edit == "reasoning" and model == "deepseek-flash"):
+            assert "previous_response_id" not in sent
+            assert (
+                sent["input"] == build_ws_request(provider, history, None, options)[1]
+            )
+        else:
+            assert sent["previous_response_id"] == "r1"
+            assert sent["input"] == [
+                {"role": "user", "content": [{"type": "input_text", "text": "next"}]}
+            ]
+
     async def test_disabled_mode_uses_chat_completions_directly(self):
         provider = make_provider()
         await self._drive(provider)
         assert provider._client.chat.completions.kwargs is not None
+
+    async def test_echo_uses_model_at_submission_when_changed_during_stream(self):
+        provider = make_provider(websocket_mode=True)
+        provider.config.model = "deepseek-flash"
+        connection = provider._client.responses.connection
+        connection.scripts = [
+            [
+                Ev(type="response.reasoning_text.delta", delta="plan"),
+                Ev(type="response.output_text.delta", delta="answer"),
+                completed("r1"),
+            ],
+            [completed("r2")],
+        ]
+        async for _ in provider.chat(MESSAGES):
+            provider.config.model = "gpt-x"
+        history = [
+            *MESSAGES,
+            {"role": "assistant", "content": "answer", "reasoning_content": "plan"},
+            {"role": "user", "content": "next"},
+        ]
+        async for _ in provider.chat(history):
+            pass
+        assert "previous_response_id" not in connection.sent[-1]
+        assert (
+            connection.sent[-1]["input"]
+            == build_ws_request(provider, history, None, {})[1]
+        )
 
     def test_with_model_propagates_ws_mode_with_fresh_session(self):
         provider = make_provider(websocket_mode=True)
