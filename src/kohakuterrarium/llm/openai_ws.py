@@ -16,7 +16,11 @@ from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.responses_ws import ResponsesWSSession
 
 # Request knobs consumed by the framework, never sent on the wire.
-_FRAMEWORK_KNOBS = ("disable_prompt_caching", "websocket_mode")
+_FRAMEWORK_KNOBS = (
+    "disable_prompt_caching",
+    "websocket_mode",
+    "responses_reasoning_replay",
+)
 
 
 def build_ws_request(
@@ -36,7 +40,16 @@ def build_ws_request(
         else:
             input_messages.append(msg)
     model = kwargs.get("model", provider.config.model)
-    items = to_responses_input(input_messages, model=model)
+    merged_extra = (
+        extra_body
+        if extra_body is not None
+        else {**provider.extra_body, **(kwargs.get("extra_body") or {})}
+    )
+    items = to_responses_input(
+        input_messages,
+        model=model,
+        replay_reasoning=merged_extra.get("responses_reasoning_replay"),
+    )
 
     event: dict[str, Any] = {
         "model": model,
@@ -63,11 +76,6 @@ def build_ws_request(
     if provider.prompt_cache_key:
         event["prompt_cache_key"] = provider.prompt_cache_key
 
-    merged_extra = (
-        extra_body
-        if extra_body is not None
-        else {**provider.extra_body, **(kwargs.get("extra_body") or {})}
-    )
     for key, value in merged_extra.items():
         if key in _FRAMEWORK_KNOBS:
             continue

@@ -12,10 +12,16 @@ logger = get_logger(__name__)
 
 
 def to_responses_input(
-    messages: list[dict[str, Any]], *, model: str = ""
+    messages: list[dict[str, Any]],
+    *,
+    model: str = "",
+    replay_reasoning: bool | None = None,
 ) -> list[dict[str, Any]]:
-    """Convert chat messages to Responses input with model-specific reasoning."""
-    replay_reasoning = model.lower().startswith(("deepseek-", "deepseek/"))
+    """Convert messages with an optional plaintext-reasoning capability override."""
+    if replay_reasoning is None:
+        replay_reasoning = model.lower().startswith(("deepseek-", "deepseek/"))
+    elif not isinstance(replay_reasoning, bool):
+        raise ValueError("responses_reasoning_replay must be a boolean or null")
     items: list[dict[str, Any]] = []
     for msg in messages:
         role = msg.get("role")

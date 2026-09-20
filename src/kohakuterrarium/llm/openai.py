@@ -249,7 +249,11 @@ class OpenAIProvider(BaseLLMProvider):
 
     def _sanitize_extra_body(self, extra: dict[str, Any]) -> dict[str, Any]:
         """Remove framework-only request knobs before provider submission."""
-        knobs = ("disable_prompt_caching", "websocket_mode")
+        knobs = (
+            "disable_prompt_caching",
+            "websocket_mode",
+            "responses_reasoning_replay",
+        )
         if not any(k in extra for k in knobs):
             return extra
         return {k: v for k, v in extra.items() if k not in knobs}

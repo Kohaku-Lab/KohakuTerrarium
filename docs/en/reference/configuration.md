@@ -173,6 +173,24 @@ Anthropic-compatible endpoints also get automatic prompt-caching markers
 applied to the system message and the last three non-tool conversation
 messages unless you set `extra_body.disable_prompt_caching: true`.
 
+Responses transports (`codex` over HTTP or WebSocket, and `openai` with
+`websocket_mode: true`) accept the framework setting
+`extra_body.responses_reasoning_replay`. Set it to `true` only for a target
+that accepts plaintext `reasoning_text` input, including a compatible model
+served under an alias. It replays stored assistant `reasoning_content` when
+converting full history, including after reconnect or session resume.
+`false` disables plaintext replay. Omission or `null` retains the legacy
+default: replay only for model names starting with `deepseek-` or `deepseek/`
+(case-insensitive). Other value types are rejected by Responses conversion.
+
+This setting does not enable model thinking, reconstruct missing reasoning,
+or convert reasoning summaries or encrypted state into plaintext. It is
+removed before sending a request and does not change Chat Completions
+reasoning handling, including HTTP fallback. Set it on the target preset;
+when switching to a target that rejects plaintext reasoning, use `false`.
+Programmatic `with_model()` preserves `extra_body`, so update the setting
+when the new model has different capabilities.
+
 ### Input
 
 Dict fields: `{type, module?, class?, options?, ...type-specific keys}`.
