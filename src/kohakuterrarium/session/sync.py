@@ -273,7 +273,7 @@ class SessionMirrorWriter:
             event_type = data.get("type", "")
             # SessionStore re-stamps the event type; preserve all other payload data.
             payload = {k: v for k, v in data.items() if k not in ("type",)}
-            store.append_event(agent, event_type, payload)
+            await store.run(store.append_event, agent, event_type, payload)
             # Stamp origin only after persistence. Plain assignment avoids the
             # metadata proxy's byte-coercing ``setdefault`` implementation.
             source_node = getattr(msg, "sender_node", "") or body.get("node_id", "")

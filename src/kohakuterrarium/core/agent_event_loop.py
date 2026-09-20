@@ -234,7 +234,7 @@ class AgentEventLoopMixin:
             self._advance_turn_for_user_input()
         if primary.type == "user_input" and not is_rerun:
             if self.session_store is not None:
-                self._record_primary_user_input(primary)
+                await self._record_primary_user_input(primary)
 
         if (
             primary.type == "user_input"
@@ -277,7 +277,7 @@ class AgentEventLoopMixin:
         existing_max = helper(self._turn_index) if helper else 0
         self._branch_id = existing_max + 1 if existing_max > 0 else 1
 
-    def _record_primary_user_input(self, event) -> None:
+    async def _record_primary_user_input(self, event) -> None:
         """Append the ``user_input`` + ``user_message`` session events for a
         fresh (non-rerun) user turn."""
         content = (
@@ -290,7 +290,8 @@ class AgentEventLoopMixin:
         pending_id = pending_id_of(event)
         if pending_id:
             payload["pending_id"] = pending_id
-        self.session_store.append_event(
+        await self.session_store.run(
+            self.session_store.append_event,
             self.config.name,
             "user_input",
             dict(payload),
@@ -298,7 +299,8 @@ class AgentEventLoopMixin:
             branch_id=self._branch_id,
             parent_branch_path=ppath,
         )
-        self.session_store.append_event(
+        await self.session_store.run(
+            self.session_store.append_event,
             self.config.name,
             "user_message",
             dict(payload),
@@ -312,7 +314,7 @@ class AgentEventLoopMixin:
         pops its queued banner and replay shows it as its own bubble."""
         content = _to_serializable_content(self._resolve_injected_content(evt))
         pending_id = pending_id_of(evt)
-        self._record_injected_input_event(content, pending_id=pending_id)
+        await self._record_injected_input_event(content, pending_id=pending_id)
         metadata = {
             "content": content,
             "turn_index": self._turn_index,

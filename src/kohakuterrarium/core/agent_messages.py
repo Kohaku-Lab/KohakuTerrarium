@@ -136,7 +136,8 @@ class AgentMessagesMixin:
             # opening a sibling branch of the SAME turn, so the path
             # of prior turns is unchanged.
             ppath = [tuple(p) for p in getattr(self, "_parent_branch_path", [])]
-            self.session_store.append_event(
+            await self.session_store.run(
+                self.session_store.append_event,
                 self.config.name,
                 "user_input",
                 {"content": prev_content},
@@ -144,7 +145,8 @@ class AgentMessagesMixin:
                 branch_id=self._branch_id,
                 parent_branch_path=ppath,
             )
-            self.session_store.append_event(
+            await self.session_store.run(
+                self.session_store.append_event,
                 self.config.name,
                 "user_message",
                 {"content": prev_content},
@@ -292,7 +294,8 @@ class AgentMessagesMixin:
         self._parent_branch_path = cur_path
         if self.session_store is not None:
             ppath = [tuple(p) for p in cur_path]
-            self.session_store.append_event(
+            await self.session_store.run(
+                self.session_store.append_event,
                 self.config.name,
                 "user_input",
                 {"content": new_content},
@@ -300,7 +303,8 @@ class AgentMessagesMixin:
                 branch_id=self._branch_id,
                 parent_branch_path=ppath,
             )
-            self.session_store.append_event(
+            await self.session_store.run(
+                self.session_store.append_event,
                 self.config.name,
                 "user_message",
                 {"content": new_content},
