@@ -94,6 +94,22 @@ class TestConstruction:
 
 
 class TestErrorMapping:
+    async def test_missing_package_is_not_found_without_spawning(self):
+        engine = await TestTerrariumBuilder().build()
+        adapter = TerrariumRuntimeAdapter(engine, _FakeNode())
+        try:
+            out = await adapter._dispatch(
+                _msg(
+                    "add_creature",
+                    {"config": {"kind": "path", "value": "@missing/creatures/general"}},
+                )
+            )
+            assert out["error"]["kind"] == "not_found"
+            assert "Package not installed: missing" in out["error"]["message"]
+            assert engine.list_creatures() == []
+        finally:
+            await engine.shutdown()
+
     async def test_not_hosted_here(self):
         adapter = await _make_adapter()
         try:

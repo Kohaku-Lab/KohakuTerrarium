@@ -44,6 +44,7 @@ from kohakuterrarium.llm.api_keys import (
     register_api_key_resolver,
 )
 from kohakuterrarium.studio.nodes import NodeMap
+from kohakuterrarium.studio.catalog.packages import install_package_op
 from kohakuterrarium.terrarium import Terrarium
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
@@ -165,7 +166,13 @@ class TestLaboratoryMultiNodeService:
         not a shape check.
         """
         monkeypatch.setenv("KT_SESSION_DIR", str(tmp_path / "sessions"))
-        cfg_alpha = _write_creature_config(tmp_path, "alpha")
+        package_source = tmp_path / "workflow-biome"
+        cfg_alpha = _write_creature_config(package_source, "alpha")
+        (package_source / "kohaku.yaml").write_text(
+            "name: workflow-biome\nversion: 1.0.0\ncreatures: [creature_alpha]\n",
+            encoding="utf-8",
+        )
+        install_package_op(str(package_source), editable=True, deps="never")
         cfg_bravo = _write_creature_config(tmp_path, "bravo")
 
         # ── 1. Start the host (no local creatures) + the multi-node service ──
@@ -290,8 +297,11 @@ class TestLaboratoryMultiNodeService:
             # ── 5. add_creature on w1 (path-form via studio.deploy) ──
             from kohakuterrarium.core.config import load_agent_config
 
-            a_cfg = load_agent_config(cfg_alpha)
-            alpha_info = await service.add_creature(a_cfg, on_node="w1", start=True)
+            with pytest.raises(KeyError, match="Package not installed"):
+                await service.add_creature("@missing/creatures/general", on_node="w1")
+            alpha_info = await service.add_creature(
+                "@workflow-biome/creature_alpha", on_node="w1", start=True
+            )
             assert alpha_info.creature_id
             assert alpha_info.is_running is True
             alpha = w1_engine.get_creature(alpha_info.creature_id)

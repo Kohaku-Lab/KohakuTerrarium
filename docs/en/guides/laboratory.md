@@ -141,6 +141,14 @@ POST /api/sessions/active/creature
 (In lab-host mode, `on_node` is required for `start_creature`;
 spawning on the host is rejected because the host runs no agents.)
 
+`config_path` can also be a package reference such as
+`@kt-biome/creatures/general`. The selected worker resolves it using its own
+installed packages; the host does not need the same package or directory layout.
+Install the package on that worker with `kt install @kt-biome`, using the same
+`KT_CONFIG_DIR` as the worker's `--home-dir` when a custom home is configured.
+Starting a creature does not install missing packages automatically. Ordinary
+filesystem paths must still be absolute paths on the worker.
+
 ### From the HTTP API
 
 Every session/topology endpoint accepts `on_node` for new spawns

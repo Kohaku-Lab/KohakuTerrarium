@@ -141,7 +141,7 @@ class TerrariumRuntimeAdapter:
         except _NotHostedHere as e:
             # Catch the routing sentinel before its KeyError base class.
             return {"error": {"kind": "creature_not_hosted", "message": str(e)}}
-        except KeyError as e:
+        except (KeyError, FileNotFoundError) as e:
             return {"error": {"kind": "not_found", "message": str(e)}}
         except ConflictError as e:
             return {"error": {"kind": "conflict", "message": str(e)}}

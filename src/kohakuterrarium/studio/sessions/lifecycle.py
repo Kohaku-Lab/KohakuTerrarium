@@ -103,10 +103,10 @@ async def start_creature(
     is an already-loaded :class:`AgentConfig`.  Exactly one is required.
 
     ``on_node`` (default ``"_host"``) selects the runtime node.  For a
-    remote worker, the caller must have deployed the recipe to the
-    worker first via ``POST /api/nodes/{node_id}/deploy/creature``; the
-    ``config_path`` for a remote spawn should be the worker-side
-    absolute path returned by the deploy call.
+    remote worker, package references resolve against that worker's
+    installed packages. Filesystem paths must be worker-side absolute
+    paths; host-local files can first be copied via
+    ``POST /api/nodes/{node_id}/deploy/creature``.
     """
     # Only host-targeted paths can be validated against the host filesystem;
     # remote workers validate their own paths during creature creation.

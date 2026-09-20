@@ -26,8 +26,8 @@ take a primitive dict and return the dataclass.  Unpack functions are
 strict — missing keys raise ``KeyError`` and unknown keys are ignored
 (forward-compatible with field additions).
 
-Path-form ``add_creature`` accepts only absolute worker-side paths; callers must
-first deploy local files and then pass the resulting remote path.
+Path-form ``add_creature`` accepts worker-side absolute paths and package
+references. Local files must be deployed before passing their remote path.
 """
 
 from dataclasses import is_dataclass
@@ -294,8 +294,8 @@ def pack_creature_build_input(config: Any) -> dict[str, Any]:
     """Pack the ``config`` argument of remote ``add_creature``.
 
     Accepts :class:`AgentConfig` (sent as a dataclass dict) or
-    ``str``/:class:`Path` — the path must exist on the worker node.
-    Deploy bytes first via
+    ``str``/:class:`Path` — absolute paths and ``@pkg/...`` references
+    are resolved on the worker node. Deploy host-local files first via
     :func:`kohakuterrarium.studio.deploy.deploy_creature_to_node`.
 
     :class:`CreatureConfig` is rejected because its ``base_dir`` is
@@ -312,7 +312,7 @@ def pack_creature_build_input(config: Any) -> dict[str, Any]:
         # leading slash (POSIX or pre-normalised Windows), backslash
         # (Windows), or a drive prefix like ``X:``.
         if not (
-            path_str.startswith(("/", "\\"))
+            path_str.startswith(("@", "/", "\\"))
             or (len(path_str) >= 2 and path_str[1] == ":")
         ):
             raise RemoteAddCreatureError(
