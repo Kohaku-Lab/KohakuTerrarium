@@ -36,6 +36,8 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
+from kohakuterrarium.builtins.tools.glob import GlobTool
+from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
@@ -1537,6 +1539,22 @@ class TestModulesIntegration:
                     match="publish updated image",
                 ),
                 ScriptEntry("updated image published", match="Canvas:"),
+                ScriptEntry(
+                    "[/grep]@@pattern=MATCH\n@@path=grep.txt\n@@limit=5\n[grep/]",
+                    match="search the text",
+                ),
+                ScriptEntry("search complete", match="Showing 5 matches from 1 files"),
+                ScriptEntry(
+                    "[/grep]@@pattern=MATCH\n@@glob=src\\**\\*.txt\n"
+                    "@@limit=1\n[grep/]",
+                    match="search recursive paths",
+                ),
+                ScriptEntry("recursive search complete", match="a.txt:2: MATCH"),
+                ScriptEntry(
+                    "[/glob]@@pattern=src\\**\\*.txt\n[glob/]",
+                    match="list recursive paths",
+                ),
+                ScriptEntry("recursive listing complete", match="a.txt"),
             ]
         )
         tool = RecordingTool()
@@ -1545,6 +1563,12 @@ class TestModulesIntegration:
         canvas_tool = CanvasImageTool()
         agent.registry.register_tool(canvas_tool)
         agent.executor.register_tool(canvas_tool)
+        grep_tool = GrepTool()
+        agent.registry.register_tool(grep_tool)
+        agent.executor.register_tool(grep_tool)
+        glob_tool = GlobTool()
+        agent.registry.register_tool(glob_tool)
+        agent.executor.register_tool(glob_tool)
         store = SessionStore(str(tmp_path / "canvas.kohakutr"))
         store.init_meta("canvas", "agent", "", str(tmp_path), [agent.config.name])
         agent.attach_session_store(store)
@@ -1621,6 +1645,39 @@ class TestModulesIntegration:
             }
             last = agent.controller.conversation.get_last_assistant_message()
             assert last.get_text_content() == "updated image published"
+            (tmp_path / "grep.txt").write_text("MATCH\n" * 20000, encoding="utf-8")
+            await agent._process_event(create_user_input_event("search the text"))
+            convo_text = "\n".join(
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            )
+            assert ".:5: MATCH" in convo_text
+            assert ".:6: MATCH" not in convo_text
+            assert "Showing 5 matches from 1 files; more may exist" in convo_text
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert last.get_text_content() == "search complete"
+            search_dir = tmp_path / "src" / "nested"
+            search_dir.mkdir(parents=True)
+            (search_dir / "a.txt").write_text("skip\nMATCH\n", encoding="utf-8")
+            await agent._process_event(
+                create_user_input_event("search recursive paths")
+            )
+            convo_text = "\n".join(
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            )
+            assert "a.txt:2: MATCH" in convo_text
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert last.get_text_content() == "recursive search complete"
+            await agent._process_event(create_user_input_event("list recursive paths"))
+            glob_output = next(
+                message.get_text_content()
+                for message in reversed(agent.controller.conversation.get_messages())
+                if "## glob_" in message.get_text_content()
+            )
+            assert f"\n{(search_dir / 'a.txt').relative_to(tmp_path)}" in glob_output
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert last.get_text_content() == "recursive listing complete"
         finally:
             await agent.stop()
             store.close()

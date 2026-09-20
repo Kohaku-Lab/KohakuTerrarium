@@ -7,6 +7,7 @@ HTTP-path detour, or failed turn falls back to a full resend.
 """
 
 import asyncio
+from copy import deepcopy
 from typing import Any, AsyncIterator, Callable
 
 from kohakuterrarium.utils.logging import get_logger
@@ -17,16 +18,21 @@ logger = get_logger(__name__)
 class ResponsesWSError(Exception):
     """Raised when a WebSocket turn cannot complete.
 
-    ``mid_stream`` distinguishes failures after events already reached the
-    caller (must propagate) from failures before any output (safe to fall
-    back to the HTTP transport).
+    ``submitted`` marks failures after a send attempt; their outcome may be
+    uncertain even when no events reached the caller.
     """
 
     def __init__(
-        self, message: str, *, mid_stream: bool, transport: bool = False
+        self,
+        message: str,
+        *,
+        mid_stream: bool,
+        transport: bool = False,
+        submitted: bool = True,
     ) -> None:
         super().__init__(message)
         self.mid_stream = mid_stream
+        self.submitted = submitted
         # Transport failures leave the connection unusable; server error
         # events arrive on a healthy connection.
         self.transport = transport
@@ -42,7 +48,7 @@ class ResponsesWSSession:
         self._lock = asyncio.Lock()
         self._prev_id: str | None = None
         self._sent_items: list[dict[str, Any]] = []
-        self._last_call_ids: set[str] = set()
+        self._assistant_echo: list[dict[str, Any]] | None = None
 
     @property
     def busy(self) -> bool:
@@ -57,7 +63,12 @@ class ResponsesWSSession:
         """
         self._prev_id = None
         self._sent_items = []
-        self._last_call_ids = set()
+        self._assistant_echo = None
+
+    def record_assistant_echo(self, items: list[dict[str, Any]]) -> None:
+        """Snapshot the provider's exact conversation projection of its output."""
+        if self._prev_id is not None:
+            self._assistant_echo = deepcopy(items)
 
     async def close(self) -> None:
         """Close the connection and reset all state."""
@@ -66,10 +77,30 @@ class ResponsesWSSession:
         self._connection = None
         self._manager = None
         if connection is not None:
+            receive = getattr(connection, "recv_bytes", None)
+            drain = (
+                asyncio.create_task(self._discard_during_close(receive))
+                if callable(receive)
+                else None
+            )
             try:
                 await connection.close()
             except Exception:
                 logger.debug("Responses WS close failed", exc_info=True)
+            finally:
+                if drain is not None:
+                    drain.cancel()
+                    await asyncio.gather(drain, return_exceptions=True)
+
+    @staticmethod
+    async def _discard_during_close(receive: Callable[[], Any]) -> None:
+        """Keep bounded SDK receive queues moving until the close handshake ends."""
+        try:
+            while True:
+                await receive()
+        except Exception:
+            # EOF or another active reader: the closing task owns the outcome.
+            pass
 
     async def stream_turn(
         self,
@@ -85,39 +116,25 @@ class ResponsesWSSession:
         """
         async with self._lock:
             delta = self._compute_delta(items)
-            try:
-                async for event in self._run_turn(
-                    base_event, items, pairing_fix, delta
-                ):
-                    yield event
-                return
-            except ResponsesWSError as ws_exc:
-                if ws_exc.transport:
+            for attempt in range(2):
+                try:
+                    async for event in self._run_turn(
+                        base_event, items, pairing_fix, delta if attempt == 0 else None
+                    ):
+                        yield event
+                    return
+                except (asyncio.CancelledError, GeneratorExit):
                     await self.close()
-                # Server error events and mid-stream failures surface to the
-                # caller; only a pre-output transport failure earns a retry.
-                if ws_exc.mid_stream or not ws_exc.transport:
                     raise
-                failure: Exception = ws_exc
-            except Exception as exc:
-                # Establishment/send failures always happen before output.
-                await self.close()
-                failure = exc
-
-            logger.warning(
-                "Responses WS turn failed, retrying on a fresh connection",
-                error=str(failure),
-            )
-            try:
-                async for event in self._run_turn(base_event, items, pairing_fix, None):
-                    yield event
-            except ResponsesWSError as retry_exc:
-                if retry_exc.transport:
-                    await self.close()
-                raise
-            except Exception as retry_exc:
-                await self.close()
-                raise ResponsesWSError(str(retry_exc), mid_stream=False) from retry_exc
+                except ResponsesWSError as exc:
+                    if exc.transport:
+                        await self.close()
+                    if attempt or exc.submitted or exc.mid_stream or not exc.transport:
+                        raise
+                    logger.warning(
+                        "Responses WS connection failed before submission, reconnecting",
+                        error=str(exc),
+                    )
 
     async def _run_turn(
         self,
@@ -126,14 +143,22 @@ class ResponsesWSSession:
         pairing_fix: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
         delta: list[dict[str, Any]] | None,
     ) -> AsyncIterator[Any]:
-        connection = await self._ensure_connection()
+        try:
+            connection = await self._ensure_connection()
+        except Exception as exc:
+            raise ResponsesWSError(
+                str(exc), mid_stream=False, transport=True, submitted=False
+            ) from exc
         event: dict[str, Any] = {"type": "response.create", **base_event}
         if delta is not None:
             event["previous_response_id"] = self._prev_id
             event["input"] = delta
         else:
             event["input"] = pairing_fix(list(items))
-        await connection.send(event)
+        try:
+            await connection.send(event)
+        except Exception as exc:
+            raise ResponsesWSError(str(exc), mid_stream=False, transport=True) from exc
 
         yielded = False
         iterator = connection.__aiter__()
@@ -153,6 +178,16 @@ class ResponsesWSSession:
                     str(exc), mid_stream=yielded, transport=True
                 ) from exc
             etype = getattr(server_event, "type", "")
+            if etype in ("response.failed", "response.incomplete"):
+                self.invalidate()
+                response = getattr(server_event, "response", None)
+                detail = getattr(response, "error", None) or getattr(
+                    response, "incomplete_details", None
+                )
+                message = getattr(detail, "message", None) or getattr(
+                    detail, "reason", ""
+                )
+                raise ResponsesWSError(f"{etype}: {message}", mid_stream=yielded)
             if etype == "error":
                 async for retry_event in self._handle_error_event(
                     server_event, base_event, items, pairing_fix, delta, yielded
@@ -198,29 +233,14 @@ class ResponsesWSSession:
     ) -> list[dict[str, Any]] | None:
         """Return the not-yet-server-known suffix, or ``None`` for full resend."""
         sent = self._sent_items
-        if not self._prev_id or len(items) <= len(sent):
+        echo = self._assistant_echo
+        if not self._prev_id or echo is None or len(items) <= len(sent) + len(echo):
             return None
         if items[: len(sent)] != sent:
             return None
-        delta = list(items[len(sent) :])
-        # The server already holds its own generated items: skip the
-        # conversation's echo of the last response (assistant messages and
-        # the function_call items whose outputs we are about to send).
-        while delta:
-            head = delta[0]
-            if (
-                head.get("type") == "function_call"
-                and head.get("call_id") in self._last_call_ids
-            ):
-                delta.pop(0)
-                continue
-            if head.get("role") == "assistant" or head.get("type") == "reasoning":
-                delta.pop(0)
-                continue
-            break
-        if not delta:
+        if items[len(sent) : len(sent) + len(echo)] != echo:
             return None
-        return delta
+        return list(items[len(sent) + len(echo) :])
 
     def _record_completed(self, server_event: Any, items: list[dict[str, Any]]) -> None:
         response = getattr(server_event, "response", None)
@@ -229,11 +249,5 @@ class ResponsesWSSession:
             self.invalidate()
             return
         self._prev_id = response_id
-        self._sent_items = list(items)
-        call_ids: set[str] = set()
-        for output_item in getattr(response, "output", None) or []:
-            if getattr(output_item, "type", "") == "function_call":
-                call_id = getattr(output_item, "call_id", "")
-                if call_id:
-                    call_ids.add(call_id)
-        self._last_call_ids = call_ids
+        self._sent_items = deepcopy(items)
+        self._assistant_echo = None

@@ -8,6 +8,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class RateLimitWindow:
@@ -473,3 +477,16 @@ def clear_cache() -> None:
     """Remove the process-level usage snapshot."""
     global _cached
     _cached = None
+
+
+async def capture_rate_limit_headers(response: Any) -> None:
+    """Cache rate-limit headers without allowing telemetry failures to break requests."""
+    try:
+        snap = capture_from_headers(response.headers)
+        set_cached(snap)
+    except Exception as exc:  # pragma: no cover - response hooks must be isolated
+        logger.warning(
+            "Codex rate-limit header capture failed",
+            error=str(exc),
+            exc_info=True,
+        )

@@ -17,15 +17,16 @@ lines with their paths and line numbers.
 | pattern | string | yes | Python regex |
 | path | string | no | Directory or file to search; defaults to the working directory |
 | glob | string | no | File filter, e.g. `**/*.py` |
-| limit | integer | no | Maximum matches, default 50 |
+| limit | integer | no | Maximum matches; must be positive, default 50 |
 | ignore_case | boolean | no | Case-insensitive match |
 
 ## Behavior
 
 - Python `re` syntax, not ripgrep or shell grep; escape `(`, `[`, and `.`.
 - Binary files are skipped.
-- When matches exceed `limit`, the total count is reported so you know the
-  pattern needs narrowing rather than the limit raising.
+- Search stops when `limit` matches have been collected, including within a
+  single file. The output then says more matches may exist; no exhaustive
+  total is computed. Narrow the pattern or file filter to refine the results.
 
 ## Limits
 

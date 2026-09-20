@@ -59,13 +59,17 @@ class _StubProvider(BaseLLMProvider):
         super().__init__(config)
         self.streamed_messages = None
         self.completed_messages = None
+        self.stream_closed = False
 
     async def _stream_chat(
         self, messages, *, tools=None, provider_native_tools=None, **kw
     ):
         self.streamed_messages = messages
-        yield "chunk-a"
-        yield "chunk-b"
+        try:
+            yield "chunk-a"
+            yield "chunk-b"
+        finally:
+            self.stream_closed = True
 
     async def _complete_chat(self, messages, **kw):
         self.completed_messages = messages
@@ -99,6 +103,28 @@ class TestBaseLLMProviderChat:
         chunks = [c async for c in provider.chat([{"role": "user", "content": "x"}])]
         assert chunks == ["chunk-a", "chunk-b"]
         assert provider.streamed_messages == [{"role": "user", "content": "x"}]
+        assert provider.stream_closed
+
+    async def test_closing_chat_finishes_owned_provider_stream(self):
+        provider = _StubProvider()
+        stream = provider.chat([{"role": "user", "content": "x"}])
+        assert await anext(stream) == "chunk-a"
+        await stream.aclose()
+        assert provider.stream_closed
+
+    async def test_stream_iterator_without_aclose_remains_supported(self):
+        class Iterator:
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+        class IteratorProvider(_StubProvider):
+            def _stream_chat(self, messages, **kwargs):
+                return Iterator()
+
+        assert [chunk async for chunk in IteratorProvider().chat([])] == []
 
     async def test_non_streaming_chat_yields_single_full_response(self):
         provider = _StubProvider()
