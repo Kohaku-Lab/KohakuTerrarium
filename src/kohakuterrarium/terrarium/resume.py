@@ -27,9 +27,11 @@ from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.resume import (
     _open_store_with_migration,
     detect_session_type,
-    inject_saved_state,
     preflight_legacy_workspace,
-    resume_agent,
+)
+from kohakuterrarium.session.resume_async import (
+    inject_saved_state_async,
+    resume_agent_async,
 )
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.config import load_terrarium_config
@@ -264,12 +266,13 @@ async def _resume_agent_into_engine(
     the Studio / Lab spawn path; without it a worker-side resume boots
     a stdin reader with no TTY and wedges the worker.
     """
-    # session.resume.resume_agent does the heavy lifting: opens store
-    # with migration, rebuilds Agent from the saved config, injects
-    # every state slot, and calls agent.attach_session_store(store).
-    # Its own handler closes the store if the rebuild fails; the guard
-    # below covers the adopt-into-engine steps that run after it returns.
-    agent, store = resume_agent(
+    # session.resume_async.resume_agent_async does the heavy lifting: opens
+    # store with migration, rebuilds Agent from the saved config, injects
+    # every state slot on the store's affinity thread, and calls
+    # agent.attach_session_store(store). Its own handler closes the store if
+    # the rebuild fails; the guard below covers the adopt-into-engine steps
+    # that run after it returns.
+    agent, store = await resume_agent_async(
         path,
         pwd_override=pwd,
         io_mode=None,
@@ -472,7 +475,7 @@ async def _resume_terrarium_body(
                 fresh,
             )
         consumed.add(agent_name)
-        inject_saved_state(creature.agent, store, agent_name)
+        await inject_saved_state_async(creature.agent, store, agent_name)
         # ``inject_saved_state`` aligns ``agent.config.name``; mirror
         # the saved name onto the Creature wrapper too so chat-history
         # lookups (which key off ``creature.name``) hit the same

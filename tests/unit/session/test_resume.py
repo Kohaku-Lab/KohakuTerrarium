@@ -5,7 +5,9 @@ on disk plus a ``ScriptedLLM`` injected via the monkeypatched LLM
 bootstrap, so resumption is tested end-to-end without a live provider.
 """
 
+import asyncio
 import os
+import time
 
 import pytest
 
@@ -26,6 +28,10 @@ from kohakuterrarium.session.resume import (
     detect_session_type,
     inject_saved_state,
     resume_agent,
+)
+from kohakuterrarium.session.resume_async import (
+    inject_saved_state_async,
+    resume_agent_async,
 )
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -2039,6 +2045,81 @@ class TestInjectSavedState:
         finally:
             store.close()
 
+    async def test_async_injection_restores_the_same_state(self, tmp_path):
+        # The affinity-thread path must produce the identical restored state
+        # as the sync injection: conversation, branch state, pending events.
+        store = SessionStore(str(tmp_path / "async.kohakutr"))
+        try:
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "hello"},
+                turn_index=1,
+                branch_id=1,
+            )
+            store.append_event(
+                "alice",
+                "user_message",
+                {"content": "second"},
+                turn_index=2,
+                branch_id=1,
+                parent_branch_path=[(1, 1)],
+            )
+            store.save_state("alice", scratchpad={"key": "value"})
+            store.flush()
+            sync_agent = _FakeAgentForInject()
+            inject_saved_state(sync_agent, store, "alice")
+            async_agent = _FakeAgentForInject()
+            await inject_saved_state_async(async_agent, store, "alice")
+            assert async_agent.config.name == "alice"
+            assert (
+                async_agent.controller.conversation.to_messages()
+                == sync_agent.controller.conversation.to_messages()
+            )
+            assert async_agent.session.scratchpad.to_dict() == {"key": "value"}
+            assert async_agent._turn_index == sync_agent._turn_index
+            assert len(async_agent._pending_resume_events) == len(
+                sync_agent._pending_resume_events
+            )
+        finally:
+            store.close()
+
+    async def test_async_injection_does_not_block_event_loop(self, tmp_path):
+        # Negative case for S3: a large session's event scan runs on the
+        # store's affinity thread, so a ping task keeps the loop alive.
+        store = SessionStore(str(tmp_path / "slow.kohakutr"))
+        try:
+            real_get_events = store.get_events
+
+            def slow_get_events(agent, **kwargs):
+                time.sleep(0.3)
+                return real_get_events(agent, **kwargs)
+
+            store.get_events = slow_get_events
+            loop_alive: list[float] = []
+            stop = asyncio.Event()
+
+            async def _ping():
+                while not stop.is_set():
+                    loop_alive.append(time.monotonic())
+                    await asyncio.sleep(0.02)
+                loop_alive.append(time.monotonic())
+
+            ping = asyncio.create_task(_ping())
+            await asyncio.sleep(0)
+            agent = _FakeAgentForInject()
+            await inject_saved_state_async(agent, store, "alice")
+            stop.set()
+            await ping
+            gaps = [
+                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
+            ]
+            assert (
+                max(gaps) < 0.15
+            ), f"async injection blocked the loop; max gap={max(gaps):.3f}s"
+        finally:
+            store.close()
+
 
 # -- _open_store_with_migration ------------------------------------
 
@@ -2064,12 +2145,12 @@ class TestOpenStoreWithMigration:
         # If ensure_latest_version raises, the helper re-raises a
         # RuntimeError that names the original path so the user can
         # retry against the preserved file.
-        import kohakuterrarium.session.resume as resume_mod
+        import kohakuterrarium.session.resume_open as resume_open_mod
 
         def _boom(p):
             raise ValueError("migration broke")
 
-        monkeypatch.setattr(resume_mod, "ensure_latest_version", _boom)
+        monkeypatch.setattr(resume_open_mod, "ensure_latest_version", _boom)
         with pytest.raises(RuntimeError, match="Failed to migrate"):
             _open_store_with_migration(tmp_path / "x.kohakutr")
 
@@ -2110,6 +2191,45 @@ class TestResumeAgent:
             assert store.load_meta()["status"] == "running"
         finally:
             store.close()
+
+    async def test_async_resume_matches_sync_resume(self, tmp_path, patched_llm):
+        # The affinity-thread resume path must rebuild and rehydrate the
+        # same agent state as the sync entry point.
+        config_dir = tmp_path / "creature"
+        _write_agent_config(config_dir)
+        path = self._make_session(tmp_path, config_dir)
+        agent, store = await resume_agent_async(path)
+        try:
+            assert agent.config.name == "resumee"
+            msgs = agent.controller.conversation.to_messages()
+            assert any(m.get("content") == "earlier turn" for m in msgs)
+            assert store.load_meta()["status"] == "running"
+            # The store was re-attached for continued recording.
+            assert agent.session_store is store
+        finally:
+            store.close()
+
+    async def test_async_resume_closes_store_on_failure(
+        self, tmp_path, patched_llm, monkeypatch
+    ):
+        # A post-open failure must release the writer lock, mirroring the
+        # sync guard, so the session stays resumable afterwards. The lock
+        # sidecar is never unlinked (FileLock.release contract), so the
+        # observable check is that a fresh writer-locked open succeeds.
+        import kohakuterrarium.session.resume_async as async_mod
+
+        config_dir = tmp_path / "creature"
+        _write_agent_config(config_dir)
+        path = self._make_session(tmp_path, config_dir)
+
+        def _boom(*_a, **_k):
+            raise RuntimeError("injection exploded")
+
+        monkeypatch.setattr(async_mod, "inject_saved_state", _boom)
+        with pytest.raises(RuntimeError, match="injection exploded"):
+            await resume_agent_async(path)
+        reopened = SessionStore(str(path), writer_lock=True)
+        reopened.close(update_status=False)
 
     def test_resume_does_not_chdir(self, tmp_path, patched_llm):
         # E8: resume used to ``os.chdir(saved_pwd)`` process-wide — a
@@ -2404,7 +2524,7 @@ class TestDetectSessionTypeDefensive:
     def test_unmigratable_file_still_probed_directly(self, tmp_path, monkeypatch):
         # If ensure_latest_version raises, detect_session_type falls
         # back to probing the raw path rather than propagating.
-        import kohakuterrarium.session.resume as resume_mod
+        import kohakuterrarium.session.resume_open as resume_open_mod
 
         path = tmp_path / "s.kohakutr"
         s = SessionStore(str(path))
@@ -2417,7 +2537,7 @@ class TestDetectSessionTypeDefensive:
         def _boom(p):
             raise ValueError("cannot migrate")
 
-        monkeypatch.setattr(resume_mod, "ensure_latest_version", _boom)
+        monkeypatch.setattr(resume_open_mod, "ensure_latest_version", _boom)
         # Falls back to the raw path -> still reports the stored type.
         assert detect_session_type(path) == "agent"
 

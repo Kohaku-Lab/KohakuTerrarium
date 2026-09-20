@@ -52,6 +52,10 @@ class TestResolveStorePathRealStore:
 # ---------------------------------------------------------------------------
 
 
+async def _async_noop(*_a, **_k):
+    return None
+
+
 class TestTerrariumResumeNameMatch:
     async def test_fresh_name_in_saved_set_used_directly(self, monkeypatch, tmp_path):
         """When the rebuilt creature's name is already in the saved
@@ -82,11 +86,11 @@ class TestTerrariumResumeNameMatch:
             lambda p: TerrariumConfig(name="t", creatures=[], channels=[]),
         )
         injected = []
-        monkeypatch.setattr(
-            resume_mod,
-            "inject_saved_state",
-            lambda agent, store, name: injected.append(name),
-        )
+
+        async def _record_inject(agent, store, name):
+            injected.append(name)
+
+        monkeypatch.setattr(resume_mod, "inject_saved_state_async", _record_inject)
 
         engine_holder = {}
 
@@ -147,7 +151,7 @@ class TestTerrariumResumeNameMatch:
             "load_terrarium_config",
             lambda p: TerrariumConfig(name="t", creatures=[], channels=[]),
         )
-        monkeypatch.setattr(resume_mod, "inject_saved_state", lambda *a, **kw: None)
+        monkeypatch.setattr(resume_mod, "inject_saved_state_async", _async_noop)
 
         engine_holder = {}
 
