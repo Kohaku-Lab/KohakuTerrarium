@@ -95,10 +95,9 @@ class GrepTool(BaseTool):
                     base, file_pattern, gitignore=follow_gitignore
                 )
 
+            # iter_matching_files already yields files only, and the
+            # single-file branch checked base.is_file() above.
             for file_path in files_iter:
-                if not file_path.is_file():
-                    continue
-
                 if is_binary_file(file_path):
                     continue
 

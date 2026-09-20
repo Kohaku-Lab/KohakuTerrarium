@@ -16,6 +16,7 @@ from kohakuterrarium.utils.file_walk import (
     _glob_match,
     _glob_to_regex,
     iter_matching_files,
+    iter_matching_files_stat,
     should_skip_dir,
     walk_dirs,
     walk_files,
@@ -91,13 +92,13 @@ def test_ignored_subtree_is_not_enumerated(tmp_path, monkeypatch):
     _build_tree(
         tmp_path, {".gitignore": "/temp/\n", "temp": {"bad.py": "x"}, "ok.py": "x"}
     )
-    original = Path.iterdir
+    real_scandir = file_walk.scandir
 
     def entries(path):
-        assert path != tmp_path / "temp"
-        return original(path)
+        assert Path(path) != tmp_path / "temp"
+        return real_scandir(path)
 
-    monkeypatch.setattr(Path, "iterdir", entries)
+    monkeypatch.setattr(file_walk, "scandir", entries)
     assert _rel_set(tmp_path, walk_files(tmp_path)) == {"ok.py"}
     assert _rel_set(tmp_path, walk_dirs(tmp_path)) == {"."}
 
@@ -274,35 +275,93 @@ class TestWalkFiles:
         out = list(walk_files(tmp_path, gitignore=False, cap=0))
         assert len(out) == 5
 
-    def test_permission_error_on_iterdir_skips_subtree(self, tmp_path, monkeypatch):
+    def test_permission_error_on_scandir_skips_subtree(self, tmp_path, monkeypatch):
         _build_tree(tmp_path, {"sub": {"a.py": "x"}, "ok.py": "y"})
 
-        original_iterdir = Path.iterdir
+        real_scandir = file_walk.scandir
 
-        def _boom(self):
-            if self.name == "sub":
+        def _boom(path):
+            if Path(path).name == "sub":
                 raise PermissionError("denied")
-            return original_iterdir(self)
+            return real_scandir(path)
 
-        monkeypatch.setattr(Path, "iterdir", _boom)
+        monkeypatch.setattr(file_walk, "scandir", _boom)
         rels = _rel_set(tmp_path, walk_files(tmp_path, gitignore=False))
         # ``sub`` skipped silently, top-level files still yielded.
         assert "ok.py" in rels
         assert "sub/a.py" not in rels
 
-    def test_permission_error_on_is_dir_skips_entry(self, tmp_path, monkeypatch):
-        _build_tree(tmp_path, {"weird": {}, "ok.py": "y"})
+    def test_permission_error_on_entry_is_dir_skips_entry(self, tmp_path, monkeypatch):
+        _build_tree(tmp_path, {"weird": {"inner.py": "x"}, "ok.py": "y"})
 
-        original_is_dir = Path.is_dir
+        real_scandir = file_walk.scandir
 
-        def _boom(self):
-            if self.name == "weird":
-                raise PermissionError("denied")
-            return original_is_dir(self)
+        class _BrokenIsDir:
+            def __init__(self, entry):
+                self._entry = entry
 
-        monkeypatch.setattr(Path, "is_dir", _boom)
+            @property
+            def name(self):
+                return self._entry.name
+
+            @property
+            def path(self):
+                return self._entry.path
+
+            def is_dir(self, follow_symlinks=True):
+                if self._entry.name == "weird":
+                    raise PermissionError("denied")
+                return self._entry.is_dir(follow_symlinks=follow_symlinks)
+
+            def is_file(self, follow_symlinks=True):
+                return self._entry.is_file(follow_symlinks=follow_symlinks)
+
+        def _boom(path):
+            if Path(path) == tmp_path:
+                return iter([_BrokenIsDir(e) for e in real_scandir(path)])
+            return real_scandir(path)
+
+        monkeypatch.setattr(file_walk, "scandir", _boom)
         rels = _rel_set(tmp_path, walk_files(tmp_path, gitignore=False))
+        # The entry whose type can't be determined is skipped (and not
+        # descended into); the sibling file is still yielded.
         assert "ok.py" in rels
+        assert "weird/inner.py" not in rels
+
+    def test_scandir_walk_matches_reference_filters(self, tmp_path):
+        # End-to-end equivalence of the scandir walk against the pinned
+        # filter semantics: gitignore (inherited + nested + dir-only),
+        # hidden filtering, and unconditional skip names.
+        _build_tree(
+            tmp_path,
+            {
+                ".gitignore": "*.log\nbuild/\n",
+                "keep.py": "",
+                "drop.log": "",
+                "sub": {
+                    ".gitignore": "*.tmp\n",
+                    "also.tmp": "",
+                    "deep": {"x.py": ""},
+                },
+                "build": {"out.o": ""},
+                ".hidden": {"h.py": ""},
+                "__pycache__": {"c.pyc": ""},
+            },
+        )
+        rels = _rel_set(tmp_path, walk_files(tmp_path))
+        assert rels == {"keep.py", "sub/deep/x.py"}
+
+    def test_stat_carrying_walk_reports_mtimes(self, tmp_path):
+        _build_tree(tmp_path, {"a.py": "x", "sub": {"b.py": "y"}})
+        pairs = list(
+            file_walk._walk(
+                tmp_path, gitignore=False, show_hidden=False, cap=0, want_stat=True
+            )
+        )
+        assert {rel for _p, rel, _s in pairs} == {"a.py", "sub/b.py"}
+        for path, _rel, stat in pairs:
+            assert stat is not None
+            assert stat.st_mtime == pytest.approx(path.stat().st_mtime)
 
 
 # ── walk_dirs ────────────────────────────────────────────────────────
@@ -349,18 +408,18 @@ class TestWalkDirs:
         assert ".hidden" not in names_default
         assert ".hidden" in names_hidden
 
-    def test_permission_error_on_iterdir_skips_subtree(self, tmp_path, monkeypatch):
+    def test_permission_error_on_scandir_skips_subtree(self, tmp_path, monkeypatch):
         _build_tree(tmp_path, {"sub": {"a.py": ""}})
 
-        original_iterdir = Path.iterdir
+        real_scandir = file_walk.scandir
 
-        def _boom(self):
-            if self.name == "sub":
+        def _boom(path):
+            if Path(path).name == "sub":
                 raise PermissionError("denied")
-            return original_iterdir(self)
+            return real_scandir(path)
 
-        monkeypatch.setattr(Path, "iterdir", _boom)
-        # sub is still yielded (the dir itself was found before iterdir
+        monkeypatch.setattr(file_walk, "scandir", _boom)
+        # sub is still yielded (the dir itself was found before scandir
         # failed), but its contents aren't walked.
         names = {p.name for p in walk_dirs(tmp_path, gitignore=False)}
         assert "sub" in names
@@ -476,6 +535,43 @@ class TestIterMatchingFiles:
         rels = _rel_set(tmp_path, iter_matching_files(tmp_path, "**/*", gitignore=True))
         assert "sub/keep.py" in rels
         assert "sub/drop.log" not in rels
+
+
+# ── iter_matching_files_stat ─────────────────────────────────────────
+
+
+class TestIterMatchingFilesStat:
+    def test_recursive_pairs_match_plain_iterator_and_real_stats(self, tmp_path):
+        _build_tree(tmp_path, {"a.py": "", "sub": {"b.py": ""}, "x.md": ""})
+        plain = _rel_set(tmp_path, iter_matching_files(tmp_path, "**/*.py"))
+        pairs = list(iter_matching_files_stat(tmp_path, "**/*.py"))
+        assert {
+            str(p.relative_to(tmp_path)).replace(os.sep, "/") for p, _s in pairs
+        } == plain
+        for p, stat in pairs:
+            assert stat is not None
+            assert stat.st_mtime == pytest.approx(p.stat().st_mtime)
+
+    def test_non_recursive_pairs_carry_stats(self, tmp_path):
+        _build_tree(tmp_path, {"a.py": "", "b.py": "", "c.md": ""})
+        pairs = list(iter_matching_files_stat(tmp_path, "*.py"))
+        assert {p.name for p, _s in pairs} == {"a.py", "b.py"}
+        assert all(s is not None for _p, s in pairs)
+
+    def test_cap_applies_to_pairs(self, tmp_path):
+        _build_tree(tmp_path, {f"f{i}.py": "" for i in range(6)})
+        out = list(iter_matching_files_stat(tmp_path, "**/*.py", cap=3))
+        assert len(out) == 3
+
+    def test_respects_gitignore(self, tmp_path):
+        _build_tree(
+            tmp_path,
+            {".gitignore": "drop.log\n", "keep.py": "", "drop.log": ""},
+        )
+        rels = _rel_set(
+            tmp_path, (p for p, _s in iter_matching_files_stat(tmp_path, "**/*"))
+        )
+        assert rels == {"keep.py"}
 
 
 # ── _glob_to_regex / _glob_match ─────────────────────────────────────
