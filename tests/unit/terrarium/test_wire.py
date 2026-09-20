@@ -262,6 +262,12 @@ class TestStringifyPaths:
 
 
 class TestPackCreatureBuildInput:
+    def test_package_reference_round_trip_without_host_install(self):
+        ref = "@worker-only/creatures/general"
+        packed = pack_creature_build_input(ref)
+        assert packed == {"kind": "path", "value": ref}
+        assert unpack_creature_build_input(packed) == ref
+
     def test_agent_config_form(self):
         c = AgentConfig(name="x", agent_path=Path("."))
         out = pack_creature_build_input(c)

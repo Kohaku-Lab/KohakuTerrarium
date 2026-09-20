@@ -1333,6 +1333,65 @@ async def test_subprocess_worker_spawn_and_chat_round_trip(tmp_path, monkeypatch
                 f"subprocess.  Worker stderr: {worker.dump_stderr()[:2000]}"
             )
 
+            package_root = worker.kt_config_dir / "packages" / "worker-biome"
+            package_config = _write_creature_config(
+                package_root, "package_scout", "Worker package configuration."
+            )
+            package_ref = "@worker-biome/creature_package_scout"
+            for host_has_package in (False, True):
+                if host_has_package:
+                    _write_creature_config(
+                        tmp_path / "kt-config" / "packages" / "worker-biome",
+                        "package_scout",
+                        "Host package configuration must not be used.",
+                    )
+                    host_config = (
+                        tmp_path
+                        / "kt-config"
+                        / "packages"
+                        / "worker-biome"
+                        / "creature_package_scout"
+                        / "config.yaml"
+                    )
+                    host_config.write_text(
+                        "name: wrong_host_creature\n", encoding="utf-8"
+                    )
+                spawned = await host.http.post(
+                    "/api/sessions/active/creature",
+                    json={"config_path": package_ref, "on_node": worker.node_id},
+                )
+                assert spawned.status_code == 200, spawned.text
+                package_session = spawned.json()
+                entry = package_session["creatures"][0]
+                assert entry["name"] == "package_scout"
+                sid = package_session["session_id"]
+                cid = entry["creature_id"]
+                async with host.api_ws(
+                    f"/ws/sessions/{sid}/creatures/{cid}/chat"
+                ) as ws:
+                    assert "sub-scout reporting in" in await _drain_chat_ws(
+                        ws, "report"
+                    )
+                stopped = await host.http.delete(f"/api/sessions/active/agents/{cid}")
+                assert stopped.status_code == 200, stopped.text
+                active = (await host.http.get("/api/sessions/active")).json()
+                assert sid not in {item["session_id"] for item in active}
+
+            for bad_ref, message in (
+                ("@missing-worker-package/creatures/general", "Package not installed"),
+                ("@worker-biome/missing", "Path not found in package"),
+                ("@worker-biome/../outside", "escapes the package root"),
+                ("@/creatures/general", "Empty package name"),
+                ("creatures/general", "requires an absolute remote path"),
+            ):
+                rejected = await host.http.post(
+                    "/api/sessions/active/creature",
+                    json={"config_path": bad_ref, "on_node": worker.node_id},
+                )
+                assert rejected.status_code == 400, rejected.text
+                assert message in rejected.json()["detail"]
+            assert package_config.is_dir()
+
 
 # ---------------------------------------------------------------------------
 # Headline journey — spawn / chat / model / stop a creature ON A WORKER.
