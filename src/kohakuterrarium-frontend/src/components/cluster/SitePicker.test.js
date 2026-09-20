@@ -40,6 +40,43 @@ beforeEach(() => {
 })
 
 describe("SitePicker", () => {
+  it("shows and selects the sole worker for execution without a host entry", async () => {
+    nodesAPI.list.mockResolvedValueOnce({
+      nodes: [{ node_id: "worker-1", is_host: false, status: "online", creatures: 0 }],
+    })
+    const cluster = useClusterStore()
+    await cluster.hydrate()
+    const w = mount(SitePicker, { props: { modelValue: "_host", executionTarget: true } })
+    expect(w.find("select").exists()).toBe(true)
+    expect(w.findAll("option").map((option) => option.element.value)).toContain("worker-1")
+    expect(w.emitted("update:modelValue")).toEqual([["worker-1"]])
+    w.unmount()
+  })
+
+  it("clears a disconnected execution target without silently switching workers", async () => {
+    nodesAPI.list.mockResolvedValueOnce({
+      nodes: [
+        { node_id: "worker-1", is_host: false, status: "online", creatures: 0 },
+        { node_id: "worker-2", is_host: false, status: "online", creatures: 0 },
+      ],
+    })
+    const cluster = useClusterStore()
+    await cluster.hydrate()
+    const w = mount(SitePicker, { props: { modelValue: "worker-1", executionTarget: true } })
+    nodesAPI.list.mockResolvedValueOnce({
+      nodes: [{ node_id: "worker-2", is_host: false, status: "online", creatures: 0 }],
+    })
+    await cluster.hydrate()
+    expect(w.emitted("update:modelValue")).toEqual([[""]])
+    await w.setProps({ modelValue: "" })
+    nodesAPI.list.mockResolvedValueOnce({
+      nodes: [{ node_id: "worker-2", is_host: false, status: "online", creatures: 0 }],
+    })
+    await cluster.hydrate()
+    expect(w.emitted("update:modelValue")).toEqual([[""]])
+    w.unmount()
+  })
+
   it("renders nothing in standalone mode", async () => {
     nodesAPI.list.mockRejectedValueOnce(notFoundError())
     const cluster = useClusterStore()

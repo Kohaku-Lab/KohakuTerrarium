@@ -9,6 +9,7 @@ Resolved absolute paths are the identity boundary, preventing editable package
 links or overlapping local directories from producing duplicate entries.
 """
 
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -285,6 +286,14 @@ def scan_catalog() -> list[CatalogEntry]:
                     _add_terrarium(child, source="local")
 
     return [r for r in results if r.name]
+
+
+def scan_worker_creatures() -> list[dict]:
+    """Discover installed and local creatures on the current worker."""
+    roots = [p for p in os.environ.get("KT_CREATURES_DIRS", "").split(",") if p.strip()]
+    roots.extend(str(Path.cwd() / name) for name in ("creatures", "agents"))
+    roots.extend(str(Path(pkg["path"]) / "creatures") for pkg in list_packages())
+    return scan_creatures_in_dirs(dedupe_dirs(roots))
 
 
 def scan_creatures_in_dirs(base_dirs: list[Path]) -> list[dict]:

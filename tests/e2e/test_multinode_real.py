@@ -194,7 +194,10 @@ async def test_subprocess_harness_boots_host_and_worker(tmp_path, monkeypatch):
 
     async with RealLabHost(tmp_path) as host:
         async with RealLabSubprocessWorker(
-            "sub-worker-1", host.lab_ws_url, tmp_path / "sub-worker-1"
+            "sub-worker-1",
+            host.lab_ws_url,
+            tmp_path / "sub-worker-1",
+            extra_env={"KT_CREATURES_DIRS": str(tmp_path / "worker-local-creatures")},
         ) as worker:
             await worker.wait_for_join(host, timeout=OP_TIMEOUT * 4)
             assert "sub-worker-1" in set(host.host_engine.alive_clients())
@@ -202,6 +205,47 @@ async def test_subprocess_harness_boots_host_and_worker(tmp_path, monkeypatch):
             assert worker.kt_config_dir.exists()
             assert worker.kt_session_dir.exists()
             assert worker.kt_config_dir != tmp_path / "kt-config"
+
+            local_config = _write_creature_config(
+                tmp_path / "worker-local-creatures",
+                "worker_local",
+                "Worker local config.",
+            )
+            package = worker.kt_config_dir / "packages" / "worker-only"
+            _write_creature_config(package, "worker_package", "Worker package config.")
+            (package / "kohaku.yaml").write_text(
+                "name: worker-only\nversion: 1.0.0\ncreatures:\n  - path: creature_worker_package\n",
+                encoding="utf-8",
+            )
+            host_catalog = await host.http.get("/api/configs/creatures")
+            assert host_catalog.status_code == 200, host_catalog.text
+            assert "worker_package" not in {
+                item["name"] for item in host_catalog.json()
+            }
+            catalog = await host.http.get(
+                "/api/configs/creatures", params={"on_node": worker.node_id}
+            )
+            assert catalog.status_code == 200, catalog.text
+            found = {item["name"]: item["path"] for item in catalog.json()}
+            assert found["worker_package"] == "@worker-only/creature_worker_package"
+            assert found["worker_local"] == str(local_config)
+            spawned = await host.http.post(
+                "/api/sessions/active/creature",
+                json={"config_path": found["worker_local"], "on_node": worker.node_id},
+            )
+            assert spawned.status_code == 200, spawned.text
+            session = spawned.json()
+            sid = session["session_id"]
+            cid = session["creatures"][0]["creature_id"]
+            async with host.api_ws(f"/ws/sessions/{sid}/creatures/{cid}/chat") as ws:
+                assert "OK" in await _drain_chat_ws(ws, "hello")
+            assert (
+                await host.http.delete(f"/api/sessions/active/agents/{cid}")
+            ).status_code == 200
+            rejected = await host.http.get(
+                "/api/configs/creatures", params={"on_node": "not-connected"}
+            )
+            assert rejected.status_code == 404
         # After __aexit__, the worker process must be gone.
         assert worker.returncode is not None, (
             "worker did not exit after __aexit__; stderr: "
