@@ -25,16 +25,9 @@ lines with their paths and line numbers.
 
 - Python `re` syntax, not ripgrep or shell grep; escape `(`, `[`, and `.`.
 - Binary files are skipped.
-- Directory searches apply `.gitignore` rules to recursive and non-recursive
-  file filters. Ancestor rules are loaded up to the nearest repository root;
-  outside a repository, rules start at the requested search directory.
-- Rules support anchored paths, nested overrides and `!` re-inclusion. A file
-  inside an excluded directory stays excluded unless its parent is re-included.
-- `gitignore=false` only disables `.gitignore` filtering. Recursive traversal
-  still skips dot-prefixed entries and built-in dependency/cache directories.
-  An explicitly addressed single file bypasses directory filtering.
-- This uses `.gitignore` files only, not Git's index, global excludes or
-  `.git/info/exclude`. A tracked file can still match a search ignore rule.
+- Directory searches respect `.gitignore`; `gitignore=false` disables those
+  rules, not hidden-item or built-in directory exclusions. An explicitly
+  addressed single file bypasses directory filtering.
 - When matches exceed `limit`, the total count is reported so you know the
   pattern needs narrowing rather than the limit raising.
 
@@ -43,6 +36,19 @@ lines with their paths and line numbers.
 - Lines over 2000 characters are truncated in the output.
 
 ## Reference
+
+### Ignore rules
+
+Recursive and non-recursive file filters apply directory-scoped `.gitignore`
+rules. Ancestors are loaded up to the nearest repository root; outside a
+repository, rules start at the requested search directory. Anchored paths,
+nested overrides and `!` re-inclusion are supported. An excluded parent must
+be re-included before its children can be searched.
+
+`gitignore=false` only disables `.gitignore` filtering. Recursive traversal
+still skips dot-prefixed entries and built-in dependency/cache directories.
+Git's index, global excludes and `.git/info/exclude` are not consulted, so a
+tracked file can still match a search ignore rule.
 
 ### Output format
 
