@@ -23,11 +23,11 @@ lines with their paths and line numbers.
 
 ## Behavior
 
-- Python `re` syntax, not ripgrep or shell grep; escape `(`, `[`, and `.`.
-- Binary files are skipped.
 - Directory searches respect `.gitignore`; `gitignore=false` disables those
   rules, not hidden-item or built-in directory exclusions. An explicitly
   addressed single file bypasses directory filtering.
+- Python `re` syntax, not ripgrep or shell grep; escape `(`, `[`, and `.`.
+- Binary files are skipped.
 - When matches exceed `limit`, the total count is reported so you know the
   pattern needs narrowing rather than the limit raising.
 

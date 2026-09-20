@@ -1530,16 +1530,6 @@ class TestModulesIntegration:
                 ),
                 ScriptEntry("handled the failure", match="deliberate explosion"),
                 ScriptEntry(
-                    f"[/canvas_image]@@path={tmp_path / 'out.png'}\n[canvas_image/]",
-                    match="publish first image",
-                ),
-                ScriptEntry("first image published", match="Canvas:"),
-                ScriptEntry(
-                    f"[/canvas_image]@@path={tmp_path / 'out.png'}\n[canvas_image/]",
-                    match="publish updated image",
-                ),
-                ScriptEntry("updated image published", match="Canvas:"),
-                ScriptEntry(
                     "[/grep]@@pattern=MATCH\n@@glob=*.log\n[grep/]",
                     match="search with ignore rules",
                 ),
@@ -1549,17 +1539,27 @@ class TestModulesIntegration:
                     match="list including ignored logs",
                 ),
                 ScriptEntry("unfiltered listing done", match="drop.log"),
+                ScriptEntry(
+                    f"[/canvas_image]@@path={tmp_path / 'out.png'}\n[canvas_image/]",
+                    match="publish first image",
+                ),
+                ScriptEntry("first image published", match="Canvas:"),
+                ScriptEntry(
+                    f"[/canvas_image]@@path={tmp_path / 'out.png'}\n[canvas_image/]",
+                    match="publish updated image",
+                ),
+                ScriptEntry("updated image published", match="Canvas:"),
             ]
         )
         tool = RecordingTool()
         agent.registry.register_tool(tool)
         agent.executor.register_tool(tool)
-        canvas_tool = CanvasImageTool()
-        agent.registry.register_tool(canvas_tool)
-        agent.executor.register_tool(canvas_tool)
         for search_tool in (GrepTool(), GlobTool()):
             agent.registry.register_tool(search_tool)
             agent.executor.register_tool(search_tool)
+        canvas_tool = CanvasImageTool()
+        agent.registry.register_tool(canvas_tool)
+        agent.executor.register_tool(canvas_tool)
         store = SessionStore(str(tmp_path / "canvas.kohakutr"))
         store.init_meta("canvas", "agent", "", str(tmp_path), [agent.config.name])
         agent.attach_session_store(store)
@@ -1614,28 +1614,6 @@ class TestModulesIntegration:
             assert "recorder failed: deliberate explosion" in convo_text
             last = agent.controller.conversation.get_last_assistant_message()
             assert "handled the failure" in last.get_text_content()
-            image_path = tmp_path / "out.png"
-            Image.new("RGB", (2, 2), "red").save(image_path)
-            original = image_path.read_bytes()
-            await agent._process_event(create_user_input_event("publish first image"))
-            artifacts = list((store.artifacts_dir / "canvas_images").rglob("*.png"))
-            assert len(artifacts) == 1, [
-                m.get_text_content()
-                for m in agent.controller.conversation.get_messages()[-3:]
-            ]
-            first_artifact = artifacts[0]
-            assert first_artifact.read_bytes() == original
-            Image.new("RGB", (2, 2), "blue").save(image_path)
-            await agent._process_event(create_user_input_event("publish updated image"))
-            artifacts = list((store.artifacts_dir / "canvas_images").rglob("*.png"))
-            assert len(artifacts) == 2
-            assert first_artifact.read_bytes() == original
-            assert {p.read_bytes() for p in artifacts} == {
-                original,
-                image_path.read_bytes(),
-            }
-            last = agent.controller.conversation.get_last_assistant_message()
-            assert last.get_text_content() == "updated image published"
             (tmp_path / ".gitignore").write_text("*.log\n!keep.log\n", encoding="utf-8")
             (tmp_path / "keep.log").write_text("MATCH kept\n", encoding="utf-8")
             (tmp_path / "drop.log").write_text("MATCH ignored\n", encoding="utf-8")
@@ -1666,6 +1644,28 @@ class TestModulesIntegration:
                 agent.controller.conversation.get_last_assistant_message().get_text_content()
                 == "unfiltered listing done"
             )
+            image_path = tmp_path / "out.png"
+            Image.new("RGB", (2, 2), "red").save(image_path)
+            original = image_path.read_bytes()
+            await agent._process_event(create_user_input_event("publish first image"))
+            artifacts = list((store.artifacts_dir / "canvas_images").rglob("*.png"))
+            assert len(artifacts) == 1, [
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()[-3:]
+            ]
+            first_artifact = artifacts[0]
+            assert first_artifact.read_bytes() == original
+            Image.new("RGB", (2, 2), "blue").save(image_path)
+            await agent._process_event(create_user_input_event("publish updated image"))
+            artifacts = list((store.artifacts_dir / "canvas_images").rglob("*.png"))
+            assert len(artifacts) == 2
+            assert first_artifact.read_bytes() == original
+            assert {p.read_bytes() for p in artifacts} == {
+                original,
+                image_path.read_bytes(),
+            }
+            last = agent.controller.conversation.get_last_assistant_message()
+            assert last.get_text_content() == "updated image published"
         finally:
             await agent.stop()
             store.close()
