@@ -2,6 +2,7 @@
 
 import pytest
 
+from kohakuterrarium.session.history import replay_conversation
 from kohakuterrarium.session.migrations.v1_to_v2 import (
     _backfill_assistant_tool_call_content,
     _coerce_args,
@@ -18,6 +19,10 @@ from kohakuterrarium.session.migrations.v1_to_v2 import (
     migrate,
 )
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.raw_history import (
+    UserMessageSelector,
+    select_raw_history_prefix,
+)
 
 # ── _coerce_args ──────────────────────────────────────────────────
 
@@ -383,6 +388,206 @@ class TestHighestSyntheticEventId:
 
 
 class TestMigrateE2E:
+    @pytest.mark.parametrize("legacy_first", [True, False])
+    @pytest.mark.parametrize("same_agent", [True, False])
+    def test_rejects_mixed_history_before_creating_destination(
+        self, tmp_path, legacy_first, same_agent
+    ):
+        src_path = tmp_path / "mixed.kohakutr"
+        source = SessionStore(src_path)
+        try:
+            names = (
+                ["legacy", "structured"] if legacy_first else ["structured", "legacy"]
+            )
+            source.init_meta("sess", "terrarium", "/p", "/w", names)
+            source.meta["format_version"] = 1
+            source.append_event("legacy", "user_input", {"content": "old user"})
+            source.append_event("legacy", "text", {"content": "old answer"})
+            source.append_event(
+                "legacy" if same_agent else "structured",
+                "user_message",
+                {"content": "new user"},
+                turn_index=2,
+                branch_id=1,
+            )
+            source.flush()
+            before = {name: source.get_events(name) for name in names}
+        finally:
+            source.close(update_status=False)
+        destination = tmp_path / "mixed.kohakutr.v2"
+        with pytest.raises(ValueError, match="mixed.*history"):
+            migrate(str(src_path), str(destination))
+        assert not destination.exists()
+        unchanged = SessionStore(src_path)
+        try:
+            assert {name: unchanged.get_events(name) for name in names} == before
+        finally:
+            unchanged.close(update_status=False)
+
+    @pytest.mark.parametrize("invalid_id", [1, 0, True])
+    def test_rejects_invalid_structured_ids_before_creating_destination(
+        self, tmp_path, invalid_id
+    ):
+        src_path = tmp_path / "invalid.kohakutr"
+        source = SessionStore(src_path)
+        try:
+            source.meta["format_version"] = 1
+            source.append_event(
+                "alice",
+                "user_message",
+                {"event_id": 1, "content": "first"},
+                turn_index=1,
+                branch_id=1,
+            )
+            # Bypass the writer's ID coercion to exercise an actual malformed log.
+            source.events["bob:e000002"] = {
+                "event_id": invalid_id,
+                "type": "user_message",
+                "content": "second",
+                "turn_index": 1,
+                "branch_id": 1,
+            }
+        finally:
+            source.close(update_status=False)
+        destination = tmp_path / "invalid.kohakutr.v2"
+        with pytest.raises(ValueError, match="event IDs"):
+            migrate(str(src_path), str(destination))
+        assert not destination.exists()
+
+    def test_rejects_snapshot_only_agent_mixed_with_structured_history(self, tmp_path):
+        src_path = tmp_path / "snapshot.kohakutr"
+        source = SessionStore(src_path)
+        try:
+            source.init_meta("sess", "terrarium", "/p", "/w", ["alice", "bob"])
+            source.meta["format_version"] = 1
+            source.append_event(
+                "alice", "user_message", {"content": "first"}, turn_index=1, branch_id=1
+            )
+            source.save_conversation("bob", [{"role": "user", "content": "snapshot"}])
+        finally:
+            source.close(update_status=False)
+        destination = tmp_path / "snapshot.kohakutr.v2"
+        with pytest.raises(ValueError, match="mixed.*history"):
+            migrate(str(src_path), str(destination))
+        assert not destination.exists()
+
+    @pytest.mark.parametrize("version", [None, 1])
+    def test_preserves_event_sourced_legacy_history_and_edit_targets(
+        self, tmp_path, version
+    ):
+        src_path = tmp_path / "legacy.kohakutr"
+        source = SessionStore(src_path)
+        try:
+            source.init_meta("sess", "terrarium", "/p", "/w", ["alice", "bob"])
+            if version is None:
+                del source.meta["format_version"]
+            else:
+                source.meta["format_version"] = version
+            for name in ("alice", "bob"):
+                source.append_event(
+                    name,
+                    "user_input",
+                    {"content": "first"},
+                    turn_index=1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+                source.append_event(
+                    name,
+                    "user_message",
+                    {"content": "first"},
+                    turn_index=1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+                source.append_event(
+                    name,
+                    "text_chunk",
+                    {"content": "answer", "chunk_seq": 0},
+                    turn_index=1,
+                    branch_id=1,
+                    parent_branch_path=[],
+                )
+                source.append_event(
+                    name,
+                    "user_input",
+                    {"content": "alternate"},
+                    turn_index=1,
+                    branch_id=2,
+                    parent_branch_path=[],
+                )
+                source.append_event(
+                    name,
+                    "user_message",
+                    {"content": "alternate"},
+                    turn_index=1,
+                    branch_id=2,
+                    parent_branch_path=[],
+                )
+                source.append_event(
+                    name,
+                    "user_message",
+                    {"content": "follow up"},
+                    turn_index=2,
+                    branch_id=1,
+                    parent_branch_path=[(1, 2)],
+                )
+                alternate = source.get_events(name)[4]
+                source.append_event(
+                    name,
+                    "compact_replace",
+                    {
+                        "summary_text": "alternate summary",
+                        "replaced_from_event_id": alternate["event_id"],
+                        "replaced_to_event_id": alternate["event_id"],
+                        "compact_path": [[1, 2]],
+                    },
+                    turn_index=2,
+                    branch_id=1,
+                    parent_branch_path=[(1, 2)],
+                )
+                source.save_conversation(name, [{"role": "system", "content": "rules"}])
+                source.state[f"{name}:snapshot_event_id"] = source.max_event_id(name)
+            source.flush()
+            original = {name: source.get_events(name) for name in ("alice", "bob")}
+        finally:
+            source.close(update_status=False)
+
+        destination = tmp_path / "legacy.kohakutr.v2"
+        migrate(str(src_path), str(destination))
+        migrated = SessionStore(destination)
+        try:
+            all_ids = []
+            for name, expected in original.items():
+                actual = migrated.get_events(name)
+                all_ids.extend(event["event_id"] for event in actual)
+                assert actual == expected
+                target = expected[-2]
+                prefix = select_raw_history_prefix(
+                    actual,
+                    selector=UserMessageSelector(
+                        target["event_id"], target["turn_index"], target["branch_id"]
+                    ),
+                )
+                assert prefix.target["content"] == "follow up"
+                assert prefix.branch_view == {1: 2, 2: 1}
+                assert replay_conversation(actual, branch_view=prefix.branch_view) == [
+                    {"role": "assistant", "content": "alternate summary"},
+                    {"role": "user", "content": "follow up"},
+                ]
+                assert migrated.load_conversation(name) == [
+                    {"role": "system", "content": "rules"}
+                ]
+                assert (
+                    migrated.state[f"{name}:snapshot_event_id"]
+                    == expected[-1]["event_id"]
+                )
+            assert len(all_ids) == len(set(all_ids))
+            _, new_id = migrated.append_event("alice", "processing_end", {})
+            assert new_id > max(all_ids)
+        finally:
+            migrated.close(update_status=False)
+
     def test_missing_source_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError):
             migrate(str(tmp_path / "nope.kohakutr"), str(tmp_path / "dst"))

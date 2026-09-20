@@ -37,6 +37,18 @@ The format is append-only for event data and versioned through KohakuVault's aut
 
 Compaction changes the live prompt and writes a fast-resume snapshot, but it does not erase the append-only event log. Studio identifies editable user messages with the persisted `event_id`, `turn_index`, and `branch_id`. Save & Rerun and Regenerate rebuild the new branch from the selected message's original event prefix, ignoring compact summaries and snapshots. The previous branch and every later event remain available for branch navigation and resume. If the locator is missing, ambiguous, points to injected mid-turn input, or conflicts with the selected branch, the operation fails without changing history.
 
+### Older session formats
+
+Some older writers recorded canonical messages with event, turn, and branch IDs
+without updating the session format marker. Migration preserves those event logs,
+snapshots, and compaction references rather than translating them again.
+
+If a session mixes canonical history with legacy history, snapshot-only agents,
+or agents with only observability events, migration refuses before creating a
+destination. Duplicate or invalid event IDs also require explicit repair. The
+original session remains intact; migration does not guess new identities or
+automatically repair a previously migrated file.
+
 ## Where sessions live
 
 ```
