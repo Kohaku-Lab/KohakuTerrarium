@@ -45,6 +45,7 @@ dependencies = [
     # API our codegen uses is stable across both.
     "libcst>=0.3.23,<2",
     "aiofiles>=25.1.0",
+    "pathspec>=1.1.1,<2",
     "python-dotenv>=1.0.0",
     # >=0.8.6 for PEP 738 Android wheel tags + the relaxed numpy>=1.26 floor
     # (Chaquopy compat). The floor here drives the Android wheel URL ref.

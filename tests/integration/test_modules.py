@@ -36,6 +36,8 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
+from kohakuterrarium.builtins.tools.glob import GlobTool
+from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import (
@@ -1537,6 +1539,16 @@ class TestModulesIntegration:
                     match="publish updated image",
                 ),
                 ScriptEntry("updated image published", match="Canvas:"),
+                ScriptEntry(
+                    "[/grep]@@pattern=MATCH\n@@glob=*.log\n[grep/]",
+                    match="search with ignore rules",
+                ),
+                ScriptEntry("filtered search done", match="keep.log:1: MATCH kept"),
+                ScriptEntry(
+                    "[/glob]@@pattern=*.log\n@@gitignore=false\n[glob/]",
+                    match="list including ignored logs",
+                ),
+                ScriptEntry("unfiltered listing done", match="drop.log"),
             ]
         )
         tool = RecordingTool()
@@ -1545,6 +1557,9 @@ class TestModulesIntegration:
         canvas_tool = CanvasImageTool()
         agent.registry.register_tool(canvas_tool)
         agent.executor.register_tool(canvas_tool)
+        for search_tool in (GrepTool(), GlobTool()):
+            agent.registry.register_tool(search_tool)
+            agent.executor.register_tool(search_tool)
         store = SessionStore(str(tmp_path / "canvas.kohakutr"))
         store.init_meta("canvas", "agent", "", str(tmp_path), [agent.config.name])
         agent.attach_session_store(store)
@@ -1621,6 +1636,36 @@ class TestModulesIntegration:
             }
             last = agent.controller.conversation.get_last_assistant_message()
             assert last.get_text_content() == "updated image published"
+            (tmp_path / ".gitignore").write_text("*.log\n!keep.log\n", encoding="utf-8")
+            (tmp_path / "keep.log").write_text("MATCH kept\n", encoding="utf-8")
+            (tmp_path / "drop.log").write_text("MATCH ignored\n", encoding="utf-8")
+            await agent._process_event(
+                create_user_input_event("search with ignore rules")
+            )
+            outputs = [
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            ]
+            grep_output = next(text for text in reversed(outputs) if "## grep_" in text)
+            assert "keep.log:1: MATCH kept" in grep_output
+            assert "drop.log" not in grep_output
+            assert (
+                agent.controller.conversation.get_last_assistant_message().get_text_content()
+                == "filtered search done"
+            )
+            await agent._process_event(
+                create_user_input_event("list including ignored logs")
+            )
+            outputs = [
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            ]
+            glob_output = next(text for text in reversed(outputs) if "## glob_" in text)
+            assert "drop.log" in glob_output and "keep.log" in glob_output
+            assert (
+                agent.controller.conversation.get_last_assistant_message().get_text_content()
+                == "unfiltered listing done"
+            )
         finally:
             await agent.stop()
             store.close()

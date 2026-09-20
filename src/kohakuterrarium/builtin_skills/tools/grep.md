@@ -19,11 +19,22 @@ lines with their paths and line numbers.
 | glob | string | no | File filter, e.g. `**/*.py` |
 | limit | integer | no | Maximum matches, default 50 |
 | ignore_case | boolean | no | Case-insensitive match |
+| gitignore | boolean | no | Follow scoped `.gitignore` rules; default true. Set false to include paths excluded by those rules |
 
 ## Behavior
 
 - Python `re` syntax, not ripgrep or shell grep; escape `(`, `[`, and `.`.
 - Binary files are skipped.
+- Directory searches apply `.gitignore` rules to recursive and non-recursive
+  file filters. Ancestor rules are loaded up to the nearest repository root;
+  outside a repository, rules start at the requested search directory.
+- Rules support anchored paths, nested overrides and `!` re-inclusion. A file
+  inside an excluded directory stays excluded unless its parent is re-included.
+- `gitignore=false` only disables `.gitignore` filtering. Recursive traversal
+  still skips dot-prefixed entries and built-in dependency/cache directories.
+  An explicitly addressed single file bypasses directory filtering.
+- This uses `.gitignore` files only, not Git's index, global excludes or
+  `.git/info/exclude`. A tracked file can still match a search ignore rule.
 - When matches exceed `limit`, the total count is reported so you know the
   pattern needs narrowing rather than the limit raising.
 
