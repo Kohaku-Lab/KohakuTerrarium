@@ -30,12 +30,13 @@ async def fork_session(
     Invalid fork points or mutations return 400, splitting an in-flight job
     returns 409, and an unknown source returns 404. Live sources use and flush
     the engine-owned store so the fork includes current events without opening
-    an unreliable second SQLite connection on POSIX.
+    an unreliable second SQLite connection on POSIX; the flush runs on the
+    store's affinity thread.
     """
     live = live_store_entry(service, session_name)
     if live is not None:
         _, store = live
-        store.flush()
+        await store.run(store.flush)
         path = Path(getattr(store, "_path"))
     else:
         store = None

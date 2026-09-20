@@ -120,22 +120,18 @@ def _load_messages(
         store.close(update_status=False)
 
 
-def build_diff_payload(
-    a_path: Path,
-    b_path: Path,
-    *,
-    agent: str | None,
-    a_store: SessionStore | None = None,
-    b_store: SessionStore | None = None,
+def merge_diff_payload(
+    a: tuple[list[dict], str, str],
+    b: tuple[list[dict], str, str],
 ) -> dict[str, Any]:
-    """Compare one agent slice from two sessions.
+    """Merge two loaded diff sides into the comparison payload.
 
-    The payload contains the shared-prefix length and compact divergent
-    suffixes; full message bodies remain server-side. Supplied live stores are
-    reused because reopening actively written SQLite files can fail on POSIX.
+    Both sides are ``(messages, session_name, agent)`` tuples as produced by
+    :func:`_load_messages`. The merge is pure in-memory work, so callers that
+    load each side on a store's affinity thread can run this on the event loop.
     """
-    a_msgs, a_name, a_agent = _load_messages(a_path, agent, a_store)
-    b_msgs, b_name, b_agent = _load_messages(b_path, agent, b_store)
+    a_msgs, a_name, a_agent = a
+    b_msgs, b_name, b_agent = b
 
     common = 0
     for ma, mb in zip(a_msgs, b_msgs):
@@ -155,3 +151,22 @@ def build_diff_payload(
         "b_only": [_summarize_msg(m) for m in b_diverge],
         "identical": not a_diverge and not b_diverge and len(a_msgs) == len(b_msgs),
     }
+
+
+def build_diff_payload(
+    a_path: Path,
+    b_path: Path,
+    *,
+    agent: str | None,
+    a_store: SessionStore | None = None,
+    b_store: SessionStore | None = None,
+) -> dict[str, Any]:
+    """Compare one agent slice from two sessions.
+
+    The payload contains the shared-prefix length and compact divergent
+    suffixes; full message bodies remain server-side. Supplied live stores are
+    reused because reopening actively written SQLite files can fail on POSIX.
+    """
+    a = _load_messages(a_path, agent, a_store)
+    b = _load_messages(b_path, agent, b_store)
+    return merge_diff_payload(a, b)

@@ -4,10 +4,10 @@ Paths use ``/{session_name}/history[/{target}]`` so mounting under
 ``/api/sessions`` preserves the public URLs.
 
 Saved-session SQLite reads run in a worker thread. Live sessions reuse the
-engine-owned store on the event loop because a second connection to an actively
-written store can raise ``SQLITE_IOERR`` on POSIX; loop affinity also
-serializes reads with the writer. HTTP history target reads are always a
-bounded page; ``paged=false`` and ``limit=0`` return 400.
+engine-owned store on its affinity thread because a second connection to an
+actively written store can raise ``SQLITE_IOERR`` on POSIX; the single-worker
+affinity thread also serializes reads with the writer. HTTP history target
+reads are always a bounded page; ``paged=false`` and ``limit=0`` return 400.
 """
 
 import asyncio
@@ -182,7 +182,8 @@ async def get_session_history_detail(
         entry = live_store_entry(service, session_name)
         if entry is not None:
             graph_id, store = entry
-            return history_detail(
+            return await store.run(
+                history_detail,
                 store,
                 target,
                 session_id=graph_id,
@@ -216,7 +217,11 @@ async def get_session_history_index(
     entry = live_store_entry(service, session_name)
     if entry is not None:
         _, store = entry
-        return history_index_from_store(store, _live_session_name(store, session_name))
+        return await store.run(
+            history_index_from_store,
+            store,
+            _live_session_name(store, session_name),
+        )
     path = await _resolve_saved_path(session_name)
     return await asyncio.to_thread(history_index_payload, path)
 
@@ -249,7 +254,8 @@ async def get_session_history(
         live_session_name = _live_session_name(store, session_name)
         live_job_ids = _live_job_ids_for_graph(service, graph_id) or set()
         try:
-            return history_page_from_store(
+            return await store.run(
+                history_page_from_store,
                 store,
                 session_id=graph_id,
                 session_name=live_session_name,

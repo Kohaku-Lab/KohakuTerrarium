@@ -21,6 +21,7 @@ from kohakuterrarium.session.rollup import (
     list_turn_rollups,
     save_turn_rollup,
 )
+from kohakuterrarium.session.store_affinity import StoreAffinityMixin
 from kohakuterrarium.session.store_counters import (
     persist_event_counter,
     restore_event_counters,
@@ -65,7 +66,7 @@ def iter_kv_keys(
     return table.keys(prefix=prefix, limit=limit)
 
 
-class SessionStore:
+class SessionStore(StoreAffinityMixin):
     """Persistent session storage backed by KohakuVault.
 
     One ``.kohakutr`` file contains metadata, per-agent state, append-only
