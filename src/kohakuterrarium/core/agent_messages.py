@@ -23,7 +23,10 @@ from kohakuterrarium.core.events import EventType, TriggerEvent
 from kohakuterrarium.errors import ConflictError
 from kohakuterrarium.llm.message import normalize_content_parts
 from kohakuterrarium.session.history import replay_conversation
-from kohakuterrarium.session.raw_history import UserMessageSelector
+from kohakuterrarium.session.raw_history import (
+    UserMessageSelector,
+    append_user_event_pair,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -137,22 +140,13 @@ class AgentMessagesMixin:
             # of prior turns is unchanged.
             ppath = [tuple(p) for p in getattr(self, "_parent_branch_path", [])]
             await self.session_store.run(
-                self.session_store.append_event,
+                append_user_event_pair,
+                self.session_store,
                 self.config.name,
-                "user_input",
                 {"content": prev_content},
-                turn_index=self._turn_index,
-                branch_id=self._branch_id,
-                parent_branch_path=ppath,
-            )
-            await self.session_store.run(
-                self.session_store.append_event,
-                self.config.name,
-                "user_message",
-                {"content": prev_content},
-                turn_index=self._turn_index,
-                branch_id=self._branch_id,
-                parent_branch_path=ppath,
+                self._turn_index,
+                self._branch_id,
+                ppath,
             )
         self._branch_request_id = request_id
         try:
@@ -295,22 +289,13 @@ class AgentMessagesMixin:
         if self.session_store is not None:
             ppath = [tuple(p) for p in cur_path]
             await self.session_store.run(
-                self.session_store.append_event,
+                append_user_event_pair,
+                self.session_store,
                 self.config.name,
-                "user_input",
                 {"content": new_content},
-                turn_index=self._turn_index,
-                branch_id=self._branch_id,
-                parent_branch_path=ppath,
-            )
-            await self.session_store.run(
-                self.session_store.append_event,
-                self.config.name,
-                "user_message",
-                {"content": new_content},
-                turn_index=self._turn_index,
-                branch_id=self._branch_id,
-                parent_branch_path=ppath,
+                self._turn_index,
+                self._branch_id,
+                ppath,
             )
         self._branch_request_id = request_id
         try:

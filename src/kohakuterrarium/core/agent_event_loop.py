@@ -13,6 +13,7 @@ from kohakuterrarium.core.agent_runtime_tools import _make_job_label
 from kohakuterrarium.core.event_inbox import EventEnvelope, TurnOutcome
 from kohakuterrarium.core.metrics_hook import metrics
 from kohakuterrarium.core.pending_input import pending_id_of
+from kohakuterrarium.session.raw_history import append_user_event_pair
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.skills.hints import inject_skill_path_hint
@@ -291,22 +292,13 @@ class AgentEventLoopMixin:
         if pending_id:
             payload["pending_id"] = pending_id
         await self.session_store.run(
-            self.session_store.append_event,
+            append_user_event_pair,
+            self.session_store,
             self.config.name,
-            "user_input",
             dict(payload),
-            turn_index=self._turn_index,
-            branch_id=self._branch_id,
-            parent_branch_path=ppath,
-        )
-        await self.session_store.run(
-            self.session_store.append_event,
-            self.config.name,
-            "user_message",
-            dict(payload),
-            turn_index=self._turn_index,
-            branch_id=self._branch_id,
-            parent_branch_path=ppath,
+            self._turn_index,
+            self._branch_id,
+            ppath,
         )
 
     async def _record_folded_user_event(self, evt) -> None:

@@ -189,3 +189,28 @@ def select_raw_history_prefix(
         target=deepcopy(target),
         branch_view=dict(sorted(selected.items())),
     )
+
+
+def append_user_event_pair(
+    store: Any,
+    agent_name: str,
+    payload: dict,
+    turn_index: int | None,
+    branch_id: int | None,
+    parent_branch_path: list[tuple[int, int]] | None,
+) -> None:
+    """Append the canonical ``user_input`` + ``user_message`` pair.
+
+    Both records run as one affinity-thread unit so a cancelled turn can
+    never persist half the pair (the raw-history editor and replay both
+    key off the ``user_message`` half).
+    """
+    for event_type in ("user_input", "user_message"):
+        store.append_event(
+            agent_name,
+            event_type,
+            dict(payload),
+            turn_index=turn_index,
+            branch_id=branch_id,
+            parent_branch_path=parent_branch_path,
+        )
