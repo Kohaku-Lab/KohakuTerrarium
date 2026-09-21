@@ -268,6 +268,10 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         # turn, so drain before reading the store.
         await self.drain()
         self._record("processing_end", {})
+        # _record flushed the open text segment and queued processing_end
+        # itself; drain again so the turn's final events are durable and
+        # the snapshot watermark below cannot run ahead of the log.
+        await self.drain()
 
         # Snapshots are derived caches; use live controller messages when event
         # replay cannot yet reconstruct the conversation. The full event log is

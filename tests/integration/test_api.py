@@ -862,17 +862,18 @@ class TestApiIntegration:
         assert resp.json() == {"response": _REPLY_TWO}
         assert scripted_llm.call_count == 2
         # History now carries both turns — the WS turn and this one —
-        # with the streamed scripted replies.
+        # with the streamed scripted replies. The default read is a
+        # bounded page whose raw events include the user_message /
+        # assistant pairs of both turns.
         resp = client.get(f"{base}/history")
         assert resp.status_code == 200
-        messages = resp.json().get("messages", [])
-        roles = [m.get("role") for m in messages]
-        assert "user" in roles and "assistant" in roles
-        user_msgs = [m for m in messages if m.get("role") == "user"]
+        page = resp.json()
+        events = page.get("events", [])
+        user_msgs = [e for e in events if e.get("type") == "user_message"]
         assert len(user_msgs) == 2
         joined = " ".join(
-            m.get("content", "") if isinstance(m.get("content"), str) else ""
-            for m in messages
+            str(e.get("content", "")) if isinstance(e.get("content"), str) else ""
+            for e in events
         )
         assert "hello creature" in joined
         assert "a second http turn" in joined
@@ -1200,8 +1201,12 @@ class TestApiIntegration:
         #    The rewind-to-0 in step 3b truncated the live conversation
         #    back to just the system prompt; the only user turn since is
         #    the single "post-switch turn" chat driven in step 4a. (The
-        #    full pre-rewind transcript was asserted in step 3b.)
-        resp = client.get(f"{base}/history")
+        #    full pre-rewind transcript was asserted in step 3b.) The
+        #    default read is a bounded page of raw events.
+        # The snapshot stream is the bounded, replay-consistent view (the
+        # raw-events default stream keeps pre-rewind branch history by
+        # design — the dashboard replays branches client-side).
+        resp = client.get(f"{base}/history", params={"stream": "snapshot"})
         assert resp.status_code == 200
         post_rewind_users = [
             m for m in resp.json().get("messages", []) if m.get("role") == "user"

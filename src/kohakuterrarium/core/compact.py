@@ -418,6 +418,13 @@ class CompactManager:
 
             # Notify output for TUI/frontend display
             if self._output_router:
+                # The watermark persisted below scans the event log; it must
+                # observe both the turn events still queued on the store's
+                # affinity thread and the compact_complete event queued by
+                # the notify below, or resume tail-replays events the
+                # compacted snapshot already contains.
+                if self._session_store is not None:
+                    await self._session_store.run(lambda: None)
                 events = []
                 if self._session_store is not None:
                     try:
@@ -441,6 +448,8 @@ class CompactManager:
                     f"Context auto-compact done (round {self._compact_count})",
                     metadata=metadata,
                 )
+                if self._session_store is not None:
+                    await self._session_store.run(lambda: None)
             terminal_sent = True
 
             # Save conversation snapshot with post-compact version
