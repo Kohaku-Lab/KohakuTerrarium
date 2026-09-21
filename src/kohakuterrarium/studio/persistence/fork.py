@@ -166,9 +166,12 @@ async def fork_session_handler(
     stability conflicts raise ``ConflictError``; other failures are wrapped in
     ``SessionError``.
 
-    Every blocking store stage — the full-event fork-point scan, the fork copy,
-    and the owned store's open/close — runs on that store's affinity thread so
-    callers never block their event loop.
+    Every blocking store stage runs off the caller's event loop: the
+    fork-point scan and the fork copy on the store's affinity thread, and the
+    owned store's open/close on plain worker threads. The vault layer
+    serializes access per call and is thread-agnostic, so handing the
+    connection between those threads is safe — the stages are strictly
+    sequenced, each ``await`` completing before the next starts.
     """
     session_path = Path(session_path)
     if not session_path.exists():
