@@ -1,16 +1,19 @@
 """Path hints remain stable while a user turn runs its tool continuations."""
 
+import asyncio
 from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
 
+from kohakuterrarium.builtins.user_commands.clear import ClearCommand
 from kohakuterrarium.core.agent import Agent
 from kohakuterrarium.core.config_types import AgentConfig
 from kohakuterrarium.core.events import TriggerEvent, create_user_input_event
 from kohakuterrarium.llm.openai import OpenAIProvider
 from kohakuterrarium.llm.responses_ws import ResponsesWSSession
 from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode, ToolResult
+from kohakuterrarium.modules.user_command.base import UserCommandContext
 from kohakuterrarium.skills.hints import inject_skill_path_hint
 from kohakuterrarium.skills.paths import SkillPathScanner
 from kohakuterrarium.skills.registry import Skill, SkillRegistry
@@ -70,9 +73,6 @@ async def test_rerun_and_folded_user_refresh_current_guidance(agent):
 
 
 async def test_clear_command_removes_hint_before_background_round(agent):
-    from kohakuterrarium.builtins.user_commands.clear import ClearCommand
-    from kohakuterrarium.modules.user_command.base import UserCommandContext
-
     await agent.run("Original user")
     assert agent.controller._skill_path_hint
     result = await ClearCommand().execute("--force", UserCommandContext(agent=agent))
@@ -188,8 +188,6 @@ async def test_native_tool_continuations_keep_hint_and_send_only_delta(tmp_path)
 
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_next_user_refreshes_hint_after_error_or_cancellation(tmp_path, cancel):
-    import asyncio
-
     class InterruptedLLM(ScriptedLLM):
         def __init__(self):
             super().__init__(["Done"])
