@@ -7,7 +7,7 @@
           <h1 class="text-2xl font-bold text-warm-800 dark:text-warm-200">KohakuTerrarium</h1>
           <p class="text-sm text-warm-500 mt-1">{{ t("shell.dashboard.welcome") }}</p>
         </div>
-        <select v-model.number="refreshIntervalMs" class="text-xs rounded px-2 py-1 border border-warm-300 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 text-warm-700 dark:text-warm-300 hover:border-iolite focus:border-iolite focus:outline-none">
+        <select v-model.number="refreshIntervalMs" class="text-xs rounded px-2 py-1 border border-warm-300 dark:border-warm-700 bg-warm-50 dark:bg-warm-900 text-warm-700 dark:text-warm-300 hover:border-iolite focus:border-iolite focus:outline-none" @change="saveRefreshInterval">
           <option :value="0">{{ t("shell.dashboard.autoRefreshOff") }}</option>
           <option :value="5000">{{ t("shell.dashboard.autoRefresh5s") }}</option>
           <option :value="15000">{{ t("shell.dashboard.autoRefresh15s") }}</option>
@@ -73,17 +73,32 @@ import AdvancedStartModal from "@/components/shell/modals/AdvancedStartModal.vue
 import { useInstancesStore } from "@/stores/instances"
 import { sessionAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
+import { ensureUIPrefsLoaded, getHybridPrefSync, setHybridPref } from "@/utils/uiPrefs"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
 
 const { t } = useI18n()
 
 const instances = useInstancesStore()
-const refreshIntervalMs = ref(5000)
+const refreshPrefKey = "kt.dashboard.refreshIntervalMs"
+const refreshIntervalMs = ref(readRefreshInterval())
 const recentSessions = ref([])
 const recentLoading = ref(true)
 const showAll = ref(false)
 const modal = ref(null)
 let timer = null
+let unmounted = false
+let refreshPreferenceChanged = false
+
+function readRefreshInterval() {
+  const value = getHybridPrefSync(refreshPrefKey, 5000)
+  const interval = typeof value === "number" || (typeof value === "string" && value.trim()) ? Number(value) : NaN
+  return [0, 5000, 15000, 60000].includes(interval) ? interval : 5000
+}
+
+function saveRefreshInterval() {
+  refreshPreferenceChanged = true
+  setHybridPref(refreshPrefKey, refreshIntervalMs.value)
+}
 
 const displayedSessions = computed(() => (showAll.value ? recentSessions.value : recentSessions.value.slice(0, 5)))
 
@@ -126,6 +141,12 @@ watch(refreshIntervalMs, startTimer)
 onMounted(() => {
   refresh()
   startTimer()
+  void ensureUIPrefsLoaded().then(() => {
+    if (!unmounted && !refreshPreferenceChanged) refreshIntervalMs.value = readRefreshInterval()
+  })
 })
-onUnmounted(stopTimer)
+onUnmounted(() => {
+  unmounted = true
+  stopTimer()
+})
 </script>
