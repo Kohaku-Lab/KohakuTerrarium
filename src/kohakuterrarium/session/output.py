@@ -10,7 +10,7 @@ cannot await.
 
 import asyncio
 from concurrent.futures import Future
-from typing import Any
+from typing import Any, Callable
 
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
@@ -123,29 +123,31 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         awaited at the next :meth:`drain`; stores without an affinity
         executor fall back to an inline append.
         """
+        self._submit_store_write(
+            self._store.append_event,
+            self._event_key_prefix,
+            event_type,
+            data,
+            turn_index=turn_index,
+            branch_id=branch_id,
+            parent_branch_path=parent_branch_path,
+        )
+
+    def _submit_store_write(
+        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> None:
+        """Queue one store write on the affinity thread (inline fallback).
+
+        Submission order matches call order, so auxiliary writes queued
+        after an event land after it. Stores without an affinity executor
+        run inline; failures surface with the standard record warning.
+        """
         try:
             submit = getattr(self._store, "submit", None)
             if not callable(submit):
-                self._store.append_event(
-                    self._event_key_prefix,
-                    event_type,
-                    data,
-                    turn_index=turn_index,
-                    branch_id=branch_id,
-                    parent_branch_path=parent_branch_path,
-                )
+                fn(*args, **kwargs)
                 return
-            self._pending_writes.append(
-                submit(
-                    self._store.append_event,
-                    self._event_key_prefix,
-                    event_type,
-                    data,
-                    turn_index=turn_index,
-                    branch_id=branch_id,
-                    parent_branch_path=parent_branch_path,
-                )
-            )
+            self._pending_writes.append(submit(fn, *args, **kwargs))
         except Exception as e:
             logger.warning("Session record failed", error=str(e), exc_info=True)
 
@@ -273,15 +275,65 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         # the snapshot watermark below cannot run ahead of the log.
         await self.drain()
 
-        # Snapshots are derived caches; use live controller messages when event
-        # replay cannot yet reconstruct the conversation. The full event log is
-        # only replayed when the controller is absent; otherwise a single-key
-        # read supplies ``last_event_id`` (the O(N) full scan here made every
-        # turn cost linear in total session length).
+        # Agent-side inputs are read here; the store writes and the
+        # fallback event scan run on the store's affinity thread (inline
+        # for duck-typed stores without submit).
+        messages: list | None = None
+        branch_tag: dict | None = None
+        state_kwargs: dict = {}
         try:
             if self._agent and hasattr(self._agent, "controller"):
                 messages = self._agent.controller.conversation.snapshot_messages()
-            else:
+            agent = self._agent
+            turn_index = getattr(agent, "_turn_index", None) if agent else None
+            branch_id = getattr(agent, "_branch_id", None) if agent else None
+            if (
+                isinstance(turn_index, int)
+                and turn_index > 0
+                and isinstance(branch_id, int)
+                and branch_id > 0
+            ):
+                # Tag the snapshot with the agent's branch so resume can
+                # reject it when the target branch differs and rebuild via
+                # replay instead.
+                branch_tag = {
+                    "turn_index": turn_index,
+                    "branch_id": branch_id,
+                    "parent_branch_path": getattr(agent, "_parent_branch_path", None),
+                }
+            if agent and hasattr(agent, "session") and agent.session:
+                pad = agent.session.scratchpad
+                if hasattr(pad, "to_dict"):
+                    state_kwargs["scratchpad"] = pad.to_dict()
+        except Exception as e:
+            # A controller-read failure must not abort persistence; the
+            # dispatched unit rebuilds the conversation via event replay.
+            logger.warning("Conversation snapshot failed", error=str(e))
+
+        persist = getattr(self._store, "run", None)
+        if callable(persist):
+            await persist(
+                self._persist_turn_snapshot, messages, branch_tag, state_kwargs
+            )
+        else:
+            self._persist_turn_snapshot(messages, branch_tag, state_kwargs)
+
+    def _persist_turn_snapshot(
+        self,
+        messages: list | None,
+        branch_tag: dict | None,
+        state_kwargs: dict,
+    ) -> None:
+        """Persist the post-turn snapshot, watermark, and state.
+
+        Runs on the store's affinity thread where available. ``messages``
+        is ``None`` when the controller was absent; the full event log is
+        only replayed in that case (otherwise a single-key read supplies
+        ``last_event_id`` — the O(N) scan here used to make every turn
+        cost linear in total session length).
+        """
+        try:
+            if messages is None:
                 events = self._store.get_events(self._event_key_prefix)
                 messages = replay_conversation(events, include_metadata=True)
             try:
@@ -298,35 +350,18 @@ class SessionOutput(SessionActivityMixin, OutputModule):
                 self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (
                     last_event_id
                 )
-                # The snapshot is the "last active branch" view; tag it with
-                # the agent's branch so resume can reject it when the target
-                # branch differs and rebuild via replay instead.
-                agent = getattr(self, "_agent", None)
-                if agent is not None:
-                    branch = {
-                        "turn_index": getattr(agent, "_turn_index", None),
-                        "branch_id": getattr(agent, "_branch_id", None),
-                        "parent_branch_path": getattr(
-                            agent, "_parent_branch_path", None
-                        ),
-                    }
-                    if (
-                        isinstance(branch["turn_index"], int)
-                        and branch["turn_index"] > 0
-                        and isinstance(branch["branch_id"], int)
-                        and branch["branch_id"] > 0
-                    ):
-                        self._store.state[
-                            f"{self._event_key_prefix}:snapshot_branch"
-                        ] = branch
-                    else:
-                        # The snapshot was rewritten above but the agent's
-                        # branch state is missing/invalid; clear any stale tag
-                        # from a prior run so resume does not trust a branch
-                        # that no longer matches this snapshot.
-                        self._store.state.pop(
-                            f"{self._event_key_prefix}:snapshot_branch", None
-                        )
+                if branch_tag is not None:
+                    self._store.state[f"{self._event_key_prefix}:snapshot_branch"] = (
+                        branch_tag
+                    )
+                else:
+                    # The snapshot was rewritten but the agent's branch state
+                    # is missing/invalid; clear any stale tag from a prior
+                    # run so resume does not trust a branch that no longer
+                    # matches this snapshot.
+                    self._store.state.pop(
+                        f"{self._event_key_prefix}:snapshot_branch", None
+                    )
             except Exception as e:
                 logger.warning(
                     "Failed to save snapshot_event_id",
@@ -336,20 +371,11 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         except Exception as e:
             logger.warning("Conversation snapshot failed", error=str(e))
 
-        # Token totals have a separate cumulative writer and must not be overwritten.
+        # Token totals have a separate cumulative writer and must not be
+        # overwritten; a per-call token shape here would clobber them.
         try:
-            if self._agent:
-                state_kwargs = {}
-
-                if hasattr(self._agent, "session") and self._agent.session:
-                    pad = self._agent.session.scratchpad
-                    if hasattr(pad, "to_dict"):
-                        state_kwargs["scratchpad"] = pad.to_dict()
-
-                # A per-call token shape here would clobber cumulative totals.
-
-                if state_kwargs:
-                    self._store.save_state(self._event_key_prefix, **state_kwargs)
+            if state_kwargs:
+                self._store.save_state(self._event_key_prefix, **state_kwargs)
         except Exception as e:
             logger.warning("State save failed", error=str(e), exc_info=True)
 

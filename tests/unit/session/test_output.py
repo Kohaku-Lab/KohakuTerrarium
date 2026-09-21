@@ -1389,6 +1389,7 @@ class TestStartTokenRestore:
             )
             assert out2._total_input_tokens == 10500
             assert out2._total_output_tokens == 2100
+            await out2.drain()
             usage = store2.state.get("alice:token_usage")
             assert usage["total_input_tokens"] == 10500
         finally:

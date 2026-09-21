@@ -240,27 +240,14 @@ class SessionActivityMixin:
         submitted writes and stays atomic with them.
         """
         task_record = self._subagent_tasks.pop(job_id, None)
-        submit = getattr(self._store, "submit", None)
-        if not callable(submit):
-            self._write_subagent_conversation(
-                name,
-                job_id,
-                output_text,
-                success=success,
-                metadata=metadata,
-                task_record=task_record,
-            )
-            return
-        self._pending_writes.append(
-            submit(
-                self._write_subagent_conversation,
-                name,
-                job_id,
-                output_text,
-                success=success,
-                metadata=metadata,
-                task_record=task_record,
-            )
+        self._submit_store_write(
+            self._write_subagent_conversation,
+            name,
+            job_id,
+            output_text,
+            success=success,
+            metadata=metadata,
+            task_record=task_record,
         )
 
     def _write_subagent_conversation(
@@ -331,20 +318,16 @@ class SessionActivityMixin:
             },
         )
         # Namespace cumulative totals so attached agents cannot collide with hosts.
-        try:
-            self._store.save_state(
-                self._event_key_prefix,
-                token_usage={
-                    "total_input_tokens": self._total_input_tokens,
-                    "total_output_tokens": self._total_output_tokens,
-                    "total_cached_tokens": self._total_cached_tokens,
-                    "last_prompt_tokens": prompt,
-                },
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to save token usage state", error=str(e), exc_info=True
-            )
+        self._submit_store_write(
+            self._store.save_state,
+            self._event_key_prefix,
+            token_usage={
+                "total_input_tokens": self._total_input_tokens,
+                "total_output_tokens": self._total_output_tokens,
+                "total_cached_tokens": self._total_cached_tokens,
+                "last_prompt_tokens": prompt,
+            },
+        )
 
     def _handle_compact_start(self, name: str, detail: str, metadata: dict) -> None:
         self._record(
@@ -463,26 +446,19 @@ class SessionActivityMixin:
         # Persist the derived rollup at the source to avoid repeated event scans.
         turn_index = metadata.get("turn_index", 0)
         if self._store and isinstance(turn_index, int) and turn_index > 0:
-            try:
-                self._store.save_turn_rollup(
-                    self._event_key_prefix,
-                    turn_index,
-                    {
-                        "started_at": metadata.get("started_at"),
-                        "ended_at": metadata.get("ended_at"),
-                        "tokens_in": int(metadata.get("prompt_tokens") or 0),
-                        "tokens_out": int(metadata.get("completion_tokens") or 0),
-                        "tokens_cached": int(metadata.get("cached_tokens") or 0),
-                        "cost_usd": metadata.get("cost_usd"),
-                    },
-                )
-            except Exception as e:
-                logger.warning(
-                    "save_turn_rollup failed",
-                    error=str(e),
-                    turn_index=turn_index,
-                    exc_info=True,
-                )
+            self._submit_store_write(
+                self._store.save_turn_rollup,
+                self._event_key_prefix,
+                turn_index,
+                {
+                    "started_at": metadata.get("started_at"),
+                    "ended_at": metadata.get("ended_at"),
+                    "tokens_in": int(metadata.get("prompt_tokens") or 0),
+                    "tokens_out": int(metadata.get("completion_tokens") or 0),
+                    "tokens_cached": int(metadata.get("cached_tokens") or 0),
+                    "cost_usd": metadata.get("cost_usd"),
+                },
+            )
 
     def _handle_plugin_hook_timing(
         self, name: str, detail: str, metadata: dict
