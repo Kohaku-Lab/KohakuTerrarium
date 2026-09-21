@@ -1,8 +1,10 @@
 """Unit tests for ``llm/openai_ws.py`` and OpenAIProvider websocket mode."""
 
 import asyncio
+import json
 
 import pytest
+from websockets import serve
 
 from kohakuterrarium.llm.base import ToolSchema
 from kohakuterrarium.llm.openai import OpenAIProvider
@@ -205,6 +207,45 @@ class TestBuildWsRequest:
 
 
 class TestProviderWebsocketMode:
+    async def test_receives_event_larger_than_one_mib_with_real_sdk(self):
+        text = "x" * (1024 * 1024 + 1)
+        submissions = []
+
+        async def respond(socket):
+            submissions.append(json.loads(await socket.recv()))
+            await socket.send(
+                json.dumps({"type": "response.output_text.delta", "delta": text})
+            )
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "response.completed",
+                        "response": {"id": "large-response", "output": []},
+                    }
+                )
+            )
+            await socket.wait_closed()
+
+        async with serve(respond, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            provider = OpenAIProvider(
+                api_key="test",
+                model="test",
+                base_url=f"http://127.0.0.1:{port}/v1",
+                websocket_mode=True,
+            )
+            try:
+                if not hasattr(provider._client.responses, "connect"):
+                    pytest.skip(
+                        "Installed OpenAI SDK has no Responses WebSocket support"
+                    )
+                chunks = [chunk async for chunk in provider.chat(MESSAGES)]
+                assert chunks == [text]
+                assert len(submissions) == 1
+                assert submissions[0]["type"] == "response.create"
+            finally:
+                await provider.close()
+
     async def test_replay_capability_is_removed_from_http_fallback(self):
         provider = make_provider(
             websocket_mode=True, extra_body={"responses_reasoning_replay": True}

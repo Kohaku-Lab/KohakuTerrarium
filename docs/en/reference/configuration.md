@@ -152,9 +152,9 @@ per-preset catalogue of groups and options.
 
 ### Provider-specific `extra_body` notes
 
-`extra_body` is deep-merged into the JSON request body. Each provider reads
-reasoning/effort knobs from a different path; set the knob the provider
-actually honours:
+`extra_body` is deep-merged into the JSON request body, except for framework
+settings described below. Each provider reads reasoning/effort knobs from a
+different path; set the knob the provider actually honours:
 
 | Provider | Canonical path | Notes |
 |---|---|---|
@@ -190,6 +190,53 @@ reasoning handling, including HTTP fallback. Set it on the target preset;
 when switching to a target that rejects plaintext reasoning, use `false`.
 Programmatic `with_model()` preserves `extra_body`, so update the setting
 when the new model has different capabilities.
+
+### Responses WebSocket transport
+
+The `openai` and `codex` providers enable Responses WebSocket transport with
+`extra_body.websocket_mode: true`. Configure socket resources and liveness
+through `extra_body.websocket_connection_options`, a dictionary or `null`:
+
+```yaml
+controller:
+  extra_body:
+    websocket_mode: true
+    websocket_connection_options:
+      max_size: null
+      max_queue: 16
+      open_timeout: 120
+      ping_timeout: 120
+```
+
+These settings are validated when the provider is constructed and copied
+for each socket connection. They remain fixed for that provider instance,
+including credential reloads and programmatic `with_model()` clones.
+Per-call `extra_body` overrides do not change them. Both framework keys are
+removed from outgoing HTTP and WebSocket request bodies, including HTTP
+fallback. Invalid values or unknown options fail during construction.
+
+| Option | Default | Accepted values and behavior |
+|---|---|---|
+| `max_size` | `null` | Positive integer bytes or `null`. Limits each incoming message; `null` removes the SDK's receive-size limit. This is not an outgoing-request or conversation-size limit. |
+| `max_queue` | SDK default: `16` | Positive integer frames or `null`. Receive-queue high-water mark; `null` disables queue flow control. |
+| `write_limit` | SDK default: `32768` | Positive integer bytes. Write-buffer high-water mark; applies backpressure rather than limiting request size. |
+| `open_timeout` | Provider timeout | Positive finite seconds or `null`. Deadline for opening the socket; `null` disables it. |
+| `ping_interval` | SDK default: `20` | Positive finite seconds or `null`. Interval between keepalive pings; `null` disables keepalive. |
+| `ping_timeout` | Provider timeout | Positive finite seconds or `null`. Time to await a pong; `null` disables this deadline while allowing pings. |
+| `close_timeout` | SDK default: `10` | Positive finite seconds or `null`. Deadline for the close handshake; `null` disables it. |
+| `compression` | SDK default: `"deflate"` | `"deflate"` or `null`; `null` disables compression. |
+
+The provider timeout defaults to **120 seconds for OpenAI** and **300 seconds
+for Codex**, or the `timeout` passed to the provider's Python constructor.
+Setting `open_timeout` or `ping_timeout` here overrides only the corresponding
+socket deadline. These are connection and heartbeat settings, not a deadline
+for completing generation. A responsive WebSocket can continue generating
+beyond them; upstream generation deadlines still apply.
+
+Boolean values, nonfinite numbers, zero or negative limits, and unrelated
+connection arguments such as `proxy` or `additional_headers` are rejected.
+This setting does not change the SDK's outgoing failed-send queue or authorize
+automatic replay after a generation request may have been submitted.
 
 ### Input
 
