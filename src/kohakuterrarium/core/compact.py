@@ -423,8 +423,9 @@ class CompactManager:
                 # affinity thread and the compact_complete event queued by
                 # the notify below, or resume tail-replays events the
                 # compacted snapshot already contains.
-                if self._session_store is not None:
-                    await self._session_store.run(lambda: None)
+                barrier = getattr(self._session_store, "run", None)
+                if callable(barrier):
+                    await barrier(lambda: None)
                 events = []
                 if self._session_store is not None:
                     try:
@@ -448,8 +449,9 @@ class CompactManager:
                     f"Context auto-compact done (round {self._compact_count})",
                     metadata=metadata,
                 )
-                if self._session_store is not None:
-                    await self._session_store.run(lambda: None)
+                barrier = getattr(self._session_store, "run", None)
+                if callable(barrier):
+                    await barrier(lambda: None)
             terminal_sent = True
 
             # Save conversation snapshot with post-compact version
