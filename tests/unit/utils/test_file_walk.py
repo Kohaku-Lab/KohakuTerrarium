@@ -339,17 +339,37 @@ class TestWalkFiles:
         rels = _rel_set(tmp_path, walk_files(tmp_path))
         assert rels == {"keep.py", "sub/deep/x.py"}
 
-    def test_stat_carrying_walk_reports_mtimes(self, tmp_path):
-        _build_tree(tmp_path, {"a.py": "x", "sub": {"b.py": "y"}})
-        pairs = list(
-            file_walk._walk(
-                tmp_path, gitignore=False, show_hidden=False, cap=0, want_stat=True
-            )
+    def test_stat_carrying_match_reports_mtimes_and_defers_io(
+        self, tmp_path, monkeypatch
+    ):
+        _build_tree(
+            tmp_path,
+            {
+                "a.py": "x",
+                "sub": {"b.py": "y"},
+                "skipme.log": "z",
+                ".gitignore": "*.log\n",
+            },
         )
-        assert {rel for _p, rel, _s in pairs} == {"a.py", "sub/b.py"}
-        for path, _rel, stat in pairs:
+        # The walk hands out raw DirEntries; _iter_matching must stat
+        # only entries that survive the glob match (selective searches
+        # keep their per-match syscall budget on POSIX).
+        statted = []
+        real_stat = os.DirEntry.stat
+
+        def observe(entry, follow_symlinks=True):
+            statted.append(entry.name)
+            return real_stat(entry, follow_symlinks=follow_symlinks)
+
+        monkeypatch.setattr(os.DirEntry, "stat", observe)
+        pairs = list(iter_matching_files_stat(tmp_path, "**/*.py"))
+        assert {
+            str(p.relative_to(tmp_path)).replace(os.sep, "/") for p, _s in pairs
+        } == {"a.py", "sub/b.py"}
+        for path, stat in pairs:
             assert stat is not None
             assert stat.st_mtime == pytest.approx(path.stat().st_mtime)
+        assert sorted(statted) == ["a.py", "b.py"]
 
 
 # ── walk_dirs ────────────────────────────────────────────────────────

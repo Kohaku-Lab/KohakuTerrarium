@@ -4,9 +4,10 @@ Gitignore-aware file walking with early termination.
 Provides directory/file iterators that respect ``.gitignore`` at every
 level (scoped rules included, via
 :class:kohakuterrarium.utils.file_ignore.GitIgnoreFilter) and skip
-common build/cache directories immediately.  Used by the tree, grep,
-and glob tools to avoid scanning huge ignored subtrees (``node_modules``,
-``.git``, ``__pycache__``, …).
+common build/cache directories immediately.  Used by the grep and glob
+tools; the tree tool shares the skip/ignore helpers but walks with its
+own recursive builder (per-directory sorting, depth limits and
+truncation reporting).
 
 Traversal is built on ``os.scandir``: one listing call per directory
 supplies the name, directory/file type and — on Windows — the stat
@@ -62,15 +63,15 @@ def _walk(
     gitignore: bool,
     show_hidden: bool,
     cap: int,
-    want_stat: bool,
     _ignore: GitIgnoreFilter | None = None,
-) -> Iterator[tuple[Path, str, "os.stat_result | None"]]:
+) -> Iterator[tuple[Path, str, os.DirEntry]]:
     """Core depth-first walk shared by the public walkers.
 
-    Yields ``(path, relpath, stat_or_none)`` where *relpath* is the
-    path relative to *root* with forward slashes, and *stat* is the
-    entry's ``stat_result`` when *want_stat* is set (served from the
-    scandir cache on Windows).
+    Yields ``(path, relpath, entry)`` where *relpath* is the path
+    relative to *root* with forward slashes and *entry* is the raw
+    ``os.DirEntry`` — its cached ``stat()`` stays usable after the
+    scandir listing closed, so callers can stat only the entries they
+    actually keep.
     """
     ignore = (_ignore or GitIgnoreFilter(root)) if gitignore else None
     if ignore and ignore.is_ignored(root, True):
@@ -117,13 +118,7 @@ def _walk(
                 subdirs.append((Path(entry.path), f"{rel_dir}{name}/"))
                 continue
 
-            stat = None
-            if want_stat:
-                try:
-                    stat = entry.stat()
-                except (PermissionError, OSError):
-                    stat = None
-            yield Path(entry.path), f"{rel_dir}{name}", stat
+            yield Path(entry.path), f"{rel_dir}{name}", entry
             count += 1
             if cap and count >= cap:
                 return
@@ -161,12 +156,11 @@ def walk_files(
         building one at *root*.  Internal; used by glob matching so
         rules from outside the narrowed walk root still apply.
     """
-    for path, _rel, _stat in _walk(
+    for path, _rel, _entry in _walk(
         root,
         gitignore=gitignore,
         show_hidden=show_hidden,
         cap=cap,
-        want_stat=False,
         _ignore=_ignore,
     ):
         yield path
@@ -333,20 +327,30 @@ def _iter_matching(
     # plain string concats — no per-file ``relative_to`` round-trip.
     # The filter is rooted at *base* so rules anchored outside the
     # narrowed walk root still apply.
-    for f, rel, stat in _walk(
+    # Stats are taken only from matched entries: on Windows the
+    # DirEntry serves them from the scandir cache (free), on POSIX it
+    # costs one syscall per match — the same count as statching the
+    # collected subset after a full traversal, without the extra pass.
+    for _path, rel, entry in _walk(
         walk_root,
         gitignore=gitignore,
         show_hidden=False,
         cap=0,
-        want_stat=want_stat,
         _ignore=ignore,
     ):
         rel = f"{rel_prefix}{rel}"
-        if matcher.match(rel):
-            yield f, rel, stat
-            count += 1
-            if cap and count >= cap:
-                return
+        if not matcher.match(rel):
+            continue
+        stat = None
+        if want_stat:
+            try:
+                stat = entry.stat()
+            except (PermissionError, OSError):
+                stat = None
+        yield _path, rel, stat
+        count += 1
+        if cap and count >= cap:
+            return
 
 
 # ── internal glob pattern matcher ────────────────────────────────────

@@ -53,6 +53,25 @@ def _compile_rules(lines: list[str]) -> tuple[_Rule, ...]:
     return tuple(reversed(rules))
 
 
+def _entry_prefix(full: str, base: str) -> str | None:
+    """Prefix turning entry names of *full* into candidates relative to
+    *base*, or ``None`` when the string prefix does not hold (caller
+    falls back to pathlib).
+
+    Mirrors ``Path.relative_to(base).as_posix()``: on POSIX a ``\\`` is
+    an ordinary filename character and must survive untouched — only
+    the Windows separator is normalized.
+    """
+    if full == base:
+        return ""
+    if full.startswith(base) and full[len(base)] in "\\/":
+        prefix = full[len(base) + 1 :]
+        if os.name == "nt":
+            prefix = prefix.replace("\\", "/")
+        return prefix + "/"
+    return None
+
+
 class GitIgnoreFilter:
     """Cache scoped rules and excluded parents within one search (blocking I/O)."""
 
@@ -176,15 +195,9 @@ class GitIgnoreFilter:
         # each ancestor otherwise.  Computed once per directory.
         prefixes: list[tuple[tuple[_Rule, ...], str | None, Path]] = []
         for rules_dir, rules in context:
-            base = str(rules_dir)
-            full = str(directory)
-            if full == base:
-                prefix = ""
-            elif full.startswith(base) and full[len(base)] in "\\/":
-                prefix = full[len(base) + 1 :].replace("\\", "/") + "/"
-            else:  # defensive: fall back to pathlib for this directory
-                prefix = None
-            prefixes.append((rules, prefix, rules_dir))
+            prefixes.append(
+                (rules, _entry_prefix(str(directory), str(rules_dir)), rules_dir)
+            )
 
         def check(name: str, is_dir: bool) -> bool:
             if parent_excluded:

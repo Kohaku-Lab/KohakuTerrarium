@@ -448,3 +448,20 @@ def test_walk_terminates_when_pattern_prefix_escapes_the_boundary(tmp_path):
 
     out = list(iter_matching_files(work, "../../**/*.py"))
     assert {p.name for p in out} == {"outer.py", "lib.py", "in.py"}
+
+
+def test_entry_prefix_normalizes_separators_only_on_windows(monkeypatch):
+    # A "\" is a legal filename character on POSIX: prefix building must
+    # leave it alone there (mirroring relative_to().as_posix()) while
+    # Windows separators are normalized to "/".
+    from kohakuterrarium.utils.file_ignore import _entry_prefix
+
+    monkeypatch.setattr(os, "name", "posix")
+    assert _entry_prefix("/r/sub", "/r") == "sub/"
+    assert _entry_prefix("/r/a\\b", "/r") == "a\\b/"
+    assert _entry_prefix("/r", "/r") == ""
+    assert _entry_prefix("/elsewhere", "/r") is None
+
+    monkeypatch.setattr(os, "name", "nt")
+    assert _entry_prefix("C:\\r\\a\\b", "C:\\r") == "a/b/"
+    assert _entry_prefix("C:\\r\\a\\b", "C:\\r") != "a\\b/"
