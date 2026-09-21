@@ -216,3 +216,198 @@ def test_rule_combinations_agree_with_git(tmp_path):
         ignore = GitIgnoreFilter(tmp_path)
         actual = {p for p in files if ignore.is_ignored(tmp_path / p, False)}
         assert actual == expected, (rules, actual ^ expected)
+
+
+def _reference_match(lines, relative, is_dir):
+    """Verbatim port of the pre-optimization _matches inner loops.
+
+    Kept as the oracle for the anchored fast path: last-match-wins
+    scanning with the finditer/lastgroup/end acceptance predicate.
+    """
+    from pathspec.patterns.gitignore.spec import GitIgnoreSpecPattern
+
+    patterns = []
+    for line in lines:
+        if os.name == "nt":
+            line = line.lower()
+        if line.rstrip().endswith("/**/"):
+            line = line.rstrip()[:-1] + "/*/"
+        try:
+            patterns.append(GitIgnoreSpecPattern(line))
+        except GitIgnorePatternError:
+            continue
+    ignored = False
+    for pattern in reversed(patterns):
+        candidate = relative
+        if is_dir and pattern.pattern.rstrip().endswith("/"):
+            candidate += "/"
+        if pattern.regex and any(
+            match.lastgroup is None or match.end() == len(candidate)
+            for match in pattern.regex.finditer(candidate)
+        ):
+            ignored = bool(pattern.include)
+            break
+    return ignored
+
+
+@pytest.mark.parametrize("is_dir", [False, True])
+def test_matches_agrees_with_reference_scan_semantics(tmp_path, is_dir):
+    # Wide pattern corpus: wildcards, negation, anchoring, scoping,
+    # doublestar, dir-only, classes, escapes, comments, blanks.
+    lines = [
+        "*.log",
+        "!keep.log",
+        "build/",
+        "/temp/",
+        "artifacts/out/",
+        "**/*.py",
+        "src/**/*.ts",
+        "foo/**/bar",
+        "docs",
+        "a?c",
+        "build/output",
+        "*.tmp/",
+        "**/deep",
+        "x/**/",
+        "[abc].py",
+        "*.py[cod]",
+        "sub/dir/leaf.txt",
+        "**",
+        "/",
+        "weird/**/",
+        "root*end",
+        "#comment",
+        "",
+        "!/rootonly",
+        "/rootonly",
+        "MiXeDCase",
+    ]
+    candidates = [
+        "a.log",
+        "sub/x.log",
+        "keep.log",
+        "src/keep.log",
+        "build",
+        "build/",
+        "build/out.o",
+        "temp",
+        "temp/x",
+        "artifacts/out",
+        "artifacts/out/z",
+        "src/mod.ts",
+        "other/mod.ts",
+        "foo/bar",
+        "foo/mid/bar",
+        "docs",
+        "docs/a",
+        "abc",
+        "axc",
+        "a.py",
+        "m.pyc",
+        "x.pycod",
+        "sub/dir/leaf.txt",
+        "deep",
+        "x/deep",
+        "deep/y",
+        "x/deep/y",
+        "weird",
+        "weird/a",
+        "root*end",
+        "rootMIDDLEend",
+        "rootonly",
+        "sub/rootonly",
+        "mixedcase",
+        "MIXEDCASE",
+    ]
+    (tmp_path / ".gitignore").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    ignore = GitIgnoreFilter(tmp_path)
+    for relative in candidates:
+        path = tmp_path / relative
+        assert ignore._matches(path, is_dir) == _reference_match(
+            lines, relative.lower() if os.name == "nt" else relative, is_dir
+        ), (relative, is_dir)
+
+
+@pytest.mark.parametrize("is_dir", [False, True])
+def test_prepare_dir_matches_is_ignored_and_reference(tmp_path, is_dir):
+    # Same corpus as the scan-semantics test, but driven through the
+    # walker-facing prepare_dir fast path: hoisted prefixes per parent
+    # directory, name-only matching per entry.
+    lines = [
+        "*.log",
+        "!keep.log",
+        "build/",
+        "/temp/",
+        "artifacts/out/",
+        "**/*.py",
+        "src/**/*.ts",
+        "foo/**/bar",
+        "docs",
+        "a?c",
+        "build/output",
+        "*.tmp/",
+        "**/deep",
+        "x/**/",
+        "[abc].py",
+        "*.py[cod]",
+        "sub/dir/leaf.txt",
+        "**",
+        "/",
+        "weird/**/",
+        "root*end",
+        "#comment",
+        "",
+        "!/rootonly",
+        "/rootonly",
+        "MiXeDCase",
+    ]
+    candidates = [
+        "a.log",
+        "sub/x.log",
+        "keep.log",
+        "src/keep.log",
+        "build/out.o",
+        "temp/x",
+        "artifacts/out/z",
+        "src/mod.ts",
+        "other/mod.ts",
+        "foo/bar",
+        "foo/mid/bar",
+        "docs/a",
+        "abc",
+        "axc",
+        "a.py",
+        "m.pyc",
+        "x.pycod",
+        "sub/dir/leaf.txt",
+        "deep",
+        "x/deep",
+        "deep/y",
+        "x/deep/y",
+        "weird/a",
+        "root*end",
+        "rootMIDDLEend",
+        "rootonly",
+        "sub/rootonly",
+        "mixedcase",
+        "MIXEDCASE",
+    ]
+    (tmp_path / ".gitignore").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    ignore = GitIgnoreFilter(tmp_path)
+
+    checkers = {}
+
+    def checker_for(parent: Path):
+        if parent not in checkers:
+            checkers[parent] = ignore.prepare_dir(parent)
+        return checkers[parent]
+
+    for relative in candidates:
+        path = tmp_path / relative
+        name = Path(relative).name
+        parent = path.parent
+        expected = _reference_match(
+            lines, relative.lower() if os.name == "nt" else relative, is_dir
+        )
+        assert ignore.is_ignored(path, is_dir) == expected, (relative, is_dir)
+        assert checker_for(parent)(name, is_dir) == expected, (relative, is_dir)

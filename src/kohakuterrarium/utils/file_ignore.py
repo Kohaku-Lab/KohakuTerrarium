@@ -1,24 +1,54 @@
 """Directory-scoped .gitignore matching for a single filesystem traversal."""
 
 import os
+import re
+from collections.abc import Callable
 from pathlib import Path
+from typing import NamedTuple
 
 from pathspec.patterns.gitignore import GitIgnorePatternError
 from pathspec.patterns.gitignore.spec import GitIgnoreSpecPattern
 
 
-def _compile_rules(lines: list[str]) -> tuple[GitIgnoreSpecPattern, ...]:
-    patterns = []
+class _Rule(NamedTuple):
+    """A compiled pattern with the flags ``_matches`` would otherwise
+    recompute for every candidate."""
+
+    include: bool
+    regex: re.Pattern[str] | None
+    # pathspec emits ^-anchored regexes, where finditer can only ever
+    # yield the position-0 match — one regex.match() is then equivalent
+    # to scanning and fails fast. False falls back to the scan.
+    anchored: bool
+    dir_only: bool  # pattern ends with "/" (directory-only rule)
+
+
+def _compile_rules(lines: list[str]) -> tuple[_Rule, ...]:
+    """Compile ignore *lines* into rules, in reverse line order.
+
+    ``_matches`` scans last-line-first (the last matching gitignore
+    rule wins); reversing here keeps the hot loop allocation-free.
+    """
+    rules: list[_Rule] = []
     for line in lines:
         if os.name == "nt":
             line = line.lower()
         if line.rstrip().endswith("/**/"):
             line = line.rstrip()[:-1] + "/*/"
         try:
-            patterns.append(GitIgnoreSpecPattern(line))
+            pattern = GitIgnoreSpecPattern(line)
         except GitIgnorePatternError:
             continue
-    return tuple(patterns)
+        regex = pattern.regex
+        rules.append(
+            _Rule(
+                include=bool(pattern.include),
+                regex=regex if regex else None,
+                anchored=bool(regex) and regex.pattern.startswith("^"),
+                dir_only=pattern.pattern.rstrip().endswith("/"),
+            )
+        )
+    return tuple(reversed(rules))
 
 
 class GitIgnoreFilter:
@@ -31,14 +61,10 @@ class GitIgnoreFilter:
             if (directory / ".git").exists():
                 self.boundary = directory
                 break
-        self._contexts: dict[
-            Path, tuple[tuple[Path, tuple[GitIgnoreSpecPattern, ...]], ...]
-        ] = {}
+        self._contexts: dict[Path, tuple[tuple[Path, tuple[_Rule, ...]], ...]] = {}
         self._excluded: dict[Path, bool] = {self.boundary: False}
 
-    def _context(
-        self, directory: Path
-    ) -> tuple[tuple[Path, tuple[GitIgnoreSpecPattern, ...]], ...]:
+    def _context(self, directory: Path) -> tuple[tuple[Path, tuple[_Rule, ...]], ...]:
         pending = []
         current = directory
         while current not in self._contexts:
@@ -63,21 +89,34 @@ class GitIgnoreFilter:
 
     def _matches(self, path: Path, is_dir: bool) -> bool:
         ignored = False
-        for directory, patterns in self._context(path.parent):
+        for directory, rules in self._context(path.parent):
             relative = path.relative_to(directory).as_posix()
             if os.name == "nt":
                 relative = relative.lower()
-            for pattern in reversed(patterns):
+            for rule in rules:
                 # Parent matches are evaluated separately by _directory_ignored.
                 candidate = relative
-                if is_dir and pattern.pattern.rstrip().endswith("/"):
+                if is_dir and rule.dir_only:
                     candidate += "/"
-                if pattern.regex and any(
+                regex = rule.regex
+                if regex is None:
+                    continue
+                if rule.anchored:
+                    # ^-anchored: the scan below could only ever yield
+                    # the position-0 match, so match() is equivalent
+                    # and rejects most candidates on their first char.
+                    match = regex.match(candidate)
+                    if match is None or (
+                        match.lastgroup is not None and match.end() != len(candidate)
+                    ):
+                        continue
+                elif not any(
                     match.lastgroup is None or match.end() == len(candidate)
-                    for match in pattern.regex.finditer(candidate)
+                    for match in regex.finditer(candidate)
                 ):
-                    ignored = bool(pattern.include)
-                    break
+                    continue
+                ignored = rule.include
+                break
         return ignored
 
     def _directory_ignored(self, directory: Path) -> bool:
@@ -100,3 +139,75 @@ class GitIgnoreFilter:
         if is_dir:
             return self._directory_ignored(path)
         return self._directory_ignored(path.parent) or self._matches(path, False)
+
+    def prepare_dir(self, directory: Path) -> Callable[[str, bool], bool]:
+        """Build a fast checker for direct entries of *directory*.
+
+        ``is_ignored`` re-derives the rule context, the ancestor
+        exclusion chain and the relative path for every single entry.
+        A walker visiting all entries of one directory can hoist that
+        work out of its loop::
+
+            check = ignore.prepare_dir(current)
+            ...
+            if check(entry.name, entry_is_dir):
+                continue
+
+        The returned callable is bound to *directory* — entries must be
+        its direct children — and its verdicts are identical to
+        ``is_ignored(directory / name, is_dir)``.
+        """
+        directory = Path(os.path.abspath(directory))
+        parent_excluded = self._directory_ignored(directory)
+        context = self._context(directory)
+
+        # Per rules-directory relative prefixes for entries of
+        # *directory*: "" for the directory's own rules, its path under
+        # each ancestor otherwise.  Computed once per directory.
+        prefixes: list[tuple[tuple[_Rule, ...], str | None, Path]] = []
+        for rules_dir, rules in context:
+            base = str(rules_dir)
+            full = str(directory)
+            if full == base:
+                prefix = ""
+            elif full.startswith(base) and full[len(base)] in "\\/":
+                prefix = full[len(base) + 1 :].replace("\\", "/") + "/"
+            else:  # defensive: fall back to pathlib for this directory
+                prefix = None
+            prefixes.append((rules, prefix, rules_dir))
+
+        def check(name: str, is_dir: bool) -> bool:
+            if parent_excluded:
+                return True
+            ignored = False
+            for rules, prefix, rules_dir in prefixes:
+                if prefix is None:
+                    relative = (directory / name).relative_to(rules_dir).as_posix()
+                else:
+                    relative = prefix + name
+                if os.name == "nt":
+                    relative = relative.lower()
+                for rule in rules:
+                    candidate = relative
+                    if is_dir and rule.dir_only:
+                        candidate += "/"
+                    regex = rule.regex
+                    if regex is None:
+                        continue
+                    if rule.anchored:
+                        match = regex.match(candidate)
+                        if match is None or (
+                            match.lastgroup is not None
+                            and match.end() != len(candidate)
+                        ):
+                            continue
+                    elif not any(
+                        match.lastgroup is None or match.end() == len(candidate)
+                        for match in regex.finditer(candidate)
+                    ):
+                        continue
+                    ignored = rule.include
+                    break
+            return ignored
+
+        return check

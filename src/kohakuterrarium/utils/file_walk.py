@@ -88,6 +88,10 @@ def _walk(
         except (PermissionError, OSError):
             continue
 
+        # One hoisted ignore-checker per directory; per entry it only
+        # matches the entry name against precomputed rule prefixes.
+        check = ignore.prepare_dir(current) if ignore else None
+
         subdirs: list[tuple[Path, str]] = []
         for entry in entries:
             name = entry.name
@@ -106,7 +110,7 @@ def _walk(
                 continue
 
             # Gitignore check
-            if ignore and ignore.is_ignored(Path(entry.path), entry_is_dir):
+            if check is not None and check(name, entry_is_dir):
                 continue
 
             if entry_is_dir:
@@ -196,6 +200,9 @@ def walk_dirs(
         except (PermissionError, OSError):
             continue
 
+        # One hoisted ignore-checker per directory (entries are subdirs).
+        check = ignore.prepare_dir(current) if ignore else None
+
         subdirs: list[Path] = []
         for entry in entries:
             name = entry.name
@@ -208,7 +215,7 @@ def walk_dirs(
                     continue
             except (PermissionError, OSError):
                 continue
-            if ignore and ignore.is_ignored(Path(entry.path), True):
+            if check is not None and check(name, True):
                 continue
             subdirs.append(Path(entry.path))
 
