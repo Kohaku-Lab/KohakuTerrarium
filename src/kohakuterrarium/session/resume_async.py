@@ -7,6 +7,7 @@ The agent being resumed is not started yet, so no other coroutine touches it
 while the affinity thread mutates it.
 """
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -81,9 +82,18 @@ async def resume_agent_async(
     output_module: OutputModule | None = None,
     mark_conversation_open: bool = True,
 ) -> tuple[Agent, SessionStore]:
-    """Async twin of :func:`resume_agent`; the caller owns the store."""
-    pwd_override = preflight_legacy_workspace(session_path, pwd_override)
-    store = _open_store_with_migration(session_path, writer_lock=True)
+    """Async twin of :func:`resume_agent`; the caller owns the store.
+
+    Preflight and store opening are blocking file work (legacy migration
+    may copy the session file) and run in a worker thread; any post-open
+    failure releases the writer lock off-loop as well.
+    """
+    pwd_override = await asyncio.to_thread(
+        preflight_legacy_workspace, session_path, pwd_override
+    )
+    store = await asyncio.to_thread(
+        _open_store_with_migration, session_path, writer_lock=True
+    )
     try:
         return await _resume_agent_from_open_store_async(
             store,
@@ -96,9 +106,10 @@ async def resume_agent_async(
             mark_conversation_open=mark_conversation_open,
         )
     except BaseException:
-        # Any post-open failure must release the writer lock before propagating.
+        # Any post-open failure must release the writer lock before
+        # propagating; close checkpoints WAL and must stay off the loop.
         try:
-            store.close(update_status=False)
+            await asyncio.to_thread(store.close, update_status=False)
         except Exception:
             logger.warning(
                 "resume_agent_async: closing store after failed resume failed",
