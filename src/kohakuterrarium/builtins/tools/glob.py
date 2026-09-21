@@ -1,6 +1,7 @@
 """Find files with gitignore-aware, bounded glob traversal."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
@@ -11,7 +12,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
     resolve_tool_path,
 )
-from kohakuterrarium.utils.file_walk import iter_matching_files
+from kohakuterrarium.utils.file_walk import iter_matching_files_stat
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -83,25 +84,29 @@ class GlobTool(BaseTool):
         # while retaining an upper bound for large trees.
         cap = max(limit * 10, 5_000) if limit > 0 else 50_000
 
-        matches: list[Path] = list(
-            iter_matching_files(
+        entries: list[tuple[Path, os.stat_result | None]] = list(
+            iter_matching_files_stat(
                 base,
                 pattern,
                 gitignore=follow_gitignore,
                 cap=cap,
             )
         )
-        hit_cap = len(matches) >= cap
+        hit_cap = len(entries) >= cap
 
-        # Stat only the capped subset before sorting newest first.
-        matches.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+        # Stats were carried out of the walk itself (free on Windows);
+        # a file that vanished mid-walk sorts oldest instead of failing
+        # the whole search.
+        entries.sort(
+            key=lambda e: e[1].st_mtime if e[1] is not None else 0.0, reverse=True
+        )
 
-        total = len(matches)
+        total = len(entries)
         if limit > 0 and total > limit:
-            matches = matches[:limit]
+            entries = entries[:limit]
 
         output_lines = []
-        for match in matches:
+        for match, _stat in entries:
             try:
                 rel_path = match.relative_to(base)
             except ValueError:
@@ -112,16 +117,16 @@ class GlobTool(BaseTool):
 
         if hit_cap:
             output += (
-                f"\n\n... (showing {len(matches)} of {total} collected, "
+                f"\n\n... (showing {len(entries)} of {total} collected, "
                 f"capped at {cap}; more may exist — narrow your pattern)"
             )
-        elif total > len(matches):
-            output += f"\n\n... ({total} total, showing {len(matches)})"
+        elif total > len(entries):
+            output += f"\n\n... ({total} total, showing {len(entries)})"
 
         logger.debug(
             "Glob search",
             pattern=pattern,
-            matches=len(matches),
+            matches=len(entries),
         )
 
         return ToolResult(output=output or "(no matches)", exit_code=0)
