@@ -1,9 +1,5 @@
-"""Unit tests for :mod:`kohakuterrarium.utils.file_walk`.
-
-This module powers the tree / grep / glob built-in tools.  Bugs
-here cause those tools to silently miss files or scan ignored
-subtrees.  Every branch exercised against real filesystem fixtures.
-"""
+"""Unit tests for :mod:`kohakuterrarium.utils.file_walk`, the traversal
+behind the tree / grep / glob tools.  Every branch exercised on real fixtures."""
 
 import os
 from pathlib import Path
@@ -300,21 +296,13 @@ class TestWalkFiles:
             def __init__(self, entry):
                 self._entry = entry
 
-            @property
-            def name(self):
-                return self._entry.name
-
-            @property
-            def path(self):
-                return self._entry.path
+            name = property(lambda self: self._entry.name)
+            path = property(lambda self: self._entry.path)
 
             def is_dir(self, follow_symlinks=True):
                 if self._entry.name == "weird":
                     raise PermissionError("denied")
                 return self._entry.is_dir(follow_symlinks=follow_symlinks)
-
-            def is_file(self, follow_symlinks=True):
-                return self._entry.is_file(follow_symlinks=follow_symlinks)
 
         def _boom(path):
             if Path(path) == tmp_path:

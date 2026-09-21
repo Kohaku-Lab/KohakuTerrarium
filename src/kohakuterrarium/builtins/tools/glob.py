@@ -1,6 +1,7 @@
 """Find files with gitignore-aware, bounded glob traversal."""
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Any
 
@@ -83,7 +84,7 @@ class GlobTool(BaseTool):
         # while retaining an upper bound for large trees.
         cap = max(limit * 10, 5_000) if limit > 0 else 50_000
 
-        entries: list[tuple[Path, Any]] = list(
+        entries: list[tuple[Path, os.stat_result | None]] = list(
             iter_matching_files_stat(
                 base,
                 pattern,

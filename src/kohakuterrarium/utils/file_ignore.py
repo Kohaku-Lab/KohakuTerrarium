@@ -16,9 +16,11 @@ class _Rule(NamedTuple):
 
     include: bool
     regex: re.Pattern[str] | None
-    # pathspec emits ^-anchored regexes, where finditer can only ever
-    # yield the position-0 match — one regex.match() is then equivalent
-    # to scanning and fails fast. False falls back to the scan.
+    # Segment-built pathspec regexes start with ^, where finditer could
+    # only ever yield the position-0 match — one regex.match() is then
+    # equivalent to scanning and fails fast. A few shortcut forms
+    # (e.g. a bare "*" or trailing "/**/") compile unanchored and take
+    # the finditer fallback below. False falls back to the scan.
     anchored: bool
     dir_only: bool  # pattern ends with "/" (directory-only rule)
 
@@ -69,7 +71,9 @@ class GitIgnoreFilter:
         current = directory
         while current not in self._contexts:
             pending.append(current)
-            if current == self.boundary:
+            # current == current.parent at a filesystem root: stop there
+            # too, or an out-of-boundary directory would climb forever.
+            if current == self.boundary or current == current.parent:
                 break
             current = current.parent
         context = self._contexts.get(current, ())
@@ -110,7 +114,7 @@ class GitIgnoreFilter:
                         match.lastgroup is not None and match.end() != len(candidate)
                     ):
                         continue
-                elif not any(
+                elif not any(  # unanchored: keep the original full scan
                     match.lastgroup is None or match.end() == len(candidate)
                     for match in regex.finditer(candidate)
                 ):
@@ -122,10 +126,10 @@ class GitIgnoreFilter:
     def _directory_ignored(self, directory: Path) -> bool:
         pending = []
         current = directory
-        while current not in self._excluded:
+        while current not in self._excluded and current != current.parent:
             pending.append(current)
             current = current.parent
-        ignored = self._excluded[current]
+        ignored = self._excluded.get(current, False)
         for current in reversed(pending):
             ignored = ignored or self._matches(current, True)
             self._excluded[current] = ignored
@@ -155,9 +159,15 @@ class GitIgnoreFilter:
 
         The returned callable is bound to *directory* — entries must be
         its direct children — and its verdicts are identical to
-        ``is_ignored(directory / name, is_dir)``.
+        ``is_ignored(directory / name, is_dir)``.  Directories outside
+        the boundary check as not ignored, like ``is_ignored`` does.
         """
         directory = Path(os.path.abspath(directory))
+        if not directory.is_relative_to(self.boundary):
+            # is_ignored returns False for everything outside the
+            # boundary; hand back the same verdict without touching the
+            # exclusion chain — climbing from here would never reach it.
+            return lambda name, is_dir: False
         parent_excluded = self._directory_ignored(directory)
         context = self._context(directory)
 

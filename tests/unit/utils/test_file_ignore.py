@@ -411,3 +411,40 @@ def test_prepare_dir_matches_is_ignored_and_reference(tmp_path, is_dir):
         )
         assert ignore.is_ignored(path, is_dir) == expected, (relative, is_dir)
         assert checker_for(parent)(name, is_dir) == expected, (relative, is_dir)
+
+
+def test_prepare_dir_outside_boundary_checks_as_not_ignored(tmp_path):
+    # Regression: prepare_dir used to climb the exclusion chain from
+    # out-of-boundary directories, where the boundary is never an
+    # ancestor — a deterministic hang (glob/grep patterns like
+    # "../**/*.py" reach this). is_ignored always checked such paths
+    # as not ignored; the fast path must agree.
+    (tmp_path / ".git").mkdir()
+    ignore = GitIgnoreFilter(tmp_path)
+    outside = tmp_path.parent
+    check = ignore.prepare_dir(outside)
+    assert check("whatever.py", False) is False
+    assert check("whatever", True) is False
+    assert ignore.is_ignored(outside / "whatever.py", False) is False
+    assert ignore.is_ignored(outside / "whatever", True) is False
+
+
+def test_walk_terminates_when_pattern_prefix_escapes_the_boundary(tmp_path):
+    # Companion to test_prepare_dir_outside_boundary_checks_as_not_ignored,
+    # driven through iter_matching_files like the glob/grep tools reach
+    # it: pattern prefixes may escape the search base (".."), putting
+    # walk directories outside the gitignore boundary (proj, which
+    # holds .git). The walk must terminate; the out-of-base paths
+    # leaking into the result matches baseline (pre-existing) behavior.
+    from kohakuterrarium.utils.file_walk import iter_matching_files
+
+    (tmp_path / ".git").mkdir()
+    proj = tmp_path / "proj"
+    work = proj / "work"
+    work.mkdir(parents=True)
+    (work / "in.py").write_text("")
+    (proj / "lib.py").write_text("")
+    (tmp_path / "outer.py").write_text("")
+
+    out = list(iter_matching_files(work, "../../**/*.py"))
+    assert {p.name for p in out} == {"outer.py", "lib.py", "in.py"}
