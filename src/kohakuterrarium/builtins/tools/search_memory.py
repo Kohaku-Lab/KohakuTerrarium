@@ -69,9 +69,16 @@ class SearchMemoryTool(BaseTool):
         await self._ensure_indexed(context, memory)
 
         try:
-            results = await asyncio.to_thread(
-                memory.search, query, mode=mode, k=k, agent=agent
-            )
+            # A live store routes the query through its affinity thread so
+            # the SessionMemory handles stay serialized with store writes.
+            store = getattr(context.agent, "session_store", None)
+            run = getattr(store, "run", None) if store is not None else None
+            if callable(run):
+                results = await run(memory.search, query, mode=mode, k=k, agent=agent)
+            else:
+                results = await asyncio.to_thread(
+                    memory.search, query, mode=mode, k=k, agent=agent
+                )
         except Exception as e:
             return ToolResult(error=f"Search failed: {e}")
 
@@ -115,6 +122,13 @@ class SearchMemoryTool(BaseTool):
         if not agent or not hasattr(agent, "session_store") or not agent.session_store:
             return None
 
+        store = agent.session_store
+        run = getattr(store, "run", None)
+        if callable(run):
+            # SessionMemory opens its own handles on the same file as the
+            # live store; constructing on the affinity thread keeps them
+            # serialized with the store's writes.
+            return await run(self._build_memory, context)
         return await asyncio.to_thread(self._build_memory, context)
 
     def _build_memory(self, context: ToolContext) -> Any:
