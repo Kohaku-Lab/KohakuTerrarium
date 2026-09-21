@@ -237,7 +237,50 @@ def test_windows_startup_passes_window_icon_to_webview(monkeypatch):
 
     desktop.run_desktop_app(port=8001, log_level="ERROR")
 
-    assert starts and starts[0].get("icon", "").endswith("window.ico")
+    expected = Path(desktop.__file__).parent.parent / "app_icons" / "window.ico"
+    assert starts and starts[0].get("icon") == str(expected)
+
+
+def test_windows_startup_passes_no_icon_when_ico_missing(monkeypatch):
+    starts = []
+    shell32 = SimpleNamespace(
+        SetCurrentProcessExplicitAppUserModelID=lambda app_id: None
+    )
+    user32 = SimpleNamespace(
+        LoadImageW=lambda *_args: 73,
+        FindWindowW=lambda *_args: 91,
+        SendMessageW=lambda *args: None,
+    )
+    webview = _Webview([])
+
+    def _record_start(*_args, **kwargs):
+        starts.append(kwargs)
+
+    webview.start = _record_start
+    monkeypatch.setattr(desktop.sys, "platform", "win32")
+    monkeypatch.setattr(
+        ctypes,
+        "windll",
+        SimpleNamespace(shell32=shell32, user32=user32),
+        raising=False,
+    )
+    monkeypatch.setattr(desktop, "configure_utf8_stdio", lambda **_kwargs: None)
+    monkeypatch.setattr(desktop.threading, "Thread", _ImmediateThread)
+    monkeypatch.setattr(desktop, "_load_webview", lambda: webview)
+    monkeypatch.setattr(
+        desktop, "_start_server", lambda **_kwargs: SimpleNamespace(pid=42)
+    )
+    monkeypatch.setattr(
+        desktop,
+        "_wait_for_server",
+        lambda *_args, **_kwargs: {"status": "ready", "port": 8123},
+    )
+    monkeypatch.setattr(desktop, "_stop_server_child", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(desktop.Path, "exists", lambda _self: False)
+
+    desktop.run_desktop_app(port=8001, log_level="ERROR")
+
+    assert starts and starts[0] == {"icon": None}
 
 
 def test_macos_desktop_restores_native_dock_icon(monkeypatch):
