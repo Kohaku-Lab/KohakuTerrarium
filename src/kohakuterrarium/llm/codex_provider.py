@@ -17,6 +17,7 @@ except ImportError:
     AsyncOpenAI = None  # type: ignore[assignment,misc]
     HAS_OPENAI = False
 
+from kohakuterrarium.llm import responses_ws_options as ws_options
 from kohakuterrarium.llm.base import (
     BaseLLMProvider,
     ChatResponse,
@@ -87,10 +88,12 @@ class CodexOAuthProvider(BaseLLMProvider):
         self.timeout = timeout
         self.max_retries = max_retries
         self._retry_policy = RetryPolicy.from_value(retry_policy)
-        # An explicit key bypasses OAuth and targets the configured Responses endpoint.
         self._api_key = api_key
         self._base_url = base_url
         self.extra_body = dict(extra_body or {})
+        self._ws_connection_options = ws_options.build_websocket_connection_options(
+            self.extra_body.get("websocket_connection_options"), timeout=timeout
+        )
         if websocket_mode is None:
             websocket_mode = bool(self.extra_body.get("websocket_mode"))
         self._websocket_mode = bool(websocket_mode)
@@ -231,10 +234,14 @@ class CodexOAuthProvider(BaseLLMProvider):
             retry_policy=self._retry_policy,
             api_key=self._api_key,
             base_url=self._base_url,
-            extra_body=dict(self.extra_body),
+            extra_body={
+                **self.extra_body,
+                "websocket_connection_options": self._ws_connection_options,
+            },
             websocket_mode=self._websocket_mode,
         )
         clone._tokens = self._tokens
+        clone.extra_body = dict(self.extra_body)
         clone._token_lock = self._token_lock
         clone._client = self._client
         clone._retry_policy = self._retry_policy
@@ -501,17 +508,8 @@ class CodexOAuthProvider(BaseLLMProvider):
 
     def _wire_extra_body(self) -> dict[str, Any]:
         """Return extra_body wire fields (framework knobs and reasoning removed)."""
-        return {
-            k: v
-            for k, v in self.extra_body.items()
-            if k
-            not in (
-                "reasoning",
-                "websocket_mode",
-                "disable_prompt_caching",
-                "responses_reasoning_replay",
-            )
-        }
+        knobs = ws_options.FRAMEWORK_KNOBS | {"reasoning"}
+        return {k: v for k, v in self.extra_body.items() if k not in knobs}
 
     def _ws_session_for_turn(
         self, session_headers: dict[str, str]
@@ -523,7 +521,9 @@ class CodexOAuthProvider(BaseLLMProvider):
             def _factory() -> Any:
                 # Late-bound so credential reloads and header updates apply.
                 return self._client.responses.connect(
-                    max_retries=0, extra_headers=dict(self._ws_headers)
+                    max_retries=0,
+                    extra_headers=dict(self._ws_headers),
+                    websocket_connection_options=dict(self._ws_connection_options),
                 )
 
             self._ws_session = ResponsesWSSession(_factory)

@@ -149,6 +149,8 @@ class ResponsesWSSession:
             raise ResponsesWSError(
                 str(exc), mid_stream=False, transport=True, submitted=False
             ) from exc
+        if self._prev_id is None:
+            delta = None
         event: dict[str, Any] = {"type": "response.create", **base_event}
         if delta is not None:
             event["previous_response_id"] = self._prev_id
@@ -158,7 +160,16 @@ class ResponsesWSSession:
         try:
             await connection.send(event)
         except Exception as exc:
-            raise ResponsesWSError(str(exc), mid_stream=False, transport=True) from exc
+            detail = exc
+            if type(exc).__name__ == "WebSocketQueueFullError":
+                cause = exc.__cause__
+                if cause is None:
+                    cause = exc.__context__
+                if cause is not None:
+                    detail = cause
+            raise ResponsesWSError(
+                str(detail) or type(detail).__name__, mid_stream=False, transport=True
+            ) from exc
 
         yielded = False
         iterator = connection.__aiter__()
@@ -222,6 +233,13 @@ class ResponsesWSSession:
         raise ResponsesWSError(f"{code}: {message}", mid_stream=yielded)
 
     async def _ensure_connection(self) -> Any:
+        if self._connection is not None:
+            socket = getattr(self._connection, "_connection", self._connection)
+            state = getattr(socket, "state", None)
+            if getattr(state, "name", None) in ("CLOSING", "CLOSED") or (
+                getattr(socket, "closed", False) is True
+            ):
+                await self.close()
         if self._connection is None:
             self._manager = self._connect_factory()
             self._connection = await self._manager.enter()

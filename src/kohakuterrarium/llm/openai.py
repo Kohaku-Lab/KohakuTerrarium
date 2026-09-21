@@ -8,6 +8,7 @@ from typing import Any, AsyncIterator
 
 from openai import AsyncOpenAI
 
+from kohakuterrarium.llm import responses_ws_options as ws_options
 from kohakuterrarium.llm.anthropic_cache import (
     apply_anthropic_cache_markers,
     is_anthropic_endpoint,
@@ -89,6 +90,9 @@ class OpenAIProvider(BaseLLMProvider):
         )
 
         self.extra_body = extra_body or {}
+        self._ws_connection_options = ws_options.build_websocket_connection_options(
+            self.extra_body.get("websocket_connection_options"), timeout=timeout
+        )
         self._websocket_mode = bool(
             websocket_mode or self.extra_body.get("websocket_mode")
         )
@@ -162,6 +166,7 @@ class OpenAIProvider(BaseLLMProvider):
         )
         clone.extra_body = dict(self.extra_body)
         clone._websocket_mode = self._websocket_mode
+        clone._ws_connection_options = dict(self._ws_connection_options)
         clone._ws_session = None
         clone.echo_reasoning = self.echo_reasoning
         clone._retry_policy = self._retry_policy
@@ -228,7 +233,10 @@ class OpenAIProvider(BaseLLMProvider):
 
             def _factory() -> Any:
                 # Late-bound so credential reloads pick up the rebuilt client.
-                return self._client.responses.connect(max_retries=0)
+                return self._client.responses.connect(
+                    max_retries=0,
+                    websocket_connection_options=dict(self._ws_connection_options),
+                )
 
             self._ws_session = ResponsesWSSession(_factory)
         if self._ws_session.busy:
@@ -249,11 +257,7 @@ class OpenAIProvider(BaseLLMProvider):
 
     def _sanitize_extra_body(self, extra: dict[str, Any]) -> dict[str, Any]:
         """Remove framework-only request knobs before provider submission."""
-        knobs = (
-            "disable_prompt_caching",
-            "websocket_mode",
-            "responses_reasoning_replay",
-        )
+        knobs = ws_options.FRAMEWORK_KNOBS
         if not any(k in extra for k in knobs):
             return extra
         return {k: v for k, v in extra.items() if k not in knobs}

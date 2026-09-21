@@ -6,8 +6,8 @@ config system, ``api_keys`` storage, the native tool-schema builder, and
 the multimodal ``Message`` / ``ContentPart`` types.
 
 Live endpoint checks are excluded. The multimodal workflow also exercises
-the real OpenAI SDK with an in-memory HTTP transport; the remaining workflows
-exercise the abstraction surface that ``bootstrap/llm.py`` drives:
+the real OpenAI SDK with in-memory HTTP and loopback WebSocket transports;
+the remaining workflows exercise the abstraction surface that ``bootstrap/llm.py`` drives:
 
     resolve_controller_llm()  -> LLMProfile
     get_api_key()             -> str
@@ -37,6 +37,7 @@ import httpx
 import pytest
 from openai import APIStatusError
 from PIL import Image
+from websockets import serve
 
 from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
@@ -1589,6 +1590,106 @@ class TestLlmIntegration:
             assert restored.to_messages() == saved_history
         finally:
             await responses_provider.close()
+
+        large_text = "x" * (1024 * 1024 + 1)
+        ws_submissions = []
+
+        async def ws_response(socket):
+            for turn in range(2):
+                ws_submissions.append(json.loads(await socket.recv()))
+                text = large_text if turn == 0 else "continued"
+                response_id = f"ws-response-{turn}"
+                for offset in range(0, len(text), 512 * 1024):
+                    await socket.send(
+                        json.dumps(
+                            {
+                                "type": "response.output_text.delta",
+                                "delta": text[offset : offset + 512 * 1024],
+                            }
+                        )
+                    )
+                await socket.send(
+                    json.dumps(
+                        {
+                            "type": "response.completed",
+                            "response": {
+                                "id": response_id,
+                                "output": [
+                                    {
+                                        "type": "message",
+                                        "role": "assistant",
+                                        "content": [
+                                            {"type": "output_text", "text": text}
+                                        ],
+                                    }
+                                ],
+                            },
+                        }
+                    )
+                )
+            await socket.wait_closed()
+
+        async with serve(ws_response, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            for provider_type in (OpenAIProvider, CodexOAuthProvider):
+                ws_submissions.clear()
+                ws_provider = provider_type(
+                    api_key="test",
+                    model="vision",
+                    base_url=f"http://127.0.0.1:{port}/v1",
+                    extra_body={
+                        "websocket_mode": True,
+                        "websocket_connection_options": {
+                            "max_queue": 1,
+                            "ping_timeout": None,
+                            "compression": None,
+                        },
+                    },
+                )
+                ws_history = messages_to_dicts(
+                    [UserMessage([TextPart("Inspect"), ImagePart(url=file_reference)])]
+                )
+                try:
+                    if isinstance(ws_provider, CodexOAuthProvider):
+                        await ws_provider.ensure_authenticated()
+                    if not hasattr(ws_provider._client.responses, "connect"):
+                        continue
+                    chunks = [
+                        chunk
+                        async for chunk in ws_provider.chat(
+                            ws_history,
+                            extra_body={
+                                "websocket_connection_options": {"max_size": 1}
+                            },
+                        )
+                    ]
+                    assert "".join(chunks) == large_text
+                    assert "websocket_connection_options" not in ws_submissions[0]
+                    assert ws_submissions[0]["input"][0]["content"] == [
+                        {"type": "input_text", "text": "Inspect"},
+                        {
+                            "type": "input_image",
+                            "image_url": f"data:image/png;base64,{encoded}",
+                        },
+                    ]
+                    ws_history.extend(
+                        [
+                            {"role": "assistant", "content": large_text},
+                            {"role": "user", "content": "Continue"},
+                        ]
+                    )
+                    chunks = [chunk async for chunk in ws_provider.chat(ws_history)]
+                    assert chunks == ["continued"]
+                    assert len(ws_submissions) == 2
+                    assert ws_submissions[1]["previous_response_id"] == "ws-response-0"
+                    assert ws_submissions[1]["input"] == [
+                        {
+                            "role": "user",
+                            "content": [{"type": "input_text", "text": "Continue"}],
+                        }
+                    ]
+                finally:
+                    await ws_provider.close()
 
     def test_api_key_storage_and_resolution_workflow(self):
         """Store + retrieve an API key, then assert the resolver override.

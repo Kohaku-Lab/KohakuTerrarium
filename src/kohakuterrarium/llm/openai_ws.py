@@ -14,13 +14,7 @@ from kohakuterrarium.llm.codex_format import fix_tool_call_pairing, to_responses
 from kohakuterrarium.llm.openai_sanitize import strip_kt_extras, strip_surrogates
 from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.responses_ws import ResponsesWSSession
-
-# Request knobs consumed by the framework, never sent on the wire.
-_FRAMEWORK_KNOBS = (
-    "disable_prompt_caching",
-    "websocket_mode",
-    "responses_reasoning_replay",
-)
+from kohakuterrarium.llm.responses_ws_options import FRAMEWORK_KNOBS
 
 
 def build_ws_request(
@@ -77,7 +71,7 @@ def build_ws_request(
         event["prompt_cache_key"] = provider.prompt_cache_key
 
     for key, value in merged_extra.items():
-        if key in _FRAMEWORK_KNOBS:
+        if key in FRAMEWORK_KNOBS:
             continue
         if key == "reasoning" and isinstance(value, dict):
             # ``enabled`` is OpenRouter's unified knob; the Responses API

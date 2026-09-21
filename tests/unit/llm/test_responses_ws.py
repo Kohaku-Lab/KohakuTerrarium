@@ -6,6 +6,7 @@ import json
 import pytest
 from openai import AsyncOpenAI
 from websockets import serve as serve_websocket
+from openai.resources.responses import responses as sdk_responses
 
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 
@@ -191,6 +192,139 @@ class TestFullAndIncrementalTurns:
 
 
 class TestFailureRecovery:
+    @pytest.mark.parametrize(
+        ("state", "closed", "reconnect"),
+        [
+            ("CLOSING", False, True),
+            ("CLOSED", False, True),
+            (None, True, True),
+            ("OPEN", False, False),
+        ],
+    )
+    async def test_socket_state_controls_pre_send_reconnection(
+        self, state, closed, reconnect
+    ):
+        h = Harness()
+        h.conn.scripts = [[completed("r1")], [completed("r2")]]
+        await h.run([USER1])
+        h.session.record_assistant_echo([ASSIST1])
+        h.conn.state = Ev(name=state)
+        h.conn.closed = closed
+        if reconnect:
+            replacement = FakeConnection()
+            replacement.scripts = [[completed("r2")]]
+            h.connections.append(replacement)
+        history = [USER1, ASSIST1, USER2]
+        await h.run(history)
+        if reconnect:
+            assert h.factory_calls == 2 and h.conn.send_attempts == 1
+            sent = h.connections[1].sent[0]
+            assert sent["input"] == ["PAIRED", *history]
+            assert "previous_response_id" not in sent
+        else:
+            assert h.factory_calls == 1
+            assert h.conn.sent[1]["input"] == [USER2]
+            assert h.conn.sent[1]["previous_response_id"] == "r1"
+        await h.session.close()
+
+    async def test_large_failed_send_reports_transport_cause_without_replay(self):
+        connection_type = getattr(sdk_responses, "AsyncResponsesConnection", None)
+        if connection_type is None:
+            pytest.skip("Installed OpenAI SDK has no Responses WebSocket support")
+
+        class FailingSocket:
+            def __init__(self):
+                self.attempts = 0
+                self.closed = False
+
+            async def send(self, data):
+                self.attempts += 1
+                raise ConnectionError("synthetic underlying send failure")
+
+            async def recv(self, **kwargs):
+                raise EOFError
+
+            async def close(self, **kwargs):
+                self.closed = True
+
+        raw = FailingSocket()
+        connection = connection_type(connection=raw)
+        if getattr(connection, "_send_queue", None) is None:
+            await connection.close()
+            pytest.skip("Installed OpenAI SDK has no failed-send buffer")
+        session = ResponsesWSSession(lambda: FakeManager(connection))
+        history = [{"role": "user", "content": "x" * (1024**2 + 1)}]
+        try:
+            with pytest.raises(
+                ResponsesWSError, match="synthetic underlying send failure"
+            ) as captured:
+                async for _ in session.stream_turn(
+                    {"model": "m"}, history, lambda x: x
+                ):
+                    pass
+            assert captured.value.submitted and captured.value.transport
+            assert not captured.value.mid_stream
+            assert raw.attempts == 1 and raw.closed
+            assert session._connection is None and session._prev_id is None
+            assert (
+                captured.value.__cause__.__class__.__name__ == "WebSocketQueueFullError"
+            )
+        finally:
+            await session.close()
+
+    async def test_real_sdk_closed_socket_reconnects_with_full_history_before_send(
+        self,
+    ):
+        submissions = []
+
+        async def serve(socket):
+            submissions.append(json.loads(await socket.recv()))
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "response.completed",
+                        "response": {
+                            "id": f"r{len(submissions)}",
+                            "status": "completed",
+                            "output": [],
+                        },
+                    }
+                )
+            )
+            if len(submissions) == 1:
+                await socket.close(code=1001)
+            else:
+                await socket.wait_closed()
+
+        async with serve_websocket(serve, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            client = AsyncOpenAI(api_key="test", base_url=f"http://127.0.0.1:{port}/v1")
+            if not hasattr(client.responses, "connect"):
+                await client.close()
+                pytest.skip("Installed OpenAI SDK has no Responses WebSocket support")
+            session = ResponsesWSSession(lambda: client.responses.connect())
+            try:
+                async for _ in session.stream_turn(
+                    {"model": "m"}, [USER1], lambda x: x
+                ):
+                    pass
+                session.record_assistant_echo([ASSIST1])
+                await session._connection._connection.wait_closed()
+                history = [USER1, ASSIST1, USER2]
+                events = [
+                    event
+                    async for event in session.stream_turn(
+                        {"model": "m"}, history, lambda x: x
+                    )
+                ]
+                assert events[-1].response.id == "r2"
+                assert len(submissions) == 2
+                assert submissions[1]["input"] == history
+                assert "previous_response_id" not in submissions[1]
+            finally:
+                await session.close()
+                await client.close()
+
     async def test_close_drains_buffered_frames_with_real_sdk(self):
         submissions = []
         burst_sent = asyncio.Event()

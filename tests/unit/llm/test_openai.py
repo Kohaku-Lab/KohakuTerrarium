@@ -73,6 +73,32 @@ def _success(streaming):
 
 class TestOpenAIRetries:
     @pytest.mark.parametrize("streaming", [False, True])
+    async def test_socket_options_are_removed_from_http_requests(self, streaming):
+        requests = []
+
+        async def respond(request):
+            requests.append(json.loads(request.content))
+            return _success(streaming)
+
+        async with OpenAIProvider(
+            api_key="test",
+            model="test",
+            extra_body={"websocket_connection_options": {"ping_timeout": None}},
+        ) as provider:
+            await _attach_transport(provider, respond)
+            chunks = [
+                chunk
+                async for chunk in provider.chat(
+                    MESSAGES,
+                    stream=streaming,
+                    extra_body={"websocket_connection_options": {"max_size": 1}},
+                )
+            ]
+            assert chunks == ["ok"]
+        assert len(requests) == 1
+        assert "websocket_connection_options" not in requests[0]
+
+    @pytest.mark.parametrize("streaming", [False, True])
     @pytest.mark.parametrize(
         ("header", "expected_delay"),
         [("10", 10.0), ("Thu, 01 Jan 10000 00:00:00 GMT", 1.0)],

@@ -5,14 +5,16 @@ With an explicit ``api_key`` it authenticates against a custom ``base_url``
 using API-key auth and MUST skip the Codex OAuth login; with no key it
 falls back to the ChatGPT-subscription OAuth flow (tokens). These tests
 pin the client-construction, mode-selection, and token-reload paths
-without any network/OAuth.
+without external network/OAuth.
 """
 
 import asyncio
+import json
 import time
 from dataclasses import dataclass
 
 import pytest
+from websockets import serve
 
 from kohakuterrarium.llm import codex_provider as cp
 from kohakuterrarium.llm.codex_auth import CodexTokens
@@ -721,6 +723,51 @@ def _ws_completed(resp_id="r1"):
 class TestWebsocketMode:
     """websocket_mode drives turns over responses.connect with HTTP fallback."""
 
+    async def test_receives_event_larger_than_one_mib_with_real_sdk(self):
+        text = "x" * (1024 * 1024 + 1)
+        submissions = []
+
+        async def respond(socket):
+            submissions.append(json.loads(await socket.recv()))
+            await socket.send(
+                json.dumps({"type": "response.output_text.delta", "delta": text})
+            )
+            await socket.send(
+                json.dumps(
+                    {
+                        "type": "response.completed",
+                        "response": {"id": "large-response", "output": []},
+                    }
+                )
+            )
+            await socket.wait_closed()
+
+        async with serve(respond, "127.0.0.1", 0) as server:
+            port = server.sockets[0].getsockname()[1]
+            provider = CodexOAuthProvider(
+                api_key="test",
+                model="test",
+                base_url=f"http://127.0.0.1:{port}/v1",
+                websocket_mode=True,
+            )
+            try:
+                await provider.ensure_authenticated()
+                if not hasattr(provider._client.responses, "connect"):
+                    pytest.skip(
+                        "Installed OpenAI SDK has no Responses WebSocket support"
+                    )
+                chunks = [
+                    chunk
+                    async for chunk in provider.chat(
+                        [{"role": "user", "content": "hi"}]
+                    )
+                ]
+                assert chunks == [text]
+                assert len(submissions) == 1
+                assert submissions[0]["type"] == "response.create"
+            finally:
+                await provider.close()
+
     def _provider(self, extra_body=None) -> CodexOAuthProvider:
         p = CodexOAuthProvider(
             model="m",
@@ -902,7 +949,10 @@ class TestWebsocketMode:
             api_key="sk",
             base_url="https://h/v1",
             reasoning_effort="low",
-            extra_body={"reasoning": {"mode": "pro"}},
+            extra_body={
+                "reasoning": {"mode": "pro"},
+                "websocket_connection_options": {"ping_timeout": None},
+            },
         )
         p._client = _FakeClient()
         async for _ in p._raw_stream_chat([{"role": "user", "content": "hi"}]):
@@ -910,6 +960,7 @@ class TestWebsocketMode:
 
         kw = p._client.responses.kwargs
         assert kw["reasoning"] == {"effort": "low", "mode": "pro"}
+        assert "websocket_connection_options" not in kw.get("extra_body", {})
 
     def test_with_model_propagates_ws_mode_with_fresh_session(self):
         p = self._provider()
