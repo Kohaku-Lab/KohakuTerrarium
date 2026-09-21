@@ -155,11 +155,19 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         Turn boundaries await this before reading or snapshotting so the
         persisted view includes everything dispatched during the turn.
         Failures surface here with the same warning the inline path used.
+
+        Cancellation-safe: the in-flight write is shielded so it completes
+        on its own, and writes not yet started are put back at the head of
+        the queue for the next drain — a cancelled turn must not silently
+        drop events it already emitted.
         """
         pending, self._pending_writes = self._pending_writes, []
-        for fut in pending:
+        for idx, fut in enumerate(pending):
             try:
-                await asyncio.wrap_future(fut)
+                await asyncio.shield(asyncio.wrap_future(fut))
+            except asyncio.CancelledError:
+                self._pending_writes[:0] = [f for f in pending[idx:] if not f.done()]
+                raise
             except Exception as e:
                 logger.warning("Session record failed", error=str(e), exc_info=True)
 

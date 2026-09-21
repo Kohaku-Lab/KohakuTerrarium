@@ -1658,3 +1658,35 @@ class TestWriteBehindQueue:
             assert calls == ["tool_call"]
         finally:
             store.close()
+
+    async def test_drain_cancellation_does_not_drop_queued_events(self, tmp_path):
+        # Reviewer-reproduced defect: a turn cancelled mid-drain must not
+        # silently drop events that were already emitted. The in-flight
+        # write is shielded and not-yet-started writes return to the queue.
+        import pytest
+
+        store, out = _make(tmp_path)
+        try:
+            real_append = store.append_event
+
+            def slow_append(*args, **kwargs):
+                time.sleep(0.1)
+                return real_append(*args, **kwargs)
+
+            store.append_event = slow_append
+            for i in range(3):
+                out.on_activity("tool_start", f"[bash] {i}")
+
+            task = asyncio.create_task(out.drain())
+            await asyncio.sleep(0.05)  # drain is now awaiting the first write
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            # The next drain (turn boundary / stop) persists everything.
+            await out.drain()
+            store.flush()
+            evts = [e for e in store.get_events("alice") if e["type"] == "tool_call"]
+            assert len(evts) == 3
+        finally:
+            store.close()
