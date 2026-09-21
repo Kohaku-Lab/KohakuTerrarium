@@ -15,6 +15,15 @@ The dashboard uses a configurable binary split tree: every pane is either a leaf
 
 See also: [Serving](serving.md) for how to open the dashboard.
 
+## Dashboard refresh preference
+
+The Dashboard's auto-refresh selector remembers Off, 5s (default), 15s, or
+60s through the shared UI preference storage, across tab switches and app
+restarts. Opening the Dashboard always loads current data once; Off disables
+its subsequent periodic refreshes. Leaving the Dashboard stops its timer.
+The shell's running-instance poll and the statistics card's metrics poll
+remain independent of this selector.
+
 ## Core concepts
 
 - **Panel**: a single-responsibility view (Chat, Files, Activity, State,
