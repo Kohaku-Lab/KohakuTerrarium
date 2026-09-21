@@ -238,12 +238,18 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
             await output.stop()
             logger.debug("Named output stopped", output_name=name)
         await self.default_output.stop()
+        # Secondaries carry state too (e.g. SessionOutput's write-behind
+        # queue); skipping them would drop queued writes at shutdown.
+        for output in self._secondary_outputs:
+            await output.stop()
         logger.debug("Output router stopped")
 
     async def flush(self) -> None:
         """Flush output modules."""
         await self.default_output.flush()
         for output in self.named_outputs.values():
+            await output.flush()
+        for output in self._secondary_outputs:
             await output.flush()
 
     async def on_user_input(self, text: str) -> None:
