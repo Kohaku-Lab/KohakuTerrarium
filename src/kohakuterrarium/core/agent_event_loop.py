@@ -252,7 +252,9 @@ class AgentEventLoopMixin:
 
         if self.plugins is not None:
             await self.plugins.notify("on_event", event=primary)
-        if primary.type == "user_input":
+        if primary.type == "user_input" or any(
+            _is_fresh_user_input(event) for event in events
+        ):
             inject_skill_path_hint(self)
 
         # Folded events get their own injected record + queued-banner-clear

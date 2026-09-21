@@ -162,6 +162,13 @@ Procedural skills are separate from tool docs. Discovered package skills default
 disabled until the creature opts them in with `skills:`; the prompt only gets a
 byte-budgeted skill index, not every full `SKILL.md` body.
 
+Skills with matching `paths` filters also add a short working-directory hint.
+That hint stays identical through the user's tool calls and background
+completions, preserving the history prefix for incremental Responses requests.
+The next user input refreshes it; changed or disabled matches can then require
+one full-history request. The hint is request context, not a saved conversation
+message.
+
 ## Tool format
 
 Controls the syntax the LLM emits to call tools (and to invoke framework commands). Applies to the parser and to the framework-hints block of the system prompt.

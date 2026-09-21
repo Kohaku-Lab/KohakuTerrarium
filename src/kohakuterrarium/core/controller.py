@@ -197,6 +197,8 @@ class Controller:
         # Injections remain pending until the next round so every pre-LLM hook
         # receives the same augmented message list.
         self._pending_injections: list[dict] = []
+        # Path guidance belongs to the whole user turn, including tool rounds.
+        self._skill_path_hint: str | None = None
 
         # Job store (shared with executor if provided)
         if executor:
@@ -834,9 +836,12 @@ class Controller:
 
         # Insert after all system messages so plugin context is early while
         # remaining visible to every pre-LLM hook.
-        if self._pending_injections:
-            injected = self._pending_injections
-            self._pending_injections = []
+        injected = self._pending_injections
+        self._pending_injections = []
+        if self._skill_path_hint:
+            # A fresh dict prevents a pre-hook from mutating the turn snapshot.
+            injected = [{"role": "user", "content": self._skill_path_hint}, *injected]
+        if injected:
             insert_idx = 0
             for i, msg in enumerate(messages):
                 if msg.get("role") == "system":
@@ -930,6 +935,7 @@ class Controller:
         Used in ephemeral mode after completing an interaction.
         """
         self.conversation.clear(keep_system=True)
+        self._skill_path_hint = None
         logger.debug("Controller flushed (ephemeral mode)")
 
     @property

@@ -15,7 +15,7 @@ def _do_clear(context: UserCommandContext) -> str:
     """Clear context, emit its activity, persist the empty snapshot, and summarize."""
     agent = context.agent
     msgs = len(agent.controller.conversation.get_messages())
-    agent.controller.conversation.clear()
+    agent.controller.flush()
 
     # Activity notification keeps frontends and the session event log synchronized.
     agent.output_router.notify_activity(
