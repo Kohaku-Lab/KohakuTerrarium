@@ -5,6 +5,7 @@ limit. These pure helpers turn the agent's branch state into the path a
 compaction covers, and compute the event-id range from the event log.
 """
 
+import asyncio
 from typing import Any
 
 from kohakuterrarium.utils.logging import get_logger
@@ -67,6 +68,43 @@ def persist_compacted(
         )
     tag_snapshot_branch(store, agent, agent_name)
     persist_compact_state(store, agent_name, compact_count, last_compact_time)
+
+
+async def persist_compacted_async(
+    store: Any,
+    agent_name: str,
+    agent: Any,
+    conversation: Any,
+    compact_count: int,
+    last_compact_time: float,
+) -> None:
+    """Off-loop twin of :func:`persist_compacted`.
+
+    Runs on the store's affinity thread when it has one (FIFO after any
+    queued writes), else on a plain worker thread; compaction dispatches
+    this only after a drain barrier, so no queued write can interleave.
+    """
+    run = getattr(store, "run", None)
+    if callable(run):
+        await run(
+            persist_compacted,
+            store,
+            agent_name,
+            agent,
+            conversation,
+            compact_count,
+            last_compact_time,
+        )
+    else:
+        await asyncio.to_thread(
+            persist_compacted,
+            store,
+            agent_name,
+            agent,
+            conversation,
+            compact_count,
+            last_compact_time,
+        )
 
 
 def persist_compact_state(
@@ -213,3 +251,13 @@ def compute_replaced_range(
     if not ids:
         return None
     return min(ids), max(ids)
+
+
+def read_agent_events(store: Any, agent_name: str) -> list[dict]:
+    """Read one agent's events, tolerating read failures (compact is best-effort)."""
+    if store is None:
+        return []
+    try:
+        return list(store.get_events(agent_name))
+    except Exception:  # pragma: no cover - defensive
+        return []
