@@ -5940,6 +5940,9 @@ class TestMidTurnBatchDrain:
             assert len(banners) == 1
             assert banners[0]["job_id"] == "grep_abc123"
             assert banners[0]["kind"] == "tool"
+            # The banner event rides the sink's write-behind queue (S4b);
+            # drain before asserting on the persisted store.
+            await agent._session_output.drain()
             events = store.get_events("test_agent")
             persisted = [e for e in events if e.get("type") == "background_result"]
             assert len(persisted) == 1
