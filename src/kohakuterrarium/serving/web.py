@@ -454,7 +454,7 @@ def _run_desktop_app_blocking(port: int = 8001, log_level: str = "INFO") -> None
             _set_icon_windows()
 
         window.events.shown += _on_shown
-        webview.start()
+        webview.start(icon=str(icon_ico) if icon_ico.exists() else None)
     elif sys.platform == "darwin":
 
         def _on_shown():
