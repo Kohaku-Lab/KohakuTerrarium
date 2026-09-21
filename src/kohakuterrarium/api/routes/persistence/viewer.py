@@ -305,8 +305,10 @@ async def get_session_diff(
     # Each live store loads its own side on its affinity thread; a saved side
     # opens and closes its store as one worker-thread unit. Loads run
     # concurrently and the merge is pure in-memory work on the event loop.
+    # No annotations here: nested-def annotations evaluate on every call on
+    # Python < 3.14, and tests monkeypatch SessionStore with plain functions.
 
-    async def _side(store: SessionStore | None, path: Path) -> Any:
+    async def _side(store, path):
         if store is not None:
             return await store.run(_load_messages, path, agent, store)
         return await asyncio.to_thread(_load_messages, path, agent, None)
