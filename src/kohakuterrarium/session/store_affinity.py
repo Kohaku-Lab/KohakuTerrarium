@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from functools import partial
 from typing import Any, Callable, TypeVar
 
@@ -52,3 +52,20 @@ class StoreAffinityMixin:
         if args:
             return await loop.run_in_executor(executor, fn, *args)
         return await loop.run_in_executor(executor, fn)
+
+    def submit(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> Future[_T]:
+        """Queue ``fn`` on this store's affinity thread without awaiting.
+
+        Execution order matches submit order (single worker), so a reader
+        dispatched through :meth:`run` observes every previously submitted
+        write. Safe to call without a running event loop; raises the same
+        ``RuntimeError`` as :meth:`run` when the store is closed.
+        """
+        if getattr(self, "_closed", False):
+            raise RuntimeError("SessionStore is closed")
+        executor = self._ensure_affinity()
+        if kwargs:
+            return executor.submit(partial(fn, *args, **kwargs))
+        if args:
+            return executor.submit(fn, *args)
+        return executor.submit(fn)

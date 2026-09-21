@@ -1,0 +1,594 @@
+"""Activity-event payload builders for :class:`SessionOutput`.
+
+Each handler translates one routed activity into its durable event payload
+and hands it to :meth:`SessionOutput._record`. Pure dispatch + shaping —
+all persistence goes through the host class's write-behind queue.
+"""
+
+import json
+from typing import Any
+
+from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
+from kohakuterrarium.utils.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class SessionActivityMixin:
+    """Translate routed activity events into persisted session events."""
+
+    # String targets keep activity dispatch declarative at class scope.
+    _ACTIVITY_HANDLERS: dict[str, str] = {
+        "trigger_fired": "_handle_trigger_fired",
+        "tool_start": "_handle_tool_start",
+        "tool_done": "_handle_tool_done",
+        "tool_error": "_handle_tool_error",
+        "subagent_start": "_handle_subagent_start",
+        "subagent_done": "_handle_subagent_done",
+        "subagent_error": "_handle_subagent_error",
+        "subagent_token_update": "_handle_subagent_token_update",
+        "token_usage": "_handle_token_usage",
+        "compact_start": "_handle_compact_start",
+        "compact_complete": "_handle_compact_complete",
+        "compact_skipped": "_handle_compact_skipped",
+        "background_result": "_handle_background_result",
+        "processing_complete": "_handle_processing_complete",
+        "processing_error": "_handle_processing_error",
+        "context_cleared": "_handle_context_cleared",
+        "tool_wait": "_handle_tool_wait",
+        "compact_decision": "_handle_compact_decision",
+        "turn_token_usage": "_handle_turn_token_usage",
+        "plugin_hook_timing": "_handle_plugin_hook_timing",
+        "cache_stats": "_handle_cache_stats",
+        "assistant_reasoning": "_handle_assistant_reasoning",
+        "scratchpad_write": "_handle_scratchpad_write",
+        # Suppress duplicate activity rows for input already persisted by the agent.
+        "user_input_injected": "_handle_user_input_injected",
+    }
+
+    def _record_activity(
+        self, activity_type: str, name: str, detail: str, metadata: dict
+    ) -> None:
+        handler_name = self._ACTIVITY_HANDLERS.get(activity_type)
+        if handler_name:
+            getattr(self, handler_name)(name, detail, metadata)
+        elif activity_type.startswith("subagent_tool_"):
+            self._handle_subagent_tool(activity_type, name, detail, metadata)
+        else:
+            self._record(
+                f"activity:{activity_type}",
+                {"name": name, "detail": detail, **metadata},
+            )
+
+    def _handle_assistant_reasoning(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        payload = {}
+        for key in (
+            "reasoning_content",
+            "reasoning_summary",
+            "reasoning_details",
+            "reasoning",
+            "_kt_assistant_segments",
+        ):
+            value = metadata.get(key)
+            if value not in (None, "", [], {}):
+                payload[key] = value
+        if payload:
+            self._record("assistant_reasoning", payload)
+
+    def _handle_trigger_fired(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "trigger_fired",
+            {
+                "trigger_id": metadata.get("trigger_id", ""),
+                "channel": metadata.get("channel", ""),
+                "sender": metadata.get("sender", ""),
+                "content": metadata.get("content", ""),
+            },
+        )
+
+    def _handle_tool_start(self, name: str, detail: str, metadata: dict) -> None:
+        data = {
+            "name": metadata.get("tool_name") or canonical_tool_name(name),
+            "call_id": metadata.get("job_id", ""),
+            "args": metadata.get("args", {}),
+        }
+        if metadata.get("tool_call_id"):
+            data["tool_call_id"] = metadata["tool_call_id"]
+            data["tool_call_arguments"] = metadata.get("tool_call_arguments")
+        self._record(
+            "tool_call",
+            data,
+        )
+
+    def _handle_tool_done(self, name: str, detail: str, metadata: dict) -> None:
+        event_data: dict[str, Any] = {
+            "name": _tool_name(name, metadata),
+            "call_id": metadata.get("job_id", ""),
+            "output": metadata.get("result", metadata.get("output", detail)),
+            "exit_code": metadata.get("exit_code", 0),
+        }
+        # Persist preview metadata so history reload need not read the file again.
+        canvas_preview = metadata.get("canvas_preview")
+        if canvas_preview:
+            event_data["canvas_preview"] = canvas_preview
+        tool_metadata = metadata.get("tool_metadata")
+        if isinstance(tool_metadata, dict):
+            event_data["tool_metadata"] = dict(tool_metadata)
+        self._record("tool_result", event_data)
+
+    def _handle_tool_error(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "tool_result",
+            {
+                "name": _tool_name(name, metadata),
+                "call_id": metadata.get("job_id", ""),
+                "output": metadata.get("result", metadata.get("output", detail)),
+                "exit_code": metadata.get("exit_code", 1),
+                "error": metadata.get("error", detail),
+                "interrupted": bool(metadata.get("interrupted", False)),
+                "cancelled": bool(metadata.get("cancelled", False)),
+                "final_state": metadata.get("final_state", "error"),
+            },
+        )
+
+    def _handle_subagent_start(self, name: str, detail: str, metadata: dict) -> None:
+        name = _subagent_name(name, metadata)
+        task = metadata.get("task", detail)
+        job_id = metadata.get("job_id", "")
+        if job_id:
+            # Completion may need the task to synthesize missing child history.
+            self._subagent_tasks[job_id] = {
+                "name": name,
+                "task": task,
+                "llm_name": metadata.get("llm_name", ""),
+                "model": metadata.get("model", ""),
+            }
+        self._record(
+            "subagent_call",
+            {
+                "name": name,
+                "task": task,
+                "job_id": job_id,
+                "background": bool(metadata.get("background", False)),
+                "llm_name": metadata.get("llm_name", ""),
+                "model": metadata.get("model", ""),
+            },
+        )
+
+    def _handle_subagent_done(self, name: str, detail: str, metadata: dict) -> None:
+        job_id = metadata.get("job_id", "")
+        task_record = self._subagent_tasks.get(job_id) or {}
+        name = _subagent_name(name, metadata)
+        output_text = metadata.get("result", detail)
+        self._record(
+            "subagent_result",
+            {
+                "name": name,
+                "job_id": job_id,
+                "output": output_text,
+                "tools_used": metadata.get("tools_used", []),
+                "turns": metadata.get("turns", 0),
+                "duration": metadata.get("duration", 0),
+                "llm_name": metadata.get("llm_name", "")
+                or task_record.get("llm_name", ""),
+                "model": metadata.get("model", "") or task_record.get("model", ""),
+                **_token_metadata(metadata),
+            },
+        )
+        # Preserve history for child runs outside SubAgentManager.
+        self._persist_subagent_conversation(
+            name, job_id, output_text, success=True, metadata=metadata
+        )
+
+    def _handle_subagent_token_update(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        self._record(
+            "subagent_token_usage",
+            {
+                "name": _subagent_name(name, metadata),
+                "job_id": metadata.get("job_id", ""),
+                **_token_metadata(metadata),
+            },
+        )
+
+    def _handle_subagent_error(self, name: str, detail: str, metadata: dict) -> None:
+        job_id = metadata.get("job_id", "")
+        task_record = self._subagent_tasks.get(job_id) or {}
+        name = _subagent_name(name, metadata)
+        output_text = metadata.get("result", detail)
+        self._record(
+            "subagent_result",
+            {
+                "name": name,
+                "job_id": job_id,
+                "output": output_text,
+                "error": metadata.get("error", detail),
+                "success": False,
+                "interrupted": bool(metadata.get("interrupted", False)),
+                "cancelled": bool(metadata.get("cancelled", False)),
+                "final_state": metadata.get("final_state", "error"),
+                "tools_used": metadata.get("tools_used", []),
+                "turns": metadata.get("turns", 0),
+                "duration": metadata.get("duration", 0),
+                "llm_name": metadata.get("llm_name", "")
+                or task_record.get("llm_name", ""),
+                "model": metadata.get("model", "") or task_record.get("model", ""),
+                **_token_metadata(metadata),
+            },
+        )
+        self._persist_subagent_conversation(
+            name, job_id, output_text, success=False, metadata=metadata
+        )
+
+    def _persist_subagent_conversation(
+        self,
+        name: str,
+        job_id: str,
+        output_text: str,
+        *,
+        success: bool,
+        metadata: dict,
+    ) -> None:
+        """Persist a minimal conversation when no full child history exists.
+
+        Managed sub-agents already store their complete conversation; this path
+        preserves tool-like child runs that bypass that persistence. The
+        find-then-write runs as one queued unit so it observes previously
+        submitted writes and stays atomic with them.
+        """
+        task_record = self._subagent_tasks.pop(job_id, None)
+        submit = getattr(self._store, "submit", None)
+        if not callable(submit):
+            self._write_subagent_conversation(
+                name,
+                job_id,
+                output_text,
+                success=success,
+                metadata=metadata,
+                task_record=task_record,
+            )
+            return
+        self._pending_writes.append(
+            submit(
+                self._write_subagent_conversation,
+                name,
+                job_id,
+                output_text,
+                success=success,
+                metadata=metadata,
+                task_record=task_record,
+            )
+        )
+
+    def _write_subagent_conversation(
+        self,
+        name: str,
+        job_id: str,
+        output_text: str,
+        *,
+        success: bool,
+        metadata: dict,
+        task_record: dict | None,
+    ) -> None:
+        task_text = task_record.get("task", "") if task_record is not None else ""
+        try:
+            find_run = getattr(self._store, "find_subagent_run", None)
+            if (
+                callable(find_run)
+                and find_run(job_id, parent=self._agent_name) is not None
+            ):
+                return
+            run = self._store.next_subagent_run(self._agent_name, name)
+            convo = [
+                {"role": "user", "content": task_text},
+                {"role": "assistant", "content": output_text or ""},
+            ]
+            self._store.save_subagent(
+                parent=self._agent_name,
+                name=name,
+                run=run,
+                meta={
+                    "job_id": job_id,
+                    "task": task_text,
+                    "turns": metadata.get("turns", 0),
+                    "tools_used": metadata.get("tools_used", []),
+                    "success": success,
+                    "duration": metadata.get("duration", 0),
+                    "llm_name": metadata.get("llm_name", "")
+                    or (task_record or {}).get("llm_name", ""),
+                    "model": metadata.get("model", "")
+                    or (task_record or {}).get("model", ""),
+                    "output_preview": (output_text or "")[:500],
+                    "source": "session_output",
+                },
+                conv_json=json.dumps(convo),
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to persist sub-agent conversation via SessionOutput",
+                error=str(e),
+                exc_info=True,
+            )
+
+    def _handle_token_usage(self, name: str, detail: str, metadata: dict) -> None:
+        self._ensure_token_totals_restored()
+        prompt = metadata.get("prompt_tokens", 0)
+        completion = metadata.get("completion_tokens", 0)
+        cached = metadata.get("cached_tokens", 0)
+        self._total_input_tokens += prompt
+        self._total_output_tokens += completion
+        self._total_cached_tokens += cached
+        self._record(
+            "token_usage",
+            {
+                "prompt_tokens": prompt,
+                "completion_tokens": completion,
+                "total_tokens": metadata.get("total_tokens", 0),
+                "cached_tokens": cached,
+            },
+        )
+        # Namespace cumulative totals so attached agents cannot collide with hosts.
+        try:
+            self._store.save_state(
+                self._event_key_prefix,
+                token_usage={
+                    "total_input_tokens": self._total_input_tokens,
+                    "total_output_tokens": self._total_output_tokens,
+                    "total_cached_tokens": self._total_cached_tokens,
+                    "last_prompt_tokens": prompt,
+                },
+            )
+        except Exception as e:
+            logger.warning(
+                "Failed to save token usage state", error=str(e), exc_info=True
+            )
+
+    def _handle_compact_start(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "compact_start",
+            {"round": metadata.get("round", 0)},
+        )
+
+    def _handle_compact_complete(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "compact_complete",
+            {
+                "round": metadata.get("round", 0),
+                "summary": metadata.get("summary", ""),
+                "messages_compacted": metadata.get("messages_compacted", 0),
+                "replaced_from_event_id": metadata.get("replaced_from_event_id"),
+                "replaced_to_event_id": metadata.get("replaced_to_event_id"),
+                "compact_path": metadata.get("compact_path"),
+                "turn_index": metadata.get("turn_index"),
+                "branch_id": metadata.get("branch_id"),
+                "parent_branch_path": metadata.get("parent_branch_path"),
+            },
+        )
+
+    def _handle_compact_skipped(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "compact_skipped",
+            {
+                "round": metadata.get("round", 0),
+                "reason": metadata.get("reason", ""),
+            },
+        )
+
+    def _handle_background_result(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "background_result",
+            {
+                "job_id": metadata.get("job_id", ""),
+                "kind": metadata.get("kind", "tool"),
+                "label": metadata.get("label", ""),
+            },
+        )
+
+    def _handle_subagent_tool(
+        self, activity_type: str, name: str, detail: str, metadata: dict
+    ) -> None:
+        self._record(
+            "subagent_tool",
+            {
+                "subagent": metadata.get("subagent", name),
+                "tool_name": metadata.get("tool", ""),
+                "activity": activity_type.replace("subagent_", ""),
+                "detail": metadata.get("detail", detail),
+                "job_id": metadata.get("job_id", ""),
+            },
+        )
+
+    def _handle_context_cleared(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "context_cleared",
+            {"messages_cleared": metadata.get("messages_cleared", 0)},
+        )
+
+    def _handle_processing_error(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "processing_error",
+            {
+                "error_type": metadata.get("error_type", "Error"),
+                "error": metadata.get("error", detail),
+            },
+        )
+
+    def _handle_processing_complete(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        self._record(
+            "processing_complete",
+            {
+                "trigger_channel": metadata.get("trigger_channel", ""),
+                "trigger_sender": metadata.get("trigger_sender", ""),
+                "output_preview": metadata.get("output_preview", ""),
+            },
+        )
+
+    def _handle_tool_wait(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "tool_wait",
+            {
+                "tool": metadata.get("tool", name),
+                "wait_ms": metadata.get("wait_ms", 0),
+                "reason": metadata.get("reason", "serial_lock"),
+            },
+        )
+
+    def _handle_compact_decision(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "compact_decision",
+            {
+                "reason": metadata.get("reason", "unknown"),
+                "tokens_before": metadata.get("tokens_before", 0),
+                "tokens_after": metadata.get("tokens_after", 0),
+                "skipped": bool(metadata.get("skipped", False)),
+            },
+        )
+
+    def _handle_turn_token_usage(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "turn_token_usage",
+            {
+                "turn_index": metadata.get("turn_index", 0),
+                "prompt_tokens": metadata.get("prompt_tokens", 0),
+                "completion_tokens": metadata.get("completion_tokens", 0),
+                "cached_tokens": metadata.get("cached_tokens", 0),
+                "total_tokens": metadata.get("total_tokens", 0),
+            },
+        )
+        # Persist the derived rollup at the source to avoid repeated event scans.
+        turn_index = metadata.get("turn_index", 0)
+        if self._store and isinstance(turn_index, int) and turn_index > 0:
+            try:
+                self._store.save_turn_rollup(
+                    self._event_key_prefix,
+                    turn_index,
+                    {
+                        "started_at": metadata.get("started_at"),
+                        "ended_at": metadata.get("ended_at"),
+                        "tokens_in": int(metadata.get("prompt_tokens") or 0),
+                        "tokens_out": int(metadata.get("completion_tokens") or 0),
+                        "tokens_cached": int(metadata.get("cached_tokens") or 0),
+                        "cost_usd": metadata.get("cost_usd"),
+                    },
+                )
+            except Exception as e:
+                logger.warning(
+                    "save_turn_rollup failed",
+                    error=str(e),
+                    turn_index=turn_index,
+                    exc_info=True,
+                )
+
+    def _handle_plugin_hook_timing(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        self._record(
+            "plugin_hook_timing",
+            {
+                "hook": metadata.get("hook", name),
+                "plugin": metadata.get("plugin", ""),
+                "duration_ms": metadata.get("duration_ms", 0),
+                "blocked": bool(metadata.get("blocked", False)),
+            },
+        )
+
+    def _handle_cache_stats(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "cache_stats",
+            {
+                "agent": metadata.get("agent", self._agent_name),
+                "cache_write": metadata.get("cache_write", 0),
+                "cache_read": metadata.get("cache_read", 0),
+                "cache_hit_ratio": metadata.get("cache_hit_ratio", 0.0),
+            },
+        )
+
+    def _handle_scratchpad_write(self, name: str, detail: str, metadata: dict) -> None:
+        self._record(
+            "scratchpad_write",
+            {
+                "agent": metadata.get("agent", self._agent_name),
+                "key": metadata.get("key", name),
+                "action": metadata.get("action", "set"),
+                "size_bytes": metadata.get("size_bytes", 0),
+            },
+        )
+
+    def _handle_user_input_injected(
+        self, name: str, detail: str, metadata: dict
+    ) -> None:
+        # The agent already wrote the canonical event with branch attribution.
+        return
+
+
+def _subagent_name(fallback: str, metadata: dict) -> str:
+    raw = metadata.get("subagent") or metadata.get("subagent_name")
+    if isinstance(raw, str) and raw:
+        return raw
+    job_id = str(metadata.get("job_id") or "")
+    if fallback == "agent" and job_id.startswith("agent_"):
+        body = job_id[len("agent_") :]
+        if "_" in body:
+            return body.rsplit("_", 1)[0]
+    return fallback
+
+
+def _token_metadata(metadata: dict) -> dict[str, Any]:
+    prompt = metadata.get("prompt_tokens")
+    completion = metadata.get("completion_tokens")
+    total = metadata.get("total_tokens")
+    cached = metadata.get("cached_tokens")
+    if prompt is None:
+        prompt = metadata.get("tokens_in", 0)
+    if completion is None:
+        completion = metadata.get("tokens_out", 0)
+    if cached is None:
+        cached = metadata.get("tokens_cached", 0)
+    if total is None:
+        try:
+            total = int(prompt or 0) + int(completion or 0)
+        except (TypeError, ValueError):
+            total = 0
+    data = {
+        "total_tokens": total or 0,
+        "prompt_tokens": prompt or 0,
+        "completion_tokens": completion or 0,
+        "cached_tokens": cached or 0,
+    }
+    if "cost_usd" in metadata:
+        data["cost_usd"] = metadata.get("cost_usd")
+    return data
+
+
+def _tool_name(label: str, metadata: dict) -> str:
+    """Resolve canonical identity from structured activity or legacy labels."""
+    return metadata.get("tool_name") or (
+        make_job_label(metadata["job_id"])[0]
+        if "_" in metadata.get("job_id", "")
+        else canonical_tool_name(label)
+    )
+
+
+def _parse_detail(detail: str) -> tuple[str, str]:
+    """Extract [name] prefix from detail string.
+
+    Handles nested brackets by finding ``] `` (closing bracket + space).
+    """
+    try:
+        if detail.startswith("["):
+            # The delimiter preserves nested brackets inside the label.
+            end = detail.index("] ", 1)
+            return detail[1:end], detail[end + 2 :]
+    except ValueError:
+        # A bare bracketed label has no detail suffix.
+        try:
+            if detail.startswith("[") and detail.endswith("]"):
+                return detail[1:-1], ""
+        except ValueError:
+            pass
+    return "unknown", detail

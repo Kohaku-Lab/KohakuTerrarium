@@ -105,3 +105,23 @@ def test_concurrent_first_dispatch_creates_one_executor(tmp_path, monkeypatch):
         if getattr(c, "__name__", "") == "_shutdown_affinity"
     ]
     assert len(closers) == 1
+
+
+async def test_submit_queues_without_await_and_rejects_after_close(tmp_path):
+    store = SessionStore(str(tmp_path / "submit.kohakutr"))
+    store.init_meta("a", "agent", "/p", "/w", ["a"])
+    try:
+        seen: list[int] = []
+        fut = store.submit(store.append_event, "a", "user_message", {"i": 1})
+        fut2 = store.submit(lambda: seen.append(7))
+        fut.result(timeout=5)
+        fut2.result(timeout=5)
+        assert seen == [7]
+        assert len(store.get_events("a")) == 1
+    finally:
+        store.close()
+    try:
+        store.submit(lambda: None)
+        raise AssertionError("submit on a closed store must fail")
+    except RuntimeError as exc:
+        assert "closed" in str(exc).lower()
