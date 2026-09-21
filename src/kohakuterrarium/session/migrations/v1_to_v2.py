@@ -39,6 +39,55 @@ def _coerce_args(args: Any) -> str:
         return "{}"
 
 
+def _preserve_structured_session(source: SessionStore, agents: list[str]) -> bool:
+    """Validate event-sourced history before creating a migration destination.
+
+    Older writers omitted the version marker even when recording canonical
+    messages. Retranslating those messages changes IDs and branch references.
+    Mixing copied IDs with synthetic legacy IDs is unsafe, so ambiguous mixed
+    histories require explicit repair rather than a partial automatic migration.
+    """
+    if not any(
+        event.get("type") == "user_message"
+        for agent in agents
+        for event in source.get_events(agent)
+    ):
+        return False
+
+    seen_ids: set[int] = set()
+    for agent in agents:
+        events = source.get_events(agent)
+        canonical = [e for e in events if e.get("type") == "user_message"]
+        mixed_error = ValueError(
+            f"Cannot safely migrate mixed legacy and structured history for {agent!r}; "
+            "the source is unchanged and no destination was created."
+        )
+        if (events or source.load_conversation(agent)) and not canonical:
+            raise mixed_error
+        turns = set()
+        for event in canonical:
+            if not all(
+                type(event.get(field)) is int and event[field] > 0
+                for field in ("turn_index", "branch_id")
+            ):
+                raise mixed_error
+            turns.add((event["turn_index"], event["branch_id"]))
+        for event in events:
+            event_id = event.get("event_id")
+            if type(event_id) is not int or event_id <= 0 or event_id in seen_ids:
+                raise ValueError(
+                    "Structured history requires unique positive event IDs"
+                )
+            seen_ids.add(event_id)
+            if event.get("type") == "user_input" and (
+                type(event.get("turn_index")) is not int
+                or type(event.get("branch_id")) is not int
+                or (event.get("turn_index"), event.get("branch_id")) not in turns
+            ):
+                raise mixed_error
+    return True
+
+
 def _flush_pending_tool_calls(
     pending: list[dict[str, Any]],
 ) -> tuple[str, dict[str, Any]] | None:
@@ -402,6 +451,8 @@ def migrate(source_path: str, target_path: str) -> None:
 
     source = SessionStore(str(src_path))
     try:
+        agents = _iter_agents(source, source.load_meta())
+        preserve_structured = _preserve_structured_session(source, agents)
         dest = SessionStore(str(dst_path))
         try:
             source_meta = _copy_meta_fields(source, dest)
@@ -421,11 +472,24 @@ def migrate(source_path: str, target_path: str) -> None:
             merged["migration"] = lineage
             dest.meta["lineage"] = merged
 
-            agents = _iter_agents(source, source_meta)
-
             for agent in agents:
                 v1_events = source.get_events(agent)
                 snapshot = source.load_conversation(agent) or []
+
+                if preserve_structured:
+                    # Preserve the complete log, including branch and compaction
+                    # references. append_event retains supplied IDs/timestamps
+                    # and advances the allocator past the imported identifiers.
+                    for event in v1_events:
+                        dest.append_event(agent, event["type"], dict(event))
+                    if snapshot:
+                        dest.save_conversation(agent, snapshot)
+                    logger.info(
+                        "Preserved structured legacy history",
+                        agent=agent,
+                        events=len(v1_events),
+                    )
+                    continue
 
                 if v1_events:
                     triples = _translate_v1_events(v1_events)

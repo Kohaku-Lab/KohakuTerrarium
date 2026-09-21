@@ -57,6 +57,7 @@ from kohakuterrarium.session.migrations import (
     path_for_version,
 )
 from kohakuterrarium.session.readonly import read_session_meta
+from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.session.resume import detect_session_type, resume_agent
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
@@ -1365,6 +1366,44 @@ class TestSessionIntegration:
             assert any(m.get("content") == "old tool output" for m in tool_msgs)
         finally:
             resumed_store.close()
+
+        # Structured events existed before the format marker. Migrating such a
+        # recording must preserve the canonical edit target, then permit a real
+        # rerun after resume rather than reject colliding event identifiers.
+        structured_path = tmp_path / "structured.kohakutr"
+        structured = _new_store(
+            structured_path, config_path=config_path, agents=["legacy"]
+        )
+        recording_agent = Agent.from_path(config_path)
+        recording_agent.attach_session_store(structured)
+        await recording_agent.start()
+        try:
+            await recording_agent._process_event(create_user_input_event("original"))
+        finally:
+            await recording_agent.stop()
+        recorded = structured.get_events("legacy")
+        target = next(event for event in recorded if event["type"] == "user_message")
+        del structured.meta["format_version"]
+        structured.close()
+        restored, restored_store = resume_agent(structured_path)
+        try:
+            assert restored_store.get_events("legacy") == recorded
+            await restored.start()
+            assert await restored.edit_and_rerun(
+                0,
+                "edited after migration",
+                target=UserMessageSelector(
+                    target["event_id"], target["turn_index"], target["branch_id"]
+                ),
+            )
+            messages = restored.controller.conversation.to_messages()
+            assert [m["content"] for m in messages if m["role"] == "user"] == [
+                "edited after migration"
+            ]
+            assert any(m["role"] == "assistant" for m in messages)
+        finally:
+            await restored.stop()
+            restored_store.close()
 
         # ---- the snapshot-fallback migration path ----
         # A v1 session that never streamed events: its history lives
