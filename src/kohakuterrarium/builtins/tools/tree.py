@@ -13,7 +13,8 @@ from kohakuterrarium.modules.tool.base import (
     ToolResult,
     resolve_tool_path,
 )
-from kohakuterrarium.utils.file_walk import is_ignored, parse_gitignore, should_skip_dir
+from kohakuterrarium.utils.file_ignore import GitIgnoreFilter
+from kohakuterrarium.utils.file_walk import should_skip_dir
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -78,16 +79,8 @@ class _TreeBuilder:
         self.lines: list[str] = []
         self.truncated = False
         self.total_skipped = 0
-        # Each recursion level contributes patterns inherited by its descendants.
-        self._ignore_stack: list[list[str]] = [[]]
+        self._ignore = GitIgnoreFilter(root) if follow_gitignore else None
         self.ignored_dirs: list[str] = []
-
-    def _current_patterns(self) -> list[str]:
-        """Return the ignore patterns inherited at the current tree level."""
-        result: list[str] = []
-        for patterns in self._ignore_stack:
-            result.extend(patterns)
-        return result
 
     def _add_line(self, line: str) -> bool:
         """Append one output line unless the configured limit is exhausted."""
@@ -106,12 +99,8 @@ class _TreeBuilder:
         if depth >= self.max_depth or self.truncated:
             return
 
-        local_patterns: list[str] = []
-        if self.follow_gitignore:
-            gi = path / ".gitignore"
-            if gi.is_file():
-                local_patterns = parse_gitignore(gi)
-        self._ignore_stack.append(local_patterns)
+        if self._ignore and self._ignore.is_ignored(path, True):
+            return
 
         try:
             entries = sorted(
@@ -119,13 +108,11 @@ class _TreeBuilder:
             )
         except PermissionError:
             self._add_line(f"{prefix}(permission denied)")
-            self._ignore_stack.pop()
             return
 
         if not self.show_hidden:
             entries = [e for e in entries if not e.name.startswith(".")]
 
-        patterns = self._current_patterns() if self.follow_gitignore else []
         filtered = []
         for e in entries:
             if should_skip_dir(e.name):
@@ -133,7 +120,7 @@ class _TreeBuilder:
                     self.ignored_dirs.append(e.name)
                 self.total_skipped += 1
                 continue
-            if self.follow_gitignore and is_ignored(e.name, e.is_dir(), patterns):
+            if self._ignore and self._ignore.is_ignored(e, e.is_dir()):
                 if e.is_dir():
                     self.ignored_dirs.append(e.name)
                 self.total_skipped += 1
@@ -176,8 +163,6 @@ class _TreeBuilder:
 
                 if not self._add_line(f"{prefix}{connector}{entry.name}{summary}"):
                     break
-
-        self._ignore_stack.pop()
 
 
 @register_builtin("tree")

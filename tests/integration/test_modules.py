@@ -1530,6 +1530,16 @@ class TestModulesIntegration:
                 ),
                 ScriptEntry("handled the failure", match="deliberate explosion"),
                 ScriptEntry(
+                    "[/grep]@@pattern=MATCH\n@@glob=*.log\n[grep/]",
+                    match="search with ignore rules",
+                ),
+                ScriptEntry("filtered search done", match="keep.log:1: MATCH kept"),
+                ScriptEntry(
+                    "[/glob]@@pattern=*.log\n@@gitignore=false\n[glob/]",
+                    match="list including ignored logs",
+                ),
+                ScriptEntry("unfiltered listing done", match="drop.log"),
+                ScriptEntry(
                     f"[/canvas_image]@@path={tmp_path / 'out.png'}\n[canvas_image/]",
                     match="publish first image",
                 ),
@@ -1560,6 +1570,9 @@ class TestModulesIntegration:
         tool = RecordingTool()
         agent.registry.register_tool(tool)
         agent.executor.register_tool(tool)
+        for search_tool in (GrepTool(), GlobTool()):
+            agent.registry.register_tool(search_tool)
+            agent.executor.register_tool(search_tool)
         canvas_tool = CanvasImageTool()
         agent.registry.register_tool(canvas_tool)
         agent.executor.register_tool(canvas_tool)
@@ -1623,6 +1636,36 @@ class TestModulesIntegration:
             assert "recorder failed: deliberate explosion" in convo_text
             last = agent.controller.conversation.get_last_assistant_message()
             assert "handled the failure" in last.get_text_content()
+            (tmp_path / ".gitignore").write_text("*.log\n!keep.log\n", encoding="utf-8")
+            (tmp_path / "keep.log").write_text("MATCH kept\n", encoding="utf-8")
+            (tmp_path / "drop.log").write_text("MATCH ignored\n", encoding="utf-8")
+            await agent._process_event(
+                create_user_input_event("search with ignore rules")
+            )
+            outputs = [
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            ]
+            grep_output = next(text for text in reversed(outputs) if "## grep_" in text)
+            assert "keep.log:1: MATCH kept" in grep_output
+            assert "drop.log" not in grep_output
+            assert (
+                agent.controller.conversation.get_last_assistant_message().get_text_content()
+                == "filtered search done"
+            )
+            await agent._process_event(
+                create_user_input_event("list including ignored logs")
+            )
+            outputs = [
+                m.get_text_content()
+                for m in agent.controller.conversation.get_messages()
+            ]
+            glob_output = next(text for text in reversed(outputs) if "## glob_" in text)
+            assert "drop.log" in glob_output and "keep.log" in glob_output
+            assert (
+                agent.controller.conversation.get_last_assistant_message().get_text_content()
+                == "unfiltered listing done"
+            )
             image_path = tmp_path / "out.png"
             Image.new("RGB", (2, 2), "red").save(image_path)
             original = image_path.read_bytes()

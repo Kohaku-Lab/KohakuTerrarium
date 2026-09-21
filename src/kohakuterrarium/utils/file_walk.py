@@ -8,9 +8,10 @@ the tree, grep, and glob tools to avoid scanning huge ignored subtrees
 """
 
 import re
-from fnmatch import fnmatch
 from pathlib import Path
 from typing import Iterator
+
+from kohakuterrarium.utils.file_ignore import GitIgnoreFilter
 
 # ── always-skip dirs ─────────────────────────────────────────────────
 # Directories unconditionally skipped regardless of .gitignore state.
@@ -43,40 +44,6 @@ def should_skip_dir(name: str) -> bool:
     return False
 
 
-# ── gitignore helpers ────────────────────────────────────────────────
-
-
-def parse_gitignore(gitignore_path: Path) -> list[str]:
-    """Read a ``.gitignore`` and return non-empty, non-comment patterns."""
-    try:
-        text = gitignore_path.read_text(encoding="utf-8", errors="ignore")
-    except (OSError, PermissionError):
-        return []
-    return [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip() and not line.strip().startswith("#")
-    ]
-
-
-def is_ignored(name: str, is_dir: bool, patterns: list[str]) -> bool:
-    """Check if *name* matches any gitignore-style pattern (simplified).
-
-    Handles trailing ``/`` (dir-only) patterns.  Negation (``!``) is
-    intentionally not supported — negated patterns are skipped.
-    """
-    for pat in patterns:
-        if pat.startswith("!"):
-            continue
-        if pat.endswith("/"):
-            if is_dir and fnmatch(name, pat.rstrip("/")):
-                return True
-            continue
-        if fnmatch(name, pat):
-            return True
-    return False
-
-
 # ── walkers ──────────────────────────────────────────────────────────
 
 
@@ -86,6 +53,7 @@ def walk_files(
     gitignore: bool = True,
     show_hidden: bool = False,
     cap: int = 0,
+    _ignore: GitIgnoreFilter | None = None,
 ) -> Iterator[Path]:
     """Yield files under *root*, skipping ignored subtrees.
 
@@ -104,25 +72,20 @@ def walk_files(
         Stop after yielding this many files (0 = unlimited).
     """
     count = 0
-    # Stack entries: (directory, inherited gitignore patterns)
-    stack: list[tuple[Path, list[str]]] = [(root, [])]
+    ignore = (_ignore or GitIgnoreFilter(root)) if gitignore else None
+    if ignore and ignore.is_ignored(root, True):
+        return
+    stack = [root]
 
     while stack:
-        current, parent_patterns = stack.pop()
-
-        # Build patterns for this directory
-        patterns = list(parent_patterns)
-        if gitignore:
-            gi = current / ".gitignore"
-            if gi.is_file():
-                patterns.extend(parse_gitignore(gi))
+        current = stack.pop()
 
         try:
             entries = list(current.iterdir())
         except (PermissionError, OSError):
             continue
 
-        subdirs: list[tuple[Path, list[str]]] = []
+        subdirs: list[Path] = []
         for entry in entries:
             name = entry.name
 
@@ -140,11 +103,11 @@ def walk_files(
                 continue
 
             # Gitignore check
-            if gitignore and is_ignored(name, entry_is_dir, patterns):
+            if ignore and ignore.is_ignored(entry, entry_is_dir):
                 continue
 
             if entry_is_dir:
-                subdirs.append((entry, patterns))
+                subdirs.append(entry)
             else:
                 yield entry
                 count += 1
@@ -166,24 +129,21 @@ def walk_dirs(
     Same filtering as :func:`walk_files` but yields directories instead
     of files.  Useful when the caller wants to run per-directory globs.
     """
-    stack: list[tuple[Path, list[str]]] = [(root, [])]
+    ignore = GitIgnoreFilter(root) if gitignore else None
+    if ignore and ignore.is_ignored(root, True):
+        return
+    stack = [root]
 
     while stack:
-        current, parent_patterns = stack.pop()
+        current = stack.pop()
         yield current
-
-        patterns = list(parent_patterns)
-        if gitignore:
-            gi = current / ".gitignore"
-            if gi.is_file():
-                patterns.extend(parse_gitignore(gi))
 
         try:
             entries = sorted(current.iterdir(), key=lambda p: p.name.lower())
         except (PermissionError, OSError):
             continue
 
-        subdirs: list[tuple[Path, list[str]]] = []
+        subdirs: list[Path] = []
         for entry in entries:
             name = entry.name
             if not show_hidden and name.startswith("."):
@@ -195,9 +155,9 @@ def walk_dirs(
                     continue
             except (PermissionError, OSError):
                 continue
-            if gitignore and is_ignored(name, True, patterns):
+            if ignore and ignore.is_ignored(entry, True):
                 continue
-            subdirs.append((entry, patterns))
+            subdirs.append(entry)
 
         stack.extend(reversed(subdirs))
 
@@ -229,12 +189,13 @@ def iter_matching_files(
     cap:
         Stop after yielding this many files (0 = unlimited).
     """
+    ignore = GitIgnoreFilter(base) if gitignore else None
     if "**" not in pattern:
         # Non-recursive — Path.glob is fast, no deep walking needed
         count = 0
         for f in base.glob(pattern):
             try:
-                if f.is_file():
+                if f.is_file() and not (ignore and ignore.is_ignored(f, False)):
                     yield f
                     count += 1
                     if cap and count >= cap:
@@ -265,7 +226,7 @@ def iter_matching_files(
 
     matcher = _glob_to_regex(pattern)
     count = 0
-    for f in walk_files(walk_root, gitignore=gitignore):
+    for f in walk_files(walk_root, gitignore=gitignore, _ignore=ignore):
         try:
             rel = f.relative_to(base)
         except ValueError:

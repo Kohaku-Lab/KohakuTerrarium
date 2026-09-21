@@ -3,6 +3,26 @@ from kohakuterrarium.modules.tool.base import ToolContext
 
 
 class TestTreeToolRootLabel:
+    async def test_scoped_rules_negation_and_opt_out(self, tmp_path):
+        (tmp_path / ".gitignore").write_text(
+            "/temp/\n*.log\n!keep.log\n", encoding="utf-8"
+        )
+        (tmp_path / "temp").mkdir()
+        (tmp_path / "temp/bad.txt").write_text("x", encoding="utf-8")
+        (tmp_path / "drop.log").write_text("x", encoding="utf-8")
+        (tmp_path / "keep.log").write_text("x", encoding="utf-8")
+        ctx = ToolContext(agent_name="agent", session=None, working_dir=tmp_path)
+        filtered = await TreeTool().execute({}, context=ctx)
+        assert filtered.success
+        tree = filtered.output.split("\n(")[0]
+        assert "keep.log" in tree
+        assert "drop.log" not in tree
+        assert "temp/" not in tree
+        unfiltered = await TreeTool().execute({"gitignore": False}, context=ctx)
+        assert unfiltered.success
+        assert "bad.txt" in unfiltered.output
+        assert "drop.log" in unfiltered.output
+
     async def test_dot_path_preserves_dot_root_label(self, tmp_path):
         (tmp_path / "child.txt").write_text("hello", encoding="utf-8")
         ctx = ToolContext(agent_name="agent", session=None, working_dir=tmp_path)

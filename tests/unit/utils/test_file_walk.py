@@ -15,13 +15,114 @@ from kohakuterrarium.utils.file_walk import (
     ALWAYS_SKIP_NAMES,
     _glob_match,
     _glob_to_regex,
-    is_ignored,
     iter_matching_files,
-    parse_gitignore,
     should_skip_dir,
     walk_dirs,
     walk_files,
 )
+
+
+@pytest.mark.parametrize("pattern", ["**/*.log", "*.log", "src/**/*.log", "src/*.log"])
+def test_search_preserves_ignore_scope_and_negation(tmp_path, pattern):
+    _build_tree(
+        tmp_path,
+        {
+            ".gitignore": "*.log\n!keep.log\n",
+            "drop.log": "x",
+            "keep.log": "x",
+            "src": {"drop.log": "x", "keep.log": "x"},
+        },
+    )
+    paths = _rel_set(tmp_path, iter_matching_files(tmp_path, pattern))
+    assert paths
+    assert all(p.endswith("keep.log") for p in paths)
+    unfiltered = _rel_set(
+        tmp_path, iter_matching_files(tmp_path, pattern, gitignore=False)
+    )
+    assert any(p.endswith("drop.log") for p in unfiltered)
+
+
+def test_search_anchored_rules_and_nested_scope(tmp_path):
+    _build_tree(
+        tmp_path,
+        {
+            ".gitignore": "/temp/\nartifacts/out/\n",
+            "temp": {"bad.py": "x"},
+            "artifacts": {"out": {"bad.py": "x"}},
+            "src": {
+                ".gitignore": "/cache/\n",
+                "cache": {"bad.py": "x"},
+                "deep": {"cache": {"good.py": "x"}, "temp": {"good.py": "x"}},
+            },
+        },
+    )
+    assert _rel_set(tmp_path, iter_matching_files(tmp_path, "**/*.py")) == {
+        "src/deep/cache/good.py",
+        "src/deep/temp/good.py",
+    }
+
+
+@pytest.mark.parametrize("pattern", ["blocked/**/*.py", "blocked/*.py"])
+def test_narrowed_root_cannot_bypass_excluded_parent(tmp_path, pattern):
+    _build_tree(
+        tmp_path,
+        {
+            ".gitignore": "blocked/\n!blocked/keep.py\n",
+            "blocked": {".gitignore": "!keep.py\n", "keep.py": "x"},
+        },
+    )
+    assert list(iter_matching_files(tmp_path, pattern)) == []
+    assert len(list(iter_matching_files(tmp_path, pattern, gitignore=False))) == 1
+
+
+def test_walk_from_repository_subdirectory_inherits_ancestors(tmp_path):
+    _build_tree(
+        tmp_path,
+        {
+            ".git": {},
+            ".gitignore": "*.log\n",
+            "src": {"drop.log": "x", "ok.txt": "x"},
+        },
+    )
+    assert _rel_set(tmp_path, walk_files(tmp_path / "src")) == {"src/ok.txt"}
+
+
+def test_ignored_subtree_is_not_enumerated(tmp_path, monkeypatch):
+    _build_tree(
+        tmp_path, {".gitignore": "/temp/\n", "temp": {"bad.py": "x"}, "ok.py": "x"}
+    )
+    original = Path.iterdir
+
+    def entries(path):
+        assert path != tmp_path / "temp"
+        return original(path)
+
+    monkeypatch.setattr(Path, "iterdir", entries)
+    assert _rel_set(tmp_path, walk_files(tmp_path)) == {"ok.py"}
+    assert _rel_set(tmp_path, walk_dirs(tmp_path)) == {"."}
+
+
+def test_disabled_gitignore_does_not_read_rules_or_disable_other_filters(
+    tmp_path, monkeypatch
+):
+    _build_tree(
+        tmp_path,
+        {
+            ".gitignore": "*.log\n",
+            "drop.log": "x",
+            ".secret": "x",
+            "node_modules": {"a.log": "x"},
+        },
+    )
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("gitignore=False must not read ignore files")
+
+    monkeypatch.setattr(Path, "read_text", forbidden)
+    assert _rel_set(
+        tmp_path, iter_matching_files(tmp_path, "**/*", gitignore=False)
+    ) == {"drop.log"}
+
 
 # ── tree builder for assertions ──────────────────────────────────────
 
@@ -63,66 +164,6 @@ class TestShouldSkipDir:
 
     def test_empty_string_not_skipped(self):
         assert should_skip_dir("") is False
-
-
-# ── parse_gitignore ──────────────────────────────────────────────────
-
-
-class TestParseGitignore:
-    def test_missing_file_returns_empty(self, tmp_path):
-        assert parse_gitignore(tmp_path / "nope") == []
-
-    def test_strips_comments_and_blanks(self, tmp_path):
-        gi = tmp_path / ".gitignore"
-        gi.write_text("# comment\n\n*.log\n\nbuild/\n  # indented comment\n")
-        patterns = parse_gitignore(gi)
-        assert patterns == ["*.log", "build/"]
-
-    def test_strips_inline_whitespace(self, tmp_path):
-        gi = tmp_path / ".gitignore"
-        gi.write_text("  *.log  \n")
-        assert parse_gitignore(gi) == ["*.log"]
-
-    def test_unreadable_returns_empty(self, tmp_path, monkeypatch):
-        gi = tmp_path / ".gitignore"
-        gi.write_text("*.log")
-
-        original = Path.read_text
-
-        def _boom(self, *a, **kw):
-            if self == gi:
-                raise PermissionError("denied")
-            return original(self, *a, **kw)
-
-        monkeypatch.setattr(Path, "read_text", _boom)
-        assert parse_gitignore(gi) == []
-
-
-# ── is_ignored ───────────────────────────────────────────────────────
-
-
-class TestIsIgnored:
-    def test_no_patterns_means_not_ignored(self):
-        assert is_ignored("foo.py", False, []) is False
-
-    def test_simple_glob_matches_file(self):
-        assert is_ignored("a.log", False, ["*.log"]) is True
-
-    def test_simple_glob_no_match(self):
-        assert is_ignored("a.txt", False, ["*.log"]) is False
-
-    def test_trailing_slash_dir_only_for_dir(self):
-        # ``build/`` only matches directories.
-        assert is_ignored("build", True, ["build/"]) is True
-        assert is_ignored("build", False, ["build/"]) is False
-
-    def test_negation_pattern_silently_skipped(self):
-        # ``!keep.log`` does NOT make ``keep.log`` matching ``*.log``
-        # be un-ignored — the simplified matcher just skips negation.
-        # So ``keep.log`` still matches ``*.log`` → ignored.
-        assert is_ignored("keep.log", False, ["*.log", "!keep.log"]) is True
-        # ``!``-only patterns produce no match on their own.
-        assert is_ignored("anything", False, ["!anything"]) is False
 
 
 # ── walk_files ───────────────────────────────────────────────────────
