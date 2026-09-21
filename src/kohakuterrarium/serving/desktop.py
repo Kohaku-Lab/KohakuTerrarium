@@ -354,7 +354,7 @@ def run_desktop_app(port: int = 8001, log_level: str = "INFO") -> None:
     if sys.platform == "darwin":
         webview.start(gui="cocoa")
     elif sys.platform == "win32":
-        webview.start()
+        webview.start(icon=str(icon_ico) if icon_ico.exists() else None)
     else:
         webview.start(icon=str(icon_png) if icon_png.exists() else None)
 
