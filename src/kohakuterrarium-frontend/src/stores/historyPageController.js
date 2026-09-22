@@ -13,18 +13,19 @@ export function createHistoryPageController({ kind = "live", applyReplay, onChan
   function publish() {
     onChange?.(getState())
   }
-  function apply(result) {
+  function apply(result, canApply) {
+    if (canApply && !canApply()) return { applied: false }
     if (result.discarded) return { applied: false, resetRequired: result.resetRequired }
     if (!result.applied && !result.legacy) return { applied: false }
     if (source.getWindow()?.hasNewer) return { applied: false, catchingUp: true }
-    applyReplay(result.records, result)
+    if (applyReplay(result.records, result) === false) return { applied: false, deferred: true }
     return { applied: true, legacy: !!result.legacy, payload: result.payload }
   }
-  async function run(method, argument) {
+  async function run(method, argument, canApply) {
     const promise = source[method](argument)
     publish()
     try {
-      return apply(await promise)
+      return apply(await promise, canApply)
     } finally {
       publish()
     }
@@ -33,8 +34,8 @@ export function createHistoryPageController({ kind = "live", applyReplay, onChan
     kind,
     getState,
     isCurrent: source.isCurrent,
-    initialize: () => run("initialize"),
-    refreshHead: () => run("refreshHead"),
+    initialize: (initialPayload, canApply) => run("initialize", { initialPayload }, canApply),
+    refreshHead: (canApply) => run("refreshHead", undefined, canApply),
     loadRecord: (key) => run("loadRecord", key),
     async prefetchOlder() {
       const promise = source.prefetchOlder()

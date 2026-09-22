@@ -4697,6 +4697,46 @@ const _chatStoreOptions = {
       }
     },
 
+    _historyBranchComplete(tab, events) {
+      const pending = this._branchResyncPendingByTab[tab]
+      const expectedBranchByTurn = pending?.expectedBranchByTurn || {}
+      let complete = true
+      if (Object.keys(expectedBranchByTurn).length) {
+        const parentPaths = _indexParentPaths(events)
+        const expected = new Map(
+          Object.entries(expectedBranchByTurn).map(([turn, branch]) => [
+            Number(turn),
+            Number(branch),
+          ]),
+        )
+        complete = [...expected].every(([turn, branch]) =>
+          events.some((evt) => {
+            if (evt?._optimistic || evt?.turn_index !== turn || evt?.branch_id !== branch) {
+              return false
+            }
+            const path = parentPaths.get(evt?.event_id) || _coercePath(evt?.parent_branch_path)
+            return [...expected].every(([parentTurn, parentBranch]) => {
+              if (parentTurn >= turn) return true
+              return path.some(([t, b]) => t === parentTurn && b === parentBranch)
+            })
+          }),
+        )
+      } else if (pending?.active && Object.hasOwn(pending, "baselineMaxEventId")) {
+        const fetchedMax = this._maxEventId(events)
+        if (pending.baselineMaxEventId != null) {
+          complete = fetchedMax != null && fetchedMax > pending.baselineMaxEventId
+        } else {
+          const physicalFingerprint = JSON.stringify(
+            events
+              .filter((evt) => !evt?._optimistic)
+              .map((evt) => [evt?.type, evt?.turn_index, evt?.branch_id, evt?.content]),
+          )
+          complete = physicalFingerprint !== pending.baselinePhysicalFingerprint
+        }
+      }
+      return complete
+    },
+
     /** Re-fetch conversation history from the backend and rebuild the
      *  local message list. Called after edit/regenerate/rewind so the
      *  frontend matches the backend's truncated conversation.
@@ -4732,6 +4772,12 @@ const _chatStoreOptions = {
       const instanceGeneration = options.generation ?? this._instanceGeneration
       const mutationGeneration = this._historyMutationSeqByTab[tab] || 0
       const requestedInstanceId = this._instanceId
+      const canApply = () =>
+        branchOwned() &&
+        requestId === this._historyRequestSeqByTab[tab] &&
+        this._instanceId === requestedInstanceId &&
+        this._instanceGeneration === instanceGeneration &&
+        (this._historyMutationSeqByTab[tab] || 0) === mutationGeneration
       const preFetchMessages = options.initialLoad ? this.messagesByTab[tab] || [] : null
       try {
         const { terrariumAPI } = await import("@/utils/api")
@@ -4741,27 +4787,27 @@ const _chatStoreOptions = {
         // returns, so job-reconciliation must not prune it.
         const fetchedAt = Date.now()
         const controller = _historyPageMap(this).get(tab)
-        const branchPending = !!this._branchResyncPendingByTab[tab]?.active
-        if (!branchPending && !options.full && (options.initialLoad || controller)) {
+        if (!options.full && (options.initialLoad || controller)) {
           // Reconnect keeps an established paged range: only a tab with no
           // range yet needs the reset that a fresh initialize performs.
           const result = !controller?.getState().historyId
-            ? await this.initHistoryPage(tab)
-            : await this.refreshHistoryHead(tab)
-          if (result.resetRequired) return (await this.initHistoryPage(tab)).applied
-          return result.applied
+            ? await this.initHistoryPage(tab, { canApply })
+            : await this.refreshHistoryHead(tab, { canApply })
+          if (result.resetRequired) {
+            const fresh = await this.initHistoryPage(tab, { canApply })
+            return fresh.applied || fresh.deferred || false
+          }
+          return result.applied || result.deferred || false
         }
-        if (controller) controller.reset()
         const data = await terrariumAPI.getHistory(this._instanceGraphId, tab)
-        if (
-          !branchOwned() ||
-          requestId !== this._historyRequestSeqByTab[tab] ||
-          this._instanceId !== requestedInstanceId ||
-          this._instanceGeneration !== instanceGeneration ||
-          (this._historyMutationSeqByTab[tab] || 0) !== mutationGeneration
-        ) {
+        if (!canApply()) {
           return false
         }
+        if (data?.history_page) {
+          const result = await this._controllerForTab(tab).initialize(data, canApply)
+          return result.applied || result.deferred || false
+        }
+        if (controller) controller.reset()
         if (!data?.events) {
           if (this._branchResyncPendingByTab[tab]?.active) return false
           if (Array.isArray(data?.messages)) {
@@ -4841,44 +4887,8 @@ const _chatStoreOptions = {
         // ``ChatMessage.confirmEdit`` re-opens the edit panel with
         // the user's text. Guarding the rebuild keeps the optimistic
         // UI visible until the new branch lands.
-        const pending = this._branchResyncPendingByTab[tab]
-        const expectedBranchByTurn = pending?.expectedBranchByTurn || {}
-        let complete = true
-        if (Object.keys(expectedBranchByTurn).length) {
-          const parentPaths = _indexParentPaths(data.events)
-          const expected = new Map(
-            Object.entries(expectedBranchByTurn).map(([turn, branch]) => [
-              Number(turn),
-              Number(branch),
-            ]),
-          )
-          complete = [...expected].every(([turn, branch]) =>
-            data.events.some((evt) => {
-              if (evt?._optimistic || evt?.turn_index !== turn || evt?.branch_id !== branch) {
-                return false
-              }
-              const path = parentPaths.get(evt?.event_id) || _coercePath(evt?.parent_branch_path)
-              return [...expected].every(([parentTurn, parentBranch]) => {
-                if (parentTurn >= turn) return true
-                return path.some(([t, b]) => t === parentTurn && b === parentBranch)
-              })
-            }),
-          )
-        } else if (pending?.active && Object.hasOwn(pending, "baselineMaxEventId")) {
-          const fetchedMax = this._maxEventId(data.events)
-          if (pending.baselineMaxEventId != null) {
-            complete = fetchedMax != null && fetchedMax > pending.baselineMaxEventId
-          } else {
-            const physicalFingerprint = JSON.stringify(
-              data.events
-                .filter((evt) => !evt?._optimistic)
-                .map((evt) => [evt?.type, evt?.turn_index, evt?.branch_id, evt?.content]),
-            )
-            complete = physicalFingerprint !== pending.baselinePhysicalFingerprint
-          }
-        }
 
-        if (!complete) {
+        if (!this._historyBranchComplete(tab, data.events)) {
           // Don't replace events / rebuild — keep optimistic state
           // visible. Schedule a retry so the navigator eventually
           // catches up once the new branch is fully written.
@@ -6159,6 +6169,10 @@ const _chatStoreOptions = {
       { payload = {}, fetchedAt, legacy, head } = {},
     ) {
       const stream = controller.getState().stream
+      if (!legacy && !this._historyBranchComplete(tab, stream === "events" ? records : [])) {
+        this._scheduleBranchResync(tab)
+        return false
+      }
       if (legacy) {
         const replay = _replayEvents(
           payload.messages || [],
@@ -6214,7 +6228,11 @@ const _chatStoreOptions = {
       const events = this._projectHistoryPageRecords(records || [], stream)
       const prepared = _prepareReplayEvents(events, this.branchViewByTab[tab] || null)
       this._setEvents(tab, prepared.events)
-      if (!this.tokenUsage[tab] || this.tokenUsage[tab].partial) {
+      if (
+        !this.tokenUsage[tab] ||
+        this.tokenUsage[tab].partial ||
+        this._branchResyncPendingByTab[tab]?.active
+      ) {
         this._restoreTokenUsage(tab, prepared.events, true)
       }
       if (this.tokenUsage[tab]) {
@@ -6233,6 +6251,7 @@ const _chatStoreOptions = {
       const maxEventId = this._maxEventId(events)
       if (maxEventId != null) this._appliedMaxEventIdByTab[tab] = maxEventId
       this._setHistoryDetails(tab, records)
+      delete this._branchResyncPendingByTab[tab]
     },
 
     /** Establish the bounded newest page for ``tab``. Idempotent: the
@@ -6241,7 +6260,7 @@ const _chatStoreOptions = {
     async initHistoryPage(tab, opts = {}) {
       if (!tab) return { applied: false }
       const controller = this._controllerForTab(tab, opts)
-      return controller.initialize()
+      return controller.initialize(undefined, opts.canApply)
     },
 
     async prefetchOlderHistory(tab) {
@@ -6260,7 +6279,7 @@ const _chatStoreOptions = {
     async refreshHistoryHead(tab, opts = {}) {
       if (!tab) return { applied: false }
       const controller = this._controllerForTab(tab, opts)
-      return controller.refreshHead()
+      return controller.refreshHead(opts.canApply)
     },
 
     /** Drop the paged controller for ``tab`` (clears its cached raw range
