@@ -397,7 +397,10 @@ class TestApiTerrariumJourney:
         assert scripted_llm.call_count == 1
 
         # The turn is observable on the per-creature history endpoint.
-        resp = client.get(f"/api/sessions/{session_id}/creatures/alice/history")
+        resp = client.get(
+            f"/api/sessions/{session_id}/creatures/alice/history",
+            params={"stream": "snapshot", "limit": 400},
+        )
         assert resp.status_code == 200
         messages = resp.json().get("messages", [])
         roles = {m.get("role") for m in messages}

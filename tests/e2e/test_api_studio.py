@@ -488,7 +488,10 @@ class TestApiStudioJourney:
         assert scripted_llm.call_count == 1
 
         # 8. Sessions: history reflects the turn we just took.
-        resp = client.get(f"/api/sessions/{session_id}/creatures/{creature_id}/history")
+        resp = client.get(
+            f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+            params={"stream": "snapshot", "limit": 400},
+        )
         assert resp.status_code == 200
         messages = resp.json()["messages"]
         roles = [m.get("role") for m in messages]
@@ -592,7 +595,9 @@ class TestApiStudioJourney:
         assert resp.status_code == 200
         # The regeneration replaced the tail assistant message — history
         # reflects the new reply, the two user turns are untouched.
-        resp = client.get(f"{base}/history")
+        resp = client.get(
+            f"{base}/history", params={"stream": "snapshot", "limit": 400}
+        )
         assert resp.status_code == 200
         regen_msgs = resp.json()["messages"]
         assert [m["content"] for m in regen_msgs if m["role"] == "user"] == [
@@ -656,14 +661,15 @@ class TestApiStudioJourney:
         assert listing["total"] == 1
         assert listing["sessions"][0]["name"] == saved_name
         assert listing["sessions"][0]["agents"] == ["scout"]
-        # History index lists the agent target; the per-target read
-        # returns its saved metadata.
+        # The index carries metadata; the target endpoint carries bounded events.
         resp = client.get(f"/api/sessions/{saved_name}/history")
         assert resp.status_code == 200
         assert "scout" in resp.json()["targets"]
+        assert resp.json()["meta"]["agents"] == ["scout"]
         resp = client.get(f"/api/sessions/{saved_name}/history/scout")
         assert resp.status_code == 200
-        assert resp.json()["meta"]["agents"] == ["scout"]
+        assert resp.json()["history_page"]["stream"] == "events"
+        assert any(row.get("content") == _REPLY_TWO for row in resp.json()["events"])
         # An unknown target is a hard 404.
         resp = client.get(f"/api/sessions/{saved_name}/history/no-such-target")
         assert resp.status_code == 404

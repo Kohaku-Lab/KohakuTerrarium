@@ -180,6 +180,42 @@ compensates already resumed members, removes partial runtime metadata, preserves
 the original saved lifecycle, and returns a non-success response rather than a
 degraded partial cluster.
 
+## HTTP history pagination
+
+History target endpoints return one bounded page, with a default and maximum
+`limit` of 400 records. Clients upgrading from full-history responses must
+retain `history_page` alongside the records; a response is not the complete log.
+
+- Live creature: `GET /api/sessions/{session_id}/creatures/{creature_id}/history`.
+- Saved target: `GET /api/sessions/{session_name}/history/{target}`.
+- Use `stream=events` (the default) for physical event rows in `events`.
+  Use `stream=snapshot` for conversation message rows in `messages`. Channels
+  return `stream=channel` and place channel records in `messages`.
+
+Saved-session metadata and the available target list come from
+`GET /api/sessions/{session_name}/history`; target pages omit the legacy `meta`
+field.
+
+Start without a cursor. To load older records, send `before` from the oldest
+loaded page; to catch up, send `after` from the newest loaded page. Include the
+returned `history_id` and `stream` on continuations. Cursors are opaque and must
+be URL-encoded, not parsed or replaced with numeric event IDs. Never send both
+`before` and `after`. Continue in each direction while `has_older` or
+`has_newer` is true. If `reset_required` is true, discard that stream's cached
+range and restart without a cursor or history ID.
+
+`paged=false` and non-positive limits, including `limit=0`, now return HTTP 400.
+The live endpoint also rejects `since_event_id`; replace it with the opaque
+`after` cursor. A snapshot-only session may return `stream=snapshot` even when
+an initial events page was requested; always inspect the response stream.
+
+Keep previously loaded pages when refreshing the head of the same history.
+Treat token totals computed from an incomplete loaded range as partial. Large
+records may be previews with `_history_truncated` and `_history_detail`; fetch
+`history/detail` on the live creature endpoint or `{target}/detail` on the saved
+history endpoint with `stream`, `history_id`, and `ref=_history_detail` to expand
+one record. For full offline inspection, use `SessionReader` below.
+
 ## Interrupt and resume workflow
 
 ```bash
