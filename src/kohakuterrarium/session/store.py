@@ -86,6 +86,7 @@ class SessionStore(StoreAffinityMixin):
         flush_every_n_seconds: float | None = None,
         writer_lock: bool = False,
     ) -> None:
+        self._init_affinity()
         self._path = str(coerce_fs_path(path))
         Path(self._path).parent.mkdir(parents=True, exist_ok=True)
         # Read-only consumers must not alter status or recency on close.
@@ -923,9 +924,8 @@ class SessionStore(StoreAffinityMixin):
         Writable stores optionally transition to paused; read-only stores never
         mutate metadata.
         """
-        if getattr(self, "_closed", False):
+        if not self._begin_close():
             return
-        self._closed = True
         if self._readonly:
             update_status = False
         if not self._readonly:

@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
-from functools import partial
 from typing import Any, Callable, TypeVar
 
 _T = TypeVar("_T")
@@ -14,58 +13,51 @@ _T = TypeVar("_T")
 class StoreAffinityMixin:
     """Dispatch synchronous store work onto one dedicated worker thread."""
 
-    _affinity_init_lock = threading.Lock()
+    def _init_affinity(self) -> None:
+        self._affinity_lock = threading.RLock()
+        self._affinity: ThreadPoolExecutor | None = None
+        self._affinity_worker_ident: int | None = None
+        self._closed = False
+
+    def _mark_affinity_worker(self) -> None:
+        self._affinity_worker_ident = threading.get_ident()
 
     def _ensure_affinity(self) -> ThreadPoolExecutor:
-        executor = getattr(self, "_affinity", None)
-        if executor is not None:
-            return executor
-        # The class-level lock makes executor creation atomic even if two
-        # threads race the first dispatch; an instance-level lock cannot,
-        # because creating it is itself racy.
-        with StoreAffinityMixin._affinity_init_lock:
-            executor = getattr(self, "_affinity", None)
-            if executor is None:
+        with self._affinity_lock:
+            if self._closed:
+                raise RuntimeError("SessionStore is closed")
+            if self._affinity is None:
                 self._affinity = ThreadPoolExecutor(
-                    max_workers=1, thread_name_prefix="kt-store"
+                    max_workers=1,
+                    thread_name_prefix="kt-store",
+                    initializer=self._mark_affinity_worker,
                 )
-                closers = getattr(self, "_companion_closers", None)
-                if closers is not None:
-                    closers.append(self._shutdown_affinity)
-                executor = self._affinity
-        return executor
+                self._companion_closers.append(self._shutdown_affinity)
+            return self._affinity
+
+    def _begin_close(self) -> bool:
+        """Stop accepting work and drain accepted calls before table disposal."""
+        with self._affinity_lock:
+            if self._closed:
+                return False
+            if threading.get_ident() == self._affinity_worker_ident:
+                raise RuntimeError("Cannot close SessionStore from its affinity worker")
+            self._closed = True
+        self._shutdown_affinity()
+        return True
 
     def _shutdown_affinity(self) -> None:
-        executor = getattr(self, "_affinity", None)
-        self._affinity = None
+        with self._affinity_lock:
+            executor, self._affinity = self._affinity, None
         if executor is not None:
             executor.shutdown(wait=True)
 
     async def run(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
         """Run ``fn`` on this store's affinity thread and return its result."""
-        if getattr(self, "_closed", False):
-            raise RuntimeError("SessionStore is closed")
-        loop = asyncio.get_running_loop()
-        executor = self._ensure_affinity()
-        if kwargs:
-            return await loop.run_in_executor(executor, partial(fn, *args, **kwargs))
-        if args:
-            return await loop.run_in_executor(executor, fn, *args)
-        return await loop.run_in_executor(executor, fn)
+        return await asyncio.wrap_future(self.submit(fn, *args, **kwargs))
 
     def submit(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> Future[_T]:
-        """Queue ``fn`` on this store's affinity thread without awaiting.
-
-        Execution order matches submit order (single worker), so a reader
-        dispatched through :meth:`run` observes every previously submitted
-        write. Safe to call without a running event loop; raises the same
-        ``RuntimeError`` as :meth:`run` when the store is closed.
-        """
-        if getattr(self, "_closed", False):
-            raise RuntimeError("SessionStore is closed")
-        executor = self._ensure_affinity()
-        if kwargs:
-            return executor.submit(partial(fn, *args, **kwargs))
-        if args:
-            return executor.submit(fn, *args)
-        return executor.submit(fn)
+        """Queue one call in FIFO order, rejecting requests once close begins."""
+        with self._affinity_lock:
+            executor = self._ensure_affinity()
+            return executor.submit(fn, *args, **kwargs)

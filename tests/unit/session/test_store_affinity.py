@@ -5,6 +5,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 from kohakuterrarium.session import store_affinity as store_affinity_mod
 from kohakuterrarium.session.store import SessionStore
 
@@ -125,3 +127,79 @@ async def test_submit_queues_without_await_and_rejects_after_close(tmp_path):
         raise AssertionError("submit on a closed store must fail")
     except RuntimeError as exc:
         assert "closed" in str(exc).lower()
+
+
+@pytest.mark.parametrize("dispatch", ["run", "submit"])
+@pytest.mark.parametrize("warm", [False, True])
+def test_close_serializes_with_dispatch_acceptance(
+    tmp_path, monkeypatch, dispatch, warm
+):
+    store = SessionStore(tmp_path / "closing.kohakutr")
+    store.state["sentinel"] = "kept"
+    if warm:
+        store.submit(lambda: None).result(timeout=5)
+    entered = threading.Event()
+    release = threading.Event()
+    closed = threading.Event()
+    original = store._ensure_affinity
+    values, errors = [], []
+
+    def gated_ensure():
+        entered.set()
+        assert release.wait(5)
+        return original()
+
+    def request():
+        try:
+            if dispatch == "run":
+                values.append(asyncio.run(store.run(store.state.get, "sentinel")))
+            else:
+                values.append(store.submit(store.state.get, "sentinel").result(5))
+        except Exception as exc:
+            errors.append(exc)
+
+    def close():
+        try:
+            store.close(update_status=False)
+        finally:
+            closed.set()
+
+    monkeypatch.setattr(store, "_ensure_affinity", gated_ensure)
+    requester = threading.Thread(target=request, daemon=True)
+    closer = threading.Thread(target=close, daemon=True)
+    try:
+        requester.start()
+        assert entered.wait(5)
+        closer.start()
+        closed.wait(0.25)
+        release.set()
+        requester.join(5)
+        closer.join(5)
+        assert not requester.is_alive() and not closer.is_alive()
+        if errors:
+            assert len(errors) == 1
+            assert isinstance(errors[0], RuntimeError)
+            assert str(errors[0]) == "SessionStore is closed"
+        else:
+            assert values == ["kept"]
+        assert getattr(store, "_affinity", None) is None
+        with pytest.raises(RuntimeError, match="SessionStore is closed"):
+            store.submit(lambda: None)
+    finally:
+        release.set()
+        requester.join(5)
+        if closer.ident is not None:
+            closer.join(5)
+        store._shutdown_affinity()
+        store.close(update_status=False)
+
+
+def test_close_from_worker_is_rejected_without_disposing_store(tmp_path):
+    store = SessionStore(tmp_path / "self-close.kohakutr")
+    try:
+        with pytest.raises(RuntimeError, match="affinity worker"):
+            store.submit(store.close).result(timeout=5)
+        store.submit(store.state.put, "still-open", "value").result(timeout=5)
+        assert store.submit(store.state.get, "still-open").result(timeout=5) == "value"
+    finally:
+        store.close(update_status=False)
