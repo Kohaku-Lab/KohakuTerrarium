@@ -1,16 +1,48 @@
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
   barTone,
   compactProductLabel,
   finiteNumber,
   formatDateTime,
+  formatCreditExpiry,
   formatPercentLabel,
   periodKind,
   remainingPercent,
 } from "./usageFormat"
 
+afterEach(() => vi.useRealTimers())
+
 describe("usageFormat", () => {
+  it("uses minute precision for compact dates and keeps dates on older updates", () => {
+    const epoch = Date.parse("2026-09-23T00:59:14Z") / 1000
+    vi.useFakeTimers({ toFake: ["Date"] })
+    vi.setSystemTime(new Date(epoch * 1000))
+    const options = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    expect(formatDateTime(epoch, "compact")).toBe(
+      new Date(epoch * 1000).toLocaleString(undefined, options),
+    )
+    expect(formatDateTime(epoch, "updated")).toBe(
+      new Date(epoch * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+    )
+    vi.setSystemTime(new Date((epoch + 86400) * 1000))
+    expect(formatDateTime(epoch, "updated")).toBe(
+      new Date(epoch * 1000).toLocaleString(undefined, options),
+    )
+    expect(formatDateTime(null, "compact")).toBe("")
+    expect(formatDateTime(Infinity, "updated")).toBe("")
+  })
+
+  it("formats ISO credit expiry without fractions, preserving the full timestamp separately", () => {
+    const iso = "2026-10-04T05:32:34.160668Z"
+    const options = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }
+    expect(formatCreditExpiry(iso)).toBe(new Date(iso).toLocaleString(undefined, options))
+    expect(formatCreditExpiry(iso, "full")).toBe(new Date(iso).toLocaleString())
+    expect(formatCreditExpiry("2026-10-04T07:32:34+02:00", "full")).toBe(
+      new Date("2026-10-04T05:32:34Z").toLocaleString(),
+    )
+    for (const invalid of [null, "", "not a date", 0]) expect(formatCreditExpiry(invalid)).toBe("")
+  })
   it("keeps numeric zero and rejects missing or non-finite values", () => {
     expect(finiteNumber(0)).toBe(0)
     for (const value of ["0", " ", [], [0], {}]) expect(finiteNumber(value)).toBeNull()

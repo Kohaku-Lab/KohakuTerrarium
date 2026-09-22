@@ -127,9 +127,11 @@ describe("AccountUsagePanel", () => {
     expect(settingsAPI.getGrokUsage).toHaveBeenCalledWith("worker-a")
     expect(wrapper.text()).toContain("settings.account.grok.weekly")
     expect(wrapper.text()).toContain("Build")
-    expect(wrapper.text()).toContain("settings.account.grok.extraCredits:value=0")
-    expect(wrapper.text()).toContain("settings.account.grok.source:value=grok-cli")
-    expect(wrapper.text()).toContain(new Date(RESET_AT * 1000).toLocaleString())
+    expect(provider(wrapper, "grok").get("[data-extra-credits] dd").text()).toBe("0")
+    expect(wrapper.text()).toContain("settings.account.grok.cliSignIn")
+    expect(provider(wrapper, "grok").get("[data-quota] time").attributes("title")).toBe(
+      new Date(RESET_AT * 1000).toLocaleString(),
+    )
     expect(wrapper.text()).toContain("settings.account.grok.sharedPool")
   })
 
@@ -170,7 +172,9 @@ describe("AccountUsagePanel", () => {
     )
     expect(unknown.text()).toContain("settings.account.grok.unknownPeriod")
     expect(unknown.text()).toContain("settings.account.grok.unknown")
-    expect(unknown.text()).not.toContain("settings.account.grok.extraCredits:value=0")
+    expect(provider(unknown, "grok").get("[data-extra-credits] dd").text()).toBe(
+      "settings.account.grok.unknown",
+    )
     expect(unknown.text()).not.toContain("settings.account.grok.remaining:value=100")
   })
 

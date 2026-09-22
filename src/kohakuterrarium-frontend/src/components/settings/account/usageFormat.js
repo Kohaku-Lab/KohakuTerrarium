@@ -19,14 +19,6 @@ export function barTone(used) {
   return "purple"
 }
 
-export function barClass(used) {
-  const tone = barTone(used)
-  if (tone === "coral") return "bg-coral"
-  if (tone === "amber") return "bg-amber"
-  if (tone === "purple") return "bg-iolite"
-  return ""
-}
-
 export function clampPercent(value) {
   const n = finiteNumber(value)
   if (n == null) return 0
@@ -56,9 +48,20 @@ export function compactProductLabel(name) {
   return label.charAt(0).toUpperCase() + label.slice(1)
 }
 
-export function formatDateTime(epochSeconds) {
+export function formatDateTime(epochSeconds, style = "full") {
   const n = finiteNumber(epochSeconds)
   if (n == null) return ""
   const date = new Date(n * 1000)
-  return Number.isFinite(date.getTime()) ? date.toLocaleString() : ""
+  if (!Number.isFinite(date.getTime())) return ""
+  if (style === "full") return date.toLocaleString()
+  const time = { hour: "2-digit", minute: "2-digit" }
+  if (style === "updated" && date.toDateString() === new Date().toDateString()) {
+    return date.toLocaleTimeString(undefined, time)
+  }
+  return date.toLocaleString(undefined, { month: "short", day: "numeric", ...time })
+}
+
+export function formatCreditExpiry(iso, style = "compact") {
+  if (typeof iso !== "string" || !iso.trim()) return ""
+  return formatDateTime(Date.parse(iso) / 1000, style)
 }

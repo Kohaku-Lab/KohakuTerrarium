@@ -475,6 +475,15 @@ export default {
   "settings.account.resetAlready": "Reset credit already redeemed",
   "settings.account.resetFailed": "Failed to redeem reset credit",
 
+  "settings.account.updatedAt": "Updated {value}",
+  "settings.account.updatedUnknown": "Update time unknown",
+  "settings.account.codex.resetCredits": "Codex reset credits",
+  "settings.account.codex.resetCount": "{count} available",
+  "settings.account.codex.creditDetails": "Details",
+  "settings.account.grok.breakdown": "Usage breakdown",
+  "settings.account.grok.noBreakdown": "No product breakdown available",
+  "settings.account.grok.extraCreditsLabel": "Extra credits",
+  "settings.account.grok.cliSignIn": "Grok CLI sign-in",
   "settings.account.codex.title": "Codex",
   "settings.account.codex.loadFailed": "Couldn't refresh Codex usage.",
   "settings.account.codex.stale": "Showing the last Codex snapshot from {value}. Refresh failed.",
@@ -490,8 +499,7 @@ export default {
   "settings.account.grok.extraCredits": "Extra credits: {value}",
   "settings.account.grok.extraCreditsUnknown": "Extra credits unknown",
   "settings.account.grok.source": "Source: {value}",
-  "settings.account.grok.sharedPool":
-    "Product percentages share one quota pool; they are not separate allowances.",
+  "settings.account.grok.sharedPool": "All products share the quota above.",
   "settings.account.grok.loadFailed": "Couldn't refresh Grok usage.",
   "settings.account.grok.stale": "Showing the last Grok snapshot from {value}. Refresh failed.",
   "settings.account.grok.notLoggedIn":
