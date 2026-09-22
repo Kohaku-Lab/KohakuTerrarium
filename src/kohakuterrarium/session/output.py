@@ -274,6 +274,16 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         self._flush_text_segment()
         await self.drain()
 
+    def flush_sync(self) -> None:
+        """Finalize output before a synchronous store handoff (requires blocking)."""
+        self._flush_text_segment()
+        pending, self._pending_writes = self._pending_writes, []
+        for future in pending:
+            try:
+                future.result()
+            except Exception as exc:
+                logger.warning("Session record failed", error=str(exc), exc_info=True)
+
     async def on_processing_start(self, *, request_id: str | None = None) -> None:
         # Sequence numbers are local to one assistant response.
         self._chunk_seq = 0

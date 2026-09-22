@@ -47,8 +47,9 @@ def copy_events_into(src: SessionStore, dst: SessionStore) -> int:
     other payload fields are preserved; ``event_id`` is re-stamped by
     ``dst`` (a re-stamp is fine — order is what callers care about).
     """
-    # Cache-enabled stores might still have pending writes; force a
-    # flush so ``discover_agents_from_events`` sees everything.
+    # This synchronous topology transaction includes all accepted writes.
+    for store in (src, dst):
+        store.submit(lambda: None).result()
     try:
         src.events.flush_cache()
     except Exception:
@@ -325,6 +326,7 @@ def apply_merge(
     if not source_stores:
         return
     old_stores = list(source_stores.values())
+    _flush_graph_outputs(engine, old_stores)
     owned = getattr(engine, "_owned_sessions", None)
     owned_source_gids = {
         gid for gid in source_gids if owned is not None and gid in owned
@@ -417,6 +419,7 @@ def apply_split(
         return
     owned = getattr(engine, "_owned_sessions", None)
     parent_owned = owned is not None and parent_gid in owned
+    _flush_graph_outputs(engine, [parent])
     new_paths = [_store_path_for(engine, gid) for gid in delta.new_graph_ids]
     if any(p is None for p in new_paths):
         # No session_dir — keep the parent on the largest new graph
@@ -478,6 +481,16 @@ def apply_split(
         if reuse_gid is not None and parent_owned:
             owned.add(reuse_gid)
     _topo_leftovers.distribute_leftovers(engine, parent_gid, list(delta.new_graph_ids))
+
+
+def _flush_graph_outputs(engine: "Terrarium", stores: list[SessionStore]) -> None:
+    """Persist open segments before copying history and replacing output sinks."""
+    for creature in engine._creatures.values():
+        output = getattr(creature.agent, "_session_output", None)
+        if output is not None and output._store in stores:
+            output.flush_sync()
+    for store in stores:
+        store.submit(store.flush).result()
 
 
 def _merge_into_existing_store(

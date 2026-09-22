@@ -1838,6 +1838,7 @@ class TestTerrariumIntegration:
 
         engine = Terrarium(
             pwd=str(tmp_path),
+            session_dir=str(tmp_path / "sessions"),
             drive_config=DriveRuntimeConfig(enabled=True),
             drive_registrations=default_registrations(),
         )
@@ -1866,6 +1867,11 @@ class TestTerrariumIntegration:
                 initial_status=DriveStatus.WAITING,
             )
 
+            for creature in (alice, bob):
+                await creature.agent._session_output.write_stream(
+                    f"merge-{creature.name}"
+                )
+
             # MERGE: the real engine drains B's Drive rows into the survivor.
             result = await engine.connect("alice", "bob", channel="ab")
             assert result.delta_kind == "merge"
@@ -1877,6 +1883,19 @@ class TestTerrariumIntegration:
             # The non-survivor source graph's manager was dropped (§6.6).
             other = bob_gid0 if survivor == alice_gid0 else alice_gid0
             assert engine.drives.peek_manager(other) is None
+
+            merged_store = engine._session_stores[survivor]
+            for creature in (alice, bob):
+                events = await merged_store.run(merged_store.get_events, creature.name)
+                assert [
+                    e["content"]
+                    for e in events
+                    if e["type"] == "text_chunk"
+                    and e["content"].startswith(("merge-", "split-"))
+                ] == [f"merge-{creature.name}"]
+                await creature.agent._session_output.write_stream(
+                    f"split-{creature.name}"
+                )
 
             # SPLIT: each assigned Drive follows its assignee's child graph.
             disc = await engine.disconnect("alice", "bob", channel="ab")
@@ -1890,6 +1909,16 @@ class TestTerrariumIntegration:
             assert await amgr.get_drive(db.drive_id) is None
             assert await bmgr.get_drive(db.drive_id) is not None
             assert await bmgr.get_drive(da.drive_id) is None
+
+            for store in set(engine._session_stores.values()):
+                for creature in (alice, bob):
+                    events = await store.run(store.get_events, creature.name)
+                    assert [
+                        e["content"]
+                        for e in events
+                        if e["type"] == "text_chunk"
+                        and e["content"].startswith(("merge-", "split-"))
+                    ] == [f"merge-{creature.name}", f"split-{creature.name}"]
 
     @pytest.mark.timeout(120)
     async def test_drive_delivery_waits_for_startup_trigger(
