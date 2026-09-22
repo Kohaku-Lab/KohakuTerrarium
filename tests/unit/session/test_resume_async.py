@@ -1,10 +1,13 @@
 """Async resume must recover interrupted output without scanning on the loop."""
 
 import asyncio
+import gc
 import threading
+import weakref
 
 import pytest
 
+from kohakuterrarium.session import resume_async
 from kohakuterrarium.session.resume_async import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -166,3 +169,49 @@ async def test_cancel_between_recovery_append_and_slot_clear_does_not_duplicate(
         ]
     finally:
         await asyncio.to_thread(store.close, update_status=False)
+
+
+@pytest.mark.parametrize("cancel_twice", [False, True])
+async def test_cancelled_open_closes_unclaimed_vaults(
+    tmp_path, monkeypatch, cancel_twice
+):
+    path = _interrupted_session(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+    returned = threading.Event()
+    references = []
+    daemons = []
+    opener = resume_async._open_store_with_migration
+
+    def gated_open(*args, **kwargs):
+        store = opener(*args, **kwargs)
+        references.append(weakref.ref(store.events))
+        daemons.append(store.events._daemon_thread)
+        entered.set()
+        assert release.wait(5)
+        returned.set()
+        return store
+
+    monkeypatch.setattr(resume_async, "_open_store_with_migration", gated_open)
+    task = asyncio.create_task(resume_agent_async(path, llm=ScriptedLLM(["unused"])))
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        task.cancel()
+        await asyncio.sleep(0)
+        if cancel_twice:
+            task.cancel()
+            await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(returned.wait, 3)
+        await asyncio.sleep(0)
+        gc.collect()
+        assert all(ref() is None or ref()._closed for ref in references)
+        assert all(not thread.is_alive() for thread in daemons)
+    finally:
+        release.set()
+        for ref in references:
+            vault = ref()
+            if vault is not None:
+                await asyncio.to_thread(vault.close)

@@ -20,6 +20,7 @@ from kohakuterrarium.errors import (
 from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.migrations import path_for_version
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.store_open import open_owned_store
 from kohakuterrarium.session.version import FORMAT_VERSION
 
 
@@ -182,7 +183,7 @@ async def fork_session_handler(
     owned = store is None
     try:
         if store is None:
-            store = await asyncio.to_thread(SessionStore, str(session_path))
+            store = await open_owned_store(SessionStore, str(session_path))
         fork_point_event = await store.run(find_fork_point, store, at_event_id)
         if fork_point_event is None:
             raise InvalidRequestError(

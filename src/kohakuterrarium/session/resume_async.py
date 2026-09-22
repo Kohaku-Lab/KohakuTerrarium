@@ -24,6 +24,7 @@ from kohakuterrarium.session.resume_open import (
     preflight_legacy_workspace,
 )
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.store_open import open_owned_store
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -110,7 +111,7 @@ async def resume_agent_async(
     pwd_override = await asyncio.to_thread(
         preflight_legacy_workspace, session_path, pwd_override
     )
-    store = await asyncio.to_thread(
+    store = await open_owned_store(
         _open_store_with_migration, session_path, writer_lock=True
     )
     try:
