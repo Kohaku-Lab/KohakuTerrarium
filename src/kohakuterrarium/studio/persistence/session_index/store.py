@@ -12,6 +12,7 @@ KohakuVault's WAL and busy retries. Entry updates are last-writer-wins.
 from collections.abc import Iterable, Iterator
 from dataclasses import asdict
 from pathlib import Path
+from threading import RLock
 from typing import Any
 
 from kohakuvault import KVault, TextVault
@@ -85,6 +86,9 @@ class SessionIndex:
     """
 
     def __init__(self, sidecar_path: Path) -> None:
+        # One entry update spans both native tables. Hook and reconcile
+        # workers must not create competing FTS rows for the same filename.
+        self._write_lock = RLock()
         self._path = str(sidecar_path)
         sidecar_path.parent.mkdir(parents=True, exist_ok=True)
         # FTS column definitions are fixed at table creation. Purging stale
@@ -182,30 +186,33 @@ class SessionIndex:
         Existing search row IDs are reused to keep the index compact. A missing
         or externally removed search row is recreated transparently.
         """
-        cols = entry.to_search_columns()
-        existing = (
-            self._entries.get(entry.filename)
-            if entry.filename in self._entries
-            else None
-        )
-        rowid = int((existing or {}).get("_search_rowid", 0))
-        if rowid:
-            try:
-                self._search.update(id=rowid, texts=cols, value=entry.filename)
-                entry._search_rowid = rowid
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "FTS row missing; reinserting",
-                    rowid=rowid,
-                    error=str(exc),
-                    exc_info=True,
-                )
+        with self._write_lock:
+            cols = entry.to_search_columns()
+            existing = (
+                self._entries.get(entry.filename)
+                if entry.filename in self._entries
+                else None
+            )
+            rowid = int((existing or {}).get("_search_rowid", 0))
+            if rowid:
+                try:
+                    self._search.update(id=rowid, texts=cols, value=entry.filename)
+                    entry._search_rowid = rowid
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "FTS row missing; reinserting",
+                        rowid=rowid,
+                        error=str(exc),
+                        exc_info=True,
+                    )
+                    entry._search_rowid = int(
+                        self._search.insert(cols, value=entry.filename)
+                    )
+            else:
                 entry._search_rowid = int(
                     self._search.insert(cols, value=entry.filename)
                 )
-        else:
-            entry._search_rowid = int(self._search.insert(cols, value=entry.filename))
-        self._entries.put(entry.filename, asdict(entry))
+            self._entries.put(entry.filename, asdict(entry))
 
     def upsert_many(self, entries: Iterable[SessionIndexEntry]) -> int:
         n = 0
@@ -220,30 +227,35 @@ class SessionIndex:
         Returns ``True`` when something was removed, ``False`` when
         the filename was already absent.
         """
-        if filename not in self._entries:
-            return False
-        existing = self._entries.get(filename)
-        rowid = int((existing or {}).get("_search_rowid", 0))
-        if rowid:
-            try:
-                self._search.delete(rowid)
-            except Exception as exc:  # noqa: BLE001
-                logger.warning(
-                    "FTS row already gone", rowid=rowid, error=str(exc), exc_info=True
-                )
-        self._entries.delete(filename)
-        return True
+        with self._write_lock:
+            if filename not in self._entries:
+                return False
+            existing = self._entries.get(filename)
+            rowid = int((existing or {}).get("_search_rowid", 0))
+            if rowid:
+                try:
+                    self._search.delete(rowid)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "FTS row already gone",
+                        rowid=rowid,
+                        error=str(exc),
+                        exc_info=True,
+                    )
+            self._entries.delete(filename)
+            return True
 
     def clear(self) -> None:
         """Wipe every table — used on schema bumps and explicit rebuild."""
-        try:
-            self._entries.clear()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("clear entries failed", error=str(exc), exc_info=True)
-        try:
-            self._search.clear()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("clear search failed", error=str(exc), exc_info=True)
+        with self._write_lock:
+            try:
+                self._entries.clear()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("clear entries failed", error=str(exc), exc_info=True)
+            try:
+                self._search.clear()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("clear search failed", error=str(exc), exc_info=True)
 
     def get(self, filename: str) -> dict[str, Any] | None:
         if filename not in self._entries:
@@ -426,28 +438,29 @@ class SessionIndex:
         Explicitly deleting native wrappers forces refcount-driven cleanup,
         which prevents lingering Windows handles from blocking later opens.
         """
-        if self._closed:
-            return
-        # TextVault has no close method; its underlying vault is released
-        # explicitly after closable tables are handled.
-        for table in (self._entries, self._search, self._meta):
-            close = getattr(table, "close", None)
-            if not callable(close):
-                continue
+        with self._write_lock:
+            if self._closed:
+                return
+            # TextVault has no close method; its underlying vault is released
+            # explicitly after closable tables are handled.
+            for table in (self._entries, self._search, self._meta):
+                close = getattr(table, "close", None)
+                if not callable(close):
+                    continue
+                try:
+                    close()
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning("close table failed", error=str(exc), exc_info=True)
+            for table in (self._entries, self._meta):
+                try:
+                    del table._inner
+                except AttributeError:
+                    pass
             try:
-                close()
-            except Exception as exc:  # noqa: BLE001
-                logger.warning("close table failed", error=str(exc), exc_info=True)
-        for table in (self._entries, self._meta):
-            try:
-                del table._inner
+                del self._search._vault
             except AttributeError:
                 pass
-        try:
-            del self._search._vault
-        except AttributeError:
-            pass
-        self._closed = True
+            self._closed = True
 
     @property
     def path(self) -> str:

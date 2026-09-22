@@ -1,5 +1,6 @@
 """Unit tests for ``session_index.hooks`` — every code path."""
 
+import threading
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -75,6 +76,73 @@ class TestPushIndexUpdate:
 
 
 class TestSessionIndexHook:
+    def test_slow_push_cooldown_starts_after_completion(
+        self, idx, tmp_path, monkeypatch
+    ):
+        now = 100.0
+        monkeypatch.setattr(hooks_mod, "time", SimpleNamespace(monotonic=lambda: now))
+        original_upsert = idx.upsert
+
+        def slow_upsert(entry):
+            nonlocal now
+            original_upsert(entry)
+            now += 6.0
+
+        monkeypatch.setattr(idx, "upsert", slow_upsert)
+        store = _make_store(tmp_path, "cooldown")
+        hook = None
+        try:
+            hook = SessionIndexHook(store, idx, flush_every_n_events=999)
+            store.append_event("alice", "user_input", {"content": "new input"})
+            hook.detach()
+            assert idx.get("cooldown.kohakutr")["preview"] == ""
+        finally:
+            if hook is not None:
+                hook.detach()
+            store.close()
+
+    def test_busy_index_does_not_block_store_writes_and_final_flush_is_current(
+        self, idx, tmp_path, monkeypatch
+    ):
+        entered = threading.Event()
+        release = threading.Event()
+        original_upsert = idx.upsert
+        writes = []
+
+        def gated_upsert(entry):
+            entered.set()
+            assert release.wait(5), "test did not release the index writer"
+            original_upsert(entry)
+            writes.append(entry)
+
+        monkeypatch.setattr(idx, "upsert", gated_upsert)
+        store = _make_store(tmp_path, "busy")
+        hook = SessionIndexHook(
+            store, idx, push_on_attach=False, flush_every_n_events=1
+        )
+        try:
+            first = store.submit(
+                store.append_event, "alice", "user_input", {"content": "first"}
+            )
+            assert entered.wait(2), "index refresh did not start"
+            first.result(timeout=0.5)
+            for _ in range(25):
+                store.submit(
+                    store.append_event, "alice", "text", {"content": "progress"}
+                ).result(timeout=0.5)
+            store.submit(store.update_status, "paused").result(timeout=0.5)
+            release.set()
+            hook.flush()
+            hook.detach()
+            row = idx.get("busy.kohakutr")
+            assert row["preview"] == "first"
+            assert row["status"] == "paused"
+            assert len(writes) <= 3, "events during a pending refresh must coalesce"
+        finally:
+            release.set()
+            hook.detach()
+            store.close()
+
     def test_attach_pushes_initial_entry(self, idx, tmp_path):
         s = _make_store(tmp_path, "alice")
         try:
@@ -108,8 +176,8 @@ class TestSessionIndexHook:
             s.append_event("alice", "user_input", {"content": "one"})
             # Drop a second event: counter 2 → push.
             s.append_event("alice", "user_input", {"content": "two"})
-            row2 = idx.get("alice.kohakutr")
             hook.detach()
+            row2 = idx.get("alice.kohakutr")
         finally:
             s.close()
         # The second push captured the latest preview ("one" wins

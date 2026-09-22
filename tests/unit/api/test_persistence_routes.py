@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.routes.persistence import saved as saved_mod
+from kohakuterrarium.studio.persistence.session_index import refresh as refresh_mod
 from kohakuterrarium.studio.persistence.session_index.reconcile import (
     ReconcileReport,
 )
@@ -207,10 +208,10 @@ class TestReconcileSingleFlight:
             if block is not None:
                 block.wait(timeout=5)
 
-        monkeypatch.setattr(saved_mod, "reconcile", fake_reconcile)
+        monkeypatch.setattr(refresh_mod, "reconcile", fake_reconcile)
         # Fresh per-directory state (tmp_path is unique per test anyway).
-        saved_mod._RECONCILE_LOCKS.clear()
-        saved_mod._RECONCILE_STARTED.clear()
+        refresh_mod._RECONCILE_LOCKS.clear()
+        refresh_mod._RECONCILE_STARTED.clear()
 
     def _call(self, **params):
         kw = dict(
@@ -330,7 +331,7 @@ class TestReconcileSingleFlight:
                 )
             return ReconcileReport(read=0, deleted=0, total=0, elapsed_ms=0.0)
 
-        monkeypatch.setattr(saved_mod, "reconcile", aborting_twice)
+        monkeypatch.setattr(refresh_mod, "reconcile", aborting_twice)
 
         def refresh_once():
             self._call(refresh=True)
@@ -378,14 +379,14 @@ class TestReconcileSingleFlight:
                 raise RuntimeError("sqlite exploded")
             return ReconcileReport(read=0, deleted=0, total=0, elapsed_ms=0.0)
 
-        monkeypatch.setattr(saved_mod, "reconcile", raising_once)
+        monkeypatch.setattr(refresh_mod, "reconcile", raising_once)
 
         with pytest.raises(RuntimeError):
             self._call(refresh=True)
 
-        key = saved_mod.os.path.normcase(str(tmp_path))
+        key = refresh_mod.os.path.normcase(str(tmp_path))
         assert (
-            saved_mod._RECONCILE_STARTED.get(key, 0) == 0
+            refresh_mod._RECONCILE_STARTED.get(key, 0) == 0
         ), "a scan that raised must roll back its start count"
 
         # The next refresh still scans (it was not entitled to a skip).

@@ -1,6 +1,8 @@
 """Unit tests for ``session_index.store`` — every code path."""
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import pytest
 
@@ -800,3 +802,42 @@ class TestSessionIndexPage:
             "offset": 0,
             "limit": 20,
         }
+
+
+class TestConcurrentUpdates:
+    def test_parallel_upserts_keep_one_search_row_and_delete_removes_it(
+        self, idx, monkeypatch
+    ):
+        entered = threading.Event()
+        release = threading.Event()
+        original_insert = idx._search.insert
+        calls = []
+
+        def gated_insert(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                entered.set()
+                assert release.wait(5)
+            return original_insert(*args, **kwargs)
+
+        monkeypatch.setattr(idx._search, "insert", gated_insert)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(
+                idx.upsert, _entry(filename="same.kohakutr", preview="needle")
+            )
+            try:
+                assert entered.wait(5)
+                second = pool.submit(
+                    idx.upsert, _entry(filename="same.kohakutr", preview="needle")
+                )
+                try:
+                    second.result(timeout=0.2)
+                except TimeoutError:
+                    pass
+            finally:
+                release.set()
+            first.result(timeout=5)
+            second.result(timeout=5)
+        assert idx.list(search="needle").total == 1
+        assert idx.delete("same.kohakutr")
+        assert idx._search.search("needle") == []
