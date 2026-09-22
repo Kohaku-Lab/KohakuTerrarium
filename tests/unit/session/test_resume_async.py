@@ -113,3 +113,56 @@ async def test_cancelled_recovery_releases_writer_and_retains_text(
         ]
     finally:
         await asyncio.to_thread(store.close, update_status=False)
+
+
+async def test_cancel_between_recovery_append_and_slot_clear_does_not_duplicate(
+    tmp_path, monkeypatch
+):
+    path = _interrupted_session(tmp_path)
+    loop = asyncio.get_running_loop()
+    append_queued = asyncio.Event()
+    close_started = asyncio.Event()
+    release = threading.Event()
+    submit = SessionStore.submit
+    shutdown = SessionStore._shutdown_affinity
+
+    def gated_submit(self, fn, *args, **kwargs):
+        future = submit(self, fn, *args, **kwargs)
+        if getattr(fn, "__name__", "") == "append_event" and args[1] == "text_chunk":
+            loop.call_soon_threadsafe(append_queued.set)
+            assert release.wait(5), "recovery append was not released"
+        return future
+
+    def observed_shutdown(self):
+        if self._closed:
+            loop.call_soon_threadsafe(close_started.set)
+        shutdown(self)
+
+    monkeypatch.setattr(SessionStore, "submit", gated_submit)
+    monkeypatch.setattr(SessionStore, "_shutdown_affinity", observed_shutdown)
+    task = asyncio.create_task(resume_agent_async(path, llm=ScriptedLLM(["unused"])))
+    try:
+        await asyncio.wait_for(append_queued.wait(), timeout=3)
+        task.cancel()
+        # On a broken implementation close marks the store closed before
+        # attachment can submit the recovery-slot clear. A safe cancellation
+        # waits for attachment; give the old close path time to enter its gate.
+        try:
+            await asyncio.wait_for(close_started.wait(), timeout=0.2)
+        except asyncio.TimeoutError:
+            pass
+    finally:
+        release.set()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    monkeypatch.setattr(SessionStore, "submit", submit)
+    monkeypatch.setattr(SessionStore, "_shutdown_affinity", shutdown)
+    agent, store = await resume_agent_async(path, llm=ScriptedLLM(["unused"]))
+    try:
+        await agent._session_output.drain()
+        events = await store.run(store.get_events, "resumee")
+        assert [e["content"] for e in events if e["type"] == "text_chunk"] == [
+            "interrupted response"
+        ]
+    finally:
+        await asyncio.to_thread(store.close, update_status=False)

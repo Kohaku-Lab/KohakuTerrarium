@@ -66,14 +66,29 @@ async def _resume_agent_from_open_store_async(
     # Attachment can recover an interrupted text segment, including another
     # event scan. Keep it on the same worker as state injection; the agent
     # has not started and cannot observe partially attached state.
-    return await store.run(
-        _attach_resumed_agent,
-        agent,
-        store,
-        session_path,
-        agent_name,
-        mark_conversation_open=mark_conversation_open,
+    attachment = asyncio.create_task(
+        store.run(
+            _attach_resumed_agent,
+            agent,
+            store,
+            session_path,
+            agent_name,
+            mark_conversation_open=mark_conversation_open,
+        )
     )
+    try:
+        return await asyncio.shield(attachment)
+    except asyncio.CancelledError:
+        # Recovery submits an event and then its slot clear. Closing between
+        # those submissions leaves a durable duplicate for the next resume.
+        # Finish attachment before the outer failure guard closes the store.
+        try:
+            await attachment
+        except Exception:
+            logger.warning(
+                "Attachment failed during resume cancellation", exc_info=True
+            )
+        raise
 
 
 async def resume_agent_async(
