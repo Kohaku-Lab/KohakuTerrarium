@@ -5,6 +5,7 @@ import json
 import threading
 import time
 
+import pytest
 
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.output import (
@@ -534,23 +535,19 @@ class TestStart:
         finally:
             store.close()
 
-    async def test_stop_is_noop(self, tmp_path):
+    async def test_stop_with_empty_buffer_writes_no_event(self, tmp_path):
         store, out = _make(tmp_path)
         try:
-            # stop() is a no-op: the router never starts/stops secondary
-            # outputs, so an interrupt is recovered from the durable slot
-            # on resume rather than flushed here.
             await out.stop()
             store.flush()
             assert store.get_events("alice") == []
         finally:
             store.close()
 
-    async def test_flush_is_noop(self, tmp_path):
+    async def test_flush_with_empty_buffer_writes_no_event(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             await out.flush()
-            # A no-op: writes no events to the store.
             store.flush()
             assert store.get_events("alice") == []
         finally:
@@ -1757,3 +1754,39 @@ class TestOpenTextAffinity:
         finally:
             await out.drain()
             store.close()
+
+
+@pytest.mark.parametrize("boundary", ["flush", "stop"])
+@pytest.mark.parametrize("prefix", ["", "x" * 600], ids=["short", "after-checkpoint"])
+async def test_graceful_boundary_persists_uncheckpointed_tail(
+    tmp_path, monkeypatch, boundary, prefix
+):
+    # Keep the final short chunk below the time gate as well as the size gate.
+    monkeypatch.setattr("kohakuterrarium.session.text_buffer._FLUSH_SECONDS", 3600)
+    store, output = _make(tmp_path, _FakeAgent(turn=3, branch=2))
+    try:
+        if prefix:
+            await output.write_stream(prefix)
+            await output.drain()
+            assert store.state.get("alice:open_text") == prefix
+        await output.write_stream("TAIL")
+        await getattr(output, boundary)()
+        # Repeated lifecycle calls must not duplicate the finalized segment.
+        await output.flush()
+        await output.stop()
+        chunks = [e for e in store.get_events("alice") if e["type"] == "text_chunk"]
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == prefix + "TAIL"
+        assert chunks[0]["turn_index"] == 3
+        assert chunks[0]["branch_id"] == 2
+        assert not store.state.get("alice:open_text")
+    finally:
+        store.close(update_status=False)
+    reopened = SessionStore(str(tmp_path / "x.kohakutr"))
+    try:
+        recovered = SessionOutput("alice", reopened, None)
+        await recovered.drain()
+        chunks = [e for e in reopened.get_events("alice") if e["type"] == "text_chunk"]
+        assert [e["content"] for e in chunks] == [prefix + "TAIL"]
+    finally:
+        reopened.close(update_status=False)

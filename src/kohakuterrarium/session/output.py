@@ -208,7 +208,7 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         self._recover_open_text()
 
     async def stop(self) -> None:
-        await self.drain()
+        await self.flush()
 
     async def write(self, text: str) -> None:
         self._ingest_text(text)
@@ -271,6 +271,7 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         return self._append_event("text_chunk", data)
 
     async def flush(self) -> None:
+        self._flush_text_segment()
         await self.drain()
 
     async def on_processing_start(self, *, request_id: str | None = None) -> None:
