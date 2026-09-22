@@ -56,7 +56,9 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         self._event_key_prefix = event_key_prefix or agent_name
         # Durable buffering preserves partial text across process interruption.
         # Sequence numbers restart for each assistant response.
-        self._open_text = OpenTextSegment(store, self._event_key_prefix)
+        self._open_text = OpenTextSegment(
+            store, self._event_key_prefix, submit=self._submit_store_write
+        )
         self._recovered_open_text: bool = False
         self._chunk_seq: int = 0
         # Retain tasks for child runs that lack SubAgentManager persistence.
@@ -104,10 +106,12 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         self._flush_text_segment()
         self._append_event(event_type, data)
 
-    def _append_event(self, event_type: str, data: dict) -> None:
+    def _append_event(self, event_type: str, data: dict) -> Future:
         """Append one event under this sink's configured namespace."""
         ti, bi = self._current_turn_branch()
-        self._append_event_at(event_type, data, ti, bi, self._current_parent_path())
+        return self._append_event_at(
+            event_type, data, ti, bi, self._current_parent_path()
+        )
 
     def _append_event_at(
         self,
@@ -116,14 +120,14 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         turn_index: int | None,
         branch_id: int | None,
         parent_branch_path: list[tuple[int, int]] | None,
-    ) -> None:
+    ) -> Future:
         """Queue one event with explicit turn/branch/path stamps.
 
         Writes go to the store's affinity thread in submit order and are
         awaited at the next :meth:`drain`; stores without an affinity
         executor fall back to an inline append.
         """
-        self._submit_store_write(
+        return self._submit_store_write(
             self._store.append_event,
             self._event_key_prefix,
             event_type,
@@ -135,21 +139,27 @@ class SessionOutput(SessionActivityMixin, OutputModule):
 
     def _submit_store_write(
         self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
-    ) -> None:
-        """Queue one store write on the affinity thread (inline fallback).
+    ) -> Future:
+        """Queue a store write and expose its outcome to dependent writes.
 
-        Submission order matches call order, so auxiliary writes queued
-        after an event land after it. Stores without an affinity executor
-        run inline; failures surface with the standard record warning.
+        Submission order matches call order. Stores without an affinity
+        executor run inline; failures retain the standard record warning.
         """
         try:
             submit = getattr(self._store, "submit", None)
-            if not callable(submit):
-                fn(*args, **kwargs)
-                return
-            self._pending_writes.append(submit(fn, *args, **kwargs))
+            if callable(submit):
+                future = submit(fn, *args, **kwargs)
+                self._pending_writes.append(future)
+                return future
+            result = fn(*args, **kwargs)
         except Exception as e:
             logger.warning("Session record failed", error=str(e), exc_info=True)
+            future = Future()
+            future.set_exception(e)
+            return future
+        future = Future()
+        future.set_result(result)
+        return future
 
     async def drain(self) -> None:
         """Wait for every queued write to reach the store.
@@ -230,7 +240,7 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         if not recovered:
             return
         ti, bi, ppath = last_persisted_turn_branch(self._store, self._event_key_prefix)
-        self._append_event_at(
+        recorded = self._append_event_at(
             "text_chunk",
             {
                 "content": recovered,
@@ -242,19 +252,23 @@ class SessionOutput(SessionActivityMixin, OutputModule):
             ppath,
         )
         self._chunk_seq += 1
+        self._open_text.clear(after=recorded)
 
     def _flush_text_segment(self, *, finalize: str | None = None) -> None:
         """Write the open segment as one ``text_chunk`` event and clear it."""
         text = self._open_text.take()
         if text:
-            self._append_text_chunk(text, finalize=finalize)
+            recorded = self._append_text_chunk(text, finalize=finalize)
+            self._open_text.clear(after=recorded)
 
-    def _append_text_chunk(self, content: str, *, finalize: str | None = None) -> None:
+    def _append_text_chunk(
+        self, content: str, *, finalize: str | None = None
+    ) -> Future:
         data: dict[str, Any] = {"content": content, "chunk_seq": self._chunk_seq}
         if finalize:
             data["finalize"] = finalize
         self._chunk_seq += 1
-        self._append_event("text_chunk", data)
+        return self._append_event("text_chunk", data)
 
     async def flush(self) -> None:
         await self.drain()

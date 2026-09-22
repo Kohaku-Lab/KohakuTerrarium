@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 import time
 
 
@@ -12,6 +13,7 @@ from kohakuterrarium.session.output import (
     _subagent_name,
     _token_metadata,
 )
+from kohakuterrarium.session.readonly_view import SessionReadView
 from kohakuterrarium.session.store import SessionStore
 
 # ── fakes ─────────────────────────────────────────────────────────
@@ -1690,4 +1692,68 @@ class TestWriteBehindQueue:
             evts = [e for e in store.get_events("alice") if e["type"] == "tool_call"]
             assert len(evts) == 3
         finally:
+            store.close()
+
+
+class TestOpenTextAffinity:
+    async def test_stream_slot_writes_use_store_worker_and_clear_after_durable_event(
+        self, tmp_path, monkeypatch
+    ):
+        store, out = _make(tmp_path)
+        writes = []
+        durable_on_clear = []
+        vault_type = type(store.state)
+        original_set = vault_type.__setitem__
+
+        def observe(vault, key, value):
+            if vault is store.state and key == "alice:open_text":
+                writes.append(threading.get_ident())
+                if value == "":
+                    with SessionReadView(store.path) as reader:
+                        durable_on_clear.extend(
+                            event["content"]
+                            for _, event in reader.items("events", prefix="alice:e")
+                            if event.get("type") == "text_chunk"
+                        )
+            return original_set(vault, key, value)
+
+        monkeypatch.setattr(vault_type, "__setitem__", observe)
+        try:
+            worker = await store.run(threading.get_ident)
+            await out.write_stream("x" * 512)
+            await out.drain()
+            assert store.state.get("alice:open_text") == "x" * 512
+            out._record("boundary", {})
+            await out.drain()
+            assert writes and set(writes) == {worker}
+            assert durable_on_clear == ["x" * 512]
+            assert store.state.get("alice:open_text") == ""
+        finally:
+            await out.drain()
+            store.close()
+
+    async def test_failed_text_event_keeps_durable_recovery_slot(
+        self, tmp_path, monkeypatch
+    ):
+        store, out = _make(tmp_path)
+        original_append = store.append_event
+
+        def fail_text(prefix, event_type, data, **kwargs):
+            if event_type == "text_chunk":
+                raise OSError("injected event write failure")
+            return original_append(prefix, event_type, data, **kwargs)
+
+        try:
+            await out.write_stream("recover me" * 64)
+            await out.drain()
+            monkeypatch.setattr(store, "append_event", fail_text)
+            out._record("boundary", {})
+            await out.drain()
+            with SessionReadView(store.path) as reader:
+                assert reader.get("state", "alice:open_text") == "recover me" * 64
+            assert not [
+                e for e in store.get_events("alice") if e["type"] == "text_chunk"
+            ]
+        finally:
+            await out.drain()
             store.close()
