@@ -235,3 +235,15 @@ class TestCodexAccount:
         # Empty strings normalize to None so the client generates a key
         # and redeems any credit (never sends an empty credit_id).
         assert seen == {"idempotency_key": None, "credit_id": None}
+
+
+class TestGrokUsageDispatch:
+    async def test_grok_usage_dispatches_to_node_local_service(self, monkeypatch):
+        async def fake_usage():
+            return {"status": "not_logged_in", "source": "live", "products": []}
+
+        monkeypatch.setattr(mod, "grok_get_usage", fake_usage)
+        adapter = StudioIdentityAdapter(_FakeNode())
+        out = await adapter._dispatch(_msg("grok_usage"))
+        assert out == {"status": "not_logged_in", "source": "live", "products": []}
+        assert "error" not in out
