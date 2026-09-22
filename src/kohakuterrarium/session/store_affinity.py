@@ -53,8 +53,14 @@ class StoreAffinityMixin:
             executor.shutdown(wait=True)
 
     async def run(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> _T:
-        """Run ``fn`` on this store's affinity thread and return its result."""
-        return await asyncio.wrap_future(self.submit(fn, *args, **kwargs))
+        """Run ``fn`` on this store's affinity thread and return its result.
+
+        Cancelling the caller stops waiting, but accepted work retains its FIFO
+        position and still runs. Store close drains it before table disposal.
+        """
+        return await asyncio.shield(
+            asyncio.wrap_future(self.submit(fn, *args, **kwargs))
+        )
 
     def submit(self, fn: Callable[..., _T], /, *args: Any, **kwargs: Any) -> Future[_T]:
         """Queue one call in FIFO order, rejecting requests once close begins."""

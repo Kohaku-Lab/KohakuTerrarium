@@ -203,3 +203,82 @@ def test_close_from_worker_is_rejected_without_disposing_store(tmp_path):
         assert store.submit(store.state.get, "still-open").result(timeout=5) == "value"
     finally:
         store.close(update_status=False)
+
+
+@pytest.mark.parametrize("cancel_when", ["queued", "running"])
+async def test_cancelled_run_keeps_accepted_write_in_fifo(tmp_path, cancel_when):
+    path = tmp_path / "cancelled-write.kohakutr"
+    store = SessionStore(path)
+    store.append_event("alice", "user_message", {"content": "before"})
+    release = threading.Event()
+    started = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    task = None
+
+    def write():
+        if cancel_when == "running":
+            loop.call_soon_threadsafe(started.set)
+            assert release.wait(5), "running write was not released"
+        return store.append_event(
+            "alice", "user_message", {"content": "accepted"}, turn_index=2, branch_id=1
+        )
+
+    try:
+        if cancel_when == "queued":
+            store.submit(release.wait, 5)
+        task = asyncio.create_task(store.run(write))
+        # run submits synchronously up to its first await: the next loop turn
+        # guarantees acceptance before cancellation, without polling internals.
+        await asyncio.sleep(0)
+        if cancel_when == "running":
+            await asyncio.wait_for(started.wait(), timeout=2)
+        later = store.submit(
+            store.append_event, "alice", "user_message", {"content": "after"}
+        )
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+        assert not release.is_set()
+        assert not later.done(), "cancellation must return while work is still blocked"
+    finally:
+        release.set()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        await asyncio.to_thread(store.close, update_status=False)
+    reopened = SessionStore(path)
+    try:
+        events = reopened.get_events("alice")
+        assert [e["content"] for e in events] == ["before", "accepted", "after"]
+        assert events[1]["turn_index"] == 2
+        assert events[1]["branch_id"] == 1
+    finally:
+        reopened.close(update_status=False)
+
+
+def test_cancelled_run_survives_waiter_event_loop_shutdown(tmp_path):
+    path = tmp_path / "closed-loop.kohakutr"
+    store = SessionStore(path)
+    release = threading.Event()
+    store.submit(release.wait, 5)
+
+    async def queue_and_cancel():
+        task = asyncio.create_task(
+            store.run(store.append_event, "alice", "user_message", {"content": "saved"})
+        )
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    try:
+        asyncio.run(queue_and_cancel())
+    finally:
+        # The caller's loop is gone. Store.close still owns the accepted write
+        # and must drain it before disposing the native database handles.
+        release.set()
+        store.close(update_status=False)
+    reopened = SessionStore(path)
+    try:
+        assert [e["content"] for e in reopened.get_events("alice")] == ["saved"]
+    finally:
+        reopened.close(update_status=False)
