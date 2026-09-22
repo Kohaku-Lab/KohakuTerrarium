@@ -84,9 +84,23 @@ def _emit_lineage(
         "attach_seq": attach_seq,
         "ts": time.time(),
     }
+
+    def report_result(future) -> None:
+        try:
+            future.result()
+        except Exception as e:
+            logger.warning(
+                "Lineage event emit failed",
+                event_type=event_type,
+                error=str(e),
+                exc_info=True,
+            )
+
     try:
-        store.append_event(host, event_type, payload)
-    except Exception as e:  # pragma: no cover - lineage must not block attachment
+        store.submit(store.append_event, host, event_type, payload).add_done_callback(
+            report_result
+        )
+    except Exception as e:
         logger.warning(
             "Lineage event emit failed",
             event_type=event_type,

@@ -1,6 +1,7 @@
 """Unit tests for SessionStore affinity-thread dispatch."""
 
 import asyncio
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -8,7 +9,12 @@ from concurrent.futures import ThreadPoolExecutor
 import pytest
 
 from kohakuterrarium.session import store_affinity as store_affinity_mod
+from kohakuterrarium.core.events import TriggerEvent
+from kohakuterrarium.core.trigger_manager import TriggerManager
+from kohakuterrarium.session.attachment_service import _emit_lineage
+from kohakuterrarium.session.output import SessionOutput
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.modules.trigger.timer import TimerTrigger
 
 
 def _gaps(stamps: list[float]) -> list[float]:
@@ -282,3 +288,106 @@ def test_cancelled_run_survives_waiter_event_loop_shutdown(tmp_path):
         assert [e["content"] for e in reopened.get_events("alice")] == ["saved"]
     finally:
         reopened.close(update_status=False)
+
+
+def _emit_live_event(store, producer):
+    if producer == "schedule_drift":
+        manager = TriggerManager(lambda event: None)
+        manager._session_store = store
+        manager._agent_name = "root"
+        manager._maybe_emit_schedule_drift(
+            "timer-1",
+            TimerTrigger(interval=60),
+            TriggerEvent(type="timer", context={"scheduled_at": time.time() - 5}),
+        )
+    else:
+        _emit_lineage(
+            store,
+            "root",
+            event_type=producer,
+            agent_name="helper",
+            role="reviewer",
+            attach_seq=0,
+            attached_by="root",
+            session_id="s",
+        )
+
+
+@pytest.mark.parametrize(
+    "producer", ["schedule_drift", "agent_attached", "agent_detached"]
+)
+async def test_live_producers_preserve_queued_output(tmp_path, producer):
+    store = SessionStore(tmp_path / "mixed-writers.kohakutr")
+    output = SessionOutput("root", store, None)
+    loop = asyncio.get_running_loop()
+    allocated = asyncio.Event()
+    release = threading.Event()
+    counter_code = SessionStore._next_event_seq.__code__
+    gated = False
+
+    def pause_allocation(frame, event, arg):
+        nonlocal gated
+        if frame.f_code is not counter_code:
+            return None
+        if event == "line" and "seq" in frame.f_locals and not gated:
+            gated = True
+            loop.call_soon_threadsafe(allocated.set)
+            assert release.wait(5), "event allocation was not released"
+        return pause_allocation
+
+    try:
+        await store.run(sys.settrace, pause_allocation)
+        output._append_event("text_chunk", {"content": "queued output"})
+        await asyncio.wait_for(allocated.wait(), timeout=3)
+        _emit_live_event(store, producer)
+        release.set()
+        await output.drain()
+        await store.run(store.flush)
+        rows = await store.run(
+            lambda: [(key, store.events[key]) for key in sorted(store.events.keys())]
+        )
+        assert [key for key, _ in rows] == [b"root:e000000", b"root:e000001"]
+        assert [event["type"] for _, event in rows] == ["text_chunk", producer]
+        assert [event["event_id"] for _, event in rows] == [1, 2]
+        assert rows[0][1]["content"] == "queued output"
+        if producer == "schedule_drift":
+            assert rows[1][1]["trigger_id"] == "timer-1"
+        else:
+            assert rows[1][1]["agent_name"] == "helper"
+    finally:
+        release.set()
+        await store.run(sys.settrace, None)
+        await asyncio.to_thread(store.close, update_status=False)
+
+
+@pytest.mark.parametrize(
+    "producer", ["schedule_drift", "agent_attached", "agent_detached"]
+)
+@pytest.mark.parametrize("failure", ["write", "closed"])
+async def test_live_producer_failures_are_logged(
+    tmp_path, monkeypatch, caplog, producer, failure
+):
+    store = SessionStore(tmp_path / "failed-producer.kohakutr")
+
+    def fail_write(*args, **kwargs):
+        raise OSError("storage unavailable")
+
+    try:
+        if failure == "closed":
+            store.close(update_status=False)
+        else:
+            monkeypatch.setattr(store, "append_event", fail_write)
+        _emit_live_event(store, producer)
+        if failure == "write":
+            await store.run(lambda: None)
+        expected = (
+            "schedule_drift emit failed"
+            if producer == "schedule_drift"
+            else "Lineage event emit failed"
+        )
+        assert expected in caplog.text
+        assert (
+            "storage unavailable" if failure == "write" else "SessionStore is closed"
+        ) in caplog.text
+    finally:
+        await asyncio.to_thread(store.close, update_status=False)

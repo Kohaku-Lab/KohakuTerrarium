@@ -1,11 +1,10 @@
 """Persist routed agent output and activity events to a session store.
 
 Event appends are dispatched to the store's single-worker affinity thread in
-submit order and become durable at the next :meth:`SessionOutput.drain`
-boundary (turn end), so activity bursts never block the event loop. Readers
-that go through the store's affinity thread observe submitted writes
-automatically; the synchronous hooks keep their signatures for producers that
-cannot await.
+submit order. :meth:`SessionOutput.drain` waits for queued writes to complete;
+turn snapshots and recovery-slot clearing explicitly flush the native cache.
+Readers that use the store's affinity thread observe earlier submitted writes.
+The synchronous hooks keep their signatures for producers that cannot await.
 """
 
 import asyncio

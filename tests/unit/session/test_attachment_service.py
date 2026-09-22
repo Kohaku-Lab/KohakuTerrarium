@@ -142,7 +142,7 @@ class TestEmitLineage:
                 session_id="s",
             )
             store.flush()
-            events = store.get_events("host")
+            events = store.submit(store.get_events, "host").result(timeout=5)
             assert len(events) == 1
             assert events[0]["type"] == "agent_attached"
             assert events[0]["agent_name"] == "alice"
@@ -229,7 +229,7 @@ class TestAttachAgentToSession:
             # Lineage is emitted under the *host* namespace (here:
             # the fallback "host" since the session has no agent and
             # no recorded meta agents).
-            events = store.get_events("host")
+            events = store.submit(store.get_events, "host").result(timeout=5)
             assert any(e["type"] == "agent_attached" for e in events)
         finally:
             store.close()
@@ -242,7 +242,9 @@ class TestAttachAgentToSession:
             attach_agent_to_session(agent, sess, "rev", attached_by="caller")
             store.flush()
             events = [
-                e for e in store.get_events("host") if e["type"] == "agent_attached"
+                e
+                for e in store.submit(store.get_events, "host").result(timeout=5)
+                if e["type"] == "agent_attached"
             ]
             assert events[0]["attached_by"] == "caller"
         finally:
@@ -299,7 +301,9 @@ class TestDetachAgentFromSession:
             detach_agent_from_session(agent)
             store.flush()
             events = [
-                e for e in store.get_events("host") if e["type"] == "agent_detached"
+                e
+                for e in store.submit(store.get_events, "host").result(timeout=5)
+                if e["type"] == "agent_detached"
             ]
             assert len(events) == 1
         finally:
