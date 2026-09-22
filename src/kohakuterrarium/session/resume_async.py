@@ -24,7 +24,7 @@ from kohakuterrarium.session.resume_open import (
     preflight_legacy_workspace,
 )
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.session.store_open import open_owned_store
+from kohakuterrarium.session.store_open import _finish_cleanup, open_owned_store
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -80,11 +80,9 @@ async def _resume_agent_from_open_store_async(
     try:
         return await asyncio.shield(attachment)
     except asyncio.CancelledError:
-        # Recovery submits an event and then its slot clear. Closing between
-        # those submissions leaves a durable duplicate for the next resume.
-        # Finish attachment before the outer failure guard closes the store.
+        # Finish all recovery submissions before closing the store.
         try:
-            await attachment
+            await _finish_cleanup(attachment)
         except Exception:
             logger.warning(
                 "Attachment failed during resume cancellation", exc_info=True

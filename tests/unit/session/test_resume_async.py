@@ -118,8 +118,9 @@ async def test_cancelled_recovery_releases_writer_and_retains_text(
         await asyncio.to_thread(store.close, update_status=False)
 
 
+@pytest.mark.parametrize("cancel_twice", [False, True])
 async def test_cancel_between_recovery_append_and_slot_clear_does_not_duplicate(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, cancel_twice
 ):
     path = _interrupted_session(tmp_path)
     loop = asyncio.get_running_loop()
@@ -147,6 +148,10 @@ async def test_cancel_between_recovery_append_and_slot_clear_does_not_duplicate(
     try:
         await asyncio.wait_for(append_queued.wait(), timeout=3)
         task.cancel()
+        await asyncio.sleep(0)
+        if cancel_twice:
+            task.cancel()
+            await asyncio.sleep(0)
         # On a broken implementation close marks the store closed before
         # attachment can submit the recovery-slot clear. A safe cancellation
         # waits for attachment; give the old close path time to enter its gate.
@@ -160,6 +165,16 @@ async def test_cancel_between_recovery_append_and_slot_clear_does_not_duplicate(
         await task
     monkeypatch.setattr(SessionStore, "submit", submit)
     monkeypatch.setattr(SessionStore, "_shutdown_affinity", shutdown)
+    check = SessionStore(path)
+    try:
+        assert check.state.get("resumee:open_text") == ""
+        assert [
+            e["content"]
+            for e in check.get_events("resumee")
+            if e["type"] == "text_chunk"
+        ] == ["interrupted response"]
+    finally:
+        check.close(update_status=False)
     agent, store = await resume_agent_async(path, llm=ScriptedLLM(["unused"]))
     try:
         await agent._session_output.drain()
