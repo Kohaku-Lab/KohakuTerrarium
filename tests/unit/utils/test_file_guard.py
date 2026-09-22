@@ -15,6 +15,7 @@ from kohakuterrarium.utils.file_guard import (
     FileReadRecord,
     FileReadState,
     PathBoundaryGuard,
+    _SAMPLING_ALLOWED_BYTES,
     check_read_before_write,
     is_binary_file,
 )
@@ -286,6 +287,28 @@ class TestIsBinaryFile:
         # High bytes (>=0x80) are explicitly excluded from the
         # control-byte count — UTF-8 text MUST NOT be flagged.
         assert is_binary_file(p) is False
+
+    def test_large_ascii_sample_is_not_binary(self, tmp_path):
+        # Multi-chunk text exercising the translate()-based count on a
+        # full 8KB sample, not just a tiny fixture.
+        p = tmp_path / "big.dat"
+        p.write_bytes(b"The quick brown fox jumps over the lazy dog.\n" * 200)
+        assert is_binary_file(p) is False
+
+    def test_control_byte_count_matches_reference_formula(self):
+        # The translate()-based control count must stay exactly
+        # equivalent to the per-byte formula it replaced:
+        # ``b < 0x08 or (0x0E <= b <= 0x1F and b != 0x1B)``.
+        import random
+
+        rng = random.Random(20260921)
+        for _ in range(50):
+            chunk = bytes(rng.randrange(256) for _ in range(300))
+            expected = sum(
+                1 for b in chunk if b < 0x08 or (0x0E <= b <= 0x1F and b != 0x1B)
+            )
+            actual = len(chunk.translate(None, _SAMPLING_ALLOWED_BYTES))
+            assert actual == expected
 
     def test_extension_match_takes_precedence_over_text_content(self, tmp_path):
         # Even if the file is actually text, the extension wins.

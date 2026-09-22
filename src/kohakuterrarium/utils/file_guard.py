@@ -268,6 +268,11 @@ _BINARY_EXTENSIONS: set[str] = {
     ".kohakutr",  # KohakuVault session files
 }
 
+# Byte values NOT counted as control characters when content-sampling:
+# backspace/tab/LF/VT/FF/CR (0x08–0x0D), ESC (0x1B), and everything
+# from 0x20 up (printable ASCII + all high bytes, so UTF-8 is safe).
+_SAMPLING_ALLOWED_BYTES = bytes(range(0x08, 0x0E)) + b"\x1b" + bytes(range(0x20, 0x100))
+
 
 def is_binary_file(path: str | Path, sample_size: int = 8192) -> bool:
     """Detect if a file is binary.
@@ -300,7 +305,11 @@ def is_binary_file(path: str | Path, sample_size: int = 8192) -> bool:
     if b"\x00" in chunk:
         return True
 
-    # High ratio of control characters (excluding common whitespace + ANSI escape)
-    # suggests binary. UTF-8 high bytes (0x80+) are NOT counted as control chars.
-    control = sum(1 for b in chunk if b < 0x08 or (0x0E <= b <= 0x1F and b != 0x1B))
+    # High ratio of control characters (excluding common whitespace + ANSI
+    # escape) suggests binary. UTF-8 high bytes (0x80+) are NOT counted.
+    # translate() drops the allowed bytes in one C pass; the length of
+    # what remains is exactly the per-byte count ``b < 0x08 or
+    # (0x0E <= b <= 0x1F and b != 0x1B)`` — same semantics, no Python
+    # loop per byte.
+    control = len(chunk.translate(None, _SAMPLING_ALLOWED_BYTES))
     return control / len(chunk) > 0.10

@@ -1,5 +1,6 @@
 """Regex search over text files with gitignore-aware traversal."""
 
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -95,8 +96,14 @@ class GrepTool(BaseTool):
                     base, file_pattern, gitignore=follow_gitignore
                 )
 
+            # iter_matching_files yields non-directory entries; the
+            # single-file branch checked base.is_file() above. On POSIX
+            # that can still include FIFOs/sockets/devices, which would
+            # block forever on open() — the baseline filtered them via
+            # is_file(), keep that guard there. NTFS cannot hold them,
+            # so Windows skips the stat entirely.
             for file_path in files_iter:
-                if not file_path.is_file():
+                if os.name == "posix" and not file_path.is_file():
                     continue
 
                 if is_binary_file(file_path):

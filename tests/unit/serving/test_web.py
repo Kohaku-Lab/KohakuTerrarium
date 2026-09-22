@@ -6,9 +6,11 @@ end-user-facing UI / platform-dependent — they fall under the
 "final end-user UI" exception in the coverage policy.
 """
 
+import ctypes
 import json
 import socket
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -128,6 +130,58 @@ def test_desktop_blocking_ensures_file_logging(monkeypatch):
         _run_desktop_app_blocking()
 
     assert calls == ["fd_limit", "file"]
+
+
+def test_desktop_blocking_passes_window_icon_on_windows(monkeypatch, tmp_path):
+    started = {}
+
+    class _Shown:
+        def __init__(self):
+            self.handlers = []
+
+        def __iadd__(self, handler):
+            self.handlers.append(handler)
+            return self
+
+    window = SimpleNamespace(events=SimpleNamespace(shown=_Shown()))
+    webview = SimpleNamespace(
+        create_window=lambda *args, **kwargs: window,
+        start=lambda **kwargs: started.update(kwargs),
+    )
+    shell32 = SimpleNamespace(
+        SetCurrentProcessExplicitAppUserModelID=lambda app_id: None
+    )
+    user32 = SimpleNamespace(
+        LoadImageW=lambda *_args: 73,
+        FindWindowW=lambda *_args: 91,
+        SendMessageW=lambda *args: None,
+    )
+    monkeypatch.setattr(web_mod.sys, "platform", "win32")
+    monkeypatch.setattr(
+        ctypes,
+        "windll",
+        SimpleNamespace(shell32=shell32, user32=user32),
+        raising=False,
+    )
+    monkeypatch.setattr(web_mod, "configure_utf8_stdio", lambda **kwargs: None)
+    monkeypatch.setattr(web_mod, "raise_fd_limit", lambda **kwargs: None)
+    monkeypatch.setattr(web_mod, "enable_file_logging", lambda: None)
+    monkeypatch.setattr(web_mod, "set_level", lambda level: None)
+    monkeypatch.setattr(web_mod, "enable_stderr_logging", lambda level: None)
+    monkeypatch.setitem(sys.modules, "webview", webview)
+    monkeypatch.setattr(web_mod, "WEB_DIST_DIR", tmp_path)
+    monkeypatch.setattr(web_mod, "_resolve_config_dirs", lambda: ([], []))
+    monkeypatch.setattr(web_mod, "create_app", lambda **kwargs: object())
+    monkeypatch.setattr(
+        web_mod,
+        "start_uvicorn_with_port_fallback",
+        lambda *args, **kwargs: (None, 8123),
+    )
+
+    _run_desktop_app_blocking(port=8001, log_level="ERROR")
+
+    expected = Path(web_mod.__file__).parent.parent / "app_icons" / "window.ico"
+    assert started.get("icon") == str(expected)
 
 
 # ── find_free_port ──────────────────────────────────────────────
