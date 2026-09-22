@@ -134,6 +134,10 @@ class SearchMemoryTool(BaseTool):
     def _build_memory(self, context: ToolContext) -> Any:
         """Construct the memory index (blocking: model load + SQLite open)."""
         session = context.session
+        # Concurrent cold requests can all miss the event-loop cache check.
+        # Recheck inside the store's serialized worker before opening handles.
+        if session and hasattr(session, "_memory"):
+            return session._memory
         agent = context.agent
         store = agent.session_store
 
