@@ -842,7 +842,7 @@ class TestWebsocketMode:
         assert kw["model"] == "m"
 
     @pytest.mark.parametrize("started", [False, True])
-    async def test_uncertain_submission_bypasses_all_retry_and_http_paths(
+    async def test_retry_exhaustion_or_first_event_prevents_further_retry(
         self, started
     ):
         p = self._provider()
@@ -852,7 +852,7 @@ class TestWebsocketMode:
         with pytest.raises(ResponsesWSError):
             async for _ in p.chat([{"role": "user", "content": "hi"}]):
                 pass
-        assert len(connection.sent) == 1
+        assert len(connection.sent) == (1 if started else 2)
         assert p._client.responses.kwargs is None
         assert connection.closed
 

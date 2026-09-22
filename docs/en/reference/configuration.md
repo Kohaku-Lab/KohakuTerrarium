@@ -235,8 +235,23 @@ beyond them; upstream generation deadlines still apply.
 
 Boolean values, nonfinite numbers, zero or negative limits, and unrelated
 connection arguments such as `proxy` or `additional_headers` are rejected.
-This setting does not change the SDK's outgoing failed-send queue or authorize
-automatic replay after a generation request may have been submitted.
+These options do not change the SDK's outgoing failed-send queue or the retry
+policy. For ordinary Responses requests, a transport failure before the first
+server event permits one reconnect and full-history resend. This applies to
+requests without tools or with only client-executed function tools. The original
+generation may already have started, so this bounded retry can duplicate remote
+generation; it is not an exactly-once guarantee.
+
+Any server event, including `response.created`, ends that retry window. Partial
+output, cancellation, explicit server errors, and submitted requests with
+server-executed tools or `background: true` are not automatically replayed.
+Explicit protocol, policy, message-size, and application-specific WebSocket
+close codes are also terminal; retry does not bypass those limits.
+An explicit `previous_response_not_found` still permits full-history recovery.
+Once a send has been attempted, exhausting the reconnect does not fall through
+to HTTP or the provider's additional retries, even if the reconnect itself
+failed before sending. Failures entirely before submission retain connection
+retry and HTTP-fallback behavior.
 
 ### Input
 
