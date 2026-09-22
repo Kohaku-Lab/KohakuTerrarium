@@ -841,3 +841,44 @@ class TestConcurrentUpdates:
         assert idx.list(search="needle").total == 1
         assert idx.delete("same.kohakutr")
         assert idx._search.search("needle") == []
+
+
+class TestQueuedUpdates:
+    def test_close_drains_accepted_updates_before_disposing_tables(
+        self, idx, tmp_path, monkeypatch
+    ):
+        entered = threading.Event()
+        release = threading.Event()
+        upsert = idx.upsert
+
+        def gated_upsert(entry):
+            entered.set()
+            assert release.wait(5), "index writer was not released"
+            upsert(entry)
+
+        monkeypatch.setattr(idx, "upsert", gated_upsert)
+        first = idx.submit_update(_entry(filename="first.kohakutr", preview="first"))
+        second = idx.submit_update(_entry(filename="second.kohakutr", preview="second"))
+        try:
+            assert entered.wait(2)
+            with ThreadPoolExecutor(max_workers=1) as caller:
+                closed = caller.submit(idx.close)
+                try:
+                    with pytest.raises(TimeoutError):
+                        closed.result(timeout=0.05)
+                finally:
+                    release.set()
+                closed.result(timeout=2)
+            first.result(timeout=2)
+            second.result(timeout=2)
+            with pytest.raises(RuntimeError, match="closed"):
+                idx.submit_update(_entry(filename="late.kohakutr"))
+            reopened = SessionIndex(tmp_path / ".kt-index.kvault")
+            try:
+                assert reopened.list().total == 2
+                assert reopened.get("first.kohakutr")["preview"] == "first"
+                assert reopened.get("second.kohakutr")["preview"] == "second"
+            finally:
+                reopened.close()
+        finally:
+            release.set()

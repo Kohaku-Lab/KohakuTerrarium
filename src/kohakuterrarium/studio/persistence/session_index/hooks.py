@@ -3,7 +3,7 @@
 import threading
 import time
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future
 from pathlib import Path
 
 from kohakuterrarium.session.store import SessionStore
@@ -45,8 +45,8 @@ def push_index_update(
 class SessionIndexHook:
     """Coalesce event-driven pushes without holding up event persistence.
 
-    A snapshot runs on the store's affinity thread, then a separate worker
-    writes the index. At most one refresh is outstanding per hook. Periodic
+    A snapshot runs on the store's affinity thread, then the index's shared
+    writer persists it. At most one refresh is outstanding per hook. Periodic
     refreshes are asynchronous; ``flush`` forces a current snapshot and waits,
     while ``detach`` stops accepting events and drains outstanding work.
     These lifecycle barriers must be called outside the store worker.
@@ -80,10 +80,10 @@ class SessionIndexHook:
         self._last_push = time.monotonic()
         self._attached = False
         self._listener: Callable[[str, dict], None] | None = None
-        self._lock = threading.Lock()
+        # Future callbacks may run inline while a refresh is being scheduled.
+        self._lock = threading.RLock()
         self._pending: Future | None = None
-        self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="kt-index")
-        # Drain the hook before affinity shutdown and native-table disposal.
+        # Detach before native-table disposal; snapshots use the store worker.
         store._ensure_affinity()
         store._companion_closers.append(self.detach)
         self._attach(push_on_attach=push_on_attach)
@@ -105,18 +105,42 @@ class SessionIndexHook:
         """Queue one immutable snapshot; the caller owns ``_lock``."""
         snapshot = self._store.submit(_snapshot_entry, self._store)
         self._unflushed_events = 0
-        self._pending = self._writer.submit(self._push, snapshot)
-        return self._pending
+        pending = self._pending = Future()
+        snapshot.add_done_callback(lambda result: self._push(result, pending))
+        return pending
 
-    def _push(self, snapshot: Future) -> None:
+    def _push(self, snapshot: Future, pending: Future) -> None:
+        # Called only when the snapshot is ready. Waiting for a store inside
+        # the shared writer would block unrelated sessions behind that store.
         try:
-            self._index.upsert(snapshot.result())
+            written = self._index.submit_update(snapshot.result())
         except Exception as exc:  # noqa: BLE001
-            logger.warning("index refresh failed", error=str(exc), exc_info=True)
-        finally:
-            # A slow refresh must not make the next event immediately overdue.
-            with self._lock:
-                self._last_push = time.monotonic()
+            self._complete_refresh(pending, exc)
+            return
+
+        def completed(result: Future) -> None:
+            try:
+                result.result()
+            except Exception as exc:  # noqa: BLE001
+                self._complete_refresh(pending, exc)
+            else:
+                self._complete_refresh(pending)
+
+        written.add_done_callback(completed)
+
+    def _complete_refresh(
+        self, pending: Future, error: Exception | None = None
+    ) -> None:
+        if error is not None:
+            logger.warning(
+                "index refresh failed",
+                error=str(error),
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        # A slow refresh must not make the next event immediately overdue.
+        with self._lock:
+            self._last_push = time.monotonic()
+        pending.set_result(None)
 
     def _on_event(self) -> None:
         with self._lock:
@@ -151,11 +175,13 @@ class SessionIndexHook:
             listener = self._listener
             self._attached = False
             self._listener = None
+            pending = self._pending
         try:
             self._store.unsubscribe(listener)
         except Exception as exc:  # noqa: BLE001
             logger.warning("detach unsubscribe failed", error=str(exc), exc_info=True)
-        self._writer.shutdown(wait=True)
+        if pending is not None:
+            pending.result()
 
     def __enter__(self) -> "SessionIndexHook":
         return self

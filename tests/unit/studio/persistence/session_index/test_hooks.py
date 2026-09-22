@@ -1,6 +1,7 @@
 """Unit tests for ``session_index.hooks`` — every code path."""
 
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -286,3 +287,118 @@ class TestSessionIndexHook:
             hook.detach()  # must not raise
         finally:
             s.close()
+
+
+class TestSharedIndexWriter:
+    def test_sessions_share_writer_and_detach_keeps_peers_working(
+        self, idx, tmp_path, monkeypatch
+    ):
+        stores = []
+        hooks = []
+        writer_threads = set()
+        upsert = idx.upsert
+
+        def observed_upsert(entry):
+            writer_threads.add(threading.current_thread())
+            upsert(entry)
+
+        monkeypatch.setattr(idx, "upsert", observed_upsert)
+        try:
+            for number in range(8):
+                store = _make_store(tmp_path, f"session-{number}")
+                stores.append(store)
+                hooks.append(SessionIndexHook(store, idx, flush_every_n_events=1))
+            assert idx.list().total == 8
+            assert len(writer_threads) == 1
+            hooks[0].detach()
+            stores[0].close(update_status=False)
+            for store, hook in zip(stores[1:], hooks[1:]):
+                store.submit(
+                    store.append_event,
+                    "alice",
+                    "user_input",
+                    {"content": "still alive"},
+                ).result(timeout=2)
+                hook.flush()
+                assert idx.get(Path(store.path).name)["preview"] == "still alive"
+            assert len(writer_threads) == 1
+        finally:
+            for hook in hooks:
+                hook.detach()
+            for store in stores:
+                store.close(update_status=False)
+        idx.close()
+        assert not any(thread.is_alive() for thread in writer_threads)
+
+    def test_blocked_snapshot_does_not_delay_other_sessions(self, idx, tmp_path):
+        slow = _make_store(tmp_path, "slow")
+        ready = _make_store(tmp_path, "ready")
+        hooks = [
+            SessionIndexHook(store, idx, push_on_attach=False, flush_every_n_events=1)
+            for store in (slow, ready)
+        ]
+        release = threading.Event()
+        blocked = slow.submit(release.wait, 5)
+        try:
+            # Schedule a snapshot behind slow's blocked affinity work.
+            slow.append_event("alice", "user_input", {"content": "slow snapshot"})
+            ready.submit(
+                ready.append_event, "alice", "user_input", {"content": "ready snapshot"}
+            ).result(timeout=2)
+            with ThreadPoolExecutor(max_workers=1) as caller:
+                try:
+                    caller.submit(hooks[1].flush).result(timeout=2)
+                    assert idx.get("ready.kohakutr")["preview"] == "ready snapshot"
+                    assert not blocked.done()
+                finally:
+                    release.set()
+            hooks[0].flush()
+            assert idx.get("slow.kohakutr")["preview"] == "slow snapshot"
+        finally:
+            release.set()
+            for hook in hooks:
+                hook.detach()
+            slow.close(update_status=False)
+            ready.close(update_status=False)
+
+
+@pytest.mark.parametrize("stage", ["snapshot", "write"])
+def test_failed_shared_refresh_finishes_and_can_retry(
+    idx, tmp_path, monkeypatch, stage
+):
+    store = _make_store(tmp_path, "retry")
+    hook = SessionIndexHook(store, idx, push_on_attach=False)
+    owner, method = (store, "load_meta") if stage == "snapshot" else (idx, "upsert")
+    original = getattr(owner, method)
+
+    def failed(*args, **kwargs):
+        raise OSError("injected storage failure")
+
+    try:
+        monkeypatch.setattr(owner, method, failed)
+        hook.flush()
+        assert idx.list().total == 0
+        monkeypatch.setattr(owner, method, original)
+        store.append_event("alice", "user_input", {"content": "retry succeeded"})
+        hook.flush()
+        assert idx.get("retry.kohakutr")["preview"] == "retry succeeded"
+    finally:
+        hook.detach()
+        store.close(update_status=False)
+
+
+def test_index_closed_before_snapshot_finishes_does_not_block_detach(idx, tmp_path):
+    store = _make_store(tmp_path, "late")
+    hook = SessionIndexHook(store, idx, push_on_attach=False, flush_every_n_events=1)
+    release = threading.Event()
+    store.submit(release.wait, 5)
+    try:
+        store.append_event("alice", "user_input", {"content": "retained event"})
+        idx.close()
+        release.set()
+        hook.detach()
+        assert store.get_events("alice")[0]["content"] == "retained event"
+    finally:
+        release.set()
+        hook.detach()
+        store.close(update_status=False)

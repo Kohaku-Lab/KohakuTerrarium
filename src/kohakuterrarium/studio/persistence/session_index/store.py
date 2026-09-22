@@ -10,6 +10,7 @@ KohakuVault's WAL and busy retries. Entry updates are last-writer-wins.
 """
 
 from collections.abc import Iterable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import asdict
 from pathlib import Path
 from threading import RLock
@@ -89,6 +90,9 @@ class SessionIndex:
         # One entry update spans both native tables. Hook and reconcile
         # workers must not create competing FTS rows for the same filename.
         self._write_lock = RLock()
+        self._writer_lock = RLock()
+        self._close_lock = RLock()
+        self._writer: ThreadPoolExecutor | None = None
         self._path = str(sidecar_path)
         sidecar_path.parent.mkdir(parents=True, exist_ok=True)
         # FTS column definitions are fixed at table creation. Purging stale
@@ -179,6 +183,21 @@ class SessionIndex:
                     path=str(target),
                     error=str(exc),
                 )
+
+    def submit_update(self, entry: SessionIndexEntry) -> Future:
+        """Queue a captured entry on the index's single shared writer.
+
+        Only ready snapshots enter this queue, so a busy session store cannot
+        stall other sessions' updates. Closing drains accepted entries first.
+        """
+        with self._writer_lock:
+            if self._closed:
+                raise RuntimeError("SessionIndex is closed")
+            if self._writer is None:
+                self._writer = ThreadPoolExecutor(
+                    max_workers=1, thread_name_prefix="kt-index"
+                )
+            return self._writer.submit(self.upsert, entry)
 
     def upsert(self, entry: SessionIndexEntry) -> None:
         """Insert or update an entry and its FTS row by filename.
@@ -438,29 +457,40 @@ class SessionIndex:
         Explicitly deleting native wrappers forces refcount-driven cleanup,
         which prevents lingering Windows handles from blocking later opens.
         """
-        with self._write_lock:
-            if self._closed:
-                return
-            # TextVault has no close method; its underlying vault is released
-            # explicitly after closable tables are handled.
-            for table in (self._entries, self._search, self._meta):
-                close = getattr(table, "close", None)
-                if not callable(close):
-                    continue
-                try:
-                    close()
-                except Exception as exc:  # noqa: BLE001
-                    logger.warning("close table failed", error=str(exc), exc_info=True)
-            for table in (self._entries, self._meta):
-                try:
-                    del table._inner
-                except AttributeError:
-                    pass
+        with self._close_lock:
+            with self._writer_lock:
+                if self._closed:
+                    return
+                self._closed = True
+                writer, self._writer = self._writer, None
+            # Neither submission nor native-write locks may be held while
+            # joining: the worker and its completion callbacks need them.
+            if writer is not None:
+                writer.shutdown(wait=True)
+            with self._write_lock:
+                self._close_tables()
+
+    def _close_tables(self) -> None:
+        """Dispose native handles after the shared writer has drained."""
+        # TextVault has no close method; its underlying vault is released
+        # explicitly after closable tables are handled.
+        for table in (self._entries, self._search, self._meta):
+            close = getattr(table, "close", None)
+            if not callable(close):
+                continue
             try:
-                del self._search._vault
+                close()
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("close table failed", error=str(exc), exc_info=True)
+        for table in (self._entries, self._meta):
+            try:
+                del table._inner
             except AttributeError:
                 pass
-            self._closed = True
+        try:
+            del self._search._vault
+        except AttributeError:
+            pass
 
     @property
     def path(self) -> str:
