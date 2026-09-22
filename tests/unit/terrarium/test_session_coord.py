@@ -1,12 +1,21 @@
 """Unit tests for :mod:`kohakuterrarium.terrarium.session_coord`."""
 
+import asyncio
+import threading
 from types import SimpleNamespace
+
+import pytest
+
+from kohakuterrarium.core.config_types import AgentConfig
 
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import session_coord as sc
 from kohakuterrarium.terrarium.autosession import close_owned_stores
 from kohakuterrarium.terrarium.topology import TopologyDelta
+from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.drive.config import DriveRuntimeConfig
+from kohakuterrarium.testing.llm import ScriptedLLM
 
 # ── copy_events_into ──────────────────────────────────────────
 
@@ -483,3 +492,71 @@ class TestRefreshAndAttach:
             assert agent.attached == [store]
         finally:
             store.close()
+
+
+@pytest.mark.parametrize("queued_on", ["source", "destination"])
+async def test_copy_includes_accepted_writes_before_appending(tmp_path, queued_on):
+    src = SessionStore(str(tmp_path / "source.kohakutr"))
+    dst = SessionStore(str(tmp_path / "destination.kohakutr"))
+    release = threading.Event()
+    entered = threading.Event()
+    selected = src if queued_on == "source" else dst
+
+    def blocked():
+        entered.set()
+        assert release.wait(5)
+
+    selected.submit(blocked)
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        accepted = selected.submit(
+            selected.append_event, "alice", "text_chunk", {"content": "accepted"}
+        )
+        if queued_on == "destination":
+            src.append_event("alice", "text_chunk", {"content": "copied"})
+        copying = asyncio.create_task(asyncio.to_thread(sc.copy_events_into, src, dst))
+        try:
+            await asyncio.wait_for(asyncio.shield(copying), timeout=0.2)
+        except asyncio.TimeoutError:
+            pass
+        release.set()
+        await copying
+        await asyncio.wrap_future(accepted)
+        expected = ["accepted"] if queued_on == "source" else ["accepted", "copied"]
+        assert [e["content"] for e in dst.get_events("alice")] == expected
+    finally:
+        release.set()
+        await asyncio.to_thread(src.close)
+        await asyncio.to_thread(dst.close)
+
+
+@pytest.mark.parametrize("operation", ["merge", "split"])
+async def test_topology_rebinding_preserves_open_text(tmp_path, operation):
+    async with Terrarium(
+        pwd=str(tmp_path),
+        session_dir=str(tmp_path / "sessions"),
+        drive_config=DriveRuntimeConfig(enabled=False),
+    ) as engine:
+        alice, bob = [
+            await engine.add_creature(
+                AgentConfig(name=name, system_prompt="test", tools=[]),
+                llm=ScriptedLLM(["unused"]),
+                io="headless",
+                creature_id=name,
+            )
+            for name in ("alice", "bob")
+        ]
+        if operation == "split":
+            await engine.connect(alice, bob, channel="bridge")
+        for creature in (alice, bob):
+            await creature.agent._session_output.write_stream(f"tail-{creature.name}")
+        if operation == "merge":
+            await engine.connect(alice, bob, channel="bridge")
+        else:
+            await engine.disconnect(alice, bob, channel="bridge")
+        for store in set(engine._session_stores.values()):
+            for name in ("alice", "bob"):
+                events = await store.run(store.get_events, name)
+                assert [e["content"] for e in events if e["type"] == "text_chunk"] == [
+                    f"tail-{name}"
+                ]

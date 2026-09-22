@@ -55,11 +55,10 @@ function encodeTarget(target) {
 const HISTORY_PAGE_LIMIT_DEFAULT = 400
 const HISTORY_PAGE_LIMIT_MAX = 400
 
-// Build query params for an opt-in paged history read. ``before`` and
+// Build query params for a bounded history page. ``before`` and
 // ``after`` are opaque string cursors and are mutually exclusive. The
 // limit must be a positive number; it is clamped to the backend page
-// bound when too large. Without ``paged`` the legacy full history call
-// is unchanged.
+// bound when too large. The server rejects unbounded full-log reads.
 function buildHistoryPageParams({ limit, before, after, history_id, stream } = {}) {
   const raw = limit ?? HISTORY_PAGE_LIMIT_DEFAULT
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 1) {
@@ -363,16 +362,11 @@ export const terrariumAPI = {
   },
 
   /**
-   * Get full history for a creature/root in a terrarium.
-   * Returns { messages: [...], events: [...] }
+   * Get history for a creature/root in a terrarium.
+   * Always requests a bounded page; the server rejects unbounded reads.
    */
-  async getHistory(id, target, sinceEventId = null) {
-    const params = sinceEventId != null ? { params: { since_event_id: sinceEventId } } : {}
-    const { data } = await api.get(
-      `/sessions/${id}/creatures/${encodeTarget(target)}/history`,
-      params,
-    )
-    return data
+  async getHistory(id, target) {
+    return this.getHistoryPage(id, target)
   },
 
   async getHistoryDetail(id, target, { stream, ref, history_id }) {
@@ -940,8 +934,7 @@ export const sessionAPI = {
   },
 
   async getHistory(sessionName, target) {
-    const { data } = await api.get(`/sessions/${sessionName}/history/${encodeTarget(target)}`)
-    return data
+    return this.getHistoryPage(sessionName, target)
   },
 
   async getHistoryDetail(sessionName, target, { stream, ref, history_id }) {

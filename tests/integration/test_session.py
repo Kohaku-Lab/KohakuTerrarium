@@ -17,6 +17,7 @@ the agent from the ``config_path`` in meta and re-injects state;
 ``studio/sessions/memory_search.py`` indexes events and searches.
 """
 
+import asyncio
 from datetime import datetime
 from pathlib import Path
 
@@ -59,6 +60,7 @@ from kohakuterrarium.session.migrations import (
 from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.raw_history import UserMessageSelector
 from kohakuterrarium.session.resume import detect_session_type, resume_agent
+from kohakuterrarium.session.resume_async import resume_agent_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.session.version import FORMAT_VERSION, detect_format_version
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -674,6 +676,33 @@ class TestSessionIntegration:
             assert all(t in plain_users for t in recorded_user_turns)
         finally:
             plain_store.close()
+        # Resume interrupted output through the async API, then stop with a
+        # short tail that never reached the durable streaming checkpoint.
+        interrupted = SessionStore(str(session_path))
+        try:
+            interrupted.state["scribe:open_text"] = "interrupted async response"
+        finally:
+            interrupted.close(update_status=False)
+        async_agent, async_store = await resume_agent_async(session_path)
+        try:
+            await async_agent._session_output.drain()
+            await async_agent._session_output.write_stream("graceful tail")
+            await async_agent._session_output.stop()
+            await async_agent._session_output.flush()
+        finally:
+            await asyncio.to_thread(async_store.close, update_status=False)
+        verified = SessionStore(str(session_path), writer_lock=True)
+        try:
+            chunks = [
+                e["content"]
+                for e in verified.get_events("scribe")
+                if e["type"] == "text_chunk"
+            ]
+            assert chunks[-2:] == ["interrupted async response", "graceful tail"]
+            assert not verified.state.get("scribe:open_text")
+        finally:
+            verified.close(update_status=False)
+
         # An unknown io_mode is rejected loudly before any agent is built.
         with pytest.raises(ValueError, match="Unknown IO mode"):
             resume_agent(session_path, io_mode="bogus-mode")
@@ -695,6 +724,12 @@ class TestSessionIntegration:
         try:
             # attach_agent routes a fresh SessionOutput sink under the
             # attached namespace; its turns land there, not under host.
+            host_store.submit(
+                host_store.append_event,
+                "scribe",
+                "text_chunk",
+                {"content": "host output before attachment"},
+            )
             host_session.attach_agent(helper, role="helper")
             attach_state = get_attach_state(helper)
             assert attach_state is not None
@@ -729,8 +764,10 @@ class TestSessionIntegration:
             assert "attached helper reporting in" in attached_text
             assert any(e["type"] == "processing_end" for e in attached_events)
             # The host namespace carries the agent_attached lineage event.
-            host_events = host_store.get_events("scribe")
-            assert any(e["type"] == "agent_attached" for e in host_events)
+            host_events = await host_store.run(host_store.get_events, "scribe")
+            assert [e["type"] for e in host_events] == ["text_chunk", "agent_attached"]
+            assert host_events[0]["content"] == "host output before attachment"
+            assert host_events[0]["event_id"] < host_events[1]["event_id"]
             # discover_attached_agents surfaces the attached namespace.
             discovered = host_store.discover_attached_agents()
             assert any(d["namespace"] == attached_prefix for d in discovered)
@@ -741,7 +778,7 @@ class TestSessionIntegration:
             # detach unwires the sink and emits the agent_detached event.
             host_session.detach_agent(helper)
             assert get_attach_state(helper) is None
-            host_events_after = host_store.get_events("scribe")
+            host_events_after = await host_store.run(host_store.get_events, "scribe")
             assert any(e["type"] == "agent_detached" for e in host_events_after)
             # Detaching an unattached agent is a hard error.
             with pytest.raises(NotAttachedError):

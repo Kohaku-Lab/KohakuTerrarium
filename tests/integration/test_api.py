@@ -862,17 +862,18 @@ class TestApiIntegration:
         assert resp.json() == {"response": _REPLY_TWO}
         assert scripted_llm.call_count == 2
         # History now carries both turns — the WS turn and this one —
-        # with the streamed scripted replies.
+        # with the streamed scripted replies. The default read is a
+        # bounded page whose raw events include the user_message /
+        # assistant pairs of both turns.
         resp = client.get(f"{base}/history")
         assert resp.status_code == 200
-        messages = resp.json().get("messages", [])
-        roles = [m.get("role") for m in messages]
-        assert "user" in roles and "assistant" in roles
-        user_msgs = [m for m in messages if m.get("role") == "user"]
+        page = resp.json()
+        events = page.get("events", [])
+        user_msgs = [e for e in events if e.get("type") == "user_message"]
         assert len(user_msgs) == 2
         joined = " ".join(
-            m.get("content", "") if isinstance(m.get("content"), str) else ""
-            for m in messages
+            str(e.get("content", "")) if isinstance(e.get("content"), str) else ""
+            for e in events
         )
         assert "hello creature" in joined
         assert "a second http turn" in joined
@@ -1200,8 +1201,12 @@ class TestApiIntegration:
         #    The rewind-to-0 in step 3b truncated the live conversation
         #    back to just the system prompt; the only user turn since is
         #    the single "post-switch turn" chat driven in step 4a. (The
-        #    full pre-rewind transcript was asserted in step 3b.)
-        resp = client.get(f"{base}/history")
+        #    full pre-rewind transcript was asserted in step 3b.) The
+        #    default read is a bounded page of raw events.
+        # The snapshot stream is the bounded, replay-consistent view (the
+        # raw-events default stream keeps pre-rewind branch history by
+        # design — the dashboard replays branches client-side).
+        resp = client.get(f"{base}/history", params={"stream": "snapshot"})
         assert resp.status_code == 200
         post_rewind_users = [
             m for m in resp.json().get("messages", []) if m.get("role") == "user"
@@ -1388,13 +1393,22 @@ class TestApiIntegration:
         assert resp.json()["total"] == 1
 
         # While the session is still live, its per-creature HTTP
-        # history carries both turns — and the ``ch:`` channel-history
-        # branch of the same route answers for a (here empty) channel.
+        # history is a bounded page (default) and still carries both
+        # turns. Unbounded ``paged=false`` is rejected. The ``ch:``
+        # channel-history branch of the same route answers for a
+        # (here empty) channel.
         resp = client.get(f"/api/sessions/{session_id}/creatures/{creature_id}/history")
         assert resp.status_code == 200
         live_blob = str(resp.json())
         assert "persist this turn" in live_blob
         assert "second turn please" in live_blob
+        assert (
+            client.get(
+                f"/api/sessions/{session_id}/creatures/{creature_id}/history",
+                params={"paged": "false"},
+            ).status_code
+            == 400
+        )
         resp = client.get(
             f"/api/sessions/{session_id}/creatures/ch:no-such-channel/history"
         )
@@ -1429,8 +1443,8 @@ class TestApiIntegration:
         assert "persist this turn" in str(resp.json())
 
         # ── History paging (bounded, cursor-driven pages) ─────────────
-        # The dashboard opts into ``paged=true``; legacy full reads above
-        # are unchanged. Live event pages carry raw event records with a
+        # Omitted ``paged`` and explicit ``paged=true`` both return a
+        # bounded page. Live event pages carry raw event records with a
         # physical ``_history_key`` and NEVER embed the conversation
         # snapshot (no snapshot giant on an event page). Cursors are
         # opaque exclusive record tokens; ``history_id`` is the

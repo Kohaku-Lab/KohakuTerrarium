@@ -1,12 +1,25 @@
-"""Persist routed agent output and activity events to a session store."""
+"""Persist routed agent output and activity events to a session store.
 
-import json
-from typing import Any
+Event appends are dispatched to the store's single-worker affinity thread in
+submit order. :meth:`SessionOutput.drain` waits for queued writes to complete;
+turn snapshots and recovery-slot clearing explicitly flush the native cache.
+Readers that use the store's affinity thread observe earlier submitted writes.
+The synchronous hooks keep their signatures for producers that cannot await.
+"""
 
-from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
+import asyncio
+from concurrent.futures import Future
+from typing import Any, Callable
+
 from kohakuterrarium.modules.output.base import OutputModule
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.history import replay_conversation
+from kohakuterrarium.session.output_activity import (
+    SessionActivityMixin,
+    _parse_detail,
+    _subagent_name as _subagent_name,  # noqa: F401
+    _token_metadata as _token_metadata,  # noqa: F401
+)
 from kohakuterrarium.session.text_buffer import (
     OpenTextSegment,
     last_persisted_turn_branch,
@@ -16,7 +29,7 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
-class SessionOutput(OutputModule):
+class SessionOutput(SessionActivityMixin, OutputModule):
     """Output module that records events to a SessionStore.
 
     Streamed text is coalesced into one durable segment and flushed at the
@@ -42,7 +55,9 @@ class SessionOutput(OutputModule):
         self._event_key_prefix = event_key_prefix or agent_name
         # Durable buffering preserves partial text across process interruption.
         # Sequence numbers restart for each assistant response.
-        self._open_text = OpenTextSegment(store, self._event_key_prefix)
+        self._open_text = OpenTextSegment(
+            store, self._event_key_prefix, submit=self._submit_store_write
+        )
         self._recovered_open_text: bool = False
         self._chunk_seq: int = 0
         # Retain tasks for child runs that lack SubAgentManager persistence.
@@ -52,6 +67,10 @@ class SessionOutput(OutputModule):
         self._total_input_tokens: int = 0
         self._total_output_tokens: int = 0
         self._total_cached_tokens: int = 0
+        # Event writes queued on the store's affinity thread, drained at
+        # turn boundaries. Populated before recovery so the constructor can
+        # queue without an event loop.
+        self._pending_writes: list[Future] = []
         # Recover immediately so read-only resumes expose interrupted text.
         self._recover_open_text()
 
@@ -86,10 +105,12 @@ class SessionOutput(OutputModule):
         self._flush_text_segment()
         self._append_event(event_type, data)
 
-    def _append_event(self, event_type: str, data: dict) -> None:
+    def _append_event(self, event_type: str, data: dict) -> Future:
         """Append one event under this sink's configured namespace."""
         ti, bi = self._current_turn_branch()
-        self._append_event_at(event_type, data, ti, bi, self._current_parent_path())
+        return self._append_event_at(
+            event_type, data, ti, bi, self._current_parent_path()
+        )
 
     def _append_event_at(
         self,
@@ -98,19 +119,68 @@ class SessionOutput(OutputModule):
         turn_index: int | None,
         branch_id: int | None,
         parent_branch_path: list[tuple[int, int]] | None,
-    ) -> None:
-        """Append one event with explicit turn/branch/path stamps."""
+    ) -> Future:
+        """Queue one event with explicit turn/branch/path stamps.
+
+        Writes go to the store's affinity thread in submit order and are
+        awaited at the next :meth:`drain`; stores without an affinity
+        executor fall back to an inline append.
+        """
+        return self._submit_store_write(
+            self._store.append_event,
+            self._event_key_prefix,
+            event_type,
+            data,
+            turn_index=turn_index,
+            branch_id=branch_id,
+            parent_branch_path=parent_branch_path,
+        )
+
+    def _submit_store_write(
+        self, fn: Callable[..., Any], /, *args: Any, **kwargs: Any
+    ) -> Future:
+        """Queue a store write and expose its outcome to dependent writes.
+
+        Submission order matches call order. Stores without an affinity
+        executor run inline; failures retain the standard record warning.
+        """
         try:
-            self._store.append_event(
-                self._event_key_prefix,
-                event_type,
-                data,
-                turn_index=turn_index,
-                branch_id=branch_id,
-                parent_branch_path=parent_branch_path,
-            )
+            submit = getattr(self._store, "submit", None)
+            if callable(submit):
+                future = submit(fn, *args, **kwargs)
+                self._pending_writes.append(future)
+                return future
+            result = fn(*args, **kwargs)
         except Exception as e:
             logger.warning("Session record failed", error=str(e), exc_info=True)
+            future = Future()
+            future.set_exception(e)
+            return future
+        future = Future()
+        future.set_result(result)
+        return future
+
+    async def drain(self) -> None:
+        """Wait for every queued write to reach the store.
+
+        Turn boundaries await this before reading or snapshotting so the
+        persisted view includes everything dispatched during the turn.
+        Failures surface here with the same warning the inline path used.
+
+        Cancellation-safe: the in-flight write is shielded so it completes
+        on its own, and writes not yet started are put back at the head of
+        the queue for the next drain — a cancelled turn must not silently
+        drop events it already emitted.
+        """
+        pending, self._pending_writes = self._pending_writes, []
+        for idx, fut in enumerate(pending):
+            try:
+                await asyncio.shield(asyncio.wrap_future(fut))
+            except asyncio.CancelledError:
+                self._pending_writes[:0] = [f for f in pending[idx:] if not f.done()]
+                raise
+            except Exception as e:
+                logger.warning("Session record failed", error=str(e), exc_info=True)
 
     def _ensure_token_totals_restored(self) -> None:
         """Seed cumulative totals from the persisted slot, exactly once.
@@ -131,12 +201,13 @@ class SessionOutput(OutputModule):
             pass
 
     async def start(self) -> None:
+        await self.drain()
         self._ensure_token_totals_restored()
         # Finalize any segment left by an interrupted process.
         self._recover_open_text()
 
     async def stop(self) -> None:
-        pass
+        await self.flush()
 
     async def write(self, text: str) -> None:
         self._ingest_text(text)
@@ -168,7 +239,7 @@ class SessionOutput(OutputModule):
         if not recovered:
             return
         ti, bi, ppath = last_persisted_turn_branch(self._store, self._event_key_prefix)
-        self._append_event_at(
+        recorded = self._append_event_at(
             "text_chunk",
             {
                 "content": recovered,
@@ -180,22 +251,37 @@ class SessionOutput(OutputModule):
             ppath,
         )
         self._chunk_seq += 1
+        self._open_text.clear(after=recorded)
 
     def _flush_text_segment(self, *, finalize: str | None = None) -> None:
         """Write the open segment as one ``text_chunk`` event and clear it."""
         text = self._open_text.take()
         if text:
-            self._append_text_chunk(text, finalize=finalize)
+            recorded = self._append_text_chunk(text, finalize=finalize)
+            self._open_text.clear(after=recorded)
 
-    def _append_text_chunk(self, content: str, *, finalize: str | None = None) -> None:
+    def _append_text_chunk(
+        self, content: str, *, finalize: str | None = None
+    ) -> Future:
         data: dict[str, Any] = {"content": content, "chunk_seq": self._chunk_seq}
         if finalize:
             data["finalize"] = finalize
         self._chunk_seq += 1
-        self._append_event("text_chunk", data)
+        return self._append_event("text_chunk", data)
 
     async def flush(self) -> None:
-        pass
+        self._flush_text_segment()
+        await self.drain()
+
+    def flush_sync(self) -> None:
+        """Finalize output before a synchronous store handoff (requires blocking)."""
+        self._flush_text_segment()
+        pending, self._pending_writes = self._pending_writes, []
+        for future in pending:
+            try:
+                future.result()
+            except Exception as exc:
+                logger.warning("Session record failed", error=str(exc), exc_info=True)
 
     async def on_processing_start(self, *, request_id: str | None = None) -> None:
         # Sequence numbers are local to one assistant response.
@@ -204,17 +290,74 @@ class SessionOutput(OutputModule):
         self._record("processing_start", payload)
 
     async def on_processing_end(self) -> None:
+        # The snapshot below must observe every event queued during the
+        # turn, so drain before reading the store.
+        await self.drain()
         self._record("processing_end", {})
+        # _record flushed the open text segment and queued processing_end
+        # itself; drain again so the turn's final events are durable and
+        # the snapshot watermark below cannot run ahead of the log.
+        await self.drain()
 
-        # Snapshots are derived caches; use live controller messages when event
-        # replay cannot yet reconstruct the conversation. The full event log is
-        # only replayed when the controller is absent; otherwise a single-key
-        # read supplies ``last_event_id`` (the O(N) full scan here made every
-        # turn cost linear in total session length).
+        # Agent-side inputs are read here; the store writes and the
+        # fallback event scan run on the store's affinity thread (inline
+        # for duck-typed stores without submit).
+        messages: list | None = None
+        branch_tag: dict | None = None
+        state_kwargs: dict = {}
         try:
             if self._agent and hasattr(self._agent, "controller"):
                 messages = self._agent.controller.conversation.snapshot_messages()
-            else:
+            agent = self._agent
+            turn_index = getattr(agent, "_turn_index", None) if agent else None
+            branch_id = getattr(agent, "_branch_id", None) if agent else None
+            if (
+                isinstance(turn_index, int)
+                and turn_index > 0
+                and isinstance(branch_id, int)
+                and branch_id > 0
+            ):
+                # Tag the snapshot with the agent's branch so resume can
+                # reject it when the target branch differs and rebuild via
+                # replay instead.
+                branch_tag = {
+                    "turn_index": turn_index,
+                    "branch_id": branch_id,
+                    "parent_branch_path": getattr(agent, "_parent_branch_path", None),
+                }
+            if agent and hasattr(agent, "session") and agent.session:
+                pad = agent.session.scratchpad
+                if hasattr(pad, "to_dict"):
+                    state_kwargs["scratchpad"] = pad.to_dict()
+        except Exception as e:
+            # A controller-read failure must not abort persistence; the
+            # dispatched unit rebuilds the conversation via event replay.
+            logger.warning("Conversation snapshot failed", error=str(e))
+
+        persist = getattr(self._store, "run", None)
+        if callable(persist):
+            await persist(
+                self._persist_turn_snapshot, messages, branch_tag, state_kwargs
+            )
+        else:
+            self._persist_turn_snapshot(messages, branch_tag, state_kwargs)
+
+    def _persist_turn_snapshot(
+        self,
+        messages: list | None,
+        branch_tag: dict | None,
+        state_kwargs: dict,
+    ) -> None:
+        """Persist the post-turn snapshot, watermark, and state.
+
+        Runs on the store's affinity thread where available. ``messages``
+        is ``None`` when the controller was absent; the full event log is
+        only replayed in that case (otherwise a single-key read supplies
+        ``last_event_id`` — the O(N) scan here used to make every turn
+        cost linear in total session length).
+        """
+        try:
+            if messages is None:
                 events = self._store.get_events(self._event_key_prefix)
                 messages = replay_conversation(events, include_metadata=True)
             try:
@@ -231,35 +374,18 @@ class SessionOutput(OutputModule):
                 self._store.state[f"{self._event_key_prefix}:snapshot_event_id"] = (
                     last_event_id
                 )
-                # The snapshot is the "last active branch" view; tag it with
-                # the agent's branch so resume can reject it when the target
-                # branch differs and rebuild via replay instead.
-                agent = getattr(self, "_agent", None)
-                if agent is not None:
-                    branch = {
-                        "turn_index": getattr(agent, "_turn_index", None),
-                        "branch_id": getattr(agent, "_branch_id", None),
-                        "parent_branch_path": getattr(
-                            agent, "_parent_branch_path", None
-                        ),
-                    }
-                    if (
-                        isinstance(branch["turn_index"], int)
-                        and branch["turn_index"] > 0
-                        and isinstance(branch["branch_id"], int)
-                        and branch["branch_id"] > 0
-                    ):
-                        self._store.state[
-                            f"{self._event_key_prefix}:snapshot_branch"
-                        ] = branch
-                    else:
-                        # The snapshot was rewritten above but the agent's
-                        # branch state is missing/invalid; clear any stale tag
-                        # from a prior run so resume does not trust a branch
-                        # that no longer matches this snapshot.
-                        self._store.state.pop(
-                            f"{self._event_key_prefix}:snapshot_branch", None
-                        )
+                if branch_tag is not None:
+                    self._store.state[f"{self._event_key_prefix}:snapshot_branch"] = (
+                        branch_tag
+                    )
+                else:
+                    # The snapshot was rewritten but the agent's branch state
+                    # is missing/invalid; clear any stale tag from a prior
+                    # run so resume does not trust a branch that no longer
+                    # matches this snapshot.
+                    self._store.state.pop(
+                        f"{self._event_key_prefix}:snapshot_branch", None
+                    )
             except Exception as e:
                 logger.warning(
                     "Failed to save snapshot_event_id",
@@ -269,20 +395,11 @@ class SessionOutput(OutputModule):
         except Exception as e:
             logger.warning("Conversation snapshot failed", error=str(e))
 
-        # Token totals have a separate cumulative writer and must not be overwritten.
+        # Token totals have a separate cumulative writer and must not be
+        # overwritten; a per-call token shape here would clobber them.
         try:
-            if self._agent:
-                state_kwargs = {}
-
-                if hasattr(self._agent, "session") and self._agent.session:
-                    pad = self._agent.session.scratchpad
-                    if hasattr(pad, "to_dict"):
-                        state_kwargs["scratchpad"] = pad.to_dict()
-
-                # A per-call token shape here would clobber cumulative totals.
-
-                if state_kwargs:
-                    self._store.save_state(self._event_key_prefix, **state_kwargs)
+            if state_kwargs:
+                self._store.save_state(self._event_key_prefix, **state_kwargs)
         except Exception as e:
             logger.warning("State save failed", error=str(e), exc_info=True)
 
@@ -399,544 +516,3 @@ class SessionOutput(OutputModule):
         """Persist the terminal lifecycle marker used by history reconstruction."""
         if self._capture_activity:
             self._record("ui_supersede", {"ui_event_id": event_id})
-
-    # String targets keep activity dispatch declarative at class scope.
-    _ACTIVITY_HANDLERS: dict[str, str] = {
-        "trigger_fired": "_handle_trigger_fired",
-        "tool_start": "_handle_tool_start",
-        "tool_done": "_handle_tool_done",
-        "tool_error": "_handle_tool_error",
-        "subagent_start": "_handle_subagent_start",
-        "subagent_done": "_handle_subagent_done",
-        "subagent_error": "_handle_subagent_error",
-        "subagent_token_update": "_handle_subagent_token_update",
-        "token_usage": "_handle_token_usage",
-        "compact_start": "_handle_compact_start",
-        "compact_complete": "_handle_compact_complete",
-        "compact_skipped": "_handle_compact_skipped",
-        "background_result": "_handle_background_result",
-        "processing_complete": "_handle_processing_complete",
-        "processing_error": "_handle_processing_error",
-        "context_cleared": "_handle_context_cleared",
-        "tool_wait": "_handle_tool_wait",
-        "compact_decision": "_handle_compact_decision",
-        "turn_token_usage": "_handle_turn_token_usage",
-        "plugin_hook_timing": "_handle_plugin_hook_timing",
-        "cache_stats": "_handle_cache_stats",
-        "assistant_reasoning": "_handle_assistant_reasoning",
-        "scratchpad_write": "_handle_scratchpad_write",
-        # Suppress duplicate activity rows for input already persisted by the agent.
-        "user_input_injected": "_handle_user_input_injected",
-    }
-
-    def _record_activity(
-        self, activity_type: str, name: str, detail: str, metadata: dict
-    ) -> None:
-        handler_name = self._ACTIVITY_HANDLERS.get(activity_type)
-        if handler_name:
-            getattr(self, handler_name)(name, detail, metadata)
-        elif activity_type.startswith("subagent_tool_"):
-            self._handle_subagent_tool(activity_type, name, detail, metadata)
-        else:
-            self._record(
-                f"activity:{activity_type}",
-                {"name": name, "detail": detail, **metadata},
-            )
-
-    def _handle_assistant_reasoning(
-        self, name: str, detail: str, metadata: dict
-    ) -> None:
-        payload = {}
-        for key in (
-            "reasoning_content",
-            "reasoning_summary",
-            "reasoning_details",
-            "reasoning",
-            "_kt_assistant_segments",
-        ):
-            value = metadata.get(key)
-            if value not in (None, "", [], {}):
-                payload[key] = value
-        if payload:
-            self._record("assistant_reasoning", payload)
-
-    def _handle_trigger_fired(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "trigger_fired",
-            {
-                "trigger_id": metadata.get("trigger_id", ""),
-                "channel": metadata.get("channel", ""),
-                "sender": metadata.get("sender", ""),
-                "content": metadata.get("content", ""),
-            },
-        )
-
-    def _handle_tool_start(self, name: str, detail: str, metadata: dict) -> None:
-        data = {
-            "name": metadata.get("tool_name") or canonical_tool_name(name),
-            "call_id": metadata.get("job_id", ""),
-            "args": metadata.get("args", {}),
-        }
-        if metadata.get("tool_call_id"):
-            data["tool_call_id"] = metadata["tool_call_id"]
-            data["tool_call_arguments"] = metadata.get("tool_call_arguments")
-        self._record(
-            "tool_call",
-            data,
-        )
-
-    def _handle_tool_done(self, name: str, detail: str, metadata: dict) -> None:
-        event_data: dict[str, Any] = {
-            "name": _tool_name(name, metadata),
-            "call_id": metadata.get("job_id", ""),
-            "output": metadata.get("result", metadata.get("output", detail)),
-            "exit_code": metadata.get("exit_code", 0),
-        }
-        # Persist preview metadata so history reload need not read the file again.
-        canvas_preview = metadata.get("canvas_preview")
-        if canvas_preview:
-            event_data["canvas_preview"] = canvas_preview
-        tool_metadata = metadata.get("tool_metadata")
-        if isinstance(tool_metadata, dict):
-            event_data["tool_metadata"] = dict(tool_metadata)
-        self._record("tool_result", event_data)
-
-    def _handle_tool_error(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "tool_result",
-            {
-                "name": _tool_name(name, metadata),
-                "call_id": metadata.get("job_id", ""),
-                "output": metadata.get("result", metadata.get("output", detail)),
-                "exit_code": metadata.get("exit_code", 1),
-                "error": metadata.get("error", detail),
-                "interrupted": bool(metadata.get("interrupted", False)),
-                "cancelled": bool(metadata.get("cancelled", False)),
-                "final_state": metadata.get("final_state", "error"),
-            },
-        )
-
-    def _handle_subagent_start(self, name: str, detail: str, metadata: dict) -> None:
-        name = _subagent_name(name, metadata)
-        task = metadata.get("task", detail)
-        job_id = metadata.get("job_id", "")
-        if job_id:
-            # Completion may need the task to synthesize missing child history.
-            self._subagent_tasks[job_id] = {
-                "name": name,
-                "task": task,
-                "llm_name": metadata.get("llm_name", ""),
-                "model": metadata.get("model", ""),
-            }
-        self._record(
-            "subagent_call",
-            {
-                "name": name,
-                "task": task,
-                "job_id": job_id,
-                "background": bool(metadata.get("background", False)),
-                "llm_name": metadata.get("llm_name", ""),
-                "model": metadata.get("model", ""),
-            },
-        )
-
-    def _handle_subagent_done(self, name: str, detail: str, metadata: dict) -> None:
-        job_id = metadata.get("job_id", "")
-        task_record = self._subagent_tasks.get(job_id) or {}
-        name = _subagent_name(name, metadata)
-        output_text = metadata.get("result", detail)
-        self._record(
-            "subagent_result",
-            {
-                "name": name,
-                "job_id": job_id,
-                "output": output_text,
-                "tools_used": metadata.get("tools_used", []),
-                "turns": metadata.get("turns", 0),
-                "duration": metadata.get("duration", 0),
-                "llm_name": metadata.get("llm_name", "")
-                or task_record.get("llm_name", ""),
-                "model": metadata.get("model", "") or task_record.get("model", ""),
-                **_token_metadata(metadata),
-            },
-        )
-        # Preserve history for child runs outside SubAgentManager.
-        self._persist_subagent_conversation(
-            name, job_id, output_text, success=True, metadata=metadata
-        )
-
-    def _handle_subagent_token_update(
-        self, name: str, detail: str, metadata: dict
-    ) -> None:
-        self._record(
-            "subagent_token_usage",
-            {
-                "name": _subagent_name(name, metadata),
-                "job_id": metadata.get("job_id", ""),
-                **_token_metadata(metadata),
-            },
-        )
-
-    def _handle_subagent_error(self, name: str, detail: str, metadata: dict) -> None:
-        job_id = metadata.get("job_id", "")
-        task_record = self._subagent_tasks.get(job_id) or {}
-        name = _subagent_name(name, metadata)
-        output_text = metadata.get("result", detail)
-        self._record(
-            "subagent_result",
-            {
-                "name": name,
-                "job_id": job_id,
-                "output": output_text,
-                "error": metadata.get("error", detail),
-                "success": False,
-                "interrupted": bool(metadata.get("interrupted", False)),
-                "cancelled": bool(metadata.get("cancelled", False)),
-                "final_state": metadata.get("final_state", "error"),
-                "tools_used": metadata.get("tools_used", []),
-                "turns": metadata.get("turns", 0),
-                "duration": metadata.get("duration", 0),
-                "llm_name": metadata.get("llm_name", "")
-                or task_record.get("llm_name", ""),
-                "model": metadata.get("model", "") or task_record.get("model", ""),
-                **_token_metadata(metadata),
-            },
-        )
-        self._persist_subagent_conversation(
-            name, job_id, output_text, success=False, metadata=metadata
-        )
-
-    def _persist_subagent_conversation(
-        self,
-        name: str,
-        job_id: str,
-        output_text: str,
-        *,
-        success: bool,
-        metadata: dict,
-    ) -> None:
-        """Persist a minimal conversation when no full child history exists.
-
-        Managed sub-agents already store their complete conversation; this path
-        preserves tool-like child runs that bypass that persistence.
-        """
-        task_record = self._subagent_tasks.pop(job_id, None)
-        task_text = task_record.get("task", "") if task_record is not None else ""
-        try:
-            find_run = getattr(self._store, "find_subagent_run", None)
-            if (
-                callable(find_run)
-                and find_run(job_id, parent=self._agent_name) is not None
-            ):
-                return
-            run = self._store.next_subagent_run(self._agent_name, name)
-            convo = [
-                {"role": "user", "content": task_text},
-                {"role": "assistant", "content": output_text or ""},
-            ]
-            self._store.save_subagent(
-                parent=self._agent_name,
-                name=name,
-                run=run,
-                meta={
-                    "job_id": job_id,
-                    "task": task_text,
-                    "turns": metadata.get("turns", 0),
-                    "tools_used": metadata.get("tools_used", []),
-                    "success": success,
-                    "duration": metadata.get("duration", 0),
-                    "llm_name": metadata.get("llm_name", "")
-                    or (task_record or {}).get("llm_name", ""),
-                    "model": metadata.get("model", "")
-                    or (task_record or {}).get("model", ""),
-                    "output_preview": (output_text or "")[:500],
-                    "source": "session_output",
-                },
-                conv_json=json.dumps(convo),
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to persist sub-agent conversation via SessionOutput",
-                error=str(e),
-                exc_info=True,
-            )
-
-    def _handle_token_usage(self, name: str, detail: str, metadata: dict) -> None:
-        self._ensure_token_totals_restored()
-        prompt = metadata.get("prompt_tokens", 0)
-        completion = metadata.get("completion_tokens", 0)
-        cached = metadata.get("cached_tokens", 0)
-        self._total_input_tokens += prompt
-        self._total_output_tokens += completion
-        self._total_cached_tokens += cached
-        self._record(
-            "token_usage",
-            {
-                "prompt_tokens": prompt,
-                "completion_tokens": completion,
-                "total_tokens": metadata.get("total_tokens", 0),
-                "cached_tokens": cached,
-            },
-        )
-        # Namespace cumulative totals so attached agents cannot collide with hosts.
-        try:
-            self._store.save_state(
-                self._event_key_prefix,
-                token_usage={
-                    "total_input_tokens": self._total_input_tokens,
-                    "total_output_tokens": self._total_output_tokens,
-                    "total_cached_tokens": self._total_cached_tokens,
-                    "last_prompt_tokens": prompt,
-                },
-            )
-        except Exception as e:
-            logger.warning(
-                "Failed to save token usage state", error=str(e), exc_info=True
-            )
-
-    def _handle_compact_start(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "compact_start",
-            {"round": metadata.get("round", 0)},
-        )
-
-    def _handle_compact_complete(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "compact_complete",
-            {
-                "round": metadata.get("round", 0),
-                "summary": metadata.get("summary", ""),
-                "messages_compacted": metadata.get("messages_compacted", 0),
-                "replaced_from_event_id": metadata.get("replaced_from_event_id"),
-                "replaced_to_event_id": metadata.get("replaced_to_event_id"),
-                "compact_path": metadata.get("compact_path"),
-                "turn_index": metadata.get("turn_index"),
-                "branch_id": metadata.get("branch_id"),
-                "parent_branch_path": metadata.get("parent_branch_path"),
-            },
-        )
-
-    def _handle_compact_skipped(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "compact_skipped",
-            {
-                "round": metadata.get("round", 0),
-                "reason": metadata.get("reason", ""),
-            },
-        )
-
-    def _handle_background_result(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "background_result",
-            {
-                "job_id": metadata.get("job_id", ""),
-                "kind": metadata.get("kind", "tool"),
-                "label": metadata.get("label", ""),
-            },
-        )
-
-    def _handle_subagent_tool(
-        self, activity_type: str, name: str, detail: str, metadata: dict
-    ) -> None:
-        self._record(
-            "subagent_tool",
-            {
-                "subagent": metadata.get("subagent", name),
-                "tool_name": metadata.get("tool", ""),
-                "activity": activity_type.replace("subagent_", ""),
-                "detail": metadata.get("detail", detail),
-                "job_id": metadata.get("job_id", ""),
-            },
-        )
-
-    def _handle_context_cleared(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "context_cleared",
-            {"messages_cleared": metadata.get("messages_cleared", 0)},
-        )
-
-    def _handle_processing_error(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "processing_error",
-            {
-                "error_type": metadata.get("error_type", "Error"),
-                "error": metadata.get("error", detail),
-            },
-        )
-
-    def _handle_processing_complete(
-        self, name: str, detail: str, metadata: dict
-    ) -> None:
-        self._record(
-            "processing_complete",
-            {
-                "trigger_channel": metadata.get("trigger_channel", ""),
-                "trigger_sender": metadata.get("trigger_sender", ""),
-                "output_preview": metadata.get("output_preview", ""),
-            },
-        )
-
-    def _handle_tool_wait(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "tool_wait",
-            {
-                "tool": metadata.get("tool", name),
-                "wait_ms": metadata.get("wait_ms", 0),
-                "reason": metadata.get("reason", "serial_lock"),
-            },
-        )
-
-    def _handle_compact_decision(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "compact_decision",
-            {
-                "reason": metadata.get("reason", "unknown"),
-                "tokens_before": metadata.get("tokens_before", 0),
-                "tokens_after": metadata.get("tokens_after", 0),
-                "skipped": bool(metadata.get("skipped", False)),
-            },
-        )
-
-    def _handle_turn_token_usage(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "turn_token_usage",
-            {
-                "turn_index": metadata.get("turn_index", 0),
-                "prompt_tokens": metadata.get("prompt_tokens", 0),
-                "completion_tokens": metadata.get("completion_tokens", 0),
-                "cached_tokens": metadata.get("cached_tokens", 0),
-                "total_tokens": metadata.get("total_tokens", 0),
-            },
-        )
-        # Persist the derived rollup at the source to avoid repeated event scans.
-        turn_index = metadata.get("turn_index", 0)
-        if self._store and isinstance(turn_index, int) and turn_index > 0:
-            try:
-                self._store.save_turn_rollup(
-                    self._event_key_prefix,
-                    turn_index,
-                    {
-                        "started_at": metadata.get("started_at"),
-                        "ended_at": metadata.get("ended_at"),
-                        "tokens_in": int(metadata.get("prompt_tokens") or 0),
-                        "tokens_out": int(metadata.get("completion_tokens") or 0),
-                        "tokens_cached": int(metadata.get("cached_tokens") or 0),
-                        "cost_usd": metadata.get("cost_usd"),
-                    },
-                )
-            except Exception as e:
-                logger.warning(
-                    "save_turn_rollup failed",
-                    error=str(e),
-                    turn_index=turn_index,
-                    exc_info=True,
-                )
-
-    def _handle_plugin_hook_timing(
-        self, name: str, detail: str, metadata: dict
-    ) -> None:
-        self._record(
-            "plugin_hook_timing",
-            {
-                "hook": metadata.get("hook", name),
-                "plugin": metadata.get("plugin", ""),
-                "duration_ms": metadata.get("duration_ms", 0),
-                "blocked": bool(metadata.get("blocked", False)),
-            },
-        )
-
-    def _handle_cache_stats(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "cache_stats",
-            {
-                "agent": metadata.get("agent", self._agent_name),
-                "cache_write": metadata.get("cache_write", 0),
-                "cache_read": metadata.get("cache_read", 0),
-                "cache_hit_ratio": metadata.get("cache_hit_ratio", 0.0),
-            },
-        )
-
-    def _handle_scratchpad_write(self, name: str, detail: str, metadata: dict) -> None:
-        self._record(
-            "scratchpad_write",
-            {
-                "agent": metadata.get("agent", self._agent_name),
-                "key": metadata.get("key", name),
-                "action": metadata.get("action", "set"),
-                "size_bytes": metadata.get("size_bytes", 0),
-            },
-        )
-
-    def _handle_user_input_injected(
-        self, name: str, detail: str, metadata: dict
-    ) -> None:
-        # The agent already wrote the canonical event with branch attribution.
-        return
-
-
-def _subagent_name(fallback: str, metadata: dict) -> str:
-    raw = metadata.get("subagent") or metadata.get("subagent_name")
-    if isinstance(raw, str) and raw:
-        return raw
-    job_id = str(metadata.get("job_id") or "")
-    if fallback == "agent" and job_id.startswith("agent_"):
-        body = job_id[len("agent_") :]
-        if "_" in body:
-            return body.rsplit("_", 1)[0]
-    return fallback
-
-
-def _token_metadata(metadata: dict) -> dict[str, Any]:
-    prompt = metadata.get("prompt_tokens")
-    completion = metadata.get("completion_tokens")
-    total = metadata.get("total_tokens")
-    cached = metadata.get("cached_tokens")
-    if prompt is None:
-        prompt = metadata.get("tokens_in", 0)
-    if completion is None:
-        completion = metadata.get("tokens_out", 0)
-    if cached is None:
-        cached = metadata.get("tokens_cached", 0)
-    if total is None:
-        try:
-            total = int(prompt or 0) + int(completion or 0)
-        except (TypeError, ValueError):
-            total = 0
-    data = {
-        "total_tokens": total or 0,
-        "prompt_tokens": prompt or 0,
-        "completion_tokens": completion or 0,
-        "cached_tokens": cached or 0,
-    }
-    if "cost_usd" in metadata:
-        data["cost_usd"] = metadata.get("cost_usd")
-    return data
-
-
-def _tool_name(label: str, metadata: dict) -> str:
-    """Resolve canonical identity from structured activity or legacy labels."""
-    return metadata.get("tool_name") or (
-        make_job_label(metadata["job_id"])[0]
-        if "_" in metadata.get("job_id", "")
-        else canonical_tool_name(label)
-    )
-
-
-def _parse_detail(detail: str) -> tuple[str, str]:
-    """Extract [name] prefix from detail string.
-
-    Handles nested brackets by finding ``] `` (closing bracket + space).
-    """
-    try:
-        if detail.startswith("["):
-            # The delimiter preserves nested brackets inside the label.
-            end = detail.index("] ", 1)
-            return detail[1:end], detail[end + 2 :]
-    except ValueError:
-        # A bare bracketed label has no detail suffix.
-        try:
-            if detail.startswith("[") and detail.endswith("]"):
-                return detail[1:-1], ""
-        except ValueError:
-            pass
-    return "unknown", detail

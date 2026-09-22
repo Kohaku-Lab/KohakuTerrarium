@@ -24,7 +24,8 @@ class HistoryServiceProtocol(Protocol):
 class LocalHistoryServiceMixin:
     async def chat_history_page(self, creature_id: str, **kwargs) -> dict:
         creature, store = self._history_source(creature_id)
-        return history_page(
+        return await store.run(
+            history_page,
             store,
             creature.name,
             session_id=creature.graph_id,
@@ -37,7 +38,8 @@ class LocalHistoryServiceMixin:
 
     async def chat_history_detail(self, creature_id: str, **kwargs) -> dict:
         creature, store = self._history_source(creature_id)
-        return history_detail(
+        return await store.run(
+            history_detail,
             store,
             creature.name,
             session_id=creature.graph_id,
@@ -58,17 +60,24 @@ class LocalHistoryServiceMixin:
         envelope = {"session_id": graph_id, "creature_id": f"ch:{name}"}
         store = self._engine._session_stores.get(graph_id)
         if store is not None:
-            return history_page(
-                store, f"ch:{name}", session_id=graph_id, envelope=envelope, **kwargs
+            return await store.run(
+                history_page,
+                store,
+                f"ch:{name}",
+                session_id=graph_id,
+                envelope=envelope,
+                **kwargs,
             )
         messages = await self.channel_history(graph_id, name)
         return channel_list_page(messages, graph_id, name, **kwargs)
 
     async def channel_history_detail(self, graph_id: str, name: str, **kwargs) -> dict:
         store = self._engine._session_stores.get(graph_id)
-        messages = (
-            None if store is not None else await self.channel_history(graph_id, name)
-        )
+        if store is not None:
+            return await store.run(
+                history_detail, store, f"ch:{name}", session_id=graph_id, **kwargs
+            )
+        messages = await self.channel_history(graph_id, name)
         return history_detail(
             store,
             f"ch:{name}",

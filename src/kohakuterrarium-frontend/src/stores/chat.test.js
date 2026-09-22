@@ -8,6 +8,10 @@ import { _parseSlashCommand, _replayEvents, useChatStore } from "./chat.js"
 
 beforeEach(() => {
   setActivePinia(createPinia())
+  // Production getHistory delegates to getHistoryPage, so the fixture pages
+  // the other way: per-test leaf mocks on getHistory keep feeding every
+  // history test through the paged path. The cycle cannot close — tests
+  // either replace getHistory with a leaf mock or never load history.
   vi.spyOn(terrariumAPI, "getHistoryPage").mockImplementation((id, tab) =>
     terrariumAPI.getHistory(id, tab),
   )

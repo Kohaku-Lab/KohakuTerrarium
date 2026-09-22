@@ -3,8 +3,15 @@
 Live stores can be reused through a process-local Terrarium engine. Index builds
 live in :mod:`studio.sessions.memory_build`; :func:`build_embeddings` remains a
 compatibility alias for existing CLI and Python callers.
+
+The whole search — event scans, embedder load, indexing, query — is one
+blocking unit. Live stores dispatch it onto the store's affinity thread;
+saved stores run it as a worker-thread open/search/close unit, so neither
+freezes the caller's event loop.
 """
 
+import asyncio
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -86,41 +93,23 @@ def _resolve_embed_config(store: SessionStore, live_agent: Any) -> dict[str, Any
     return embed_config
 
 
-async def search_session_memory(
+def _search_session_sync(
     path: Path,
     *,
     q: str,
-    mode: str = "auto",
-    k: int = 10,
-    agent: str | None = None,
-    engine: Terrarium | None = None,
+    mode: str,
+    k: int,
+    agent: str | None,
+    live_agent: Any,
+    live_store: SessionStore | None,
 ) -> dict[str, Any]:
-    """Run an FTS5 / vector / hybrid search across a saved session.
+    """Run store reads, embedder load, indexing, and the query as one unit.
 
-    Wraps the existing ``SessionMemory.search()`` — no new indexing
-    behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
-    ``hybrid``.
-
-    This adapter keeps the legacy HTTP contract: ``SessionMemory.search``
-    is strict (an explicit ``semantic`` request without an embedder, or
-    an unknown mode, raises ``ValueError`` — E4), but the web frontend
-    offers ``semantic`` in its mode picker regardless of whether an
-    index / embedding model exists, and the old endpoint answered that
-    with FTS-fallback results.  Degrade here (log + fall back to FTS)
-    instead of bubbling the ValueError into a 500.
-
-    Raises :class:`SessionNotFoundError` when ``path`` does not exist
-    (BEFORE opening anything — ``SessionStore(path)`` would otherwise
-    mint an empty ``.kohakutr`` as a side effect of the lookup) and
-    :class:`SessionError` when the search itself fails.
+    Called on the live store's affinity thread or in a worker thread for
+    saved sessions; every blocking step here stays off the event loop.
     """
-    path = Path(path)
-    if not path.exists():
-        raise SessionNotFoundError(f"Session not found: {path}")
     try:
-        # Reuse a live store and its agent configuration when the session is running.
-        live_agent, live_store = _live_store_for_path(engine, path)
-
+        # Reuse the live store and its agent configuration when the session is running.
         if live_store:
             store = live_store
             store.flush()
@@ -196,3 +185,55 @@ async def search_session_memory(
             for r in results
         ],
     }
+
+
+async def search_session_memory(
+    path: Path,
+    *,
+    q: str,
+    mode: str = "auto",
+    k: int = 10,
+    agent: str | None = None,
+    engine: Terrarium | None = None,
+) -> dict[str, Any]:
+    """Run an FTS5 / vector / hybrid search across a saved session.
+
+    Wraps the existing ``SessionMemory.search()`` — no new indexing
+    behavior. Modes: ``auto`` (default), ``fts``, ``semantic``,
+    ``hybrid``.
+
+    This adapter keeps the legacy HTTP contract: ``SessionMemory.search``
+    is strict (an explicit ``semantic`` request without an embedder, or
+    an unknown mode, raises ``ValueError`` — E4), but the web frontend
+    offers ``semantic`` in its mode picker regardless of whether an
+    index / embedding model exists, and the old endpoint answered that
+    with FTS-fallback results.  Degrade here (log + fall back to FTS)
+    instead of bubbling the ValueError into a 500.
+
+    Raises :class:`SessionNotFoundError` when ``path`` does not exist
+    (BEFORE opening anything — ``SessionStore(path)`` would otherwise
+    mint an empty ``.kohakutr`` as a side effect of the lookup) and
+    :class:`SessionError` when the search itself fails.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise SessionNotFoundError(f"Session not found: {path}")
+    try:
+        live_agent, live_store = _live_store_for_path(engine, path)
+    except Exception as e:
+        logger.exception("memory_search failed", path=str(path), query=q, mode=mode)
+        raise SessionError(f"Memory search failed: {type(e).__name__}: {e}")
+
+    dispatch = partial(
+        _search_session_sync,
+        path,
+        q=q,
+        mode=mode,
+        k=k,
+        agent=agent,
+        live_agent=live_agent,
+        live_store=live_store,
+    )
+    if live_store is not None:
+        return await live_store.run(dispatch)
+    return await asyncio.to_thread(dispatch)

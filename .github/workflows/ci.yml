@@ -109,6 +109,18 @@ jobs:
           node-version: "24"
       - run: npm ci
       - run: npm run format:check
+      - name: Run history and branch regression tests
+        run: >-
+          npm test -- --maxWorkers=4
+          src/utils/api.historyPage.test.js
+          src/stores/historyPaging.test.js
+          src/stores/historyHead.test.js
+          src/stores/historyDetail.test.js
+          src/stores/chat.historyPage
+          src/stores/chat.branch
+          src/stores/chat.editRerunGuards.test.js
+          src/components/chat/ChatPanel.history
+          src/components/chat/chatHistoryExpand.test.js
       - run: npm run build
       - name: Verify frontend build output
         working-directory: .

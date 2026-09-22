@@ -5,6 +5,7 @@ Derives child paths, validates optional fork mutations, and drives
 remain responsible for path resolution and response mapping.
 """
 
+import asyncio
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -19,6 +20,7 @@ from kohakuterrarium.errors import (
 from kohakuterrarium.session.errors import ForkNotStableError
 from kohakuterrarium.session.migrations import path_for_version
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.store_open import open_owned_store
 from kohakuterrarium.session.version import FORMAT_VERSION
 
 
@@ -123,6 +125,31 @@ def find_fork_point(store: SessionStore, at_event_id: int) -> dict[str, Any] | N
     return None
 
 
+def _fork_into_child(
+    store: SessionStore,
+    target_path: str,
+    *,
+    at_event_id: int,
+    mutate: Callable[[dict], dict | None] | None,
+    name: str | None,
+) -> tuple[str, str]:
+    """Fork into a child store and close it on the calling thread.
+
+    The child's complete SQLite lifecycle stays inside one dispatched call so
+    creation, copy, and close all run on the parent store's affinity thread.
+    """
+    child = store.fork(
+        target_path,
+        at_event_id=at_event_id,
+        mutate=mutate,
+        name=name,
+    )
+    try:
+        return child.session_id, child.path
+    finally:
+        child.close(update_status=False)
+
+
 async def fork_session_handler(
     session_path: Path,
     *,
@@ -139,6 +166,13 @@ async def fork_session_handler(
     create them. Invalid mutations raise ``InvalidRequestError``; target or
     stability conflicts raise ``ConflictError``; other failures are wrapped in
     ``SessionError``.
+
+    Every blocking store stage runs off the caller's event loop: the
+    fork-point scan and the fork copy on the store's affinity thread, and the
+    owned store's open/close on plain worker threads. The vault layer
+    serializes access per call and is thread-agnostic, so handing the
+    connection between those threads is safe — the stages are strictly
+    sequenced, each ``await`` completing before the next starts.
     """
     session_path = Path(session_path)
     if not session_path.exists():
@@ -149,8 +183,8 @@ async def fork_session_handler(
     owned = store is None
     try:
         if store is None:
-            store = SessionStore(session_path)
-        fork_point_event = find_fork_point(store, at_event_id)
+            store = await open_owned_store(SessionStore, str(session_path))
+        fork_point_event = await store.run(find_fork_point, store, at_event_id)
         if fork_point_event is None:
             raise InvalidRequestError(
                 f"No event with event_id={at_event_id} in this session"
@@ -166,7 +200,9 @@ async def fork_session_handler(
             raise ConflictError(f"Fork target already exists: {target_path.name}")
 
         try:
-            child_store = store.fork(
+            child_session_id, child_path = await store.run(
+                _fork_into_child,
+                store,
                 str(target_path),
                 at_event_id=at_event_id,
                 mutate=mutate,
@@ -176,17 +212,15 @@ async def fork_session_handler(
             raise ConflictError(str(exc)) from exc
         except (ValueError, FileExistsError) as exc:
             raise InvalidRequestError(str(exc)) from exc
-
-        child_session_id = child_store.session_id
-        child_path = child_store.path
-        child_store.close(update_status=False)
     except (InvalidRequestError, ConflictError, SessionNotFoundError):
         raise
     except Exception as exc:
         raise SessionError(f"Fork failed: {exc}") from exc
     finally:
         if store is not None and owned:
-            store.close(update_status=False)
+            # Never dispatched through store.run: close shuts down the
+            # affinity executor and cannot wait on itself.
+            await asyncio.to_thread(store.close, update_status=False)
 
     return {
         "session_id": child_session_id,

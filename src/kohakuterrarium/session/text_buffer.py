@@ -5,6 +5,8 @@ event persistence to ``SessionOutput``.
 """
 
 import time
+from collections.abc import Callable
+from concurrent.futures import Future
 from typing import Any
 
 from kohakuterrarium.utils.logging import get_logger
@@ -47,12 +49,17 @@ class OpenTextSegment:
     """Buffer one streamed-text segment with gated durable recovery state.
 
     ``append`` mirrors accumulated text after the size or time threshold.
-    ``take`` closes a live segment, while ``recover`` restores a segment left
-    by an interrupted process. Both reset memory and durable state.
+    ``take`` and ``recover`` reset memory; the caller clears the durable
+    slot only after recording the returned text. Optional ``submit`` routes
+    slot writes through the same ordered queue as the event log.
     """
 
-    def __init__(self, store: Any, prefix: str) -> None:
+    def __init__(
+        self, store: Any, prefix: str, *, submit: Callable | None = None
+    ) -> None:
         self._store = store
+        self._submit = submit
+        self._slot_active = False
         self._key = f"{prefix}:{_SLOT_SUFFIX}"
         self._buf = ""
         self._persisted_len = 0
@@ -67,29 +74,28 @@ class OpenTextSegment:
             or now - self._last_persist >= _FLUSH_SECONDS
         ):
             self._persist(self._buf)
+            self._slot_active = True
             self._persisted_len = len(self._buf)
             self._last_persist = now
 
     def take(self) -> str:
-        """Return the live segment and clear its memory and durable state.
-
-        Short segments never cross the persistence gate, so closing them does
-        not perform an unnecessary state write.
-        """
+        """Take buffered text; retain its recovery slot until ``clear``."""
         text = self._buf
-        had_slot = self._persisted_len > 0
         self._reset()
-        if had_slot:
-            self._persist("")
         return text
 
     def recover(self) -> str:
-        """Return interrupted text from durable state and clear the segment."""
+        """Read interrupted text without clearing it before the event exists."""
         text = self._load()
+        self._slot_active = bool(text)
         self._reset()
-        if text:
-            self._persist("")
         return text
+
+    def clear(self, *, after: Future | None = None) -> None:
+        """Clear a used slot only if the preceding event write succeeded."""
+        if self._slot_active:
+            self._persist("", after=after)
+            self._slot_active = False
 
     def _reset(self) -> None:
         self._buf = ""
@@ -103,8 +109,22 @@ class OpenTextSegment:
             return ""
         return value if isinstance(value, str) else ""
 
-    def _persist(self, text: str) -> None:
+    def _persist(self, text: str, *, after: Future | None = None) -> None:
+        if self._submit is not None:
+            self._submit(self._write_slot, text, after=after)
+        else:
+            self._write_slot(text, after=after)
+
+    def _write_slot(self, text: str, *, after: Future | None = None) -> None:
         try:
+            if after is not None:
+                # The affinity queue has already completed this predecessor.
+                # Propagate its failure before removing the recovery copy.
+                after.result()
+            if not text:
+                # Event appends may still be in the native write-back cache.
+                # Commit them before removing the durable recovery copy.
+                self._store.flush()
             self._store.state[self._key] = text
         except Exception as e:  # pragma: no cover - buffering cannot fail the turn
             logger.warning("open_text slot write failed", error=str(e), exc_info=True)

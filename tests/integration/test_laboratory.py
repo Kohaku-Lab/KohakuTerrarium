@@ -307,8 +307,11 @@ class TestLaboratoryMultiNodeService:
             alpha = w1_engine.get_creature(alpha_info.creature_id)
             paging_store = w1_engine._session_stores[alpha.graph_id]
             for index in range(4):
-                paging_store.append_event(
-                    alpha.name, "text", {"content": f"page-{index}"}
+                paging_store.submit(
+                    paging_store.append_event,
+                    alpha.name,
+                    "text",
+                    {"content": f"page-{index}"},
                 )
             tail = await service.chat_history_page(alpha_info.creature_id, limit=2)
             assert [row["content"] for row in tail["events"]] == ["page-2", "page-3"]

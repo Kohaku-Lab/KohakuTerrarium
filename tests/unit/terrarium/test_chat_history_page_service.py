@@ -9,6 +9,8 @@ genuine.
 
 from __future__ import annotations
 
+import asyncio
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -16,6 +18,7 @@ import pytest
 from kohakuterrarium.session.history_paging import HistoryPagingError
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.service import LocalTerrariumService
+from kohakuterrarium.terrarium import history_service
 
 
 @pytest.fixture()
@@ -95,3 +98,70 @@ async def test_service_unknown_channel_page_is_an_empty_page(store):
     page = await service.channel_history_page("g", "missing", limit=5)
     assert page["messages"] == []
     assert page["history_page"]["has_older"] is False
+
+
+@pytest.mark.parametrize("target", ["chat", "channel"])
+@pytest.mark.parametrize("read_kind", ["page", "detail"])
+async def test_live_reads_follow_accepted_writes_off_loop(
+    store, tmp_path, monkeypatch, target, read_kind
+):
+    store.append_event("ag", "text", {"content": "first"})
+    store.save_channel_message("room", {"sender": "ag", "content": "first"})
+    service = LocalTerrariumService(_fake_engine(store))
+    args = ("ag",) if target == "chat" else ("g", "room")
+    first = await getattr(service, f"{target}_history_page")(*args, limit=1)
+    options = (
+        {"limit": 3}
+        if read_kind == "page"
+        else {
+            "stream": first["history_page"]["stream"],
+            "history_id": first["history_page"]["history_id"],
+            "ref": first["history_page"]["after"],
+        }
+    )
+    release = threading.Event()
+    entered = threading.Event()
+    threads = []
+    original = getattr(history_service, f"history_{read_kind}")
+
+    def observed(*args, **kwargs):
+        threads.append(threading.get_ident())
+        return original(*args, **kwargs)
+
+    def blocked():
+        entered.set()
+        assert release.wait(5)
+
+    monkeypatch.setattr(history_service, f"history_{read_kind}", observed)
+    store.submit(blocked)
+    assert await asyncio.to_thread(entered.wait, 3)
+    if target == "chat":
+        store.submit(store.append_event, "ag", "text", {"content": "accepted"})
+    else:
+        store.submit(
+            store.save_channel_message, "room", {"sender": "ag", "content": "accepted"}
+        )
+    reading = asyncio.create_task(
+        getattr(service, f"{target}_history_{read_kind}")(*args, **options)
+    )
+    other = SessionStore(str(tmp_path / "other.kohakutr"))
+    try:
+        other.append_event("ag", "text", {"content": "independent"})
+        await asyncio.sleep(0)
+        unrelated = await LocalTerrariumService(_fake_engine(other)).chat_history_page(
+            "ag"
+        )
+        assert unrelated["events"][0]["content"] == "independent"
+        assert not reading.done(), "read overtook an accepted persistence operation"
+        release.set()
+        result = await reading
+        assert threading.get_ident() not in threads
+        if read_kind == "page":
+            records = result["events"] if target == "chat" else result["messages"]
+            assert [row["content"] for row in records] == ["first", "accepted"]
+        else:
+            assert result["record"]["content"] == "first"
+    finally:
+        release.set()
+        await reading
+        await asyncio.to_thread(other.close)

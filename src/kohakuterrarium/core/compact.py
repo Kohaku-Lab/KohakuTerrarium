@@ -6,8 +6,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from kohakuterrarium.core.compact_branch import (
+    read_agent_events,
     build_compact_metadata,
-    persist_compacted,
+    persist_compacted_async,
 )
 from kohakuterrarium.core.compact_splice import (
     is_real_user_message,
@@ -416,14 +417,19 @@ class CompactManager:
             # the post-compact prompt actually drops below the threshold.
             elide_after_compact(self._controller)
 
-            # Notify output for TUI/frontend display
+            # Notify output for TUI/frontend display. The watermark
+            # persisted below must observe queued turn events and the
+            # compact_complete event queued by the notify, or resume
+            # tail-replays events the compacted snapshot already contains.
             if self._output_router:
-                events = []
-                if self._session_store is not None:
-                    try:
-                        events = list(self._session_store.get_events(self._agent_name))
-                    except Exception:  # pragma: no cover - defensive
-                        events = []
+                run = getattr(self._session_store, "run", None)
+                if callable(run):
+                    # Scan on the affinity thread, ordered after queued writes.
+                    events = await run(
+                        read_agent_events, self._session_store, self._agent_name
+                    )
+                else:
+                    events = read_agent_events(self._session_store, self._agent_name)
                 metadata = build_compact_metadata(
                     self._agent,
                     events,
@@ -441,13 +447,15 @@ class CompactManager:
                     f"Context auto-compact done (round {self._compact_count})",
                     metadata=metadata,
                 )
+                if callable(run):
+                    await run(lambda: None)
             terminal_sent = True
 
             # Save conversation snapshot with post-compact version
             # (The compact_complete event is already recorded by SessionOutput
             # via notify_activity above — no need to append_event separately.)
             if self._session_store:
-                persist_compacted(
+                await persist_compacted_async(
                     self._session_store,
                     self._agent_name,
                     self._agent,

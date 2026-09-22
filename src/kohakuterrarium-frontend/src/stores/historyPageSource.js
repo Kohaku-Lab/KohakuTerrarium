@@ -49,12 +49,12 @@ export function createHistoryPageSource({
     resetRequired = true
     return { discarded: true, resetRequired: true }
   }
-  async function request(options) {
+  async function request(options, initialPayload) {
     const fence = capture()
     const fetchedAt = Date.now()
     inFlight += 1
     try {
-      const payload = await fetchPage({ limit: pageSize, ...options })
+      const payload = initialPayload ?? (await fetchPage({ limit: pageSize, ...options }))
       if (!isCurrent(fence)) return { discarded: true, resetRequired: false }
       const page = payload?.history_page
       if (!page) return { discarded: false, legacy: true, payload, fetchedAt, fence }
@@ -101,10 +101,10 @@ export function createHistoryPageSource({
       hasNewer: !!window?.hasNewer,
       hasCachedOlder: cache.has(window?.before),
     }),
-    async initialize(options = {}) {
+    async initialize({ initialPayload, ...options } = {}) {
       reset()
       const sequence = headSequence
-      let result = await request(options)
+      let result = await request(options, initialPayload)
       if (result.discarded || sequence !== headSequence)
         return { discarded: true, resetRequired: result.resetRequired }
       if (result.legacy) return result

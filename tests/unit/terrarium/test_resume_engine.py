@@ -1,7 +1,7 @@
 """Unit tests for :mod:`kohakuterrarium.terrarium.resume`.
 
 The two real branches load actual Agents from a saved store, which we
-short-circuit by patching :func:`resume_agent` and
+short-circuit by patching :func:`resume_agent_async` and
 :func:`detect_session_type`. Engine + Creature integration stays real.
 """
 
@@ -52,6 +52,10 @@ class TestResolveStorePath:
 
 
 # ── resume_into_engine dispatch ───────────────────────────────
+
+
+async def _async_noop(*_a, **_k):
+    return None
 
 
 class TestResumeIntoEngine:
@@ -157,7 +161,7 @@ class TestResumeIntoEngine:
             checkpoint=lambda: None,
         )
 
-        def _resume_agent(
+        async def _resume_agent(
             path,
             pwd_override=None,
             io_mode=None,
@@ -171,7 +175,7 @@ class TestResumeIntoEngine:
             captured["mark_conversation_open"] = mark_conversation_open
             return fake_agent, fake_store
 
-        monkeypatch.setattr(resume_mod, "resume_agent", _resume_agent)
+        monkeypatch.setattr(resume_mod, "resume_agent_async", _resume_agent)
         monkeypatch.setattr(
             resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
         )
@@ -215,10 +219,10 @@ class TestResumeIntoEngine:
 
         injects = []
 
-        def _inject(agent, store, name):
+        async def _inject(agent, store, name):
             injects.append(name)
 
-        monkeypatch.setattr(resume_mod, "inject_saved_state", _inject)
+        monkeypatch.setattr(resume_mod, "inject_saved_state_async", _inject)
         monkeypatch.setattr(
             resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
         )
@@ -303,7 +307,11 @@ class TestResumeIntoEngine:
             await t.add_creature(c, start=False)
             return t._topology.graphs[c.graph_id]
 
-        monkeypatch.setattr(resume_mod, "inject_saved_state", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            resume_mod,
+            "inject_saved_state_async",
+            lambda *a, **kw: _async_noop(),
+        )
         monkeypatch.setattr(
             resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
         )
@@ -359,10 +367,10 @@ class TestResumeIntoEngine:
             await t.add_creature(c, start=start)
             return t._topology.graphs[c.graph_id]
 
-        def _inject(agent, store, name):
+        async def _inject(agent, store, name):
             running_at_inject.append(agent.is_running)
 
-        monkeypatch.setattr(resume_mod, "inject_saved_state", _inject)
+        monkeypatch.setattr(resume_mod, "inject_saved_state_async", _inject)
 
         running_at_replay = []
 
@@ -419,7 +427,11 @@ class TestResumeIntoEngine:
 
         fake_config = TerrariumConfig(name="t", creatures=[], channels=[])
         monkeypatch.setattr(resume_mod, "load_terrarium_config", lambda p: fake_config)
-        monkeypatch.setattr(resume_mod, "inject_saved_state", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            resume_mod,
+            "inject_saved_state_async",
+            lambda *a, **kw: _async_noop(),
+        )
         monkeypatch.setattr(
             resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
         )
@@ -534,10 +546,10 @@ class TestResumeIntoEngine:
                 created_ids.append(added.creature_id)
             return t._topology.graphs[c.graph_id]
 
-        def _boom(agent, store, name):
+        async def _boom(agent, store, name):
             raise RuntimeError("inject failed")
 
-        monkeypatch.setattr(resume_mod, "inject_saved_state", _boom)
+        monkeypatch.setattr(resume_mod, "inject_saved_state_async", _boom)
 
         t = await TestTerrariumBuilder().build()
         engine_holder["t"] = t
@@ -595,7 +607,7 @@ class TestResumeIntoEngine:
                 created_ids.append(added.creature_id)
             return t._topology.graphs[c.graph_id]
 
-        def _boom_inject(agent, store, name):
+        async def _boom_inject(agent, store, name):
             # Stand in for a concurrent task landing an unrelated creature
             # after this adoption's own creature was added.
             t = engine_holder["t"]
@@ -610,7 +622,7 @@ class TestResumeIntoEngine:
             t._creatures["concurrent"] = cc
             raise RuntimeError("inject failed")
 
-        monkeypatch.setattr(resume_mod, "inject_saved_state", _boom_inject)
+        monkeypatch.setattr(resume_mod, "inject_saved_state_async", _boom_inject)
 
         t = await TestTerrariumBuilder().with_creature("preexisting").build()
         engine_holder["t"] = t
@@ -664,9 +676,11 @@ class TestResumeIntoEngine:
             update_status=lambda _value: None,
             checkpoint=lambda: None,
         )
-        monkeypatch.setattr(
-            resume_mod, "resume_agent", lambda *a, **k: (fake_agent, fake_store)
-        )
+
+        async def _fake_resume(*a, **k):
+            return fake_agent, fake_store
+
+        monkeypatch.setattr(resume_mod, "resume_agent_async", _fake_resume)
         monkeypatch.setattr(
             resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
         )
@@ -710,7 +724,7 @@ class TestResumeIntoEngine:
 
         fake_agent.start = _boom_start
 
-        def _resume_agent(
+        async def _resume_agent(
             path,
             pwd_override=None,
             io_mode=None,
@@ -726,7 +740,7 @@ class TestResumeIntoEngine:
                 store.update_status("running")
             return fake_agent, store
 
-        monkeypatch.setattr(resume_mod, "resume_agent", _resume_agent)
+        monkeypatch.setattr(resume_mod, "resume_agent_async", _resume_agent)
         captured = {}
 
         t = await TestTerrariumBuilder().with_creature("preexisting").build()

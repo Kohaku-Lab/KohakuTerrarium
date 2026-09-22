@@ -4,9 +4,8 @@ Full reconciliation rereads every canonical session file; incremental
 reconciliation only rereads files whose WAL-aware ``(mtime, size)`` fingerprint
 changed. Both modes remove entries for missing files.
 
-Session files are opened only here. Parallel reads are bounded by the CPU
-count and by the process descriptor budget, since every open store holds
-about twenty descriptors.
+Disk snapshots use selective read-only queries. Parallel reads retain the
+conservative CPU and descriptor budget used by the original store readers.
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -15,8 +14,12 @@ from pathlib import Path
 import os
 import time
 
-from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.persistence.session_index.entry import SessionIndexEntry
+from kohakuterrarium.session.readonly_view import SessionReadView
+from kohakuterrarium.session.store import SessionStore, iter_kv_keys
+from kohakuterrarium.studio.persistence.session_index.entry import (
+    SessionIndexEntry,
+    _max_mtime_with_wal,
+)
 from kohakuterrarium.studio.persistence.session_index.store import SessionIndex
 from kohakuterrarium.studio.persistence.viewer.paths import pick_canonical_per_session
 from kohakuterrarium.utils.fd_limit import soft_fd_limit
@@ -26,8 +29,8 @@ logger = get_logger(__name__)
 
 
 _MAX_WORKERS = 8
-# Descriptors one open SessionStore holds, and the number kept free for
-# sockets, config files, and live sessions.
+# Keep the original per-reader descriptor allowance and headroom for
+# sockets, config files, and live sessions; do not increase concurrency here.
 _FDS_PER_STORE = 20
 _FD_HEADROOM = 128
 
@@ -87,15 +90,28 @@ def _extract_text_preview(content, limit: int = 200) -> str:
     return str(content)[:limit]
 
 
-def _first_user_input_preview(store: SessionStore) -> str:
-    """Return the primary agent's first resumable user-input preview."""
+def _first_user_input_preview(store: SessionStore, meta: dict | None = None) -> str:
+    """Read only through the primary agent's first nonempty user input.
+
+    Resume normalization repairs tool events but never changes user inputs.
+    Reading the ordered physical records avoids replaying every tool payload
+    just to produce a listing preview. Re-reading the prefix also observes
+    edits and forks without introducing a second, invalidatable cache.
+    """
     try:
-        meta = store.load_meta()
+        if meta is None:
+            meta = store.load_meta()
         agent = (meta.get("agents") or [""])[0]
         if not agent:
             return ""
-        for evt in store.get_resumable_events(agent):
-            if evt.get("type") == "user_input":
+        store.events.flush_cache()
+        for key in sorted(iter_kv_keys(store.events, prefix=f"{agent}:e")):
+            try:
+                evt = store.events[key]
+            except Exception as exc:
+                logger.warning("Failed to read preview event", error=str(exc))
+                continue
+            if isinstance(evt, dict) and evt.get("type") == "user_input":
                 preview = _extract_text_preview(evt.get("content"))
                 if preview:
                     return preview
@@ -104,26 +120,6 @@ def _first_user_input_preview(store: SessionStore) -> str:
             "preview read failed; using empty", error=str(exc), exc_info=True
         )
     return ""
-
-
-def _max_mtime_with_wal(path: Path, *, fallback: float = 0.0) -> float:
-    """Return the newest main or SQLite-sidecar mtime.
-
-    The caller supplies the already-read main-file mtime to avoid another stat
-    in the reconciliation hot path.
-    """
-    best = fallback
-    for suffix in ("-wal", "-shm"):
-        sidecar = str(path) + suffix
-        if not os.path.exists(sidecar):
-            continue
-        try:
-            mt = os.stat(sidecar).st_mtime
-        except OSError:
-            continue
-        if mt > best:
-            best = mt
-    return best
 
 
 def _has_vector_index(store: SessionStore) -> bool:
@@ -145,9 +141,9 @@ def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
     """Build an index entry from a session file, or return ``None`` on failure.
 
     Failures are retried by later reconciliation. The fingerprint is captured
-    before opening because SQLite read initialization may touch WAL sidecars
-    and otherwise invalidate the new entry immediately. Closing without a
-    status update preserves read-only behavior and ``last_active`` stability.
+    before opening so writes committed after the read snapshot invalidate
+    the entry on the next pass. The source connection is strictly read-only;
+    it cannot update counters, schema, status, or checkpoint the writer's WAL.
     """
     try:
         try:
@@ -159,21 +155,25 @@ def read_entry_from_disk(path: Path) -> SessionIndexEntry | None:
                 "pre-open stat failed", path=str(path), error=str(exc), exc_info=True
             )
             return None
-        store = SessionStore(path)
-        try:
-            meta = store.load_meta()
-            preview = _first_user_input_preview(store)
-            has_vec = _has_vector_index(store)
+        with SessionReadView(path) as reader:
+            meta = reader.load_meta()
+            agent = (meta.get("agents") or [""])[0]
+            preview = ""
+            if agent:
+                for _, event in reader.items("events", prefix=f"{agent}:e"):
+                    if isinstance(event, dict) and event.get("type") == "user_input":
+                        preview = _extract_text_preview(event.get("content"))
+                        if preview:
+                            break
+            dimensions = reader.get("state", "vec_dimensions")
             return SessionIndexEntry.from_meta(
                 path=path,
                 meta=meta,
                 preview=preview,
-                has_vector_index=has_vec,
+                has_vector_index=isinstance(dimensions, int) and dimensions > 0,
                 file_mtime=pre_mtime,
                 file_size=pre_size,
             )
-        finally:
-            store.close(update_status=False)
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "read_entry_from_disk failed",

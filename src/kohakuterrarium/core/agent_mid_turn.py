@@ -183,7 +183,7 @@ class AgentMidTurnMixin:
             # ``content_parts_to_dicts`` so both sinks get a safe payload.
             serializable_content = _to_serializable_content(content)
             pending_id = pending_id_of(evt)
-            self._record_injected_input_event(
+            await self._record_injected_input_event(
                 serializable_content, pending_id=pending_id
             )
             metadata = {
@@ -268,7 +268,7 @@ class AgentMidTurnMixin:
             "failed."
         )
 
-    def _record_injected_input_event(
+    async def _record_injected_input_event(
         self, content: Any, *, pending_id: str | None = None
     ) -> None:
         """Append a ``user_input_injected`` event at the current
@@ -283,7 +283,8 @@ class AgentMidTurnMixin:
             payload = {"content": content}
             if pending_id:
                 payload["pending_id"] = pending_id
-            store.append_event(
+            await store.run(
+                store.append_event,
                 self.config.name,
                 "user_input_injected",
                 payload,

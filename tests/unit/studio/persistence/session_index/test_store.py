@@ -1,6 +1,8 @@
 """Unit tests for ``session_index.store`` — every code path."""
 
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor, TimeoutError
 
 import pytest
 
@@ -800,3 +802,83 @@ class TestSessionIndexPage:
             "offset": 0,
             "limit": 20,
         }
+
+
+class TestConcurrentUpdates:
+    def test_parallel_upserts_keep_one_search_row_and_delete_removes_it(
+        self, idx, monkeypatch
+    ):
+        entered = threading.Event()
+        release = threading.Event()
+        original_insert = idx._search.insert
+        calls = []
+
+        def gated_insert(*args, **kwargs):
+            calls.append(1)
+            if len(calls) == 1:
+                entered.set()
+                assert release.wait(5)
+            return original_insert(*args, **kwargs)
+
+        monkeypatch.setattr(idx._search, "insert", gated_insert)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(
+                idx.upsert, _entry(filename="same.kohakutr", preview="needle")
+            )
+            try:
+                assert entered.wait(5)
+                second = pool.submit(
+                    idx.upsert, _entry(filename="same.kohakutr", preview="needle")
+                )
+                try:
+                    second.result(timeout=0.2)
+                except TimeoutError:
+                    pass
+            finally:
+                release.set()
+            first.result(timeout=5)
+            second.result(timeout=5)
+        assert idx.list(search="needle").total == 1
+        assert idx.delete("same.kohakutr")
+        assert idx._search.search("needle") == []
+
+
+class TestQueuedUpdates:
+    def test_close_drains_accepted_updates_before_disposing_tables(
+        self, idx, tmp_path, monkeypatch
+    ):
+        entered = threading.Event()
+        release = threading.Event()
+        upsert = idx.upsert
+
+        def gated_upsert(entry):
+            entered.set()
+            assert release.wait(5), "index writer was not released"
+            upsert(entry)
+
+        monkeypatch.setattr(idx, "upsert", gated_upsert)
+        first = idx.submit_update(_entry(filename="first.kohakutr", preview="first"))
+        second = idx.submit_update(_entry(filename="second.kohakutr", preview="second"))
+        try:
+            assert entered.wait(2)
+            with ThreadPoolExecutor(max_workers=1) as caller:
+                closed = caller.submit(idx.close)
+                try:
+                    with pytest.raises(TimeoutError):
+                        closed.result(timeout=0.05)
+                finally:
+                    release.set()
+                closed.result(timeout=2)
+            first.result(timeout=2)
+            second.result(timeout=2)
+            with pytest.raises(RuntimeError, match="closed"):
+                idx.submit_update(_entry(filename="late.kohakutr"))
+            reopened = SessionIndex(tmp_path / ".kt-index.kvault")
+            try:
+                assert reopened.list().total == 2
+                assert reopened.get("first.kohakutr")["preview"] == "first"
+                assert reopened.get("second.kohakutr")["preview"] == "second"
+            finally:
+                reopened.close()
+        finally:
+            release.set()

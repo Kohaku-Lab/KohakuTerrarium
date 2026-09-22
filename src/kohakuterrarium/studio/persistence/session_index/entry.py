@@ -14,26 +14,22 @@ from typing import Any
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 
 
-def _max_mtime_with_wal(path: Path) -> float:
-    """Return the newest mtime across a session file and SQLite sidecars.
+def _max_mtime_with_wal(path: Path, *, fallback: float | None = None) -> float:
+    """Fingerprint data changes, ignoring reader-created SHM and empty WAL.
 
-    WAL writes precede main-file checkpoints, so the fingerprint must include
-    sidecars to invalidate active sessions promptly.
+    SHM contains SQLite reader bookkeeping, not session data. Including it
+    makes a read invalidate its own index entry and causes endless rescans.
     """
     try:
-        best = path.stat().st_mtime
+        best = path.stat().st_mtime if fallback is None else fallback
     except OSError:
-        return 0.0
-    for suffix in ("-wal", "-shm"):
-        sidecar = str(path) + suffix
-        if not os.path.exists(sidecar):
-            continue
-        try:
-            mt = os.stat(sidecar).st_mtime
-        except OSError:
-            continue
-        if mt > best:
-            best = mt
+        best = 0.0
+    try:
+        wal = os.stat(str(path) + "-wal")
+        if wal.st_size > 0:
+            best = max(best, wal.st_mtime)
+    except OSError:
+        pass
     return best
 
 

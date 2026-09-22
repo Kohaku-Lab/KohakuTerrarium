@@ -1,5 +1,6 @@
 """Stop sessions while keeping persisted conversation lifecycle consistent."""
 
+import asyncio
 import os
 from pathlib import Path
 from typing import Any
@@ -389,8 +390,10 @@ async def stop_session(
         hook = index_hooks.pop(session_id, None)
         if hook is not None:
             try:
-                hook.flush()
-                hook.detach()
+                try:
+                    await asyncio.to_thread(hook.flush)
+                finally:
+                    await asyncio.to_thread(hook.detach)
             except Exception as exc:
                 logger.warning(
                     "Failed to detach session-index hook on stop",
@@ -400,7 +403,7 @@ async def stop_session(
                 )
     if store is not None and hasattr(store, "close"):
         try:
-            store.close(update_status=False)
+            await asyncio.to_thread(store.close, update_status=False)
         except Exception as exc:
             logger.warning(
                 "Failed to close session store on stop",

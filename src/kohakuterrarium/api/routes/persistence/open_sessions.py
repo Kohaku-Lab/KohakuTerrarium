@@ -16,10 +16,11 @@ from kohakuterrarium.api.routes.persistence.resume_coordinator import (
     resume_coordinator,
     session_coordination_key,
 )
+from kohakuterrarium.session.readonly_view import SessionReadView
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio._runtime import host_engine_or_none
 from kohakuterrarium.studio.persistence.session_index import get_session_index_default
-from kohakuterrarium.studio.persistence.session_index.reconcile import reconcile
+from kohakuterrarium.studio.persistence.session_index.refresh import reconcile_guarded
 from kohakuterrarium.studio.persistence.store import resolve_session_path_in
 from kohakuterrarium.studio.persistence.viewer.paths import normalize_session_stem
 from kohakuterrarium.studio.sessions import lifecycle
@@ -68,7 +69,8 @@ def _live_rows(
         saved_name: str | None = None
         if store is not None:
             try:
-                meta = store.load_meta()
+                with SessionReadView(store.path) as reader:
+                    meta = reader.load_meta(discover_agents=False)
             except Exception:
                 meta = {}
             path = Path(store.path)
@@ -223,7 +225,7 @@ def build_open_session_rows(
             live_saved_names.add(saved_name)
 
     index = get_session_index_default(session_dir)
-    reconcile(index, session_dir, full=False)
+    reconcile_guarded(session_dir, index, full_rescan=False)
     dormant_rows: list[dict[str, Any]] = []
     for indexed in index.iter_entries():
         if indexed.get("conversation_open") is not True:
@@ -299,7 +301,9 @@ async def end_open_conversation(
             raise HTTPException(status_code=404, detail="saved conversation not found")
         await asyncio.to_thread(_end_saved_conversation, path, session_dir)
         index = get_session_index_default(session_dir=session_dir)
-        await asyncio.to_thread(reconcile, index, session_dir=session_dir)
+        await run_in_persistence_executor(
+            reconcile_guarded, session_dir, index, full_rescan=False
+        )
         return {"status": "ended", "conversation_id": conversation_id}
 
     try:

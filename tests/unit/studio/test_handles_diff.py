@@ -12,6 +12,7 @@ from kohakuterrarium.studio.persistence.viewer.diff import (
     _msg_signature,
     _summarize_msg,
     build_diff_payload,
+    merge_diff_payload,
 )
 from kohakuterrarium.studio.sessions.handles import Session, SessionListing
 
@@ -279,3 +280,41 @@ class TestBuildDiffPayload:
         assert out["shared_prefix_length"] == 1
         assert len(out["a_only"]) == 1
         assert len(out["b_only"]) == 1
+
+
+class TestMergeDiffPayload:
+    def test_identical_sides(self):
+        msgs = [{"role": "user", "content": "hi"}]
+        out = merge_diff_payload((msgs, "a", "alice"), (list(msgs), "b", "bob"))
+        assert out["identical"] is True
+        assert out["shared_prefix_length"] == 1
+        assert out["a_only"] == []
+        assert out["b_only"] == []
+        assert out["a"] == {"session_name": "a", "agent": "alice", "total_messages": 1}
+        assert out["b"] == {"session_name": "b", "agent": "bob", "total_messages": 1}
+
+    def test_diverging_sides(self):
+        a = (
+            [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "a"}],
+            "a",
+            "alice",
+        )
+        b = (
+            [{"role": "user", "content": "hi"}, {"role": "assistant", "content": "b"}],
+            "b",
+            "bob",
+        )
+        out = merge_diff_payload(a, b)
+        assert out["identical"] is False
+        assert out["shared_prefix_length"] == 1
+        assert len(out["a_only"]) == 1
+        assert len(out["b_only"]) == 1
+
+    def test_mutation_isolation(self):
+        # The merge must not mutate the loaded side tuples: route code may
+        # reuse them (e.g. after an exception on the other side).
+        msgs = [{"role": "user", "content": "hi"}]
+        a = (msgs, "a", "alice")
+        merge_diff_payload(a, (list(msgs), "b", "bob"))
+        assert a == (msgs, "a", "alice")
+        assert msgs == [{"role": "user", "content": "hi"}]

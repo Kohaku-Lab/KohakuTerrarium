@@ -13,6 +13,7 @@ from kohakuterrarium.core.agent_runtime_tools import _make_job_label
 from kohakuterrarium.core.event_inbox import EventEnvelope, TurnOutcome
 from kohakuterrarium.core.metrics_hook import metrics
 from kohakuterrarium.core.pending_input import pending_id_of
+from kohakuterrarium.session.raw_history import append_user_event_pair
 from kohakuterrarium.llm.message import content_parts_to_dicts
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.skills.hints import inject_skill_path_hint
@@ -234,7 +235,7 @@ class AgentEventLoopMixin:
             self._advance_turn_for_user_input()
         if primary.type == "user_input" and not is_rerun:
             if self.session_store is not None:
-                self._record_primary_user_input(primary)
+                await self._record_primary_user_input(primary)
 
         if (
             primary.type == "user_input"
@@ -277,7 +278,7 @@ class AgentEventLoopMixin:
         existing_max = helper(self._turn_index) if helper else 0
         self._branch_id = existing_max + 1 if existing_max > 0 else 1
 
-    def _record_primary_user_input(self, event) -> None:
+    async def _record_primary_user_input(self, event) -> None:
         """Append the ``user_input`` + ``user_message`` session events for a
         fresh (non-rerun) user turn."""
         content = (
@@ -290,21 +291,14 @@ class AgentEventLoopMixin:
         pending_id = pending_id_of(event)
         if pending_id:
             payload["pending_id"] = pending_id
-        self.session_store.append_event(
+        await self.session_store.run(
+            append_user_event_pair,
+            self.session_store,
             self.config.name,
-            "user_input",
             dict(payload),
-            turn_index=self._turn_index,
-            branch_id=self._branch_id,
-            parent_branch_path=ppath,
-        )
-        self.session_store.append_event(
-            self.config.name,
-            "user_message",
-            dict(payload),
-            turn_index=self._turn_index,
-            branch_id=self._branch_id,
-            parent_branch_path=ppath,
+            self._turn_index,
+            self._branch_id,
+            ppath,
         )
 
     async def _record_folded_user_event(self, evt) -> None:
@@ -312,7 +306,7 @@ class AgentEventLoopMixin:
         pops its queued banner and replay shows it as its own bubble."""
         content = _to_serializable_content(self._resolve_injected_content(evt))
         pending_id = pending_id_of(evt)
-        self._record_injected_input_event(content, pending_id=pending_id)
+        await self._record_injected_input_event(content, pending_id=pending_id)
         metadata = {
             "content": content,
             "turn_index": self._turn_index,

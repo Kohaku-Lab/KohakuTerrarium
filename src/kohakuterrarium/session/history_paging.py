@@ -20,6 +20,15 @@ class HistoryPagingError(ValueError):
     """Invalid history page or detail request."""
 
 
+def require_bounded_history_page(*, paged: bool, limit: int) -> None:
+    """Reject unbounded full-log history HTTP reads."""
+    if not paged or limit <= 0:
+        raise HistoryPagingError(
+            "Unbounded history payloads are not served; pass paged=true "
+            "with a positive limit and optional before/after cursors."
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class PageCursor:
     """Opaque exclusive cursor bound to one physical record."""

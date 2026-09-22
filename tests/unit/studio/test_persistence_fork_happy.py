@@ -1,5 +1,9 @@
 """Happy-path tests for studio.persistence.fork.fork_session_handler."""
 
+import asyncio
+import threading
+import weakref
+
 import pytest
 from kohakuterrarium.errors import (
     ConflictError,
@@ -138,3 +142,46 @@ class TestForkSessionHandlerHappyPaths:
                 mutate_args=None,
                 name=None,
             )
+
+
+async def test_cancelled_fork_open_closes_unclaimed_store(tmp_path, monkeypatch):
+    path, eid = _build_store_with_event(tmp_path)
+    entered = threading.Event()
+    release = threading.Event()
+    returned = threading.Event()
+    vaults = []
+    daemons = []
+
+    def gated_open(*args, **kwargs):
+        store = SessionStore(*args, **kwargs)
+        vaults.append(weakref.ref(store.events))
+        daemons.append(store.events._daemon_thread)
+        entered.set()
+        assert release.wait(5)
+        returned.set()
+        return store
+
+    monkeypatch.setattr(fork_mod, "SessionStore", gated_open)
+    task = asyncio.create_task(
+        fork_mod.fork_session_handler(
+            path, at_event_id=eid, mutate_kind=None, mutate_args=None, name="cancelled"
+        )
+    )
+    try:
+        assert await asyncio.to_thread(entered.wait, 3)
+        task.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert await asyncio.to_thread(returned.wait, 3)
+        await asyncio.sleep(0)
+        assert all(ref() is None or ref()._closed for ref in vaults)
+        assert all(not thread.is_alive() for thread in daemons)
+        assert not fork_mod.fork_target_path(path, "cancelled").exists()
+    finally:
+        release.set()
+        for ref in vaults:
+            vault = ref()
+            if vault is not None:
+                await asyncio.to_thread(vault.close)

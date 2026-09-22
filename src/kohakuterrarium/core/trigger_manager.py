@@ -324,15 +324,29 @@ class TriggerManager:
         store = self._session_store
         if store is None:
             return
+        args = (
+            self._agent_name or "agent",
+            "schedule_drift",
+            {
+                "trigger_id": trigger_id,
+                "trigger_name": type(trigger).__name__,
+                "drift_ms": drift_s * 1000.0,
+            },
+        )
+
+        def report_result(future) -> None:
+            try:
+                future.result()
+            except Exception as e:
+                logger.warning(
+                    "schedule_drift emit failed", error=str(e), exc_info=True
+                )
+
         try:
-            store.append_event(
-                self._agent_name or "agent",
-                "schedule_drift",
-                {
-                    "trigger_id": trigger_id,
-                    "trigger_name": type(trigger).__name__,
-                    "drift_ms": drift_s * 1000.0,
-                },
-            )
-        except Exception as e:  # pragma: no cover - telemetry must not stop triggers
+            submit = getattr(store, "submit", None)
+            if callable(submit):
+                submit(store.append_event, *args).add_done_callback(report_result)
+            else:
+                store.append_event(*args)
+        except Exception as e:
             logger.warning("schedule_drift emit failed", error=str(e), exc_info=True)

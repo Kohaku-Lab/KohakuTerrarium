@@ -2,6 +2,7 @@
 
 import errno
 import os
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -124,6 +125,47 @@ class TestFirstUserInputPreview:
         finally:
             s.close()
 
+    def test_preview_does_not_read_history_after_first_nonempty_input(
+        self, session_dir, monkeypatch
+    ):
+        with closing(SessionStore(session_dir / "long.kohakutr")) as store:
+            store.init_meta("sid", "agent", "", "", ["alice"])
+            store.append_event("worker", "user_input", {"content": "other agent"})
+            store.append_event("alice", "user_input", {"content": ""})
+            store.append_event("alice", "text", {"content": "before input"})
+            store.append_event("alice", "user_input", {"content": "first input"})
+            tail_keys = set()
+            for _ in range(100):
+                key, _ = store.append_event(
+                    "alice", "tool_result", {"output": "x" * 32768}
+                )
+                tail_keys.add(key)
+            store.flush()
+            reads = set()
+            vault_type = type(store.events)
+            original_get = vault_type.__getitem__
+
+            def record_read(vault, key):
+                if vault is store.events:
+                    reads.add(key.decode() if isinstance(key, bytes) else key)
+                return original_get(vault, key)
+
+            monkeypatch.setattr(vault_type, "__getitem__", record_read)
+            assert _first_user_input_preview(store) == "first input"
+            assert reads.isdisjoint(tail_keys)
+
+    def test_preview_observes_rewritten_input_and_primary_agent(self, session_dir):
+        with closing(SessionStore(session_dir / "edited.kohakutr")) as store:
+            store.init_meta("sid", "agent", "", "", ["alice", "bob"])
+            key, _ = store.append_event("alice", "user_input", {"content": "original"})
+            store.append_event("bob", "user_input", {"content": "second agent"})
+            assert _first_user_input_preview(store) == "original"
+            event = store.events[key]
+            store.events[key] = {**event, "content": "edited"}
+            assert _first_user_input_preview(store) == "edited"
+            store.meta["agents"] = ["bob", "alice"]
+            assert _first_user_input_preview(store) == "second agent"
+
     def test_returns_empty_when_no_user_input(self, session_dir):
         path = session_dir / "empty.kohakutr"
         s = SessionStore(str(path))
@@ -210,6 +252,43 @@ class TestHasVectorIndex:
 
 
 class TestReadEntryFromDisk:
+    def test_corrupt_optional_rows_do_not_hide_readable_session(self, session_dir):
+        path = session_dir / "partial.kohakutr"
+        with closing(SessionStore(path)) as store:
+            store.init_meta("sid", "agent", "", "", ["alice"])
+            key, _ = store.append_event("alice", "text", {"content": "damaged"})
+            invalid_json = (
+                bytes([0x89, 0x4B, 1, 3, 0, 0, 0, 0, 0x56, 0x4B]) + b"not-json"
+            )
+            store.events[key] = invalid_json
+            store.meta["optional"] = invalid_json
+            store.state["vec_dimensions"] = invalid_json
+            store.append_event("alice", "user_input", {"content": "still readable"})
+            store.flush()
+            entry = read_entry_from_disk(path)
+            assert entry is not None
+            assert entry.preview == "still readable"
+            assert entry.has_vector_index is False
+
+    def test_index_read_does_not_write_live_session_wal(self, session_dir):
+        path = session_dir / "live.kohakutr"
+        with closing(SessionStore(path)) as store:
+            store.init_meta("sid", "agent", "", "", ["alice"])
+            store.append_event("alice", "user_input", {"content": "WAL-only input"})
+            store.state["vec_dimensions"] = 384
+            store.flush()
+            wal = Path(str(path) + "-wal")
+            before = (path.read_bytes(), wal.read_bytes(), wal.stat().st_mtime_ns)
+            entry = read_entry_from_disk(path)
+            assert entry is not None
+            assert entry.preview == "WAL-only input"
+            assert entry.has_vector_index
+            assert (
+                path.read_bytes(),
+                wal.read_bytes(),
+                wal.stat().st_mtime_ns,
+            ) == before
+
     def test_happy_path(self, session_dir):
         path = _make_session(session_dir, "alice", preview_text="hello there")
         entry = read_entry_from_disk(path)
@@ -220,15 +299,11 @@ class TestReadEntryFromDisk:
 
     def test_returns_none_for_nonexistent(self, tmp_path):
         entry = read_entry_from_disk(tmp_path / "ghost.kohakutr")
-        # SessionStore() on a missing file is permitted (it creates
-        # the file) so this actually returns an entry — the function
-        # only returns None on a real read failure.  For a "doesn't
-        # exist" case the file is created empty; entry has an empty
-        # agents list and "" preview.
-        assert entry is None or entry.preview == ""
+        assert entry is None
+        assert not (tmp_path / "ghost.kohakutr").exists()
 
-    def test_returns_none_when_session_store_raises(self, tmp_path, monkeypatch):
-        # Force ``SessionStore`` construction to fail AFTER the
+    def test_returns_none_when_reader_raises(self, tmp_path, monkeypatch):
+        # Force ``SessionReadView`` construction to fail AFTER the
         # pre-open stat succeeds — exercises the outer ``except``
         # in ``read_entry_from_disk`` (the inner OSError catch
         # handles the pre-open stat failure).
@@ -236,10 +311,10 @@ class TestReadEntryFromDisk:
         path.write_bytes(b"x")  # stat() succeeds
 
         def boom(*a, **kw):
-            raise RuntimeError("simulated SessionStore boot fail")
+            raise RuntimeError("simulated read snapshot failure")
 
         monkeypatch.setattr(
-            "kohakuterrarium.studio.persistence.session_index.reconcile.SessionStore",
+            "kohakuterrarium.studio.persistence.session_index.reconcile.SessionReadView",
             boom,
         )
         out = read_entry_from_disk(path)
@@ -247,9 +322,8 @@ class TestReadEntryFromDisk:
 
     def test_returns_none_when_pre_open_stat_fails(self, tmp_path, monkeypatch):
         # The pre-open stat in ``read_entry_from_disk`` captures the
-        # fingerprint BEFORE opening SessionStore (so the WAL-touch
-        # from SQLite's open doesn't invalidate the fingerprint on
-        # the next reconcile).  If the stat itself raises (file
+        # fingerprint before opening the read snapshot. If the stat
+        # itself raises (file
         # vanished, permission denied), the function must return
         # ``None`` without proceeding to open the store.
         from kohakuterrarium.studio.persistence.session_index import (
@@ -271,6 +345,16 @@ class TestReadEntryFromDisk:
         monkeypatch.setattr(_P, "stat", _boom)
         out = reconcile_mod.read_entry_from_disk(path)
         assert out is None
+
+    def test_read_sidecars_do_not_invalidate_session_fingerprint(self, tmp_path):
+        path = tmp_path / "stable.kohakutr"
+        path.write_bytes(b"database")
+        timestamp = path.stat().st_mtime
+        for suffix, contents in (("-wal", b""), ("-shm", b"read marks")):
+            sidecar = Path(str(path) + suffix)
+            sidecar.write_bytes(contents)
+            os.utime(sidecar, (timestamp + 60, timestamp + 60))
+        assert reconcile_mod._max_mtime_with_wal(path, fallback=timestamp) == timestamp
 
     def test_max_mtime_picks_newer_sidecar_in_reconcile_helper(self, tmp_path):
         # Happy path for the ``mt > best`` branch — WAL exists with a

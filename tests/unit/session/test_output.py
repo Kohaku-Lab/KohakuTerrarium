@@ -1,7 +1,11 @@
 """Unit tests for :mod:`kohakuterrarium.session.output`."""
 
+import asyncio
 import json
+import threading
+import time
 
+import pytest
 
 from kohakuterrarium.modules.output.event import OutputEvent
 from kohakuterrarium.session.output import (
@@ -10,6 +14,7 @@ from kohakuterrarium.session.output import (
     _subagent_name,
     _token_metadata,
 )
+from kohakuterrarium.session.readonly_view import SessionReadView
 from kohakuterrarium.session.store import SessionStore
 
 # ── fakes ─────────────────────────────────────────────────────────
@@ -108,7 +113,7 @@ class TestSubagentName:
 
 
 class TestTokenMetadata:
-    def test_basic(self):
+    async def test_basic(self):
         out = _token_metadata(
             {"prompt_tokens": 5, "completion_tokens": 3, "cached_tokens": 1}
         )
@@ -221,6 +226,7 @@ class TestStreaming:
             out.on_activity_with_metadata("tool_start", "[bash] x", {"job_id": "j1"})
             await out.write("after")
             await out.on_processing_end()
+            await out.drain()
             store.flush()
             types = [e["type"] for e in store.get_events("alice")]
             assert types[:3] == ["text_chunk", "tool_call", "text_chunk"]
@@ -238,6 +244,7 @@ class TestStreaming:
         try:
             await out.write("")
             await out.on_processing_end()
+            await out.drain()
             store.flush()
             assert [
                 e for e in store.get_events("alice") if e["type"] == "text_chunk"
@@ -258,6 +265,7 @@ class TestStreaming:
             await out.on_processing_start()
             await out.write_stream("c")
             await out.on_processing_end()
+            await out.drain()
             store.flush()
             seqs = [
                 e["chunk_seq"]
@@ -308,6 +316,7 @@ class TestStreaming:
             await out2.on_processing_start()  # start() intentionally skipped
             await out2.write_stream("fresh turn")
             await out2.on_processing_end()
+            await out2.drain()
             store2.flush()
             tcs = [
                 (e["content"], e.get("finalize"))
@@ -526,23 +535,19 @@ class TestStart:
         finally:
             store.close()
 
-    async def test_stop_is_noop(self, tmp_path):
+    async def test_stop_with_empty_buffer_writes_no_event(self, tmp_path):
         store, out = _make(tmp_path)
         try:
-            # stop() is a no-op: the router never starts/stops secondary
-            # outputs, so an interrupt is recovered from the durable slot
-            # on resume rather than flushed here.
             await out.stop()
             store.flush()
             assert store.get_events("alice") == []
         finally:
             store.close()
 
-    async def test_flush_is_noop(self, tmp_path):
+    async def test_flush_with_empty_buffer_writes_no_event(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             await out.flush()
-            # A no-op: writes no events to the store.
             store.flush()
             assert store.get_events("alice") == []
         finally:
@@ -553,22 +558,26 @@ class TestStart:
 
 
 class TestActivityHandlers:
-    def test_capture_disabled_returns_early(self, tmp_path):
+    async def test_capture_disabled_returns_early(self, tmp_path):
         store, out = _make(tmp_path, capture_activity=False)
         try:
             out.on_activity("tool_start", "[bash] cmd")
+            await out.drain()
             store.flush()
+            await out.drain()
             assert store.get_events("alice") == []
         finally:
             store.close()
 
-    def test_tool_start(self, tmp_path):
+    async def test_tool_start(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
                 "tool_start", "[bash] running", {"job_id": "j1", "args": {"x": 1}}
             )
+            await out.drain()
             store.flush()
+            await out.drain()
             evts = [e for e in store.get_events("alice") if e["type"] == "tool_call"]
             assert len(evts) == 1
             assert evts[0]["name"] == "bash"
@@ -577,7 +586,9 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_tool_start_persists_identity_independently_of_display(self, tmp_path):
+    async def test_tool_start_persists_identity_independently_of_display(
+        self, tmp_path
+    ):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -601,7 +612,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_tool_done(self, tmp_path):
+    async def test_tool_done(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -613,7 +624,9 @@ class TestActivityHandlers:
                     "tool_metadata": {"backend": "deepseek"},
                 },
             )
+            await out.drain()
             store.flush()
+            await out.drain()
             evts = [e for e in store.get_events("alice") if e["type"] == "tool_result"]
             assert len(evts) == 1
             assert evts[0]["exit_code"] == 0
@@ -622,7 +635,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_tool_done_preserves_structured_media_output(self, tmp_path):
+    async def test_tool_done_preserves_structured_media_output(self, tmp_path):
         store, out = _make(tmp_path)
         result = [
             {
@@ -639,6 +652,7 @@ class TestActivityHandlers:
                 "[video_gen] done",
                 {"job_id": "j1", "result": result},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "tool_result"
@@ -647,7 +661,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_tool_done_preserves_explicit_exit_code(self, tmp_path):
+    async def test_tool_done_preserves_explicit_exit_code(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -655,6 +669,7 @@ class TestActivityHandlers:
                 "[bash] exit=2",
                 {"job_id": "j1", "result": "bad", "exit_code": 2},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "tool_result"
@@ -663,7 +678,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_tool_error(self, tmp_path):
+    async def test_tool_error(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -677,6 +692,7 @@ class TestActivityHandlers:
                     "output": "bad output",
                 },
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "tool_result"
@@ -688,7 +704,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_subagent_start_then_done(self, tmp_path):
+    async def test_subagent_start_then_done(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -706,7 +722,9 @@ class TestActivityHandlers:
                 "[explore] done",
                 {"job_id": "j1", "result": "found", "turns": 1, "duration": 0.5},
             )
+            await out.drain()
             store.flush()
+            await out.drain()
             evts = store.get_events("alice")
             call = next(e for e in evts if e["type"] == "subagent_call")
             assert call["name"] == "explore"
@@ -716,16 +734,18 @@ class TestActivityHandlers:
             assert result["llm_name"] == "openai/worker"
             assert result["model"] == "gpt-worker"
             # SubAgent conversation persisted.
+            await out.drain()
             convo = store.load_subagent_conversation("alice", "explore", 0)
             assert convo is not None
             parsed = json.loads(convo)
             assert parsed[0]["role"] == "user"
             assert parsed[1]["content"] == "found"
+            await out.drain()
             assert store.load_subagent_meta("alice", "explore", 0)["job_id"] == "j1"
         finally:
             store.close()
 
-    def test_subagent_done_does_not_duplicate_exact_managed_run(self, tmp_path):
+    async def test_subagent_done_does_not_duplicate_exact_managed_run(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             store.save_subagent(
@@ -758,17 +778,19 @@ class TestActivityHandlers:
                 },
             )
 
+            await out.drain()
             runs = store.list_subagent_runs(parent="alice", name="explore")
             assert [(row["run"], row["job_id"]) for row in runs] == [
                 (0, "agent_explore_abc12345")
             ]
+            await out.drain()
             assert store.load_subagent_conversation("alice", "explore", 0).endswith(
                 '"full"}]}'
             )
         finally:
             store.close()
 
-    def test_subagent_start_uses_metadata_name_over_job_label(self, tmp_path):
+    async def test_subagent_start_uses_metadata_name_over_job_label(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -776,6 +798,7 @@ class TestActivityHandlers:
                 "[agent_explore[abc12345]] task",
                 {"job_id": "agent_explore_abc12345", "subagent": "explore"},
             )
+            await out.drain()
             store.flush()
             call = next(
                 e for e in store.get_events("alice") if e["type"] == "subagent_call"
@@ -784,7 +807,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_subagent_error(self, tmp_path):
+    async def test_subagent_error(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -797,6 +820,7 @@ class TestActivityHandlers:
                 "[critic] failed",
                 {"job_id": "j2", "error": "boom", "result": "nope"},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "subagent_result"
@@ -806,7 +830,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_subagent_token_update(self, tmp_path):
+    async def test_subagent_token_update(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -819,6 +843,7 @@ class TestActivityHandlers:
                     "completion_tokens": 5,
                 },
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e
@@ -829,7 +854,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_subagent_tool_dispatch(self, tmp_path):
+    async def test_subagent_tool_dispatch(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -837,6 +862,7 @@ class TestActivityHandlers:
                 "[plan] using",
                 {"subagent": "plan", "tool": "bash"},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "subagent_tool"
@@ -845,7 +871,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_token_usage_accumulates(self, tmp_path):
+    async def test_token_usage_accumulates(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -861,13 +887,15 @@ class TestActivityHandlers:
             assert out._total_input_tokens == 7
             assert out._total_output_tokens == 4
             assert out._total_cached_tokens == 1
+            await out.drain()
             store.flush()
+            await out.drain()
             evts = [e for e in store.get_events("alice") if e["type"] == "token_usage"]
             assert len(evts) == 2
         finally:
             store.close()
 
-    def test_compact_events(self, tmp_path):
+    async def test_compact_events(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata("compact_start", "", {"round": 1})
@@ -876,14 +904,16 @@ class TestActivityHandlers:
                 "",
                 {"round": 1, "summary": "s", "messages_compacted": 5},
             )
+            await out.drain()
             store.flush()
+            await out.drain()
             types = [e["type"] for e in store.get_events("alice")]
             assert "compact_start" in types
             assert "compact_complete" in types
         finally:
             store.close()
 
-    def test_trigger_fired(self, tmp_path):
+    async def test_trigger_fired(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -891,6 +921,7 @@ class TestActivityHandlers:
                 "[trig]",
                 {"trigger_id": "t1", "channel": "ch", "sender": "s"},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "trigger_fired"
@@ -899,18 +930,20 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_unknown_activity_recorded_as_prefixed(self, tmp_path):
+    async def test_unknown_activity_recorded_as_prefixed(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata("what_is_this", "[name] x", {"k": 1})
+            await out.drain()
             store.flush()
+            await out.drain()
             types = [e["type"] for e in store.get_events("alice")]
             # Falls through to ``activity:<type>``.
             assert "activity:what_is_this" in types
         finally:
             store.close()
 
-    def test_assistant_reasoning_recorded_as_clean_event(self, tmp_path):
+    async def test_assistant_reasoning_recorded_as_clean_event(self, tmp_path):
         store, out = _make(tmp_path, _FakeAgent(turn=2, branch=1))
         try:
             out.on_activity_with_metadata(
@@ -928,6 +961,7 @@ class TestActivityHandlers:
                     ],
                 },
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e
@@ -941,12 +975,13 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_context_cleared(self, tmp_path):
+    async def test_context_cleared(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
                 "context_cleared", "", {"messages_cleared": 10}
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "context_cleared"
@@ -955,12 +990,13 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_processing_error(self, tmp_path):
+    async def test_processing_error(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
                 "processing_error", "boom", {"error_type": "RuntimeError"}
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "processing_error"
@@ -969,7 +1005,7 @@ class TestActivityHandlers:
         finally:
             store.close()
 
-    def test_processing_complete(self, tmp_path):
+    async def test_processing_complete(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -977,6 +1013,7 @@ class TestActivityHandlers:
                 "",
                 {"trigger_channel": "c", "output_preview": "p"},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e
@@ -989,19 +1026,21 @@ class TestActivityHandlers:
 
 
 class TestWaveBHandlers:
-    def test_tool_wait(self, tmp_path):
+    async def test_tool_wait(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
                 "tool_wait", "", {"tool": "bash", "wait_ms": 50}
             )
+            await out.drain()
             store.flush()
+            await out.drain()
             evt = next(e for e in store.get_events("alice") if e["type"] == "tool_wait")
             assert evt["wait_ms"] == 50
         finally:
             store.close()
 
-    def test_compact_decision(self, tmp_path):
+    async def test_compact_decision(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -1009,6 +1048,7 @@ class TestWaveBHandlers:
                 "",
                 {"reason": "threshold", "skipped": True},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "compact_decision"
@@ -1017,7 +1057,7 @@ class TestWaveBHandlers:
         finally:
             store.close()
 
-    def test_turn_token_usage_saves_rollup(self, tmp_path):
+    async def test_turn_token_usage_saves_rollup(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -1031,6 +1071,7 @@ class TestWaveBHandlers:
                     "total_tokens": 11,
                 },
             )
+            await out.drain()
             store.flush()
             evts = [
                 e for e in store.get_events("alice") if e["type"] == "turn_token_usage"
@@ -1042,7 +1083,7 @@ class TestWaveBHandlers:
         finally:
             store.close()
 
-    def test_plugin_hook_timing(self, tmp_path):
+    async def test_plugin_hook_timing(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -1050,6 +1091,7 @@ class TestWaveBHandlers:
                 "[name]",
                 {"hook": "pre_tool_execute", "duration_ms": 12},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e
@@ -1060,12 +1102,13 @@ class TestWaveBHandlers:
         finally:
             store.close()
 
-    def test_cache_stats(self, tmp_path):
+    async def test_cache_stats(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
                 "cache_stats", "", {"cache_write": 100, "cache_read": 50}
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "cache_stats"
@@ -1074,7 +1117,7 @@ class TestWaveBHandlers:
         finally:
             store.close()
 
-    def test_scratchpad_write(self, tmp_path):
+    async def test_scratchpad_write(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_activity_with_metadata(
@@ -1082,6 +1125,7 @@ class TestWaveBHandlers:
                 "[key1]",
                 {"key": "k", "action": "set", "size_bytes": 8},
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "scratchpad_write"
@@ -1095,10 +1139,11 @@ class TestWaveBHandlers:
 
 
 class TestAssistantImage:
-    def test_basic(self, tmp_path):
+    async def test_basic(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_assistant_image("url-1")
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "assistant_image"
@@ -1108,7 +1153,7 @@ class TestAssistantImage:
         finally:
             store.close()
 
-    def test_with_optional_fields(self, tmp_path):
+    async def test_with_optional_fields(self, tmp_path):
         store, out = _make(tmp_path)
         try:
             out.on_assistant_image(
@@ -1118,6 +1163,7 @@ class TestAssistantImage:
                 source_name="dall-e",
                 revised_prompt="r",
             )
+            await out.drain()
             store.flush()
             evt = next(
                 e for e in store.get_events("alice") if e["type"] == "assistant_image"
@@ -1150,6 +1196,7 @@ class TestEmitMatch:
         try:
             await out.emit(OutputEvent(type="processing_start", content=""))
             await out.emit(OutputEvent(type="processing_end", content=""))
+            await out.drain()
             store.flush()
             types = [e["type"] for e in store.get_events("alice")]
             assert "processing_start" in types
@@ -1205,6 +1252,7 @@ class TestEmitMatch:
                 )
             )
             out.on_supersede("confirm-1")
+            await out.drain()
             store.flush()
 
             events = store.get_events("alice")
@@ -1340,6 +1388,7 @@ class TestStartTokenRestore:
             )
             assert out2._total_input_tokens == 10500
             assert out2._total_output_tokens == 2100
+            await out2.drain()
             usage = store2.state.get("alice:token_usage")
             assert usage["total_input_tokens"] == 10500
         finally:
@@ -1381,44 +1430,52 @@ class TestRecordDefensive:
 
 
 class TestActivityMethods:
-    def test_on_activity_records_when_capture_enabled(self, tmp_path):
+    async def test_on_activity_records_when_capture_enabled(self, tmp_path):
         store, out = _make(tmp_path, capture_activity=True)
         try:
             out.on_activity("custom_step", "[stepname] did a thing")
+            await out.drain()
             store.flush()
+            await out.drain()
             events = store.get_events("alice")
             # An unknown activity type is recorded under ``activity:<type>``.
             assert any(e.get("type") == "activity:custom_step" for e in events)
         finally:
             store.close()
 
-    def test_on_activity_skipped_when_capture_disabled(self, tmp_path):
+    async def test_on_activity_skipped_when_capture_disabled(self, tmp_path):
         store, out = _make(tmp_path, capture_activity=False)
         try:
             out.on_activity("custom_step", "[stepname] ignored")
+            await out.drain()
             store.flush()
             # Capture off → nothing recorded.
+            await out.drain()
             assert store.get_events("alice") == []
         finally:
             store.close()
 
-    def test_on_activity_with_metadata_records_when_enabled(self, tmp_path):
+    async def test_on_activity_with_metadata_records_when_enabled(self, tmp_path):
         store, out = _make(tmp_path, capture_activity=True)
         try:
             out.on_activity_with_metadata(
                 "custom_step", "[stepname] meta thing", {"weight": 5}
             )
+            await out.drain()
             store.flush()
+            await out.drain()
             events = store.get_events("alice")
             assert any(e.get("type") == "activity:custom_step" for e in events)
         finally:
             store.close()
 
-    def test_on_activity_with_metadata_skipped_when_disabled(self, tmp_path):
+    async def test_on_activity_with_metadata_skipped_when_disabled(self, tmp_path):
         store, out = _make(tmp_path, capture_activity=False)
         try:
             out.on_activity_with_metadata("custom_step", "[x] ignored", {"weight": 5})
+            await out.drain()
             store.flush()
+            await out.drain()
             assert store.get_events("alice") == []
         finally:
             store.close()
@@ -1504,3 +1561,232 @@ class TestStoreFailureBranches:
             await out.on_processing_end()
         finally:
             store._closed = True
+
+
+class TestWriteBehindQueue:
+    """S4b: event appends ride the store's affinity thread, drain at boundaries."""
+
+    async def test_activity_burst_does_not_block_event_loop(self, tmp_path):
+        # Negative case: a subagent-dense turn's appends are queued, so a
+        # ping task keeps the loop alive even while the store worker is
+        # deliberately slow.
+        store, out = _make(tmp_path)
+        try:
+            real_append = store.append_event
+
+            def slow_append(*args, **kwargs):
+                time.sleep(0.03)
+                return real_append(*args, **kwargs)
+
+            store.append_event = slow_append
+            loop_alive: list[float] = []
+            stop = asyncio.Event()
+
+            async def _ping():
+                while not stop.is_set():
+                    loop_alive.append(time.monotonic())
+                    await asyncio.sleep(0.02)
+                loop_alive.append(time.monotonic())
+
+            ping = asyncio.create_task(_ping())
+            await asyncio.sleep(0)
+            for i in range(12):
+                out.on_activity_with_metadata(
+                    "tool_done",
+                    f"[bash] r{i}",
+                    {"job_id": f"j{i}", "result": "x" * 300},
+                )
+            await out.drain()
+            stop.set()
+            await ping
+            gaps = [
+                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
+            ]
+            assert (
+                max(gaps) < 0.15
+            ), f"activity burst blocked the loop; max gap={max(gaps):.3f}s"
+            # Every queued event reached the store.
+            evts = [e for e in store.get_events("alice") if e["type"] == "tool_result"]
+            assert len(evts) == 12
+        finally:
+            store.close()
+
+    async def test_burst_preserves_fifo_order(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            for i in range(50):
+                out.on_activity_with_metadata(
+                    "tool_done",
+                    f"[bash] r{i}",
+                    {"job_id": f"j{i}", "result": str(i)},
+                )
+            await out.drain()
+            store.flush()
+            evts = [e for e in store.get_events("alice") if e["type"] == "tool_result"]
+            assert [e["call_id"] for e in evts] == [f"j{i}" for i in range(50)]
+        finally:
+            store.close()
+
+    async def test_drain_is_idempotent_and_completes(self, tmp_path):
+        store, out = _make(tmp_path)
+        try:
+            for i in range(5):
+                out.on_activity("tool_start", f"[bash] {i}")
+            await out.drain()
+            store.flush()
+            first = [e for e in store.get_events("alice") if e["type"] == "tool_call"]
+            await out.drain()  # a second drain is a no-op, not a duplicate
+            again = [e for e in store.get_events("alice") if e["type"] == "tool_call"]
+            assert len(first) == 5
+            assert len(again) == 5
+        finally:
+            store.close()
+
+    async def test_inline_fallback_for_stores_without_submit(self, tmp_path):
+        # Duck-typed stores without an affinity executor keep the old
+        # inline-append behavior.
+        store, out = _make(tmp_path)
+        try:
+            calls = []
+            store.submit = None  # attribute exists but is not callable
+
+            def fake_append(*args, **kwargs):
+                calls.append(args[1])
+
+            store.append_event = fake_append
+            out.on_activity("tool_start", "[bash] x")
+            assert calls == ["tool_call"]
+        finally:
+            store.close()
+
+    async def test_drain_cancellation_does_not_drop_queued_events(self, tmp_path):
+        # Reviewer-reproduced defect: a turn cancelled mid-drain must not
+        # silently drop events that were already emitted. The in-flight
+        # write is shielded and not-yet-started writes return to the queue.
+        import pytest
+
+        store, out = _make(tmp_path)
+        try:
+            real_append = store.append_event
+
+            def slow_append(*args, **kwargs):
+                time.sleep(0.1)
+                return real_append(*args, **kwargs)
+
+            store.append_event = slow_append
+            for i in range(3):
+                out.on_activity("tool_start", f"[bash] {i}")
+
+            task = asyncio.create_task(out.drain())
+            await asyncio.sleep(0.05)  # drain is now awaiting the first write
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+            # The next drain (turn boundary / stop) persists everything.
+            await out.drain()
+            store.flush()
+            evts = [e for e in store.get_events("alice") if e["type"] == "tool_call"]
+            assert len(evts) == 3
+        finally:
+            store.close()
+
+
+class TestOpenTextAffinity:
+    async def test_stream_slot_writes_use_store_worker_and_clear_after_durable_event(
+        self, tmp_path, monkeypatch
+    ):
+        store, out = _make(tmp_path)
+        writes = []
+        durable_on_clear = []
+        vault_type = type(store.state)
+        original_set = vault_type.__setitem__
+
+        def observe(vault, key, value):
+            if vault is store.state and key == "alice:open_text":
+                writes.append(threading.get_ident())
+                if value == "":
+                    with SessionReadView(store.path) as reader:
+                        durable_on_clear.extend(
+                            event["content"]
+                            for _, event in reader.items("events", prefix="alice:e")
+                            if event.get("type") == "text_chunk"
+                        )
+            return original_set(vault, key, value)
+
+        monkeypatch.setattr(vault_type, "__setitem__", observe)
+        try:
+            worker = await store.run(threading.get_ident)
+            await out.write_stream("x" * 512)
+            await out.drain()
+            assert store.state.get("alice:open_text") == "x" * 512
+            out._record("boundary", {})
+            await out.drain()
+            assert writes and set(writes) == {worker}
+            assert durable_on_clear == ["x" * 512]
+            assert store.state.get("alice:open_text") == ""
+        finally:
+            await out.drain()
+            store.close()
+
+    async def test_failed_text_event_keeps_durable_recovery_slot(
+        self, tmp_path, monkeypatch
+    ):
+        store, out = _make(tmp_path)
+        original_append = store.append_event
+
+        def fail_text(prefix, event_type, data, **kwargs):
+            if event_type == "text_chunk":
+                raise OSError("injected event write failure")
+            return original_append(prefix, event_type, data, **kwargs)
+
+        try:
+            await out.write_stream("recover me" * 64)
+            await out.drain()
+            monkeypatch.setattr(store, "append_event", fail_text)
+            out._record("boundary", {})
+            await out.drain()
+            with SessionReadView(store.path) as reader:
+                assert reader.get("state", "alice:open_text") == "recover me" * 64
+            assert not [
+                e for e in store.get_events("alice") if e["type"] == "text_chunk"
+            ]
+        finally:
+            await out.drain()
+            store.close()
+
+
+@pytest.mark.parametrize("boundary", ["flush", "stop"])
+@pytest.mark.parametrize("prefix", ["", "x" * 600], ids=["short", "after-checkpoint"])
+async def test_graceful_boundary_persists_uncheckpointed_tail(
+    tmp_path, monkeypatch, boundary, prefix
+):
+    # Keep the final short chunk below the time gate as well as the size gate.
+    monkeypatch.setattr("kohakuterrarium.session.text_buffer._FLUSH_SECONDS", 3600)
+    store, output = _make(tmp_path, _FakeAgent(turn=3, branch=2))
+    try:
+        if prefix:
+            await output.write_stream(prefix)
+            await output.drain()
+            assert store.state.get("alice:open_text") == prefix
+        await output.write_stream("TAIL")
+        await getattr(output, boundary)()
+        # Repeated lifecycle calls must not duplicate the finalized segment.
+        await output.flush()
+        await output.stop()
+        chunks = [e for e in store.get_events("alice") if e["type"] == "text_chunk"]
+        assert len(chunks) == 1
+        assert chunks[0]["content"] == prefix + "TAIL"
+        assert chunks[0]["turn_index"] == 3
+        assert chunks[0]["branch_id"] == 2
+        assert not store.state.get("alice:open_text")
+    finally:
+        store.close(update_status=False)
+    reopened = SessionStore(str(tmp_path / "x.kohakutr"))
+    try:
+        recovered = SessionOutput("alice", reopened, None)
+        await recovered.drain()
+        chunks = [e for e in reopened.get_events("alice") if e["type"] == "text_chunk"]
+        assert [e["content"] for e in chunks] == [prefix + "TAIL"]
+    finally:
+        reopened.close(update_status=False)

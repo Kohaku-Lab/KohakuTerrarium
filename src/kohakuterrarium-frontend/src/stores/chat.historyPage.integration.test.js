@@ -2,7 +2,7 @@ import { createPinia, setActivePinia } from "pinia"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { useChatStore } from "./chat"
 import { indexOfSemanticKey, semanticKey } from "@/components/chat/chatRenderWindow"
-import { sessionAPI, terrariumAPI } from "@/utils/api"
+import api, { sessionAPI, terrariumAPI } from "@/utils/api"
 
 function event(id, type = "user_message", extra = {}) {
   return {
@@ -326,4 +326,102 @@ describe("paged history consumers", () => {
     expect(chat.attentionByTab.root).toBe(attention)
     expect(chat.historyPageByTab.root.hasNewer).toBe(true)
   })
+})
+
+describe("paged branch resync compatibility", () => {
+  it("preserves loaded older pages and cursors when the real helper returns one page", async () => {
+    const older = Array.from({ length: 11 }, (_, i) => event(i + 1))
+    older[10] = event(11, "token_usage", { total_tokens: 7 })
+    const newest = Array.from({ length: 400 }, (_, i) => event(i + 12))
+    const promoted = event(412, "user_message", {
+      turn_index: 411,
+      branch_id: 2,
+      content: "edited",
+    })
+    const usage = event(413, "token_usage", { turn_index: 411, branch_id: 2, total_tokens: 19 })
+    let changed = false
+    vi.spyOn(api, "get").mockImplementation(async (_url, { params }) => {
+      if (params.before === "b12")
+        return { data: page(older, { before: "b1", after: "a11", older: false }) }
+      if (params.after === "a411")
+        return { data: page(changed ? [promoted, usage] : [], { before: "b412", after: "a413" }) }
+      return {
+        data: page(changed ? [...newest.slice(2), promoted, usage] : newest, {
+          before: changed ? "b13" : "b12",
+          after: changed ? "a412" : "a411",
+        }),
+      }
+    })
+    await chat._loadHistory("root")
+    await chat.prefetchOlderHistory("root")
+    chat.materializeOlderHistory("root")
+    expect(chat.eventsByTab.root).toHaveLength(411)
+    chat.branchViewByTab.root = { 411: 2 }
+    chat._branchResyncPendingByTab.root = { active: true, expectedBranchByTurn: { 411: 2 } }
+    changed = true
+    expect(await chat._resyncHistory("root")).toBe(true)
+    expect(chat.eventsByTab.root).toHaveLength(413)
+    expect(content(chat)).toContain("1")
+    expect(content(chat)).toContain("edited")
+    expect(chat.tokenUsage.root.total).toBe(26)
+    expect(chat.historyPageByTab.root).toMatchObject({ historyId: "h1", hasOlder: false })
+    expect(chat.tokenUsage.root.partial).toBe(false)
+    expect(chat._branchResyncPendingByTab.root).toBeUndefined()
+  })
+
+  it("retains older-page availability and partial totals after a paged full resync", async () => {
+    const newest = Array.from({ length: 400 }, (_, i) => event(i + 12))
+    vi.spyOn(api, "get").mockResolvedValueOnce({ data: page(newest) })
+    expect(await chat._resyncHistory("root", { full: true })).toBe(true)
+    expect(chat.historyPageByTab.root).toMatchObject({ historyId: "h1", hasOlder: true })
+    expect(chat.tokenUsage.root.partial).toBe(true)
+    vi.mocked(api.get).mockResolvedValueOnce({
+      data: page([event(1)], { before: "b1", after: "a1", older: false }),
+    })
+    await chat.prefetchOlderHistory("root")
+    expect(chat.materializeOlderHistory("root").applied).toBe(true)
+    expect(content(chat)).toContain("1")
+  })
+})
+
+it("does not apply a paged branch resync after its owner is superseded", async () => {
+  let finish
+  vi.spyOn(api, "get")
+    .mockResolvedValueOnce({ data: page([event(1)], { before: "b1", after: "a1", older: false }) })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+  await chat._loadHistory("root")
+  const owner = chat._branchOpOwner("root")
+  chat._branchResyncPendingByTab.root = { active: true, expectedBranchByTurn: { 1: 2 } }
+  const resync = chat._resyncHistory("root", { branchOwner: owner })
+  await vi.waitFor(() => expect(finish).toBeTypeOf("function"))
+  chat._branchOpOwner("root")
+  finish({
+    data: page([event(2, "user_message", { turn_index: 1, branch_id: 2, content: "stale" })]),
+  })
+  expect(await resync).toBe(false)
+  expect(content(chat)).toEqual(["1"])
+})
+
+it("keeps optimistic messages until the expected branch arrives in paged history", async () => {
+  vi.spyOn(api, "get")
+    .mockResolvedValueOnce({ data: page([event(1)], { before: "b1", after: "a1", older: false }) })
+    .mockResolvedValueOnce({ data: page([], { after: "a1" }) })
+    .mockResolvedValueOnce({
+      data: page([event(2, "user_message", { turn_index: 1, branch_id: 2, content: "persisted" })]),
+    })
+  await chat._loadHistory("root")
+  chat.branchViewByTab.root = { 1: 2 }
+  chat.messagesByTab.root = [{ role: "user", content: "optimistic" }]
+  chat._branchResyncPendingByTab.root = { active: true, expectedBranchByTurn: { 1: 2 } }
+  expect(await chat._resyncHistory("root")).toBe(true)
+  expect(content(chat)).toEqual(["optimistic"])
+  expect(chat._branchResyncPendingByTab.root.active).toBe(true)
+  expect(await chat._resyncHistory("root")).toBe(true)
+  expect(content(chat)).toEqual(["persisted"])
+  expect(chat._branchResyncPendingByTab.root).toBeUndefined()
 })

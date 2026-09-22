@@ -24,11 +24,12 @@ from kohakuterrarium.session.history import (
     replay_conversation,
     resolve_selected_branches,
 )
-from kohakuterrarium.session.migrations import (
-    ensure_latest_version,
-    latest_readable_version,
+from kohakuterrarium.session.resume_open import (
+    # Re-exported for callers that still import it from this module.
+    detect_session_type as detect_session_type,  # noqa: F401
+    open_store_with_migration as _open_store_with_migration,
+    preflight_legacy_workspace,
 )
-from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.resume_branch import (
     backfill_turn_metadata,
     replayed_messages_for,
@@ -408,53 +409,6 @@ def _rebuild_agent(
     return Agent(cfg, llm=llm, pwd=pwd, strict=False, **io_kwargs)
 
 
-def _open_store_with_migration(
-    session_path: str | Path, *, writer_lock: bool = False
-) -> SessionStore:
-    """Open a session file, auto-migrating older formats upward first.
-
-    Migration resolves the newest readable file while preserving the original
-    path in failures. Live resumes may request a writer lock; preview consumers
-    remain lock-free.
-    """
-    try:
-        resolved = ensure_latest_version(session_path)
-    except Exception as exc:
-        raise RuntimeError(
-            f"Failed to migrate session at {session_path}: {exc}"
-        ) from exc
-    if str(resolved) != str(session_path):
-        logger.info(
-            "Session auto-migrated before resume",
-            original=str(session_path),
-            opened=str(resolved),
-        )
-    return SessionStore(resolved, writer_lock=writer_lock)
-
-
-def preflight_legacy_workspace(
-    session_path: str | Path,
-    pwd_override: str | None = None,
-) -> str:
-    """Resolve a legacy workspace without migration or writer acquisition."""
-    path = latest_readable_version(session_path)
-    meta = read_session_meta(path)
-    dirty_state = meta.get("workspace_resume_state")
-    if isinstance(dirty_state, dict) and dirty_state.get("status") == "partial_dirty":
-        raise SessionNotResumableError(
-            "Session has an incomplete workspace rollback and must be repaired"
-        )
-    saved_pwd = meta.get("pwd")
-    pwd = pwd_override or saved_pwd
-    if not (pwd and os.path.isdir(pwd)):
-        source = "override" if pwd_override else "saved"
-        raise SessionNotResumableError(
-            f"The {source} working directory is missing or invalid: {pwd!r}. "
-            "Choose a replacement directory or open the session history."
-        )
-    return str(Path(pwd).resolve())
-
-
 def resume_agent(
     session_path: str | Path,
     pwd_override: str | None = None,
@@ -495,7 +449,7 @@ def resume_agent(
         raise
 
 
-def _resume_agent_from_open_store(
+def _rebuild_resumed_agent(
     store: SessionStore,
     session_path: str | Path,
     *,
@@ -504,9 +458,14 @@ def _resume_agent_from_open_store(
     llm: Any,
     input_module: InputModule | None,
     output_module: OutputModule | None,
-    mark_conversation_open: bool,
-) -> tuple[Agent, SessionStore]:
-    """Rebuild and rehydrate an agent from an already-open session store."""
+) -> tuple[Agent, str]:
+    """Rebuild an agent from an open store, up to state injection.
+
+    Returns ``(agent, saved_agent_name)``. Everything after this point —
+    injection, status marking, store attachment — is kept separate so the
+    async resume flow can dispatch the injection onto the store's affinity
+    thread without duplicating the rebuild checks.
+    """
     meta = store.load_meta()
 
     # Missing type metadata follows detection's agent default for partial mirrors.
@@ -567,9 +526,18 @@ def _resume_agent_from_open_store(
         pwd=pwd,
     )
     agent_name = meta.get("agents", [agent.config.name])[0]
+    return agent, agent_name
 
-    inject_saved_state(agent, store, agent_name)
 
+def _attach_resumed_agent(
+    agent: Agent,
+    store: SessionStore,
+    session_path: str | Path,
+    agent_name: str,
+    *,
+    mark_conversation_open: bool,
+) -> tuple[Agent, SessionStore]:
+    """Mark the conversation open and attach the store for continued turns."""
     # Continued turns append to the same session file.
     if mark_conversation_open:
         _mark_conversation_open(store)
@@ -580,19 +548,34 @@ def _resume_agent_from_open_store(
     return agent, store
 
 
-def detect_session_type(session_path: str | Path) -> str:
-    """Detect whether a session file is an agent or terrarium.
+def _resume_agent_from_open_store(
+    store: SessionStore,
+    session_path: str | Path,
+    *,
+    pwd_override: str | None,
+    io_mode: str | None,
+    llm: Any,
+    input_module: InputModule | None,
+    output_module: OutputModule | None,
+    mark_conversation_open: bool,
+) -> tuple[Agent, SessionStore]:
+    """Rebuild and rehydrate an agent from an already-open session store."""
+    agent, agent_name = _rebuild_resumed_agent(
+        store,
+        session_path,
+        pwd_override=pwd_override,
+        io_mode=io_mode,
+        llm=llm,
+        input_module=input_module,
+        output_module=output_module,
+    )
 
-    Resolve migrations first so detection reflects the newest readable file.
-    Missing type metadata defaults to ``"agent"``.
-    """
-    try:
-        resolved = ensure_latest_version(session_path)
-    except Exception:
-        resolved = Path(session_path)
-    store = SessionStore(resolved)
-    try:
-        meta = store.load_meta()
-        return meta.get("config_type", "agent")
-    finally:
-        store.close(update_status=False)
+    inject_saved_state(agent, store, agent_name)
+
+    return _attach_resumed_agent(
+        agent,
+        store,
+        session_path,
+        agent_name,
+        mark_conversation_open=mark_conversation_open,
+    )

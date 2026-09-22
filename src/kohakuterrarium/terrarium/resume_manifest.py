@@ -12,10 +12,8 @@ from kohakuterrarium.errors import (
     GraphManifestCollisionError,
     SessionNotResumableError,
 )
-from kohakuterrarium.session.resume import (
-    _open_store_with_migration,
-    inject_saved_state,
-)
+from kohakuterrarium.session.resume import _open_store_with_migration
+from kohakuterrarium.session.resume_async import inject_saved_state_async
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.creature_host import (
     Creature,
@@ -185,7 +183,7 @@ async def _resume_reserved_manifest(
                 )
 
         for creature in created:
-            inject_saved_state(creature.agent, store, creature.name)
+            await inject_saved_state_async(creature.agent, store, creature.name)
             apply_creature_name(creature, creature.name)
             await creature.start()
 

@@ -5,6 +5,7 @@ layer adds lifecycle metadata, returns a ``Session`` handle, and provides a
 shared migration announcement for CLI and HTTP callers.
 """
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -83,7 +84,7 @@ async def resume_session(
     # Lifecycle registries must contain resumed graphs so listing and lookup
     # treat them like newly started sessions.
     store = engine._session_stores.get(sid)
-    meta = store.load_meta() if store is not None else {}
+    meta = await store.run(store.load_meta) if store is not None else {}
     kind = _resolve_session_kind(meta)
     meta_for(service)[sid] = {
         "kind": kind,
@@ -99,7 +100,7 @@ async def resume_session(
         index_dir = Path(store.path).parent
         if index_dir.name == "mirror":
             index_dir = index_dir.parent
-        _index_hooks.attach(sid, store, index_dir)
+        await asyncio.to_thread(_index_hooks.attach, sid, store, index_dir)
 
     logger.info(
         "Resumed session registered with studio",

@@ -306,6 +306,127 @@ class TestSearchSessionMemory:
         assert out["mode"] == "weird"
         assert out["count"] == len(out["results"]) >= 1
 
+    async def test_saved_search_does_not_block_event_loop(self, tmp_path, monkeypatch):
+        # S5 negative case: a large saved session's full event scan runs in
+        # a worker thread, so a ping task keeps the loop alive throughout.
+        import asyncio
+        import time
+
+        path = tmp_path / "slow-saved.kohakutr"
+        store = SessionStore(str(path))
+        try:
+            store.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            store.append_event("alice", "user_input", {"content": "needle"})
+            store.flush()
+        finally:
+            store.close()
+
+        real_get_events = SessionStore.get_events
+
+        def slow_get_events(self, agent, **kwargs):
+            time.sleep(0.3)
+            return real_get_events(self, agent, **kwargs)
+
+        monkeypatch.setattr(SessionStore, "get_events", slow_get_events)
+        monkeypatch.setattr(
+            mem_mod, "_live_store_for_path", lambda eng, p: (None, None)
+        )
+
+        loop_alive: list[float] = []
+        stop = asyncio.Event()
+
+        async def _ping():
+            while not stop.is_set():
+                loop_alive.append(time.monotonic())
+                await asyncio.sleep(0.02)
+            loop_alive.append(time.monotonic())
+
+        ping = asyncio.create_task(_ping())
+        await asyncio.sleep(0)
+        out = await mem_mod.search_session_memory(path, q="needle", mode="fts")
+        stop.set()
+        await ping
+        assert out["count"] >= 1
+        gaps = [loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)]
+        assert max(gaps) < 0.15, f"saved search blocked the loop; max={max(gaps):.3f}s"
+
+    async def test_live_search_does_not_block_event_loop(self, tmp_path, monkeypatch):
+        # S5 negative case: a live store's search dispatches onto the
+        # store's affinity thread instead of the caller's loop.
+        import asyncio
+        import time
+
+        path = tmp_path / "slow-live.kohakutr"
+        live_store = SessionStore(str(path))
+        try:
+            live_store.init_meta("sess", "agent", "/p", "/w", ["alice"])
+            live_store.append_event("alice", "user_input", {"content": "needle"})
+            live_store.flush()
+        except Exception:
+            live_store.close()
+            raise
+
+        real_get_events = live_store.get_events
+
+        def slow_get_events(agent, **kwargs):
+            time.sleep(0.3)
+            return real_get_events(agent, **kwargs)
+
+        live_store.get_events = slow_get_events
+        monkeypatch.setattr(
+            mem_mod, "_live_store_for_path", lambda eng, p: (None, live_store)
+        )
+        from kohakuterrarium.session.memory import SearchResult
+
+        class _FakeMemory:
+            def __init__(self, *a, **kw):
+                pass
+
+            def close(self):
+                pass
+
+            def index_events(self, *a, **kw):
+                return 0
+
+            def search(self, query, mode, k, agent):
+                return [
+                    SearchResult(
+                        content="needle",
+                        round_num=0,
+                        block_num=0,
+                        agent="alice",
+                        block_type="user",
+                        score=1.0,
+                    )
+                ]
+
+        monkeypatch.setattr(mem_mod, "SessionMemory", _FakeMemory)
+
+        loop_alive: list[float] = []
+        stop = asyncio.Event()
+
+        async def _ping():
+            while not stop.is_set():
+                loop_alive.append(time.monotonic())
+                await asyncio.sleep(0.02)
+            loop_alive.append(time.monotonic())
+
+        try:
+            ping = asyncio.create_task(_ping())
+            await asyncio.sleep(0)
+            out = await mem_mod.search_session_memory(path, q="needle", mode="fts")
+            stop.set()
+            await ping
+            assert out["count"] >= 1
+            gaps = [
+                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
+            ]
+            assert (
+                max(gaps) < 0.15
+            ), f"live search blocked the loop; max={max(gaps):.3f}s"
+        finally:
+            live_store.close()
+
     async def test_missing_path_raises_not_found_without_creating_it(self, tmp_path):
         from kohakuterrarium.errors import SessionNotFoundError
 

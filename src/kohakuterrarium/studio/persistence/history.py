@@ -122,8 +122,8 @@ def history_page_from_store(
     paged as the ``channel`` stream; agent/root targets page the ``events``
     (default) or ``snapshot`` stream. Reuses the shared session pager, so
     cursors, history identity, and byte bounds are identical to the live route.
-    Callers that only want the legacy full read keep using ``history_from_store``
-    / ``history_payload`` unchanged.
+    HTTP history routes reject unbounded full-log reads; CLI and Studio
+    helpers may still call ``history_from_store`` / ``history_payload``.
     """
     meta = store.load_meta()
     known = target in set(session_targets(store, meta))

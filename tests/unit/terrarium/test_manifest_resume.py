@@ -17,6 +17,10 @@ from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
 
 
+async def _async_noop(*_a, **_k):
+    return None
+
+
 def _manifest(pwd: str = "."):
     return {
         "kind": "kohakuterrarium.live_graph",
@@ -80,7 +84,7 @@ async def _engine_for_manifest_resume(monkeypatch):
         return await original_add(config, **kwargs)
 
     monkeypatch.setattr(engine, "add_creature", add_creature)
-    monkeypatch.setattr(manifest_resume_mod, "inject_saved_state", lambda *args: None)
+    monkeypatch.setattr(manifest_resume_mod, "inject_saved_state_async", _async_noop)
     return engine
 
 

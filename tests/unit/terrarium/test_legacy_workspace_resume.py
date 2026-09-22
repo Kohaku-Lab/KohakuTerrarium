@@ -25,6 +25,10 @@ def _topology(description: str) -> dict:
     }
 
 
+async def _async_noop(*_a, **_k):
+    return None
+
+
 class _InterceptMetaWrites:
     """Delegate to a real KVault while exposing its immediate-write seam."""
 
@@ -74,11 +78,11 @@ def _agent_case(monkeypatch, tmp_path, filename):
 
     fake_agent = _FakeAgent(name="alice")
     fake_agent.executor = SimpleNamespace(_working_dir=replacement.resolve())
-    monkeypatch.setattr(
-        resume_mod,
-        "resume_agent",
-        lambda *args, **kwargs: (fake_agent, store),
-    )
+
+    async def _fake_resume(*args, **kwargs):
+        return fake_agent, store
+
+    monkeypatch.setattr(resume_mod, "resume_agent_async", _fake_resume)
     return path, store, old_pwd, replacement, original_topology
 
 
@@ -108,7 +112,7 @@ class TestLegacyTerrariumWorkspaceResume:
             "load_terrarium_config",
             lambda _path: TerrariumConfig(name="t", creatures=[], channels=[]),
         )
-        monkeypatch.setattr(resume_mod, "inject_saved_state", lambda *args: None)
+        monkeypatch.setattr(resume_mod, "inject_saved_state_async", _async_noop)
         engine_holder = {}
 
         async def apply_recipe(
@@ -212,11 +216,11 @@ class TestLegacyAgentWorkspaceResume:
         store.init_meta("saved", "agent", "", ".", ["alice"])
         fake_agent = _FakeAgent(name="alice")
         fake_agent.executor = SimpleNamespace(_working_dir=tmp_path.resolve())
-        monkeypatch.setattr(
-            resume_mod,
-            "resume_agent",
-            lambda *args, **kwargs: (fake_agent, store),
-        )
+
+        async def _fake_resume(*args, **kwargs):
+            return fake_agent, store
+
+        monkeypatch.setattr(resume_mod, "resume_agent_async", _fake_resume)
         monkeypatch.setattr(
             resume_mod._checkpoint, "checkpoint", AsyncMock(return_value=True)
         )

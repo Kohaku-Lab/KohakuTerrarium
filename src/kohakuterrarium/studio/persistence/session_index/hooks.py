@@ -1,13 +1,10 @@
-"""Push-side integration for the session index sidecar.
+"""Debounced index snapshots with sidecar writes outside the store worker."""
 
-Reconciliation provides the pull path for disk changes. These hooks provide a
-push path by translating store events into debounced, idempotent sidecar
-upserts. Studio lifecycle wiring owns hook attachment and final flushing.
-"""
-
-from collections.abc import Callable
-from pathlib import Path
+import threading
 import time
+from collections.abc import Callable
+from concurrent.futures import Future
+from pathlib import Path
 
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.studio.persistence.session_index.entry import SessionIndexEntry
@@ -21,22 +18,23 @@ from kohakuterrarium.utils.logging import get_logger
 logger = get_logger(__name__)
 
 
+def _snapshot_entry(store: SessionStore) -> SessionIndexEntry:
+    """Capture store-owned data before passing it to the index writer."""
+    meta = store.load_meta()
+    return SessionIndexEntry.from_meta(
+        path=Path(store._path),
+        meta=meta,
+        preview=_first_user_input_preview(store, meta),
+        has_vector_index=_has_vector_index(store),
+    )
+
+
 def push_index_update(
     store: SessionStore, index: SessionIndex
 ) -> SessionIndexEntry | None:
-    """Upsert the store's current metadata and return the indexed entry.
-
-    Read or write failures are logged and converted to ``None`` so indexing
-    cannot interrupt session processing.
-    """
+    """Synchronously snapshot and upsert an externally owned store."""
     try:
-        path = Path(store._path)
-        meta = store.load_meta()
-        preview = _first_user_input_preview(store)
-        has_vec = _has_vector_index(store)
-        entry = SessionIndexEntry.from_meta(
-            path=path, meta=meta, preview=preview, has_vector_index=has_vec
-        )
+        entry = _snapshot_entry(store)
         index.upsert(entry)
         return entry
     except Exception as exc:  # noqa: BLE001
@@ -45,12 +43,13 @@ def push_index_update(
 
 
 class SessionIndexHook:
-    """Keep one live store's index entry current with debounced pushes.
+    """Coalesce event-driven pushes without holding up event persistence.
 
-    Construction subscribes and optionally performs an initial push. The event
-    count or elapsed-time threshold, whichever occurs first, triggers updates.
-    Callers flush before closing the store and detach afterward to avoid a
-    dangling subscriber.
+    A snapshot runs on the store's affinity thread, then the index's shared
+    writer persists it. At most one refresh is outstanding per hook. Periodic
+    refreshes are asynchronous; ``flush`` forces a current snapshot and waits,
+    while ``detach`` stops accepting events and drains outstanding work.
+    These lifecycle barriers must be called outside the store worker.
     """
 
     DEFAULT_FLUSH_EVERY_N_EVENTS = 20
@@ -81,14 +80,19 @@ class SessionIndexHook:
         self._last_push = time.monotonic()
         self._attached = False
         self._listener: Callable[[str, dict], None] | None = None
+        # Future callbacks may run inline while a refresh is being scheduled.
+        self._lock = threading.RLock()
+        self._pending: Future | None = None
+        # Detach before native-table disposal; snapshots use the store worker.
+        store._ensure_affinity()
+        store._companion_closers.append(self.detach)
         self._attach(push_on_attach=push_on_attach)
 
     def _attach(self, *, push_on_attach: bool) -> None:
         if self._attached:
             return
 
-        # Preserve the exact callback identity required by ``unsubscribe``.
-        def _on_event(key: str, data: dict) -> None:  # noqa: ARG001 — protocol args
+        def _on_event(key: str, data: dict) -> None:
             self._on_event()
 
         self._listener = _on_event
@@ -97,32 +101,93 @@ class SessionIndexHook:
         if push_on_attach:
             self.flush()
 
+    def _schedule_locked(self) -> Future:
+        """Queue one immutable snapshot; the caller owns ``_lock``."""
+        snapshot = self._store.submit(_snapshot_entry, self._store)
+        self._unflushed_events = 0
+        pending = self._pending = Future()
+        snapshot.add_done_callback(lambda result: self._push(result, pending))
+        return pending
+
+    def _push(self, snapshot: Future, pending: Future) -> None:
+        # Called only when the snapshot is ready. Waiting for a store inside
+        # the shared writer would block unrelated sessions behind that store.
+        try:
+            written = self._index.submit_update(snapshot.result())
+        except Exception as exc:  # noqa: BLE001
+            self._complete_refresh(pending, exc)
+            return
+
+        def completed(result: Future) -> None:
+            try:
+                result.result()
+            except Exception as exc:  # noqa: BLE001
+                self._complete_refresh(pending, exc)
+            else:
+                self._complete_refresh(pending)
+
+        written.add_done_callback(completed)
+
+    def _complete_refresh(
+        self, pending: Future, error: Exception | None = None
+    ) -> None:
+        if error is not None:
+            logger.warning(
+                "index refresh failed",
+                error=str(error),
+                exc_info=(type(error), error, error.__traceback__),
+            )
+        # A slow refresh must not make the next event immediately overdue.
+        with self._lock:
+            self._last_push = time.monotonic()
+        pending.set_result(None)
+
     def _on_event(self) -> None:
-        self._unflushed_events += 1
-        now = time.monotonic()
-        if self._unflushed_events >= self._n or (now - self._last_push) >= self._s:
-            self.flush()
+        with self._lock:
+            if not self._attached:
+                return
+            self._unflushed_events += 1
+            if self._pending is not None and not self._pending.done():
+                return
+            if (
+                self._unflushed_events >= self._n
+                or time.monotonic() - self._last_push >= self._s
+            ):
+                self._schedule_locked()
 
     def flush(self) -> None:
-        """Force a push regardless of the debounce state."""
-        self._unflushed_events = 0
-        self._last_push = time.monotonic()
-        push_index_update(self._store, self._index)
+        """Wait for a snapshot requested after this barrier was entered."""
+        with self._lock:
+            pending = self._pending
+        if pending is not None:
+            pending.result()
+        with self._lock:
+            if not self._attached:
+                return
+            pending = self._schedule_locked()
+        pending.result()
 
     def detach(self) -> None:
-        """Idempotently stop listening to store events."""
-        if not self._attached or self._listener is None:
-            return
+        """Stop listening and drain scheduled work before the store closes."""
+        with self._lock:
+            if not self._attached or self._listener is None:
+                return
+            listener = self._listener
+            self._attached = False
+            self._listener = None
+            pending = self._pending
         try:
-            self._store.unsubscribe(self._listener)
+            self._store.unsubscribe(listener)
         except Exception as exc:  # noqa: BLE001
             logger.warning("detach unsubscribe failed", error=str(exc), exc_info=True)
-        self._attached = False
-        self._listener = None
+        if pending is not None:
+            pending.result()
 
     def __enter__(self) -> "SessionIndexHook":
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        self.flush()
-        self.detach()
+        try:
+            self.flush()
+        finally:
+            self.detach()

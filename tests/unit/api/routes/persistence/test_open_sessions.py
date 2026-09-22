@@ -1,6 +1,8 @@
 """Unit tests for the open-conversation aggregation endpoint."""
 
 import asyncio
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -8,9 +10,13 @@ from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 from kohakuterrarium.api.deps import get_service, resolve_request_session_dir
-from kohakuterrarium.api.routes.persistence import open_sessions
+from kohakuterrarium.api.routes.persistence import open_sessions, saved
 from kohakuterrarium.session.store import SessionStore
-from kohakuterrarium.studio.persistence.session_index import close_session_index
+from kohakuterrarium.studio.persistence.session_index import (
+    close_session_index,
+    get_session_index_default,
+    reconcile as reconcile_mod,
+)
 from kohakuterrarium.studio.sessions import lifecycle
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -225,6 +231,59 @@ class TestOpenSessions:
             assert isinstance(response.json(), list)
             assert response.json()[0]["saved_name"] == "open"
         finally:
+            close_session_index()
+
+    def test_open_and_saved_refresh_share_one_scan(self, tmp_path, monkeypatch):
+        service = LocalTerrariumService(Terrarium())
+        path = tmp_path / "shared.kohakutr"
+        _saved_store(path, session_id="shared", conversation_open=True)
+        index = get_session_index_default(tmp_path)
+        store = SessionStore(path)
+        store.append_event("alice", "user_input", {"content": "fresh"})
+        store.close(update_status=False)
+        entered = threading.Event()
+        overlap = threading.Event()
+        release = threading.Event()
+        lock = threading.Lock()
+        active = 0
+        original_read = reconcile_mod.read_entry_from_disk
+
+        def gated_read(path):
+            nonlocal active
+            with lock:
+                active += 1
+                if active > 1:
+                    overlap.set()
+            entered.set()
+            try:
+                assert release.wait(5)
+                return original_read(path)
+            finally:
+                with lock:
+                    active -= 1
+
+        monkeypatch.setattr(reconcile_mod, "read_entry_from_disk", gated_read)
+        try:
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                first = pool.submit(
+                    saved._reconcile_guarded, tmp_path, index, full_rescan=True
+                )
+                try:
+                    assert entered.wait(2)
+                    second = pool.submit(
+                        open_sessions.build_open_session_rows, service, tmp_path
+                    )
+                    assert not overlap.wait(
+                        0.3
+                    ), "open-list bypassed the active saved scan"
+                finally:
+                    release.set()
+                first.result(timeout=5)
+                rows = second.result(timeout=5)
+            assert rows[0]["saved_name"] == "shared"
+            assert index.get("shared.kohakutr")["preview"] == "fresh"
+        finally:
+            release.set()
             close_session_index()
 
     def test_repeated_reads_reconcile_external_session_changes(self, tmp_path):
