@@ -63,7 +63,11 @@ async def _resume_agent_from_open_store_async(
 
     await inject_saved_state_async(agent, store, agent_name)
 
-    return _attach_resumed_agent(
+    # Attachment can recover an interrupted text segment, including another
+    # event scan. Keep it on the same worker as state injection; the agent
+    # has not started and cannot observe partially attached state.
+    return await store.run(
+        _attach_resumed_agent,
         agent,
         store,
         session_path,
