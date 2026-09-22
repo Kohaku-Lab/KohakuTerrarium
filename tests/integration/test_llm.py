@@ -1595,8 +1595,12 @@ class TestLlmIntegration:
         ws_submissions = []
 
         async def ws_response(socket):
-            for turn in range(2):
+            while len(ws_submissions) < 4:
+                turn = len(ws_submissions)
                 ws_submissions.append(json.loads(await socket.recv()))
+                if turn == 1:
+                    socket.transport.abort()
+                    return
                 text = large_text if turn == 0 else "continued"
                 response_id = f"ws-response-{turn}"
                 for offset in range(0, len(text), 512 * 1024):
@@ -1629,7 +1633,7 @@ class TestLlmIntegration:
                 )
             await socket.wait_closed()
 
-        async with serve(ws_response, "127.0.0.1", 0) as server:
+        async with serve(ws_response, "127.0.0.1", 0, max_size=None) as server:
             port = server.sockets[0].getsockname()[1]
             for provider_type in (OpenAIProvider, CodexOAuthProvider):
                 ws_submissions.clear()
@@ -1680,12 +1684,40 @@ class TestLlmIntegration:
                     )
                     chunks = [chunk async for chunk in ws_provider.chat(ws_history)]
                     assert chunks == ["continued"]
-                    assert len(ws_submissions) == 2
+                    assert len(ws_submissions) == 3
                     assert ws_submissions[1]["previous_response_id"] == "ws-response-0"
                     assert ws_submissions[1]["input"] == [
                         {
                             "role": "user",
                             "content": [{"type": "input_text", "text": "Continue"}],
+                        }
+                    ]
+                    assert "previous_response_id" not in ws_submissions[2]
+                    assert ws_submissions[2]["input"] == [
+                        *ws_submissions[0]["input"],
+                        {
+                            "role": "assistant",
+                            "content": [{"type": "output_text", "text": large_text}],
+                        },
+                        *ws_submissions[1]["input"],
+                    ]
+                    ws_history.extend(
+                        [
+                            {"role": "assistant", "content": "continued"},
+                            {"role": "user", "content": "Continue again"},
+                        ]
+                    )
+                    assert [chunk async for chunk in ws_provider.chat(ws_history)] == [
+                        "continued"
+                    ]
+                    assert len(ws_submissions) == 4
+                    assert ws_submissions[3]["previous_response_id"] == "ws-response-2"
+                    assert ws_submissions[3]["input"] == [
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "input_text", "text": "Continue again"}
+                            ],
                         }
                     ]
                 finally:

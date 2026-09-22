@@ -383,7 +383,9 @@ class TestProviderWebsocketMode:
         assert "websocket_mode" not in kwargs.get("extra_body", {})
 
     @pytest.mark.parametrize("started", [False, True])
-    async def test_uncertain_submission_bypasses_retry_and_http(self, started):
+    async def test_retry_exhaustion_or_first_event_prevents_further_retry(
+        self, started
+    ):
         provider = make_provider(websocket_mode=True)
         connection = provider._client.responses.connection
         events = [Ev(type="response.created")] if started else []
@@ -391,7 +393,7 @@ class TestProviderWebsocketMode:
         with pytest.raises(ResponsesWSError):
             async for _ in provider.chat(MESSAGES):
                 pass
-        assert len(connection.sent) == 1
+        assert len(connection.sent) == (1 if started else 2)
         assert connection.closed
         assert provider._client.chat.completions.kwargs is None
 

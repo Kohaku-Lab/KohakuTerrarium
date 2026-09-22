@@ -6,6 +6,8 @@ import json
 import pytest
 from openai import AsyncOpenAI
 from websockets import serve as serve_websocket
+from websockets.exceptions import ConnectionClosedError
+from websockets.frames import Close
 from openai.resources.responses import responses as sdk_responses
 
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
@@ -192,6 +194,36 @@ class TestFullAndIncrementalTurns:
 
 
 class TestFailureRecovery:
+    @pytest.mark.parametrize("side", ["sent", "received"])
+    @pytest.mark.parametrize(
+        "code,retry",
+        [
+            (1002, False),
+            (1008, False),
+            (1009, False),
+            (4001, False),
+            (1011, True),
+            (1012, True),
+        ],
+    )
+    async def test_explicit_close_code_controls_replay(self, side, code, retry):
+        h = Harness()
+        frame = Close(code, "synthetic close")
+        h.conn.iter_exc = ConnectionClosedError(
+            frame if side == "received" else None,
+            frame if side == "sent" else None,
+        )
+        replacement = FakeConnection()
+        replacement.scripts = [[completed("recovered")]]
+        h.connections.append(replacement)
+        if retry:
+            events = await h.run([USER1])
+            assert events[-1].response.id == "recovered"
+        else:
+            with pytest.raises(ResponsesWSError, match=str(code)):
+                await h.run([USER1])
+        assert h.factory_calls == (2 if retry else 1)
+
     @pytest.mark.parametrize(
         ("state", "closed", "reconnect"),
         [
@@ -259,7 +291,9 @@ class TestFailureRecovery:
                 ResponsesWSError, match="synthetic underlying send failure"
             ) as captured:
                 async for _ in session.stream_turn(
-                    {"model": "m"}, history, lambda x: x
+                    {"model": "m", "tools": [{"type": "image_generation"}]},
+                    history,
+                    lambda x: x,
                 ):
                     pass
             assert captured.value.submitted and captured.value.transport
@@ -444,31 +478,77 @@ class TestFailureRecovery:
         await h.run([USER1, ASSIST1, USER2])
         assert "previous_response_id" not in h.conn.sent[2]
 
-    async def test_disconnect_after_send_does_not_retry(self):
+    async def test_disconnect_before_events_reconnects_once_with_full_history(self):
         h = Harness()
         h.conn.scripts = [[completed("r1")]]
         await h.run([USER1])
+        h.session.record_assistant_echo([ASSIST1])
 
-        # Second turn: the old connection dies before any event arrives.
         h.conn.scripts = [[]]
         h.connections.append(FakeConnection())
         h.connections[1].scripts = [[text("C"), completed("r2")]]
 
-        with pytest.raises(ResponsesWSError):
-            await h.run([USER1, ASSIST1, USER2])
+        events = await h.run([USER1, ASSIST1, USER2])
 
-        assert h.factory_calls == 1
-        assert h.connections[1].sent == []
+        assert h.factory_calls == 2
+        assert [event.type for event in events] == [
+            "response.output_text.delta",
+            "response.completed",
+        ]
+        sent = h.connections[1].sent[0]
+        assert h.conn.sent[1]["previous_response_id"] == "r1"
+        assert h.conn.sent[1]["input"] == [USER2]
+        assert sent["input"] == ["PAIRED", USER1, ASSIST1, USER2]
+        assert "previous_response_id" not in sent
         assert h.conn.closed
-        assert h.session._prev_id is None
+        assert h.session._prev_id == "r2"
 
-    async def test_send_failure_does_not_retry_an_uncertain_submission(self):
+    async def test_send_failure_before_events_recovers_once(self):
         h = Harness()
         h.conn.send_exc = ConnectionError("write interrupted")
-        with pytest.raises(ResponsesWSError):
-            await h.run([USER1])
-        assert sum(c.send_attempts for c in h.connections) == 1
+        recovered = FakeConnection()
+        recovered.scripts = [[completed("r2")]]
+        h.connections.append(recovered)
+        await h.run(
+            [USER1],
+            base={"model": "m", "tools": [{"type": "function", "name": "read"}]},
+        )
+        assert sum(c.send_attempts for c in h.connections) == 2
         assert h.conn.closed
+        assert h.session._prev_id == "r2"
+
+    @pytest.mark.parametrize(
+        "base",
+        [
+            {"tools": [{"type": "image_generation"}]},
+            {
+                "tools": [
+                    {"type": "function", "name": "read"},
+                    {"type": "image_generation"},
+                ]
+            },
+            {"tools": [{"type": "mcp", "server_url": "https://example.invalid"}]},
+            {"background": True},
+        ],
+    )
+    async def test_server_executed_work_is_not_replayed(self, base):
+        h = Harness()
+        with pytest.raises(ResponsesWSError):
+            await h.run([USER1], base={"model": "m", **base})
+        assert h.factory_calls == 1 and h.conn.send_attempts == 1
+
+    async def test_failed_reconnect_retains_prior_submission_uncertainty(self):
+        h = Harness()
+        await h.session._ensure_connection()
+
+        def unavailable():
+            raise ConnectionError("reconnect failed")
+
+        h.session._connect_factory = unavailable
+        with pytest.raises(ResponsesWSError, match="reconnect failed") as captured:
+            await h.run([USER1])
+        assert captured.value.submitted and not captured.value.mid_stream
+        assert h.conn.send_attempts == 1 and h.conn.closed
 
     async def test_cancellation_closes_connection_and_clears_history(self):
         h = Harness()
@@ -491,9 +571,10 @@ class TestFailureRecovery:
         assert h.session._prev_id is None
         assert not h.session.busy
 
-    async def test_mid_stream_failure_propagates_without_retry(self):
+    @pytest.mark.parametrize("event", [text("partial"), Ev(type="response.created")])
+    async def test_mid_stream_failure_propagates_without_retry(self, event):
         h = Harness()
-        h.conn.scripts = [[text("partial")]]
+        h.conn.scripts = [[event]]
         h.conn.iter_exc = ConnectionError("socket dropped")
 
         collected = []

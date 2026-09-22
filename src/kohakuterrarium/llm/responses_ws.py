@@ -10,16 +10,35 @@ import asyncio
 from copy import deepcopy
 from typing import Any, AsyncIterator, Callable
 
+from websockets.exceptions import ConnectionClosed
+
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 
+def _retryable_close(error: BaseException) -> bool:
+    """Check received and sent close codes through SDK exception wrappers."""
+    seen: set[int] = set()
+    while id(error) not in seen:
+        seen.add(id(error))
+        if isinstance(error, ConnectionClosed):
+            return all(
+                frame is None or frame.code in {1000, 1001, 1011, 1012, 1013, 1014}
+                for frame in (error.rcvd, error.sent)
+            )
+        cause = error.__cause__ or error.__context__
+        if cause is None:
+            break
+        error = cause
+    return True
+
+
 class ResponsesWSError(Exception):
     """Raised when a WebSocket turn cannot complete.
 
-    ``submitted`` marks failures after a send attempt; their outcome may be
-    uncertain even when no events reached the caller.
+    ``submitted`` records any send attempt across this turn's connection
+    attempts, including when the final reconnect fails before sending.
     """
 
     def __init__(
@@ -116,6 +135,11 @@ class ResponsesWSSession:
         """
         async with self._lock:
             delta = self._compute_delta(items)
+            submitted = False
+            replayable = not base_event.get("background") and all(
+                isinstance(tool, dict) and tool.get("type") == "function"
+                for tool in base_event.get("tools") or []
+            )
             for attempt in range(2):
                 try:
                     async for event in self._run_turn(
@@ -127,12 +151,21 @@ class ResponsesWSSession:
                     await self.close()
                     raise
                 except ResponsesWSError as exc:
+                    submitted = submitted or exc.submitted
+                    exc.submitted = submitted
                     if exc.transport:
                         await self.close()
-                    if attempt or exc.submitted or exc.mid_stream or not exc.transport:
+                    if (
+                        attempt
+                        or exc.mid_stream
+                        or not exc.transport
+                        or (submitted and not replayable)
+                        or not _retryable_close(exc)
+                    ):
                         raise
                     logger.warning(
-                        "Responses WS connection failed before submission, reconnecting",
+                        "Responses WS transport failed before the first event, reconnecting once",
+                        submission_uncertain=submitted,
                         error=str(exc),
                     )
 
