@@ -261,6 +261,46 @@ class TestGrokTokens:
         assert bootstrap[0].expires_at == now - 60
         assert GrokTokens.available() is True
 
+    def test_valid_opencode_does_not_hide_expired_refreshable_cli(
+        self, tmp_path, monkeypatch
+    ):
+        """Billing discovery must still see a refreshable CLI beside OpenCode."""
+        now = 2_000_000_000.0
+        grok_home = tmp_path / "grok"
+        grok_home.mkdir()
+        self._write_cli_auth(grok_home, "cli-expired-canary", now - 60)
+        opencode = tmp_path / "opencode.json"
+        opencode.write_text(
+            json.dumps(
+                {
+                    "xai": {
+                        "type": "oauth",
+                        "access": "opencode-valid-canary",
+                        "expires": int((now + 3600) * 1000),
+                    }
+                }
+            ),
+            encoding="utf-8",
+        )
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setenv("OPENCODE_AUTH_FILE", str(opencode))
+        monkeypatch.setattr("kohakuterrarium.llm.grok_auth.time.time", lambda: now)
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth._grok_cli_executable",
+            lambda: "/test/grok",
+        )
+
+        valid = GrokTokens.load_candidates()
+        discovered = GrokTokens.load_bootstrap_candidates()
+
+        assert [item.source for item in valid] == [OPENCODE_SOURCE]
+        assert [item.source for item in discovered] == [OPENCODE_SOURCE]
+        cli = GrokTokens.load_cli_candidate()
+        assert cli.source == GROK_CLI_SOURCE
+        assert cli.expires_at == now - 60
+        assert "cli-expired-canary" not in repr(discovered)
+        assert "opencode-valid-canary" not in repr(discovered)
+
     @pytest.mark.asyncio
     async def test_refreshes_cli_token_inside_thirty_minute_window(
         self, tmp_path, monkeypatch
@@ -363,3 +403,125 @@ class TestGrokTokens:
         )
 
         assert await GrokTokens.ensure_fresh_cli(force=True) is None
+
+    @staticmethod
+    async def _max_gap_during(work):
+        """Return the longest heartbeat stall while ``work`` runs."""
+        loop = asyncio.get_running_loop()
+        gaps = []
+        stop = asyncio.Event()
+
+        async def heartbeat():
+            previous = loop.time()
+            while not stop.is_set():
+                await asyncio.sleep(0.01)
+                now = loop.time()
+                gaps.append(now - previous)
+                previous = now
+
+        pulse = asyncio.create_task(heartbeat())
+        await asyncio.sleep(0.03)
+        result = await work()
+        await asyncio.sleep(0.03)
+        stop.set()
+        await pulse
+        return result, max(gaps)
+
+    @pytest.mark.asyncio
+    async def test_cli_load_and_version_probe_stay_off_the_event_loop(
+        self, tmp_path, monkeypatch
+    ):
+        """Filesystem and version subprocess work must not block the loop."""
+        now = 2_000_000_000.0
+        grok_home = tmp_path / "grok"
+        grok_home.mkdir()
+        self._write_cli_auth(grok_home, "current", now + 31 * 60)
+        executable = grok_home / "bin" / "grok.exe"
+        executable.parent.mkdir()
+        executable.write_bytes(b"test executable placeholder")
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setattr("kohakuterrarium.llm.grok_auth.time.time", lambda: now)
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth._grok_cli_executable",
+            lambda: str(executable),
+        )
+        grok_auth._grok_version_cache.clear()
+
+        def slow_version(*args, **kwargs):
+            time.sleep(0.2)
+            return SimpleNamespace(returncode=0, stdout="grok 1.2.3\n", stderr="")
+
+        monkeypatch.setattr(grok_auth.subprocess, "run", slow_version)
+
+        try:
+            token, gap = await self._max_gap_during(GrokTokens.ensure_fresh_cli)
+        finally:
+            grok_auth._grok_version_cache.clear()
+
+        assert token is not None
+        assert token.access_token == "current"
+        assert token.extra_headers["x-grok-client-version"] == "1.2.3"
+        assert gap < 0.1
+
+    @pytest.mark.asyncio
+    async def test_refresh_reread_stays_off_the_event_loop(self, tmp_path, monkeypatch):
+        now = 2_000_000_000.0
+        grok_home = tmp_path / "grok"
+        grok_home.mkdir()
+        self._write_cli_auth(grok_home, "old", now + 60)
+        executable = grok_home / "bin" / "grok.exe"
+        executable.parent.mkdir()
+        executable.write_bytes(b"test executable placeholder")
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setattr("kohakuterrarium.llm.grok_auth.time.time", lambda: now)
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth._grok_cli_executable",
+            lambda: str(executable),
+        )
+        grok_auth._grok_version_cache.clear()
+
+        async def fake_models():
+            self._write_cli_auth(grok_home, "new", now + 6 * 3600)
+            return True
+
+        def slow_version(*args, **kwargs):
+            time.sleep(0.2)
+            return SimpleNamespace(returncode=0, stdout="grok 1.2.3\n", stderr="")
+
+        monkeypatch.setattr(
+            "kohakuterrarium.llm.grok_auth._run_grok_models", fake_models
+        )
+        monkeypatch.setattr(grok_auth.subprocess, "run", slow_version)
+
+        try:
+            refreshed, gap = await self._max_gap_during(GrokTokens.ensure_fresh_cli)
+        finally:
+            grok_auth._grok_version_cache.clear()
+
+        assert refreshed is not None
+        assert refreshed.access_token == "new"
+        assert refreshed.extra_headers["x-grok-client-version"] == "1.2.3"
+        assert gap < 0.1
+
+    @pytest.mark.asyncio
+    async def test_refresh_failure_is_redacted_auth_unavailable(
+        self, tmp_path, monkeypatch
+    ):
+        now = 2_000_000_000.0
+        grok_home = tmp_path / "grok"
+        grok_home.mkdir()
+        self._write_cli_auth(grok_home, "secret-access-canary", now + 60)
+        monkeypatch.setenv("GROK_HOME", str(grok_home))
+        monkeypatch.setattr("kohakuterrarium.llm.grok_auth.time.time", lambda: now)
+
+        async def boom():
+            raise RuntimeError("secret-access-canary leaked from cli")
+
+        monkeypatch.setattr("kohakuterrarium.llm.grok_auth._run_grok_models", boom)
+
+        with pytest.raises(grok_auth.GrokAuthError) as exc:
+            await GrokTokens.ensure_fresh_cli()
+
+        assert exc.value.kind == "unavailable"
+        assert "secret-access-canary" not in str(exc.value)
+        assert "leaked" not in str(exc.value)

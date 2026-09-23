@@ -44,6 +44,19 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 
+from tests.helpers.grok_usage_script import (
+    FAKE_ACCESS,
+    assert_billing_request,
+    assert_empty,
+    assert_usage_ok,
+    billing_body,
+    install_billing_script,
+    install_grok_home,
+    patch_cli_version_probe,
+    write_cli_auth,
+    write_metadata_version,
+)
+
 pytestmark = pytest.mark.timeout(30)
 
 # Deterministic assistant replies — the ScriptedLLM hands out the next
@@ -181,6 +194,7 @@ class TestApiStudioJourney:
         client: TestClient,
         workspace_root: Path,
         scripted_llm: ScriptedLLM,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Catalog browse → workspace authoring → validate → start a
         session → chat → history.
@@ -191,6 +205,33 @@ class TestApiStudioJourney:
         start a live session from that creature directory and take a
         turn.
         """
+        with monkeypatch.context() as usage_patch:
+            grok_home = install_grok_home(workspace_root, usage_patch)
+            patch_cli_version_probe(usage_patch)
+            write_metadata_version(grok_home)
+            billing = install_billing_script(usage_patch)
+            url = "/api/settings/grok-usage?node=_host"
+            response = client.get(url)
+            assert response.status_code == 200
+            assert_empty(response.json(), "not_logged_in")
+            write_cli_auth(grok_home, FAKE_ACCESS)
+            for used in (1.0, 4.0):
+                billing.push(200, billing_body(used))
+                response = client.get(url)
+                assert response.status_code == 200
+                assert_usage_ok(response.json(), used)
+                assert_billing_request(
+                    billing.requests[-1], FAKE_ACCESS, version="1.0.5"
+                )
+            for code, status in ((503, "unavailable"), (403, "auth_expired")):
+                billing.push(code)
+                response = client.get(url)
+                assert response.status_code == 200
+                assert_empty(response.json(), status)
+            (grok_home / "auth.json").unlink()
+            assert_empty(client.get(url).json(), "not_logged_in")
+            assert len(billing.requests) == 4
+
         # 1. Catalog: browse builtin tools — the read-only module pool.
         resp = client.get("/api/studio/catalog/tools")
         assert resp.status_code == 200

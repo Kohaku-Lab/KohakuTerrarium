@@ -1,8 +1,11 @@
-"""Redacted node-local status for reusable Grok subscription credentials."""
+"""Redacted node-local Grok subscription status and live billing usage."""
 
 from typing import Any
 
 from kohakuterrarium.llm.grok_auth import GrokTokens
+from kohakuterrarium.studio.identity.grok_account import get_usage
+
+__all__ = ["get_status", "get_usage"]
 
 
 def get_status() -> dict[str, Any]:
@@ -17,6 +20,3 @@ def get_status() -> dict[str, Any]:
         "sources": [candidate.source for candidate in candidates],
         "expires_at": first.expires_at,
     }
-
-
-__all__ = ["get_status"]

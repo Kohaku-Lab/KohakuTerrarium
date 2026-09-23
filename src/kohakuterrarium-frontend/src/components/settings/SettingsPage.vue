@@ -278,95 +278,17 @@
         </div>
       </el-tab-pane>
 
-      <!-- ════════════════════════ Account (Codex usage) ════════════════════════ -->
+      <!-- ════════════════════════ Account ════════════════════════ -->
       <el-tab-pane :label="t('settings.tabs.account')" name="account">
         <div class="settings-pane flex flex-col gap-4 max-w-xl">
           <!-- KohakuTerrarium account (L4) — only when logged into a
-               multi-user host.  Provider/Codex usage follows below. -->
+               multi-user host. Provider usage follows below. -->
           <AccountSection v-if="auth.currentUser" />
-          <div v-if="codexUsageLoading" class="text-warm-400 text-sm py-4 text-center">{{ t("common.loading") }}</div>
-          <div v-else-if="codexUsageError" class="card p-4 border-l-3 border-l-coral">
-            <p class="text-sm text-warm-600 dark:text-warm-400">{{ codexUsageError }}</p>
-            <p class="text-xs text-warm-400 mt-1">{{ t("settings.account.loginHint") }}</p>
+          <div class="flex items-center gap-2">
+            <SitePicker v-model="providerNode" :label="t('settings.providers.targetNode')" />
+            <span v-if="providerNode && providerNode !== '_host'" class="text-[11px] text-amber-shadow dark:text-amber-light">{{ t("settings.providers.targetNodeHint") }}</span>
           </div>
-          <template v-else-if="codexUsage">
-            <div v-if="codexUsage.status === 'not_logged_in'" class="card p-4 border-l-3 border-l-warm-400">
-              <p class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.account.notLoggedIn") }}</p>
-            </div>
-            <div v-else-if="codexUsage.status === 'no_data_yet'" class="card p-4 border-l-3 border-l-warm-400">
-              <p class="text-sm text-warm-600 dark:text-warm-400">{{ t("settings.account.noDataYet") }}</p>
-            </div>
-            <template v-else-if="codexUsage.status === 'ok'">
-              <div v-if="codexUsage.captured_at" class="text-[11px] text-warm-400">
-                {{ t("settings.account.capturedAt", { value: formatCapturedAt(codexUsage.captured_at) }) }}
-              </div>
-              <div v-for="snap in codexUsage.snapshots || []" :key="snap.limit_id" class="card p-4 flex flex-col gap-3">
-                <div class="flex items-center justify-between">
-                  <div class="font-medium text-warm-700 dark:text-warm-300">
-                    {{ snap.limit_name || snap.limit_id || t("settings.account.defaultLimit") }}
-                  </div>
-                  <div v-if="snap.plan_type" class="text-[11px] text-warm-400 capitalize">
-                    {{ snap.plan_type }}
-                  </div>
-                </div>
-                <div v-if="snap.primary" class="flex flex-col gap-1">
-                  <div class="flex items-center justify-between text-xs text-warm-500">
-                    <span>{{ t("settings.account.shortTermWindow") }}</span>
-                    <span>{{ t("settings.account.used", { value: formatPercent(snap.primary.used_percent) }) }}</span>
-                  </div>
-                  <div class="h-2 w-full rounded bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                    <div class="h-full bg-iolite" :style="{ width: clampPercent(snap.primary.used_percent) + '%' }" />
-                  </div>
-                  <div v-if="snap.primary.resets_at" class="text-[11px] text-warm-400">
-                    {{ t("settings.account.resets", { value: formatResets(snap.primary.resets_at) }) }}
-                  </div>
-                </div>
-                <div v-if="snap.secondary" class="flex flex-col gap-1">
-                  <div class="flex items-center justify-between text-xs text-warm-500">
-                    <span>{{ t("settings.account.weeklyWindow") }}</span>
-                    <span>{{ t("settings.account.used", { value: formatPercent(snap.secondary.used_percent) }) }}</span>
-                  </div>
-                  <div class="h-2 w-full rounded bg-warm-200 dark:bg-warm-700 overflow-hidden">
-                    <div class="h-full bg-iolite" :style="{ width: clampPercent(snap.secondary.used_percent) + '%' }" />
-                  </div>
-                  <div v-if="snap.secondary.resets_at" class="text-[11px] text-warm-400">
-                    {{ t("settings.account.resets", { value: formatResets(snap.secondary.resets_at) }) }}
-                  </div>
-                </div>
-                <div v-if="snap.credits" class="text-xs text-warm-500 flex items-center gap-2">
-                  <span class="font-medium text-warm-600 dark:text-warm-400">{{ t("settings.account.credits") }}</span>
-                  <span v-if="snap.credits.unlimited" class="text-iolite">{{ t("settings.account.unlimited") }}</span>
-                  <span v-else-if="snap.credits.has_credits && snap.credits.balance">
-                    {{ t("settings.account.balance", { value: snap.credits.balance }) }}
-                  </span>
-                  <span v-else class="text-warm-400">{{ t("settings.account.noCredits") }}</span>
-                </div>
-                <div v-if="snap.rate_limit_reached_type" class="text-xs text-coral">
-                  {{ t("settings.account.overageLimitReached") }}
-                </div>
-              </div>
-              <div v-if="codexUsage.promo_message" class="card p-3 border-l-3 border-l-iolite text-xs text-warm-600 dark:text-warm-400">
-                {{ codexUsage.promo_message }}
-              </div>
-            </template>
-
-            <!-- Redeemable rate-limit reset credits -->
-            <div v-if="resetCredits.length" class="card p-4 flex flex-col gap-3">
-              <div class="font-medium text-warm-700 dark:text-warm-300">{{ t("settings.account.resetCredits") }}</div>
-              <div v-for="credit in resetCredits" :key="credit.id" class="flex items-center justify-between gap-3 text-xs">
-                <div class="min-w-0">
-                  <div class="text-warm-700 dark:text-warm-300 truncate">{{ credit.title || credit.reset_type || t("settings.account.resetCredit") }}</div>
-                  <div v-if="credit.description" class="text-[11px] text-warm-400 truncate">{{ credit.description }}</div>
-                  <div v-if="credit.expires_at" class="text-[11px] text-warm-400">{{ t("settings.account.resetExpires", { value: credit.expires_at }) }}</div>
-                </div>
-                <el-button size="small" type="primary" plain :loading="redeemingCreditId === credit.id" :disabled="!!redeemingCreditId" @click="redeemResetCredit(credit)">
-                  {{ t("settings.account.resetRedeem") }}
-                </el-button>
-              </div>
-            </div>
-
-            <el-button size="small" @click="loadCodexUsage">{{ t("common.refresh") }}</el-button>
-          </template>
+          <AccountUsagePanel :node="providerNode" :active="activeTab === 'account'" />
         </div>
       </el-tab-pane>
 
@@ -551,6 +473,7 @@ import { computed, reactive, ref, onBeforeUnmount, onMounted, watch } from "vue"
 import { ElMessage, ElMessageBox } from "element-plus"
 
 import AccountSection from "@/components/account/AccountSection.vue"
+import AccountUsagePanel from "@/components/settings/account/AccountUsagePanel.vue"
 import AboutPanel from "@/components/settings/AboutPanel.vue"
 import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
@@ -804,7 +727,6 @@ async function onCodexLoginDone() {
 // manual Refresh) — UXI-13.
 watch(providerNode, () => {
   loadKeys()
-  if (activeTab.value === "account") loadCodexUsage()
 })
 
 // ───────── Backends / providers ─────────
@@ -1159,94 +1081,6 @@ async function removeMCPServer(name) {
   }
 }
 
-// ───────── Codex usage (Account tab) ─────────
-
-const codexUsage = ref(null)
-const codexUsageLoading = ref(false)
-const codexUsageError = ref("")
-const redeemingCreditId = ref("")
-
-async function loadCodexUsage() {
-  codexUsageLoading.value = true
-  codexUsageError.value = ""
-  try {
-    // Live snapshot for the settings-target node — no model round.
-    codexUsage.value = await settingsAPI.getCodexUsage(providerNode.value)
-  } catch (err) {
-    codexUsageError.value = err.response?.data?.detail || t("settings.account.loadFailed")
-  } finally {
-    codexUsageLoading.value = false
-  }
-}
-
-const resetCredits = computed(() => codexUsage.value?.reset_credits?.credits || [])
-
-// Outcome → user message. The redeem is idempotent on the backend, so a
-// stable key derived from the credit id means a retried click never
-// double-spends. Refetch on success so the snapshot + credit list reflect
-// the redemption.
-async function redeemResetCredit(credit) {
-  if (!credit?.id || redeemingCreditId.value) return
-  redeemingCreditId.value = credit.id
-  try {
-    const res = await settingsAPI.codexResetConsume({ idempotencyKey: `reset-${credit.id}`, creditId: credit.id }, providerNode.value)
-    switch (res?.outcome) {
-      case "reset":
-        ElMessage.success(t("settings.account.resetRedeemed"))
-        break
-      case "nothingToReset":
-        ElMessage.info(t("settings.account.resetNothing"))
-        break
-      case "noCredit":
-        ElMessage.warning(t("settings.account.resetNoCredit"))
-        break
-      case "alreadyRedeemed":
-        ElMessage.info(t("settings.account.resetAlready"))
-        break
-      default:
-        ElMessage.info(String(res?.outcome || ""))
-    }
-    await loadCodexUsage()
-  } catch (err) {
-    ElMessage.error(err.response?.data?.detail || t("settings.account.resetFailed"))
-  } finally {
-    redeemingCreditId.value = ""
-  }
-}
-
-function clampPercent(value) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return 0
-  if (n < 0) return 0
-  if (n > 100) return 100
-  return n
-}
-function formatPercent(value) {
-  const n = Number(value)
-  if (!Number.isFinite(n)) return "0"
-  return n.toFixed(n >= 10 ? 0 : 1)
-}
-function formatResets(epochSeconds) {
-  if (!epochSeconds) return ""
-  const resetMs = Number(epochSeconds) * 1000
-  const now = Date.now()
-  const diffMs = resetMs - now
-  if (diffMs <= 0) return t("settings.account.soon")
-  const totalMinutes = Math.round(diffMs / 60000)
-  const hours = Math.floor(totalMinutes / 60)
-  const minutes = totalMinutes % 60
-  if (hours > 0) return t("settings.account.inHoursMinutes", { hours, minutes })
-  return t("settings.account.inMinutes", { minutes })
-}
-function formatCapturedAt(epochSeconds) {
-  if (!epochSeconds) return ""
-  const ms = Number(epochSeconds) * 1000
-  const diff = Math.round((Date.now() - ms) / 60000)
-  if (diff <= 0) return new Date(ms).toLocaleTimeString()
-  if (diff < 60) return `${diff}m ago`
-  return new Date(ms).toLocaleTimeString()
-}
-
 // ───────── Lifecycle ─────────
 
 function detectDesktopSurface() {
@@ -1267,12 +1101,6 @@ onMounted(async () => {
 
 onBeforeUnmount(() => {
   window.removeEventListener("pywebviewready", detectDesktopSurface)
-})
-
-watch(activeTab, (tab) => {
-  // Live refresh every time the Account tab is opened — the snapshot is
-  // fetched fresh (no model round), never served from a stale cache.
-  if (tab === "account" && !codexUsageLoading.value) loadCodexUsage()
 })
 
 // The Drives *record* panel lives in a workspace, not in global Settings.

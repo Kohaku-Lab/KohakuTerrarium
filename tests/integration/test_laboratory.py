@@ -14,6 +14,7 @@ import asyncio
 
 import pytest
 
+from kohakuterrarium.api.routes.identity.grok import grok_usage
 from kohakuterrarium.bootstrap import agent_init as _agent_init_mod
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm_mod
 from kohakuterrarium.laboratory.config import ClientConfig, HostConfig
@@ -27,6 +28,7 @@ from kohakuterrarium.laboratory._internal.transport_inproc import InProcTranspor
 from kohakuterrarium.laboratory.adapters import (
     StudioCatalogAdapter,
     StudioDeployAdapter,
+    StudioIdentityAdapter,
     StudioSettingsAdapter,
     TerrariumAttachAdapter,
     TerrariumBroadcastAdapter,
@@ -60,6 +62,17 @@ from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
 from kohakuterrarium.terrarium.multi_node_service import MultiNodeTerrariumService
 from kohakuterrarium.terrarium.service import LocalTerrariumService
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
+
+from tests.helpers.grok_usage_script import (
+    FAKE_ACCESS,
+    assert_empty,
+    assert_usage_ok,
+    billing_body,
+    install_billing_script,
+    install_grok_home,
+    patch_cli_version_probe,
+    write_cli_auth,
+)
 
 pytestmark = pytest.mark.timeout(60)
 
@@ -220,6 +233,30 @@ class TestLaboratoryMultiNodeService:
         service.add_remote("w2")
 
         try:
+            with monkeypatch.context() as usage_patch:
+                grok_home = install_grok_home(tmp_path, usage_patch)
+                patch_cli_version_probe(usage_patch)
+                billing = install_billing_script(usage_patch)
+                identity_adapter = StudioIdentityAdapter(w1_client)
+                try:
+                    assert_empty(
+                        await grok_usage(node="w1", service=service), "not_logged_in"
+                    )
+                    write_cli_auth(grok_home, FAKE_ACCESS)
+                    billing.push(200, billing_body(1.0))
+                    assert_usage_ok(await grok_usage(node="w1", service=service), 1.0)
+                    billing.push(503)
+                    assert_empty(
+                        await grok_usage(node="w1", service=service), "unavailable"
+                    )
+                    (grok_home / "auth.json").unlink()
+                    assert_empty(
+                        await grok_usage(node="w1", service=service), "not_logged_in"
+                    )
+                    assert len(billing.requests) == 2
+                finally:
+                    identity_adapter.detach()
+
             # ── 2.4. Attach RuntimeGraphPrompt so topology changes
             # trigger the per-creature system-prompt regeneration path.
             try:

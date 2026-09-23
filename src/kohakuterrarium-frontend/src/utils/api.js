@@ -1214,6 +1214,14 @@ export const settingsAPI = {
     const { data } = await api.get("/settings/grok-status", _nodeQuery(node))
     return data
   },
+  /**
+   * Node-local Grok subscription usage. The body is the normalized
+   * contract only — never an upstream error or credential.
+   */
+  async getGrokUsage(node = "_host") {
+    const { data } = await api.get("/settings/grok-usage", { timeout: 120000, ..._nodeQuery(node) })
+    return data
+  },
   async codexLogin(node = "_host") {
     const cfg = { timeout: 300000, ..._nodeQuery(node) }
     const { data } = await api.post("/settings/codex-login", {}, cfg)

@@ -35,6 +35,14 @@ _GROK_VERSION_PATTERN = re.compile(
 )
 
 
+class GrokAuthError(Exception):
+    """A redacted CLI credential failure. ``kind`` is auth_expired or unavailable."""
+
+    def __init__(self, kind: str) -> None:
+        self.kind = kind
+        super().__init__(f"Grok auth {kind}")
+
+
 @dataclass(frozen=True)
 class GrokToken:
     """A borrowed access token and the request profile required by its owner."""
@@ -76,14 +84,23 @@ class GrokTokens:
         return [token] if token and _grok_cli_executable() else []
 
     @classmethod
+    def load_cli_candidate(cls) -> GrokToken | None:
+        """Return the CLI token even when expired, independent of OpenCode."""
+        return _load_grok_cli_token()
+
+    @classmethod
     def available(cls) -> bool:
         """Return whether a valid or CLI-refreshable local login exists."""
         return bool(cls.load_bootstrap_candidates())
 
     @classmethod
     async def ensure_fresh_cli(cls, *, force: bool = False) -> GrokToken | None:
-        """Ask Grok CLI to refresh its token when due, sharing concurrent work."""
-        current = _load_grok_cli_token()
+        """Ask Grok CLI to refresh its token when due, sharing concurrent work.
+
+        Auth-file and version lookups run off the event loop. Unexpected refresh
+        failures are redacted rather than returned with raw exception text.
+        """
+        current = await asyncio.to_thread(_load_grok_cli_token)
         if current is None:
             return None
         if not force and not _needs_cli_refresh(current):
@@ -147,8 +164,12 @@ def _needs_cli_refresh(token: GrokToken, now: float | None = None) -> bool:
 
 
 async def _refresh_grok_cli(before: GrokToken, *, force: bool) -> GrokToken | None:
-    await _run_grok_models()
-    refreshed = _load_grok_cli_token()
+    try:
+        await _run_grok_models()
+        refreshed = await asyncio.to_thread(_load_grok_cli_token)
+    except Exception as exc:
+        logger.warning("Grok CLI credential refresh failed", error=type(exc).__name__)
+        raise GrokAuthError("unavailable") from exc
     if refreshed is None or _needs_cli_refresh(refreshed):
         return None
     if force and refreshed.access_token == before.access_token:
@@ -158,7 +179,7 @@ async def _refresh_grok_cli(before: GrokToken, *, force: bool) -> GrokToken | No
 
 async def _run_grok_models() -> bool:
     """Run a non-generating CLI command; auth-file changes prove refresh."""
-    executable = _grok_cli_executable()
+    executable = await asyncio.to_thread(_grok_cli_executable)
     if executable is None:
         return False
     try:
@@ -353,6 +374,7 @@ __all__ = [
     "GROK_CLI_BASE_URL",
     "OPENCODE_SOURCE",
     "XAI_BASE_URL",
+    "GrokAuthError",
     "GrokToken",
     "GrokTokens",
 ]

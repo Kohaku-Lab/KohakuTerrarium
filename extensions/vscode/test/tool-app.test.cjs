@@ -52,7 +52,7 @@ async function settle(n = 12) {
   for (let i = 0; i < n; i++) await new Promise((resolve) => setImmediate(resolve))
 }
 
-async function boot() {
+async function boot({ controlledClock = false } = {}) {
   const code = await buildWebview()
   const errors = []
   const virtualConsole = new VirtualConsole()
@@ -66,6 +66,32 @@ async function boot() {
   })
   const { window } = dom
   const { document } = window
+  let advanceTime
+  if (controlledClock) {
+    let now = window.Date.now()
+    let nextId = 0
+    const intervals = new Map()
+    window.Date.now = () => now
+    window.setInterval = (callback, delay, ...args) => {
+      const id = ++nextId
+      intervals.set(id, { callback, delay, args, next: now + delay })
+      return id
+    }
+    window.clearInterval = (id) => intervals.delete(id)
+    advanceTime = async (milliseconds) => {
+      const target = now + milliseconds
+      while (true) {
+        const due = [...intervals.values()].filter((timer) => timer.next <= target).sort((a, b) => a.next - b.next)[0]
+        if (!due) break
+        now = due.next
+        due.next += due.delay
+        due.callback(...due.args)
+        await settle()
+      }
+      now = target
+      await settle()
+    }
+  }
   const requests = []
   const session = {
     runtimeId: RUNTIME,
@@ -148,11 +174,11 @@ async function boot() {
   const ready = requests.find((message) => message.type === 'ready')
   reply(ready, { available: true, automatic: true, readyId: ready.requestId, connectionId: 'service-a', selectionVersion: 1, selection })
   await settle(14)
-  return { window, document, frame, sent, toolBlock, errors, close: () => window.close() }
+  return { window, document, frame, sent, toolBlock, errors, advanceTime, close: () => window.close() }
 }
 
 test('built App renders the shared production tool block with args, result parts and pinned media, and promotes a running task through the Host', async () => {
-  const app = await boot()
+  const app = await boot({ controlledClock: true })
   try {
     // A running direct task with args, promotable (not backgrounded).
     app.frame({
@@ -170,10 +196,15 @@ test('built App renders the shared production tool block with args, result parts
     // Args come from the real frame, formatted by the production leaf.
     assert.match(bash.textContent, /cmd=ls -la/)
 
-    // The promote control appears for a still-running, promotable task; the
-    // real click drives the Host promote route through the installed bridge.
-    await new Promise((resolve) => setTimeout(resolve, 1050))
-    const promote = bash.querySelector('[aria-label="Move task to background"]')
+    // Promotion is exposed on a job tick strictly after the first second.
+    const promotionControl = () => app.toolBlock('Tool bash').querySelector('[aria-label="Move task to background"]')
+    assert.equal(promotionControl(), null)
+    await app.advanceTime(1000)
+    assert.equal(promotionControl(), null, 'the exact 1000ms boundary is not yet promotable')
+    await app.advanceTime(50)
+    assert.equal(promotionControl(), null, 'elapsed wall time alone does not invalidate the computed control')
+    await app.advanceTime(950)
+    const promote = promotionControl()
     assert.ok(promote, 'the shared block exposes the background-promotion control')
     promote.click()
     await settle(20)
