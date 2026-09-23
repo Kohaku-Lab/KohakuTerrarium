@@ -227,6 +227,8 @@ class TerrariumRuntimeAdapter:
         if not provider:
             return
         backend_type = profile.get("backend_type") or provider
+        if backend_type == "google-antigravity":
+            raise ValueError("Antigravity: local_host_only")
         set_remote_backend(
             LLMBackend(
                 name=provider,

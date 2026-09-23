@@ -221,3 +221,17 @@ class TestLogRequestShape:
         # a text-only request is logged at DEBUG, never INFO
         assert all(r.levelno != logging.INFO for r in handler.records)
         assert any(r.levelno == logging.DEBUG for r in handler.records)
+
+
+def test_antigravity_signed_parts_never_reach_openai():
+    messages = [
+        {
+            "role": "assistant",
+            "content": "ok",
+            "_kt_antigravity_content": {"parts": [{"thoughtSignature": "private"}]},
+        }
+    ]
+    assert strip_internal_message_fields(messages) == [
+        {"role": "assistant", "content": "ok"}
+    ]
+    assert "_kt_antigravity_content" in messages[0]

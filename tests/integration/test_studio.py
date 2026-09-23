@@ -1031,6 +1031,7 @@ class TestStudioIntegration:
             assert set(baseline_backends) == {
                 "codex",
                 "grok-subscription",
+                "google-antigravity",
                 "openai",
                 "openrouter",
                 "anthropic",
@@ -1039,6 +1040,10 @@ class TestStudioIntegration:
                 "kimi-code",
                 "glm-coding",
             }
+            assert (
+                baseline_backends["google-antigravity"]["backend_type"]
+                == "google-antigravity"
+            )
             grok = baseline_backends["grok-subscription"]
             assert grok["backend_type"] == "grok-subscription"
             assert grok["provider_native_tools"] == [

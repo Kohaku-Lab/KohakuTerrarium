@@ -61,6 +61,9 @@ def delete_cli(provider: str) -> int:
         return 0
     try:
         remove_key(provider)
+    except ValueError as exc:
+        print(str(exc))
+        return 1
     except LookupError:
         print(f"Unknown provider: {provider}")
         return 1

@@ -36,6 +36,7 @@ from kohakuterrarium.llm.backends import (
 )
 from kohakuterrarium.llm.codex_auth import CodexTokens
 from kohakuterrarium.llm.grok_auth import GrokTokens
+from kohakuterrarium.llm.antigravity_auth import AgyCredentials
 from kohakuterrarium.llm.preset_store import get_subagent_models, load_presets
 from kohakuterrarium.llm.preset_store import preset_from_data as _preset_from_data
 from kohakuterrarium.llm.preset_store import serialize_user_data as _serialize_user_data
@@ -61,6 +62,11 @@ logger = get_logger(__name__)
 def save_backend(backend: LLMBackend) -> None:
     """Persist a user provider after normalizing its backend type."""
     backend.backend_type = validate_backend_type(backend.backend_type)
+    if (
+        backend.backend_type == "google-antigravity"
+        or backend.name == "google-antigravity"
+    ):
+        raise ValueError("Antigravity is a fixed built-in local provider")
     data = _load_yaml()
     backends = load_backends()
     presets = load_presets()
@@ -518,6 +524,8 @@ def _is_available(provider_name: str) -> bool:
         return CodexTokens.load() is not None
     if backend and backend.backend_type == "grok-subscription":
         return GrokTokens.available()
+    if backend and backend.backend_type == "google-antigravity":
+        return AgyCredentials.available()
     if provider_name == "grok-subscription":
         return GrokTokens.available()
     if backend:

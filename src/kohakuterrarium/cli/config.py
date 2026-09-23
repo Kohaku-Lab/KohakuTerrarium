@@ -1,6 +1,7 @@
 """``kt config`` dispatcher — argparse wiring for identity sub-commands."""
 
 from kohakuterrarium.cli.auth import login_cli
+from kohakuterrarium.cli.identity_antigravity import run_cli as _antigravity_cli
 from kohakuterrarium.cli.identity_backend import (
     add_or_update_cli as _backend_add_cli,
 )
@@ -86,6 +87,11 @@ def add_config_subparser(subparsers):
     k_set.add_argument("value", nargs="?", default=None)
     k_del = key_sub.add_parser("delete", help="Delete the stored key")
     k_del.add_argument("provider")
+
+    agy_parser = sub.add_parser("antigravity", help="Inspect the local agy account")
+    agy_parser.add_argument(
+        "action", choices=["status", "refresh", "models"], nargs="?", default="status"
+    )
 
     login_parser = sub.add_parser("login", help="Authenticate with a provider")
     login_parser.add_argument("provider")
@@ -220,6 +226,8 @@ def config_cli(args):
             return _dispatch_llm(args)
         case "key":
             return _dispatch_key(args)
+        case "antigravity":
+            return _antigravity_cli(args.action)
         case "login":
             return login_cli(getattr(args, "provider", ""))
         case "mcp":

@@ -1,4 +1,18 @@
 export default {
+  "settings.antigravity.hint": "复用本机 Windows 官方 agy 登录；请运行 agy 登录。KT 不保存凭据。",
+  "settings.antigravity.ready": "本机 agy 凭据可用。",
+  "settings.antigravity.expired": "访问凭据已过期，请通过 agy 刷新。",
+  "settings.antigravity.login_required": "未找到 agy 登录，请先运行 agy 登录。",
+  "settings.antigravity.ambiguous_sources": "发现两份凭据来源，请先在 agy 中解决冲突。",
+  "settings.antigravity.unsupported_platform": "当前版本支持 Windows agy 凭据存储。",
+  "settings.antigravity.malformed_credential": "不支持此凭据格式，请通过 agy 重新登录。",
+  "settings.antigravity.credential_store_unavailable": "无法读取本地凭据存储。",
+  "settings.antigravity.refreshCredential": "通过 agy 刷新凭据",
+  "settings.antigravity.models": "获取可用模型",
+  "settings.antigravity.localOnly": "Antigravity 暂仅支持本地主机。",
+  "settings.antigravity.adminRequired": "查看此账号需要管理员权限。",
+  "settings.antigravity.failed": "操作失败。请检查 agy 登录及账号访问权限后重试。",
+
   "common.activity": "活动",
   "common.add": "新增",
   "common.agent": "智能体配置",

@@ -520,5 +520,11 @@
     "function": "build_plugin_manager",
     "target": "kohakuterrarium.bootstrap.plugins",
     "reason": "cycle break: bootstrap.plugins imports the builtin catalog, whose sub-agent configs import modules.subagent, which imports this module. Importing init_plugins at module top makes `import kohakuterrarium.bootstrap.plugins` fail outright as the first import of a process. Latent before 3.0 and reachable only through certain entry points; deferring to call time is the smallest fix that does not move plugin bootstrapping out of bootstrap/."
+  },
+  {
+    "file": "src/kohakuterrarium/bootstrap/llm.py",
+    "function": "_create_from_profile",
+    "target": "kohakuterrarium.llm.antigravity_provider",
+    "reason": "Load the Google consumer transport only for a selected Antigravity profile."
   }
 ]

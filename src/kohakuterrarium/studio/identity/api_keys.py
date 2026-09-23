@@ -80,6 +80,8 @@ def set_key(provider: str, key: str) -> None:
         raise ValueError("Provider and key are required")
     if provider not in _provider_credentials():
         raise LookupError(f"Provider not found: {provider}")
+    if _provider_credentials()[provider][0] == "google-antigravity":
+        raise ValueError("Antigravity credentials are managed by agy")
     save_api_key(provider, key)
 
 
@@ -87,6 +89,8 @@ def remove_key(provider: str) -> None:
     """Delete a provider's stored key, rejecting unknown providers."""
     if provider not in _provider_credentials():
         raise LookupError(f"Provider not found: {provider}")
+    if _provider_credentials()[provider][0] == "google-antigravity":
+        raise ValueError("Antigravity credentials are managed by agy")
     save_api_key(provider, "")
 
 

@@ -77,6 +77,7 @@ from kohakuterrarium.api.routes.catalog import workspace as catalog_workspace
 from kohakuterrarium.api.routes.identity import api_keys as identity_api_keys
 from kohakuterrarium.api.routes.identity import codex as identity_codex
 from kohakuterrarium.api.routes.identity import grok as identity_grok
+from kohakuterrarium.api.routes.identity import antigravity as identity_antigravity
 from kohakuterrarium.api.routes.identity import config_files as identity_config_files
 from kohakuterrarium.api.routes.identity import llm as identity_llm
 from kohakuterrarium.api.routes.identity import mcp as identity_mcp
@@ -733,6 +734,9 @@ def _mount_phase0_stubs(app: FastAPI) -> None:
     )
     app.include_router(identity_codex.router, prefix="/api/settings", tags=["identity"])
     app.include_router(identity_grok.router, prefix="/api/settings", tags=["identity"])
+    app.include_router(
+        identity_antigravity.router, prefix="/api/settings", tags=["identity"]
+    )
     app.include_router(identity_mcp.router, prefix="/api/settings", tags=["identity"])
     app.include_router(
         identity_ui_prefs.router, prefix="/api/settings", tags=["identity"]

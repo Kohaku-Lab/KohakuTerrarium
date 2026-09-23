@@ -271,10 +271,14 @@ endpoint fallback 仅允许已审核的上游主机，且发生在未交付输�
 
 真实账户验收单独记录：Windows 本地 CLI 和同机 Web 各跑一次登录→发现→选模型→两轮对话→函数工具→恢复→刷新→退出；每个宣称支持的模型族至少一个代表，含 thinking 与 signature-only 实际样本（如能产生）。不把 CI 的固定 HTTP fixtures 当成上游当前可用证明，不在测试日志保存 token。当前未执行这些在线验收，也未产生订阅请求费用。
 
-## 11. 当前交付与待验证事项
+## 11. 实施状态（2026-09-24）
 
-本次产物是调查证据与可实施方案；生产代码没有改动。已核实工厂、配置、CLI/Web 鉴权、锁与历史边界，并运行合成字段离线探针。上游最新协议细节另见[上游设计证据](C:/Users/slapa/workspace/KohakuTerrarium/docs/zh-CN/dev/research/antigravity-upstream-design-evidence-2026-09-23.md)。
+A 路线已实现于 `codex/antigravity-agy` 独立 worktree：Windows 官方 agy consumer 凭据复用、由 agy 续期、固定 Google 传输、Gemini/Claude 文本与函数调用适配、签名历史持久化/回放/恢复、CLI 命令及 Web 管理卡片。没有新增 KT OAuth 登录或 refresh token 存储。
 
-实施中仍需用实际账户回答：内置 OAuth client 与所需 scopes 当前是否获准、账户资格与 project 开通、当前模型列表、Gemini/Claude 的 signature 规则与容量、固定客户端版本是否被接受、callback 在目标 Windows 浏览器上的行为。PKCE/自建 client 为独立实验，不阻塞按已参考流程开发，也不能在验证前宣称支持。
+首版收敛范围与用法见[接入指南](../../guides/antigravity.md)。模型列表按显式操作获取；没有增加长期模型缓存。macOS/Linux、远程节点、多账号、显式思考参数和任意 extra_body 不在本版支持范围。带工具历史跨模型切换如果无法安全复用签名，会明确要求新建或压缩会话；不伪造签名。
 
-最终验收以本地 CLI＋Web 的完整行为为准；优先 A 的 agy 复用路线，按第 0 节记录自动刷新是否支持。ToS 不作为附加开发门禁，离线通过也不代替真实协议可用性。
+原方案中自建 OAuth、账户存储与 callback 的设计保留为历史研究，不属于此次交付。在线探针结果已记录在[探针报告](antigravity-agy-probe-results-2026-09-23.md)。本次实现没有追加在线推理；此前授权的三次小型推理已全部使用。
+
+验证结果：受影响的 Python 单元/集成/Studio e2e 及依赖、文件大小门禁合计 4,288 passed、4 skipped；最后的 CLI/API 错误处理修正再单独通过 12 项测试；前端设置组件 16 项测试通过，完整 Prettier 检查与生产构建通过。全仓 Ruff 与 Black 检查通过。完整 agent 测试使用离线 HTTP 边界，真实执行 scratchpad 工具、保存签名并恢复会话继续调用。
+
+仍待真实账户验收：生产 provider 的完整 CLI/Web 操作链及 Claude 工具/思考组合。已有在线探针证明协议路径可行，离线测试证明实现路径与回归边界；两者不等同于完整产品在线验收。

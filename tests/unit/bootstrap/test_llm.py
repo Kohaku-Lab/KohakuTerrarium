@@ -8,6 +8,8 @@ since each requires live API keys.
 
 import pytest
 
+from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
+
 from kohakuterrarium.bootstrap import llm as llm_mod
 from kohakuterrarium.bootstrap.llm import (
     _agent_config_default,
@@ -612,3 +614,24 @@ class TestResolvedBaseUrl:
     def test_none_when_empty(self):
         assert llm_mod._resolved_base_url(self._P("")) is None
         assert llm_mod._resolved_base_url(self._P(None)) is None
+
+
+def test_antigravity_resolves_without_key_and_rejects_worker(monkeypatch):
+    provider = create_llm_provider(
+        AgentConfig(name="a"), "google-antigravity/gemini-3-flash"
+    )
+    assert isinstance(provider, AntigravityProvider)
+    assert provider.config.model == "gemini-3-flash"
+    monkeypatch.setattr(llm_mod._api_keys, "_resolver", object())
+    with pytest.raises(ValueError, match="local_host_only"):
+        create_llm_provider(AgentConfig(name="a"), "google-antigravity/gemini-3-flash")
+
+
+def test_antigravity_inline_unknown_model_uses_consumer_transport():
+    provider = _create_from_inline(
+        AgentConfig(
+            name="a", provider="google-antigravity", model="gemini-3.1-pro-high"
+        )
+    )
+    assert isinstance(provider, AntigravityProvider)
+    assert provider.config.model == "gemini-3.1-pro-high"

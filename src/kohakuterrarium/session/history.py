@@ -6,6 +6,7 @@ from collections.abc import Hashable, Mapping
 from typing import Any, Iterable
 
 from kohakuterrarium.core.job_label import canonical_tool_name, make_job_label
+from kohakuterrarium.llm.antigravity_format import replay_target
 
 # Parent paths identify the selected branches of earlier turns. Legacy events
 # derive this ancestry from event order when no explicit path was persisted.
@@ -769,6 +770,9 @@ def replay_conversation(
                 ),
                 None,
             )
+            state = evt.get("_kt_antigravity_content")
+            if state:
+                target = replay_target(messages, target, state)
             if target is not None:
                 for key in (
                     "reasoning_content",
@@ -776,6 +780,7 @@ def replay_conversation(
                     "reasoning_details",
                     "reasoning",
                     "_kt_assistant_segments",
+                    "_kt_antigravity_content",
                 ):
                     value = evt.get(key)
                     if value not in (None, "", [], {}):

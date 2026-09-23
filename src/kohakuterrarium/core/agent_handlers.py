@@ -690,6 +690,7 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             "reasoning_details",
             "reasoning",
             "_kt_assistant_segments",
+            "_kt_antigravity_content",
         ):
             value = fields.get(key)
             if value not in (None, "", [], {}):

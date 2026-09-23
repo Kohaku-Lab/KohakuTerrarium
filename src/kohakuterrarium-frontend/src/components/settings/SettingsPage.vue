@@ -36,14 +36,15 @@
                   </div>
                   <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
                     <span v-if="backend.env_var">{{ backend.env_var }}</span>
-                    <span v-if="backend.masked_key && !isOAuthCodex(backend) && !isGrokSubscription(backend)"> · {{ backend.masked_key }}</span>
+                    <span v-if="backend.masked_key && !isOAuthCodex(backend) && !isGrokSubscription(backend) && !isAntigravity(backend)"> · {{ backend.masked_key }}</span>
                     <span v-if="isOAuthCodex(backend)">{{ t("settings.keys.oauthHint") }}</span>
                     <span v-if="isGrokSubscription(backend)">{{ t("settings.grok.hint") }}</span>
                   </div>
+                  <AntigravityCard v-if="isAntigravity(backend)" :node="providerNode" />
                   <GrokSubscriptionCard v-if="isGrokSubscription(backend)" :node="providerNode" />
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                  <template v-if="isGrokSubscription(backend)" />
+                  <template v-if="isGrokSubscription(backend) || isAntigravity(backend)" />
                   <template v-else-if="!isOAuthCodex(backend)">
                     <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
                     <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
@@ -101,10 +102,11 @@
                   </div>
                   <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
                     <span v-if="backend.env_var">{{ backend.env_var }}</span>
-                    <span v-if="backend.masked_key && !isOAuthCodex(backend) && !isGrokSubscription(backend)"> · {{ backend.masked_key }}</span>
+                    <span v-if="backend.masked_key && !isOAuthCodex(backend) && !isGrokSubscription(backend) && !isAntigravity(backend)"> · {{ backend.masked_key }}</span>
                     <span v-if="isOAuthCodex(backend)">{{ t("settings.keys.oauthHint") }}</span>
                     <span v-if="isGrokSubscription(backend)">{{ t("settings.grok.hint") }}</span>
                   </div>
+                  <AntigravityCard v-if="isAntigravity(backend)" :node="providerNode" />
                   <GrokSubscriptionCard v-if="isGrokSubscription(backend)" :node="providerNode" />
                   <div v-if="backend.provider_name || backend.provider_native_tools?.length" class="text-[10px] text-warm-400 mt-1 flex items-center gap-2 flex-wrap">
                     <span v-if="backend.provider_name" class="font-mono">identity: {{ backend.provider_name }}</span>
@@ -112,7 +114,7 @@
                   </div>
                 </div>
                 <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                  <template v-if="isGrokSubscription(backend)" />
+                  <template v-if="isGrokSubscription(backend) || isAntigravity(backend)" />
                   <template v-else-if="!isOAuthCodex(backend)">
                     <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
                     <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
@@ -479,6 +481,7 @@ import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
 import DriveSettingsPanel from "@/components/settings/DriveSettingsPanel.vue"
+import AntigravityCard from "@/components/settings/AntigravityCard.vue"
 import GrokSubscriptionCard from "@/components/settings/GrokSubscriptionCard.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
@@ -677,6 +680,10 @@ const codexModalNode = ref("_host")
 // so we show the normal key-entry UI instead of the OAuth-only login.
 function isOAuthCodex(backend) {
   return backend.backend_type === "codex" && !backend.base_url
+}
+
+function isAntigravity(backend) {
+  return backend.backend_type === "google-antigravity"
 }
 
 function isGrokSubscription(backend) {

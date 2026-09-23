@@ -2,6 +2,8 @@
 
 import pytest
 
+from kohakuterrarium.llm.antigravity_format import STATE_KEY, signed_state
+
 from kohakuterrarium.session.history import (
     InvalidBranchViewError,
     _coerce_path,
@@ -1827,3 +1829,21 @@ class TestSelectLiveEventIdsPrefix:
         live = select_live_event_ids(events)
         assert live == {0, 3}
         assert 4 not in live
+
+
+def test_antigravity_state_replay_does_not_attach_empty_round_to_previous():
+    first = {"role": "assistant", "content": "first"}
+    empty = {"role": "assistant", "content": ""}
+    state1 = signed_state(first, [{"text": "first"}], "m", "scope")
+    state2 = signed_state(empty, [{"thoughtSignature": "opaque"}], "m", "scope")
+    messages = replay_conversation(
+        [
+            {"type": "user_message", "content": "a"},
+            {"type": "text_chunk", "content": "first"},
+            {"type": "assistant_reasoning", STATE_KEY: state1},
+            {"type": "user_message", "content": "b"},
+            {"type": "assistant_reasoning", STATE_KEY: state2},
+        ]
+    )
+    assert messages[1][STATE_KEY] == state1
+    assert messages[3] == {**empty, STATE_KEY: state2}

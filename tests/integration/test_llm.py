@@ -31,6 +31,7 @@ Why these collaborators are real:
 import base64
 import io
 import json
+import time
 from typing import Any
 
 import httpx
@@ -39,10 +40,17 @@ from openai import APIStatusError
 from PIL import Image
 from websockets import serve
 
+from kohakuterrarium import Terrarium
+from kohakuterrarium.core.conversation import Conversation
+from kohakuterrarium.llm import antigravity_auth as agy_auth
+from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
+from kohakuterrarium.session.history import (
+    replay_conversation,
+    normalize_resumable_events,
+)
 from kohakuterrarium.bootstrap.llm import _create_from_profile
 from kohakuterrarium.builtins.tools.grok_image_gen import GrokImageGenTool
 from kohakuterrarium.builtins.tools.read import ReadTool
-from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.tool_output import normalize_tool_result
 from kohakuterrarium.llm import api_keys as ak
@@ -1722,6 +1730,90 @@ class TestLlmIntegration:
                     ]
                 finally:
                     await ws_provider.close()
+
+        # A real agent executes a signed Google tool round and resumes its history.
+        with monkeypatch.context() as agy_patch:
+            agy_patch.setattr(
+                agy_auth,
+                "read_sources",
+                lambda: [
+                    agy_auth.BorrowedCredential(
+                        "offline-agy", time.time() + 3600, "test"
+                    )
+                ],
+            )
+            submissions = []
+
+            def agy_http(request):
+                if request.url.path.endswith("loadCodeAssist"):
+                    return httpx.Response(
+                        200, json={"cloudaicompanionProject": "offline-project"}
+                    )
+                body = json.loads(request.content)
+                submissions.append(body)
+                if len(submissions) == 1:
+                    parts = [
+                        {
+                            "functionCall": {
+                                "name": "scratchpad",
+                                "args": {
+                                    "action": "set",
+                                    "key": "agy",
+                                    "value": "preserved",
+                                },
+                            },
+                            "thoughtSignature": "opaque-signature",
+                        }
+                    ]
+                else:
+                    history_parts = [
+                        part
+                        for message in body["request"]["contents"]
+                        for part in message["parts"]
+                    ]
+                    assert any(
+                        part.get("thoughtSignature") == "opaque-signature"
+                        for part in history_parts
+                    )
+                    parts = [{"text": "AGY_OK"}]
+                data = {
+                    "response": {
+                        "candidates": [
+                            {"content": {"parts": parts}, "finishReason": "STOP"}
+                        ]
+                    }
+                }
+                return httpx.Response(200, text="data: " + json.dumps(data) + "\n\n")
+
+            agy = AntigravityProvider(
+                "gemini-3-flash", transport=httpx.MockTransport(agy_http)
+            )
+            config = tmp_path / "agy.yaml"
+            config.write_text(
+                "name: agy_probe\nsystem_prompt: offline\ninput: {type: none}\noutput: {type: stdout}\ntools: [{name: scratchpad, type: builtin}]\n"
+            )
+            async with Terrarium(session_dir=tmp_path / "agy-sessions") as engine:
+                creature = await engine.add_creature(
+                    str(config), llm=agy, io="headless", start=True
+                )
+                result = await creature.run("remember", timeout=10)
+                assert result.text == "AGY_OK"
+                assert creature.agent.scratchpad.get("agy") == "preserved"
+                events = creature.agent.session_store.get_events("agy_probe")
+                replay = replay_conversation(normalize_resumable_events(events))
+                signed = [message for message in replay if message.get("tool_calls")]
+                assert (
+                    signed[0]["_kt_antigravity_content"]["parts"][0]["thoughtSignature"]
+                    == "opaque-signature"
+                )
+                session_path = creature.agent.session_store.path
+            resumed = await Terrarium.resume(str(session_path), llm=agy)
+            try:
+                worker = resumed.list_creatures()[0]
+                assert (await worker.run("continue", timeout=10)).text == "AGY_OK"
+            finally:
+                await resumed.__aexit__(None, None, None)
+            assert len(submissions) == 3
 
     def test_api_key_storage_and_resolution_workflow(self):
         """Store + retrieve an API key, then assert the resolver override.

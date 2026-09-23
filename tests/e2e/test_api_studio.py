@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from kohakuterrarium.llm import antigravity_auth as agy_auth
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.catalog import _deps as catalog_deps
@@ -205,6 +206,17 @@ class TestApiStudioJourney:
         start a live session from that creature directory and take a
         turn.
         """
+        with monkeypatch.context() as agy_patch:
+            agy_patch.setattr(agy_auth, "read_sources", lambda: [])
+            status = client.get("/api/settings/antigravity-status")
+            assert status.status_code == 200
+            assert status.json()["state"] == "login_required"
+            assert (
+                client.get("/api/settings/antigravity-status?node=worker").status_code
+                == 400
+            )
+            assert client.post("/api/settings/antigravity-refresh").status_code == 409
+
         with monkeypatch.context() as usage_patch:
             grok_home = install_grok_home(workspace_root, usage_patch)
             patch_cli_version_probe(usage_patch)

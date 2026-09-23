@@ -1,4 +1,23 @@
 export default {
+  "settings.antigravity.hint":
+    "Reuse the official agy login on this Windows host. Run agy to sign in. No token is stored by KT.",
+  "settings.antigravity.ready": "Local agy credential is ready.",
+  "settings.antigravity.expired": "The access token has expired; refresh through agy.",
+  "settings.antigravity.login_required": "No agy login found. Run agy to sign in.",
+  "settings.antigravity.ambiguous_sources":
+    "Both credential sources exist. Resolve the conflict in agy first.",
+  "settings.antigravity.unsupported_platform":
+    "This version supports the Windows agy credential store.",
+  "settings.antigravity.malformed_credential":
+    "Unsupported agy credential format. Sign in again using agy.",
+  "settings.antigravity.credential_store_unavailable": "The local credential store is unavailable.",
+  "settings.antigravity.refreshCredential": "Refresh through agy",
+  "settings.antigravity.models": "Fetch available models",
+  "settings.antigravity.localOnly": "Antigravity is supported on the local host only.",
+  "settings.antigravity.adminRequired": "Administrator access is required to inspect this account.",
+  "settings.antigravity.failed":
+    "The operation failed. Check agy login and account access, then retry.",
+
   "common.activity": "Activity",
   "common.add": "Add",
   "common.agent": "Agent",

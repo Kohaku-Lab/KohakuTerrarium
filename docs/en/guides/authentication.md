@@ -280,3 +280,6 @@ frontend nags with a banner *"connection is not encrypted"* when
   via ``LoadCredential=`` directives
 - [Reverse-proxy deployment](deployment-reverse-proxy.md): TLS
   termination + CORS allowlist for hosted static frontends
+
+
+For a local Windows agy consumer account, see [Antigravity](antigravity.md).
