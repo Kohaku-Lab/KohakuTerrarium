@@ -261,6 +261,63 @@ describe("AccountUsagePanel", () => {
     expect(provider(wrapper, "grok").text()).not.toContain("settings.account.grok.stale")
   })
 
+  it.each(["codex", "grok"])(
+    "clears %s quota and actions when the selected worker returns 404, then recovers",
+    async (name) => {
+      const api = name === "codex" ? settingsAPI.getCodexUsage : settingsAPI.getGrokUsage
+      const wrapper = await mountPanel({ node: "worker-a" })
+      await flushPromises()
+      const section = provider(wrapper, name)
+      expect(section.find("[data-usage-bar]").exists()).toBe(true)
+
+      api.mockRejectedValueOnce({ response: { status: 502 } })
+      await section.get("[data-refresh]").trigger("click")
+      await flushPromises()
+      expect(section.find("[data-usage-bar]").exists()).toBe(true)
+      expect(section.text()).toContain(`settings.account.${name}.stale`)
+
+      api.mockRejectedValueOnce({
+        response: {
+          status: 404,
+          data: { detail: "worker-a is not connected: private diagnostic" },
+        },
+      })
+      await section.get("[data-refresh]").trigger("click")
+      await flushPromises()
+      expect(section.find("[data-usage-bar]").exists()).toBe(false)
+      expect(section.find("[data-reset-redeem]").exists()).toBe(false)
+      expect(section.find("footer").exists()).toBe(false)
+      expect(section.text()).toContain(`settings.account.${name}.loadFailed`)
+      expect(section.text()).not.toContain(`settings.account.${name}.stale`)
+      expect(section.text()).not.toContain("private diagnostic")
+      expect(section.get("[data-refresh]").attributes("disabled")).toBeUndefined()
+
+      await section.get("[data-refresh]").trigger("click")
+      await flushPromises()
+      expect(api).toHaveBeenLastCalledWith("worker-a")
+      expect(section.find("[data-usage-bar]").exists()).toBe(true)
+      expect(section.text()).not.toContain(`settings.account.${name}.loadFailed`)
+      if (name === "codex") expect(section.find("[data-reset-redeem]").exists()).toBe(true)
+      wrapper.unmount()
+    },
+  )
+
+  it("ignores a late 404 from a previously selected worker", async () => {
+    const oldRequest = deferred()
+    const wrapper = await mountPanel({ node: "worker-a" })
+    await flushPromises()
+    settingsAPI.getGrokUsage.mockReturnValueOnce(oldRequest.promise)
+    await provider(wrapper, "grok").get("[data-refresh]").trigger("click")
+    await wrapper.setProps({ node: "worker-b" })
+    await flushPromises()
+    oldRequest.reject({ response: { status: 404 } })
+    await flushPromises()
+    expect(settingsAPI.getGrokUsage).toHaveBeenLastCalledWith("worker-b")
+    expect(provider(wrapper, "grok").find("[data-usage-bar]").exists()).toBe(true)
+    expect(provider(wrapper, "grok").text()).not.toContain("settings.account.grok.loadFailed")
+    wrapper.unmount()
+  })
+
   it("labels a stale snapshot with the original capture time, not the failure time", async () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date("2026-09-22T12:00:00Z"))

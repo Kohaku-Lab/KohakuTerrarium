@@ -69,7 +69,8 @@ export function useProviderUsage(load, { t, fallbackKey }) {
       if (requestGeneration !== generation) return
       error.value = t(fallbackKey)
       const status = err?.response?.status
-      if (previous && status !== 401 && status !== 403) retain(previous, { failed: true })
+      if (previous && status !== 401 && status !== 403 && status !== 404)
+        retain(previous, { failed: true })
       else {
         usage.value = null
         stale.value = false
