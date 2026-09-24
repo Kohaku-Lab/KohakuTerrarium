@@ -1752,7 +1752,7 @@ class TestLlmIntegration:
                 submissions.append(body)
                 assert body["model"] == "gemini-3.8-flash-tiered"
                 assert body["request"]["generationConfig"] == {
-                    "maxOutputTokens": 65536,
+                    "maxOutputTokens": 4096 if len(submissions) == 4 else 65536,
                     "thinkingConfig": {
                         "includeThoughts": True,
                         "thinkingLevel": "MEDIUM",
@@ -1762,6 +1762,7 @@ class TestLlmIntegration:
                     parts = [
                         {
                             "functionCall": {
+                                "id": "server-scratchpad-1",
                                 "name": "scratchpad",
                                 "args": {
                                     "action": "set",
@@ -1772,16 +1773,32 @@ class TestLlmIntegration:
                             "thoughtSignature": "opaque-signature",
                         }
                     ]
+                elif len(submissions) == 4:
+                    parts = [{"text": "AGY_COMPACT_SUMMARY"}]
                 else:
                     history_parts = [
                         part
                         for message in body["request"]["contents"]
                         for part in message["parts"]
                     ]
-                    assert any(
-                        part.get("thoughtSignature") == "opaque-signature"
-                        for part in history_parts
-                    )
+                    if len(submissions) <= 3:
+                        assert any(
+                            part.get("thoughtSignature") == "opaque-signature"
+                            for part in history_parts
+                        )
+                        responses = [
+                            part["functionResponse"]
+                            for part in history_parts
+                            if "functionResponse" in part
+                        ]
+                        assert [response["id"] for response in responses] == [
+                            "server-scratchpad-1"
+                        ]
+                    else:
+                        assert any(
+                            "AGY_COMPACT_SUMMARY" in part.get("text", "")
+                            for part in history_parts
+                        )
                     parts = [{"text": "AGY_OK"}]
                 data = {
                     "response": {
@@ -1820,9 +1837,26 @@ class TestLlmIntegration:
             try:
                 worker = resumed.list_creatures()[0]
                 assert (await worker.run("continue", timeout=10)).text == "AGY_OK"
+                compact = worker.agent.compact_manager
+                compact.config.keep_recent_turns = 1
+                assert compact.trigger_compact()
+                await compact.wait_for_current()
+                assert compact._compact_count == 1
+                assert compact._last_summary_error == ""
+                snapshot = worker.agent.session_store.load_conversation("agy_probe")
+                assert any(
+                    "AGY_COMPACT_SUMMARY" in (message.get("content") or "")
+                    for message in snapshot
+                )
             finally:
                 await resumed.__aexit__(None, None, None)
-            assert len(submissions) == 3
+            compacted = await Terrarium.resume(str(session_path), llm=agy)
+            try:
+                worker = compacted.list_creatures()[0]
+                assert (await worker.run("after compact", timeout=10)).text == "AGY_OK"
+            finally:
+                await compacted.__aexit__(None, None, None)
+            assert len(submissions) == 5
 
     def test_api_key_storage_and_resolution_workflow(self):
         """Store + retrieve an API key, then assert the resolver override.

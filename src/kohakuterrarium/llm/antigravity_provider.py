@@ -126,14 +126,34 @@ class AntigravityProvider(BaseLLMProvider):
         )
 
     def _request(self, messages, scope, tools, provider_native_tools, kwargs):
-        if provider_native_tools or kwargs:
+        if provider_native_tools or kwargs.keys() - {"max_tokens"}:
             raise AntigravityError("unsupported_generation_option")
         system, contents = encode_messages(messages, self._settings.wire_model, scope)
         if not contents:
             raise AntigravityError("empty_conversation")
-        config = {"maxOutputTokens": self.config.max_tokens}
-        if self._settings.thinking_config:
-            config["thinkingConfig"] = dict(self._settings.thinking_config)
+        limit = kwargs.get("max_tokens")
+        thinking = dict(self._settings.thinking_config)
+        if limit is None:
+            limit = self.config.max_tokens
+        else:
+            ceiling = model_settings(
+                self.config.model, self.reasoning_effort
+            ).max_output
+            if type(limit) is not int or not 0 < limit <= ceiling:
+                raise AntigravityError("invalid_max_output_tokens")
+            budget = thinking.get("thinkingBudget")
+            if budget is not None and limit <= budget:
+                minimum = (
+                    1024 if self._settings.wire_model.startswith("claude-") else 128
+                )
+                if limit <= minimum:
+                    raise AntigravityError(
+                        "max_output_tokens_must_exceed_thinking_budget"
+                    )
+                thinking["thinkingBudget"] = max(minimum, limit // 2)
+        config = {"maxOutputTokens": limit}
+        if thinking:
+            config["thinkingConfig"] = thinking
         if self.config.temperature is not None:
             config["temperature"] = self.config.temperature
         request = {"contents": contents, "generationConfig": config}

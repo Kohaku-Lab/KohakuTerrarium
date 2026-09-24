@@ -90,6 +90,7 @@ def encode_messages(
     """Serialize text/images and complete tool rounds, retaining bound raw parts."""
     system, contents = [], []
     pending = []
+    wire_ids = set()
     results = {}
     for message in messages:
         role = message.get("role")
@@ -107,6 +108,11 @@ def encode_messages(
                                 "functionResponse": {
                                     "name": call["function"]["name"],
                                     "response": {"output": results[call["id"]]},
+                                    **(
+                                        {"id": call["id"]}
+                                        if call["id"] in wire_ids
+                                        else {}
+                                    ),
                                 }
                             }
                             for call in pending
@@ -138,6 +144,13 @@ def encode_messages(
             pending = message.get("tool_calls") or []
             if bound:
                 parts = copy.deepcopy(state["parts"])
+                wire_ids = {
+                    call["id"]
+                    for part in parts
+                    if isinstance(call := part.get("functionCall"), dict)
+                    and isinstance(call.get("id"), str)
+                    and call["id"]
+                }
             elif pending:
                 raise AntigravityError("history_requires_new_session")
             if pending and (

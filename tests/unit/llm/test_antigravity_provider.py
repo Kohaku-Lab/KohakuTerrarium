@@ -4,6 +4,7 @@ import time
 import httpx
 import pytest
 
+from kohakuterrarium.core.compact import CompactManager
 from kohakuterrarium.llm import antigravity_auth as auth
 from kohakuterrarium.llm.antigravity_auth import AntigravityError, BorrowedCredential
 from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
@@ -36,7 +37,8 @@ def credentials(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_complete_and_streaming_tool_roundtrip_and_signed_history():
+@pytest.mark.parametrize("upstream_id", [None, "server-1", "agy_server-1"])
+async def test_complete_and_streaming_tool_roundtrip_and_signed_history(upstream_id):
     requests = []
 
     def respond(request):
@@ -52,7 +54,11 @@ async def test_complete_and_streaming_tool_roundtrip_and_signed_history():
                 text=frame(
                     [
                         {
-                            "functionCall": {"name": "echo", "args": {"value": "ok"}},
+                            "functionCall": {
+                                "name": "echo",
+                                "args": {"value": "ok"},
+                                **({"id": upstream_id} if upstream_id else {}),
+                            },
                             "thoughtSignature": "test-signature",
                         }
                     ]
@@ -62,6 +68,15 @@ async def test_complete_and_streaming_tool_roundtrip_and_signed_history():
             data["request"]["contents"][1]["parts"][0]["thoughtSignature"]
             == "test-signature"
         )
+        assert data["request"]["contents"][-1]["parts"] == [
+            {
+                "functionResponse": {
+                    "name": "echo",
+                    "response": {"output": "ok"},
+                    **({"id": upstream_id} if upstream_id else {}),
+                }
+            }
+        ]
         return httpx.Response(200, text=frame([{"text": "ok"}]))
 
     provider = AntigravityProvider(
@@ -414,3 +429,106 @@ async def test_tiered_only_catalog_routes_do_not_request_missing_effort_skus(
         requests[0]["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"]
         == (effort or "high").upper()
     )
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "gemini-3.6-flash",
+        "gemini-3.7-flash",
+        "gemini-3.8-flash",
+        "gemini-3.1-pro",
+        "gemini-3.1-pro-low",
+        "claude-sonnet-4-6",
+        "claude-opus-4-6-thinking",
+    ],
+)
+async def test_compact_summary_uses_per_call_limit_without_mutating_profile(model):
+    submitted = []
+
+    def respond(request):
+        if request.url.path.endswith("loadCodeAssist"):
+            return httpx.Response(200, json={"cloudaicompanionProject": "test-project"})
+        submitted.append(json.loads(request.content)["request"]["generationConfig"])
+        return httpx.Response(200, text=frame([{"text": "Summary retained."}]))
+
+    provider = AntigravityProvider(model, transport=httpx.MockTransport(respond))
+    original = provider._request(
+        [{"role": "user", "content": "test"}], "scope", None, None, {}
+    )["generationConfig"]
+    manager = CompactManager()
+    manager._llm = provider
+    manager.config.max_tokens = provider._profile_max_context
+    assert (
+        await manager._summarize("User: test. Assistant: done.") == "Summary retained."
+    )
+    assert manager._last_summary_error == ""
+    assert submitted[0]["maxOutputTokens"] == (
+        3906 if model.startswith("claude-") else 4096
+    )
+    budget = submitted[0]["thinkingConfig"].get("thinkingBudget")
+    if model == "gemini-3.1-pro":
+        assert budget == 2048
+    elif budget is not None:
+        assert budget == (1001 if model.endswith("pro-low") else 1024)
+    await provider.chat_complete([{"role": "user", "content": "test"}])
+    assert submitted[1] == original
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 1.5, "4096", 65537])
+def test_invalid_per_call_limit_is_rejected(limit):
+    provider = AntigravityProvider("gemini-3.8-flash")
+    with pytest.raises(AntigravityError, match="invalid_max_output_tokens"):
+        provider._request(
+            [{"role": "user", "content": "test"}],
+            "scope",
+            None,
+            None,
+            {"max_tokens": limit},
+        )
+
+
+@pytest.mark.parametrize(
+    "model,limit", [("gemini-3.1-pro", 128), ("claude-sonnet-4-6", 1024)]
+)
+def test_per_call_limit_must_fit_minimum_thinking_budget(model, limit):
+    provider = AntigravityProvider(model)
+    with pytest.raises(
+        AntigravityError, match="max_output_tokens_must_exceed_thinking_budget"
+    ):
+        provider._request(
+            [{"role": "user", "content": "test"}],
+            "scope",
+            None,
+            None,
+            {"max_tokens": limit},
+        )
+
+
+def test_none_override_and_unknown_generation_options():
+    provider = AntigravityProvider("gemini-3.1-pro")
+    args = ([{"role": "user", "content": "test"}], "scope", None, None)
+    assert provider._request(*args, {"max_tokens": None}) == provider._request(
+        *args, {}
+    )
+    with pytest.raises(AntigravityError, match="unsupported_generation_option"):
+        provider._request(*args, {"max_tokens": 4096, "typo": 1})
+
+
+@pytest.mark.parametrize(
+    "limit,budget", [(512, 256), (129, 128), (10001, 5000), (12000, 10001)]
+)
+def test_per_call_numeric_budget_respects_output_cap_and_minimum(limit, budget):
+    provider = AntigravityProvider("gemini-3.1-pro")
+    request = provider._request(
+        [{"role": "user", "content": "test"}],
+        "scope",
+        None,
+        None,
+        {"max_tokens": limit},
+    )
+    assert request["generationConfig"] == {
+        "maxOutputTokens": limit,
+        "thinkingConfig": {"includeThoughts": True, "thinkingBudget": budget},
+    }
+    assert provider._settings.thinking_config["thinkingBudget"] == 10001

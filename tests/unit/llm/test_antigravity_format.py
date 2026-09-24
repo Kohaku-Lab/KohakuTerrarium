@@ -10,7 +10,8 @@ from kohakuterrarium.llm.antigravity_format import (
 )
 
 
-def test_signed_tool_roundtrip_orders_results_by_id():
+@pytest.mark.parametrize("upstream_ids", [(), ("a",), ("a", "b")])
+def test_signed_tool_roundtrip_orders_results_by_id(upstream_ids):
     calls = [
         {
             "id": key,
@@ -23,7 +24,11 @@ def test_signed_tool_roundtrip_orders_results_by_id():
         {"thoughtSignature": "signature-only"},
         *[
             {
-                "functionCall": {"name": "echo", "args": {"value": key}},
+                "functionCall": {
+                    "name": "echo",
+                    "args": {"value": key},
+                    **({"id": key} if key in upstream_ids else {}),
+                },
                 "thoughtSignature": "sig-" + key,
             }
             for key in ("a", "b")
@@ -44,9 +49,16 @@ def test_signed_tool_roundtrip_orders_results_by_id():
     )
     assert system == {"parts": [{"text": "Be brief"}]}
     assert contents[1]["parts"] == parts
-    assert [
-        p["functionResponse"]["response"]["output"] for p in contents[2]["parts"]
-    ] == ["first", "second"]
+    assert contents[2]["parts"] == [
+        {
+            "functionResponse": {
+                "name": "echo",
+                "response": {"output": output},
+                **({"id": key} if key in upstream_ids else {}),
+            }
+        }
+        for key, output in (("a", "first"), ("b", "second"))
+    ]
     message["tool_calls"] = calls[:1]
     with pytest.raises(AntigravityError, match="history_requires_new_session"):
         encode_messages([message], "gemini-3-flash", "account")

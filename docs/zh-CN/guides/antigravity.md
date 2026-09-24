@@ -41,7 +41,7 @@ Pro 切换 `-low/-high`，对应 `thinkingBudget=1001/10001`。直接填写明�
 
 agy 1.2.9 对两个 Claude 都拒绝 `--effort`，Pro 则拒绝 medium；KT 保持相同能力边界。
 Claude 使用模型目录默认的 1,024 thinking budget，不套用 Anthropic 直连 API 的
-自适应 effort。输出可手动调低，但不得超过模型上限或小于等于数字 thinking budget。
+自适应 effort。profile 输出上限可手动调低，但不得超过模型上限或小于等于数字 thinking budget。
 
 原 `gemini-3-flash` 预设继续兼容旧配置，保留 120,000/8,192 的运行限制，不新增
 推理档位。也可复制预设填写发现接口返回的 ID；未知模型不会猜测 effort 支持情况。
@@ -85,3 +85,11 @@ Claude Sonnet 4.6 文本。本次实现验证使用离线 HTTP 响应及真实 T
 后续两次明确授权的在线对照确认：Flash 3.8 的 `-high` 返回 404，改用 `-tiered`
 并保持 HIGH thinkingLevel 返回 200 / STOP。Flash 3.7 按同样只提供 tiered 的发现
 目录修正，尚未额外在线验证。
+
+
+单次 `max_tokens` 覆盖（包括压缩摘要）不修改已保存的 profile，保持该次总输出上限。
+若数字思考预算无法容纳，则仅该次请求取输出上限的一半，并遵守 Gemini Pro 128、
+Claude 1,024 的最低思考预算；输出上限不足以超过最低预算时明确拒绝。
+常规请求仍使用配置的 effort 预算，未知生成参数继续报错。
+工具结果会回传服务端提供的函数调用 ID；上游未提供 ID 时，KT 生成的 ID 只用于
+内部配对，不作为服务端 ID 外发。

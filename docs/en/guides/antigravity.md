@@ -46,7 +46,7 @@ an effort that conflicts with the ID fails before authentication.
 agy 1.2.9 rejects `--effort` on both Claude models and rejects medium for Pro.
 KT exposes the same choices. Claude sends the catalog's default thinking budget
 of 1,024; it does not expose Anthropic direct-API effort controls. Unsupported
-choices fail explicitly. Smaller output overrides are retained; values above the
+choices fail explicitly. Smaller profile output limits are retained; values above the
 catalog cap, or at/below a numeric thinking budget, are rejected.
 
 The original `gemini-3-flash` preset remains for compatibility with its prior
@@ -111,3 +111,12 @@ not add live inference calls. A subsequent authorized two-request comparison
 verified that Flash 3.8 `-high` returned HTTP 404 while `-tiered` with the same
 HIGH thinking level returned HTTP 200 / STOP. Flash 3.7 routing follows the
 same discovered tiered-only catalog but has not been live-tested. See the [metadata and routing evidence](../../zh-CN/dev/research/antigravity-agy-models-2026-09-24.md).
+
+
+Per-call `max_tokens` overrides (including compaction summaries) leave the saved
+profile unchanged and retain the total output cap. If a numeric thinking budget
+cannot fit, that request uses half the output cap, floored at 128 for Gemini Pro
+or 1,024 for Claude. Caps that cannot exceed that minimum are rejected. Normal
+requests retain the configured effort budget; unknown generation options still fail.
+Tool results echo upstream function-call IDs when present. Locally generated IDs
+for no-ID calls are used only for KT pairing and are not sent as upstream IDs.
