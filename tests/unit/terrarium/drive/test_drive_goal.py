@@ -13,7 +13,7 @@ import pytest
 from kohakuterrarium.terrarium.drive import goal as goal_mod
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 from kohakuterrarium.terrarium.drive.goal import GoalDriveRegistration
-from kohakuterrarium.terrarium.drive.models import ActorRef
+from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 
 # ── GoalSpec ────────────────────────────────────────────────────────
 
@@ -112,6 +112,15 @@ class TestGoalRegistration:
         assert cont.ready is True
         # continue_when_ready re-arms so the dispatcher continues after settlement.
         assert cont.re_arm is True
+
+    @pytest.mark.parametrize("autonomy", ["manual", "continue_when_ready"])
+    def test_waiting_does_not_grant_initial_or_continuation_readiness(self, autonomy):
+        record = _record(objective="Await a result", autonomy=autonomy)
+        record.status = DriveStatus.WAITING
+        readiness = GoalDriveRegistration().readiness(record, {}, None)
+        assert readiness.ready is False
+        assert readiness.initial is False
+        assert readiness.re_arm is False
 
     def test_readiness_stops_re_arm_when_budget_exhausted(self):
         reg = GoalDriveRegistration()

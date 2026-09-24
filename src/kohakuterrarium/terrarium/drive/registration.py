@@ -26,6 +26,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationNotFoundError,
     DriveValidationError,
 )
+from kohakuterrarium.terrarium.drive.models import DriveStatus
 from kohakuterrarium.terrarium.drive.registration_options import (
     EFFECTIVE_OPTIONS_ATTR,
     apply_registration_options,
@@ -375,7 +376,7 @@ class GenericDriveRegistration:
     """Opaque-spec builtin registration with manual terminal proposals.
 
     Accepts any JSON-safe spec within a byte cap, adds no transition edges
-    beyond the generic graph, is trivially ready, and requires no verifier
+    beyond the generic graph, is ready when active, and requires no verifier
     (``verifier_mode="none"``). Contributes a minimal bounded prompt.
     """
 
@@ -422,7 +423,7 @@ class GenericDriveRegistration:
         return None
 
     def readiness(self, drive: Any, dependencies: Any, now: Any) -> Readiness:
-        return Readiness(ready=True)
+        return Readiness(ready=getattr(drive, "status", None) != DriveStatus.WAITING)
 
     def project_event(
         self, drive: Any, assignment: Any, reason: Any

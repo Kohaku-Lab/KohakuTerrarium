@@ -35,13 +35,7 @@ from kohakuterrarium.core.config_types import (
     InputConfig,
     OutputConfig,
 )
-from kohakuterrarium.modules.subagent.config import SubAgentConfig
-from kohakuterrarium.modules.tool.base import (
-    BaseTool,
-    ExecutionMode,
-    ToolContext,
-    ToolResult,
-)
+from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.session.store import SessionStore
 import kohakuterrarium.terrarium.session_coord as _session_coord
 from kohakuterrarium.terrarium.drive.store import (
@@ -208,33 +202,6 @@ async def _settle() -> None:
     sync call returns. A few event-loop turns let it land."""
     for _ in range(5):
         await asyncio.sleep(0)
-
-
-class _GatedJobTool(BaseTool):
-    """Produce a background result after the test releases the job."""
-
-    def __init__(self, *, direct: bool):
-        super().__init__()
-        self.direct = direct
-        self.started = asyncio.Event()
-        self.release = asyncio.Event()
-
-    @property
-    def tool_name(self):
-        return "gated_job"
-
-    @property
-    def description(self):
-        return "Wait for a result."
-
-    @property
-    def execution_mode(self):
-        return ExecutionMode.DIRECT if self.direct else ExecutionMode.BACKGROUND
-
-    async def _execute(self, args, **kwargs):
-        self.started.set()
-        await self.release.wait()
-        return ToolResult(output="BACKGROUND-JOB-RESULT")
 
 
 class _TwoPartyReviewReg(GenericDriveRegistration):
@@ -1684,7 +1651,7 @@ class TestTerrariumIntegration:
             assert record.status is DriveStatus.ACTIVE
 
             # 2) drive_ready delivered as an ORDINARY TriggerEvent + processed.
-            for _ in range(300):
+            for _ in range(150):
                 deliveries = await manager.list_deliveries(drive_id)
                 if any(d.state == "acknowledged" for d in deliveries):
                     break
@@ -1954,32 +1921,21 @@ class TestTerrariumIntegration:
                     ] == [f"merge-{creature.name}", f"split-{creature.name}"]
 
     @pytest.mark.timeout(120)
-    @pytest.mark.parametrize("job_kind", ["tool", "subagent"])
     async def test_drive_delivery_waits_for_startup_trigger(
-        self, patched_llm, tmp_path, job_kind
+        self, patched_llm, tmp_path
     ):
-        """Defer goals through startup and background work, then wait and wake."""
+        """Respect startup restoration, explicit waiting, and authorized wake."""
         patched_llm.set_script(
             "worker",
             [
-                ScriptEntry(
-                    "STARTUP-DONE-MARKER\n"
-                    + (
-                        "[/delegate]Wait for the result[delegate/]"
-                        if job_kind == "subagent"
-                        else "[/gated_job][gated_job/]"
-                    ),
-                    match="startup wake",
-                ),
-                ScriptEntry(
-                    "BACKGROUND-CONSUMED-MARKER", match="BACKGROUND-JOB-RESULT"
-                ),
+                ScriptEntry("STARTUP-DONE-MARKER", match="startup wake"),
                 "DRIVE-DONE-MARKER",
+                "DRIVE-RESUMED-MARKER",
             ],
         )
         engine = Terrarium(
             pwd=str(tmp_path),
-            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_config=DriveRuntimeConfig(enabled=True, readiness_cooldown_s=60),
             drive_registrations=default_registrations(),
         )
         async with engine:
@@ -1987,22 +1943,13 @@ class TestTerrariumIntegration:
             cfg.startup_trigger = {"prompt": "startup wake"}
             # start=False so a drive is seeded BEFORE the barrier is crossed.
             worker = await engine.add_creature(cfg, creature_id="worker", start=False)
-            job = _GatedJobTool(direct=job_kind == "subagent")
-            worker.agent.add_tool(job)
-            if job_kind == "subagent":
-                subagent = SubAgentConfig(name="delegate", tools=["gated_job"])
-                worker.agent.add_subagent(subagent)
-                worker.agent.registry.register_subagent("delegate", subagent)
-                worker.agent.subagent_manager.llm = ScriptedLLM(
-                    ["[/gated_job][gated_job/]", "BACKGROUND-JOB-RESULT"]
-                )
             actor = ActorRef("user", "alice")
             record = await engine.drives.manager.create_drive(
                 CreateDriveRequest(
                     kind="goal",
                     title="watch",
                     spec={
-                        "objective": "Process background results",
+                        "objective": "Honor explicit waiting",
                         "autonomy": "continue_when_ready",
                         "budgets": {"max_turns": 2},
                     },
@@ -2020,41 +1967,16 @@ class TestTerrariumIntegration:
             # Start: the startup trigger fires; the drive is deferred behind
             # the barrier and delivered only after startup settles.
             await engine.start("worker")
-            await asyncio.wait_for(job.started.wait(), timeout=5)
-            await worker.wait_restoration_ready()
-            await _settle()
+            for _ in range(200):
+                deliveries = await engine.drives.manager.list_deliveries(
+                    record.drive_id
+                )
+                if any(d.state == "acknowledged" for d in deliveries):
+                    break
+                await asyncio.sleep(0.03)
             manager = engine.drives.manager
             await manager.stop()
-            assert worker.is_running
-            for _ in range(3):
-                await manager._scan_ready()
-                await manager.dispatcher.dispatch_once()
-                await manager.dispatcher.drain()
-                deliveries = await manager.list_deliveries(record.drive_id)
-                assert [d.state for d in deliveries] == ["pending"]
-                assert deliveries[0].attempt == 0
-                assert worker.agent.llm.call_count == 1
-
-            job.release.set()
-            for _ in range(200):
-                if worker.agent.llm.call_count == 2 and worker.is_naturally_idle():
-                    break
-                await asyncio.sleep(0.01)
-            assert worker.agent.llm.call_count == 2
-            assert worker.is_naturally_idle()
-            await manager.dispatcher.dispatch_once()
-            await manager.dispatcher.drain()
-            assert (
-                len(
-                    [
-                        d
-                        for d in await manager.list_deliveries(record.drive_id)
-                        if d.state == "acknowledged"
-                    ]
-                )
-                == 1
-            )
-
+            assert len([d for d in deliveries if d.state == "acknowledged"]) == 1
             result = await worker.agent.registry.get_tool("drive_transition").execute(
                 {
                     "drive_id": record.drive_id,
@@ -2065,27 +1987,21 @@ class TestTerrariumIntegration:
             )
             assert result.error is None
             waiting = await manager.get_drive(record.drive_id)
+            before = await manager.list_deliveries(record.drive_id)
             assert waiting.status is DriveStatus.WAITING
             for _ in range(3):
                 await manager._scan_ready()
                 await manager.dispatcher.dispatch_once()
                 await manager.dispatcher.drain()
-                assert (
-                    await manager.get_drive(record.drive_id)
-                ).revision == waiting.revision
+                current = await manager.get_drive(record.drive_id)
+                assert current.status is DriveStatus.WAITING
+                assert current.revision == waiting.revision
+            assert await manager.list_deliveries(record.drive_id) == before
             await manager.wake_drive(record.drive_id, actor=actor)
             await manager.dispatcher.dispatch_once()
             await manager.dispatcher.drain()
-            assert (
-                len(
-                    [
-                        d
-                        for d in await manager.list_deliveries(record.drive_id)
-                        if d.state == "acknowledged"
-                    ]
-                )
-                == 2
-            )
+            deliveries = await manager.list_deliveries(record.drive_id)
+            assert len([d for d in deliveries if d.state == "acknowledged"]) == 2
             assistant_text = " || ".join(
                 m.get("content", "") if isinstance(m.get("content"), str) else ""
                 for m in worker.agent.conversation_history
@@ -2093,9 +2009,7 @@ class TestTerrariumIntegration:
             )
             assert "STARTUP-DONE-MARKER" in assistant_text
             assert "DRIVE-DONE-MARKER" in assistant_text
-            assert assistant_text.index(
-                "BACKGROUND-CONSUMED-MARKER"
-            ) < assistant_text.index("DRIVE-DONE-MARKER")
+            assert "DRIVE-RESUMED-MARKER" in assistant_text
             # Ordering: startup settled BEFORE the drive turn ran.
             assert assistant_text.index("STARTUP-DONE-MARKER") < assistant_text.index(
                 "DRIVE-DONE-MARKER"

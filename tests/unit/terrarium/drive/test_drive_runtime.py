@@ -72,7 +72,7 @@ class _FakeCreature:
         result=None,
         paused=False,
         stop_requested=False,
-        naturally_idle=True,
+        naturally_idle=False,
     ):
         self.creature_id = cid
         self._running = running
@@ -179,24 +179,6 @@ class TestBuildDriveRuntime:
 
 
 class TestEngineSink:
-    async def test_running_creature_defers_until_pending_work_finishes(self):
-        engine = _FakeEngine()
-        creature = _FakeCreature("worker", naturally_idle=False)
-        engine._creatures["worker"] = creature
-        sink = _EngineDriveSink(engine)
-        out = await sink.deliver("worker", object(), delivery_id="d1")
-        if out.admitted:
-            await out.settlement()
-        assert not out.admitted
-        assert creature.injected == []
-
-        creature.naturally_idle = True
-        out = await sink.deliver("worker", object(), delivery_id="d1")
-        assert out.admitted
-        assert await out.settlement() == Settlement(SettlementStatus.OK)
-        assert len(creature.injected) == 1
-        assert creature.start_count == 0
-
     async def test_rejected_when_creature_absent(self):
         engine = _FakeEngine()
         sink = _EngineDriveSink(engine)

@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Any
 
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+from kohakuterrarium.terrarium.drive.models import DriveStatus
 from kohakuterrarium.terrarium.drive.registration import (
     DriveProjection,
     DriveRegistrationDescriptor,
@@ -190,7 +191,9 @@ class GoalDriveRegistration:
     def readiness(
         self, drive: Any, dependencies: Any, now: datetime, *, turns_used: int = 0
     ) -> Readiness:
-        """Compute readiness from autonomy mode and consumed turn budget."""
+        """Compute readiness from lifecycle state, autonomy, and turn budget."""
+        if getattr(drive, "status", None) == DriveStatus.WAITING:
+            return Readiness(ready=False, reason="waiting for an explicit wake")
         spec = self._spec(drive)
         if spec.get("autonomy") != "continue_when_ready":
             # Manual goals receive one initial opportunity and require an

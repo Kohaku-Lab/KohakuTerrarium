@@ -281,7 +281,7 @@ class ManagerReadinessMixin:
     ) -> bool:
         """Return whether registration readiness permits admission.
 
-        Missing or unavailable readiness roles impose no additional gate.
+        Missing or unavailable readiness roles cannot wake waiting drives.
         ``ready`` permits admission, while ``initial`` permits only the first
         completed opportunity in a lifecycle epoch. Readiness errors fail closed
         by blocking the drive.
@@ -292,10 +292,10 @@ class ManagerReadinessMixin:
         """
         entry = self._snapshot.for_kind(record.kind) if self._snapshot else None
         if entry is None or not entry.available:
-            return True
+            return record.status is not DriveStatus.WAITING
         registration = entry.registration
         if not callable(getattr(registration, "readiness", None)):
-            return True
+            return record.status is not DriveStatus.WAITING
         source = (
             list(await self._repo.list_deliveries(record.drive_id))
             if deliveries is None
@@ -318,7 +318,9 @@ class ManagerReadinessMixin:
             return False
         if getattr(verdict, "ready", False):
             return True
-        if getattr(verdict, "initial", False):
+        if record.status is not DriveStatus.WAITING and getattr(
+            verdict, "initial", False
+        ):
             # Only a non-superseded delivery consumes the epoch's initial grant.
             # This allows recovery of an uncertain first attempt without treating
             # the abandoned row as completed delivery.
@@ -429,13 +431,17 @@ class ManagerReadinessMixin:
         for record in await self._repo.list_drives(
             DriveQuery(statuses=frozenset({DriveStatus.WAITING}))
         ):
-            if record.not_before is None and not record.dependency_ids:
-                continue
             assignment = await self._repo.get_assignment(record.drive_id)
             if assignment is None or assignment.assignee_creature_id is None:
                 continue
             deps = await self._dependency_statuses(record)
             if not wake_conditions_met(record, now, deps):
+                continue
+            if (
+                record.not_before is None
+                and not record.dependency_ids
+                and not await self._readiness_admits(record, deps, evaluated_at=now)
+            ):
                 continue
             try:
                 woken = await self._repo.transition_drive(

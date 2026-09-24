@@ -334,8 +334,7 @@ class Creature:
         return self._stop_requested
 
     def is_naturally_idle(self) -> bool:
-        """Return whether no turn, queued event, or background work is pending."""
-        if self._stop_requested:
+        if self._stop_requested or self.agent.is_running:
             return False
         if self._turn_work_pending():
             return False
