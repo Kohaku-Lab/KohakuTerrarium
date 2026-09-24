@@ -46,8 +46,8 @@ agy 1.2.9 对两个 Claude 都拒绝 `--effort`，Pro 则拒绝 medium；KT 保�
 Claude 使用模型目录默认的 1,024 thinking budget，不套用 Anthropic 直连 API 的
 自适应 effort。profile 输出上限可手动调低，但不得超过模型上限或小于等于数字 thinking budget。
 
-原 `gemini-3-flash` 预设继续兼容旧配置，保留 120,000/8,192 的运行限制，不新增
-推理档位。也可复制预设填写发现接口返回的 ID；未知模型不会猜测 effort 支持情况。
+旧 `gemini-3-flash` 已从 Antigravity 内置预设移除；使用它的配置请改选上表中的
+当前 Flash 预设。仍可填写自定义模型 ID，未知模型不会猜测 effort 支持情况。
 
 ## 凭据与会话
 

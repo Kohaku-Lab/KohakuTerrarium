@@ -40,7 +40,7 @@ def test_current_agy_limits_and_variations(model, context, output, efforts):
         ("gemini-3.1-pro-low", "", "gemini-3.1-pro-low", 65535),
         ("gemini-3.1-pro-high", "", "gemini-pro-agent", 65535),
         ("gemini-3.1-pro", "high", "gemini-pro-agent", 65535),
-        ("gemini-3-flash", "", "gemini-3-flash", 8192),
+        ("gemini-custom", "", "gemini-custom", 8192),
     ],
 )
 def test_default_and_explicit_sku_settings(model, effort, wire, limit):
@@ -95,3 +95,7 @@ def test_smaller_explicit_output_is_preserved():
 def test_catalog_rejects_unsupported_variations(selector):
     with pytest.raises(ValueError, match="Unknown variation"):
         get_profile("google-antigravity/" + selector)
+
+
+def test_retired_flash_is_not_advertised_as_an_antigravity_preset():
+    assert ("google-antigravity", "gemini-3-flash") not in get_all_presets()

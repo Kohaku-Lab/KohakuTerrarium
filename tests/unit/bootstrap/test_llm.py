@@ -618,13 +618,15 @@ class TestResolvedBaseUrl:
 
 def test_antigravity_resolves_without_key_and_rejects_worker(monkeypatch):
     provider = create_llm_provider(
-        AgentConfig(name="a"), "google-antigravity/gemini-3-flash"
+        AgentConfig(name="a"), "google-antigravity/gemini-3.8-flash"
     )
     assert isinstance(provider, AntigravityProvider)
-    assert provider.config.model == "gemini-3-flash"
+    assert provider.config.model == "gemini-3.8-flash"
     monkeypatch.setattr(llm_mod._api_keys, "_resolver", object())
     with pytest.raises(ValueError, match="local_host_only"):
-        create_llm_provider(AgentConfig(name="a"), "google-antigravity/gemini-3-flash")
+        create_llm_provider(
+            AgentConfig(name="a"), "google-antigravity/gemini-3.8-flash"
+        )
 
 
 def test_antigravity_inline_unknown_model_uses_consumer_transport():

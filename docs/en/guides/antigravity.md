@@ -53,9 +53,9 @@ of 1,024; it does not expose Anthropic direct-API effort controls. Unsupported
 choices fail explicitly. Smaller profile output limits are retained; values above the
 catalog cap, or at/below a numeric thinking budget, are rejected.
 
-The original `gemini-3-flash` preset remains for compatibility with its prior
-120,000/8,192 operating limits and no effort override. Discovery can provide IDs
-for custom presets; unknown models have no inferred effort controls.
+The retired `gemini-3-flash` is no longer included in the built-in Antigravity
+presets. Choose a current Flash preset above for configurations that used it.
+Custom model IDs remain supported without inferred effort controls.
 
 ## Ownership and request behavior
 

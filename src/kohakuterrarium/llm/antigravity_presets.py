@@ -58,13 +58,6 @@ PRESETS = {
     }
     for name, spec in MODELS.items()
 }
-# Retain the original preset for existing creature configurations.
-PRESETS[("google-antigravity", "gemini-3-flash")] = {
-    "model": "gemini-3-flash",
-    "max_context": 120000,
-    "max_output": 8192,
-    "provider_native_tools": [],
-}
 
 
 @dataclass(frozen=True)
