@@ -16,11 +16,13 @@ kt run ./my-creature --llm google-antigravity/gemini-3.8-flash@reasoning=medium
 needed. `models` makes an authenticated discovery request and does not generate
 text. Generation consumes the account's available quota.
 
-In Web settings, open the `google-antigravity` provider row to inspect local
-status or refresh through agy. These operations respect the server's admin-token
-setting. Provider settings do not display a discovered model list; built-in and
-custom presets are managed in the Custom Models tab. CLI and Web share the built-in model catalog and
-its reasoning variation selector. No preset becomes the default automatically.
+In Web settings, the OAuth sign-in section shows Google Antigravity with a
+Check status action. This reads local credential state and respects the server's
+admin-token setting. Expired credentials that agy can renew show Awaiting refresh;
+renewal is attempted automatically on the next request. There is no manual renewal
+button in Web settings. Provider settings do not display a discovered model list;
+built-in and custom presets are managed in the Custom Models tab. CLI and Web
+share the built-in model catalog and its reasoning variation selector. No preset becomes the default automatically.
 
 ## Models and reasoning
 

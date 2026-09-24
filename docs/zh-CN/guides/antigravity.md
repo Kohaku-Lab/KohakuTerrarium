@@ -14,7 +14,8 @@ kt run ./my-creature --llm google-antigravity/gemini-3.8-flash@reasoning=medium
 - `status` 仅查看本地凭据状态，不联网。
 - `refresh` 在必要时运行 `agy --output-format json models`，由 agy 自己续期。
 - `models` 联网获取账号可用模型，不产生推理。
-- Web 设置中的 `google-antigravity` 行仅提供凭据状态与刷新操作，遵循管理员权限配置。
+- Web 设置的「OAuth 登录」区块中，Google Antigravity 仅提供「检查状态」，遵循管理员权限配置。
+- 已过期且 agy 可续期的凭据显示「待自动刷新」，下次请求时自动尝试续期；Web 不提供手动续期按钮。
 - 提供者页不展示服务端模型列表；预置模型与自定义模型统一在「自定义模型」页管理。
 
 ## 内置模型与 reasoning effort

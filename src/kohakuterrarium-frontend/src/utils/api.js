@@ -1214,14 +1214,6 @@ export const settingsAPI = {
     const { data } = await api.get("/settings/antigravity-status", _nodeQuery(node))
     return data
   },
-  async refreshAntigravity(node = "_host") {
-    const { data } = await api.post(
-      "/settings/antigravity-refresh",
-      {},
-      { timeout: 90000, ..._nodeQuery(node) },
-    )
-    return data
-  },
   async getGrokStatus(node = "_host") {
     const { data } = await api.get("/settings/grok-status", _nodeQuery(node))
     return data

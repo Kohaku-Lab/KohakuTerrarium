@@ -9,155 +9,48 @@
       <el-tab-pane :label="t('settings.tabs.providers')" name="providers">
         <div class="settings-pane flex flex-col gap-3 max-w-2xl">
           <p class="text-xs text-warm-400 mb-1">{{ t("settings.providers.description") }}</p>
-          <p class="text-xs text-warm-400 mb-2">{{ t("settings.keys.storageHint") }}</p>
           <!-- Multi-node target picker. Hidden in standalone mode by SitePicker itself. -->
           <div class="flex items-center gap-2">
             <SitePicker v-model="providerNode" :label="t('settings.providers.targetNode')" />
             <span v-if="providerNode && providerNode !== '_host'" class="text-[11px] text-amber-shadow dark:text-amber-light">{{ t("settings.providers.targetNodeHint") }}</span>
           </div>
 
-          <!-- Built-in provider list (auth managed inline) -->
-          <div class="card p-4">
-            <div class="font-medium text-warm-700 dark:text-warm-300 text-sm mb-3">
-              {{ t("settings.providers.builtInTitle") }}
+          <section v-if="oauthBackends.length" class="card p-4 provider-section" data-provider-section="oauth">
+            <h3 class="provider-section-title">{{ t("settings.providers.oauthTitle") }}</h3>
+            <p class="provider-section-hint">{{ t("settings.providers.oauthHint") }}</p>
+            <OAuthProviderRow v-for="backend in oauthBackends" :key="backend.name" :backend="backend" :node="providerNode" :login-busy="codexLoggingIn" @login="runCodexLogin" />
+          </section>
+          <section class="card p-4 provider-section" data-provider-section="keys">
+            <h3 class="provider-section-title">{{ t("settings.providers.keysTitle") }}</h3>
+            <p class="provider-section-hint">{{ t("settings.keys.storageHint") }}</p>
+            <ProviderKeyRow v-for="backend in keyBackends" :key="backend.name" v-model="keyInput" :backend="backend" :editing="editingKey === backend.name" @edit="startEditKey(backend.name)" @save="saveKey(backend.name)" @cancel="editingKey = ''" @delete="deleteKey(backend.name)" />
+          </section>
+          <section class="card p-4 provider-section" data-provider-section="custom">
+            <div class="flex items-center justify-between gap-3">
+              <h3 class="provider-section-title">{{ t("settings.providers.customTitle") }}</h3>
+              <el-button size="small" @click="toggleBackendForm">{{ showBackendForm ? t("common.cancel") : t("settings.providers.addCustom") }}</el-button>
             </div>
-            <div class="flex flex-col gap-3">
-              <div v-for="backend in builtInBackends" :key="backend.name" class="flex items-start gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 mb-1 flex-wrap">
-                    <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
-                    <el-tag size="small" effect="plain">{{ backend.backend_type }}</el-tag>
-                    <el-tag size="small" :type="backend.available ? 'success' : 'info'" effect="plain">
-                      {{ backend.available ? t("settings.keys.active") : t("settings.keys.noKey") }}
-                    </el-tag>
-                  </div>
-                  <div class="text-[11px] text-warm-400 font-mono truncate">
-                    {{ backend.base_url || "(built-in endpoint)" }}
-                  </div>
-                  <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
-                    <span v-if="backend.env_var">{{ backend.env_var }}</span>
-                    <span v-if="backend.masked_key && !isOAuthCodex(backend) && !isGrokSubscription(backend) && !isAntigravity(backend)"> · {{ backend.masked_key }}</span>
-                    <span v-if="isOAuthCodex(backend)">{{ t("settings.keys.oauthHint") }}</span>
-                    <span v-if="isGrokSubscription(backend)">{{ t("settings.grok.hint") }}</span>
-                  </div>
-                  <AntigravityCard v-if="isAntigravity(backend)" :node="providerNode" />
-                  <GrokSubscriptionCard v-if="isGrokSubscription(backend)" :node="providerNode" />
-                </div>
-                <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                  <template v-if="isGrokSubscription(backend) || isAntigravity(backend)" />
-                  <template v-else-if="!isOAuthCodex(backend)">
-                    <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
-                    <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
-                      {{ t("common.save") }}
-                    </el-button>
-                    <el-button v-if="editingKey === backend.name" size="small" @click="editingKey = ''">
-                      {{ t("common.cancel") }}
-                    </el-button>
-                    <el-button v-else size="small" @click="startEditKey(backend.name)">
-                      {{ backend.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
-                    </el-button>
-                    <el-popconfirm v-if="editingKey !== backend.name && backend.has_key" :title="t('settings.keys.deleteConfirm', { provider: backend.name })" :confirm-button-text="t('common.delete')" :cancel-button-text="t('common.cancel')" @confirm="deleteKey(backend.name)">
-                      <template #reference>
-                        <el-button size="small" type="danger" plain :title="t('settings.keys.delete')">
-                          <span class="i-carbon-trash-can" />
-                        </el-button>
-                      </template>
-                    </el-popconfirm>
-                  </template>
-                  <template v-else>
-                    <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
-                      {{ backend.available ? t("common.refresh") : t("settings.keys.setKey") }}
-                    </el-button>
-                  </template>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- Custom provider list -->
-          <div class="card p-4">
-            <div class="flex items-center justify-between mb-3">
-              <h3 class="font-medium text-warm-700 dark:text-warm-300 text-sm">
-                {{ t("settings.providers.customTitle") }}
-              </h3>
-              <el-button size="small" type="primary" plain @click="toggleBackendForm">
-                {{ showBackendForm ? t("common.cancel") : t("settings.providers.addCustom") }}
-              </el-button>
-            </div>
-            <div v-if="customBackends.length === 0 && !showBackendForm" class="text-[11px] text-warm-400 italic text-center py-4">
-              {{ t("settings.providers.noCustom") }}
-            </div>
-            <div class="flex flex-col gap-3">
-              <div v-for="backend in customBackends" :key="backend.name" class="flex flex-col gap-3">
-                <div class="flex-1 min-w-0">
-                  <div class="flex items-center gap-2 mb-1 flex-wrap">
-                    <div class="font-medium text-warm-700 dark:text-warm-300 text-sm">{{ backend.name }}</div>
-                    <el-tag size="small" effect="plain">{{ backend.backend_type }}</el-tag>
-                    <el-tag size="small" :type="backend.available ? 'success' : 'info'" effect="plain">
-                      {{ backend.available ? t("settings.keys.active") : t("settings.keys.noKey") }}
-                    </el-tag>
-                  </div>
-                  <div class="text-[11px] text-warm-400 font-mono truncate">
-                    {{ backend.base_url || "(no base_url)" }}
-                  </div>
-                  <div class="text-[11px] text-warm-400 font-mono truncate mt-1">
-                    <span v-if="backend.env_var">{{ backend.env_var }}</span>
-                    <span v-if="backend.masked_key && !isOAuthCodex(backend) && !isGrokSubscription(backend) && !isAntigravity(backend)"> · {{ backend.masked_key }}</span>
-                    <span v-if="isOAuthCodex(backend)">{{ t("settings.keys.oauthHint") }}</span>
-                    <span v-if="isGrokSubscription(backend)">{{ t("settings.grok.hint") }}</span>
-                  </div>
-                  <AntigravityCard v-if="isAntigravity(backend)" :node="providerNode" />
-                  <GrokSubscriptionCard v-if="isGrokSubscription(backend)" :node="providerNode" />
-                  <div v-if="backend.provider_name || backend.provider_native_tools?.length" class="text-[10px] text-warm-400 mt-1 flex items-center gap-2 flex-wrap">
-                    <span v-if="backend.provider_name" class="font-mono">identity: {{ backend.provider_name }}</span>
-                    <span v-if="backend.provider_native_tools?.length" class="font-mono">native: {{ backend.provider_native_tools.join(", ") }}</span>
-                  </div>
-                </div>
-                <div class="flex flex-wrap items-center justify-end gap-2 shrink-0">
-                  <template v-if="isGrokSubscription(backend) || isAntigravity(backend)" />
-                  <template v-else-if="!isOAuthCodex(backend)">
-                    <el-input v-if="editingKey === backend.name" v-model="keyInput" size="small" type="password" show-password :placeholder="t('settings.keys.enterKey')" class="!w-60" @keyup.enter="saveKey(backend.name)" />
-                    <el-button v-if="editingKey === backend.name" size="small" type="primary" @click="saveKey(backend.name)">
-                      {{ t("common.save") }}
-                    </el-button>
-                    <el-button v-if="editingKey === backend.name" size="small" @click="editingKey = ''">
-                      {{ t("common.cancel") }}
-                    </el-button>
-                    <el-button v-else size="small" @click="startEditKey(backend.name)">
-                      {{ backend.has_key ? t("settings.keys.change") : t("settings.keys.setKey") }}
-                    </el-button>
-                    <el-popconfirm v-if="editingKey !== backend.name && backend.has_key" :title="t('settings.keys.deleteConfirm', { provider: backend.name })" :confirm-button-text="t('common.delete')" :cancel-button-text="t('common.cancel')" @confirm="deleteKey(backend.name)">
-                      <template #reference>
-                        <el-button size="small" type="danger" plain :title="t('settings.keys.delete')">
-                          <span class="i-carbon-trash-can" />
-                        </el-button>
-                      </template>
-                    </el-popconfirm>
-                  </template>
-                  <template v-else>
-                    <el-button size="small" type="primary" :loading="codexLoggingIn" @click="runCodexLogin">
-                      {{ backend.available ? t("common.refresh") : t("settings.keys.setKey") }}
-                    </el-button>
-                  </template>
-                  <el-button size="small" plain @click="startEditBackend(backend)">
-                    {{ t("common.edit") }}
-                  </el-button>
+            <p class="provider-section-hint">{{ t("settings.providers.customHint") }}</p>
+            <p v-if="!customBackends.length && !showBackendForm" class="text-xs text-warm-400 py-4">{{ t("settings.providers.noCustom") }}</p>
+            <div v-for="backend in customBackends" :key="backend.name" class="custom-provider-entry">
+              <component :is="isOAuthBackend(backend) ? OAuthProviderRow : ProviderKeyRow" v-model="keyInput" :backend="backend" :node="providerNode" :login-busy="codexLoggingIn" :editing="editingKey === backend.name" @login="runCodexLogin" @edit="startEditKey(backend.name)" @save="saveKey(backend.name)" @cancel="editingKey = ''" @delete="deleteKey(backend.name)">
+                <template #actions>
+                  <el-button size="small" @click="startEditBackend(backend)">{{ t("common.edit") }}</el-button>
                   <el-popconfirm :title="t('settings.backends.deleteConfirm')" @confirm="deleteBackend(backend.name)">
-                    <template #reference>
-                      <el-button size="small" type="danger" plain>{{ t("common.delete") }}</el-button>
-                    </template>
+                    <template #reference
+                      ><el-button size="small" :aria-label="t('settings.providers.removeProvider')"><span class="i-carbon-trash-can" /></el-button
+                    ></template>
                   </el-popconfirm>
-                </div>
-                <div v-if="showBackendForm && editingBackendName === backend.name" class="border-t border-warm-100 dark:border-warm-800 pt-3">
-                  <BackendForm :form="backendForm" :native-tool-catalog="nativeToolCatalog" :is-editing="true" @save="saveBackend" @cancel="closeBackendForm" @update-field="onBackendFormUpdate" />
-                </div>
+                </template>
+              </component>
+              <div v-if="showBackendForm && editingBackendName === backend.name" class="border-t border-warm-100 dark:border-warm-800 pt-3">
+                <BackendForm :form="backendForm" :native-tool-catalog="nativeToolCatalog" :is-editing="true" @save="saveBackend" @cancel="closeBackendForm" @update-field="onBackendFormUpdate" />
               </div>
             </div>
-
             <div v-if="showBackendForm && !editingBackendName" class="mt-4 pt-3 border-t border-warm-100 dark:border-warm-800">
               <BackendForm :form="backendForm" :native-tool-catalog="nativeToolCatalog" :is-editing="false" @save="saveBackend" @cancel="closeBackendForm" @update-field="onBackendFormUpdate" />
             </div>
-          </div>
+          </section>
         </div>
       </el-tab-pane>
 
@@ -481,8 +374,8 @@ import AdvancedPanel from "@/components/settings/AdvancedPanel.vue"
 import BackendForm from "@/components/settings/BackendForm.vue"
 import CodexLoginModal from "@/components/settings/CodexLoginModal.vue"
 import DriveSettingsPanel from "@/components/settings/DriveSettingsPanel.vue"
-import AntigravityCard from "@/components/settings/AntigravityCard.vue"
-import GrokSubscriptionCard from "@/components/settings/GrokSubscriptionCard.vue"
+import OAuthProviderRow from "@/components/settings/OAuthProviderRow.vue"
+import ProviderKeyRow from "@/components/settings/ProviderKeyRow.vue"
 import MCPServerEditModal from "@/components/settings/modals/MCPServerEditModal.vue"
 import PresetEditor from "@/components/settings/PresetEditor.vue"
 import SitesPane from "@/components/settings/SitesPane.vue"
@@ -690,6 +583,10 @@ function isGrokSubscription(backend) {
   return backend.backend_type === "grok-subscription"
 }
 
+function isOAuthBackend(backend) {
+  return isOAuthCodex(backend) || isAntigravity(backend) || isGrokSubscription(backend)
+}
+
 function runCodexLogin() {
   // Worker-side login still uses the one-shot REST endpoint (the
   // streaming variant only supports the host node in 1.5.0).  For
@@ -757,6 +654,7 @@ const backendsWithAuth = computed(() => {
     const keyMeta = keyMetaByProvider.get(backend.name) || {}
     return {
       ...backend,
+      available: keyMeta.available ?? backend.available,
       env_var: keyMeta.env_var || backend.api_key_env || "",
       has_key: keyMeta.has_key ?? backend.has_token,
       masked_key: keyMeta.masked_key || "",
@@ -778,7 +676,8 @@ const backendsWithAuth = computed(() => {
   return [...configuredBackends, ...credentialOnlyProviders]
 })
 
-const builtInBackends = computed(() => backendsWithAuth.value.filter((b) => b.built_in))
+const oauthBackends = computed(() => backendsWithAuth.value.filter((b) => b.built_in && isOAuthBackend(b)))
+const keyBackends = computed(() => backendsWithAuth.value.filter((b) => b.built_in && !isOAuthBackend(b)))
 const customBackends = computed(() => backendsWithAuth.value.filter((b) => !b.built_in))
 
 async function loadBackends() {
@@ -1118,6 +1017,21 @@ function onOpenDrives() {
 </script>
 
 <style scoped>
+.provider-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--el-text-color-primary);
+}
+.provider-section-hint {
+  font-size: 12px;
+  line-height: 1.5;
+  margin-top: 0.4rem;
+  color: var(--el-text-color-secondary);
+}
+.custom-provider-entry + .custom-provider-entry {
+  border-top: 1px solid var(--el-border-color-lighter);
+}
+
 /* ── Page-level flex chain ──
    The page is a non-scrolling flex column: header stays fixed, tabs fill
    the remaining viewport, and each tab pane manages its OWN scroll region.

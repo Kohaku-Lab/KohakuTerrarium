@@ -6,6 +6,9 @@ import ElementPlus, { ElMessage } from "element-plus"
 vi.mock("@/utils/api", () => {
   const settingsAPI = {
     getKeys: vi.fn(),
+    saveKey: vi.fn(),
+    getAntigravityStatus: vi.fn(),
+    getGrokStatus: vi.fn(),
     getBackends: vi.fn(),
     getNativeTools: vi.fn(),
     listMCP: vi.fn(),
@@ -39,6 +42,12 @@ function mountSettingsPage() {
     global: {
       plugins: [ElementPlus],
       stubs: {
+        OAuthProviderRow: false,
+        ProviderKeyRow: false,
+        ProviderRow: false,
+        ElButton: false,
+        ElInput: false,
+        ElTag: false,
         ElTabs: { template: "<div><slot /></div>" },
         ElTabPane: { template: "<section><slot /></section>" },
       },
@@ -55,6 +64,8 @@ describe("SettingsPage model presets", () => {
       removeItem: vi.fn(),
     })
     setActivePinia(createPinia())
+    settingsAPI.getAntigravityStatus.mockResolvedValue({ state: "ready", refresh_available: true })
+    settingsAPI.getGrokStatus.mockResolvedValue({ authenticated: true, source: "grok-cli" })
     settingsAPI.getKeys.mockResolvedValue({ providers: [] })
     settingsAPI.getBackends.mockResolvedValue({ backends: [] })
     settingsAPI.getNativeTools.mockResolvedValue({ tools: [] })
@@ -69,6 +80,64 @@ describe("SettingsPage model presets", () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     vi.restoreAllMocks()
+  })
+
+  it("separates OAuth identities from API keys without reclassifying a custom Codex endpoint", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    settingsAPI.getBackends.mockResolvedValue({
+      backends: [
+        { name: "codex", backend_type: "codex", built_in: true, available: true },
+        { name: "google-antigravity", backend_type: "google-antigravity", built_in: true },
+        { name: "grok-subscription", backend_type: "grok-subscription", built_in: true },
+        { name: "openai", backend_type: "openai", built_in: true },
+        {
+          name: "my-proxy",
+          backend_type: "codex",
+          base_url: "https://proxy.test/v1",
+          built_in: false,
+        },
+      ],
+    })
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+    const oauth = wrapper.get('[data-provider-section="oauth"]')
+    expect(oauth.findAll(".provider-row")).toHaveLength(3)
+    expect(oauth.text()).toContain("Google Antigravity")
+    expect(oauth.text()).not.toContain("settings.keys.storageHint")
+    const keys = wrapper.get('[data-provider-section="keys"]')
+    expect(keys.findAll(".provider-row")).toHaveLength(1)
+    expect(keys.text()).toContain("OpenAI")
+    expect(keys.text()).not.toContain("Google Antigravity")
+    const custom = wrapper.get('[data-provider-section="custom"]')
+    expect(custom.text()).toContain("my-proxy")
+    expect(custom.text()).toContain("https://proxy.test/v1")
+    expect(custom.text()).toContain("settings.keys.setKey")
+    expect(custom.text()).not.toContain("settings.oauth.login")
+    await oauth.findAll("button")[0].trigger("click")
+    expect(wrapper.vm.codexModalOpen).toBe(true)
+  })
+
+  it("saves the key for the selected provider and updates its configured state", async () => {
+    configAPI.getModels.mockResolvedValue([])
+    settingsAPI.getBackends.mockResolvedValue({
+      backends: [{ name: "openai", backend_type: "openai", built_in: true }],
+    })
+    settingsAPI.saveKey.mockResolvedValue({})
+    vi.spyOn(ElMessage, "success").mockImplementation(() => {})
+    const wrapper = mountSettingsPage()
+    await flushPromises()
+    const keys = wrapper.get('[data-provider-section="keys"]')
+    expect(keys.text()).toContain("settings.providers.unconfigured")
+    await keys.findAll("button")[0].trigger("click")
+    await keys.get("input").setValue("test-only-key")
+    settingsAPI.getKeys.mockResolvedValue({
+      providers: [{ provider: "openai", has_key: true, available: true }],
+    })
+    await keys.get("input").trigger("keyup", { key: "Enter" })
+    await flushPromises()
+    expect(settingsAPI.saveKey).toHaveBeenCalledWith("openai", "test-only-key", "_host")
+    expect(keys.text()).toContain("settings.oauth.configured")
+    expect(keys.find("input").exists()).toBe(false)
   })
 
   it("groups attention preferences by channel instead of rendering one flat list", async () => {
