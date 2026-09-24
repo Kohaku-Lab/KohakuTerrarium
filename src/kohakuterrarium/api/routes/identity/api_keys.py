@@ -105,6 +105,8 @@ async def remove_key_route(
     if is_host_target(node):
         try:
             remove_key(provider)
+        except ValueError as e:
+            raise HTTPException(400, str(e)) from e
         except LookupError as e:
             raise HTTPException(404, str(e)) from e
         # Providers may retain a cached value when no replacement exists, while

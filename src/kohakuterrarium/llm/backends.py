@@ -31,6 +31,7 @@ def _profiles_path() -> Path:
 _BUILTIN_PROVIDER_NAMES: set[str] = {
     "codex",
     "grok-subscription",
+    "google-antigravity",
     "openai",
     "openrouter",
     "anthropic",
@@ -80,6 +81,11 @@ def _built_in_providers() -> dict[str, LLMBackend]:
             backend_type="codex",
             provider_name="codex",
             provider_native_tools=["image_gen"],
+        ),
+        "google-antigravity": LLMBackend(
+            name="google-antigravity",
+            backend_type="google-antigravity",
+            provider_name="google-antigravity",
         ),
         "grok-subscription": LLMBackend(
             name="grok-subscription",
@@ -230,6 +236,12 @@ def load_backends() -> dict[str, LLMBackend]:
 def validate_backend_type(backend_type: str) -> str:
     """Validate and return a canonical provider transport type."""
     normalized = _normalize_backend_type(backend_type)
-    if normalized not in {"openai", "anthropic", "codex", "grok-subscription"}:
+    if normalized not in {
+        "openai",
+        "anthropic",
+        "codex",
+        "grok-subscription",
+        "google-antigravity",
+    }:
         raise ValueError(f"Unsupported backend_type: {backend_type}")
     return normalized

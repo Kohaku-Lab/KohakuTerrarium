@@ -1,5 +1,6 @@
 """Authentication CLI dispatcher — codex OAuth vs API key per provider."""
 
+from kohakuterrarium.cli.identity_antigravity import login_cli as _antigravity_login
 from kohakuterrarium.cli.identity_codex import login_cli as _codex_login
 from kohakuterrarium.cli.identity_keys import login_with_api_key
 from kohakuterrarium.studio.identity.llm_backends import get_backend
@@ -15,4 +16,6 @@ def login_cli(provider: str) -> int:
     # API-key authentication consistently across bootstrap and UI availability.
     if backend.backend_type == "codex" and not backend.base_url:
         return _codex_login()
+    if backend.backend_type == "google-antigravity":
+        return _antigravity_login()
     return login_with_api_key(provider, backend.api_key_env)

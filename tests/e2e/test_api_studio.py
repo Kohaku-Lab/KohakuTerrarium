@@ -35,6 +35,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from kohakuterrarium.llm import antigravity_auth as agy_auth
 from kohakuterrarium.api.app import create_app
 from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.catalog import _deps as catalog_deps
@@ -43,6 +44,8 @@ from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
+
+from tests.helpers.antigravity_usage import install_quota_script, assert_quota
 
 from tests.helpers.grok_usage_script import (
     FAKE_ACCESS,
@@ -205,6 +208,35 @@ class TestApiStudioJourney:
         start a live session from that creature directory and take a
         turn.
         """
+        with monkeypatch.context() as agy_patch:
+            agy_patch.setattr(agy_auth, "read_sources", lambda: [])
+            status = client.get("/api/settings/antigravity-status")
+            assert status.status_code == 200
+            assert status.json()["state"] == "login_required"
+            assert (
+                client.get("/api/settings/antigravity-status?node=worker").status_code
+                == 400
+            )
+            assert client.post("/api/settings/antigravity-refresh").status_code == 409
+
+        with monkeypatch.context() as quota_patch:
+            quota = install_quota_script(quota_patch)
+            usage_url = "/api/settings/antigravity-usage"
+            assert client.get(usage_url).json()["status"] == "not_logged_in"
+            quota["logged_in"] = True
+            response = client.get(usage_url)
+            assert response.status_code == 200
+            assert_quota(response.json(), 25)
+            quota["remaining"] = 0.5
+            assert_quota(client.get(usage_url).json(), 50)
+            remote = client.get(usage_url + "?node=worker").json()
+            assert remote["status"] == "unsupported"
+            assert remote["groups"] == []
+            quota["status"] = 503
+            assert client.get(usage_url).json()["status"] == "unavailable"
+            quota["logged_in"] = False
+            assert client.get(usage_url).json()["groups"] == []
+
         with monkeypatch.context() as usage_patch:
             grok_home = install_grok_home(workspace_root, usage_patch)
             patch_cli_version_probe(usage_patch)
@@ -280,6 +312,29 @@ class TestApiStudioJourney:
         assert resp.status_code == 200
         models = resp.json()
         assert models and all("name" in m for m in models)
+        agy_models = {
+            entry["model"]: entry
+            for entry in models
+            if entry["provider"] == "google-antigravity"
+        }
+        for model in ("gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"):
+            entry = agy_models[model]
+            assert (entry["max_context"], entry["max_output"]) == (1048576, 65536)
+            assert list(entry["variation_groups"]["reasoning"]) == [
+                "low",
+                "medium",
+                "high",
+            ]
+        assert list(agy_models["gemini-3.1-pro"]["variation_groups"]["reasoning"]) == [
+            "low",
+            "high",
+        ]
+        for model in ("claude-sonnet-4-6", "claude-opus-4-6-thinking"):
+            assert agy_models[model]["variation_groups"] == {}
+            assert (
+                agy_models[model]["max_context"],
+                agy_models[model]["max_output"],
+            ) == (250000, 64000)
 
         # Embedding presets + plugin-hook catalog round out the catalog.
         resp = client.get("/api/studio/catalog/embedding_presets")

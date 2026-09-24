@@ -1210,6 +1210,17 @@ export const settingsAPI = {
     const { data } = await api.get("/settings/codex-status", _nodeQuery(node))
     return data
   },
+  async getAntigravityStatus(node = "_host") {
+    const { data } = await api.get("/settings/antigravity-status", _nodeQuery(node))
+    return data
+  },
+  async getAntigravityUsage(node = "_host") {
+    const { data } = await api.get("/settings/antigravity-usage", {
+      timeout: 90000,
+      ..._nodeQuery(node),
+    })
+    return data
+  },
   async getGrokStatus(node = "_host") {
     const { data } = await api.get("/settings/grok-status", _nodeQuery(node))
     return data

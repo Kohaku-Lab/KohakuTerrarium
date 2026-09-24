@@ -9,6 +9,8 @@ may be lower than the vendor-advertised maximum for reliability.
 
 from typing import Any
 
+from kohakuterrarium.llm.antigravity_presets import PRESETS as AGY_PRESETS
+
 from kohakuterrarium.llm.preset_aliases import _CANONICAL_NAMES, ALIASES
 from kohakuterrarium.llm.preset_groups import (
     _ANTHROPIC_EFFORT_46_GROUP,
@@ -982,6 +984,7 @@ def get_all_presets() -> dict[tuple[str, str], dict[str, Any]]:
         flat[(provider, bare_name)] = body
 
     flat.update(_merge_package_presets())
+    flat.update(AGY_PRESETS)
     _all_presets_cache = flat
     return _all_presets_cache
 

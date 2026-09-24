@@ -264,3 +264,6 @@ API 令牌和邀请由 CSPRNG 生成并以哈希形式存储，DB 泄漏无法�
   指令传递 ``[auth]`` 配置
 - [反向代理部署](deployment-reverse-proxy.md)：TLS 终止 +
   CORS 白名单用于托管的静态前端
+
+
+复用 Windows 本机 agy consumer 登录，请参阅 [Antigravity 接入](antigravity.md)。

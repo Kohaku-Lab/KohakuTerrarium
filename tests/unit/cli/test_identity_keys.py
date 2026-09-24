@@ -86,3 +86,9 @@ class TestSecretKeyPrompts:
 
         assert identity_keys.login_with_api_key("openai", "OPENAI_API_KEY") == 0
         assert "Cancelled" in capsys.readouterr().out
+
+
+def test_antigravity_delete_reports_owner_without_traceback(monkeypatch, capsys):
+    monkeypatch.setattr(identity_keys, "_confirm", lambda *args, **kwargs: True)
+    assert identity_keys.delete_cli("google-antigravity") == 1
+    assert "managed by agy" in capsys.readouterr().out

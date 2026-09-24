@@ -53,6 +53,9 @@ from kohakuterrarium.studio.sessions import memory_search as _session_memory_mod
 from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.testing.llm import ScriptedLLM
 
+from tests.helpers.antigravity_usage import install_quota_script, assert_quota
+from kohakuterrarium.studio.identity import antigravity
+
 from tests.helpers.grok_usage_script import (
     FAKE_ACCESS,
     assert_billing_request,
@@ -1031,6 +1034,7 @@ class TestStudioIntegration:
             assert set(baseline_backends) == {
                 "codex",
                 "grok-subscription",
+                "google-antigravity",
                 "openai",
                 "openrouter",
                 "anthropic",
@@ -1039,6 +1043,10 @@ class TestStudioIntegration:
                 "kimi-code",
                 "glm-coding",
             }
+            assert (
+                baseline_backends["google-antigravity"]["backend_type"]
+                == "google-antigravity"
+            )
             grok = baseline_backends["grok-subscription"]
             assert grok["backend_type"] == "grok-subscription"
             assert grok["provider_native_tools"] == [
@@ -1150,6 +1158,18 @@ class TestStudioIntegration:
             (grok_home / "auth.json").unlink()
             assert_empty(await grok_subscription.get_usage(), "not_logged_in")
             assert len(billing.requests) == 4
+
+            with monkeypatch.context() as agy_patch:
+                quota = install_quota_script(agy_patch)
+                assert (await antigravity.get_usage())["status"] == "not_logged_in"
+                quota["logged_in"] = True
+                assert_quota(await antigravity.get_usage(), 25)
+                quota["remaining"] = 0
+                assert_quota(await antigravity.get_usage(), 100)
+                quota["status"] = 403
+                assert (await antigravity.get_usage())["status"] == "auth_expired"
+                quota["logged_in"] = False
+                assert (await antigravity.get_usage())["groups"] == []
 
             # --- catalog.builtins: read-only catalog --------------------
             tool_entries = studio.catalog.builtins.list("tools")

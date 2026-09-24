@@ -23,7 +23,9 @@ _OAI_IMAGE_URL_ALLOWED_KEYS: frozenset[str] = frozenset({"url", "detail"})
 
 # Provider-owned assistant fields that only matter for local persistence and
 # must never reach a Chat Completions-compatible endpoint.
-_INTERNAL_MESSAGE_KEYS = frozenset({"_kt_assistant_segments", "_kt_anthropic_content"})
+_INTERNAL_MESSAGE_KEYS = frozenset(
+    {"_kt_assistant_segments", "_kt_anthropic_content", "_kt_antigravity_content"}
+)
 
 
 def strip_internal_message_fields(

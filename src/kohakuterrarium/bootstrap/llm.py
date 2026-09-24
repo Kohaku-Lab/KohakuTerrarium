@@ -199,6 +199,27 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
         _apply_backend_native_identity(provider, profile)
         return provider
 
+    if profile.backend_type == "google-antigravity":
+        from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
+
+        if _api_keys._resolver is not None:
+            raise ValueError("Antigravity: local_host_only")
+        if profile.base_url or profile.api_key_env:
+            raise ValueError("Antigravity: custom_endpoint_not_supported")
+        provider = AntigravityProvider(
+            model=profile.model,
+            temperature=profile.temperature,
+            max_tokens=profile.max_output or None,
+            retry_policy=getattr(profile, "retry_policy", None),
+            reasoning_effort=profile.reasoning_effort,
+            extra_body=getattr(profile, "extra_body", None),
+        )
+        provider._profile_max_context = (
+            profile.max_context or provider._profile_max_context
+        )
+        _apply_backend_native_identity(provider, profile)
+        return provider
+
     if profile.backend_type == "grok-subscription":
         from kohakuterrarium.llm.grok_provider import GrokSubscriptionProvider
 
@@ -320,6 +341,30 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
             "Use 'kt login <provider>' to authenticate, then "
             "'kt model default <name>' to set a default, "
             "or add 'llm: <profile>' to your creature config."
+        )
+
+    if config.provider == "google-antigravity":
+        return _create_from_profile(
+            LLMProfile(
+                name=config.model,
+                provider="google-antigravity",
+                backend_type="google-antigravity",
+                model=config.model,
+                base_url=config.base_url,
+                api_key_env=config.api_key_env,
+                temperature=config.temperature,
+                max_output=config.max_tokens or 0,
+                max_context=0,
+                reasoning_effort=(
+                    config.reasoning_effort
+                    if _is_meaningful_config_value(
+                        "reasoning_effort", config.reasoning_effort
+                    )
+                    else ""
+                ),
+                extra_body=config.extra_body,
+                retry_policy=config.retry_policy,
+            )
         )
 
     if config.auth_mode == "codex-oauth":

@@ -8,6 +8,7 @@ vi.mock("@/utils/api", () => ({
   settingsAPI: {
     getCodexUsage: vi.fn(),
     getGrokUsage: vi.fn(),
+    getAntigravityUsage: vi.fn(),
     codexResetConsume: vi.fn(),
   },
 }))
@@ -105,6 +106,16 @@ describe("AccountUsagePanel", () => {
     setActivePinia(createPinia())
     settingsAPI.getCodexUsage.mockReset().mockResolvedValue(codexOk())
     settingsAPI.getGrokUsage.mockReset().mockResolvedValue(grokOk())
+    settingsAPI.getAntigravityUsage.mockReset().mockResolvedValue({
+      status: "ok",
+      captured_at: CAPTURED_AT,
+      groups: [
+        {
+          id: "gemini",
+          windows: [{ id: "gemini-5h", period: "5h", used_percent: 25, resets_at: RESET_AT }],
+        },
+      ],
+    })
     settingsAPI.codexResetConsume.mockReset()
     vi.spyOn(ElMessage, "success").mockImplementation(() => {})
     vi.spyOn(ElMessage, "info").mockImplementation(() => {})
@@ -133,6 +144,33 @@ describe("AccountUsagePanel", () => {
       new Date(RESET_AT * 1000).toLocaleString(),
     )
     expect(wrapper.text()).toContain("settings.account.grok.sharedPool")
+  })
+
+  it("shows Antigravity quota, retains stale data, clears expired login, and isolates nodes", async () => {
+    const wrapper = await mountPanel()
+    await flushPromises()
+    const agy = provider(wrapper, "antigravity")
+    expect(agy.find("[data-usage-bar]").attributes("style")).toContain("25%")
+    expect(agy.text()).toContain("settings.account.antigravity.gemini")
+    settingsAPI.getAntigravityUsage.mockResolvedValueOnce({ status: "unavailable" })
+    await agy.get("[data-refresh]").trigger("click")
+    await flushPromises()
+    expect(agy.find("[data-usage-bar]").exists()).toBe(true)
+    expect(agy.find("[data-stale]").exists()).toBe(true)
+    settingsAPI.getAntigravityUsage.mockResolvedValueOnce({ status: "auth_expired" })
+    await agy.get("[data-refresh]").trigger("click")
+    await flushPromises()
+    expect(agy.find("[data-usage-bar]").exists()).toBe(false)
+    const pending = deferred()
+    settingsAPI.getAntigravityUsage.mockReturnValueOnce(pending.promise)
+    await agy.get("[data-refresh]").trigger("click")
+    await wrapper.setProps({ node: "worker-a" })
+    pending.resolve({ status: "ok", groups: [{ id: "old", windows: [] }] })
+    await flushPromises()
+    expect(agy.find("[data-usage-bar]").exists()).toBe(false)
+    expect(agy.text()).toContain("settings.account.antigravity.localOnly")
+    expect(agy.text()).not.toContain("old")
+    wrapper.unmount()
   })
 
   it("does not fetch until the account tab is entered", async () => {
