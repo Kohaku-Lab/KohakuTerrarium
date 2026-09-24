@@ -635,3 +635,31 @@ def test_antigravity_inline_unknown_model_uses_consumer_transport():
     )
     assert isinstance(provider, AntigravityProvider)
     assert provider.config.model == "gemini-3.1-pro-high"
+    assert provider.config.max_tokens == 65535
+    assert provider._profile_max_context == 1048576
+
+
+@pytest.mark.parametrize(
+    "model,effort,output",
+    [
+        ("gemini-3.6-flash", "low", 65536),
+        ("gemini-3.7-flash", "medium", 65536),
+        ("gemini-3.8-flash", "high", 65536),
+        ("gemini-3.1-pro", "low", 65535),
+    ],
+)
+def test_antigravity_variation_bootstrap(model, effort, output):
+    provider = create_llm_provider(
+        AgentConfig(name="a"), f"google-antigravity/{model}@reasoning={effort}"
+    )
+    assert provider.reasoning_effort == effort
+    assert provider.config.max_tokens == output
+    assert provider._profile_max_context == 1048576
+
+
+def test_antigravity_inline_claude_limits():
+    provider = _create_from_inline(
+        AgentConfig(name="a", provider="google-antigravity", model="claude-sonnet-4-6")
+    )
+    assert provider.config.max_tokens == 64000
+    assert provider._profile_max_context == 250000

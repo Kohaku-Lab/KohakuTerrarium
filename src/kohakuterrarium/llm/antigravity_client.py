@@ -26,7 +26,7 @@ def headers(token, operation: str) -> dict:
     return {
         "Authorization": "Bearer " + token.access_token,
         "Content-Type": "application/json",
-        "User-Agent": f"antigravity-cli/1.2.8/{operation} (windows; x86_64)",
+        "User-Agent": f"antigravity-cli/1.2.9/{operation} (windows; x86_64)",
         "X-Goog-Api-Client": "google-api-go-client/0.5",
         "Client-Metadata": "ideType=ANTIGRAVITY,platform=WINDOWS_AMD64,pluginType=GEMINI",
     }

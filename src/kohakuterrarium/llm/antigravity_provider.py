@@ -21,6 +21,7 @@ from kohakuterrarium.llm.antigravity_format import (
     encode_tools,
     signed_state,
 )
+from kohakuterrarium.llm.antigravity_presets import MODELS, model_settings
 from kohakuterrarium.llm.antigravity_stream import Turn, read_events
 from kohakuterrarium.llm.base import BaseLLMProvider, ChatResponse, LLMConfig
 from kohakuterrarium.llm.recovery import RetryPolicy
@@ -46,13 +47,17 @@ class AntigravityProvider(BaseLLMProvider):
             raise AntigravityError("unsupported_model")
         if extra_body:
             raise AntigravityError("extra_body_not_supported")
-        if reasoning_effort:
-            raise AntigravityError("reasoning_effort_not_supported_use_model_default")
+        try:
+            self._settings = model_settings(model, reasoning_effort, max_tokens)
+        except ValueError as exc:
+            raise AntigravityError(str(exc)) from None
+        self.reasoning_effort = self._settings.reasoning_effort
+        self._profile_max_context = self._settings.max_context
         super().__init__(
             LLMConfig(
                 model=model,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_tokens=self._settings.max_output,
                 retry_policy=retry_policy,
             )
         )
@@ -63,15 +68,26 @@ class AntigravityProvider(BaseLLMProvider):
     def with_model(self, name):
         if not name or name == self.config.model:
             return self
+        target = MODELS.get(name)
+        effort = (
+            self.reasoning_effort
+            if target and self.reasoning_effort in target.efforts
+            else ""
+        )
+        try:
+            target_settings = model_settings(name)
+        except ValueError as exc:
+            raise AntigravityError(str(exc)) from None
+        limit = min(self.config.max_tokens, target_settings.max_output)
         sibling = type(self)(
             name,
             temperature=self.config.temperature,
-            max_tokens=self.config.max_tokens,
+            max_tokens=limit,
+            reasoning_effort=effort,
             retry_policy=self.config.retry_policy,
             transport=self._transport,
         )
         for key in (
-            "_profile_max_context",
             "_prompt_cache_enabled",
             "prompt_cache_key",
         ):
@@ -112,10 +128,12 @@ class AntigravityProvider(BaseLLMProvider):
     def _request(self, messages, scope, tools, provider_native_tools, kwargs):
         if provider_native_tools or kwargs:
             raise AntigravityError("unsupported_generation_option")
-        system, contents = encode_messages(messages, self.config.model, scope)
+        system, contents = encode_messages(messages, self._settings.wire_model, scope)
         if not contents:
             raise AntigravityError("empty_conversation")
-        config = {"maxOutputTokens": self.config.max_tokens or 8192}
+        config = {"maxOutputTokens": self.config.max_tokens}
+        if self._settings.thinking_config:
+            config["thinkingConfig"] = dict(self._settings.thinking_config)
         if self.config.temperature is not None:
             config["temperature"] = self.config.temperature
         request = {"contents": contents, "generationConfig": config}
@@ -143,16 +161,24 @@ class AntigravityProvider(BaseLLMProvider):
                 )
                 payload = {
                     "project": project,
-                    "model": self.config.model,
+                    "model": self._settings.wire_model,
                     "userPromptId": str(uuid4()),
                     "request": request,
                 }
                 turn = Turn()
+                request_headers = headers(token, self._settings.wire_model)
+                if (
+                    self._settings.wire_model.startswith("claude-")
+                    and self._settings.thinking_config
+                ):
+                    request_headers["anthropic-beta"] = (
+                        "interleaved-thinking-2025-05-14"
+                    )
                 try:
                     async with client.stream(
                         "POST",
                         url("streamGenerateContent"),
-                        headers=headers(token, self.config.model),
+                        headers=request_headers,
                         json=payload,
                     ) as response:
                         check_status(response)
@@ -197,7 +223,7 @@ class AntigravityProvider(BaseLLMProvider):
                 self._last_assistant_extra_fields = {
                     **turn.extra_fields(),
                     STATE_KEY: signed_state(
-                        message, turn.parts, self.config.model, scope
+                        message, turn.parts, self._settings.wire_model, scope
                     ),
                 }
                 return

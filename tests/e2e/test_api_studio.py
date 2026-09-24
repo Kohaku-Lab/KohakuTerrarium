@@ -292,6 +292,29 @@ class TestApiStudioJourney:
         assert resp.status_code == 200
         models = resp.json()
         assert models and all("name" in m for m in models)
+        agy_models = {
+            entry["model"]: entry
+            for entry in models
+            if entry["provider"] == "google-antigravity"
+        }
+        for model in ("gemini-3.6-flash", "gemini-3.7-flash", "gemini-3.8-flash"):
+            entry = agy_models[model]
+            assert (entry["max_context"], entry["max_output"]) == (1048576, 65536)
+            assert list(entry["variation_groups"]["reasoning"]) == [
+                "low",
+                "medium",
+                "high",
+            ]
+        assert list(agy_models["gemini-3.1-pro"]["variation_groups"]["reasoning"]) == [
+            "low",
+            "high",
+        ]
+        for model in ("claude-sonnet-4-6", "claude-opus-4-6-thinking"):
+            assert agy_models[model]["variation_groups"] == {}
+            assert (
+                agy_models[model]["max_context"],
+                agy_models[model]["max_output"],
+            ) == (250000, 64000)
 
         # Embedding presets + plugin-hook catalog round out the catalog.
         resp = client.get("/api/studio/catalog/embedding_presets")

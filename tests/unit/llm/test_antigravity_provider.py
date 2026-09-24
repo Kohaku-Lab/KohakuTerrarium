@@ -170,3 +170,208 @@ async def test_account_change_during_project_discovery_never_uses_old_project(
         await provider.chat_complete([{"role": "user", "content": "test"}])
     ).content == "ok"
     assert projects == ["project-b"]
+
+
+@pytest.mark.parametrize(
+    "model,effort,wire,thinking,limit",
+    [
+        (
+            f"gemini-{version}-flash",
+            effort,
+            f"gemini-{version}-flash-{effort}",
+            {"includeThoughts": True, "thinkingLevel": effort.upper()},
+            65536,
+        )
+        for version in ("3.6", "3.7", "3.8")
+        for effort in ("low", "medium", "high")
+    ]
+    + [
+        (
+            "gemini-3.1-pro",
+            "low",
+            "gemini-3.1-pro-low",
+            {"includeThoughts": True, "thinkingBudget": 1001},
+            65535,
+        ),
+        (
+            "gemini-3.1-pro",
+            "high",
+            "gemini-3.1-pro-high",
+            {"includeThoughts": True, "thinkingBudget": 10001},
+            65535,
+        ),
+        (
+            "claude-sonnet-4-6",
+            "",
+            "claude-sonnet-4-6",
+            {"includeThoughts": True, "thinkingBudget": 1024},
+            64000,
+        ),
+        (
+            "claude-opus-4-6-thinking",
+            "",
+            "claude-opus-4-6-thinking",
+            {"includeThoughts": True, "thinkingBudget": 1024},
+            64000,
+        ),
+    ],
+)
+async def test_agy_effort_reaches_wire_request(model, effort, wire, thinking, limit):
+    requests = []
+
+    def respond(request):
+        if request.url.path.endswith("loadCodeAssist"):
+            return httpx.Response(200, json={"cloudaicompanionProject": "test-project"})
+        requests.append(json.loads(request.content))
+        assert request.headers["user-agent"].startswith("antigravity-cli/1.2.9/")
+        if model.startswith("claude-"):
+            assert (
+                request.headers["anthropic-beta"] == "interleaved-thinking-2025-05-14"
+            )
+        else:
+            assert "anthropic-beta" not in request.headers
+        return httpx.Response(200, text=frame([{"text": "ok"}]))
+
+    provider = AntigravityProvider(
+        model, reasoning_effort=effort, transport=httpx.MockTransport(respond)
+    )
+    assert (
+        await provider.chat_complete([{"role": "user", "content": "test"}])
+    ).content == "ok"
+    assert requests[0]["model"] == wire
+    assert requests[0]["request"]["generationConfig"] == {
+        "maxOutputTokens": limit,
+        "thinkingConfig": thinking,
+    }
+    assert (
+        provider.last_assistant_extra_fields["_kt_antigravity_content"]["model"] == wire
+    )
+
+
+@pytest.mark.parametrize(
+    "model,effort",
+    [
+        ("gemini-3.1-pro", "medium"),
+        ("gemini-3.8-flash", "xhigh"),
+        ("gemini-3.8-flash", "none"),
+        ("gemini-3.8-flash-low", "high"),
+        ("claude-sonnet-4-6", "high"),
+        ("claude-opus-4-6-thinking", "low"),
+        ("gemini-unknown", "high"),
+    ],
+)
+def test_invalid_effort_fails_before_authentication(model, effort):
+    with pytest.raises(
+        AntigravityError,
+        match="unsupported_reasoning_effort|conflicting_reasoning_effort",
+    ):
+        AntigravityProvider(model, reasoning_effort=effort)
+
+
+@pytest.mark.parametrize(
+    "model,limit",
+    [
+        ("gemini-3.8-flash", 65537),
+        ("gemini-3.1-pro", 65536),
+        ("claude-sonnet-4-6", 64001),
+        ("gemini-3.8-flash", 0),
+        ("gemini-3.8-flash", -1),
+        ("gemini-3.8-flash", True),
+    ],
+)
+def test_invalid_output_limit_fails_before_authentication(model, limit):
+    with pytest.raises(AntigravityError, match="invalid_max_output_tokens"):
+        AntigravityProvider(model, max_tokens=limit)
+
+
+def test_explicit_sku_defaults_and_with_model_effort():
+    messages = [{"role": "user", "content": "test"}]
+    low = AntigravityProvider("gemini-3.8-flash-low")
+    assert (
+        low._request(messages, "scope", None, None, {})["generationConfig"][
+            "thinkingConfig"
+        ]["thinkingLevel"]
+        == "LOW"
+    )
+    provider = AntigravityProvider("gemini-3.8-flash", reasoning_effort="low")
+    sibling = provider.with_model("gemini-3.7-flash")
+    assert (
+        sibling._request(messages, "scope", None, None, {})["generationConfig"][
+            "thinkingConfig"
+        ]["thinkingLevel"]
+        == "LOW"
+    )
+    assert sibling.config.max_tokens == 65536
+    claude = provider.with_model("claude-sonnet-4-6")
+    assert claude.config.max_tokens == 64000
+    assert claude._profile_max_context == 250000
+    assert provider.with_model(provider.config.model) is provider
+
+
+async def test_signed_round_requires_matching_effort_wire_model():
+    requests = []
+
+    def respond(request):
+        if request.url.path.endswith("loadCodeAssist"):
+            return httpx.Response(200, json={"cloudaicompanionProject": "test-project"})
+        requests.append(json.loads(request.content))
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                text=frame(
+                    [
+                        {
+                            "functionCall": {"name": "echo", "args": {}},
+                            "thoughtSignature": "opaque",
+                        }
+                    ]
+                ),
+            )
+        assert (
+            requests[-1]["request"]["contents"][1]["parts"][0]["thoughtSignature"]
+            == "opaque"
+        )
+        return httpx.Response(200, text=frame([{"text": "ok"}]))
+
+    transport = httpx.MockTransport(respond)
+    high = AntigravityProvider(
+        "gemini-3.8-flash", reasoning_effort="high", transport=transport
+    )
+    messages = [{"role": "user", "content": "test"}]
+    await high.chat_complete(messages)
+    call = high.last_tool_calls[0]
+    messages += [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": call.id,
+                    "type": "function",
+                    "function": {"name": call.name, "arguments": call.arguments},
+                }
+            ],
+            **high.last_assistant_extra_fields,
+        },
+        {"role": "tool", "tool_call_id": call.id, "content": "ok"},
+    ]
+    same_wire = AntigravityProvider("gemini-3.8-flash-high", transport=transport)
+    assert (await same_wire.chat_complete(messages)).content == "ok"
+    low = AntigravityProvider(
+        "gemini-3.8-flash", reasoning_effort="low", transport=transport
+    )
+    with pytest.raises(AntigravityError, match="history_requires_new_session"):
+        await low.chat_complete(messages)
+    assert len(requests) == 2
+
+
+@pytest.mark.parametrize(
+    "target", ["gemini-3.8-flash-low", "gemini-3.7-flash-tiered", "gemini-unknown"]
+)
+def test_with_model_preserves_explicit_output_limit(target):
+    provider = AntigravityProvider("gemini-3.8-flash", max_tokens=4096)
+    sibling = provider.with_model(target)
+    assert sibling.config.max_tokens == 4096
+    assert sibling._profile_max_context == (
+        120000 if target == "gemini-unknown" else 1048576
+    )

@@ -43,7 +43,6 @@ from websockets import serve
 from kohakuterrarium import Terrarium
 from kohakuterrarium.core.conversation import Conversation
 from kohakuterrarium.llm import antigravity_auth as agy_auth
-from kohakuterrarium.llm.antigravity_provider import AntigravityProvider
 from kohakuterrarium.session.history import (
     replay_conversation,
     normalize_resumable_events,
@@ -1751,6 +1750,14 @@ class TestLlmIntegration:
                     )
                 body = json.loads(request.content)
                 submissions.append(body)
+                assert body["model"] == "gemini-3.8-flash-medium"
+                assert body["request"]["generationConfig"] == {
+                    "maxOutputTokens": 65536,
+                    "thinkingConfig": {
+                        "includeThoughts": True,
+                        "thinkingLevel": "MEDIUM",
+                    },
+                }
                 if len(submissions) == 1:
                     parts = [
                         {
@@ -1785,9 +1792,11 @@ class TestLlmIntegration:
                 }
                 return httpx.Response(200, text="data: " + json.dumps(data) + "\n\n")
 
-            agy = AntigravityProvider(
-                "gemini-3-flash", transport=httpx.MockTransport(agy_http)
+            agy = _create_from_profile(
+                get_profile("google-antigravity/gemini-3.8-flash@reasoning=medium")
             )
+            agy._transport = httpx.MockTransport(agy_http)
+            assert agy._profile_max_context == 1048576
             config = tmp_path / "agy.yaml"
             config.write_text(
                 "name: agy_probe\nsystem_prompt: offline\ninput: {type: none}\noutput: {type: stdout}\ntools: [{name: scratchpad, type: builtin}]\n"

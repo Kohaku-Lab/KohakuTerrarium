@@ -214,7 +214,9 @@ def _create_from_profile(profile: LLMProfile) -> LLMProvider:
             reasoning_effort=profile.reasoning_effort,
             extra_body=getattr(profile, "extra_body", None),
         )
-        provider._profile_max_context = profile.max_context
+        provider._profile_max_context = (
+            profile.max_context or provider._profile_max_context
+        )
         _apply_backend_native_identity(provider, profile)
         return provider
 
@@ -351,7 +353,8 @@ def _create_from_inline(config: AgentConfig) -> LLMProvider:
                 base_url=config.base_url,
                 api_key_env=config.api_key_env,
                 temperature=config.temperature,
-                max_output=config.max_tokens or 8192,
+                max_output=config.max_tokens or 0,
+                max_context=0,
                 reasoning_effort=(
                     config.reasoning_effort
                     if _is_meaningful_config_value(

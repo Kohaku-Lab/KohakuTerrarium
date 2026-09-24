@@ -282,3 +282,12 @@ A 路线已实现于 `codex/antigravity-agy` 独立 worktree：Windows 官方 ag
 验证结果：受影响的 Python 单元/集成/Studio e2e 及依赖、文件大小门禁合计 4,288 passed、4 skipped；最后的 CLI/API 错误处理修正再单独通过 12 项测试；前端设置组件 16 项测试通过，完整 Prettier 检查与生产构建通过。全仓 Ruff 与 Black 检查通过。完整 agent 测试使用离线 HTTP 边界，真实执行 scratchpad 工具、保存签名并恢复会话继续调用。
 
 仍待真实账户验收：生产 provider 的完整 CLI/Web 操作链及 Claude 工具/思考组合。已有在线探针证明协议路径可行，离线测试证明实现路径与回归边界；两者不等同于完整产品在线验收。
+
+
+## 12. agy 1.2.9 模型与 reasoning 对齐（2026-09-24）
+
+后续实现增加 Gemini 3.6/3.7/3.8 Flash、Gemini 3.1 Pro 和 Claude Opus 4.6 Thinking，
+并将 Sonnet 4.6 的限制更新到发现值。KT 既有 reasoning variation 开放 Flash 三档、
+Pro 两档；两个 Claude 按官方 agy 能力保持固定 Thinking。原 Gemini 3 Flash 预设
+继续兼容旧配置。详细限制、请求路由、会话边界及 3,368 项后端／32 项前端验证结果见
+[模型对齐记录](antigravity-agy-models-2026-09-24.md)。
