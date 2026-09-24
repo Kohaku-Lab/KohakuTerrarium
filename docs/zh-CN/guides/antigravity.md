@@ -36,8 +36,9 @@ KT 的 Gemini 预设默认 high，不自动改变用户的默认模型。
 
 Flash 3.6 切换实际模型 ID 的 `-low/-medium/-high`。Flash 3.7/3.8 固定使用
 发现目录中的 `-tiered` 路由；所有 Flash 均以 `thinkingLevel` 传递所选档位。
-Pro 切换 `-low/-high`，对应 `thinkingBudget=1001/10001`。直接填写明确档位的
-模型 ID 也可使用；ID 与 effort 冲突会在读取凭据前报错。
+Pro low 使用 `gemini-3.1-pro-low`，high 使用 `gemini-pro-agent`，对应
+`thinkingBudget=1001/10001`。显式 `gemini-3.1-pro-high` 选择器也映射到 agent 路由；
+ID 与 effort 冲突会在读取凭据前报错。
 
 agy 1.2.9 对两个 Claude 都拒绝 `--effort`，Pro 则拒绝 medium；KT 保持相同能力边界。
 Claude 使用模型目录默认的 1,024 thinking budget，不套用 Anthropic 直连 API 的
@@ -58,6 +59,7 @@ KT 通过有超时限制的 agy 子进程刷新，跨进程锁及进程内共享
 收到任何文本、思考、工具调用或签名后，不自动重发该推理。
 
 会话保存原始签名片段，同时绑定实际模型 ID、项目与当前消息内容。
+Claude 回传时会组装流式文本／思考块及末尾签名，去掉空占位；Gemini 保留原始片段。
 同模型的工具往返、事件回放与恢复会话已通过离线完整 agent 工作流验证。
 编辑消息后旧片段失效；跨模型可以保留普通文本，无法安全复用的工具签名历史
 会提示新建或压缩会话。Flash 3.6 和 Pro 改变 effort 会改变实际模型 ID，带工具签名的
@@ -70,22 +72,17 @@ KT 通过有超时限制的 agy 子进程刷新，跨进程锁及进程内共享
 任意 extra_body 覆盖。支持内联图片，
 其他不支持的内容或工具 schema 会明确报错。发现列表不保证每个模型支持所有模态。
 
-此前在线探针已验证 agy 续期、项目与模型发现、Gemini 3 Flash 带签名工具往返、
-Claude Sonnet 4.6 文本。本次实现验证使用离线 HTTP 响应及真实 Terrarium 工具执行、
-持久化与恢复，没有追加在线推理。Claude 工具及思考组合尚未实测。
+2026-09-24 已完成全部 13 个模型／档位组合的在线矩阵：文本、echo 工具调用、
+带签名历史的工具结果回传。首轮通过 10 个组合；修复 Pro high 路由与 Claude 流式历史
+组装后，其余 3 个组合全部重测通过。采用真实 KT provider、固定短提示词，普通输出上限
+2,048，Pro high 11,025，无自动重试。详见[在线矩阵与脱敏证据](../dev/research/antigravity-online-matrix-2026-09-24.md)。
+
+离线回归覆盖无效参数、KT variation、Web 目录，以及真实 Terrarium 的工具执行、
+持久化、恢复和压缩。在线矩阵未测试满上下文、最大长度输出、图片、长会话或并发负载；
+上表容量仍以[模型目录元数据](../dev/research/antigravity-agy-models-2026-09-24.md)为依据。
 
 该可选接入仍受账号服务条款与限制约束，由使用者决定是否启用。
-详见[开发方案](../dev/research/google-antigravity-oauth-development-plan-2026-09-23.md)
-及[探针记录](../dev/research/antigravity-agy-probe-results-2026-09-23.md)。
-
-模型更新已用离线请求验证全部 Gemini 档位、Claude 默认值、无效参数、KT variation
-解析、Web 目录和真实 agent 的工具执行与恢复；没有追加在线推理。
-详见[模型元数据与路由依据](../dev/research/antigravity-agy-models-2026-09-24.md)。
-
-后续两次明确授权的在线对照确认：Flash 3.8 的 `-high` 返回 404，改用 `-tiered`
-并保持 HIGH thinkingLevel 返回 200 / STOP。Flash 3.7 按同样只提供 tiered 的发现
-目录修正，尚未额外在线验证。
-
+详见[开发方案](../dev/research/google-antigravity-oauth-development-plan-2026-09-23.md)。
 
 单次 `max_tokens` 覆盖（包括压缩摘要）不修改已保存的 profile，保持该次总输出上限。
 若数字思考预算无法容纳，则仅该次请求取输出上限的一半，并遵守 Gemini Pro 128、

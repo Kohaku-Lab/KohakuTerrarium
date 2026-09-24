@@ -1,0 +1,1020 @@
+{
+  "date": "2026-09-24",
+  "base_revision": "ab310c15f5ae0fabf1a835960f3aaf0c4c2f3426",
+  "total_inference_requests": 50,
+  "runs": {
+    "initial_matrix": {
+      "created_at": "2026-09-24T10:41:35.156584+00:00",
+      "planned_inference_limit": 39,
+      "results": [
+        {
+          "model": "gemini-3.6-flash",
+          "effort": "low",
+          "wire_model": "gemini-3.6-flash-low",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "LOW"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 116,
+                "reasoning_tokens": 93
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 10.82
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 102
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 10.76
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 121,
+                "completion_tokens": 6,
+                "total_tokens": 127
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 12.4
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.6-flash",
+          "effort": "medium",
+          "wire_model": "gemini-3.6-flash-medium",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "MEDIUM"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 151,
+                "reasoning_tokens": 128
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 10.37
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 187,
+                "reasoning_tokens": 85
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 12.14
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 206,
+                "completion_tokens": 6,
+                "total_tokens": 239,
+                "reasoning_tokens": 27
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 13.45
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.6-flash",
+          "effort": "high",
+          "wire_model": "gemini-3.6-flash-high",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "HIGH"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 131,
+                "reasoning_tokens": 108
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 11.11
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 223,
+                "reasoning_tokens": 121
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 12.2
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 242,
+                "completion_tokens": 6,
+                "total_tokens": 268,
+                "reasoning_tokens": 20
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 10.23
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.7-flash",
+          "effort": "low",
+          "wire_model": "gemini-3.7-flash-tiered",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "LOW"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 112,
+                "reasoning_tokens": 89
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.5
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 102
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.3
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 121,
+                "completion_tokens": 6,
+                "total_tokens": 127
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.75
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.7-flash",
+          "effort": "medium",
+          "wire_model": "gemini-3.7-flash-tiered",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "MEDIUM"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 90,
+                "reasoning_tokens": 67
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 4.0
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 140,
+                "reasoning_tokens": 38
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.31
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 159,
+                "completion_tokens": 6,
+                "total_tokens": 184,
+                "reasoning_tokens": 19
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.13
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.7-flash",
+          "effort": "high",
+          "wire_model": "gemini-3.7-flash-tiered",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "HIGH"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 134,
+                "reasoning_tokens": 111
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.36
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 165,
+                "reasoning_tokens": 63
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 4.85
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 184,
+                "completion_tokens": 6,
+                "total_tokens": 242,
+                "reasoning_tokens": 52
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.33
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.8-flash",
+          "effort": "low",
+          "wire_model": "gemini-3.8-flash-tiered",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "LOW"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 23
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 7.5
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 102
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 4.56
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 121,
+                "completion_tokens": 6,
+                "total_tokens": 127
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.26
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.8-flash",
+          "effort": "medium",
+          "wire_model": "gemini-3.8-flash-tiered",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "MEDIUM"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 93,
+                "reasoning_tokens": 70
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.33
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 143,
+                "reasoning_tokens": 41
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 7.43
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 162,
+                "completion_tokens": 6,
+                "total_tokens": 216,
+                "reasoning_tokens": 48
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.14
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.8-flash",
+          "effort": "high",
+          "wire_model": "gemini-3.8-flash-tiered",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingLevel": "HIGH"
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 93,
+                "reasoning_tokens": 70
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.09
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "completion_tokens": 21,
+                "total_tokens": 156,
+                "reasoning_tokens": 54
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 5.64
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 175,
+                "completion_tokens": 6,
+                "total_tokens": 234,
+                "reasoning_tokens": 53
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 7.67
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.1-pro",
+          "effort": "low",
+          "wire_model": "gemini-3.1-pro-low",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 1001
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 140,
+                "reasoning_tokens": 117
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.06
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "total_tokens": 267,
+                "completion_tokens": 21,
+                "reasoning_tokens": 165
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.48
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 346,
+                "completion_tokens": 6,
+                "total_tokens": 374,
+                "reasoning_tokens": 22
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.63
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "gemini-3.1-pro",
+          "effort": "high",
+          "wire_model": "gemini-3.1-pro-high",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 10001
+          },
+          "max_output_tokens": 11025,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": false,
+              "error": "http_400",
+              "http_status": 400,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 0.52
+            }
+          ],
+          "passed": false
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "fixed",
+          "wire_model": "claude-sonnet-4-6",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 1024
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 53,
+                "completion_tokens": 25,
+                "total_tokens": 78
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 1.86
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 27,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 624,
+                "completion_tokens": 105,
+                "total_tokens": 729
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.92
+            },
+            {
+              "stage": "tool_result",
+              "passed": false,
+              "error": "http_400",
+              "http_status": 400,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 0.96
+            }
+          ],
+          "passed": false
+        },
+        {
+          "model": "claude-opus-4-6-thinking",
+          "effort": "fixed",
+          "wire_model": "claude-opus-4-6-thinking",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 1024
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 53,
+                "completion_tokens": 39,
+                "total_tokens": 92
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.51
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 624,
+                "completion_tokens": 94,
+                "total_tokens": 718
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.82
+            },
+            {
+              "stage": "tool_result",
+              "passed": false,
+              "error": "http_400",
+              "http_status": 400,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 0.79
+            }
+          ],
+          "passed": false
+        }
+      ],
+      "inference_requests": 37
+    },
+    "pro_old_route": {
+      "created_at": "2026-09-24T10:47:40.606310+00:00",
+      "planned_inference_limit": 1,
+      "results": [
+        {
+          "model": "gemini-3.1-pro",
+          "effort": "high",
+          "wire_model": "gemini-3.1-pro-high",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 10001
+          },
+          "max_output_tokens": 11025,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": false,
+              "error": "http_400",
+              "http_status": 400,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 1.99,
+              "diagnostic": {
+                "status": "INVALID_ARGUMENT",
+                "message": "Request contains an invalid argument."
+              }
+            }
+          ],
+          "passed": false
+        }
+      ],
+      "inference_requests": 1
+    },
+    "pro_agent_route": {
+      "model": "gemini-3.1-pro",
+      "effort": "high",
+      "wire_model": "gemini-pro-agent",
+      "max_output_tokens": 11025,
+      "passed": true,
+      "finish_reason": "stop",
+      "usage": {
+        "prompt_tokens": 17,
+        "completion_tokens": 6,
+        "total_tokens": 147,
+        "reasoning_tokens": 124
+      },
+      "http_status": 200,
+      "diagnostic": {},
+      "inference_requests": 1
+    },
+    "claude_diagnostic": {
+      "created_at": "2026-09-24T10:50:02.752025+00:00",
+      "planned_inference_limit": 2,
+      "results": [
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "fixed",
+          "wire_model": "claude-sonnet-4-6",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 1024
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 27,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 624,
+                "completion_tokens": 95,
+                "total_tokens": 719
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.83
+            },
+            {
+              "stage": "tool_result",
+              "passed": false,
+              "error": "http_400",
+              "http_status": 400,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.11,
+              "diagnostic": {
+                "status": "INVALID_ARGUMENT",
+                "message": "{\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.1.content.0.text.text: Field required\"},\"request_id\":\"[redacted]\"}"
+              }
+            }
+          ],
+          "passed": false
+        }
+      ],
+      "inference_requests": 2
+    },
+    "revalidation": {
+      "created_at": "2026-09-24T10:55:23.309528+00:00",
+      "planned_inference_limit": 9,
+      "results": [
+        {
+          "model": "gemini-3.1-pro",
+          "effort": "high",
+          "wire_model": "gemini-pro-agent",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 10001
+          },
+          "max_output_tokens": 11025,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 17,
+                "completion_tokens": 6,
+                "total_tokens": 151,
+                "reasoning_tokens": 128
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.24
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 81,
+                "total_tokens": 266,
+                "completion_tokens": 21,
+                "reasoning_tokens": 164
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.45
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 357,
+                "completion_tokens": 6,
+                "total_tokens": 383,
+                "reasoning_tokens": 20
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.65
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "claude-sonnet-4-6",
+          "effort": "fixed",
+          "wire_model": "claude-sonnet-4-6",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 1024
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 53,
+                "completion_tokens": 25,
+                "total_tokens": 78
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 1.48
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 27,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 624,
+                "completion_tokens": 95,
+                "total_tokens": 719
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.31
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 742,
+                "completion_tokens": 10,
+                "total_tokens": 752
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 1.4
+            }
+          ],
+          "passed": true
+        },
+        {
+          "model": "claude-opus-4-6-thinking",
+          "effort": "fixed",
+          "wire_model": "claude-opus-4-6-thinking",
+          "thinking": {
+            "includeThoughts": true,
+            "thinkingBudget": 1024
+          },
+          "max_output_tokens": 2048,
+          "steps": [
+            {
+              "stage": "text",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 53,
+                "completion_tokens": 39,
+                "total_tokens": 92
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.49
+            },
+            {
+              "stage": "tool_call",
+              "passed": true,
+              "finish_reason": "tool_calls",
+              "text_characters": 0,
+              "tool_calls": 1,
+              "usage": {
+                "prompt_tokens": 624,
+                "completion_tokens": 94,
+                "total_tokens": 718
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 3.36
+            },
+            {
+              "stage": "tool_result",
+              "passed": true,
+              "finish_reason": "stop",
+              "text_characters": 13,
+              "tool_calls": 0,
+              "usage": {
+                "prompt_tokens": 741,
+                "completion_tokens": 10,
+                "total_tokens": 751
+              },
+              "http_status": 200,
+              "operation": "streamGenerateContent",
+              "duration_seconds": 2.27
+            }
+          ],
+          "passed": true
+        }
+      ],
+      "inference_requests": 9
+    }
+  }
+}

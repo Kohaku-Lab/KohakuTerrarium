@@ -39,8 +39,9 @@ Use `@reasoning=low`, `@reasoning=medium`, or `@reasoning=high` where supported,
 or select the same variation in the existing CLI/Web model picker. Gemini
 presets default to **high** in KT. Flash 3.6 routes to the matching `-low`,
 `-medium`, or `-high` model. Flash 3.7/3.8 use the discovered `-tiered` route.
-All Flash variants send the selected `thinkingLevel`. Pro routes to
-`-low`/`-high` with budgets 1,001/10,001. Explicit tier IDs are also accepted;
+All Flash variants send the selected `thinkingLevel`. Pro low routes to
+`gemini-3.1-pro-low` and high to `gemini-pro-agent`, with budgets 1,001/10,001.
+Explicit tier selectors (including `gemini-3.1-pro-high`) are also accepted;
 an effort that conflicts with the ID fails before authentication.
 
 agy 1.2.9 rejects `--effort` on both Claude models and rejects medium for Pro.
@@ -75,7 +76,9 @@ reasoning, function call or signature has arrived.
 
 Signed response parts are retained in session state, bound to the wire model, managed
 project, and current canonical message. Same-model tool calls, persistence,
-event replay and resume preserve these parts. Editing a message invalidates its
+event replay and resume preserve these parts. Claude replay assembles streamed
+text/thinking blocks with their final signatures and removes empty placeholders;
+Gemini retains its original parts. Editing a message invalidates its
 old parts. Text history can be reused across models; tool history with missing or
 incompatible signatures requires a new or compacted session and fails explicitly
 instead of inventing a signature. Changing effort on Flash 3.6 or Pro changes
@@ -97,21 +100,18 @@ and restrictions. There is no compatibility or account-availability guarantee.
 
 ## Validation evidence
 
-The original live experiment verified agy credential refresh, project/model
-discovery, Gemini 3 Flash signed tool roundtrip, and Claude Sonnet 4.6 text.
-Implementation validation uses offline HTTP fixtures plus a real Terrarium
-creature, scratchpad execution, persisted events and resumed sessions. It does
-not constitute a fresh production-provider live inference test. Claude tool and
-thinking combinations have not been live-tested.
+The 2026-09-24 live matrix verified all 13 advertised model/effort combinations:
+text, one side-effect-free echo call, and signed tool-result replay. Ten passed
+initially; Pro high and both Claude models passed all three stages after fixes to
+the Pro route and Claude streamed-history assembly. The matrix used the real KT
+provider with small fixed prompts, caps of 2,048 (Pro high: 11,025), and no retries.
+See the [live matrix and redacted evidence](../../zh-CN/dev/research/antigravity-online-matrix-2026-09-24.md)
+and [catalog metadata](../../zh-CN/dev/research/antigravity-agy-models-2026-09-24.md).
 
-The catalog/effort update additionally verifies every advertised Gemini tier's
-outgoing request, Claude defaults, invalid settings, profile/variation resolution,
-Web catalog metadata, and signed replay through a real Terrarium workflow. It does
-not add live inference calls. A subsequent authorized two-request comparison
-verified that Flash 3.8 `-high` returned HTTP 404 while `-tiered` with the same
-HIGH thinking level returned HTTP 200 / STOP. Flash 3.7 routing follows the
-same discovered tiered-only catalog but has not been live-tested. See the [metadata and routing evidence](../../zh-CN/dev/research/antigravity-agy-models-2026-09-24.md).
-
+Offline tests cover invalid settings, profile/variation resolution, Web catalog
+metadata, and real Terrarium tool execution, persistence, resume and compaction.
+The live matrix does not test full context/output limits, images, prolonged
+sessions, or concurrent load; model limits above come from catalog metadata.
 
 Per-call `max_tokens` overrides (including compaction summaries) leave the saved
 profile unchanged and retain the total output cap. If a numeric thinking budget

@@ -215,7 +215,7 @@ async def test_account_change_during_project_discovery_never_uses_old_project(
         (
             "gemini-3.1-pro",
             "high",
-            "gemini-3.1-pro-high",
+            "gemini-pro-agent",
             {"includeThoughts": True, "thinkingBudget": 10001},
             65535,
         ),

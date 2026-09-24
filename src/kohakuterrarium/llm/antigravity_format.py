@@ -84,6 +84,36 @@ def _content_parts(content) -> list[dict]:
     return parts
 
 
+def _claude_replay_parts(parts: list[dict]) -> list[dict]:
+    """Assemble streamed text blocks before replaying Claude's signed history."""
+    assembled = []
+    for part in parts:
+        if isinstance(part.get("text"), str):
+            if not part["text"] and not part.get("thoughtSignature"):
+                continue
+            previous = assembled[-1] if assembled else None
+            if (
+                previous is not None
+                and isinstance(previous.get("text"), str)
+                and bool(previous.get("thought")) == bool(part.get("thought"))
+                and not previous.get("thoughtSignature")
+            ):
+                previous["text"] += part["text"]
+                if part.get("thoughtSignature"):
+                    previous["thoughtSignature"] = part["thoughtSignature"]
+                continue
+        assembled.append(part)
+    result = []
+    for part in assembled:
+        if part.get("thought"):
+            if not part.get("thoughtSignature"):
+                continue
+            if not part.get("text"):
+                raise AntigravityError("history_requires_new_session")
+        result.append(part)
+    return result
+
+
 def encode_messages(
     messages: list[dict], model: str, scope: str
 ) -> tuple[dict, list[dict]]:
@@ -144,6 +174,8 @@ def encode_messages(
             pending = message.get("tool_calls") or []
             if bound:
                 parts = copy.deepcopy(state["parts"])
+                if model.startswith("claude-"):
+                    parts = _claude_replay_parts(parts)
                 wire_ids = {
                     call["id"]
                     for part in parts

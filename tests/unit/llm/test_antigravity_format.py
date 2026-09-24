@@ -103,3 +103,85 @@ def test_text_edit_or_account_switch_does_not_replay_old_content():
 def test_unsupported_input_is_not_silently_dropped(messages):
     with pytest.raises(AntigravityError):
         encode_messages(messages, "m", "a")
+
+
+@pytest.mark.parametrize(
+    "model",
+    ["claude-sonnet-4-6", "claude-opus-4-6-thinking", "gemini-3.8-flash-tiered"],
+)
+def test_streamed_claude_parts_are_rebuilt_before_signed_tool_replay(model):
+    raw = [
+        {"text": ""},
+        {"text": "Let me ", "thought": True},
+        {"text": "use the tool.", "thought": True},
+        {"text": "", "thought": True, "thoughtSignature": "opaque-signature"},
+        {"text": "I will "},
+        {"text": "call it."},
+        {"functionCall": {"id": "server-1", "name": "echo", "args": {}}},
+        {"text": ""},
+    ]
+    message = {
+        "role": "assistant",
+        "content": "I will call it.",
+        "tool_calls": [
+            {
+                "id": "server-1",
+                "type": "function",
+                "function": {"name": "echo", "arguments": "{}"},
+            }
+        ],
+    }
+    message[STATE_KEY] = signed_state(message, raw, model, "scope")
+    _, contents = encode_messages(
+        [message, {"role": "tool", "tool_call_id": "server-1", "content": "ok"}],
+        model,
+        "scope",
+    )
+    expected = (
+        [
+            {
+                "text": "Let me use the tool.",
+                "thought": True,
+                "thoughtSignature": "opaque-signature",
+            },
+            {"text": "I will call it."},
+            raw[6],
+        ]
+        if model.startswith("claude-")
+        else raw
+    )
+    assert contents[0]["parts"] == expected
+    assert message[STATE_KEY]["parts"] == raw
+    assert contents[1]["parts"][0]["functionResponse"]["id"] == "server-1"
+
+
+def test_claude_does_not_merge_distinct_signed_blocks_or_replay_unsigned_thoughts():
+    parts = [
+        {"text": "first", "thought": True, "thoughtSignature": "sig-a"},
+        {"text": "second", "thought": True},
+        {"text": "", "thought": True, "thoughtSignature": "sig-b"},
+        {"text": "unsigned", "thought": True},
+        {"text": "answer", "thoughtSignature": "text-sig"},
+        {"text": " more"},
+    ]
+    message = {"role": "assistant", "content": "answer more"}
+    message[STATE_KEY] = signed_state(message, parts, "claude-sonnet-4-6", "scope")
+    _, contents = encode_messages([message], "claude-sonnet-4-6", "scope")
+    assert contents[0]["parts"] == [
+        parts[0],
+        {"text": "second", "thought": True, "thoughtSignature": "sig-b"},
+        parts[4],
+        parts[5],
+    ]
+
+
+def test_claude_signed_thought_without_text_fails_closed():
+    message = {"role": "assistant", "content": "answer"}
+    message[STATE_KEY] = signed_state(
+        message,
+        [{"text": "", "thought": True, "thoughtSignature": "orphan-signature"}],
+        "claude-sonnet-4-6",
+        "scope",
+    )
+    with pytest.raises(AntigravityError, match="history_requires_new_session"):
+        encode_messages([message], "claude-sonnet-4-6", "scope")

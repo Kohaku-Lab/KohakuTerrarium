@@ -1,6 +1,6 @@
 """Model limits and effort routing for the agy 1.2.9 consumer catalog."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -9,7 +9,7 @@ class ModelSpec:
     max_output: int
     efforts: tuple[str, ...] = ()
     mode: str = ""
-    wire_model: str = ""
+    wire_models: dict[str, str] = field(default_factory=dict)
 
 
 MODELS = {
@@ -19,11 +19,20 @@ MODELS = {
             65536,
             ("low", "medium", "high"),
             "level",
-            f"gemini-{version}-flash-tiered" if version in ("3.7", "3.8") else "",
+            (
+                {
+                    effort: f"gemini-{version}-flash-tiered"
+                    for effort in ("low", "medium", "high")
+                }
+                if version in ("3.7", "3.8")
+                else {}
+            ),
         )
         for version in ("3.6", "3.7", "3.8")
     },
-    "gemini-3.1-pro": ModelSpec(1048576, 65535, ("low", "high"), "budget"),
+    "gemini-3.1-pro": ModelSpec(
+        1048576, 65535, ("low", "high"), "budget", {"high": "gemini-pro-agent"}
+    ),
     "claude-sonnet-4-6": ModelSpec(250000, 64000, mode="fixed"),
     "claude-opus-4-6-thinking": ModelSpec(250000, 64000, mode="fixed"),
 }
@@ -101,7 +110,7 @@ def model_settings(
     wire_model, thinking = model, {}
     if spec:
         if spec.efforts:
-            wire_model = spec.wire_model or family + "-" + effort
+            wire_model = spec.wire_models.get(effort, family + "-" + effort)
         if spec.mode == "level":
             thinking = {"includeThoughts": True, "thinkingLevel": effort.upper()}
         elif spec.mode in ("budget", "fixed"):

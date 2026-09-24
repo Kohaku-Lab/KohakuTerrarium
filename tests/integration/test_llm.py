@@ -1731,132 +1731,178 @@ class TestLlmIntegration:
                     await ws_provider.close()
 
         # A real agent executes a signed Google tool round and resumes its history.
-        with monkeypatch.context() as agy_patch:
-            agy_patch.setattr(
-                agy_auth,
-                "read_sources",
-                lambda: [
-                    agy_auth.BorrowedCredential(
-                        "offline-agy", time.time() + 3600, "test"
-                    )
-                ],
-            )
-            submissions = []
+        for is_claude in (False, True):
+            with monkeypatch.context() as agy_patch:
+                agy_patch.setattr(
+                    agy_auth,
+                    "read_sources",
+                    lambda: [
+                        agy_auth.BorrowedCredential(
+                            "offline-agy", time.time() + 3600, "test"
+                        )
+                    ],
+                )
+                submissions = []
 
-            def agy_http(request):
-                if request.url.path.endswith("loadCodeAssist"):
-                    return httpx.Response(
-                        200, json={"cloudaicompanionProject": "offline-project"}
+                def agy_http(request):
+                    if request.url.path.endswith("loadCodeAssist"):
+                        return httpx.Response(
+                            200, json={"cloudaicompanionProject": "offline-project"}
+                        )
+                    body = json.loads(request.content)
+                    submissions.append(body)
+                    assert body["model"] == (
+                        "claude-sonnet-4-6" if is_claude else "gemini-3.8-flash-tiered"
                     )
-                body = json.loads(request.content)
-                submissions.append(body)
-                assert body["model"] == "gemini-3.8-flash-tiered"
-                assert body["request"]["generationConfig"] == {
-                    "maxOutputTokens": 4096 if len(submissions) == 4 else 65536,
-                    "thinkingConfig": {
-                        "includeThoughts": True,
-                        "thinkingLevel": "MEDIUM",
-                    },
-                }
-                if len(submissions) == 1:
-                    parts = [
-                        {
-                            "functionCall": {
-                                "id": "server-scratchpad-1",
-                                "name": "scratchpad",
-                                "args": {
-                                    "action": "set",
-                                    "key": "agy",
-                                    "value": "preserved",
-                                },
-                            },
-                            "thoughtSignature": "opaque-signature",
-                        }
-                    ]
-                elif len(submissions) == 4:
-                    parts = [{"text": "AGY_COMPACT_SUMMARY"}]
-                else:
-                    history_parts = [
-                        part
-                        for message in body["request"]["contents"]
-                        for part in message["parts"]
-                    ]
-                    if len(submissions) <= 3:
-                        assert any(
-                            part.get("thoughtSignature") == "opaque-signature"
-                            for part in history_parts
-                        )
-                        responses = [
-                            part["functionResponse"]
-                            for part in history_parts
-                            if "functionResponse" in part
-                        ]
-                        assert [response["id"] for response in responses] == [
-                            "server-scratchpad-1"
-                        ]
-                    else:
-                        assert any(
-                            "AGY_COMPACT_SUMMARY" in part.get("text", "")
-                            for part in history_parts
-                        )
-                    parts = [{"text": "AGY_OK"}]
-                data = {
-                    "response": {
-                        "candidates": [
-                            {"content": {"parts": parts}, "finishReason": "STOP"}
-                        ]
+                    assert body["request"]["generationConfig"] == {
+                        "maxOutputTokens": (
+                            (3906 if is_claude else 4096)
+                            if len(submissions) == 4
+                            else (64000 if is_claude else 65536)
+                        ),
+                        "thinkingConfig": {
+                            "includeThoughts": True,
+                            **(
+                                {"thinkingBudget": 1024}
+                                if is_claude
+                                else {"thinkingLevel": "MEDIUM"}
+                            ),
+                        },
                     }
-                }
-                return httpx.Response(200, text="data: " + json.dumps(data) + "\n\n")
+                    if len(submissions) == 1:
+                        parts = [
+                            {
+                                "functionCall": {
+                                    "id": "server-scratchpad-1",
+                                    "name": "scratchpad",
+                                    "args": {
+                                        "action": "set",
+                                        "key": "agy",
+                                        "value": "preserved",
+                                    },
+                                },
+                                "thoughtSignature": "opaque-signature",
+                            }
+                        ]
+                        if is_claude:
+                            parts[0].pop("thoughtSignature")
+                            parts = [
+                                {"text": ""},
+                                {"text": "Use ", "thought": True},
+                                {"text": "scratchpad.", "thought": True},
+                                {
+                                    "text": "",
+                                    "thought": True,
+                                    "thoughtSignature": "opaque-signature",
+                                },
+                                *parts,
+                                {"text": ""},
+                            ]
+                    elif len(submissions) == 4:
+                        parts = [{"text": "AGY_COMPACT_SUMMARY"}]
+                    else:
+                        history_parts = [
+                            part
+                            for message in body["request"]["contents"]
+                            for part in message["parts"]
+                        ]
+                        if len(submissions) <= 3:
+                            assert any(
+                                part.get("thoughtSignature") == "opaque-signature"
+                                for part in history_parts
+                            )
+                            if is_claude:
+                                assert {
+                                    "text": "Use scratchpad.",
+                                    "thought": True,
+                                    "thoughtSignature": "opaque-signature",
+                                } in history_parts
+                                assert not any(
+                                    part.get("text") == "" for part in history_parts
+                                )
+                            responses = [
+                                part["functionResponse"]
+                                for part in history_parts
+                                if "functionResponse" in part
+                            ]
+                            assert [response["id"] for response in responses] == [
+                                "server-scratchpad-1"
+                            ]
+                        else:
+                            assert any(
+                                "AGY_COMPACT_SUMMARY" in part.get("text", "")
+                                for part in history_parts
+                            )
+                        parts = [{"text": "AGY_OK"}]
+                    data = {
+                        "response": {
+                            "candidates": [
+                                {"content": {"parts": parts}, "finishReason": "STOP"}
+                            ]
+                        }
+                    }
+                    return httpx.Response(
+                        200, text="data: " + json.dumps(data) + "\n\n"
+                    )
 
-            agy = _create_from_profile(
-                get_profile("google-antigravity/gemini-3.8-flash@reasoning=medium")
-            )
-            agy._transport = httpx.MockTransport(agy_http)
-            assert agy._profile_max_context == 1048576
-            config = tmp_path / "agy.yaml"
-            config.write_text(
-                "name: agy_probe\nsystem_prompt: offline\ninput: {type: none}\noutput: {type: stdout}\ntools: [{name: scratchpad, type: builtin}]\n"
-            )
-            async with Terrarium(session_dir=tmp_path / "agy-sessions") as engine:
-                creature = await engine.add_creature(
-                    str(config), llm=agy, io="headless", start=True
+                agy = _create_from_profile(
+                    get_profile(
+                        "google-antigravity/claude-sonnet-4-6"
+                        if is_claude
+                        else "google-antigravity/gemini-3.8-flash@reasoning=medium"
+                    )
                 )
-                result = await creature.run("remember", timeout=10)
-                assert result.text == "AGY_OK"
-                assert creature.agent.scratchpad.get("agy") == "preserved"
-                events = creature.agent.session_store.get_events("agy_probe")
-                replay = replay_conversation(normalize_resumable_events(events))
-                signed = [message for message in replay if message.get("tool_calls")]
-                assert (
-                    signed[0]["_kt_antigravity_content"]["parts"][0]["thoughtSignature"]
-                    == "opaque-signature"
+                agy._transport = httpx.MockTransport(agy_http)
+                assert agy._profile_max_context == (250000 if is_claude else 1048576)
+                config = tmp_path / "agy.yaml"
+                config.write_text(
+                    "name: agy_probe\nsystem_prompt: offline\ninput: {type: none}\noutput: {type: stdout}\ntools: [{name: scratchpad, type: builtin}]\n"
                 )
-                session_path = creature.agent.session_store.path
-            resumed = await Terrarium.resume(str(session_path), llm=agy)
-            try:
-                worker = resumed.list_creatures()[0]
-                assert (await worker.run("continue", timeout=10)).text == "AGY_OK"
-                compact = worker.agent.compact_manager
-                compact.config.keep_recent_turns = 1
-                assert compact.trigger_compact()
-                await compact.wait_for_current()
-                assert compact._compact_count == 1
-                assert compact._last_summary_error == ""
-                snapshot = worker.agent.session_store.load_conversation("agy_probe")
-                assert any(
-                    "AGY_COMPACT_SUMMARY" in (message.get("content") or "")
-                    for message in snapshot
-                )
-            finally:
-                await resumed.__aexit__(None, None, None)
-            compacted = await Terrarium.resume(str(session_path), llm=agy)
-            try:
-                worker = compacted.list_creatures()[0]
-                assert (await worker.run("after compact", timeout=10)).text == "AGY_OK"
-            finally:
-                await compacted.__aexit__(None, None, None)
-            assert len(submissions) == 5
+                async with Terrarium(
+                    session_dir=tmp_path / f"agy-sessions-{is_claude}"
+                ) as engine:
+                    creature = await engine.add_creature(
+                        str(config), llm=agy, io="headless", start=True
+                    )
+                    result = await creature.run("remember", timeout=10)
+                    assert result.text == "AGY_OK"
+                    assert creature.agent.scratchpad.get("agy") == "preserved"
+                    events = creature.agent.session_store.get_events("agy_probe")
+                    replay = replay_conversation(normalize_resumable_events(events))
+                    signed = [
+                        message for message in replay if message.get("tool_calls")
+                    ]
+                    assert any(
+                        part.get("thoughtSignature") == "opaque-signature"
+                        for part in signed[0]["_kt_antigravity_content"]["parts"]
+                    )
+                    session_path = creature.agent.session_store.path
+                resumed = await Terrarium.resume(str(session_path), llm=agy)
+                try:
+                    worker = resumed.list_creatures()[0]
+                    assert (await worker.run("continue", timeout=10)).text == "AGY_OK"
+                    compact = worker.agent.compact_manager
+                    compact.config.keep_recent_turns = 1
+                    assert compact.trigger_compact()
+                    await compact.wait_for_current()
+                    assert compact._last_summary_error == ""
+                    assert compact._compact_count == 1
+                    snapshot = worker.agent.session_store.load_conversation("agy_probe")
+                    assert any(
+                        "AGY_COMPACT_SUMMARY" in (message.get("content") or "")
+                        for message in snapshot
+                    )
+                finally:
+                    await resumed.__aexit__(None, None, None)
+                compacted = await Terrarium.resume(str(session_path), llm=agy)
+                try:
+                    worker = compacted.list_creatures()[0]
+                    assert (
+                        await worker.run("after compact", timeout=10)
+                    ).text == "AGY_OK"
+                finally:
+                    await compacted.__aexit__(None, None, None)
+                assert len(submissions) == 5
 
     def test_api_key_storage_and_resolution_workflow(self):
         """Store + retrieve an API key, then assert the resolver override.
