@@ -1,6 +1,7 @@
 <template>
   <div class="flex flex-col gap-4">
     <CodexUsageCard :usage="codex.usage.value" :loading="codex.loading.value" :initial="codex.initial.value" :error="codex.error.value" :stale="codex.stale.value" :stale-at="codex.staleAt.value" :redeeming-id="redeemingId" @refresh="codex.refresh(props.node)" @redeem="redeemResetCredit" />
+    <AntigravityUsageCard :usage="antigravity.usage.value" :loading="antigravity.loading.value" :initial="antigravity.initial.value" :error="antigravity.error.value" :stale="antigravity.stale.value" :stale-at="antigravity.staleAt.value" @refresh="antigravity.refresh(props.node)" />
     <GrokUsageCard :usage="grok.usage.value" :loading="grok.loading.value" :initial="grok.initial.value" :error="grok.error.value" :stale="grok.stale.value" :stale-at="grok.staleAt.value" @refresh="grok.refresh(props.node)" />
   </div>
 </template>
@@ -13,6 +14,7 @@ import { settingsAPI } from "@/utils/api"
 import { useI18n } from "@/utils/i18n"
 
 import CodexUsageCard from "./CodexUsageCard.vue"
+import AntigravityUsageCard from "./AntigravityUsageCard.vue"
 import GrokUsageCard from "./GrokUsageCard.vue"
 import { useProviderUsage } from "./providerUsage"
 
@@ -31,6 +33,8 @@ const grok = useProviderUsage((node) => settingsAPI.getGrokUsage(node), {
   fallbackKey: "settings.account.grok.loadFailed",
 })
 
+const antigravity = useProviderUsage((node) => (!node || node === "_host" ? settingsAPI.getAntigravityUsage(node) : Promise.resolve({ status: "unsupported" })), { t, fallbackKey: "settings.account.antigravity.loadFailed" })
+
 const redeemingId = ref("")
 let redeemGeneration = 0
 
@@ -39,11 +43,13 @@ function invalidate(node) {
   redeemingId.value = ""
   codex.invalidate(node)
   grok.invalidate(node)
+  antigravity.invalidate(node)
 }
 
 function load(node) {
   codex.refresh(node)
   grok.refresh(node)
+  antigravity.refresh(node)
 }
 
 watch(

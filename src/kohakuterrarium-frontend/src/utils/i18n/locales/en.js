@@ -1772,4 +1772,20 @@ export default {
   "codexLogin.success": "Signed in!  Closing…",
   "codexLogin.failed": ({ error }) => `Login failed: ${error}`,
   "codexLogin.httpError": ({ status, body }) => `HTTP ${status}: ${body}`,
+  "settings.account.antigravity.gemini": "Gemini",
+  "settings.account.antigravity.thirdParty": "Claude / GPT shared quota",
+  "settings.account.antigravity.other": "Other quota",
+  "settings.account.antigravity.fiveHour": "5-hour window",
+  "settings.account.antigravity.weekly": "Weekly window",
+  "settings.account.antigravity.daily": "Daily window",
+  "settings.account.antigravity.unknownPeriod": "Quota window",
+  "settings.account.antigravity.cliSignIn": "agy sign-in",
+  "settings.account.antigravity.notLoggedIn": "Sign in with agy on this host to view quota.",
+  "settings.account.antigravity.authExpired":
+    "agy credentials changed or expired. Check your agy sign-in and refresh.",
+  "settings.account.antigravity.localOnly":
+    "Quota is available only for local Windows agy accounts.",
+  "settings.account.antigravity.noData": "The service returned no quota data.",
+  "settings.account.antigravity.loadFailed": "Unable to fetch Antigravity quota.",
+  "settings.account.antigravity.stale": "Showing the last successful snapshot from {value}.",
 }

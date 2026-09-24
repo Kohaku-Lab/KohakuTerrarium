@@ -8,9 +8,12 @@
     <div class="h-2 w-full rounded bg-warm-200 dark:bg-warm-700 overflow-hidden">
       <div v-if="tone" data-usage-bar class="h-full" :data-tone="tone" :class="{ 'bg-iolite': tone === 'purple', 'bg-amber': tone === 'amber', 'bg-coral': tone === 'coral' }" :style="{ width: clampPercent(window.used_percent) + '%' }" />
     </div>
-    <time v-if="formatDateTime(window.resets_at)" :title="formatDateTime(window.resets_at)" :aria-label="t('settings.account.resets', { value: formatDateTime(window.resets_at) })" class="text-xs text-warm-500">
-      {{ t("settings.account.resets", { value: formatDateTime(window.resets_at, "compact") }) }}
-    </time>
+    <div class="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 text-xs text-warm-500">
+      <slot name="details" />
+      <time v-if="formatDateTime(window.resets_at)" :title="formatDateTime(window.resets_at)" :aria-label="t('settings.account.resets', { value: formatDateTime(window.resets_at) })" class="text-xs text-warm-500">
+        {{ t("settings.account.resets", { value: formatDateTime(window.resets_at, "compact") }) }}
+      </time>
+    </div>
   </div>
 </template>
 

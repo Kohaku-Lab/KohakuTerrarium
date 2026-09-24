@@ -45,6 +45,8 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
 
+from tests.helpers.antigravity_usage import install_quota_script, assert_quota
+
 from tests.helpers.grok_usage_script import (
     FAKE_ACCESS,
     assert_billing_request,
@@ -216,6 +218,24 @@ class TestApiStudioJourney:
                 == 400
             )
             assert client.post("/api/settings/antigravity-refresh").status_code == 409
+
+        with monkeypatch.context() as quota_patch:
+            quota = install_quota_script(quota_patch)
+            usage_url = "/api/settings/antigravity-usage"
+            assert client.get(usage_url).json()["status"] == "not_logged_in"
+            quota["logged_in"] = True
+            response = client.get(usage_url)
+            assert response.status_code == 200
+            assert_quota(response.json(), 25)
+            quota["remaining"] = 0.5
+            assert_quota(client.get(usage_url).json(), 50)
+            remote = client.get(usage_url + "?node=worker").json()
+            assert remote["status"] == "unsupported"
+            assert remote["groups"] == []
+            quota["status"] = 503
+            assert client.get(usage_url).json()["status"] == "unavailable"
+            quota["logged_in"] = False
+            assert client.get(usage_url).json()["groups"] == []
 
         with monkeypatch.context() as usage_patch:
             grok_home = install_grok_home(workspace_root, usage_patch)

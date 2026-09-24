@@ -39,3 +39,10 @@ async def models(node: str = ""):
         return await antigravity.get_models()
     except AntigravityError as exc:
         raise HTTPException(502, exc.code) from None
+
+
+@router.get("/antigravity-usage")
+async def usage(node: str = ""):
+    if not is_host_target(node):
+        return antigravity.empty_usage("unsupported")
+    return await antigravity.get_usage()

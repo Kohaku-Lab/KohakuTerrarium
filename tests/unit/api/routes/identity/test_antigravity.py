@@ -36,6 +36,14 @@ async def test_host_status_offline_remote_rejected_and_mutations_admin_gated(
         assert (
             await client.get("/settings/antigravity-status?node=worker")
         ).status_code == 400
+        unsupported = await client.get("/settings/antigravity-usage?node=worker")
+        assert unsupported.status_code == 200
+        assert unsupported.json() == {
+            "status": "unsupported",
+            "source": "live",
+            "captured_at": None,
+            "groups": [],
+        }
     app.dependency_overrides.clear()
     app.state.auth_config = AuthConfig(admin_token="test-admin")
     async with httpx.AsyncClient(
@@ -43,6 +51,7 @@ async def test_host_status_offline_remote_rejected_and_mutations_admin_gated(
     ) as client:
         for method, path in (
             ("GET", "antigravity-status"),
+            ("GET", "antigravity-usage"),
             ("POST", "antigravity-refresh"),
             ("POST", "antigravity-models"),
         ):
