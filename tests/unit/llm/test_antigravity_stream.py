@@ -86,3 +86,32 @@ def test_tools_are_distinct_and_unfinished_turn_fails():
     assert [json.loads(call.arguments) for call in turn.calls] == [{"n": 1}, {"n": 2}]
     with pytest.raises(AntigravityError, match="incomplete_stream"):
         turn.finish()
+
+
+@pytest.mark.parametrize(
+    "response",
+    [{"candidates": value} for value in (None, False, 1, "private-response", {})]
+    + [{"candidates": [value]} for value in (None, False, 1, "private-response", [])]
+    + [
+        {"candidates": [{"content": value}]}
+        for value in (None, False, 1, "private-response", [])
+    ]
+    + [
+        {"candidates": [{"content": {"parts": value}}]}
+        for value in (None, False, 1, "private-response", {})
+    ]
+    + [{"candidates": [{"finishReason": value}]} for value in (["STOP"], {"STOP": 1})],
+)
+def test_malformed_response_structure_raises_redacted_error(response):
+    with pytest.raises(AntigravityError, match="^Antigravity: malformed_response$"):
+        Turn().feed({"response": response})
+
+
+def test_optional_empty_and_usage_only_frames_remain_valid():
+    turn = Turn()
+    for response in ({}, {"candidates": []}, {"usageMetadata": {"totalTokenCount": 7}}):
+        assert turn.feed({"response": response}) == []
+    assert turn.feed({"candidates": [{"finishReason": "STOP"}]}) == []
+    turn.finish()
+    assert turn.usage == {"total_tokens": 7}
+    assert turn.finish_reason == "stop"

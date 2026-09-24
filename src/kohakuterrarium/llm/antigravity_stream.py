@@ -66,10 +66,23 @@ class Turn:
                     self.usage[target] = usage[source]
         output = []
         candidates = response.get("candidates", [])
+        if not isinstance(candidates, list):
+            raise AntigravityError("malformed_response")
         if len(candidates) > 1:
             raise AntigravityError("multiple_candidates_unsupported")
         for candidate in candidates:
-            for part in candidate.get("content", {}).get("parts", []):
+            if not isinstance(candidate, dict):
+                raise AntigravityError("malformed_response")
+            content = candidate.get("content", {})
+            if not isinstance(content, dict):
+                raise AntigravityError("malformed_response")
+            parts = content.get("parts", [])
+            if not isinstance(parts, list):
+                raise AntigravityError("malformed_response")
+            reason = candidate.get("finishReason")
+            if reason is not None and not isinstance(reason, str):
+                raise AntigravityError("malformed_response")
+            for part in parts:
                 if not isinstance(part, dict):
                     raise AntigravityError("malformed_part")
                 self.committed = True
@@ -104,7 +117,6 @@ class Turn:
                             output.append(value)
                 elif "thoughtSignature" not in part:
                     raise AntigravityError("unsupported_output_part")
-            reason = candidate.get("finishReason")
             if reason:
                 if reason not in {"STOP", "MAX_TOKENS"}:
                     raise AntigravityError("generation_blocked")

@@ -532,3 +532,30 @@ def test_per_call_numeric_budget_respects_output_cap_and_minimum(limit, budget):
         "thinkingConfig": {"includeThoughts": True, "thinkingBudget": budget},
     }
     assert provider._settings.thinking_config["thinkingBudget"] == 10001
+
+
+@pytest.mark.asyncio
+async def test_malformed_success_response_is_redacted_and_not_retried():
+    attempts = []
+
+    def respond(request):
+        if request.url.path.endswith("loadCodeAssist"):
+            return httpx.Response(200, json={"cloudaicompanionProject": "p"})
+        attempts.append(1)
+        return httpx.Response(
+            200,
+            text='data: {"response":{"candidates":[{"content":null}],'
+            '"private":"secret-canary"}}\n\n',
+        )
+
+    provider = AntigravityProvider(
+        "gemini-3.8-flash",
+        retry_policy={"base_delay": 0, "max_retries": 2},
+        transport=httpx.MockTransport(respond),
+    )
+    with pytest.raises(AntigravityError) as caught:
+        await provider.chat_complete([{"role": "user", "content": "test"}])
+    assert str(caught.value) == "Antigravity: malformed_response"
+    assert attempts == [1]
+    assert provider.last_tool_calls == []
+    assert provider.last_assistant_extra_fields == {}
