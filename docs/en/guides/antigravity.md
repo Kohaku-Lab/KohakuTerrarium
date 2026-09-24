@@ -101,20 +101,7 @@ model supports every modality.
 Use of this optional integration remains subject to the account provider's terms
 and restrictions. There is no compatibility or account-availability guarantee.
 
-## Validation evidence
-
-The 2026-09-24 live matrix verified all 13 advertised model/effort combinations:
-text, one side-effect-free echo call, and signed tool-result replay. Ten passed
-initially; Pro high and both Claude models passed all three stages after fixes to
-the Pro route and Claude streamed-history assembly. The matrix used the real KT
-provider with small fixed prompts, caps of 2,048 (Pro high: 11,025), and no retries.
-See the [live matrix and redacted evidence](../../zh-CN/dev/research/antigravity-online-matrix-2026-09-24.md)
-and [catalog metadata](../../zh-CN/dev/research/antigravity-agy-models-2026-09-24.md).
-
-Offline tests cover invalid settings, profile/variation resolution, Web catalog
-metadata, and real Terrarium tool execution, persistence, resume and compaction.
-The live matrix does not test full context/output limits, images, prolonged
-sessions, or concurrent load; model limits above come from catalog metadata.
+## Output limits and tool results
 
 Per-call `max_tokens` overrides (including compaction summaries) leave the saved
 profile unchanged and retain the total output cap. If a numeric thinking budget
