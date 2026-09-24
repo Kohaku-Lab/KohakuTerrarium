@@ -8,11 +8,7 @@
       <div class="flex flex-wrap gap-3">
         <button :disabled="busy" class="text-iolite hover:underline" @click="load">{{ t("common.refresh") }}</button>
         <button :disabled="busy" class="text-iolite hover:underline" data-agy-refresh @click="run('refresh')">{{ t("settings.antigravity.refreshCredential") }}</button>
-        <button :disabled="busy" class="text-iolite hover:underline" data-agy-models @click="run('models')">{{ t("settings.antigravity.models") }}</button>
       </div>
-      <ul v-if="models.length" class="font-mono max-h-48 overflow-auto">
-        <li v-for="model in models" :key="model.id">{{ model.id }}</li>
-      </ul>
     </template>
   </div>
 </template>
@@ -28,7 +24,6 @@ const local = computed(() => !props.node || props.node === "_host")
 const busy = ref(false)
 const status = ref(null)
 const error = ref("")
-const models = ref([])
 let generation = 0
 
 async function run(action = "status") {
@@ -37,19 +32,10 @@ async function run(action = "status") {
   busy.value = true
   error.value = ""
   try {
-    if (action === "models") {
-      const result = await settingsAPI.getAntigravityModels(props.node)
-      if (current === generation) models.value = result.models || []
-    } else {
-      const result = action === "refresh" ? await settingsAPI.refreshAntigravity(props.node) : await settingsAPI.getAntigravityStatus(props.node)
-      if (current === generation) {
-        status.value = result
-        models.value = []
-      }
-    }
+    const result = action === "refresh" ? await settingsAPI.refreshAntigravity(props.node) : await settingsAPI.getAntigravityStatus(props.node)
+    if (current === generation) status.value = result
   } catch (failure) {
     if (current === generation) {
-      models.value = []
       error.value = t(failure.response?.status === 403 || failure.response?.headers?.["x-auth-required"] === "admin" ? "settings.antigravity.adminRequired" : "settings.antigravity.failed")
     }
   } finally {
@@ -65,7 +51,6 @@ watch(
   () => {
     generation++
     status.value = null
-    models.value = []
     error.value = ""
     busy.value = false
     load()

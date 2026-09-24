@@ -20,17 +20,16 @@ describe("Antigravity local account", () => {
       source: "windows_keyring",
     })
   })
-  it("loads offline status and discovers models only on request", async () => {
-    settingsAPI.getAntigravityModels.mockResolvedValue({
-      models: [{ id: "gemini-3-flash", name: "Gemini 3 Flash" }],
-    })
+  it("keeps provider settings focused on credentials", async () => {
+    settingsAPI.refreshAntigravity.mockResolvedValue({ state: "ready", source: "windows_keyring" })
     const wrapper = mount(AntigravityCard)
     await flushPromises()
     expect(wrapper.text()).toContain("settings.antigravity.ready")
-    expect(settingsAPI.getAntigravityModels).not.toHaveBeenCalled()
-    await wrapper.get("[data-agy-models]").trigger("click")
+    expect(wrapper.find("[data-agy-models]").exists()).toBe(false)
+    await wrapper.get("[data-agy-refresh]").trigger("click")
     await flushPromises()
-    expect(wrapper.text()).toContain("gemini-3-flash")
+    expect(wrapper.text()).toContain("settings.antigravity.ready")
+    expect(settingsAPI.getAntigravityModels).not.toHaveBeenCalled()
   })
   it("shows permission failures separately from missing credentials", async () => {
     settingsAPI.getAntigravityStatus.mockRejectedValue({

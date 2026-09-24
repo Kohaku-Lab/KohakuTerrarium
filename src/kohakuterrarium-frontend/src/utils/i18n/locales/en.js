@@ -12,7 +12,6 @@ export default {
     "Unsupported agy credential format. Sign in again using agy.",
   "settings.antigravity.credential_store_unavailable": "The local credential store is unavailable.",
   "settings.antigravity.refreshCredential": "Refresh through agy",
-  "settings.antigravity.models": "Fetch available models",
   "settings.antigravity.localOnly": "Antigravity is supported on the local host only.",
   "settings.antigravity.adminRequired": "Administrator access is required to inspect this account.",
   "settings.antigravity.failed":

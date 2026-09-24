@@ -8,7 +8,6 @@ export default {
   "settings.antigravity.malformed_credential": "不支持此凭据格式，请通过 agy 重新登录。",
   "settings.antigravity.credential_store_unavailable": "无法读取本地凭据存储。",
   "settings.antigravity.refreshCredential": "通过 agy 刷新凭据",
-  "settings.antigravity.models": "获取可用模型",
   "settings.antigravity.localOnly": "Antigravity 暂仅支持本地主机。",
   "settings.antigravity.adminRequired": "查看此账号需要管理员权限。",
   "settings.antigravity.failed": "操作失败。请检查 agy 登录及账号访问权限后重试。",

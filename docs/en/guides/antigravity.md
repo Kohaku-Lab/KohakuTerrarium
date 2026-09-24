@@ -17,8 +17,9 @@ needed. `models` makes an authenticated discovery request and does not generate
 text. Generation consumes the account's available quota.
 
 In Web settings, open the `google-antigravity` provider row to inspect local
-status, refresh through agy, or fetch model IDs. These operations respect the
-server's admin-token setting. CLI and Web share the built-in model catalog and
+status or refresh through agy. These operations respect the server's admin-token
+setting. Provider settings do not display a discovered model list; built-in and
+custom presets are managed in the Custom Models tab. CLI and Web share the built-in model catalog and
 its reasoning variation selector. No preset becomes the default automatically.
 
 ## Models and reasoning
