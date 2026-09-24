@@ -429,6 +429,8 @@ class ManagerReadinessMixin:
         for record in await self._repo.list_drives(
             DriveQuery(statuses=frozenset({DriveStatus.WAITING}))
         ):
+            if record.not_before is None and not record.dependency_ids:
+                continue
             assignment = await self._repo.get_assignment(record.drive_id)
             if assignment is None or assignment.assignee_creature_id is None:
                 continue

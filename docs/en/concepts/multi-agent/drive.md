@@ -136,8 +136,11 @@ the repository increments the Drive's `lifecycle_epoch` (which
 invalidates every prior delivery) and writes an audit record. Waiting
 Drives carry deterministic wake conditions only — a timestamp, a
 dependency predicate, a named external signal, a registration readiness
-function, or a manual wake by an authorized actor. The manager never
-infers readiness from free-form prose.
+function, or a manual wake by an authorized actor. The periodic manager scan
+requires an explicit `not_before` or `dependency_ids` condition before waking
+a waiting Drive. Without either, it remains waiting until explicitly activated
+or woken; unconditional registration readiness is not a wake signal. The manager
+never infers readiness from free-form prose.
 
 ## Delivery: at-least-once, logically deduplicated
 

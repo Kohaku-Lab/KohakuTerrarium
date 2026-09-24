@@ -163,6 +163,17 @@ completion with evidence rather than assert it.
   ordinary Drive event. Continuation is the dispatcher reacting to
   readiness, **not** a special agent loop.
 
+Drive delivery waits while the creature has a turn, queued event, or background
+tool/sub-agent job in progress. The pending delivery does not consume a retry
+attempt. Background results still arrive normally; once the creature finishes
+processing them, an active Goal can continue.
+
+An explicit `waiting` transition suspends Goal pursuit. The periodic scan only
+wakes it when configured `not_before` or `dependency_ids` conditions are met.
+Without those conditions it stays waiting until an authorized actor activates
+or wakes it, for example with `/goal resume`. `continue_when_ready` alone does
+not override `waiting`.
+
 ## Ownership
 
 Who owns a Goal (and who may fully manage it) depends on the creation

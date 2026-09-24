@@ -229,11 +229,12 @@ class TestStartStop:
         assert not c.stop_requested
         await c.stop()
 
-    async def test_natural_idle_requires_no_turn_or_background_work(self):
+    @pytest.mark.parametrize("running", [False, True])
+    async def test_natural_idle_requires_no_turn_or_background_work(self, running):
         c = _creature()
         await c.start()
-        c._running = False
-        c.agent._running = False
+        c._running = running
+        c.agent._running = running
         assert c.is_naturally_idle()
 
         c.agent._active_handles = {"direct": object()}

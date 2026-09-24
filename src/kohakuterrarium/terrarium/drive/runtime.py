@@ -135,16 +135,16 @@ class _EngineDriveSink:
         # available before the creature handles the Drive.
         if not getattr(creature, "restoration_ready", True):
             return DeliveryOutcome.rejected_stopped()
+        if not creature.is_naturally_idle():
+            return DeliveryOutcome.rejected_stopped()
         if not creature.is_running:
-            if not creature.is_naturally_idle():
-                return DeliveryOutcome.rejected_stopped()
             await creature.start(requested=False)
             if creature.stop_requested or not creature.is_running:
                 return DeliveryOutcome.rejected_stopped()
             await creature.wait_restoration_ready()
             if creature.stop_requested or not creature.is_running:
                 return DeliveryOutcome.rejected_stopped()
-        if creature.stop_requested or not creature.is_running:
+        if not creature.is_running or not creature.is_naturally_idle():
             return DeliveryOutcome.rejected_stopped()
         task = asyncio.ensure_future(
             creature.inject_event(event, correlation_id=delivery_id)
