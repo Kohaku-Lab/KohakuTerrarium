@@ -9,12 +9,17 @@ class ModelSpec:
     max_output: int
     efforts: tuple[str, ...] = ()
     mode: str = ""
+    wire_model: str = ""
 
 
 MODELS = {
     **{
         f"gemini-{version}-flash": ModelSpec(
-            1048576, 65536, ("low", "medium", "high"), "level"
+            1048576,
+            65536,
+            ("low", "medium", "high"),
+            "level",
+            f"gemini-{version}-flash-tiered" if version in ("3.7", "3.8") else "",
         )
         for version in ("3.6", "3.7", "3.8")
     },
@@ -96,7 +101,7 @@ def model_settings(
     wire_model, thinking = model, {}
     if spec:
         if spec.efforts:
-            wire_model = family + "-" + effort
+            wire_model = spec.wire_model or family + "-" + effort
         if spec.mode == "level":
             thinking = {"includeThoughts": True, "thinkingLevel": effort.upper()}
         elif spec.mode in ("budget", "fixed"):

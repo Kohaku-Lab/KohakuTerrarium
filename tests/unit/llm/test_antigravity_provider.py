@@ -178,7 +178,11 @@ async def test_account_change_during_project_discovery_never_uses_old_project(
         (
             f"gemini-{version}-flash",
             effort,
-            f"gemini-{version}-flash-{effort}",
+            (
+                f"gemini-{version}-flash-{effort}"
+                if version == "3.6"
+                else f"gemini-{version}-flash-tiered"
+            ),
             {"includeThoughts": True, "thinkingLevel": effort.upper()},
             65536,
         )
@@ -308,7 +312,7 @@ def test_explicit_sku_defaults_and_with_model_effort():
     assert provider.with_model(provider.config.model) is provider
 
 
-async def test_signed_round_requires_matching_effort_wire_model():
+async def test_signed_round_requires_matching_wire_model():
     requests = []
 
     def respond(request):
@@ -360,9 +364,11 @@ async def test_signed_round_requires_matching_effort_wire_model():
     low = AntigravityProvider(
         "gemini-3.8-flash", reasoning_effort="low", transport=transport
     )
+    assert (await low.chat_complete(messages)).content == "ok"
+    other_model = AntigravityProvider("gemini-3.7-flash", transport=transport)
     with pytest.raises(AntigravityError, match="history_requires_new_session"):
-        await low.chat_complete(messages)
-    assert len(requests) == 2
+        await other_model.chat_complete(messages)
+    assert len(requests) == 3
 
 
 @pytest.mark.parametrize(
@@ -374,4 +380,37 @@ def test_with_model_preserves_explicit_output_limit(target):
     assert sibling.config.max_tokens == 4096
     assert sibling._profile_max_context == (
         120000 if target == "gemini-unknown" else 1048576
+    )
+
+
+@pytest.mark.parametrize("version", ["3.7", "3.8"])
+@pytest.mark.parametrize("effort", ["", "low", "medium", "high"])
+async def test_tiered_only_catalog_routes_do_not_request_missing_effort_skus(
+    version, effort
+):
+    requests = []
+    available = {"gemini-3.7-flash-tiered", "gemini-3.8-flash-tiered"}
+
+    def respond(request):
+        if request.url.path.endswith("loadCodeAssist"):
+            return httpx.Response(200, json={"cloudaicompanionProject": "test-project"})
+        body = json.loads(request.content)
+        requests.append(body)
+        if body["model"] not in available:
+            return httpx.Response(404)
+        return httpx.Response(200, text=frame([{"text": "OK"}]))
+
+    provider = AntigravityProvider(
+        f"gemini-{version}-flash",
+        reasoning_effort=effort,
+        transport=httpx.MockTransport(respond),
+        retry_policy={"max_retries": 0},
+    )
+    assert (
+        await provider.chat_complete([{"role": "user", "content": "Reply exactly OK."}])
+    ).content == "OK"
+    assert len(requests) == 1
+    assert (
+        requests[0]["request"]["generationConfig"]["thinkingConfig"]["thinkingLevel"]
+        == (effort or "high").upper()
     )

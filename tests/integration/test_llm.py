@@ -1750,7 +1750,7 @@ class TestLlmIntegration:
                     )
                 body = json.loads(request.content)
                 submissions.append(body)
-                assert body["model"] == "gemini-3.8-flash-medium"
+                assert body["model"] == "gemini-3.8-flash-tiered"
                 assert body["request"]["generationConfig"] == {
                     "maxOutputTokens": 65536,
                     "thinkingConfig": {

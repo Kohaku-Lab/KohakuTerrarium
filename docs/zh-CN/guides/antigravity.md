@@ -34,7 +34,8 @@ CLI 和 Web 共用 KT 现有模型选择器与 reasoning variation。可以选�
 标识后加 `@reasoning=low`、`@reasoning=medium`、`@reasoning=high`。
 KT 的 Gemini 预设默认 high，不自动改变用户的默认模型。
 
-Flash 同时切换实际模型 ID 的 `-low/-medium/-high` 和 `thinkingLevel`。
+Flash 3.6 切换实际模型 ID 的 `-low/-medium/-high`。Flash 3.7/3.8 固定使用
+发现目录中的 `-tiered` 路由；所有 Flash 均以 `thinkingLevel` 传递所选档位。
 Pro 切换 `-low/-high`，对应 `thinkingBudget=1001/10001`。直接填写明确档位的
 模型 ID 也可使用；ID 与 effort 冲突会在读取凭据前报错。
 
@@ -59,9 +60,9 @@ KT 通过有超时限制的 agy 子进程刷新，跨进程锁及进程内共享
 会话保存原始签名片段，同时绑定实际模型 ID、项目与当前消息内容。
 同模型的工具往返、事件回放与恢复会话已通过离线完整 agent 工作流验证。
 编辑消息后旧片段失效；跨模型可以保留普通文本，无法安全复用的工具签名历史
-会提示新建或压缩会话。Gemini 改变 effort 也会改变实际模型 ID，因此带工具签名的
-会话应先压缩或新建，再继续使用新档位；对应同一实际 ID 的系列名与明确档位 ID
-可相互复用历史。切换到 OpenAI 时不会外发 Google 内部状态字段。
+会提示新建或压缩会话。Flash 3.6 和 Pro 改变 effort 会改变实际模型 ID，带工具签名的
+会话应先压缩或新建。Flash 3.7/3.8 共用 tiered 路由，以 thinkingLevel 切换档位，
+保持相同的历史绑定；对应同一实际 ID 的系列名与明确档位 ID 可相互复用历史。切换到 OpenAI 时不会外发 Google 内部状态字段。
 
 ## 当前边界
 
@@ -80,3 +81,7 @@ Claude Sonnet 4.6 文本。本次实现验证使用离线 HTTP 响应及真实 T
 模型更新已用离线请求验证全部 Gemini 档位、Claude 默认值、无效参数、KT variation
 解析、Web 目录和真实 agent 的工具执行与恢复；没有追加在线推理。
 详见[模型元数据与路由依据](../dev/research/antigravity-agy-models-2026-09-24.md)。
+
+后续两次明确授权的在线对照确认：Flash 3.8 的 `-high` 返回 404，改用 `-tiered`
+并保持 HIGH thinkingLevel 返回 200 / STOP。Flash 3.7 按同样只提供 tiered 的发现
+目录修正，尚未额外在线验证。

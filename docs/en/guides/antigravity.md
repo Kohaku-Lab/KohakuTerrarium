@@ -37,8 +37,9 @@ are token limits, not account quota; future server metadata can change.
 
 Use `@reasoning=low`, `@reasoning=medium`, or `@reasoning=high` where supported,
 or select the same variation in the existing CLI/Web model picker. Gemini
-presets default to **high** in KT. Flash routes to the matching `-low`,
-`-medium`, or `-high` model and sends a matching `thinkingLevel`. Pro routes to
+presets default to **high** in KT. Flash 3.6 routes to the matching `-low`,
+`-medium`, or `-high` model. Flash 3.7/3.8 use the discovered `-tiered` route.
+All Flash variants send the selected `thinkingLevel`. Pro routes to
 `-low`/`-high` with budgets 1,001/10,001. Explicit tier IDs are also accepted;
 an effort that conflicts with the ID fails before authentication.
 
@@ -77,10 +78,11 @@ project, and current canonical message. Same-model tool calls, persistence,
 event replay and resume preserve these parts. Editing a message invalidates its
 old parts. Text history can be reused across models; tool history with missing or
 incompatible signatures requires a new or compacted session and fails explicitly
-instead of inventing a signature. Changing Gemini effort changes the wire model:
-compact or start a new session before continuing a signed tool history at a new
-effort. A family selector and an explicit tier ID for the same wire model can
-reuse signed history. Switching to OpenAI strips the internal Google
+instead of inventing a signature. Changing effort on Flash 3.6 or Pro changes
+the wire model and requires a new or compacted session for signed tool history.
+Flash 3.7/3.8 share the same tiered route across efforts and retain the same
+history binding. A family selector and an explicit tier ID for the same wire
+model can reuse signed history. Switching to OpenAI strips the internal Google
 state from requests.
 
 This first implementation supports local Windows CLI/Web operation only.
@@ -105,4 +107,7 @@ thinking combinations have not been live-tested.
 The catalog/effort update additionally verifies every advertised Gemini tier's
 outgoing request, Claude defaults, invalid settings, profile/variation resolution,
 Web catalog metadata, and signed replay through a real Terrarium workflow. It does
-not add live inference calls. See the [metadata and routing evidence](../../zh-CN/dev/research/antigravity-agy-models-2026-09-24.md).
+not add live inference calls. A subsequent authorized two-request comparison
+verified that Flash 3.8 `-high` returned HTTP 404 while `-tiered` with the same
+HIGH thinking level returned HTTP 200 / STOP. Flash 3.7 routing follows the
+same discovered tiered-only catalog but has not been live-tested. See the [metadata and routing evidence](../../zh-CN/dev/research/antigravity-agy-models-2026-09-24.md).

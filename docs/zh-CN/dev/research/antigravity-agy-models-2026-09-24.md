@@ -28,7 +28,8 @@
 | claude-opus-4-6-thinking | 250000 | 64000 | 1024 | 未返回 |
 
 Flash 3.7/3.8 的发现接口只返回 tiered，但官方 CLI 明确展开三档。
-静态预设取其系列限制，不能把缺少单档发现记录当成模型不可用。
+静态预设取其系列限制。2026-09-24 对照探针确认 3.8 的 `-high` 请求返回 404，
+`-tiered` 携带相同 HIGH thinkingLevel 返回 200；CLI 档位名称不能直接当作该接口的 wire ID。
 
 ## 协议依据与选择
 
@@ -37,7 +38,9 @@ Flash 3.7/3.8 的发现接口只返回 tiered，但官方 CLI 明确展开三档
 `62bc57be1b03ef0802a33cf7f5f530e534527531`，没有复制其用户提示或服务端系统提示。
 
 - [collapse 规则](https://github.com/can1357/oh-my-pi/blob/62bc57be1b03ef0802a33cf7f5f530e534527531/packages/catalog/src/compat/rules/taxonomy/_collapse.kdl)：
-  Flash >=3.6 使用明确的 low/medium/high wire ID 和 google-level。
+  上游为 Flash >=3.6 配置明确的 low/medium/high wire ID 和 google-level。
+  此规则不能直接套用于当前 agy consumer daily endpoint：KT 对 3.7/3.8 使用
+  发现目录中的 tiered ID，另以 thinkingLevel 表达档位；3.6 保留目录中的明确档位 ID。
 - [Antigravity 规则](https://github.com/can1357/oh-my-pi/blob/62bc57be1b03ef0802a33cf7f5f530e534527531/packages/catalog/src/compat/rules/providers/google-antigravity.kdl)：
   Pro 3.1 使用数字 budget。KT 选择当前 agy 和发现结果共同列出的 `gemini-3.1-pro-high`，
   不照搬上游 hub 将 high 改路由到 `gemini-pro-agent` 的行为。
@@ -58,7 +61,8 @@ inline 路径采用模型默认限制。模型克隆保留可用的 effort 和�
 并采用目标模型上下文限制。
 
 签名状态绑定实际 wire ID，避免仅因为逻辑系列名相同便混用签名。
-同一 wire ID 的别名可复用；改变 effort 后带工具签名的历史要求压缩或新会话。
+同一 wire ID 的别名可复用；只有实际 wire ID 改变时，带工具签名的历史要求压缩或新会话。
+Flash 3.7/3.8 的三档共用 tiered ID，切换 effort 不改变签名绑定。
 这是 KT 的保守实现边界，不是宣称 Google 一定拒绝所有跨档位签名。
 
 在线验证仅包括目录发现与官方 CLI 参数校验；没有追加推理调用。
@@ -78,3 +82,25 @@ inline 路径采用模型默认限制。模型克隆保留可用的 effort 和�
   通过；Black 检查 1,668 个文件；`git diff --check` 通过。
 - 已知非失败告警：Pydantic `__fields_set__` 弃用、Node localStorage 实验提示，
   前端既有组件重名、动态导入混用和大 chunk 提示。
+
+## 404 实际会话回归（2026-09-24）
+
+用户会话在选择 `google-antigravity/gemini-3.8-flash` 后首轮报 `http_404`。
+两次明确授权的对照推理使用相同凭据、项目、固定提示词 `Reply exactly OK.`、
+输出上限 128、`includeThoughts: true` 和 `thinkingLevel: HIGH`，仅替换模型 ID：
+
+| wire ID | HTTP | 输出字符数 | finish |
+| --- | ---: | ---: | --- |
+| gemini-3.8-flash-high | 404 | 0 | 无 |
+| gemini-3.8-flash-tiered | 200 | 2 | STOP |
+
+项目发现成功；目录再次确认 3.7/3.8 只列出 tiered，3.6 列出各档位和 tiered。
+根因是将 CLI 逻辑档位与这个 consumer endpoint 的实际路由混为一谈；此前 mock
+重复实现假设，没有模拟不存在的 SKU。现已补充不存在模型返回 404 的回归，覆盖
+默认档位与 low/medium/high，以及签名历史、profile 创建和真实 agent 会话恢复。
+3.7 的修正依据为同一目录结构，尚未额外在线推理；3.8 在线仅验证 HIGH 文本请求。
+未上传用户会话或仓库内容，未保存 token、项目 ID 或原始响应。
+
+本次修复验证：先确认 19 项路由/签名用例在旧实现失败，修复后该组 70 项通过；
+LLM 单元、bootstrap LLM、LLM 集成、文件大小与依赖门禁合计 3,184 项通过。
+全仓库 Ruff、Black（1,668 文件）及差异空白检查通过。既有 45 条 Pydantic 弃用告警。
