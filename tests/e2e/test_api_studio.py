@@ -41,6 +41,7 @@ from kohakuterrarium.api.deps import set_service
 from kohakuterrarium.api.routes.catalog import _deps as catalog_deps
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.studio.catalog import packages as _catalog_packages_ops
+from kohakuterrarium.studio.attach import pty_posix
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.terrarium import LocalTerrariumService, Terrarium
 from kohakuterrarium.testing.llm import ScriptedLLM
@@ -682,6 +683,31 @@ class TestApiStudioJourney:
         # Cancelling a non-existent job is a hard 404.
         resp = client.post(f"{base}/tasks/no-such-job/stop")
         assert resp.status_code == 404
+
+        # Open, resize, use, and disconnect an idle embedded terminal.
+        if os.name == "posix":
+            terminal_home = workspace_root / "terminal-home"
+            terminal_home.mkdir()
+            (terminal_home / ".bash_profile").write_text("PS1='kt-test> '\n")
+            with monkeypatch.context() as terminal_patch:
+                terminal_patch.setenv("HOME", str(terminal_home))
+                terminal_patch.delenv("BASH_ENV", raising=False)
+                terminal_patch.delenv("ENV", raising=False)
+                terminal_patch.setattr(pty_posix, "_find_shell", lambda: "/bin/bash")
+                with client.websocket_connect(
+                    f"/ws/sessions/{session_id}/creatures/{creature_id}/pty"
+                ) as terminal:
+                    assert terminal.receive_json() == {"type": "output", "data": ""}
+                    output = ""
+                    while "kt-test> " not in output:
+                        output += terminal.receive_json()["data"]
+                    terminal.send_json({"type": "resize", "rows": 37, "cols": 91})
+                    terminal.send_json({"type": "input", "data": "stty size\n"})
+                    output = ""
+                    while "37 91\r\n" not in output:
+                        output += terminal.receive_json()["data"]
+                    assert client.get(f"{base}/jobs").json() == []
+            assert client.get("/api/sessions/open").status_code == 200
 
         # 12. A second chat turn, then regenerate the tail reply.
         resp = client.post(f"{base}/chat", json={"message": "ping again"})
