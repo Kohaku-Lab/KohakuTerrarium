@@ -60,7 +60,7 @@ def test_real_terminal_shutdown_preserves_event_loop(tmp_path, mode, loop_kind):
     )
     assert completed.returncode == 0, completed.stderr
     report = json.loads(completed.stdout.splitlines()[-1])
-    assert not report["rescued"], report
+    assert not report["rescued"], json.dumps(report, sort_keys=True)
     assert report["max_tick_gap"] < 0.75, report
     assert report["master_closed"] and report["slave_closed"], report
     assert report["pending_tasks"] == 0, report

@@ -87,7 +87,7 @@ def main() -> None:
             self.output += message["data"]
             if "kt-test> " in self.output:
                 self.ready.set()
-            if "\r\nKT-PTY-OK\r\n" in self.output:
+            if "KT-PTY-OK\r\n" in self.output:
                 self.marker.set()
 
         async def receive_text(self):
@@ -136,8 +136,16 @@ def main() -> None:
                 ticks.append(time.monotonic())
                 await asyncio.sleep(0.01)
 
+        async def observed_session():
+            try:
+                await pty_posix.pty_session(socket, directory)
+            except BaseException as exc:
+                state["error"] = type(exc).__name__
+                state["error_args"] = list(exc.args)
+                raise
+
         pulse = asyncio.create_task(heartbeat())
-        session = asyncio.create_task(pty_posix.pty_session(socket, directory))
+        session = asyncio.create_task(observed_session())
         try:
             await session
         except (
@@ -145,9 +153,8 @@ def main() -> None:
             asyncio.CancelledError,
             ValueError,
             OSError,
-        ) as exc:
-            state["error"] = type(exc).__name__
-            state["error_args"] = list(exc.args)
+        ):
+            pass
         ticks.append(time.monotonic())
         pulse.cancel()
         await asyncio.gather(pulse, return_exceptions=True)
@@ -157,6 +164,7 @@ def main() -> None:
         state["output_ok"] = (
             "KT-PTY-OK\r\n" in socket.output and "37 91" in socket.output
         )
+        state["marker_seen"] = socket.marker.is_set()
         state["pending_tasks"] = len(asyncio.all_tasks()) - 1
         for name in ("master", "slave"):
             try:
