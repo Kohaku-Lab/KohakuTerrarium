@@ -1924,7 +1924,7 @@ class TestTerrariumIntegration:
     async def test_drive_delivery_waits_for_startup_trigger(
         self, patched_llm, tmp_path
     ):
-        """Respect startup restoration, explicit waiting, and authorized wake."""
+        """Respect startup restoration, assignee waiting/resume, and owner pause."""
         patched_llm.set_script(
             "worker",
             [
@@ -1997,7 +1997,15 @@ class TestTerrariumIntegration:
                 assert current.status is DriveStatus.WAITING
                 assert current.revision == waiting.revision
             assert await manager.list_deliveries(record.drive_id) == before
-            await manager.wake_drive(record.drive_id, actor=actor)
+            result = await worker.agent.registry.get_tool("drive_transition").execute(
+                {
+                    "drive_id": record.drive_id,
+                    "expected_revision": waiting.revision,
+                    "status": "active",
+                },
+                context=_ctx_for(LocalTerrariumService(engine), "worker"),
+            )
+            assert result.error is None
             await manager.dispatcher.dispatch_once()
             await manager.dispatcher.drain()
             deliveries = await manager.list_deliveries(record.drive_id)
@@ -2014,3 +2022,22 @@ class TestTerrariumIntegration:
             assert assistant_text.index("STARTUP-DONE-MARKER") < assistant_text.index(
                 "DRIVE-DONE-MARKER"
             )
+            current = await manager.get_drive(record.drive_id)
+            paused = await manager.transition(
+                record.drive_id,
+                DriveStatus.PAUSED,
+                expected_revision=current.revision,
+                actor=actor,
+            )
+            result = await worker.agent.registry.get_tool("drive_transition").execute(
+                {
+                    "drive_id": record.drive_id,
+                    "expected_revision": paused.revision,
+                    "status": "active",
+                },
+                context=_ctx_for(LocalTerrariumService(engine), "worker"),
+            )
+            assert result.error is not None
+            assert (
+                await manager.get_drive(record.drive_id)
+            ).status is DriveStatus.PAUSED

@@ -6,8 +6,6 @@ import), and lazy :func:`resolve_registration` (import only on enable, with
 provenance-carrying typed errors).
 """
 
-from types import SimpleNamespace
-
 import pytest
 
 from kohakuterrarium.terrarium.drive.errors import (
@@ -15,7 +13,6 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveRegistrationNotFoundError,
     DriveValidationError,
 )
-from kohakuterrarium.terrarium.drive.models import DriveStatus
 from kohakuterrarium.terrarium.drive.registration import (
     DEFAULT_SPEC_MAX_BYTES,
     DriveProjection,
@@ -540,12 +537,6 @@ class TestGenericRegistration:
 
     def test_readiness_trivially_ready(self):
         assert GenericDriveRegistration().readiness(None, None, None) == Readiness(True)
-
-    def test_waiting_is_not_unconditionally_ready(self):
-        record = SimpleNamespace(status=DriveStatus.WAITING)
-        assert GenericDriveRegistration().readiness(record, {}, None) == Readiness(
-            False
-        )
 
     def test_project_event_is_bounded_drive_ready(self):
         proj = GenericDriveRegistration().project_event(None, None, "ready")

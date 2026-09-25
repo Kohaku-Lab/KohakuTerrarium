@@ -1399,11 +1399,22 @@ class TestStudioIntegration:
             # A settings save is distinct from apply and round-trips a revision.
             saved = studio.identity.drives.save(
                 {
-                    "runtime": {"enabled": True, "max_active_per_creature": 4},
+                    "runtime": {
+                        "enabled": True,
+                        "unconditional_wake_kinds": ["generic"],
+                    },
                     "registrations": {"generic": {"enabled": True}},
                 }
             )
             assert saved.revision == ds.current_revision()
+            assert ds.resolve_runtime().config.unconditional_wake_kinds == ("generic",)
+            assert studio.identity.drives.status()["runtime"][
+                "unconditional_wake_kinds"
+            ] == ["generic"]
+            assert studio.engine.drives.config.unconditional_wake_kinds == ()
+            applied = studio.identity.drives.apply()
+            assert applied["result"] == "restart_required"
+            assert applied["desired_revision"] != applied["running_revision"]
 
             # The session-scoped record façade (studio.sessions.drives) is the
             # surface the HTTP routes / CLI / /drives command all delegate to:

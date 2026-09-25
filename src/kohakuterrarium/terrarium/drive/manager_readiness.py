@@ -281,7 +281,7 @@ class ManagerReadinessMixin:
     ) -> bool:
         """Return whether registration readiness permits admission.
 
-        Missing or unavailable readiness roles cannot wake waiting drives.
+        Missing or unavailable readiness roles impose no additional gate.
         ``ready`` permits admission, while ``initial`` permits only the first
         completed opportunity in a lifecycle epoch. Readiness errors fail closed
         by blocking the drive.
@@ -292,10 +292,10 @@ class ManagerReadinessMixin:
         """
         entry = self._snapshot.for_kind(record.kind) if self._snapshot else None
         if entry is None or not entry.available:
-            return record.status is not DriveStatus.WAITING
+            return True
         registration = entry.registration
         if not callable(getattr(registration, "readiness", None)):
-            return record.status is not DriveStatus.WAITING
+            return True
         source = (
             list(await self._repo.list_deliveries(record.drive_id))
             if deliveries is None
@@ -318,9 +318,7 @@ class ManagerReadinessMixin:
             return False
         if getattr(verdict, "ready", False):
             return True
-        if record.status is not DriveStatus.WAITING and getattr(
-            verdict, "initial", False
-        ):
+        if getattr(verdict, "initial", False):
             # Only a non-superseded delivery consumes the epoch's initial grant.
             # This allows recovery of an uncertain first attempt without treating
             # the abandoned row as completed delivery.
@@ -440,7 +438,7 @@ class ManagerReadinessMixin:
             if (
                 record.not_before is None
                 and not record.dependency_ids
-                and not await self._readiness_admits(record, deps, evaluated_at=now)
+                and record.kind not in self._config.unconditional_wake_kinds
             ):
                 continue
             try:

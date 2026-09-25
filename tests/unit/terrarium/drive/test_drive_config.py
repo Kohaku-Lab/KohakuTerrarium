@@ -26,6 +26,18 @@ class TestRuntimeConfig:
         assert cfg.max_active_per_creature == 8
         assert cfg.max_consecutive_drive_turns == 3
         assert cfg.spec_max_bytes == 16384
+        assert cfg.unconditional_wake_kinds == ()
+
+    def test_unconditional_wake_is_an_explicit_per_kind_selection(self):
+        cfg = DriveRuntimeConfig(unconditional_wake_kinds=("custom",))
+        assert cfg.unconditional_wake_kinds == ("custom",)
+
+    @pytest.mark.parametrize(
+        "value", [None, True, "goal", ["goal"], (None,), (1,), ("",), (" ",)]
+    )
+    def test_invalid_unconditional_wake_kinds_rejected(self, value):
+        with pytest.raises(DriveValidationError, match="unconditional_wake_kinds"):
+            DriveRuntimeConfig(unconditional_wake_kinds=value)
 
     def test_enabled_true_is_valid(self):
         assert DriveRuntimeConfig(enabled=True).enabled is True

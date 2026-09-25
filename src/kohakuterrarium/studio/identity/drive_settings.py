@@ -158,6 +158,10 @@ def _parse_runtime(raw: dict[str, Any]) -> DriveRuntimeConfig:
     if not isinstance(enabled, bool):
         raise DriveValidationError("runtime.enabled must be a boolean")
     kwargs: dict[str, Any] = {"enabled": enabled}
+    wake_kinds = raw.get("unconditional_wake_kinds", [])
+    if not isinstance(wake_kinds, list):
+        raise DriveValidationError("runtime.unconditional_wake_kinds must be a list")
+    kwargs["unconditional_wake_kinds"] = tuple(wake_kinds)
     for name in _RUNTIME_INT_FIELDS:
         if name in raw:
             kwargs[name] = raw[name]
@@ -239,6 +243,7 @@ def settings_to_dict(settings: DriveSettings) -> dict[str, Any]:
         "schema_version": settings.schema_version,
         "runtime": {
             "enabled": runtime.enabled,
+            "unconditional_wake_kinds": list(runtime.unconditional_wake_kinds),
             "max_active_per_creature": runtime.max_active_per_creature,
             "max_pending_per_graph": runtime.max_pending_per_graph,
             "max_consecutive_drive_turns": runtime.max_consecutive_drive_turns,

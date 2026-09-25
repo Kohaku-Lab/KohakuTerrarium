@@ -31,6 +31,7 @@ from kohakuterrarium.terrarium.drive.models import (
 from kohakuterrarium.terrarium.drive.repository import (
     IdempotencyRecord,
     Mutation,
+    build_transition,
     new_audit,
     new_outbox,
     op_hash,
@@ -50,6 +51,63 @@ _USER_INTERRUPT_PAUSABLE = frozenset({DriveStatus.ACTIVE, DriveStatus.WAITING})
 
 class DriveManagerOps:
     """Build atomic mutations for ownership and terminal verification."""
+
+    async def _commit_control_transition(
+        self,
+        drive_id: str,
+        target: DriveStatus,
+        *,
+        expected_revision: int,
+        actor: ActorRef,
+        status_reason: str | None,
+        idempotency_key: str | None,
+        is_privileged: bool,
+    ) -> tuple[DriveRecord, bool]:
+        """Authorize and commit against one snapshot; replay has no new effects."""
+        fresh = False
+
+        async def build(txn, now):
+            nonlocal fresh
+            current = await txn.get_drive(drive_id)
+            if current is None:
+                raise DriveNotFoundError(f"no Drive {drive_id!r}")
+            assignment = await txn.get_assignment(drive_id)
+            authorize(
+                DriveOperation.TRANSITION,
+                actor,
+                current,
+                assignment,
+                self._snapshot,
+                is_privileged=is_privileged,
+                target_status=target,
+            )
+            require_revision(current, expected_revision)
+            self._validate_registration_transition(
+                current, target, {"operation": "transition"}
+            )
+            mutation, record = build_transition(
+                current,
+                target,
+                actor=actor,
+                terminal_evidence=None,
+                status_reason=status_reason,
+                extra_transitions=self._registration_extra_transitions(current.kind),
+                operation="transition",
+                now=now,
+                mint=self._mint,
+            )
+            fresh = True
+            return mutation, record
+
+        # Keep the repository's existing identity so persisted receipts still match.
+        record = await self._run_mutation(
+            "transition",
+            actor,
+            idempotency_key,
+            {"drive_id": drive_id, "target": target.value},
+            build,
+        )
+        return record, fresh
 
     async def _on_delivery_user_interrupted(self, drive_id: str) -> None:
         """Pause a drive whose turn the user interrupted.

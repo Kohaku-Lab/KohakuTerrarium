@@ -163,11 +163,19 @@ completion with evidence rather than assert it.
   ordinary Drive event. Continuation is the dispatcher reacting to
   readiness, **not** a special agent loop.
 
-An explicit `waiting` transition suspends Goal pursuit. The periodic scan only
-wakes it when configured `not_before` or `dependency_ids` conditions are met.
-Without those conditions it stays waiting until an authorized actor activates
-or wakes it, for example with `/goal resume`. `continue_when_ready` alone does
-not override `waiting`.
+An explicit `waiting` transition suspends Goal pursuit. By default, the periodic
+scan wakes it only when configured `not_before` or `dependency_ids` conditions
+are met. Without those conditions it stays waiting. When the awaited result
+arrives, the assignee can use `drive_transition(status="active")` with the current
+revision. This restores eligibility; delivery still follows the existing autonomy
+and budget rules. A manual Goal that consumed its initial opportunity still
+needs an owner wake such as `/goal resume` for another delivery.
+
+`continue_when_ready` alone does not override `waiting`. The optional
+[`runtime.unconditional_wake_kinds`](../reference/configuration.md#drive-settings-drive-settingsyaml)
+compatibility setting can restore automatic unconditional wake for selected
+kinds. `paused` and `blocked` still require the owner or privileged authority to
+resume; the assignee's new recovery permission applies only to `waiting`.
 
 ## Ownership
 

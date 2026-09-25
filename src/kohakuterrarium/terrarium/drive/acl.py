@@ -36,7 +36,7 @@ from kohakuterrarium.terrarium.drive.policy import (
     DriveCapability,
     DriveOperation,
     effective_capabilities,
-    _ASSIGNEE_TRANSITIONS,
+    transition_capabilities_allow,
     _OPERATION_CAPABILITY,
 )
 from kohakuterrarium.terrarium.drive.snapshot import (
@@ -130,6 +130,7 @@ def capabilities_for(
 def _caps_allow(
     caps: frozenset[DriveCapability],
     operation: DriveOperation,
+    record: DriveRecord | None,
     target_status: DriveStatus | None,
 ) -> bool:
     """Whether a capability set satisfies ``operation`` — the same predicate as
@@ -146,12 +147,7 @@ def _caps_allow(
             }
         )
     if operation == DriveOperation.TRANSITION:
-        if DriveCapability.TRANSITION in caps:
-            return True
-        return (
-            DriveCapability.MANAGE_ASSIGNED in caps
-            and target_status in _ASSIGNEE_TRANSITIONS
-        )
+        return transition_capabilities_allow(caps, record, target_status)
     return _OPERATION_CAPABILITY[operation] in caps
 
 
@@ -203,7 +199,7 @@ def authorize(
         is_privileged=is_privileged,
         extra_grants=extra_grants,
     )
-    if not _caps_allow(caps, operation, target_status):
+    if not _caps_allow(caps, operation, record, target_status):
         raise DrivePermissionError(
             f"actor {actor.format()!r} may not {operation.value} this Drive"
         )
@@ -282,7 +278,7 @@ def allowed_actions(
     )
     out: list[str] = []
     for op in _DTO_OPERATIONS:
-        if not _dto_op_allowed(caps, op):
+        if not _dto_op_allowed(caps, op, record):
             continue
         if not available and op in KIND_SEMANTIC_OPERATIONS:
             continue
@@ -290,12 +286,15 @@ def allowed_actions(
     return tuple(out)
 
 
-def _dto_op_allowed(caps: frozenset[DriveCapability], op: DriveOperation) -> bool:
+def _dto_op_allowed(
+    caps: frozenset[DriveCapability], op: DriveOperation, record: DriveRecord | None
+) -> bool:
     if op == DriveOperation.TRANSITION:
         # Offer transition controls when the actor can perform at least one
         # permitted transition.
-        return bool(
-            caps & {DriveCapability.TRANSITION, DriveCapability.MANAGE_ASSIGNED}
+        return any(
+            transition_capabilities_allow(caps, record, target)
+            for target in DriveStatus
         )
     if op == DriveOperation.REPORT_PROGRESS:
         return bool(

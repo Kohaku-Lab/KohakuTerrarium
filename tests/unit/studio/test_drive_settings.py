@@ -169,6 +169,26 @@ class TestPathAndDefaults:
 
 
 class TestSaveLoad:
+    def test_unconditional_wake_kinds_roundtrip_and_change_runtime_revision(self):
+        before = ds.resolve_runtime()
+        saved = ds.save_settings({"runtime": {"unconditional_wake_kinds": ["generic"]}})
+        loaded = ds.load_settings()
+        assert loaded.runtime.unconditional_wake_kinds == ("generic",)
+        assert ds.settings_to_dict(loaded)["runtime"]["unconditional_wake_kinds"] == [
+            "generic"
+        ]
+        resolved = ds.resolve_runtime()
+        assert resolved.config.unconditional_wake_kinds == ("generic",)
+        assert resolved.source_revision != before.source_revision
+        assert loaded.revision == saved.revision
+
+    @pytest.mark.parametrize(
+        "value", [None, True, "goal", {}, [False], [1], [""], [" "]]
+    )
+    def test_invalid_unconditional_wake_selection_rejected(self, value):
+        with pytest.raises(DriveValidationError, match="unconditional_wake_kinds"):
+            ds.parse_settings({"runtime": {"unconditional_wake_kinds": value}})
+
     def test_save_then_load_roundtrips_and_stamps_revision(self):
         saved = ds.save_settings(_enabled_settings())
         assert saved.revision is not None

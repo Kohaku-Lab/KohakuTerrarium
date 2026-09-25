@@ -714,6 +714,7 @@ runtime:
   max_pending_per_graph: 100
   max_consecutive_drive_turns: 3
   dispatcher_concurrency: 4
+  unconditional_wake_kinds: []    # selected kinds retain unconditional waiting wakes
   spec_max_bytes: 16384
   presentation_max_bytes: 8192
   metadata_max_bytes: 4096
@@ -752,6 +753,7 @@ is already active.
 | `max_pending_per_graph` | int ≥ 1 | `100` | Backpressure cap on pending deliveries per graph. |
 | `max_consecutive_drive_turns` | int ≥ 1 | `3` | After this many back-to-back Drive turns, dispatch yields one slot to queued user / channel / trigger work. |
 | `dispatcher_concurrency` | int ≥ 1 | `4` | Max concurrent delivery claims. |
+| `unconditional_wake_kinds` | list of non-empty strings | `[]` | Drive kinds whose `waiting` records may automatically become `active` without explicit time/dependency conditions. Delivery readiness is unchanged. |
 | `spec_max_bytes` / `presentation_max_bytes` / `metadata_max_bytes` / `evidence_max_bytes` | int ≥ 1 | `16384` / `8192` / `4096` / `16384` | Independent per-payload byte limits. |
 | `retry.max_attempts` | int ≥ 1 | `5` | Delivery attempts before dead-letter. |
 | `retry.initial_backoff_s` / `retry.max_backoff_s` | number ≥ 0 | `2.0` / `300.0` | Exponential backoff bounds (`max` ≥ `initial`). |
@@ -762,6 +764,19 @@ is already active.
 | `retention.dead_letter_days` | int ≥ 0 | `90` | Retention for dead letters. |
 | `retention.progress_max_count` | int ≥ 1 | `500` | Max retained progress records per Drive. |
 | `retention.progress_max_age_days` | int ≥ 0 | `90` | Max age of retained progress records. |
+
+To preserve legacy automatic wake for a custom kind, set
+`runtime.unconditional_wake_kinds: [my_kind]` in this YAML file. Entries match
+Drive **kind** exactly, not registration name or a wildcard. Explicit
+`not_before`/`dependency_ids` still gate the transition; `paused` is unaffected.
+Saving this runtime policy requires an engine restart to apply. The scalar
+`kt config drive set` command does not accept this list.
+
+For a directly constructed engine, pass
+`DriveRuntimeConfig(unconditional_wake_kinds=("my_kind",))`. The default empty
+selection leaves unconditional waiting Drives awaiting explicit activation.
+Registrations continue receiving active records for delivery readiness, including
+when a selected kind automatically wakes before its readiness returns true.
 
 ### `registrations`: installed is not enabled
 

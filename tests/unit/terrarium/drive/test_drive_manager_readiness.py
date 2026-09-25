@@ -47,6 +47,63 @@ class _UnavailableRegistration(GenericDriveRegistration):
     readiness = None
 
 
+class _ActiveOnlyRegistration(GenericDriveRegistration):
+    name = "active_only_registration"
+    kind = "active_only"
+
+    def __init__(self):
+        super().__init__()
+        self.observed_statuses = []
+
+    def readiness(self, drive, dependencies, now):
+        self.observed_statuses.append(drive.status)
+        return Readiness(
+            ready=drive.status is DriveStatus.ACTIVE
+            and now >= datetime.fromisoformat(drive.spec["release_at"])
+        )
+
+
+@pytest.mark.parametrize("opt_in", [False, True])
+async def test_readiness_remains_an_active_delivery_gate_after_resume(opt_in):
+    registration = _ActiveOnlyRegistration()
+    h = build_manager(
+        snapshot=EnabledRegistrySnapshot.build([registration]),
+        config=make_config(unconditional_wake_kinds=("active_only",) if opt_in else ()),
+    )
+    record = await h.manager.create_drive(
+        creature_request(
+            kind="active_only",
+            spec={"release_at": (h.clock() + timedelta(seconds=60)).isoformat()},
+        ),
+        actor=WORKER,
+        graph_id="g1",
+        initial_status=DriveStatus.WAITING,
+    )
+    await h.manager._scan_ready()
+    assert DriveStatus.WAITING not in registration.observed_statuses
+    assert not await h.manager.list_deliveries(record.drive_id)
+
+    current = await h.manager.get_drive(record.drive_id)
+    assert current.status is (DriveStatus.ACTIVE if opt_in else DriveStatus.WAITING)
+    if not opt_in:
+        await h.manager.transition(
+            record.drive_id,
+            DriveStatus.ACTIVE,
+            expected_revision=current.revision,
+            actor=WORKER,
+        )
+    assert not await h.manager.list_deliveries(record.drive_id)
+    h.clock.advance(60)
+    await h.manager._scan_ready()
+    await h.manager.dispatcher.dispatch_once()
+    await h.manager.dispatcher.drain()
+    assert [d.state for d in await h.manager.list_deliveries(record.drive_id)] == [
+        "acknowledged"
+    ]
+    assert registration.observed_statuses
+    assert set(registration.observed_statuses) == {DriveStatus.ACTIVE}
+
+
 @pytest.mark.parametrize(
     ("kind", "autonomy"),
     [("generic", "manual"), ("goal", "manual"), ("goal", "continue_when_ready")],
@@ -116,8 +173,14 @@ async def test_unconditional_waiting_survives_scans_and_reconcile(
 
 @pytest.mark.parametrize("conditions", ["time", "dependency", "both"])
 @pytest.mark.parametrize("kind", ["generic", "goal"])
-async def test_waiting_wakes_only_after_explicit_conditions_are_ready(conditions, kind):
-    h = build_manager(snapshot=EnabledRegistrySnapshot.build(default_registrations()))
+@pytest.mark.parametrize("opt_in", [False, True])
+async def test_waiting_wakes_only_after_explicit_conditions_are_ready(
+    conditions, kind, opt_in
+):
+    h = build_manager(
+        snapshot=EnabledRegistrySnapshot.build(default_registrations()),
+        config=make_config(unconditional_wake_kinds=(kind,) if opt_in else ()),
+    )
     dependency = await h.manager.create_drive(
         creature_request(title="dependency"), actor=WORKER, graph_id="g1"
     )
@@ -168,11 +231,12 @@ async def test_waiting_wakes_only_after_explicit_conditions_are_ready(conditions
 
 
 @pytest.mark.parametrize("initial", [False, True])
-async def test_waiting_wakes_when_registration_condition_becomes_ready(initial):
+async def test_opt_in_preserves_initial_delivery_grant(initial):
     h = build_manager(
         snapshot=EnabledRegistrySnapshot.build(
             [_ConditionalRegistration(initial=initial)]
-        )
+        ),
+        config=make_config(unconditional_wake_kinds=("conditional",)),
     )
     record = await h.manager.create_drive(
         creature_request(
@@ -184,13 +248,9 @@ async def test_waiting_wakes_when_registration_condition_becomes_ready(initial):
         initial_status=DriveStatus.WAITING,
     )
     await h.manager._scan_ready()
-    assert (await h.manager.get_drive(record.drive_id)).status is DriveStatus.WAITING
-    assert not await h.manager.list_deliveries(record.drive_id)
-    h.clock.advance(59)
-    await h.manager._scan_ready()
-    assert (await h.manager.get_drive(record.drive_id)).revision == record.revision
-
-    h.clock.advance(1)
+    assert (await h.manager.get_drive(record.drive_id)).status is DriveStatus.ACTIVE
+    assert len(await h.manager.list_deliveries(record.drive_id)) == int(initial)
+    h.clock.advance(60)
     await h.manager._scan_ready()
     await h.manager.dispatcher.dispatch_once()
     await h.manager.dispatcher.drain()
@@ -198,6 +258,27 @@ async def test_waiting_wakes_when_registration_condition_becomes_ready(initial):
     assert [d.state for d in await h.manager.list_deliveries(record.drive_id)] == [
         "acknowledged"
     ]
+
+
+@pytest.mark.parametrize("selected", [("other",), ("active_only_registration",)])
+async def test_opt_in_matches_only_the_drive_kind(selected):
+    registration = _ActiveOnlyRegistration()
+    h = build_manager(
+        snapshot=EnabledRegistrySnapshot.build([registration]),
+        config=make_config(unconditional_wake_kinds=selected),
+    )
+    record = await h.manager.create_drive(
+        creature_request(
+            kind="active_only", spec={"release_at": h.clock().isoformat()}
+        ),
+        actor=WORKER,
+        graph_id="g1",
+        initial_status=DriveStatus.WAITING,
+    )
+    await h.manager._scan_ready()
+    assert (await h.manager.get_drive(record.drive_id)).status is DriveStatus.WAITING
+    assert registration.observed_statuses == []
+    assert not await h.manager.list_deliveries(record.drive_id)
 
 
 @pytest.mark.parametrize(
