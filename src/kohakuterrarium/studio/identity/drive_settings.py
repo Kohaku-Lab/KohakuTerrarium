@@ -44,6 +44,7 @@ from kohakuterrarium.terrarium.drive.errors import (
 )
 from kohakuterrarium.terrarium.drive.registration import effective_options
 from kohakuterrarium.terrarium.drive.registration_options import (
+    apply_registration_wake_policy,
     implementation_fingerprint,
 )
 from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
@@ -84,10 +85,15 @@ def drive_settings_path() -> Path:
 
 @dataclass(frozen=True)
 class RegistrationSetting:
-    """Per-registration selection: whether it is enabled and its options."""
+    """Per-registration enablement, framework wake policy, and extension options."""
 
     enabled: bool = False
     options: dict[str, Any] = field(default_factory=dict)
+    unconditional_wake: bool = False
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.unconditional_wake, bool):
+            raise DriveValidationError("unconditional_wake must be a boolean")
 
 
 @dataclass(frozen=True)
@@ -158,10 +164,6 @@ def _parse_runtime(raw: dict[str, Any]) -> DriveRuntimeConfig:
     if not isinstance(enabled, bool):
         raise DriveValidationError("runtime.enabled must be a boolean")
     kwargs: dict[str, Any] = {"enabled": enabled}
-    wake_kinds = raw.get("unconditional_wake_kinds", [])
-    if not isinstance(wake_kinds, list):
-        raise DriveValidationError("runtime.unconditional_wake_kinds must be a list")
-    kwargs["unconditional_wake_kinds"] = tuple(wake_kinds)
     for name in _RUNTIME_INT_FIELDS:
         if name in raw:
             kwargs[name] = raw[name]
@@ -203,7 +205,11 @@ def _parse_registrations(raw: dict[str, Any]) -> dict[str, RegistrationSetting]:
                 f"registrations.{name}.enabled must be a boolean"
             )
         options = _require_dict(entry.get("options"), f"registrations.{name}.options")
-        out[name] = RegistrationSetting(enabled=enabled, options=dict(options))
+        out[name] = RegistrationSetting(
+            enabled=enabled,
+            options=dict(options),
+            unconditional_wake=entry.get("unconditional_wake", False),
+        )
     return out
 
 
@@ -243,7 +249,6 @@ def settings_to_dict(settings: DriveSettings) -> dict[str, Any]:
         "schema_version": settings.schema_version,
         "runtime": {
             "enabled": runtime.enabled,
-            "unconditional_wake_kinds": list(runtime.unconditional_wake_kinds),
             "max_active_per_creature": runtime.max_active_per_creature,
             "max_pending_per_graph": runtime.max_pending_per_graph,
             "max_consecutive_drive_turns": runtime.max_consecutive_drive_turns,
@@ -268,7 +273,11 @@ def settings_to_dict(settings: DriveSettings) -> dict[str, Any]:
             },
         },
         "registrations": {
-            name: {"enabled": rs.enabled, "options": rs.options}
+            name: {
+                "enabled": rs.enabled,
+                "unconditional_wake": rs.unconditional_wake,
+                "options": rs.options,
+            }
             for name, rs in sorted(settings.registrations.items())
         },
     }
@@ -385,6 +394,13 @@ def resolve_runtime(node: str = DEFAULT_NODE) -> DriveRuntimeSpec:
         instantiate_registration(name, settings.registrations[name].options)
         for name in settings.enabled_registration_names()
     )
+    for registration in registrations:
+        apply_registration_wake_policy(
+            registration,
+            unconditional_wake=settings.registrations[
+                registration.name
+            ].unconditional_wake,
+        )
     # Validate duplicate names and kind collisions before the spec reaches an engine.
     EnabledRegistrySnapshot.build(registrations)
     return DriveRuntimeSpec(
@@ -453,6 +469,7 @@ def _engine_runtime_revision(engine: Any) -> str | None:
                 "compatibility": d.compatibility,
                 "verifier_mode": d.verifier_mode,
                 "options": effective_options(e.registration),
+                "unconditional_wake": e.unconditional_wake,
                 "impl": implementation_fingerprint(e.registration),
             }
         )

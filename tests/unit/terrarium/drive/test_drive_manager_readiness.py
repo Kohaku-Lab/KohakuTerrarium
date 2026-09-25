@@ -12,6 +12,9 @@ from kohakuterrarium.terrarium.drive.registration import (
     Readiness,
 )
 from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
+from kohakuterrarium.terrarium.drive.registration_options import (
+    apply_registration_wake_policy,
+)
 
 from tests.unit.terrarium.drive._harness import (
     WORKER,
@@ -66,9 +69,9 @@ class _ActiveOnlyRegistration(GenericDriveRegistration):
 @pytest.mark.parametrize("opt_in", [False, True])
 async def test_readiness_remains_an_active_delivery_gate_after_resume(opt_in):
     registration = _ActiveOnlyRegistration()
+    apply_registration_wake_policy(registration, unconditional_wake=opt_in)
     h = build_manager(
         snapshot=EnabledRegistrySnapshot.build([registration]),
-        config=make_config(unconditional_wake_kinds=("active_only",) if opt_in else ()),
     )
     record = await h.manager.create_drive(
         creature_request(
@@ -177,9 +180,13 @@ async def test_unconditional_waiting_survives_scans_and_reconcile(
 async def test_waiting_wakes_only_after_explicit_conditions_are_ready(
     conditions, kind, opt_in
 ):
+    registrations = default_registrations()
+    for registration in registrations:
+        apply_registration_wake_policy(
+            registration, unconditional_wake=opt_in and registration.kind == kind
+        )
     h = build_manager(
-        snapshot=EnabledRegistrySnapshot.build(default_registrations()),
-        config=make_config(unconditional_wake_kinds=(kind,) if opt_in else ()),
+        snapshot=EnabledRegistrySnapshot.build(registrations),
     )
     dependency = await h.manager.create_drive(
         creature_request(title="dependency"), actor=WORKER, graph_id="g1"
@@ -232,11 +239,10 @@ async def test_waiting_wakes_only_after_explicit_conditions_are_ready(
 
 @pytest.mark.parametrize("initial", [False, True])
 async def test_opt_in_preserves_initial_delivery_grant(initial):
+    registration = _ConditionalRegistration(initial=initial)
+    apply_registration_wake_policy(registration, unconditional_wake=True)
     h = build_manager(
-        snapshot=EnabledRegistrySnapshot.build(
-            [_ConditionalRegistration(initial=initial)]
-        ),
-        config=make_config(unconditional_wake_kinds=("conditional",)),
+        snapshot=EnabledRegistrySnapshot.build([registration]),
     )
     record = await h.manager.create_drive(
         creature_request(
@@ -260,12 +266,12 @@ async def test_opt_in_preserves_initial_delivery_grant(initial):
     ]
 
 
-@pytest.mark.parametrize("selected", [("other",), ("active_only_registration",)])
-async def test_opt_in_matches_only_the_drive_kind(selected):
+async def test_wake_policy_is_isolated_between_registrations():
     registration = _ActiveOnlyRegistration()
+    other = GenericDriveRegistration()
+    apply_registration_wake_policy(other, unconditional_wake=True)
     h = build_manager(
-        snapshot=EnabledRegistrySnapshot.build([registration]),
-        config=make_config(unconditional_wake_kinds=selected),
+        snapshot=EnabledRegistrySnapshot.build([registration, other]),
     )
     record = await h.manager.create_drive(
         creature_request(

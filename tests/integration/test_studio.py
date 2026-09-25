@@ -1399,22 +1399,68 @@ class TestStudioIntegration:
             # A settings save is distinct from apply and round-trips a revision.
             saved = studio.identity.drives.save(
                 {
-                    "runtime": {
-                        "enabled": True,
-                        "unconditional_wake_kinds": ["generic"],
+                    "runtime": {"enabled": True},
+                    "registrations": {
+                        "generic": {"enabled": True, "unconditional_wake": True}
                     },
-                    "registrations": {"generic": {"enabled": True}},
                 }
             )
             assert saved.revision == ds.current_revision()
-            assert ds.resolve_runtime().config.unconditional_wake_kinds == ("generic",)
-            assert studio.identity.drives.status()["runtime"][
-                "unconditional_wake_kinds"
-            ] == ["generic"]
-            assert studio.engine.drives.config.unconditional_wake_kinds == ()
+            assert ds.load_settings().registrations["generic"].unconditional_wake
+            assert not studio.engine.drives.snapshot.for_kind(
+                "generic"
+            ).unconditional_wake
+            before_apply = ds._engine_runtime_revision(studio.engine)
             applied = studio.identity.drives.apply()
-            assert applied["result"] == "restart_required"
+            assert applied["result"] == "applied_live"
+            assert applied["running_revision"] != before_apply
+            assert studio.engine.drives.snapshot.for_kind("generic").unconditional_wake
             assert applied["desired_revision"] != applied["running_revision"]
+
+            # The existing graph manager receives the new policy only on Apply.
+            resumed = await svc.transition_drive(
+                did,
+                DriveStatus.ACTIVE,
+                expected_revision=paused.record.revision,
+                actor=actor,
+                is_privileged=True,
+            )
+            await svc.transition_drive(
+                did,
+                DriveStatus.WAITING,
+                expected_revision=resumed.record.revision,
+                actor=actor,
+                is_privileged=True,
+            )
+            manager = studio.engine.drives.peek_manager(gid)
+            await manager._scan_ready()
+            assert (
+                await svc.get_drive(did, actor=actor, is_privileged=True)
+            ).record.status is DriveStatus.ACTIVE
+            studio.identity.drives.save(
+                {
+                    "registrations": {
+                        "generic": {"enabled": True, "unconditional_wake": False}
+                    }
+                }
+            )
+            assert studio.engine.drives.snapshot.for_kind("generic").unconditional_wake
+            assert studio.identity.drives.apply()["result"] == "applied_live"
+            current = await svc.get_drive(did, actor=actor, is_privileged=True)
+            waiting = await svc.transition_drive(
+                did,
+                DriveStatus.WAITING,
+                expected_revision=current.record.revision,
+                actor=actor,
+                is_privileged=True,
+            )
+            await manager._scan_ready()
+            assert (
+                await svc.get_drive(did, actor=actor, is_privileged=True)
+            ).record.revision == waiting.record.revision
+            assert not studio.engine.drives.snapshot.for_kind(
+                "generic"
+            ).unconditional_wake
 
             # The session-scoped record façade (studio.sessions.drives) is the
             # surface the HTTP routes / CLI / /drives command all delegate to:

@@ -435,10 +435,11 @@ class ManagerReadinessMixin:
             deps = await self._dependency_statuses(record)
             if not wake_conditions_met(record, now, deps):
                 continue
+            entry = self._snapshot.for_kind(record.kind) if self._snapshot else None
             if (
                 record.not_before is None
                 and not record.dependency_ids
-                and record.kind not in self._config.unconditional_wake_kinds
+                and not (entry and entry.available and entry.unconditional_wake)
             ):
                 continue
             try:

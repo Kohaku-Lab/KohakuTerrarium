@@ -81,7 +81,7 @@
       </div>
 
       <!-- Runtime tuning (only meaningful when enabled) -->
-      <el-collapse v-if="store.runtimeEnabled" class="tuning">
+      <el-collapse v-if="store.runtimeEnabled" class="tuning card overflow-hidden">
         <el-collapse-item title="Scheduler & limits" name="limits">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <NumberField v-model="store.draft.runtime.dispatcher_concurrency" label="Dispatcher concurrency" :min="1" />
@@ -127,7 +127,7 @@
           </div>
         </div>
         <div v-if="store.registrationView.length === 0" class="text-[11px] text-warm-400 italic py-3 text-center">No Drive registrations installed on this node. Install a package that provides one, or enable the builtin generic kind.</div>
-        <DriveRegistrationCard v-for="reg in store.registrationView" :key="reg.name" :reg="reg" :disabled="store.saving" @toggle="store.toggleRegistration" @update-option="store.setRegistrationOption" @set-options="onSetOptions" />
+        <DriveRegistrationCard v-for="reg in store.registrationView" :key="reg.name" :reg="reg" :disabled="store.saving || store.applying" @toggle="store.toggleRegistration" @update-wake="store.setRegistrationWake" @update-option="store.setRegistrationOption" @set-options="onSetOptions" />
         <div v-if="store.runtimeEnabled && store.enabledCount === 0" class="text-[11px] text-amber-shadow dark:text-amber-light flex items-center gap-1"><span class="i-carbon-warning" /> The runtime is enabled but no registration is — saving will be rejected. Enable at least one kind.</div>
       </div>
 
@@ -164,7 +164,7 @@
       </div>
 
       <!-- Footer actions -->
-      <div class="flex items-center gap-2 sticky bottom-0 bg-warm-50 dark:bg-warm-900 py-2 border-t border-warm-100 dark:border-warm-800">
+      <div class="card flex items-center gap-2 sticky bottom-0 px-3 py-2">
         <span v-if="store.dirty" class="text-[11px] text-amber-shadow dark:text-amber-light flex items-center gap-1"> <span class="w-1.5 h-1.5 rounded-full bg-amber" /> Unsaved changes </span>
         <span v-else class="text-[11px] text-warm-400">
           Saved <span class="font-mono">rev {{ shortRev(store.savedRevision) }}</span>
@@ -294,7 +294,18 @@ const applyRevs = computed(() => {
 </script>
 
 <style scoped>
+.tuning {
+  border: 0;
+  --el-collapse-header-bg-color: transparent;
+  --el-collapse-content-bg-color: transparent;
+}
+
+.tuning :deep(.el-collapse-item__header) {
+  padding-inline: 0.75rem;
+}
+
 .tuning :deep(.el-collapse-item__content) {
+  padding-inline: 0.75rem;
   padding-bottom: 0.75rem;
 }
 </style>

@@ -714,7 +714,6 @@ runtime:
   max_pending_per_graph: 100
   max_consecutive_drive_turns: 3
   dispatcher_concurrency: 4
-  unconditional_wake_kinds: []    # selected kinds retain unconditional waiting wakes
   spec_max_bytes: 16384
   presentation_max_bytes: 8192
   metadata_max_bytes: 4096
@@ -734,9 +733,11 @@ runtime:
 registrations:
   generic:                        # a registration is keyed by its stable name
     enabled: true
+    unconditional_wake: false     # keep waiting until conditions or explicit resume
     options: {}
   goal:
     enabled: false                # installed != enabled (see below)
+    unconditional_wake: false
     options: {}
 ```
 
@@ -753,7 +754,6 @@ is already active.
 | `max_pending_per_graph` | int ≥ 1 | `100` | Backpressure cap on pending deliveries per graph. |
 | `max_consecutive_drive_turns` | int ≥ 1 | `3` | After this many back-to-back Drive turns, dispatch yields one slot to queued user / channel / trigger work. |
 | `dispatcher_concurrency` | int ≥ 1 | `4` | Max concurrent delivery claims. |
-| `unconditional_wake_kinds` | list of non-empty strings | `[]` | Drive kinds whose `waiting` records may automatically become `active` without explicit time/dependency conditions. Delivery readiness is unchanged. |
 | `spec_max_bytes` / `presentation_max_bytes` / `metadata_max_bytes` / `evidence_max_bytes` | int ≥ 1 | `16384` / `8192` / `4096` / `16384` | Independent per-payload byte limits. |
 | `retry.max_attempts` | int ≥ 1 | `5` | Delivery attempts before dead-letter. |
 | `retry.initial_backoff_s` / `retry.max_backoff_s` | number ≥ 0 | `2.0` / `300.0` | Exponential backoff bounds (`max` ≥ `initial`). |
@@ -765,29 +765,44 @@ is already active.
 | `retention.progress_max_count` | int ≥ 1 | `500` | Max retained progress records per Drive. |
 | `retention.progress_max_age_days` | int ≥ 0 | `90` | Max age of retained progress records. |
 
-To preserve legacy automatic wake for a custom kind, set
-`runtime.unconditional_wake_kinds: [my_kind]` in this YAML file. Entries match
-Drive **kind** exactly, not registration name or a wildcard. Explicit
-`not_before`/`dependency_ids` still gate the transition; `paused` is unaffected.
-Saving this runtime policy requires an engine restart to apply. The scalar
-`kt config drive set` command does not accept this list.
-
-For a directly constructed engine, pass
-`DriveRuntimeConfig(unconditional_wake_kinds=("my_kind",))`. The default empty
-selection leaves unconditional waiting Drives awaiting explicit activation.
-Registrations continue receiving active records for delivery readiness, including
-when a selected kind automatically wakes before its readiness returns true.
-
 ### `registrations`: installed is not enabled
 
 Each key under `registrations` is a registration's stable **name** with
-`{ enabled: bool, options: {...} }`. A registration must be **installed**
+`{ enabled: bool, unconditional_wake: bool, options: {...} }`. A registration must be **installed**
 (declared by a package's [`drive_registrations:`](#package-manifest-kohakuyaml)
 manifest slot, or passed directly to `Terrarium`) *and* enabled here
 before its `kind` can be created, validated, projected, or scheduled.
 Installation alone never enables anything. Enabling the runtime with no
 enabled registration is rejected. Only enabled registrations are
 imported and only they contribute prompt prose.
+
+`unconditional_wake` is a framework policy, separate from extension `options`.
+It defaults to `false`: without `not_before` or `dependency_ids`, a Drive stays
+`waiting` until explicitly resumed. Set it to `true` to retain legacy automatic
+`waiting` → `active` transitions for that registration's kind. Explicit time and
+dependency conditions still gate the transition; `paused` and delivery readiness
+are unaffected. Readiness callbacks continue receiving active records, even if
+their own delivery condition is not yet satisfied.
+
+Settings → Drives exposes **Auto-wake without conditions** on each registration
+card. **Save** persists the choice; **Apply** publishes a new running registry
+snapshot without a restart when only this policy changes. Disabling a registration
+or changing runtime tuning retains the existing restart rules.
+
+For an explicitly constructed engine, configure the registration before passing it
+to `Terrarium(drive_registrations=[registration])`:
+
+```python
+from kohakuterrarium.terrarium.drive.registration_options import (
+    apply_registration_wake_policy,
+)
+
+apply_registration_wake_policy(registration, unconditional_wake=True)
+```
+
+The helper does not invoke the extension's `configure()` hook. An existing
+engine keeps its current policy until `engine.reconfigure_drives([...])` builds
+a new snapshot; changing an instance alone does not alter a running snapshot.
 
 ### Save is not apply
 

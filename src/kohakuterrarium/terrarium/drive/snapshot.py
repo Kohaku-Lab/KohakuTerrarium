@@ -24,6 +24,9 @@ from kohakuterrarium.terrarium.drive.registration import (
     DriveRegistrationDescriptor,
     _looks_like_registration,
 )
+from kohakuterrarium.terrarium.drive.registration_options import (
+    registration_unconditional_wake,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -38,6 +41,7 @@ class EnabledRegistration:
     available: bool
     unavailable_reason: str | None
     prompt_text: str | None
+    unconditional_wake: bool = False
 
 
 @dataclass
@@ -100,6 +104,7 @@ class EnabledRegistrySnapshot:
                 available=e.available,
                 unavailable_reason=e.reason,
                 prompt_text=e.prompt_text,
+                unconditional_wake=registration_unconditional_wake(e.registration),
             )
             for e in prelim
         )

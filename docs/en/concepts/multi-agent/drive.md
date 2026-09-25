@@ -141,9 +141,9 @@ condition it stays waiting until an authorized actor activates or wakes it.
 An external result can prompt the assignee to request `waiting -> active`;
 the runtime does not infer this transition from the result's contents.
 
-For compatibility, `runtime.unconditional_wake_kinds` can opt selected **kinds**
-into the previous automatic `waiting -> active` scan even without those
-conditions. This list defaults to empty. Explicit time/dependency conditions
+For compatibility, `registrations.<name>.unconditional_wake: true` can opt a
+registration's kind into the previous automatic `waiting -> active` scan even
+without those conditions. It defaults to false. Explicit time/dependency conditions
 still apply. See [Drive settings](../../reference/configuration.md#drive-settings-drive-settingsyaml).
 
 Automatic wake changes status; registration **readiness** decides whether an

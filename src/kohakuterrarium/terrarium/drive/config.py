@@ -95,9 +95,6 @@ class DriveRuntimeConfig:
     presentation_max_bytes: int = 8192
     metadata_max_bytes: int = 4096
     evidence_max_bytes: int = 16384
-    # Kinds opting into the legacy WAITING -> ACTIVE scan without time/deps.
-    # This controls state transitions only; delivery readiness is unchanged.
-    unconditional_wake_kinds: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not isinstance(self.enabled, bool):
@@ -117,13 +114,6 @@ class DriveRuntimeConfig:
         _require_int(self.presentation_max_bytes, "presentation_max_bytes", minimum=1)
         _require_int(self.metadata_max_bytes, "metadata_max_bytes", minimum=1)
         _require_int(self.evidence_max_bytes, "evidence_max_bytes", minimum=1)
-        if not isinstance(self.unconditional_wake_kinds, tuple) or any(
-            not isinstance(kind, str) or not kind.strip()
-            for kind in self.unconditional_wake_kinds
-        ):
-            raise DriveValidationError(
-                "unconditional_wake_kinds must be a tuple of non-empty kind strings"
-            )
 
 
 def default_registrations() -> list[DriveRegistration]:
