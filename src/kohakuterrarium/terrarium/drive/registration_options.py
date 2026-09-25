@@ -14,6 +14,7 @@ from kohakuterrarium.terrarium.drive.errors import DriveValidationError
 # Effective options are retained on the instance so runtime revisions include
 # the configuration that actually governs behavior.
 EFFECTIVE_OPTIONS_ATTR = "_kt_effective_options"
+_UNCONDITIONAL_WAKE_ATTR = "_kt_unconditional_wake"
 
 _OPTION_TYPES: dict[str, type | tuple[type, ...]] = {
     "str": str,
@@ -58,6 +59,30 @@ def apply_registration_options(
 def effective_options(instance: object) -> dict[str, Any]:
     """Return the effective options applied to a registration instance."""
     return dict(getattr(instance, EFFECTIVE_OPTIONS_ATTR, {}) or {})
+
+
+def apply_registration_wake_policy(
+    instance: object, *, unconditional_wake: bool = False
+) -> None:
+    """Set framework wake policy for the next registry snapshot, outside options."""
+    if not isinstance(unconditional_wake, bool):
+        raise DriveValidationError("unconditional_wake must be a boolean")
+    if getattr(instance, _UNCONDITIONAL_WAKE_ATTR, False) is unconditional_wake:
+        return
+    try:
+        setattr(instance, _UNCONDITIONAL_WAKE_ATTR, unconditional_wake)
+    except (AttributeError, TypeError) as exc:
+        raise DriveValidationError(
+            "registration cannot retain framework unconditional_wake policy"
+        ) from exc
+
+
+def registration_unconditional_wake(instance: object) -> bool:
+    """Read a registration's framework wake policy, defaulting to explicit wake."""
+    value = getattr(instance, _UNCONDITIONAL_WAKE_ATTR, False)
+    if not isinstance(value, bool):
+        raise DriveValidationError("unconditional_wake must be a boolean")
+    return value
 
 
 def implementation_fingerprint(instance: object) -> dict[str, str | None]:
@@ -115,6 +140,8 @@ def require_json_safe(obj: object, name: str) -> None:
 __all__ = [
     "EFFECTIVE_OPTIONS_ATTR",
     "apply_registration_options",
+    "apply_registration_wake_policy",
+    "registration_unconditional_wake",
     "effective_options",
     "implementation_fingerprint",
     "json_bytes",

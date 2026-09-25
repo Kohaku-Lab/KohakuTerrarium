@@ -30,6 +30,7 @@ from kohakuterrarium.terrarium.drive.errors import (
     DriveValidationError,
 )
 from kohakuterrarium.terrarium.engine import Terrarium
+from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.utils.config_dir import config_dir
 
 # Subprocess body for the cross-process lock test: a SEPARATE process acquires
@@ -169,6 +170,35 @@ class TestPathAndDefaults:
 
 
 class TestSaveLoad:
+    def test_registration_wake_policy_roundtrip_without_extension_options(self):
+        before = ds.resolve_runtime()
+        saved = ds.save_settings(
+            {
+                "registrations": {
+                    "generic": {"enabled": True, "unconditional_wake": True},
+                    "goal": {"enabled": True},
+                }
+            }
+        )
+        loaded = ds.load_settings()
+        wire = ds.settings_to_dict(loaded)
+        assert wire["registrations"]["generic"].get("unconditional_wake") is True
+        assert wire["registrations"]["goal"]["unconditional_wake"] is False
+        assert wire["registrations"]["generic"]["options"] == {}
+        resolved = ds.resolve_runtime()
+        snapshot = EnabledRegistrySnapshot.build(resolved.registrations)
+        assert snapshot.for_kind("generic").unconditional_wake is True
+        assert snapshot.for_kind("goal").unconditional_wake is False
+        assert resolved.source_revision != before.source_revision
+        assert loaded.revision == saved.revision
+
+    @pytest.mark.parametrize("value", [None, 0, 1, "false", {}, []])
+    def test_invalid_unconditional_wake_selection_rejected(self, value):
+        with pytest.raises(DriveValidationError, match="unconditional_wake"):
+            ds.parse_settings(
+                {"registrations": {"goal": {"unconditional_wake": value}}}
+            )
+
     def test_save_then_load_roundtrips_and_stamps_revision(self):
         saved = ds.save_settings(_enabled_settings())
         assert saved.revision is not None
@@ -474,7 +504,9 @@ class TestRunningRevision:
     identity + options, not just registration names + tuning."""
 
     def _fake_engine(self, descriptor, registration):
-        entry = SimpleNamespace(descriptor=descriptor, registration=registration)
+        entry = SimpleNamespace(
+            descriptor=descriptor, registration=registration, unconditional_wake=False
+        )
         snapshot = SimpleNamespace(entries=(entry,))
         drives = SimpleNamespace(
             snapshot=snapshot, config=DriveRuntimeConfig(enabled=True)

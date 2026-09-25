@@ -45,6 +45,14 @@
       <pre v-if="showPrompt" class="mt-1 whitespace-pre-wrap bg-warm-100 dark:bg-warm-800 rounded p-2 text-[10px] text-warm-600 dark:text-warm-400 max-h-40 overflow-auto">{{ promptPreview }}</pre>
     </div>
 
+    <div class="flex items-start gap-3 border-t border-warm-100 dark:border-warm-800 pt-2 mt-1">
+      <div class="flex-1 min-w-0">
+        <div class="text-xs text-warm-700 dark:text-warm-300">Auto-wake without conditions</div>
+        <div class="text-[11px] text-warm-500 dark:text-warm-400 mt-1">Automatically change waiting Drives to active when no start time or dependencies are set. Off keeps them waiting until explicitly resumed. Delivery still follows this Drive type's rules.</div>
+      </div>
+      <el-switch :model-value="reg.unconditional_wake" :disabled="disabled || !reg.enabled || reg.conflict" :aria-label="`Auto-wake ${reg.name} without conditions`" @change="$emit('update-wake', reg.name, $event)" />
+    </div>
+
     <!-- Schema-driven options (only when enabled) -->
     <div v-if="reg.enabled" class="border-t border-warm-100 dark:border-warm-800 pt-2 mt-1">
       <div class="text-[10px] uppercase tracking-wide text-warm-400 mb-1.5">Options</div>
@@ -78,7 +86,7 @@ const props = defineProps({
   disabled: { type: Boolean, default: false },
 })
 
-const emit = defineEmits(["toggle", "update-option", "set-options"])
+const emit = defineEmits(["toggle", "update-wake", "update-option", "set-options"])
 
 const showPrompt = ref(false)
 

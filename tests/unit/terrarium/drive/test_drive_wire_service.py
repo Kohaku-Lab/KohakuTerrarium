@@ -6,16 +6,24 @@ rejection of unknown schema versions / malformed payloads.
 """
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
 from kohakuterrarium.terrarium.drive.errors import DriveValidationError
+from kohakuterrarium.terrarium.drive.registration import GenericDriveRegistration
+from kohakuterrarium.terrarium.drive.registration_options import (
+    apply_registration_wake_policy,
+)
+from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.terrarium.drive.wire_service import (
     DriveRuntimeStatus,
     DriveView,
     pack_drive_view,
     pack_runtime_status,
     pack_settings_status,
+    registration_dtos,
+    running_revision,
     unpack_drive_view,
     unpack_runtime_status,
     unpack_settings_status,
@@ -96,3 +104,13 @@ class TestSettingsStatus:
     def test_non_dict_rejected(self):
         with pytest.raises(DriveValidationError):
             pack_settings_status(["not", "a", "dict"])
+
+
+def test_runtime_status_exposes_applied_wake_policy_and_revision():
+    registration = GenericDriveRegistration()
+    before = SimpleNamespace(snapshot=EnabledRegistrySnapshot.build([registration]))
+    apply_registration_wake_policy(registration, unconditional_wake=True)
+    after = SimpleNamespace(snapshot=EnabledRegistrySnapshot.build([registration]))
+    assert registration_dtos(after)[0].get("unconditional_wake") is True
+    assert registration_dtos(before)[0]["unconditional_wake"] is False
+    assert running_revision(before) != running_revision(after)

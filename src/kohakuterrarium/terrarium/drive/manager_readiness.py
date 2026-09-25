@@ -435,6 +435,13 @@ class ManagerReadinessMixin:
             deps = await self._dependency_statuses(record)
             if not wake_conditions_met(record, now, deps):
                 continue
+            entry = self._snapshot.for_kind(record.kind) if self._snapshot else None
+            if (
+                record.not_before is None
+                and not record.dependency_ids
+                and not (entry and entry.available and entry.unconditional_wake)
+            ):
+                continue
             try:
                 woken = await self._repo.transition_drive(
                     record.drive_id,

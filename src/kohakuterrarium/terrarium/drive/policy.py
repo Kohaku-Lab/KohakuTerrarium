@@ -457,8 +457,28 @@ _OPERATION_CAPABILITY: dict[DriveOperation, DriveCapability] = {
     DriveOperation.ADMIN: DriveCapability.ADMIN,
 }
 
-# Assignees may suspend blocked work but lack the owner's full transition set.
-_ASSIGNEE_TRANSITIONS = frozenset({DriveStatus.WAITING, DriveStatus.BLOCKED})
+# Assignees may suspend pursuit and resume waiting, never undo owner controls.
+_ASSIGNEE_TRANSITIONS = frozenset(
+    {
+        (DriveStatus.ACTIVE, DriveStatus.WAITING),
+        (DriveStatus.ACTIVE, DriveStatus.BLOCKED),
+        (DriveStatus.WAITING, DriveStatus.ACTIVE),
+        (DriveStatus.WAITING, DriveStatus.BLOCKED),
+    }
+)
+
+
+def transition_capabilities_allow(
+    caps: frozenset[DriveCapability],
+    record: DriveRecord | None,
+    target_status: DriveStatus | None,
+) -> bool:
+    """Check full control or the assignee's source-specific transition grant."""
+    return DriveCapability.TRANSITION in caps or (
+        DriveCapability.MANAGE_ASSIGNED in caps
+        and record is not None
+        and (record.status, target_status) in _ASSIGNEE_TRANSITIONS
+    )
 
 
 def _is_assignee(actor: ActorRef, assignment: DriveAssignment | None) -> bool:
@@ -532,12 +552,7 @@ def is_operation_allowed(
             }
         )
     if operation == DriveOperation.TRANSITION:
-        if DriveCapability.TRANSITION in caps:
-            return True
-        return (
-            DriveCapability.MANAGE_ASSIGNED in caps
-            and target_status in _ASSIGNEE_TRANSITIONS
-        )
+        return transition_capabilities_allow(caps, record, target_status)
     return _OPERATION_CAPABILITY[operation] in caps
 
 
