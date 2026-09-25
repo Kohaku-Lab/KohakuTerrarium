@@ -842,11 +842,16 @@ Outbound:
 
 Implementation:
 
-- Unix: `pty.openpty()` + fork + exec.
+- Unix: `pty.openpty()` + fork + exec, with nonblocking reads and writes
+  registered on the event loop. Input is retained across partial writes.
 - Windows with `winpty`: ConPTY.
 - Fallback: plain pipes without PTY.
 - Initial `{"type": "output", "data": ""}` sent on connect.
-- On cleanup: SIGTERM then SIGKILL.
+- Unix cleanup cancels terminal I/O before closing its descriptor, then
+  asynchronously terminates and reaps the shell (SIGTERM, followed by SIGKILL
+  after a one-second grace period if needed). Disconnects, malformed input,
+  and handler cancellation all use the same cleanup path. Closing an idle
+  terminal must not block unrelated Studio requests.
 
 ### `WS /ws/terminal/terrariums/{terrarium_id}/{target}`
 
