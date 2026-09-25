@@ -11,10 +11,10 @@ from kohakuterrarium.terrarium.drive.registration import (
     GenericDriveRegistration,
     Readiness,
 )
-from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
 from kohakuterrarium.terrarium.drive.registration_options import (
     apply_registration_wake_policy,
 )
+from kohakuterrarium.terrarium.drive.snapshot import EnabledRegistrySnapshot
 
 from tests.unit.terrarium.drive._harness import (
     WORKER,
