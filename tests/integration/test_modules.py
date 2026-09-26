@@ -33,6 +33,7 @@ from PIL import Image
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.builtins.plugins.budget.plugin import BudgetPlugin
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
@@ -664,6 +665,30 @@ class TestModulesIntegration:
             assert mgr.collect_runtime_services(ctx) == {}
             assert mgr.collect_termination_checkers() == []
             assert mgr.collect_commands() == []
+
+            # Runtime option changes must preserve the real tool-call budget.
+            budget = BudgetPlugin(tool_call_budget={"hard": 1})
+            mgr.register(budget)
+            await mgr.load_pending()
+            first = await agent.executor.submit(
+                "recorder", {"msg": "budgeted"}, is_direct=True
+            )
+            assert (await agent.executor.wait_for(first)).success
+            assert budget.budgets.tool_call.used == 1
+            mgr.set_plugin_options("budget", {"tool_call_budget": {"hard": 2}})
+            assert budget.budgets.tool_call.used == 1
+            second = await agent.executor.submit(
+                "recorder", {"msg": "last"}, is_direct=True
+            )
+            assert (await agent.executor.wait_for(second)).success
+            mgr.set_plugin_options(
+                "budget", {"tool_call_budget": {"soft": 1, "hard": 2}}
+            )
+            blocked = await agent.executor.submit(
+                "recorder", {"msg": "over"}, is_direct=True
+            )
+            assert not (await agent.executor.wait_for(blocked)).success
+            assert tool.executed_with[-2:] == [{"msg": "budgeted"}, {"msg": "last"}]
             # should_proceed with no veto hooks → True (nothing vetoes).
             assert (
                 await mgr.should_proceed("on_compact_start", context_length=10) is True

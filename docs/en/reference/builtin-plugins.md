@@ -137,8 +137,11 @@ work down voluntarily before the hard cap fires.
 
 ### State
 
-State is per-session and namespaced under `plugin:budget:*` in the
-session store, so resume preserves accumulated counts.
+Usage belongs to the live plugin instance. Updating limits preserves
+already-accounted usage and recomputes alarms for changed axes; unchanged
+axes retain their pending alarms. Disabling and re-enabling an axis retains
+its previous count, but work performed while that axis is disabled is not
+counted. These counters are not persisted across process/session resume.
 
 ### Example
 
