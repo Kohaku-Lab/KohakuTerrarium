@@ -2,13 +2,16 @@
 
 import os
 import secrets
-import shutil
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
 
-from kohakuterrarium.mcp_server.connection import ConnectionStore, write_json
+from kohakuterrarium.mcp_server.connection import (
+    ConnectionStore,
+    validate_dependencies,
+    write_json,
+)
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 
 
@@ -24,7 +27,7 @@ def is_running(store: ConnectionStore) -> bool:
 
 
 @contextmanager
-def _command(store: ConnectionStore):
+def lifecycle_command(store: ConnectionStore):
     deadline = time.monotonic() + 40
     while True:
         try:
@@ -64,34 +67,58 @@ def status(store: ConnectionStore) -> dict:
         )
     elif snapshot.get("updated_at") and time.time() - snapshot["updated_at"] > 30:
         snapshot.update(state="unresponsive", public_ready=False)
+    configured = record.summary()
+    active = None
+    if running:
+        try:
+            active = store.load_active(snapshot.get("run_id", "")).summary()
+        except ValueError:
+            snapshot.update(
+                state="unresponsive",
+                public_ready=False,
+                error="Active configuration unavailable; stop and start this workspace once",
+            )
+    changes = (
+        {
+            key: {"running": active[key], "configured": value}
+            for key, value in configured.items()
+            if active[key] != value
+        }
+        if active is not None
+        else {}
+    )
+    effective = active if running else configured
     return {
         **snapshot,
         "running": running,
         "workspace": record.workspace,
-        "public_origin": record.public_origin,
-        "port": record.port,
-        "tunnel": record.tunnel,
+        "public_origin": effective["public_origin"] if effective else None,
+        "port": effective["port"] if effective else None,
+        "tunnel": effective["tunnel"] if effective else None,
+        "active": active,
+        "configured": configured,
+        "pending_changes": changes,
+        "restart_required": bool(changes) if not running or active else None,
         "record_path": str(store.record_path),
     }
 
 
-def start(store: ConnectionStore, *, wait: float = 30, **options) -> dict:
+def connection_url(store: ConnectionStore, *, configured: bool = False) -> str:
+    if not configured and is_running(store):
+        return store.load_active(store.runtime().get("run_id", "")).url
+    return store.load().url
+
+
+def start(store: ConnectionStore, *, wait: float = 30) -> dict:
     if not 1 <= wait <= 120:
         raise ValueError("Startup wait must be between 1 and 120 seconds")
-    with _command(store):
+    with lifecycle_command(store):
         if is_running(store):
-            record = store.load()
-            if options and store.configure(**options, persist=False) != record:
-                raise ValueError(
-                    "MCP instance is running; stop before changing its settings"
-                )
             return status(store)
-        record = store.configure(**options)
-        if record.tunnel == "ngrok" and not shutil.which(record.ngrok_bin):
-            raise ValueError(
-                "ngrok executable not found; use --ngrok-bin or --tunnel external"
-            )
+        record = store.load()
+        validate_dependencies(record)
         run_id = secrets.token_hex(16)
+        store.save_active(run_id, record)
         write_json(
             store.runtime_path,
             {
@@ -145,7 +172,7 @@ def start(store: ConnectionStore, *, wait: float = 30, **options) -> dict:
 
 
 def stop(store: ConnectionStore, *, wait: float = 20) -> dict:
-    with _command(store):
+    with lifecycle_command(store):
         if not is_running(store):
             return status(store)
         snapshot = store.runtime()

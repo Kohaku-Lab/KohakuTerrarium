@@ -75,7 +75,7 @@ def _stop_requested(store: ConnectionStore, run_id: str) -> bool:
         return False
 
 
-def _start_tunnel(store: ConnectionStore):
+def _start_tunnel(store: ConnectionStore, run_id: str):
     fd = os.open(
         store.directory / "tunnel.log", os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600
     )
@@ -89,6 +89,8 @@ def _start_tunnel(store: ConnectionStore):
                 store.workspace,
                 "--state-dir",
                 str(store.directory.parent),
+                "--run-id",
+                run_id,
             ],
             stdin=subprocess.PIPE,
             stdout=log,
@@ -124,7 +126,7 @@ async def _monitor(store, record, server, serving, snapshot):
                     retry_delay = min(retry_delay * 2, 30)
                 if tunnel is None and now >= next_start and server.started:
                     try:
-                        tunnel = _start_tunnel(store)
+                        tunnel = _start_tunnel(store, snapshot["run_id"])
                     except OSError:
                         snapshot.update(
                             tunnel_pid=None,
@@ -178,7 +180,7 @@ async def _monitor(store, record, server, serving, snapshot):
 
 
 async def serve(store: ConnectionStore, run_id: str) -> None:
-    record = store.load()
+    record = store.load_active(run_id)
     snapshot = {
         "run_id": run_id,
         "pid": os.getpid(),

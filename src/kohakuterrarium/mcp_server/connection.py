@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import secrets
+import shutil
 import time
 from pathlib import Path
 from typing import Literal
@@ -21,6 +22,7 @@ def workspace_identity(path: Path) -> str:
 
 def https_origin(value: str) -> str:
     parsed = urlsplit(value)
+    parsed.port  # Reject malformed or out-of-range ports before saving.
     if (
         parsed.scheme != "https"
         or not parsed.hostname
@@ -81,6 +83,31 @@ class Connection(BaseModel):
         """Credential-bearing URL, only for deliberate copy or network use."""
         return self.public_origin + "/mcp/" + self.secret
 
+    def summary(self) -> dict:
+        """Public settings only; diagnostics must never serialize the secret."""
+        return self.model_dump(exclude={"secret", "version"})
+
+
+def validate_dependencies(record: Connection) -> None:
+    """Validate local dependencies, without starting processes or making requests."""
+    if record.tools_config:
+        config = load_config(Path(record.tools_config))
+        if workspace_identity(config.workspace) != record.workspace:
+            raise ValueError("Tool configuration belongs to a different workspace")
+    if record.tunnel == "ngrok":
+        if not shutil.which(record.ngrok_bin):
+            raise ValueError(
+                "ngrok executable not found; configure --ngrok-bin in setup"
+            )
+        if record.ngrok_config:
+            try:
+                with Path(record.ngrok_config).open("rb") as stream:
+                    stream.read(1)
+            except OSError:
+                raise ValueError(
+                    "ngrok configuration must be an existing readable file"
+                ) from None
+
 
 class ConnectionStore:
     """One identity and OS-backed locks per canonical workspace."""
@@ -95,24 +122,62 @@ class ConnectionStore:
         self.record_path = self.directory / "connection.json"
         self.runtime_path = self.directory / "runtime.json"
         self.stop_path = self.directory / "stop.json"
+        self.active_path = self.directory / "active.json"
         self.command_lock = FileLock(self.directory / "command.lock")
         self.instance_lock = FileLock(self.directory / "instance.lock")
 
     def load(self) -> Connection:
+        record, _ = self.read_configuration()
+        if record is None:
+            raise ValueError("No saved connection; run kt mcp-serve setup first")
+        return record
+
+    def read_configuration(self) -> tuple[Connection | None, str | None]:
+        """Read settings and their conflict token from the same atomic file version."""
         try:
-            record = Connection.model_validate(
-                json.loads(self.record_path.read_text(encoding="utf-8"))
-            )
+            raw = self.record_path.read_bytes()
+        except FileNotFoundError:
+            return None, None
+        try:
+            record = Connection.model_validate(json.loads(raw))
         except (ValueError, OSError) as exc:
             raise ValueError(
                 "Missing or invalid saved connection; configure or restore it explicitly"
             ) from exc
         if record.workspace != self.workspace:
             raise ValueError("Saved connection belongs to a different workspace")
-        return record
+        return record, hashlib.sha256(raw).hexdigest()
 
-    def configure(
+    def save_active(self, run_id: str, record: Connection) -> None:
+        write_json(
+            self.active_path, {"run_id": run_id, "connection": record.model_dump()}
+        )
+
+    def load_active(self, run_id: str) -> Connection:
+        try:
+            data = json.loads(self.active_path.read_text(encoding="utf-8"))
+            if not run_id or data["run_id"] != run_id:
+                raise ValueError("Active configuration identity mismatch")
+            record = Connection.model_validate(data["connection"])
+            if record.workspace != self.workspace:
+                raise ValueError("Active configuration identity mismatch")
+            return record
+        except (OSError, KeyError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "Active configuration identity unavailable; stop and start this workspace once"
+            ) from exc
+
+    def configure(self, *, persist: bool = True, **options) -> Connection:
+        """Low-level record construction; lifecycle callers use SetupSession."""
+        record, _ = self.read_configuration()
+        candidate = self.build(record, **options)
+        if persist:
+            write_json(self.record_path, candidate.model_dump())
+        return candidate
+
+    def build(
         self,
+        base: Connection | None,
         *,
         public_origin=None,
         tunnel=None,
@@ -121,19 +186,14 @@ class ConnectionStore:
         ngrok_config=None,
         tools_config=None,
         import_connection: Path | None = None,
-        persist: bool = True,
+        clear_tools_config: bool = False,
+        clear_ngrok_config: bool = False,
     ) -> Connection:
-        """Caller holds command_lock when commands may race with a running service."""
-        if self.record_path.exists():
-            record = self.load()
+        """Construct a candidate without writing or re-reading a newer configuration."""
+        if base is not None:
             if import_connection is not None:
                 raise ValueError("Cannot import over an existing connection")
-            if (
-                public_origin is not None
-                and https_origin(public_origin) != record.public_origin
-            ):
-                raise ValueError("Saved public origin cannot be silently rebound")
-            data = record.model_dump()
+            data = base.model_dump()
         else:
             if import_connection is not None:
                 try:
@@ -156,7 +216,7 @@ class ConnectionStore:
             else:
                 if public_origin is None:
                     raise ValueError(
-                        "First start requires --public-origin and a stable HTTPS entry"
+                        "First setup requires --origin and a stable HTTPS entry"
                     )
                 data = {
                     "workspace": self.workspace,
@@ -164,6 +224,9 @@ class ConnectionStore:
                     "secret": secrets.token_urlsafe(32),
                 }
         updates = {
+            "public_origin": (
+                https_origin(public_origin) if public_origin is not None else None
+            ),
             "tunnel": tunnel,
             "port": port,
             "ngrok_bin": ngrok_bin,
@@ -171,6 +234,22 @@ class ConnectionStore:
             "tools_config": str(Path(tools_config).resolve()) if tools_config else None,
         }
         data.update({key: value for key, value in updates.items() if value is not None})
+        if clear_tools_config:
+            if tools_config is not None:
+                raise ValueError("Cannot set and clear the tool configuration together")
+            data["tools_config"] = None
+        if clear_ngrok_config:
+            if ngrok_config is not None:
+                raise ValueError(
+                    "Cannot set and clear the ngrok configuration together"
+                )
+            data["ngrok_config"] = None
+        if data.get("tunnel", "ngrok") == "external":
+            if ngrok_bin is not None or ngrok_config is not None or clear_ngrok_config:
+                raise ValueError("ngrok settings require ngrok mode")
+            data.update(ngrok_bin="ngrok", ngrok_config=None)
+        elif ngrok_bin and ("/" in ngrok_bin or "\\" in ngrok_bin):
+            data["ngrok_bin"] = str(Path(ngrok_bin).expanduser().resolve())
         try:
             record = Connection.model_validate(data)
         except ValidationError as exc:
@@ -179,8 +258,6 @@ class ConnectionStore:
             config = load_config(Path(record.tools_config))
             if workspace_identity(config.workspace) != self.workspace:
                 raise ValueError("Tool configuration belongs to a different workspace")
-        if persist:
-            write_json(self.record_path, record.model_dump())
         return record
 
     def runtime(self) -> dict:

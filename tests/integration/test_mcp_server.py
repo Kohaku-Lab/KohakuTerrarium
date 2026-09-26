@@ -21,7 +21,7 @@ from kohakuterrarium.mcp_server.connection import ConnectionStore
 class TestMCPServer:
     # Several real interpreter launches and intentional offline readiness waits
     # exceed the normal 60-second per-test budget on Windows.
-    @pytest.mark.timeout(150)
+    @pytest.mark.timeout(200)
     async def test_cli_lifecycle_isolation_restart_and_ingress_failure(self, tmp_path):
         first, second = tmp_path / "first", tmp_path / "second"
         first.mkdir()
@@ -35,6 +35,8 @@ class TestMCPServer:
         def cli(command, workspace=first, *extra):
             if command == "start":
                 extra = ("--wait", "8", *extra)
+            if command == "setup":
+                extra = ("--non-interactive", *extra)
             completed = subprocess.run(
                 [
                     sys.executable,
@@ -46,7 +48,7 @@ class TestMCPServer:
                     str(workspace),
                     "--state-dir",
                     str(state_dir),
-                    "--json",
+                    *([] if command == "url" else ["--json"]),
                     *extra,
                 ],
                 capture_output=True,
@@ -54,8 +56,9 @@ class TestMCPServer:
                 env=env,
                 timeout=45,
             )
-            return completed.returncode, json.loads(
-                completed.stdout.strip().splitlines()[-1]
+            output = completed.stdout.strip().splitlines()[-1]
+            return completed.returncode, (
+                output if command == "url" else json.loads(output)
             )
 
         def port():
@@ -64,7 +67,8 @@ class TestMCPServer:
                 return sock.getsockname()[1]
 
         async def call(workspace, name, args):
-            record = ConnectionStore(workspace, state_dir).load()
+            store = ConnectionStore(workspace, state_dir)
+            record = store.load_active(store.runtime()["run_id"])
             async with httpx.AsyncClient(trust_env=False) as http:
                 async with streamable_http_client(
                     f"http://127.0.0.1:{record.port}/mcp/{record.secret}",
@@ -78,17 +82,19 @@ class TestMCPServer:
             # HTTPS is deliberately unavailable: local service stays available,
             # startup reports failure to become publicly ready without lying.
             first_args = (
-                "start",
+                "setup",
                 first,
-                "--public-origin",
+                "--origin",
                 "https://kt-mcp-test.invalid",
-                "--tunnel",
+                "--mode",
                 "external",
                 "--port",
                 str(port()),
             )
+            setup_code, configured = cli(*first_args)
+            assert setup_code == 0 and not configured["running"]
             (code, a), (_, racing) = await asyncio.gather(
-                asyncio.to_thread(cli, *first_args), asyncio.to_thread(cli, *first_args)
+                asyncio.to_thread(cli, "start"), asyncio.to_thread(cli, "start")
             )
             assert racing["run_id"] == a["run_id"] and racing["pid"] == a["pid"]
             assert (
@@ -112,16 +118,20 @@ class TestMCPServer:
                 )
             _, repeated = cli("start")
             assert repeated["run_id"] == a["run_id"] and repeated["pid"] == a["pid"]
-            code, b = cli(
-                "start",
-                second,
-                "--public-origin",
-                "https://kt-mcp-second.invalid",
-                "--tunnel",
-                "external",
-                "--port",
-                str(port()),
+            assert (
+                cli(
+                    "setup",
+                    second,
+                    "--origin",
+                    "https://kt-mcp-second.invalid",
+                    "--mode",
+                    "external",
+                    "--port",
+                    str(port()),
+                )[0]
+                == 0
             )
+            code, b = cli("start", second)
             assert code == 1 and b["local_ready"] and b["pid"] != a["pid"]
             for workspace, content in ((first, "first"), (second, "second")):
                 assert not (
@@ -153,9 +163,11 @@ class TestMCPServer:
             with socket.socket() as occupied:
                 occupied.bind(("127.0.0.1", 0))
                 occupied.listen()
-                code, failed = cli(
-                    "start", first, "--port", str(occupied.getsockname()[1])
+                assert (
+                    cli("setup", first, "--port", str(occupied.getsockname()[1]))[0]
+                    == 0
                 )
+                code, failed = cli("start")
                 assert code == 1 and not failed["public_ready"]
                 assert "unavailable" in failed["error"]
                 assert occupied.getsockname()[1] > 0
@@ -164,16 +176,28 @@ class TestMCPServer:
             # Failure even before the child launches must also stay isolated.
             tunnel_log = ConnectionStore(first, state_dir).directory / "tunnel.log"
             tunnel_log.mkdir()
-            _, tunnel_failed = cli(
-                "start",
-                first,
-                "--port",
-                str(port()),
-                "--tunnel",
-                "ngrok",
-                "--ngrok-bin",
-                sys.executable,
+            # Python stands in for an external tunnel process. Its real child
+            # records ingress arguments then exits, exercising guardian retries.
+            (first / "http").write_text(
+                "import json, sys, time\nfrom pathlib import Path\n"
+                "with Path('ingress-observed.jsonl').open('a') as f:\n"
+                "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
+                "time.sleep(.2)\nraise SystemExit(1)\n"
             )
+            assert (
+                cli(
+                    "setup",
+                    first,
+                    "--port",
+                    str(port()),
+                    "--mode",
+                    "ngrok",
+                    "--ngrok-bin",
+                    sys.executable,
+                )[0]
+                == 0
+            )
+            _, tunnel_failed = cli("start")
             assert tunnel_failed["local_ready"] and not tunnel_failed["public_ready"]
             assert "launch" in tunnel_failed["error"]
             bg = await call(
@@ -185,6 +209,29 @@ class TestMCPServer:
                 },
             )
             tunnel_log.rmdir()
+            running_record = ConnectionStore(first, state_dir).load()
+            saved_code, saved = cli(
+                "setup",
+                first,
+                "--mode",
+                "external",
+                "--origin",
+                "https://kt-mcp-next.invalid",
+                "--port",
+                str(port()),
+            )
+            assert saved_code == 0 and saved["restart_required"]
+            _, pending = cli("start")
+            assert pending["instance_id"] == tunnel_failed["instance_id"]
+            assert pending["public_origin"] == running_record.public_origin
+            assert (
+                pending["configured"]["public_origin"] == "https://kt-mcp-next.invalid"
+            )
+            assert cli("url")[1] == running_record.url
+            assert (
+                cli("url", first, "--configured")[1]
+                == ConnectionStore(first, state_dir).load().url
+            )
             done = await call(
                 first,
                 "job_wait",
@@ -195,6 +242,25 @@ class TestMCPServer:
                 and "survived ingress failure" in done.structuredContent["output"]
             )
             assert cli("status")[1]["instance_id"] == tunnel_failed["instance_id"]
+            observed = first / "ingress-observed.jsonl"
+            count = len(observed.read_text().splitlines()) if observed.exists() else 0
+            for _ in range(100):
+                if observed.exists() and len(observed.read_text().splitlines()) > count:
+                    break
+                await asyncio.sleep(0.2)
+            lines = observed.read_text().splitlines()
+            assert len(lines) > count
+            for line in lines:
+                arguments = json.loads(line)
+                assert f"http://127.0.0.1:{running_record.port}" in arguments
+                assert running_record.public_origin in arguments
+                assert "https://kt-mcp-next.invalid" not in arguments
+            assert cli("stop")[1]["state"] == "stopped"
+            _, applied = cli("start")
+            assert applied["local_ready"] and not applied["public_ready"]
+            assert applied["instance_id"] != tunnel_failed["instance_id"]
+            assert applied["public_origin"] == "https://kt-mcp-next.invalid"
+            assert not applied["restart_required"] and applied["tunnel"] == "external"
         finally:
             for workspace in (first, second):
                 if ConnectionStore(workspace, state_dir).record_path.exists():

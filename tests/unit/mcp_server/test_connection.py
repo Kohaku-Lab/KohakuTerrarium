@@ -31,8 +31,9 @@ def test_identity_reuse_import_and_validation(tmp_path):
     assert store.configure().model_dump() == first.model_dump()
     assert store.configure(port=9900).port == 9900
     assert store.load().secret == first.secret
-    with pytest.raises(ValueError, match="origin"):
-        store.configure(public_origin="https://another.example")
+    changed = store.configure(public_origin="https://another.example")
+    assert changed.secret == first.secret
+    assert changed.public_origin == "https://another.example"
     other = tmp_path / "other"
     other.mkdir()
     with pytest.raises(ValueError, match="workspace"):

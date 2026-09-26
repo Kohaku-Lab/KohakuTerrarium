@@ -5,7 +5,7 @@ creating a Creature or starting a local model. `kt mcp-serve` manages a separate
 background process per workspace, an authenticated Streamable HTTP endpoint,
 and optionally its preconfigured ngrok tunnel.
 
-## Start, inspect and stop
+## Configure once, then start and stop
 
 Install this checkout (or put its `src` directory on `PYTHONPATH` and use
 `python -m kohakuterrarium` in place of `kt`). The tested SDK dependency is
@@ -14,23 +14,43 @@ Configure an ngrok account and fixed HTTPS domain first, then from the desired
 working directory run:
 
 ```powershell
-kt mcp-serve start --public-origin https://your-fixed-domain.example
+kt mcp-serve setup
+kt mcp-serve start
 kt mcp-serve status
 kt mcp-serve stop
 kt mcp-serve start
 ```
 
-`start` defaults to managed ngrok and a loopback listener on port 8765. Use
-`--ngrok-bin` and `--ngrok-config` for a specific installed agent/configuration,
-or `--port` for another local port. A busy port fails explicitly. The command
-does not install ngrok, register an account, or allocate a public domain.
+`setup` opens a wizard in an interactive terminal. It selects the ingress mode,
+public HTTPS origin, local port (default 8765), optional tool configuration and,
+in managed mode, ngrok executable/configuration. It shows a change summary and
+asks before saving. Cancellation or EOF leaves the previous record untouched.
+Setup does not start anything, install ngrok, register an account, allocate a
+domain, or test public connectivity. It validates the origin and local
+dependencies before saving: tools configuration is parsed, ngrok must be found,
+and an explicit ngrok configuration must be a readable file. Ngrok validates
+its own file contents when it starts. A busy local port is checked only at startup.
 
-The first start saves the canonical workspace, public origin, random secret,
+In scripts, use explicit options:
+
+```powershell
+kt mcp-serve setup --non-interactive --mode ngrok --origin https://your-fixed-domain.example
+kt mcp-serve setup --non-interactive --mode external --origin https://your-domain.example
+```
+
+`--ngrok-bin`, `--ngrok-config`, `--port` and `--config` belong to **setup**.
+The start command takes lifecycle options such as `--wait`, not configuration
+options. A start without saved configuration tells you to run setup first.
+Non-TTY input, `--non-interactive`, or `--json` disables all prompts; missing
+required input produces a nonzero exit code. Interactive arguments prefill the
+wizard. JSON output never contains the MCP secret.
+
+The first setup saves the canonical workspace, public origin, random secret,
 local port, ingress mode and optional tool-config path under
 `~/.kohakuterrarium/mcp-serve/<workspace-key>/connection.json`. Subsequent starts
 reuse them. A ready human-readable start prints the complete URL for deliberate
-copying; `kt mcp-serve url` displays it again. Keep that URL private. `status`
-and `--json` lifecycle output omit the secret.
+copying; `kt mcp-serve url` displays it again. Keep that URL private. Setup
+summaries, status, and JSON lifecycle output omit the secret.
 
 Pass `--workspace PATH` on any command to manage another directory. Workspace
 identity resolves symlinks and Windows case. Moving a directory creates a
@@ -58,14 +78,14 @@ without downloading job contents.
 For an independently maintained stable entry point, use:
 
 ```powershell
-kt mcp-serve start --public-origin https://your-domain.example --tunnel external
+kt mcp-serve setup --non-interactive --mode external --origin https://your-domain.example
+kt mcp-serve start
 ```
 
 Point that entry at the selected loopback port. KT neither starts nor stops an
-external tunnel. To change local port, ingress mode, agent path or tool-config
-path, stop first and supply the new option to `start`; changing a saved public
-origin is rejected. In managed mode only, inherited HTTP proxy environment
-variables are removed from the ngrok child, matching the tested reference setup;
+external tunnel. A public host still needs an HTTPS reverse proxy: KT listens
+on loopback and does not terminate TLS itself. In managed mode only, inherited
+HTTP proxy environment variables are removed from the ngrok child, matching the tested reference setup;
 ngrok's own configuration is retained. The system proxy is not changed.
 
 Supervisor and tunnel diagnostics are in `server.log` and `tunnel.log` beside
@@ -76,10 +96,52 @@ Transient Windows readers can delay atomic status publication. Such diagnostic
 write failures do not stop tool execution; status becomes `unresponsive` if its
 heartbeat stays stale, and a held ownership lock prevents a duplicate launch.
 
+## Editing saved settings while running
+
+Run setup again to edit the saved configuration. Omitted fields keep their
+previous values; new configurations use defaults. Use `--clear-config` or
+`--clear-ngrok-config` to restore the respective default. In the wizard, an
+empty answer keeps the displayed value and `-` clears an optional file path.
+Switching to external mode clears saved ngrok-specific settings. Ngrok flags
+are rejected when external mode is selected. Changing origin keeps the secret
+and warns that the ChatGPT connection URL must be updated.
+
+Setup may save while the service is running. The running instance and all of
+its tunnel retries use a private `active.json` snapshot tied to its run ID.
+They never adopt pending settings in the middle of a job. The next instance
+uses the saved settings. Status shows `active`, `configured`, `pending_changes`
+and `restart_required`, without credentials. Public readiness always describes
+the running instance. Repeating start reuses that instance and reports pending
+settings; it does not silently restart it.
+
+```powershell
+kt mcp-serve setup --non-interactive --origin https://new-domain.example
+kt mcp-serve status
+kt mcp-serve url                 # running URL; saved URL when stopped
+kt mcp-serve url --configured    # explicitly copy the next-start URL
+kt mcp-serve stop
+kt mcp-serve start
+```
+
+The wizard checks that the saved record has not changed since it opened. A
+conflicting save fails and asks you to start setup again; it never overwrites
+another terminal's changes. Validation precedes one atomic commit. Failed
+startup preserves the new settings and reports the failure without rollback.
+
+The snapshot freezes **setup-managed fields**, not external file contents.
+Editing the referenced tool configuration takes effect at the next tool-process
+start. Editing an ngrok configuration file may affect its next tunnel restart.
+Status does not detect or promise to freeze those file contents.
+
+Existing connection records remain readable without reconfiguration. A process
+started by the older CLI has no active snapshot: stop and start it once before
+using live setup editing or retrieving its running URL with the new CLI.
+No new identity or secret is generated by that upgrade.
+
 ## Configuration
 
 Without `--config`, the nine tools below use their defaults. To customize them,
-pass `--config` with a dedicated YAML or JSON file:
+pass `--config` to setup with a dedicated YAML or JSON file:
 
 ```yaml
 name: KT tools
@@ -129,11 +191,12 @@ authors must handle that contract; a plugin is trusted local code.
 ## Migrating the ingress experiment
 
 Stop the old experimental tool process, then explicitly import its connection
-record on the first CLI start for that workspace:
+record on the first setup for that workspace:
 
 ```powershell
-kt mcp-serve start --workspace C:/work `
-  --import-connection C:/private/ingress-test.json --tunnel external
+kt mcp-serve setup --non-interactive --workspace C:/work `
+  --import-connection C:/private/ingress-test.json --mode external
+kt mcp-serve start --workspace C:/work
 ```
 
 Import preserves the origin and secret and rejects a different workspace.
@@ -198,5 +261,7 @@ and background-job results, plus a subsequent job-query response correction,
 are recorded in `scripts/mcp_probe/PHASE2_RESULTS.md`. SDK checks are distinguished
 from owner-reported ChatGPT behavior. CLI lifecycle, managed ingress recovery
 and local regression results are in `scripts/mcp_probe/PHASE3_RESULTS.md`.
+The subsequent setup workflow and running-configuration isolation checks are
+recorded in `scripts/mcp_probe/SETUP_RESULTS.md`.
 These checks do not establish compatibility with
 all accounts, clients, operating systems or hosting providers.
