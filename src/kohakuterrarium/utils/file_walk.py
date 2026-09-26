@@ -390,9 +390,9 @@ def _glob_to_regex(pattern: str) -> re.Pattern[str]:
                 end += 1
             if end < n and pattern[end] == "]":
                 end += 1
-            while end < n and pattern[end] != "]":
+            while end < n and pattern[end] not in "]/":
                 end += 1
-            if end == n:
+            if end == n or pattern[end] == "/":
                 result += r"\["
                 i += 1
             else:

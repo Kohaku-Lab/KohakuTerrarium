@@ -689,3 +689,8 @@ def test_character_classes_follow_fnmatch_without_crossing_segments(pattern):
     for name in ("a", "b", "c", "z", "]", "[", "-", "!", "[abc"):
         assert _glob_match(name, pattern) == fnmatch.fnmatchcase(name, pattern)
     assert not _glob_match("/", pattern)
+
+
+def test_character_class_cannot_span_path_segments():
+    assert not _glob_match("a.py", "[a/z].py")
+    assert _glob_match("[a/z].py", "[a/z].py")
