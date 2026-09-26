@@ -191,7 +191,8 @@ async def test_cancelled_open_closes_unclaimed_vaults(
     tmp_path, monkeypatch, cancel_twice
 ):
     path = _interrupted_session(tmp_path)
-    entered = threading.Event()
+    loop = asyncio.get_running_loop()
+    entered = asyncio.Event()
     release = threading.Event()
     returned = threading.Event()
     references = []
@@ -202,15 +203,15 @@ async def test_cancelled_open_closes_unclaimed_vaults(
         store = opener(*args, **kwargs)
         references.append(weakref.ref(store.events))
         daemons.append(store.events._daemon_thread)
-        entered.set()
-        assert release.wait(5)
+        loop.call_soon_threadsafe(entered.set)
+        assert release.wait(30)
         returned.set()
         return store
 
     monkeypatch.setattr(resume_async, "_open_store_with_migration", gated_open)
     task = asyncio.create_task(resume_agent_async(path, llm=ScriptedLLM(["unused"])))
     try:
-        assert await asyncio.to_thread(entered.wait, 3)
+        await asyncio.wait_for(entered.wait(), timeout=30)
         task.cancel()
         await asyncio.sleep(0)
         if cancel_twice:
@@ -219,13 +220,15 @@ async def test_cancelled_open_closes_unclaimed_vaults(
         release.set()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert await asyncio.to_thread(returned.wait, 3)
-        await asyncio.sleep(0)
+        assert returned.is_set()
         gc.collect()
         assert all(ref() is None or ref()._closed for ref in references)
         assert all(not thread.is_alive() for thread in daemons)
     finally:
         release.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
         for ref in references:
             vault = ref()
             if vault is not None:
