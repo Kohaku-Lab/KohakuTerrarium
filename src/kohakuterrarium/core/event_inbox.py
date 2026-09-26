@@ -30,6 +30,7 @@ class EventEnvelope:
     event: TriggerEvent
     future: "asyncio.Future | None" = None
     capture: Any = None
+    withdrawn: bool = False
 
 
 class EventInbox:
@@ -135,6 +136,13 @@ class EventInbox:
                 _reject_future(env, status="rejected")
                 return True
         return False
+
+    def withdraw(self, target: EventEnvelope) -> None:
+        """Remove this envelope by identity if it is still queued."""
+        for index, env in enumerate(self._dq):
+            if env is target:
+                del self._dq[index]
+                return
 
     def remove_where(self, pred: Callable[[TriggerEvent], bool]) -> list[EventEnvelope]:
         """Remove and return envelopes whose events match ``pred``.

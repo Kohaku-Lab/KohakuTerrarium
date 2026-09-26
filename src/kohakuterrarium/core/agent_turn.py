@@ -28,6 +28,20 @@ def _event_correlation(event: TriggerEvent) -> str | None:
     return value if isinstance(value, str) else None
 
 
+async def _finish_owned_cleanup(future: asyncio.Future):
+    """Join owned cleanup despite repeated caller cancellation."""
+    cancelled = False
+    while not future.done():
+        try:
+            await asyncio.shield(future)
+        except asyncio.CancelledError:
+            cancelled = True
+    result = future.result()
+    if cancelled:
+        raise asyncio.CancelledError
+    return result
+
+
 class AgentTurnMixin:
     """Mixin providing :meth:`run` and :meth:`run_stream`."""
 
@@ -43,8 +57,9 @@ class AgentTurnMixin:
 
         Args:
             content: User input (str or multimodal content parts).
-            timeout: Seconds before the turn is interrupted and
-                cancelled.  ``None`` = no limit.
+            timeout: Seconds including queue wait. Expiry withdraws this
+                request, interrupting it only if active. ``None`` = no limit.
+                Active cleanup may take up to ten additional seconds.
             source: Recorded as the input's source tag.
             raise_on_error: Raise :class:`TurnError` /
                 :class:`TurnTimeoutError` on failure (default).  Pass
@@ -77,7 +92,9 @@ class AgentTurnMixin:
         Yields :class:`TextChunk` / :class:`Activity` events as they
         happen and a final ``TurnEnded(result)``.  Errors surface as
         ``Activity(kind="processing_error")`` events and in the final
-        result — iteration itself never raises mid-stream.
+        result. Cancelling iteration or explicitly closing the generator
+        withdraws its request and joins owned cleanup. Use ``aclosing`` when
+        breaking out early; ordinary iterator breaks do not close generators.
         """
         queue: "asyncio.Queue[TurnEvent]" = asyncio.Queue()
         capture = TurnCapture(queue=queue)
@@ -88,6 +105,7 @@ class AgentTurnMixin:
             )
 
         task = asyncio.create_task(_runner())
+        getter = None
         try:
             while True:
                 getter = asyncio.create_task(queue.get())
@@ -104,12 +122,12 @@ class AgentTurnMixin:
                 yield TurnEnded(task.result())
                 return
         finally:
+            if getter is not None and not getter.done():
+                getter.cancel()
             if not task.done():
                 task.cancel()
-                try:
-                    await task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                    pass
+            owned = [task] if getter is None else [task, getter]
+            await _finish_owned_cleanup(asyncio.gather(*owned, return_exceptions=True))
 
     async def run_event(
         self,
@@ -159,29 +177,47 @@ class AgentTurnMixin:
         event.context["await_turn"] = True
         return await self._drive_turn_event(event, capture, timeout=timeout)
 
-    async def _submit_awaiting(
+    def _enqueue_awaiting(
         self, event: TriggerEvent, capture: TurnCapture
-    ) -> TurnOutcome:
-        """Enqueue an event with its capture and await the consuming turn.
-
-        Capture is scoped to this event's turn. Stopped or warm-paused agents
-        reject before enqueueing so callers can retry instead of waiting across
-        a pause; strict programmatic input to a stopped agent raises
-        :class:`AgentNotRunningError`.
-        """
+    ) -> EventEnvelope:
+        """Enqueue one owned request, or settle rejected admission immediately."""
+        future = asyncio.get_running_loop().create_future()
+        env = EventEnvelope(event, future=future, capture=capture)
         if not self._running:
             if event.type == "user_input" and getattr(self, "_strict", True):
                 raise AgentNotRunningError(
                     f"Agent {self.config.name!r} is not running — "
                     "start() it before injecting input"
                 )
-            return TurnOutcome(status="rejected", was_primary=False)
-        if getattr(self, "_paused", False):
-            return TurnOutcome(status="rejected", was_primary=False)
-        fut = asyncio.get_running_loop().create_future()
-        self._event_inbox.put(EventEnvelope(event, future=fut, capture=capture))
-        self._flush_trigger_backlog_stash()
-        return await fut
+            future.set_result(TurnOutcome(status="rejected", was_primary=False))
+        elif getattr(self, "_paused", False):
+            future.set_result(TurnOutcome(status="rejected", was_primary=False))
+        else:
+            self._event_inbox.put(env)
+            self._flush_trigger_backlog_stash()
+        return env
+
+    async def _withdraw_awaiting(self, env: EventEnvelope) -> None:
+        """Withdraw only this request and join its bounded active-turn cleanup."""
+        if env.future.done():
+            return
+        env.withdrawn = True
+        self._event_inbox.withdraw(env)
+        active = getattr(self, "_active_event_run", None) or []
+        if not any(item is env for item in active):
+            env.future.set_result(TurnOutcome(status="interrupted", was_primary=False))
+            return
+        self._interrupt_active_turn()
+
+        async def finish():
+            try:
+                await asyncio.wait_for(
+                    asyncio.shield(env.future), timeout=_INTERRUPT_GRACE_S
+                )
+            except asyncio.TimeoutError:
+                logger.warning("Withdrawn turn is still finishing")
+
+        await _finish_owned_cleanup(asyncio.create_task(finish()))
 
     async def _drive_turn_event(
         self,
@@ -198,32 +234,28 @@ class AgentTurnMixin:
         t0 = time.monotonic()
         status = "ok"
         outcome: TurnOutcome | None = None
-        task = asyncio.ensure_future(self._submit_awaiting(event, capture))
+        env = None
         try:
-            if timeout is not None:
+            env = self._enqueue_awaiting(event, capture)
+            if timeout is None:
+                outcome = await asyncio.shield(env.future)
+            else:
                 try:
                     outcome = await asyncio.wait_for(
-                        asyncio.shield(task), timeout=timeout
+                        asyncio.shield(env.future), timeout=timeout
                     )
                 except asyncio.TimeoutError:
-                    status = "timeout"
-                    # Interrupt the controller loop, then allow bounded cleanup
-                    # instead of abandoning work that may keep consuming tokens.
-                    self.interrupt()
-                    try:
-                        outcome = await asyncio.wait_for(
-                            task, timeout=_INTERRUPT_GRACE_S
-                        )
-                    except asyncio.TimeoutError:
-                        task.cancel()
-                        try:
-                            await task
-                        except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                            pass
-                    except Exception as exc:  # noqa: BLE001 - capture as error
-                        logger.warning("turn unwind raised", error=str(exc))
-            else:
-                outcome = await task
+                    if env.future.done():
+                        outcome = env.future.result()
+                    else:
+                        status = "timeout"
+                        await self._withdraw_awaiting(env)
+                        if env.future.done():
+                            outcome = env.future.result()
+        except asyncio.CancelledError:
+            if env is not None and not env.withdrawn:
+                await self._withdraw_awaiting(env)
+            raise
         except AgentNotRunningError:
             # Caller misuse, not a turn failure — keep the type.
             raise

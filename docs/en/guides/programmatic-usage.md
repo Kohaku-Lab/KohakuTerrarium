@@ -78,6 +78,36 @@ is **not started**, so always pair `await agent.start()` with
 + triggers drive the agent until the input exits); it's what `kt run`
 uses. Scripts almost always want `run` / `run_stream` instead.
 
+## Concurrent requests and cancellation
+
+Concurrent `run()`, `run_event()`, and `run_stream()` requests on one agent
+run in FIFO order as separate turns, each with its own result capture.
+They share the agent's conversation history. Ordinary interactive input and
+background completions retain their existing coalescing behavior.
+
+Cancelling the calling task withdraws only its request. A queued request
+never runs; an active request interrupts its controller and foreground jobs.
+Cancellation is re-raised after cleanup. Explicit background jobs remain
+independent. Request cancellation does not discard unrelated queued Drive
+deliveries or report a human stop; `agent.interrupt()` retains that role.
+
+Active timeout/cancellation waits up to ten additional seconds for cleanup.
+If a provider or output sink takes longer, the agent remains busy until it
+actually finishes; later requests continue waiting. Already performed side
+effects and accepted session writes are not rolled back.
+
+Close an owned stream explicitly when stopping iteration early. Closing an
+observer from `creature.attach()` only detaches that observer.
+
+```python
+from contextlib import aclosing
+
+async with aclosing(agent.run_stream("Inspect the project.")) as events:
+    async for event in events:
+        if should_stop(event):
+            break  # aclosing withdraws this stream's request
+```
+
 ## What raises, and when
 
 The programmatic surface is strict by default:
@@ -88,12 +118,13 @@ The programmatic surface is strict by default:
   errors for unknown tools / broken plugins. Interactive frontends pass
   `strict=False` to degrade instead.
 - **Turns** raise `TurnError` on failure and `TurnTimeoutError` on
-  timeout. `timeout=` genuinely **interrupts** the turn (it does not
-  abandon a still-burning LLM call). Pass `raise_on_error=False` to
+  timeout. `timeout=` includes time waiting in the queue. Expiry removes
+  that request if it has not started, or interrupts its active turn and
+  foreground jobs. Pass `raise_on_error=False` to
   always get the `TurnResult` back and branch on `result.status`
   (`"ok"` / `"error"` / `"timeout"` / `"interrupted"`) yourself;
   that is the right shape for batch jobs.
-- `run_stream` never raises mid-iteration: errors arrive as
+- `run_stream` reports provider errors as
   `Activity(kind="processing_error")` events and in the final
   `TurnEnded(result)`.
 

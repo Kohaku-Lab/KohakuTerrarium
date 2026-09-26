@@ -140,6 +140,17 @@ class TestEditCancelRemove:
         # Already gone — cancel again is a no-op.
         assert inbox.cancel(pid) is False
 
+    def test_withdraw_uses_identity_and_keeps_other_equal_envelopes(self):
+        inbox = EventInbox()
+        event = create_user_input_event("same")
+        first, second = EventEnvelope(event), EventEnvelope(event)
+        inbox.put(first)
+        inbox.put(second)
+        inbox.withdraw(second)
+        inbox.withdraw(second)  # Already claimed/removed is a no-op.
+        remaining = inbox.drain_all()
+        assert len(remaining) == 1 and remaining[0] is first
+
     def test_remove_where_returns_matches_and_keeps_rest(self):
         inbox = EventInbox()
         inbox.put(EventEnvelope(TriggerEvent(type="drive_ready", content="d1")))

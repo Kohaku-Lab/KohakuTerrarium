@@ -663,6 +663,18 @@ class TestProgCreatureJourney:
                 rebuilt.get_last_assistant_message().get_text_content()
                 == conv.get_last_assistant_message().get_text_content()
             )
+
+            # Concurrent typed requests survive persistence as separate turns.
+            owned_llm = ScriptedLLM(["owned answer one", "owned answer two"])
+            resumed_agent.llm = owned_llm
+            resumed_agent.controller.llm = owned_llm
+            one, two = await asyncio.gather(
+                resumed_agent.run("owned input one"),
+                resumed_agent.run("owned input two"),
+            )
+            assert (one.text, two.text) == ("owned answer one", "owned answer two")
+            assert owned_llm.call_count == 2
+            assert resumed_agent._turn_index == 4
         finally:
             await resumed_agent.stop()
 
@@ -671,6 +683,12 @@ class TestProgCreatureJourney:
         # ``store=`` sharing param is gone) — read the events out and
         # close the resume handle FIRST so there is a single owner.
         events = resumed_store.get_events("pilot")
+        assert [
+            event["content"]
+            for event in events
+            if event["type"] == "user_input"
+            and str(event["content"]).startswith("owned input")
+        ] == ["owned input one", "owned input two"]
         resumed_store.close()
 
         # FTS keyword search finds the EXACT recorded user turn.
