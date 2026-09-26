@@ -279,10 +279,9 @@ class TestBatchingInvariants:
             release.set()
             await agent.stop()
 
-    async def test_two_concurrent_runs_share_one_turn(self, make_agent):
-        # Two await_turn drivers issued together fold into ONE turn — one
-        # LLM round, both results resolved (not two serial turns).
-        agent = make_agent(script=["single shared round"])
+    async def test_two_concurrent_runs_keep_separate_turns(self, make_agent):
+        # Awaited drivers each own one answer even when claimed together.
+        agent = make_agent(script=["first answer", "second answer"])
         await agent.start()
         try:
             r1, r2 = await asyncio.gather(
@@ -290,10 +289,8 @@ class TestBatchingInvariants:
                 agent.run("second", raise_on_error=False),
             )
             assert r1.status == "ok" and r2.status == "ok"
-            assert "single shared round" in r1.text
-            assert "single shared round" in r2.text
-            # ONE LLM round total — proof the two runs shared one turn.
-            assert agent.llm.call_count == 1
+            assert (r1.text, r2.text) == ("first answer", "second answer")
+            assert agent.llm.call_count == 2
         finally:
             await agent.stop()
 

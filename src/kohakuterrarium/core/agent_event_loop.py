@@ -46,14 +46,19 @@ def _is_fresh_user_input(event) -> bool:
 def segment_stackable(batch: list[EventEnvelope]) -> list[list[EventEnvelope]]:
     """Split a claimed batch into maximal stackable runs.
 
-    A non-stackable event (startup / shutdown / error / Drive / rerun)
-    becomes its own singleton run so it is the sole primary of its turn;
-    a maximal span of stackable events becomes one run folded into one
-    turn. Mirrors the controller's break-on-non-stackable batching."""
+    An awaited request or non-stackable event (startup / shutdown / error /
+    Drive / rerun) becomes its own singleton run and sole primary. A maximal
+    span of other stackable events becomes one run folded into one turn.
+    Mirrors the controller's break-on-non-stackable batching.
+    """
     runs: list[list[EventEnvelope]] = []
     cur: list[EventEnvelope] = []
     for env in batch:
-        if env.event.stackable:
+        if (
+            env.event.stackable
+            and env.capture is None
+            and not env.event.context.get("await_turn")
+        ):
             cur.append(env)
         else:
             if cur:
@@ -88,6 +93,7 @@ class AgentEventLoopMixin:
         the warm-pause gate; both re-checked each loop so an event landing
         at any boundary is never lost and a paused agent processes nothing
         until resume."""
+        batch: list[EventEnvelope] = []
         try:
             while self._running:
                 await self._consumer_resume.wait()
@@ -113,6 +119,7 @@ class AgentEventLoopMixin:
                     continue
                 batch = self._event_inbox.drain_all()
                 for run in segment_stackable(batch):
+                    await self._consumer_resume.wait()
                     if not self._running:
                         self._reject_run(run, status="rejected")
                         continue
@@ -127,6 +134,7 @@ class AgentEventLoopMixin:
         except asyncio.CancelledError:
             pass
         finally:
+            self._reject_run(batch)
             self._drain_and_reject_inbox()
 
     async def _run_turn_for_batch(self, run: list[EventEnvelope]) -> None:
@@ -135,6 +143,9 @@ class AgentEventLoopMixin:
         Awaiting captures (``run`` / ``run_stream`` / ``run_event``) attach
         BEFORE the turn so they record it from the start and detach after.
         The turn mutex is held for the whole turn so ``stop()`` can join."""
+        run = [env for env in run if not env.withdrawn]
+        if not run:
+            return
         events = [env.event for env in run]
         primary = events[0]
         captures = [env.capture for env in run if env.capture is not None]
@@ -145,7 +156,6 @@ class AgentEventLoopMixin:
         for cap in captures:
             self.output_router.add_secondary(cap)
         interrupted = False
-        handoff: list[EventEnvelope] = []
         try:
             async with self._processing_lock:
                 self._turn_lock_holder = asyncio.current_task()
@@ -156,13 +166,14 @@ class AgentEventLoopMixin:
                         return
                     await self._begin_batch(events)
                     await self._process_batch_with_controller(events, self.controller)
-                    interrupted = bool(primary.context.get("interrupted_by_user"))
+                    interrupted = bool(
+                        primary.context.get("interrupted_by_user")
+                    ) or any(env.withdrawn for env in run)
                 finally:
                     self._turn_lock_holder = None
                     self._active_turn_stackable = True
                 if interrupted:
                     self._flush_trigger_backlog_stash()
-                    handoff = self._event_inbox.drain_all()
         finally:
             for cap in captures:
                 self.output_router.remove_secondary(cap)
@@ -175,10 +186,8 @@ class AgentEventLoopMixin:
         self._resolve_run(
             run,
             status="interrupted" if interrupted else "ok",
-            interrupted=interrupted,
+            interrupted=bool(primary.context.get("interrupted_by_user")),
         )
-        if handoff and self._running:
-            await self._run_turn_for_batch(handoff)
 
     def _resolve_run(
         self, run: list[EventEnvelope], *, status: str, interrupted: bool = False
@@ -406,6 +415,8 @@ class AgentEventLoopMixin:
         if primary.type.startswith("drive_"):
             self._notify_drive_turn(primary)
 
+        if any(env.withdrawn for env in getattr(self, "_active_event_run", None) or []):
+            self._interrupt_active_turn()
         all_round_text: list[str] = []
         loop_task = asyncio.create_task(
             self._run_controller_loop(controller, all_round_text)
@@ -430,6 +441,8 @@ class AgentEventLoopMixin:
             metrics.observe_error("controller")
         finally:
             self._processing_task = None
-        if self._interrupt_requested:
+        if self._interrupt_requested and not any(
+            env.withdrawn for env in getattr(self, "_active_event_run", None) or []
+        ):
             primary.context["interrupted_by_user"] = True
         await self._finalize_processing(primary, controller, all_round_text)
