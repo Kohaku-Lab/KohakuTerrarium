@@ -3,7 +3,7 @@
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from difflib import unified_diff
 from pathlib import Path
 from typing import Any
@@ -34,7 +34,8 @@ class DiffHunk:
     old_count: int
     new_start: int
     new_count: int
-    lines: list[str]  # Prefixes preserve context, removal, and addition semantics.
+    lines: list[str]
+    no_newline: set[int] = field(default_factory=set)
 
 
 class DiffParseError(Exception):
@@ -44,124 +45,102 @@ class DiffParseError(Exception):
 
 
 def parse_unified_diff(diff_text: str) -> list[DiffHunk]:
-    """Parse standard unified-diff text into validated hunk structures."""
+    """Parse one file's unified diff, validating each hunk's body counts."""
     lines = diff_text.split("\n")
     hunks: list[DiffHunk] = []
-    current_hunk: DiffHunk | None = None
-    hunk_pattern = re.compile(r"^@@\s*-(\d+)(?:,(\d+))?\s*\+(\d+)(?:,(\d+))?\s*@@")
-
-    i = 0
-    while i < len(lines):
-        line = lines[i]
-
-        if line.startswith("---") or line.startswith("+++"):
-            i += 1
+    current: DiffHunk | None = None
+    old_count = new_count = 0
+    header = re.compile(r"^@@\s*-(\d+)(?:,(\d+))?\s*\+(\d+)(?:,(\d+))?\s*@@")
+    for index, line in enumerate(lines):
+        if line == r"\ No newline at end of file":
+            if current is None or not current.lines:
+                raise DiffParseError("Newline marker without a preceding body line")
+            position = len(current.lines) - 1
+            if position in current.no_newline:
+                raise DiffParseError("Duplicate newline marker")
+            current.no_newline.add(position)
             continue
-
-        match = hunk_pattern.match(line)
+        match = header.match(line)
         if match:
-            if current_hunk:
-                hunks.append(current_hunk)
-
-            old_start = int(match.group(1))
-            old_count = int(match.group(2)) if match.group(2) else 1
-            new_start = int(match.group(3))
-            new_count = int(match.group(4)) if match.group(4) else 1
-
-            current_hunk = DiffHunk(
-                old_start=old_start,
-                old_count=old_count,
-                new_start=new_start,
-                new_count=new_count,
-                lines=[],
+            if current and (old_count, new_count) != (
+                current.old_count,
+                current.new_count,
+            ):
+                raise DiffParseError("Hunk body does not match declared line counts")
+            current = DiffHunk(
+                int(match[1]),
+                int(match[2]) if match[2] else 1,
+                int(match[3]),
+                int(match[4]) if match[4] else 1,
+                [],
             )
-            i += 1
+            hunks.append(current)
+            old_count = new_count = 0
             continue
-
-        if current_hunk is not None:
-            if line.startswith(" ") or line.startswith("-") or line.startswith("+"):
-                current_hunk.lines.append(line)
-            elif line.startswith("\\"):
-                # The marker describes file termination and is not hunk content.
-                pass
-            elif line == "":
-                # ``split`` erases a context line's single-space prefix, so recover
-                # it only while the hunk still expects content.
-                expected = current_hunk.old_count + current_hunk.new_count
-                actual_context = sum(
-                    1
-                    for l in current_hunk.lines
-                    if l.startswith(" ") or l.startswith("-") or l.startswith("+")
-                )
-                if actual_context < expected:
-                    current_hunk.lines.append(" ")
-            i += 1
+        if current is None:
+            if line.startswith(("--- ", "+++ ", "diff --git ", "index ")) or not line:
+                continue
+            raise DiffParseError("Unexpected content before hunk header")
+        if not line and index == len(lines) - 1:
             continue
-
-        i += 1
-
-    if current_hunk:
-        hunks.append(current_hunk)
-
-    if not hunks:
+        if not line or line[0] not in " +-":
+            raise DiffParseError("Invalid hunk body line")
+        old_count += line[0] in " -"
+        new_count += line[0] in " +"
+        if old_count > current.old_count or new_count > current.new_count:
+            raise DiffParseError("Hunk body exceeds declared line counts")
+        current.lines.append(line)
+    if current is None:
         raise DiffParseError("No valid hunks found in diff")
-
+    if (old_count, new_count) != (current.old_count, current.new_count):
+        raise DiffParseError("Hunk body does not match declared line counts")
     return hunks
 
 
 def apply_hunks(original: str, hunks: list[DiffHunk]) -> str:
-    """Apply parsed hunks, rejecting line-range or context mismatches."""
-    original_lines = original.split("\n")
-    # Splitting drops termination semantics, so preserve the original final newline.
-    had_trailing_newline = original.endswith("\n")
-    if had_trailing_newline and original_lines and original_lines[-1] == "":
-        original_lines = original_lines[:-1]
-
-    # Reverse application keeps earlier hunk coordinates stable.
-    sorted_hunks = sorted(hunks, key=lambda h: h.old_start, reverse=True)
-
-    for hunk in sorted_hunks:
-        old_lines = []
-        new_lines = []
-
-        for line in hunk.lines:
-            if line.startswith(" "):
-                old_lines.append(line[1:])
-                new_lines.append(line[1:])
-            elif line.startswith("-"):
-                old_lines.append(line[1:])
-            elif line.startswith("+"):
-                new_lines.append(line[1:])
-
-        start_idx = hunk.old_start - 1
-
-        if old_lines:
-            end_idx = start_idx + len(old_lines)
-            if end_idx > len(original_lines):
-                raise DiffParseError(
-                    f"Hunk at line {hunk.old_start} extends beyond file "
-                    f"(file has {len(original_lines)} lines, hunk needs {end_idx})"
-                )
-
-            actual_lines = original_lines[start_idx:end_idx]
-
-            for i, (expected, actual) in enumerate(zip(old_lines, actual_lines)):
-                if expected != actual:
-                    raise DiffParseError(
-                        f"Context mismatch at line {hunk.old_start + i}:\n"
-                        f"  Expected: {expected!r}\n"
-                        f"  Actual:   {actual!r}"
-                    )
-
-            original_lines[start_idx:end_idx] = new_lines
-        else:
-            original_lines[start_idx:start_idx] = new_lines
-
-    result = "\n".join(original_lines)
-    if had_trailing_newline:
-        result += "\n"
-
-    return result
+    """Apply non-overlapping hunks with exact range, content and EOF checks."""
+    parts = original.split("\n")
+    original_lines = [part + "\n" for part in parts[:-1]]
+    if parts[-1]:
+        original_lines.append(parts[-1])
+    output: list[str] = []
+    cursor = 0
+    previous_start = -1
+    for hunk in hunks:
+        start = hunk.old_start if hunk.old_count == 0 else hunk.old_start - 1
+        end = start + hunk.old_count
+        if (
+            start < cursor
+            or start == previous_start
+            or start < 0
+            or end > len(original_lines)
+        ):
+            raise DiffParseError(
+                "Hunk range is overlapping, out of order or outside file"
+            )
+        old_lines: list[str] = []
+        new_lines: list[str] = []
+        for index, line in enumerate(hunk.lines):
+            text = line[1:] + ("" if index in hunk.no_newline else "\n")
+            if line[0] in " -":
+                old_lines.append(text)
+            if line[0] in " +":
+                new_lines.append(text)
+        if (len(old_lines), len(new_lines)) != (hunk.old_count, hunk.new_count):
+            raise DiffParseError("Hunk body does not match declared line counts")
+        if original_lines[start:end] != old_lines:
+            raise DiffParseError(f"Context mismatch at line {hunk.old_start}")
+        output.extend(original_lines[cursor:start])
+        new_start = hunk.new_start if hunk.new_count == 0 else hunk.new_start - 1
+        if new_start != len(output):
+            raise DiffParseError("New hunk coordinates do not match preceding changes")
+        output.extend(new_lines)
+        cursor = end
+        previous_start = start
+    output.extend(original_lines[cursor:])
+    if any(not line.endswith("\n") for line in output[:-1]):
+        raise DiffParseError("A missing-newline marker must describe the final line")
+    return "".join(output)
 
 
 def check_edit_guards(file_path: Path, context: Any) -> ToolResult | None:
