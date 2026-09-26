@@ -1040,41 +1040,36 @@ class TestListCreaturesResilience:
         assert cache.get("bravo") == {("g_w2", "w2", "c_good")}
 
     async def test_fan_out_runs_in_parallel(self):
-        # If listed sequentially, a slow worker holds up every fast one.
-        # The user reported w1 stuck "a dozen sec" when w2 spawned —
-        # that's the sequential fan-out blocking on a stalled RPC.
-        import time
+        started = set()
+        all_started = asyncio.Event()
+        release = asyncio.Event()
 
-        class _SlowService(_FakeService):
+        class _GatedService(_FakeService):
             async def list_creatures(self):
-                await asyncio.sleep(0.3)
+                started.add(self.node_id)
+                if len(started) == 3:
+                    all_started.set()
+                await release.wait()
                 return tuple(self._creatures)
 
-        slow = _SlowService(
-            node_id="w1", creatures=[_info("slow_cid", name="slow", graph_id="g_w1")]
-        )
-        fast = _FakeService(
-            node_id="w2", creatures=[_info("fast_cid", name="fast", graph_id="g_w2")]
-        )
-        # Add a SECOND slow worker — sequential cost would be 0.6s.
-        slow2 = _SlowService(
-            node_id="w3", creatures=[_info("slow2", name="slow2", graph_id="g_w3")]
-        )
         svc = _make_service()
-        svc._remotes = {"w1": slow, "w2": fast, "w3": slow2}
-
-        t0 = time.monotonic()
-        listed = await svc.list_creatures()
-        elapsed = time.monotonic() - t0
-
-        # 3 workers × 0.3s sleep = 0.9s sequential vs ~0.3s parallel.
-        # 0.55s gives generous CI slack while still failing the
-        # sequential-fan-out implementation.
-        assert elapsed < 0.55, (
-            f"list_creatures took {elapsed:.2f}s for 3 workers (0.3s each) — "
-            "expected parallel fan-out (~0.3s).  Sequential fan-out blocks "
-            "every UI render on the slowest worker."
-        )
-        # All workers' creatures still came through.
-        ids = {c.creature_id for c in listed}
-        assert {"slow_cid", "fast_cid", "slow2"} <= ids
+        svc._remotes = {
+            node: _GatedService(
+                node_id=node,
+                creatures=[_info(cid, name=cid, graph_id=f"g_{node}")],
+            )
+            for node, cid in (("w1", "slow_cid"), ("w2", "fast_cid"), ("w3", "slow2"))
+        }
+        listing = asyncio.create_task(svc.list_creatures())
+        try:
+            await asyncio.wait_for(all_started.wait(), timeout=30)
+            assert started == {"w1", "w2", "w3"}
+            assert not listing.done()
+            release.set()
+            listed = await listing
+            assert {c.creature_id for c in listed} == {"slow_cid", "fast_cid", "slow2"}
+        finally:
+            release.set()
+            if not listing.done():
+                listing.cancel()
+            await asyncio.gather(listing, return_exceptions=True)
