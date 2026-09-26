@@ -79,16 +79,49 @@ class BudgetPlugin(BasePlugin):
         _validate_budget_options(self.options)
         self._turn_started_at: float | None = None
         self._pending: list[tuple[str, AlarmState]] = []
+        self._retained_axes: dict[str, BudgetAxis] = {}
         self.refresh_options()
 
     def refresh_options(self) -> None:
-        """Rebuild :attr:`_budgets` from :attr:`options`."""
-        self._budgets = _build_budget_set(self.options)
+        """Update limits without losing already-accounted usage."""
+        budgets = _build_budget_set(self.options)
+        previous = getattr(self, "_budgets", None)
+        retained = dict(self._retained_axes)
+        changed: set[str] = set()
+        alarms: list[tuple[str, AlarmState]] = []
+        for name in ("turn", "walltime", "tool_call"):
+            axis = getattr(budgets, name, None)
+            old = getattr(previous, name, None)
+            if axis is None:
+                if old is not None:
+                    changed.add(name)
+                continue
+            if old is not None and (old.soft, old.hard) == (axis.soft, axis.hard):
+                setattr(budgets, name, old)
+                continue
+            changed.add(name)
+            saved = retained.get(name)
+            if saved is not None:
+                axis.used = saved.used
+            axis.consume(0)
+            alarms.extend((name, state) for state in axis.pending_transitions)
+            axis.pending_transitions.clear()
+            retained[name] = axis
+        self._pending = [item for item in self._pending if item[0] not in changed]
+        self._pending.extend(alarms)
+        self._retained_axes = retained
+        self._budgets = budgets
 
     def set_options(self, values: dict[str, Any]) -> dict[str, Any]:
         """Reject non-finite nested limits before mutating live options."""
         candidate = {**self.get_options(), **(values or {})}
         _validate_budget_options(candidate)
+        # BasePlugin logs refresh failures after mutating options. Validate
+        # nested numeric values first so a failed update remains atomic.
+        try:
+            _build_budget_set(candidate)
+        except (TypeError, ValueError) as exc:
+            raise PluginOptionError("Budget limits must be numeric") from exc
         return super().set_options(values)
 
     @property
