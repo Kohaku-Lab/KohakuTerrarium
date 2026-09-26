@@ -16,9 +16,9 @@ from kohakuterrarium.core.backgroundify import BackgroundifyHandle, PromotionRes
 from kohakuterrarium.core.controller import Controller
 from kohakuterrarium.core.events import create_tool_complete_event
 from kohakuterrarium.core.job import JobResult
+from kohakuterrarium.core.tool_dispatch import start_tool_task
 from kohakuterrarium.core.tool_output import render_content_text
 from kohakuterrarium.llm.message import content_parts_to_dicts
-from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode
 from kohakuterrarium.parsing import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
 
@@ -36,35 +36,7 @@ class AgentToolsMixin(AgentRuntimeToolsMixin):
         self, tool_call: ToolCallEvent
     ) -> tuple[str, asyncio.Task, bool]:
         """Start a tool asynchronously and return its ID, task, and wait mode."""
-        try:
-            logger.info("Running tool: %s", tool_call.name)
-            tool = self.executor.get_tool(tool_call.name)
-            is_direct = True
-            if tool and isinstance(tool, BaseTool):
-                is_direct = tool.execution_mode == ExecutionMode.DIRECT
-
-            job_id = await self.executor.submit_from_event(
-                tool_call, is_direct=is_direct
-            )
-            task = self.executor.get_task(job_id)
-            if task is None:
-
-                async def _get_result():
-                    return self.executor.get_result(job_id)
-
-                task = asyncio.create_task(_get_result())
-
-            return job_id, task, is_direct
-        except Exception as e:
-            logger.error("Failed to start tool", tool_name=tool_call.name, error=str(e))
-            error_msg = str(e)
-            error_job_id = f"error_{tool_call.name}"
-
-            async def _error_result():
-                return JobResult(job_id=error_job_id, error=error_msg)
-
-            task = asyncio.create_task(_error_result())
-            return error_job_id, task, True
+        return await start_tool_task(self.executor, tool_call)
 
     async def _wait_handles(
         self,

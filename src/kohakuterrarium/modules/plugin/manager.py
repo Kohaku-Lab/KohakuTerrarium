@@ -275,7 +275,7 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
             checkers.append((getattr(plugin, "name", "?"), fn))
         return checkers
 
-    async def load_all(self, context: PluginContext) -> None:
+    async def load_all(self, context: PluginContext, *, strict: bool = False) -> None:
         """Call on_load for enabled plugins only."""
         self._load_context = context
         host_agent = context._host_agent
@@ -292,6 +292,8 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
                 )
                 await _call_method(plugin, "on_load", context=ctx)
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning(
                     "Plugin on_load failed",
                     plugin_name=getattr(plugin, "name", "?"),

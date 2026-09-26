@@ -7,9 +7,9 @@ executor dispatch, or veto the call via ``PluginBlockError``.
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from kohakuterrarium.core.tool_dispatch import ToolDispatchBlocked, dispatch_tool_hooks
 from kohakuterrarium.core.events import TriggerEvent, create_tool_complete_event
 from kohakuterrarium.modules.plugin.base import (
-    BasePlugin,
     PluginBlockError,
     PluginContext,
 )
@@ -33,84 +33,24 @@ async def run_pre_tool_dispatch(
     is synthesised into the conversation as the tool result so the
     model sees a sensible next turn.
     """
-    plugins = getattr(agent, "plugins", None)
-    if plugins is None or not plugins._plugins:
-        return parse_event
-
-    applicable = plugins._applicable_plugins()
-    base_method = getattr(BasePlugin, "pre_tool_dispatch", None)
-    hook_plugins = [
-        p
-        for p in applicable
-        if getattr(type(p), "pre_tool_dispatch", None) not in (None, base_method)
-    ]
-    if not hook_plugins:
-        return parse_event
-
-    current = parse_event
-    for plugin in hook_plugins:
-        plugin_name = getattr(plugin, "name", "?")
-        wd = (
-            Path(getattr(agent.executor, "_working_dir", "."))
-            if agent.executor
-            else Path(".")
+    context = PluginContext(
+        agent_name=agent.config.name,
+        working_dir=Path(getattr(agent.executor, "_working_dir", ".")),
+        model=getattr(getattr(agent, "llm", None), "model", ""),
+        _host_agent=agent,
+    )
+    try:
+        return await dispatch_tool_hooks(
+            getattr(agent, "plugins", None),
+            parse_event,
+            context,
+            agent.registry.list_tools() if agent.registry else [],
         )
-        ctx = PluginContext(
-            agent_name=agent.config.name,
-            working_dir=wd,
-            model=getattr(agent.llm, "model", ""),
-            _host_agent=agent,
-            _plugin_name=plugin_name,
+    except ToolDispatchBlocked as block:
+        _synthesize_blocked_tool_result(
+            block.event, controller, str(block), block.plugin_name
         )
-        try:
-            rewritten = await plugin.pre_tool_dispatch(current, ctx)
-        except PluginBlockError as block:
-            logger.info(
-                "Tool call vetoed by plugin",
-                plugin_name=plugin_name,
-                tool_name=current.name,
-            )
-            _synthesize_blocked_tool_result(
-                current, controller, str(block), plugin_name
-            )
-            return None
-        except Exception as e:
-            logger.warning(
-                "pre_tool_dispatch raised",
-                plugin_name=plugin_name,
-                error=str(e),
-                exc_info=True,
-            )
-            continue
-        if rewritten is not None:
-            if not isinstance(rewritten, ToolCallEvent):
-                logger.warning(
-                    "pre_tool_dispatch returned non-ToolCallEvent; ignoring",
-                    plugin_name=plugin_name,
-                    returned_type=type(rewritten).__name__,
-                )
-                continue
-            current = rewritten
-
-    # Verify the (possibly renamed) tool still resolves against the
-    # registry — otherwise treat it as a veto with a descriptive
-    # error so the model doesn't hit a generic "unknown tool".
-    if current.name != parse_event.name:
-        known = agent.registry.list_tools() if agent.registry else []
-        if current.name not in known:
-            logger.warning(
-                "pre_tool_dispatch rewrote to unknown tool",
-                original=parse_event.name,
-                rewritten=current.name,
-            )
-            _synthesize_blocked_tool_result(
-                parse_event,
-                controller,
-                f"unknown tool after rewrite: {current.name}",
-                "pre_tool_dispatch",
-            )
-            return None
-    return current
+        return None
 
 
 async def run_pre_subagent_dispatch(

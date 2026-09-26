@@ -15,6 +15,7 @@ from kohakuterrarium.core.agent_tools import (
     _make_job_label,
     _TurnResult,
 )
+from kohakuterrarium.core.tool_dispatch import tool_background_handle
 from kohakuterrarium.core.backgroundify import BackgroundifyHandle, backgroundify
 from kohakuterrarium.core.budget import BudgetExhausted
 from kohakuterrarium.core.controller import Controller
@@ -371,15 +372,12 @@ class AgentHandlersMixin(AgentMidTurnMixin, AgentToolsMixin, AgentOutputWiringMi
             is_direct = False
 
         # Wrap in backgroundify handle
-        handle = backgroundify(
+        handle = tool_background_handle(
             task,
             job_id,
-            on_bg_complete=(
-                None
-                if executor_delivers_completion
-                else self._on_backgroundify_complete
-            ),
-            background_init=not is_direct,
+            not executor_delivers_completion,
+            run_bg,
+            self._on_backgroundify_complete,
         )
 
         if tool_call_id:
