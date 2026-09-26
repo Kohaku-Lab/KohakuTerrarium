@@ -15,6 +15,7 @@ data for every entry, so walking costs one syscall pass per directory
 instead of one metadata query per entry.
 """
 
+import fnmatch
 import os
 import re
 from os import scandir
@@ -300,8 +301,8 @@ def _iter_matching(
                 return
         return
 
-    # Recursive pattern. Use the leading literal segment (everything
-    # before the first "**/") only as a cheap walk-root narrowing, then
+    # Recursive pattern. Use only complete literal directory segments
+    # before the first wildcard as a cheap walk-root narrowing, then
     # walk that subtree once and match each file's full *base-relative*
     # path against the COMPLETE pattern.
     #
@@ -313,8 +314,12 @@ def _iter_matching(
     #   * ``_walk`` filters ignored *files* against .gitignore, not
     #     just ignored directories — ``Path.glob`` would leak them.
     pattern = pattern.replace("\\", "/")
-    parts = pattern.split("**/", 1)
-    prefix = parts[0].rstrip("/").rstrip("\\")
+    literal_parts = []
+    for part in pattern.split("/")[:-1]:
+        if any(char in part for char in "*?["):
+            break
+        literal_parts.append(part)
+    prefix = "/".join(literal_parts)
 
     walk_root = base / prefix if prefix else base
     if not walk_root.is_dir():
@@ -379,6 +384,24 @@ def _glob_to_regex(pattern: str) -> re.Pattern[str]:
         elif c == "?":
             result += "[^/]"
             i += 1
+        elif c == "[":
+            end = i + 1
+            if end < n and pattern[end] == "!":
+                end += 1
+            if end < n and pattern[end] == "]":
+                end += 1
+            while end < n and pattern[end] not in "]/":
+                end += 1
+            if end == n or pattern[end] == "/":
+                result += r"\["
+                i += 1
+            else:
+                # Reuse stdlib range/negation/escaping rules, but a class
+                # must never consume a path separator. Remove only the
+                # terminal anchor (Python 3.14 spells it \z, older: \Z).
+                translated = fnmatch.translate(pattern[i : end + 1])
+                result += "(?!/)" + translated.removesuffix(r"\Z").removesuffix(r"\z")
+                i = end + 1
         elif c in r".+^${}|()[]\\":
             result += "\\" + c
             i += 1
