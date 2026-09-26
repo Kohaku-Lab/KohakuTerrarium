@@ -13,6 +13,17 @@ import { getCurrentInstance } from "vue"
 import { injectScope, registerScopeDisposer } from "@/composables/useScope"
 import { filesAPI } from "@/utils/api"
 
+const _treeRequests = new WeakMap()
+
+function _treeRequestsFor(store) {
+  let state = _treeRequests.get(store)
+  if (!state) {
+    state = { generation: 0, nodes: new WeakMap() }
+    _treeRequests.set(store, state)
+  }
+  return state
+}
+
 /** Walk the file-tree dict by ``path``, return the node or null. */
 function _findNode(root, path) {
   if (!root) return null
@@ -92,19 +103,25 @@ const _editorStoreOptions = {
     },
 
     async refreshTree() {
-      if (!this.treeRoot) return
+      const state = _treeRequestsFor(this)
+      const generation = ++state.generation
+      const root = this.treeRoot
+      const isCurrent = () => state.generation === generation && this.treeRoot === root
+      if (!root) return
       try {
         // Lazy: load the root + immediate children only.  Each
         // directory child carries ``has_children`` for the expand
         // chevron; deeper levels are fetched on click via
         // ``expandTreeNode``.
-        this.treeData = await filesAPI.getTree(this.treeRoot, 1)
+        const fetched = await filesAPI.getTree(root, 1)
+        if (isCurrent()) this.treeData = fetched
       } catch (err) {
-        console.error("Failed to refresh tree:", err)
+        if (isCurrent()) console.error("Failed to refresh tree:", err)
       }
     },
 
     setTreeRoot(path) {
+      if (this.treeRoot !== path) this.treeData = null
       this.treeRoot = path
       this.refreshTree()
     },
@@ -115,18 +132,30 @@ const _editorStoreOptions = {
      * the freshly-fetched subtree.  No-op if the path is missing.
      */
     async expandTreeNode(path) {
-      if (!this.treeData) return
-      let fetched
+      const tree = this.treeData
+      const target = _findNode(tree, path)
+      if (!target) return
+      const state = _treeRequestsFor(this)
+      const generation = state.generation
+      const root = this.treeRoot
+      const request = {}
+      state.nodes.set(target, request)
+      const isCurrent = () =>
+        state.generation === generation &&
+        this.treeRoot === root &&
+        this.treeData === tree &&
+        state.nodes.get(target) === request &&
+        _findNode(tree, path) === target
       try {
-        fetched = await filesAPI.getTree(path, 1)
+        const fetched = await filesAPI.getTree(path, 1)
+        if (isCurrent()) {
+          target.children = fetched.children || []
+          target.has_children = fetched.has_children
+        }
       } catch (err) {
-        console.error("Failed to expand tree node:", err)
-        return
-      }
-      const target = _findNode(this.treeData, path)
-      if (target) {
-        target.children = fetched.children || []
-        target.has_children = fetched.has_children
+        if (isCurrent()) console.error("Failed to expand tree node:", err)
+      } finally {
+        if (state.nodes.get(target) === request) state.nodes.delete(target)
       }
     },
 
@@ -156,7 +185,11 @@ function _factoryFor(scope) {
     if (scope) {
       registerScopeDisposer(scope, () => {
         try {
-          useFn().$dispose?.()
+          const store = useFn()
+          const state = _treeRequests.get(store)
+          if (state) state.generation++
+          _treeRequests.delete(store)
+          store.$dispose?.()
         } catch {
           /* swallow */
         }
