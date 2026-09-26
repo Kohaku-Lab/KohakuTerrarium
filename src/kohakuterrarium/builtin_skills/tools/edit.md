@@ -30,3 +30,10 @@ Applies either a unified diff or a single exact search/replace to one file.
 
 - One file. For several search/replace edits with a failure policy, use
   `multi_edit`.
+
+## Reference
+
+Unified diffs use original-file coordinates, including zero-context insertions.
+Hunk line counts, ordered non-overlapping ranges, and exact old content must
+match before any write. Multi-file patches are rejected. Standard
+`\ No newline at end of file` markers preserve line termination explicitly.

@@ -36,6 +36,8 @@ from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
+from kohakuterrarium.builtins.tools.edit import EditTool
+from kohakuterrarium.builtins.tools.read import ReadTool
 from kohakuterrarium.builtins.tools.glob import GlobTool
 from kohakuterrarium.builtins.tools.grep import GrepTool
 from kohakuterrarium.builtins.tools.web_search import WebSearchTool
@@ -1721,6 +1723,28 @@ class TestModulesIntegration:
             assert f"\n{(search_dir / 'a.txt').relative_to(tmp_path)}" in glob_output
             last = agent.controller.conversation.get_last_assistant_message()
             assert last.get_text_content() == "recursive listing complete"
+            target = tmp_path / "patch.txt"
+            target.write_bytes(b"a\nb\n")
+            agent.executor.register_tool(ReadTool())
+            agent.executor.register_tool(EditTool())
+            read_job = await agent.executor.submit(
+                "read", {"path": str(target)}, is_direct=True
+            )
+            assert (await agent.executor.wait_for(read_job)).error is None
+            edit_job = await agent.executor.submit(
+                "edit",
+                {"path": str(target), "diff": "@@ -1,0 +2,1 @@\n+NEW\n"},
+                is_direct=True,
+            )
+            assert (await agent.executor.wait_for(edit_job)).error is None
+            assert target.read_text() == "a\nNEW\nb\n"
+            bad_job = await agent.executor.submit(
+                "edit",
+                {"path": str(target), "diff": "@@ -99,0 +100,1 @@\n+BAD\n"},
+                is_direct=True,
+            )
+            assert (await agent.executor.wait_for(bad_job)).error
+            assert target.read_text() == "a\nNEW\nb\n"
         finally:
             await agent.stop()
             store.close()
