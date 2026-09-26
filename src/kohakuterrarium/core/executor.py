@@ -36,12 +36,19 @@ class Executor:
         self,
         job_store: JobStore | None = None,
         on_complete: Callable[[TriggerEvent], Any] | None = None,
+        *,
+        queue_completion_events: bool = True,
     ):
-        """Initialize execution state with an optional shared job store."""
+        """Initialize execution state with an optional shared job store.
+
+        Completion queues are enabled by default, including with a callback.
+        Agent-owned executors disable the queue and use callback delivery only.
+        """
         self.job_store = job_store or JobStore()
         self._tools: dict[str, Tool] = {}
         self._tasks: dict[str, asyncio.Task[JobResult]] = {}
         self._on_complete = on_complete
+        self._queue_completion_events = queue_completion_events
         self._event_queue: asyncio.Queue[TriggerEvent] = asyncio.Queue()
 
         # Unsafe tools share one lock to protect mutable resources while safe
@@ -380,9 +387,7 @@ class Executor:
                     error=result.error,
                     result_metadata=metadata,
                 )
-                if self._on_complete:
-                    self._on_complete(event)
-                await self._event_queue.put(event)
+                self._publish_completion(event)
 
             return job_result
 
@@ -406,9 +411,7 @@ class Executor:
                     cancelled=True,
                     final_state="cancelled",
                 )
-                if self._on_complete:
-                    self._on_complete(event)
-                await self._event_queue.put(event)
+                self._publish_completion(event)
 
             return job_result
 
@@ -430,9 +433,7 @@ class Executor:
                     content="",
                     error=str(e),
                 )
-                if self._on_complete:
-                    self._on_complete(event)
-                await self._event_queue.put(event)
+                self._publish_completion(event)
 
             return job_result
 
@@ -465,9 +466,14 @@ class Executor:
             cancelled=True,
             final_state="cancelled",
         )
+        self._publish_completion(event)
+
+    def _publish_completion(self, event: TriggerEvent) -> None:
+        """Deliver a completion to the callback and enabled queue."""
         if self._on_complete:
             self._on_complete(event)
-        self._event_queue.put_nowait(event)
+        if self._queue_completion_events:
+            self._event_queue.put_nowait(event)
 
     def _retained_results(self) -> dict[str, JobResult]:
         """Return the bounded completed-result history owned by the JobStore."""
