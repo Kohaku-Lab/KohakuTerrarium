@@ -33,6 +33,7 @@ from PIL import Image
 
 from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
+from kohakuterrarium.builtins.plugins.sandbox.plugin import SandboxPlugin
 from kohakuterrarium.builtins.subagents.research import RESEARCH_CONFIG
 from kohakuterrarium.builtins.tools import web_search
 from kohakuterrarium.builtins.tools.canvas_image import CanvasImageTool
@@ -466,7 +467,7 @@ class TestModulesIntegration:
     """End-to-end workflows exercising each ``modules/`` protocol through
     a real :class:`Agent`."""
 
-    async def test_plugin_hooks_wrap_a_real_tool_call(self, make_agent):
+    async def test_plugin_hooks_wrap_a_real_tool_call(self, make_agent, tmp_path):
         """plugin protocol — the FULL hook surface fires through a real
         agent run: tool pre/post hooks (incl. arg rewrite + a
         ``PluginBlockError`` veto), LLM pre/post hooks, lifecycle
@@ -664,6 +665,40 @@ class TestModulesIntegration:
             assert mgr.collect_runtime_services(ctx) == {}
             assert mgr.collect_termination_checkers() == []
             assert mgr.collect_commands() == []
+            sandbox = SandboxPlugin(fs_read="workspace")
+            mgr.register(sandbox)
+            work = tmp_path / "workspace"
+            outside = tmp_path / "outside"
+            work.mkdir()
+            outside.mkdir()
+            (work / "allowed.txt").write_text("inside")
+            (outside / "blocked.txt").write_text("outside")
+            agent.executor._working_dir = work
+            agent.executor._path_guard = None
+            agent.executor.register_tool(GlobTool())
+            allowed_job = await agent.executor.submit(
+                "glob",
+                {
+                    "path": work.as_uri(),
+                    "pattern": "*.txt",
+                    "gitignore": False,
+                },
+                is_direct=True,
+            )
+            allowed = await agent.executor.wait_for(allowed_job)
+            assert allowed.error is None
+            assert "allowed.txt" in allowed.output
+            denied_job = await agent.executor.submit(
+                "glob",
+                {
+                    "path": str(outside),
+                    "pattern": "*.txt",
+                },
+                is_direct=True,
+            )
+            denied = await agent.executor.wait_for(denied_job)
+            assert "SandboxViolation[fs_read]" in denied.error
+            assert "blocked.txt" not in denied.output
             # should_proceed with no veto hooks → True (nothing vetoes).
             assert (
                 await mgr.should_proceed("on_compact_start", context_length=10) is True
