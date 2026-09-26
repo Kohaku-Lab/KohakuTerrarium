@@ -1719,6 +1719,16 @@ class TestModulesIntegration:
                 if "## glob_" in message.get_text_content()
             )
             assert f"\n{(search_dir / 'a.txt').relative_to(tmp_path)}" in glob_output
+
+            # Shared recursive matching must also work through both real tools.
+            for tool_name, args in (
+                ("glob", {"pattern": "src/*/**/[ab].txt"}),
+                ("grep", {"pattern": "MATCH", "glob": "src/*/**/[ab].txt"}),
+            ):
+                job = await agent.executor.submit(tool_name, args, is_direct=True)
+                result = await agent.executor.wait_for(job)
+                assert result.success, result.error
+                assert "a.txt" in result.output
             last = agent.controller.conversation.get_last_assistant_message()
             assert last.get_text_content() == "recursive listing complete"
         finally:
