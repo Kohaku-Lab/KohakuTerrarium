@@ -7,8 +7,6 @@ against the real filesystem and a real loopback socket.
 """
 
 import socket
-import threading
-import time
 
 
 from kohakuterrarium.cli import _aio_entrypoint as aio
@@ -83,31 +81,24 @@ class TestWaitForPort:
         # Pick a random high port unlikely to be bound.
         assert aio._wait_for_port("127.0.0.1", 1, timeout_s=0.3) is False
 
-    def test_returns_true_when_port_opens_mid_wait(self):
-        # Open the port from another thread half a second after the
-        # call starts; the waiter should succeed.
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.bind(("127.0.0.1", 0))
-        port = s.getsockname()[1]
-        s.close()
+    def test_returns_true_when_port_opens_mid_wait(self, monkeypatch):
+        create_connection = socket.create_connection
+        attempts = []
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+            server.bind(("127.0.0.1", 0))
+            address = server.getsockname()
 
-        def _open_later():
-            time.sleep(0.5)
-            srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            try:
-                srv.bind(("127.0.0.1", port))
-                srv.listen(1)
-                time.sleep(2.0)
-            finally:
-                srv.close()
+            def connect_and_open(*args, **kwargs):
+                attempts.append(args[0])
+                try:
+                    return create_connection(*args, **kwargs)
+                except OSError:
+                    server.listen(1)
+                    raise
 
-        t = threading.Thread(target=_open_later, daemon=True)
-        t.start()
-        try:
-            assert aio._wait_for_port("127.0.0.1", port, timeout_s=3.0) is True
-        finally:
-            t.join(timeout=3.5)
+            monkeypatch.setattr(socket, "create_connection", connect_and_open)
+            assert aio._wait_for_port(*address, timeout_s=30.0) is True
+            assert len(attempts) >= 2
 
 
 class TestKtExecutable:
