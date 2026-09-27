@@ -200,7 +200,7 @@ class AgentInitMixin:
 
     def _init_executor(self) -> None:
         """Initialize background executor."""
-        self.executor = Executor()
+        self.executor = Executor(queue_completion_events=False)
 
         for tool_name in self.registry.list_tools():
             tool = self.registry.get_tool(tool_name)

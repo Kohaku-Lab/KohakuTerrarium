@@ -606,6 +606,7 @@ class TestCoreIntegration:
                     break
                 await asyncio.sleep(0.02)
             assert "background acknowledged" in _assistant_text(agent)
+            assert agent.executor._event_queue.qsize() == 0
             assert all(
                 sum(m.get("content") == hint for m in call) == 1
                 for call in agent.llm.call_log[:4]
