@@ -449,6 +449,24 @@ class TestProgStudioJourney:
             )
             assert toggled_off == {"name": "sandbox", "enabled": False}
 
+            goal = await studio.sessions.drives.create(
+                session_id,
+                {
+                    "kind": "goal",
+                    "title": "survive session unload",
+                    "scope_type": "creature",
+                    "scope_id": creature_id,
+                    "assignee_creature_id": creature_id,
+                    "spec": {"objective": "preserve this goal", "autonomy": "manual"},
+                },
+                actor="user:operator",
+            )
+            goal = await studio.sessions.drives.transition(
+                goal["drive_id"],
+                "paused",
+                expected_revision=goal["revision"],
+                actor="user:operator",
+            )
             # Stop the session — flushes + closes the .kohakutr file.
             await studio.sessions.stop(session_id)
             assert studio.sessions.list() == []
@@ -541,6 +559,14 @@ class TestProgStudioJourney:
             resumed = await studio.persistence.resume(saved_path)
             assert len(resumed.creatures) == 1
             resumed_cid = resumed.creatures[0]["creature_id"]
+            assert resumed_cid == creature_id
+            assert resumed.session_id == session_id
+            restored_goal = await studio.sessions.drives.get(
+                goal["drive_id"], actor="user:operator"
+            )
+            assert restored_goal["status"] == "paused"
+            assert restored_goal["assignment_state"] == "assigned"
+            assert restored_goal["assignee_creature_id"] == creature_id
             resumed_history = await studio.sessions.chat.history(
                 resumed.session_id, resumed_cid
             )

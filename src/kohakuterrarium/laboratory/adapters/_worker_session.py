@@ -82,8 +82,11 @@ class WorkerSessionAttacher:
 
     def _on_store_registered(self, graph_id: str, store: SessionStore) -> None:
         """Install a tee for a newly registered graph if one is not active."""
-        if graph_id in self._graph_tees:
-            return
+        existing = self._graph_tees.get(graph_id)
+        if existing is not None:
+            if existing._store is store:
+                return
+            self.discard_graph(graph_id)
         try:
             tee = SessionEventTee(graph_id, store, self._node)
             tee.attach()

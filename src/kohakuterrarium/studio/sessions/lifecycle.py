@@ -143,7 +143,7 @@ async def start_creature(
             raise ValueError("Must provide config_path or config")
         sid = creature.graph_id
         cid = creature.creature_id
-        attach_session_store_for_creature(
+        await attach_session_store_for_creature(
             engine, creature, config_path=config_path or ""
         )
         meta_for(service)[sid] = {
@@ -758,7 +758,7 @@ async def add_creature(
             raise KeyError(f"session {session_id!r} not found")
         creature = await engine.add_creature(config, graph=session_id)
         # The existing graph store is reused, and its config type must be resumable.
-        attach_session_store_for_creature(service, creature, config_type="agent")
+        await attach_session_store_for_creature(service, creature, config_type="agent")
         return creature.creature_id
 
     # Remote additions route to the worker recorded in session metadata.

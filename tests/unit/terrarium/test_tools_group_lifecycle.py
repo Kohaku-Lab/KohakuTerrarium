@@ -143,7 +143,7 @@ class TestGroupAddNode:
         monkeypatch.setattr(
             lifecycle_mod.group_hooks,
             "attach_session_store",
-            lambda e, c, **kw: attached.update(kw),
+            AsyncMock(side_effect=lambda e, c, **kw: attached.update(kw)),
         )
         tool = lifecycle_mod.GroupAddNodeTool()
         r = await tool._execute({"config_path": "./c", "name": "alice", "pwd": "/wd"})
@@ -313,7 +313,7 @@ class TestGroupSpawnChild:
         gctx.engine.add_creature.return_value = child
         _patch_resolve(monkeypatch, gctx)
         monkeypatch.setattr(
-            lifecycle_mod.group_hooks, "attach_session_store", lambda e, c, **kw: None
+            lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
         )
         tool = lifecycle_mod.GroupSpawnChildTool()
         r = await tool._execute(
@@ -340,7 +340,7 @@ class TestGroupSpawnChild:
         gctx.engine.add_creature.return_value = child
         _patch_resolve(monkeypatch, gctx)
         monkeypatch.setattr(
-            lifecycle_mod.group_hooks, "attach_session_store", lambda e, c, **kw: None
+            lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
         )
         tool = lifecycle_mod.GroupSpawnChildTool()
         r = await tool._execute({"config_ref": "./c"})
@@ -356,7 +356,7 @@ class TestGroupSpawnChild:
         gctx.engine.connect.side_effect = RuntimeError("wire boom")
         _patch_resolve(monkeypatch, gctx)
         monkeypatch.setattr(
-            lifecycle_mod.group_hooks, "attach_session_store", lambda e, c, **kw: None
+            lifecycle_mod.group_hooks, "attach_session_store", AsyncMock()
         )
         tool = lifecycle_mod.GroupSpawnChildTool()
         r = await tool._execute({"config_ref": "./c"})

@@ -49,7 +49,7 @@ class TestReuseBranchIndexHook:
     with the saved-sessions index sidecar, or the session never shows
     up in the saved list until a manual ``?refresh=true``."""
 
-    def test_reuse_attaches_index_hook(self, monkeypatch, tmp_path):
+    async def test_reuse_attaches_index_hook(self, monkeypatch, tmp_path):
         calls = []
         monkeypatch.setattr(
             store_attach._index_hooks,
@@ -77,7 +77,7 @@ class TestReuseBranchIndexHook:
             lambda store, names: None,
         )
 
-        store_attach.attach_session_store_for_creature(engine, creature)
+        await store_attach.attach_session_store_for_creature(engine, creature)
         assert calls == [("graph_1", existing)]
 
 
@@ -87,7 +87,9 @@ class TestStaleClosedStoreSelfHeal:
     be discarded in favor of the engine's live store — otherwise the newly
     added creature attaches a closed KVault and loses its whole session."""
 
-    def test_registry_closed_engine_open_prefers_engine(self, monkeypatch, tmp_path):
+    async def test_registry_closed_engine_open_prefers_engine(
+        self, monkeypatch, tmp_path
+    ):
         registry = {}
         closed = SimpleNamespace(_closed=True)
         live = SimpleNamespace(_closed=False)
@@ -123,12 +125,12 @@ class TestStaleClosedStoreSelfHeal:
         )
 
         registry["graph_1"] = closed  # stale handle
-        store_attach.attach_session_store_for_creature(engine, creature)
+        await store_attach.attach_session_store_for_creature(engine, creature)
 
         assert attached == [live], "must attach the engine's live store"
         assert registry["graph_1"] is live, "registry must be refreshed"
 
-    def test_registry_closed_engine_closed_mints_new(self, monkeypatch, tmp_path):
+    async def test_registry_closed_engine_closed_mints_new(self, monkeypatch, tmp_path):
         registry = {}
         closed = SimpleNamespace(_closed=True)
         minted = SimpleNamespace(_closed=False)
@@ -164,7 +166,7 @@ class TestStaleClosedStoreSelfHeal:
         )
 
         registry["graph_1"] = closed
-        store_attach.attach_session_store_for_creature(engine, creature)
+        await store_attach.attach_session_store_for_creature(engine, creature)
 
         assert attached == [minted], "must mint a fresh store"
         assert registry["graph_1"] is minted

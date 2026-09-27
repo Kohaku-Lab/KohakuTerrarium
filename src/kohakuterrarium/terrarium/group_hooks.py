@@ -18,14 +18,15 @@ This keeps ``terrarium`` runnable in tests and headless usage without
 the studio layer present.
 """
 
-from typing import Any, Callable
+import inspect
+from typing import Any, Awaitable, Callable
 
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
 # (engine, creature, *, config_path: str = "", config_type: str = "agent") -> None
-StoreAttachHook = Callable[..., None]
+StoreAttachHook = Callable[..., None | Awaitable[None]]
 # (creature, name) -> None
 NameApplyHook = Callable[[Any, str], None]
 # (workspace) -> list[dict]
@@ -60,7 +61,7 @@ def register_workspace_resolver(hook: WorkspaceResolverHook) -> None:
     _workspace_resolver = hook
 
 
-def attach_session_store(
+async def attach_session_store(
     engine: Any,
     creature: Any,
     *,
@@ -70,9 +71,11 @@ def attach_session_store(
     if _store_attach is None:
         return
     try:
-        _store_attach(
+        result = _store_attach(
             engine, creature, config_path=config_path, config_type=config_type
         )
+        if inspect.isawaitable(result):
+            await result
     except Exception:
         # Never break the spawn, but surface the failure: a creature that
         # fails store attach silently loses its entire session history.
