@@ -24,6 +24,8 @@ function _findNode(root, path) {
   return null
 }
 
+const _saveQueues = new WeakMap()
+
 const _editorStoreOptions = {
   state: () => ({
     /** @type {Record<string, {content: string, dirty: boolean, language: string}>} */
@@ -76,11 +78,28 @@ const _editorStoreOptions = {
     async saveFile(path) {
       const file = this.openFiles[path]
       if (!file) return
+      const submittedText = file.content
+      let queue = _saveQueues.get(this)
+      if (!queue) {
+        queue = new Map()
+        _saveQueues.set(this, queue)
+      }
+      const previous = queue.get(path) || Promise.resolve()
+      const pending = previous.then(async () => {
+        try {
+          await filesAPI.writeFile(path, submittedText)
+          if (this.openFiles[path] === file) {
+            file.dirty = file.content !== submittedText
+          }
+        } catch (err) {
+          console.error("Failed to save file:", err)
+        }
+      })
+      queue.set(path, pending)
       try {
-        await filesAPI.writeFile(path, file.content)
-        file.dirty = false
-      } catch (err) {
-        console.error("Failed to save file:", err)
+        await pending
+      } finally {
+        if (queue.get(path) === pending) queue.delete(path)
       }
     },
 

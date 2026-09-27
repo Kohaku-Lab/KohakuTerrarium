@@ -1,7 +1,6 @@
 """Unit tests for the persistence fork + history routes."""
 
-import asyncio
-import time
+import threading
 import types
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from kohakuterrarium.api.deps import get_service
 from kohakuterrarium.api.routes.persistence import fork as fork_mod
 from kohakuterrarium.api.routes.persistence import history as history_mod
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.studio.persistence import fork as fork_handler_mod
 
 
 def _app(router) -> FastAPI:
@@ -94,8 +94,6 @@ class TestForkRoute:
         # through the engine's open store — a second open of the
         # actively-written source IOERRs on POSIX. Both source-open
         # entry points are bombed; the REAL fork runs.
-        from kohakuterrarium.studio.persistence import fork as fork_handler_mod
-
         store_path = tmp_path / "alice_3f2a9c11.kohakutr"
         store = SessionStore(str(store_path))
         store.init_meta("alice", "agent", "/p", "/w", ["alice"])
@@ -126,8 +124,8 @@ class TestForkRoute:
             store.close()
 
     async def test_live_fork_does_not_block_event_loop(self, monkeypatch, tmp_path):
-        from kohakuterrarium.studio.persistence import fork as fork_handler_mod
-
+        loop_thread = threading.get_ident()
+        worker_threads = []
         store_path = tmp_path / "alice_slow_fork.kohakutr"
         store = SessionStore(str(store_path))
         store.init_meta("alice", "agent", "/p", "/w", ["alice"])
@@ -138,8 +136,8 @@ class TestForkRoute:
 
         real_find = fork_handler_mod.find_fork_point
 
-        def slow_find(*a, **k):
-            time.sleep(0.3)
+        def record_find(*a, **k):
+            worker_threads.append(threading.get_ident())
             return real_find(*a, **k)
 
         def _bomb(*a, **k):
@@ -147,39 +145,22 @@ class TestForkRoute:
 
         monkeypatch.setattr(fork_mod, "resolve_session_path_default", _bomb)
         monkeypatch.setattr(fork_handler_mod, "SessionStore", _bomb)
-        monkeypatch.setattr(fork_handler_mod, "find_fork_point", slow_find)
+        monkeypatch.setattr(fork_handler_mod, "find_fork_point", record_find)
 
         app = _app(fork_mod.router)
         app.dependency_overrides[get_service] = lambda: engine
-        loop_alive: list[float] = []
-        stop = asyncio.Event()
-
-        async def _ping():
-            while not stop.is_set():
-                loop_alive.append(time.monotonic())
-                await asyncio.sleep(0.02)
-            loop_alive.append(time.monotonic())
-
         try:
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"
             ) as client:
-                ping = asyncio.create_task(_ping())
-                await asyncio.sleep(0)
                 resp = await client.post(
                     "/api/alice_slow_fork/fork",
                     json={"at_event_id": 1, "name": "slow-fork"},
                 )
-                stop.set()
-                await ping
             assert resp.status_code == 201, resp.text
-            gaps = [
-                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
-            ]
-            assert (
-                max(gaps) < 0.15
-            ), f"live fork blocked the loop; max gap={max(gaps):.3f}s"
+            assert worker_threads
+            assert loop_thread not in worker_threads
         finally:
             store.close()
 
@@ -247,179 +228,127 @@ class TestHistoryRoutes:
         assert "paged" in detail or "limit" in detail
 
     async def test_unpaged_reject_does_not_block_event_loop(self, monkeypatch):
-        def slow_full_scan(*_a, **_k):
-            time.sleep(0.3)
+        scanned = []
+
+        def full_scan(*_a, **_k):
+            scanned.append("page")
             return {"events": []}
 
         fake_store = types.SimpleNamespace(_path="/x/live.kohakutr")
         monkeypatch.setattr(
             history_mod, "live_store_entry", lambda *_a, **_k: ("live_g", fake_store)
         )
-        monkeypatch.setattr(history_mod, "history_page_from_store", slow_full_scan)
+        monkeypatch.setattr(history_mod, "history_page_from_store", full_scan)
         engine = _FakeEngine(graph=_FakeGraph(["root"]), creatures={})
         app = _app(history_mod.router)
         app.dependency_overrides[get_service] = lambda: engine
-        loop_alive: list[float] = []
-
-        async def _ping():
-            for _ in range(5):
-                await asyncio.sleep(0.02)
-                loop_alive.append(time.monotonic())
-
         transport = ASGITransport(app=app)
         async with AsyncClient(transport=transport, base_url="http://test") as client:
-            req = asyncio.create_task(
-                client.get("/api/live_g/history/root", params={"paged": "false"})
+            resp = await client.get(
+                "/api/live_g/history/root", params={"paged": "false"}
             )
-            ping = asyncio.create_task(_ping())
-            resp, _ = await asyncio.gather(req, ping)
         assert resp.status_code == 400
-        gaps = [loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)]
-        assert (
-            max(gaps) < 0.15
-        ), f"unpaged reject stalled the loop; max gap={max(gaps):.3f}s"
+        assert scanned == []
 
     async def test_live_history_page_does_not_block_event_loop(
         self, monkeypatch, tmp_path
     ):
-        def slow_page(*_a, **_k):
-            time.sleep(0.3)
+        loop_thread = threading.get_ident()
+        worker_threads = []
+
+        def record_page(*_a, **_k):
+            worker_threads.append(threading.get_ident())
             return {"target": "alice", "events": []}
 
         store_path = tmp_path / "live-page.kohakutr"
         store = SessionStore(str(store_path))
         store.init_meta("alice", "agent", "/p", "/w", ["alice"])
         store.checkpoint()
-        monkeypatch.setattr(history_mod, "history_page_from_store", slow_page)
+        monkeypatch.setattr(history_mod, "history_page_from_store", record_page)
         monkeypatch.setattr(
             history_mod, "live_store_entry", lambda *_a, **_k: ("live_g", store)
         )
         engine = _FakeEngine(graph=_FakeGraph(["alice"]), creatures={})
         app = _app(history_mod.router)
         app.dependency_overrides[get_service] = lambda: engine
-        loop_alive: list[float] = []
-        stop = asyncio.Event()
-
-        async def _ping():
-            while not stop.is_set():
-                loop_alive.append(time.monotonic())
-                await asyncio.sleep(0.02)
-            loop_alive.append(time.monotonic())
-
         try:
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"
             ) as client:
-                ping = asyncio.create_task(_ping())
-                await asyncio.sleep(0)
                 resp = await client.get("/api/live_g/history/alice")
-                stop.set()
-                await ping
             assert resp.status_code == 200, resp.text
-            gaps = [
-                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
-            ]
-            assert (
-                max(gaps) < 0.15
-            ), f"live history page blocked the loop; max gap={max(gaps):.3f}s"
+            assert worker_threads
+            assert loop_thread not in worker_threads
         finally:
             store.close()
 
     async def test_live_history_detail_does_not_block_event_loop(
         self, monkeypatch, tmp_path
     ):
-        def slow_detail(*_a, **_k):
-            time.sleep(0.3)
+        loop_thread = threading.get_ident()
+        worker_threads = []
+
+        def record_detail(*_a, **_k):
+            worker_threads.append(threading.get_ident())
             return {"target": "alice", "value": None}
 
         store_path = tmp_path / "live-detail.kohakutr"
         store = SessionStore(str(store_path))
         store.init_meta("alice", "agent", "/p", "/w", ["alice"])
         store.checkpoint()
-        monkeypatch.setattr(history_mod, "history_detail", slow_detail)
+        monkeypatch.setattr(history_mod, "history_detail", record_detail)
         monkeypatch.setattr(
             history_mod, "live_store_entry", lambda *_a, **_k: ("live_g", store)
         )
         engine = _FakeEngine(graph=_FakeGraph(["alice"]), creatures={})
         app = _app(history_mod.router)
         app.dependency_overrides[get_service] = lambda: engine
-        loop_alive: list[float] = []
-        stop = asyncio.Event()
-
-        async def _ping():
-            while not stop.is_set():
-                loop_alive.append(time.monotonic())
-                await asyncio.sleep(0.02)
-            loop_alive.append(time.monotonic())
-
         try:
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"
             ) as client:
-                ping = asyncio.create_task(_ping())
-                await asyncio.sleep(0)
                 resp = await client.get(
                     "/api/live_g/history/alice/detail",
                     params={"stream": "events", "ref": "r", "history_id": "h1"},
                 )
-                stop.set()
-                await ping
             assert resp.status_code == 200, resp.text
-            gaps = [
-                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
-            ]
-            assert (
-                max(gaps) < 0.15
-            ), f"live history detail blocked the loop; max gap={max(gaps):.3f}s"
+            assert worker_threads
+            assert loop_thread not in worker_threads
         finally:
             store.close()
 
     async def test_live_history_index_does_not_block_event_loop(
         self, monkeypatch, tmp_path
     ):
-        def slow_index(*_a, **_k):
-            time.sleep(0.3)
+        loop_thread = threading.get_ident()
+        worker_threads = []
+
+        def record_index(*_a, **_k):
+            worker_threads.append(threading.get_ident())
             return {"session_name": "live", "targets": []}
 
         store_path = tmp_path / "live-index.kohakutr"
         store = SessionStore(str(store_path))
         store.init_meta("alice", "agent", "/p", "/w", ["alice"])
         store.checkpoint()
-        monkeypatch.setattr(history_mod, "history_index_from_store", slow_index)
+        monkeypatch.setattr(history_mod, "history_index_from_store", record_index)
         monkeypatch.setattr(
             history_mod, "live_store_entry", lambda *_a, **_k: ("live_g", store)
         )
         engine = _FakeEngine(graph=_FakeGraph(["alice"]), creatures={})
         app = _app(history_mod.router)
         app.dependency_overrides[get_service] = lambda: engine
-        loop_alive: list[float] = []
-        stop = asyncio.Event()
-
-        async def _ping():
-            while not stop.is_set():
-                loop_alive.append(time.monotonic())
-                await asyncio.sleep(0.02)
-            loop_alive.append(time.monotonic())
-
         try:
             transport = ASGITransport(app=app)
             async with AsyncClient(
                 transport=transport, base_url="http://test"
             ) as client:
-                ping = asyncio.create_task(_ping())
-                await asyncio.sleep(0)
                 resp = await client.get("/api/live_g/history")
-                stop.set()
-                await ping
             assert resp.status_code == 200, resp.text
-            gaps = [
-                loop_alive[i + 1] - loop_alive[i] for i in range(len(loop_alive) - 1)
-            ]
-            assert (
-                max(gaps) < 0.15
-            ), f"live history index blocked the loop; max gap={max(gaps):.3f}s"
+            assert worker_threads
+            assert loop_thread not in worker_threads
         finally:
             store.close()
 
