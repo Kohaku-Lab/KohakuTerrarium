@@ -186,6 +186,15 @@ persists the clone (user presets only).
 Existing; managed by `stores/chat.js`. Streams text chunks, tool
 start/done, token usage, session info, compaction events.
 
+Upstream model recovery uses transient `type: "model_recovery"` frames with
+`source`, `turn_index`, `branch_id`, `request_id`, `request_started_at`,
+`sequence`, and `phase` (`"waiting"`, `"reconnecting"`, or `null`). The
+`session_info.model_recovery` field carries the current snapshot on local and
+remote attach. `chatRecovery.js` rejects stale request/sequence markers and
+clears at turn end; the chat store gates display by the viewed branch. These
+frames are excluded from the event replay ring and session transcript. They
+describe the model connection, independently of the browser's `wsStatus`.
+
 ### Logs (`/ws/logs`)
 Server process log tail. Messages: `{type: "meta"|"line"|"error", ...}`.
 Lines parsed into `{ts, level, module, text}`.

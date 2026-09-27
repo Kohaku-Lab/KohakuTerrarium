@@ -27,6 +27,20 @@ def get_event_log(key: str) -> deque:
     return _event_logs[key]
 
 
+def model_recovery_snapshot(agent: Any) -> dict | None:
+    """Read transient request state for a newly attached viewer."""
+    state = getattr(
+        getattr(agent, "output_router", None), "model_recovery_status", None
+    )
+    if not isinstance(state, dict):
+        return None
+    return {
+        **state,
+        "turn_index": getattr(agent, "_turn_index", None),
+        "branch_id": getattr(agent, "_branch_id", None),
+    }
+
+
 def _parse_detail(detail: str) -> tuple[str, str]:
     """Split an optional ``[name]`` prefix from activity detail text."""
     try:
@@ -98,7 +112,8 @@ class StreamOutput(OutputModule):
         if bi is not None and "branch_id" not in msg:
             msg["branch_id"] = bi
         self._q.put_nowait(msg)
-        self._log.append(msg)
+        if msg.get("type") != "model_recovery":
+            self._log.append(msg)
 
     async def start(self) -> None:
         pass
@@ -224,6 +239,8 @@ class StreamOutput(OutputModule):
         dispatch them directly.
         """
         match event.type:
+            case "model_recovery":
+                self._put({"type": "model_recovery", **event.payload})
             case "text":
                 content = event.content
                 if isinstance(content, str) and content:

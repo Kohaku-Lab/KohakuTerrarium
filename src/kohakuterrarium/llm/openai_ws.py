@@ -14,6 +14,7 @@ from kohakuterrarium.llm.codex_format import fix_tool_call_pairing, to_responses
 from kohakuterrarium.llm.openai_sanitize import strip_kt_extras, strip_surrogates
 from kohakuterrarium.llm.responses_reasoning import ResponsesReasoningCollector
 from kohakuterrarium.llm.responses_ws import ResponsesWSSession
+from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
 from kohakuterrarium.llm.responses_ws_options import FRAMEWORK_KNOBS
 
 
@@ -128,8 +129,25 @@ async def stream_ws_turn(
     collected: list[NativeToolCall] = []
     output_text: list[str] = []
     reasoning = ResponsesReasoningCollector()
+    recovery = kwargs.get("_ws_recovery") or WSRecovery(provider._retry_policy)
+
+    def reset_attempt() -> None:
+        nonlocal reasoning
+        collected.clear()
+        output_text.clear()
+        reasoning = ResponsesReasoningCollector()
+        provider._last_usage = {}
+        provider._last_tool_calls = []
+        provider._last_assistant_extra_fields = {}
+
     async with aclosing(
-        session.stream_turn(base_event, items, fix_tool_call_pairing)
+        session.stream_turn(
+            base_event,
+            items,
+            fix_tool_call_pairing,
+            recovery=recovery,
+            reset_attempt=reset_attempt,
+        )
     ) as stream:
         async for event in stream:
             reasoning.consume(event)
@@ -138,6 +156,8 @@ async def stream_ws_turn(
                 piece = strip_surrogates(event.delta)
                 output_text.append(piece)
                 reasoning.consume_output_text(piece)
+                if piece:
+                    recovery.delivered = True
                 yield piece
             elif etype == "response.output_item.done":
                 item = event.item

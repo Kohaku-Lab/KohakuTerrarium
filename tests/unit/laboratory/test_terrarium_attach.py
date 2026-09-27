@@ -134,9 +134,34 @@ class TestOnStart:
                     add_secondary=lambda x: None,
                     remove_secondary=lambda x: None,
                     submit_reply_with_status=lambda r: (True, "ok"),
+                    model_recovery_status={
+                        "request_id": cid,
+                        "phase": "waiting",
+                        "sequence": 1,
+                        "request_started_at": 1,
+                    },
                 )
+                ag._turn_index, ag._branch_id = 4, 2
             sink = _make_sink(node)
-            await adapter.on_start({"creature_id": "alice", "session_id": "_"}, sink)
+            response = await adapter.on_start(
+                {"creature_id": "alice", "session_id": "_"}, sink
+            )
+            snapshots = [response["setup"], *_drain(sink)]
+            states = {
+                frame["source"]: frame["model_recovery"]
+                for frame in snapshots
+                if frame.get("activity_type") == "session_info"
+            }
+            assert set(states) == {"alice", "bob"}
+            for source, state in states.items():
+                assert state == {
+                    "request_id": source,
+                    "phase": "waiting",
+                    "sequence": 1,
+                    "request_started_at": 1,
+                    "turn_index": 4,
+                    "branch_id": 2,
+                }
             session = adapter._sessions["stream-1"]
             # Sibling bob was wired.
             assert session.sibling_modules

@@ -1,6 +1,7 @@
 import { ElMessage } from "element-plus"
 import { getCurrentInstance, markRaw, toRaw } from "vue"
 import { extractReasoning } from "@/utils/chatReasoning"
+import { reduceModelRecovery } from "./chatRecovery"
 
 import { injectScope, registerScopeDisposer, scopeOfStoreId } from "@/composables/useScope"
 import { createVisibilityInterval } from "@/composables/useVisibilityInterval"
@@ -1919,6 +1920,7 @@ const _chatStoreOptions = {
      * @type {Object<string, boolean>}
      */
     processingByTab: {},
+    modelRecoveryByTab: {},
     /** @type {Object<string, {prompt: number, completion: number, total: number, cached: number}>} Per-source token usage */
     tokenUsage: {},
     /**
@@ -2311,6 +2313,7 @@ const _chatStoreOptions = {
       removeAttentionScope(scopeOfStoreId(this.$id) || "default")
       this.queuedMessagesByTab = {}
       this.processingByTab = {}
+      this.modelRecoveryByTab = {}
       this._recentUserInputs = {}
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}
@@ -2857,6 +2860,7 @@ const _chatStoreOptions = {
         if (generation !== this._instanceGeneration || ws !== this._ws) return
         const wasOpen = this.wsStatus === "open"
         this.wsStatus = "reconnecting"
+        this.modelRecoveryByTab = {}
         for (const tab of Object.keys(this.branchOperationByTab)) {
           this._failBranchOperation(tab, "Connection closed before the operation completed.")
         }
@@ -3052,6 +3056,8 @@ const _chatStoreOptions = {
     /** Handle ALL incoming WS messages */
     _onMessage(data) {
       const source = this._tabForSource(data.source || "")
+      if (source) this._updateModelRecovery(source, data)
+      if (data.type === "model_recovery") return
       if (source) {
         if (
           ["ask_text", "confirm", "selection", "card", "ui_supersede", "ui_reply_ack"].includes(
@@ -3399,6 +3405,16 @@ const _chatStoreOptions = {
       }
 
       if (at === "session_info") {
+        if (Object.prototype.hasOwnProperty.call(data, "model_recovery")) {
+          if (data.model_recovery) {
+            this._updateModelRecovery(source, { ...data.model_recovery, type: "model_recovery" })
+          } else if (
+            !this.modelRecoveryByTab[source] ||
+            data.ts >= this.modelRecoveryByTab[source].request_started_at
+          ) {
+            delete this.modelRecoveryByTab[source]
+          }
+        }
         // Session id is global regardless of which creature emitted.
         if (data.session_id) this.sessionInfo.sessionId = data.session_id
         // Model fields are PER CREATURE — key them by the emitting
@@ -4051,6 +4067,25 @@ const _chatStoreOptions = {
         if (latest > 0) return latest === fb
       }
       return true
+    },
+
+    _updateModelRecovery(tab, frame) {
+      if (!tab) return
+      const previous = this.modelRecoveryByTab[tab]
+      const next = reduceModelRecovery(previous, frame)
+      if (!next || next === previous) return
+      this.modelRecoveryByTab[tab] = next
+      if (next.phase) {
+        this.processingByTab[tab] = true
+        if (typeof next.turn_index === "number" && typeof next.branch_id === "number") {
+          this._streamingBranchByTab[tab] = { turnIndex: next.turn_index, branchId: next.branch_id }
+        }
+      }
+    },
+
+    modelRecoveryForTab(tab) {
+      const state = this.modelRecoveryByTab[tab]
+      return state?.phase && this._frameMatchesViewedBranch(tab, state) ? state.phase : null
     },
 
     /**
@@ -5615,6 +5650,7 @@ const _chatStoreOptions = {
       this.queuedMessagesByTab = {}
       this.processingByTab = {}
       this.eventsByTab = {}
+      this.modelRecoveryByTab = {}
       this._localCommandResultsByTab = {}
       this._pendingCommandResultContextsByTab = {}
       this._commandResultDispatchSeq = 0
@@ -5661,6 +5697,7 @@ const _chatStoreOptions = {
       this._historyLoaded = false
       this._wsBuffer = []
       this.branchOperationByTab = {}
+      this.modelRecoveryByTab = {}
       this.branchOperationErrorByTab = {}
       this._branchResyncPendingByTab = {}
       this._streamingBranchByTab = {}

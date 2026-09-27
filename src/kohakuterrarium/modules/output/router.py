@@ -38,6 +38,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
         self.suppress_tool_blocks = suppress_tool_blocks
         self.suppress_subagent_blocks = suppress_subagent_blocks
 
+        self.model_recovery_status: dict | None = None
         self._state = OutputState.NORMAL
         self._pending_tool_calls: list[ToolCallEvent] = []
         self._pending_subagent_calls: list[SubAgentCallEvent] = []
@@ -137,6 +138,9 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
     async def emit(self, event: OutputEvent) -> None:
         """Dispatch a typed event according to its output visibility contract."""
         match event.type:
+            case "model_recovery":
+                self.model_recovery_status = dict(event.payload)
+                await self._fan_event_to_outputs(event)
             case "text":
                 content = event.content
                 if isinstance(content, str):
@@ -234,6 +238,7 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
 
     async def stop(self) -> None:
         """Stop the router and output modules."""
+        await self._clear_model_recovery()
         for name, output in self.named_outputs.items():
             await output.stop()
             logger.debug("Named output stopped", output_name=name)
@@ -272,11 +277,28 @@ class OutputRouter(OutputRouterParseEventMixin, OutputRouterInteractiveMixin):
 
     async def on_processing_end(self) -> None:
         """Notify all output modules that processing has ended."""
+        await self._clear_model_recovery()
         await self.default_output.on_processing_end()
         for output in self.named_outputs.values():
             await output.on_processing_end()
         for secondary in self._secondary_outputs:
             await secondary.on_processing_end()
+
+    async def _clear_model_recovery(self) -> None:
+        """Keep a terminal sequence marker so stale queued frames cannot revive it."""
+        state = self.model_recovery_status
+        if state and state.get("phase"):
+            await self.emit(
+                OutputEvent(
+                    type="model_recovery",
+                    surface="status",
+                    payload={
+                        **state,
+                        "phase": None,
+                        "sequence": state["sequence"] + 1,
+                    },
+                )
+            )
 
     def reset(self) -> None:
         """Reset per-round state while retaining unconsumed completion feedback."""

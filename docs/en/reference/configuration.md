@@ -235,23 +235,42 @@ beyond them; upstream generation deadlines still apply.
 
 Boolean values, nonfinite numbers, zero or negative limits, and unrelated
 connection arguments such as `proxy` or `additional_headers` are rejected.
-These options do not change the SDK's outgoing failed-send queue or the retry
-policy. For ordinary Responses requests, a transport failure before the first
-server event permits one reconnect and full-history resend. This applies to
-requests without tools or with only client-executed function tools. The original
-generation may already have started, so this bounded retry can duplicate remote
-generation; it is not an exactly-once guarantee.
+Recovery is enabled with WebSocket mode. Before the provider delivers nonempty
+text to its caller (normally the controller), a transport failure or
+`websocket_connection_limit_reached` permits at most one uncertain replay on a
+fresh connection with full history. Internal metadata such as `response.created`,
+reasoning, and buffered client function calls do not end this window; failed
+attempt state is discarded. This applies to requests without tools or with only
+client-executed function tools. The original generation may already have started,
+so this bounded retry can duplicate remote generation; it is not an exactly-once
+guarantee.
 
-Any server event, including `response.created`, ends that retry window. Partial
-output, cancellation, explicit server errors, and submitted requests with
-server-executed tools or `background: true` are not automatically replayed.
+Delivered text ends the retry window, even if it has not appeared in the UI:
+the controller can already have executed commands or dispatched tools from it.
+Cancellation, terminal server errors, and submitted requests with server-executed
+or unknown tool types or `background: true` are not automatically replayed.
 Explicit protocol, policy, message-size, and application-specific WebSocket
 close codes are also terminal; retry does not bypass those limits.
-An explicit `previous_response_not_found` still permits full-history recovery.
+An explicit `previous_response_not_found` rejecting a delta before response
+events permits immediate full-history recovery. Connection expiry also recovers
+immediately; transient transport errors use the retry policy's backoff and jitter.
+Expired connections are closed even when replay is disallowed.
+
+`retry_policy.max_retries` bounds extra submissions for the entire logical
+request, including cache recovery and HTTP fallback. Zero disables automatic
+retries. HTTP fallback disables hidden SDK retries so all submissions share the
+same budget. No new total generation deadline is imposed.
 Once a send has been attempted, exhausting the reconnect does not fall through
 to HTTP or the provider's additional retries, even if the reconnect itself
 failed before sending. Failures entirely before submission retain connection
-retry and HTTP-fallback behavior.
+retry and HTTP-fallback eligibility, as does the existing busy-session HTTP path.
+After fallback, retries stay on HTTP. Ordinary HTTP-only mode is unchanged.
+
+Studio shows a transient model-connection recovery or retry-wait label in the
+existing generation indicator, retaining the background-job count. It returns
+to generation on the next attempt's first normal response event and clears on
+completion, failure, or cancellation. It is scoped to the main controller of the
+current creature and branch, restored on attach, and never added to chat history.
 
 ### Input
 

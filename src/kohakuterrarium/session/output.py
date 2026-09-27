@@ -461,6 +461,8 @@ class SessionOutput(SessionActivityMixin, OutputModule):
         corresponding output hooks.
         """
         match event.type:
+            case "model_recovery":
+                pass
             case "text":
                 content = event.content
                 if isinstance(content, str) and content:

@@ -164,6 +164,36 @@ describe("ChatPanel disconnected sends", () => {
     return { chat, wrapper }
   }
 
+  it("shows upstream recovery with background count, then returns to streaming", async () => {
+    const { chat, wrapper } = mountPanel({ wsOpen: true })
+    chat.runningJobs = { job: { tab: "kohaku" } }
+    const status = {
+      type: "model_recovery",
+      source: "kohaku",
+      request_id: "request",
+      request_started_at: 10,
+      sequence: 1,
+      phase: "waiting",
+      turn_index: 1,
+      branch_id: 2,
+    }
+    chat._onMessage(status)
+    await flushPromises()
+    expect(wrapper.find(".kt-transcript-processing").text()).toContain("waiting to retry")
+    expect(wrapper.find(".kt-transcript-processing").text()).toContain("1 background")
+    expect(chat.wsStatus).toBe("open")
+    chat._onMessage({ ...status, phase: "reconnecting", sequence: 2 })
+    await flushPromises()
+    expect(wrapper.find(".kt-transcript-processing").text()).toContain(
+      "recovering model connection",
+    )
+    chat._onMessage({ ...status, phase: null, sequence: 3 })
+    await flushPromises()
+    expect(wrapper.find(".kt-transcript-processing").text()).toContain("streaming + 1 background")
+    expect(chat.messagesByTab.kohaku).toEqual([])
+    wrapper.unmount()
+  })
+
   it("keeps the draft when there is no active tab", async () => {
     const error = vi.spyOn(ElMessage, "error").mockImplementation(() => {})
     const { chat, wrapper } = mountPanel()

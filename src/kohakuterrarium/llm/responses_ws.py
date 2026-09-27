@@ -7,54 +7,19 @@ HTTP-path detour, or failed turn falls back to a full resend.
 """
 
 import asyncio
+from contextlib import aclosing
 from copy import deepcopy
 from typing import Any, AsyncIterator, Callable
 
-from websockets.exceptions import ConnectionClosed
-
+from kohakuterrarium.llm.recovery import RetryPolicy
+from kohakuterrarium.llm.responses_ws_recovery import (
+    ResponsesWSError,
+    WSRecovery,
+    event_field,
+)
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-def _retryable_close(error: BaseException) -> bool:
-    """Check received and sent close codes through SDK exception wrappers."""
-    seen: set[int] = set()
-    while id(error) not in seen:
-        seen.add(id(error))
-        if isinstance(error, ConnectionClosed):
-            return all(
-                frame is None or frame.code in {1000, 1001, 1011, 1012, 1013, 1014}
-                for frame in (error.rcvd, error.sent)
-            )
-        cause = error.__cause__ or error.__context__
-        if cause is None:
-            break
-        error = cause
-    return True
-
-
-class ResponsesWSError(Exception):
-    """Raised when a WebSocket turn cannot complete.
-
-    ``submitted`` records any send attempt across this turn's connection
-    attempts, including when the final reconnect fails before sending.
-    """
-
-    def __init__(
-        self,
-        message: str,
-        *,
-        mid_stream: bool,
-        transport: bool = False,
-        submitted: bool = True,
-    ) -> None:
-        super().__init__(message)
-        self.mid_stream = mid_stream
-        self.submitted = submitted
-        # Transport failures leave the connection unusable; server error
-        # events arrive on a healthy connection.
-        self.transport = transport
 
 
 class ResponsesWSSession:
@@ -126,48 +91,20 @@ class ResponsesWSSession:
         base_event: dict[str, Any],
         items: list[dict[str, Any]],
         pairing_fix: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
+        *,
+        recovery: WSRecovery | None = None,
+        reset_attempt: Callable[[], None] | None = None,
     ) -> AsyncIterator[Any]:
-        """Run one turn, yielding raw server events until ``response.completed``.
-
-        ``base_event`` carries everything but ``type`` / ``input`` /
-        ``previous_response_id``; ``pairing_fix`` is applied only on full
-        resends (a delta must never gain synthetic outputs or drop orphans).
-        """
+        """Run a request with isolated attempts and exclusive continuation state."""
+        recovery = recovery or WSRecovery(
+            RetryPolicy(max_retries=1, base_delay=0), raw_delivery=True
+        )
         async with self._lock:
-            delta = self._compute_delta(items)
-            submitted = False
-            replayable = not base_event.get("background") and all(
-                isinstance(tool, dict) and tool.get("type") == "function"
-                for tool in base_event.get("tools") or []
-            )
-            for attempt in range(2):
-                try:
-                    async for event in self._run_turn(
-                        base_event, items, pairing_fix, delta if attempt == 0 else None
-                    ):
-                        yield event
-                    return
-                except (asyncio.CancelledError, GeneratorExit):
-                    await self.close()
-                    raise
-                except ResponsesWSError as exc:
-                    submitted = submitted or exc.submitted
-                    exc.submitted = submitted
-                    if exc.transport:
-                        await self.close()
-                    if (
-                        attempt
-                        or exc.mid_stream
-                        or not exc.transport
-                        or (submitted and not replayable)
-                        or not _retryable_close(exc)
-                    ):
-                        raise
-                    logger.warning(
-                        "Responses WS transport failed before the first event, reconnecting once",
-                        submission_uncertain=submitted,
-                        error=str(exc),
-                    )
+            async with aclosing(
+                recovery.run(self, base_event, items, pairing_fix, reset_attempt)
+            ) as stream:
+                async for event in stream:
+                    yield event
 
     async def _run_turn(
         self,
@@ -175,6 +112,7 @@ class ResponsesWSSession:
         items: list[dict[str, Any]],
         pairing_fix: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
         delta: list[dict[str, Any]] | None,
+        recovery: WSRecovery,
     ) -> AsyncIterator[Any]:
         try:
             connection = await self._ensure_connection()
@@ -190,6 +128,7 @@ class ResponsesWSSession:
             event["input"] = delta
         else:
             event["input"] = pairing_fix(list(items))
+        recovery.record_submission()
         try:
             await connection.send(event)
         except Exception as exc:
@@ -205,6 +144,7 @@ class ResponsesWSSession:
             ) from exc
 
         yielded = False
+        last_event_type = ""
         iterator = connection.__aiter__()
         while True:
             try:
@@ -214,56 +154,70 @@ class ResponsesWSSession:
                     "Responses WS connection closed before completion",
                     mid_stream=yielded,
                     transport=True,
+                    last_event_type=last_event_type,
                 )
             except Exception as exc:
                 # Mid-turn transport failures must not trigger a resend that
                 # would duplicate already-yielded output.
                 raise ResponsesWSError(
-                    str(exc), mid_stream=yielded, transport=True
+                    str(exc),
+                    mid_stream=yielded,
+                    transport=True,
+                    last_event_type=last_event_type,
                 ) from exc
-            etype = getattr(server_event, "type", "")
+            etype = event_field(server_event, "type") or ""
+            last_event_type = etype
             if etype in ("response.failed", "response.incomplete"):
                 self.invalidate()
-                response = getattr(server_event, "response", None)
-                detail = getattr(response, "error", None) or getattr(
-                    response, "incomplete_details", None
+                response = event_field(server_event, "response")
+                detail = event_field(response, "error") or event_field(
+                    response, "incomplete_details"
                 )
-                message = getattr(detail, "message", None) or getattr(
-                    detail, "reason", ""
+                code = (
+                    event_field(detail, "code") or event_field(detail, "reason") or ""
                 )
-                raise ResponsesWSError(f"{etype}: {message}", mid_stream=yielded)
+                message = event_field(detail, "message") or code
+                raise ResponsesWSError(
+                    f"{etype}: {message}",
+                    mid_stream=yielded,
+                    code=code,
+                    status_code=event_field(detail, "status")
+                    or event_field(server_event, "status"),
+                    raw_event=server_event,
+                    last_event_type=etype,
+                )
             if etype == "error":
-                async for retry_event in self._handle_error_event(
-                    server_event, base_event, items, pairing_fix, delta, yielded
-                ):
-                    yield retry_event
-                return
+                self._handle_error_event(server_event, delta, yielded)
             yielded = True
             yield server_event
             if etype == "response.completed":
                 self._record_completed(server_event, items)
                 return
 
-    async def _handle_error_event(
+    def _handle_error_event(
         self,
         server_event: Any,
-        base_event: dict[str, Any],
-        items: list[dict[str, Any]],
-        pairing_fix: Callable[[list[dict[str, Any]]], list[dict[str, Any]]],
         delta: list[dict[str, Any]] | None,
         yielded: bool,
-    ) -> AsyncIterator[Any]:
-        error = getattr(server_event, "error", None)
-        code = getattr(error, "code", "") or ""
-        message = getattr(error, "message", "") or str(server_event)
-        # A failed turn evicts the referenced response from the server cache.
+    ) -> None:
+        error = event_field(server_event, "error")
+        fields = {
+            key: event_field(error, key) or event_field(server_event, key)
+            for key in ("code", "message", "status")
+        }
+        code = fields["code"] or ""
+        message = fields["message"] or "Responses WebSocket request failed"
         self.invalidate()
-        if delta is not None and code == "previous_response_not_found" and not yielded:
-            logger.warning("Responses WS cache miss, resending full input")
-            async for event in self._run_turn(base_event, items, pairing_fix, None):
-                yield event
-            return
-        raise ResponsesWSError(f"{code}: {message}", mid_stream=yielded)
+        raise ResponsesWSError(
+            f"{code}: {message}",
+            mid_stream=yielded,
+            code=code,
+            status_code=fields["status"],
+            raw_event=server_event,
+            last_event_type="error",
+            retire_connection=code == "websocket_connection_limit_reached",
+            cache_miss=delta is not None and code == "previous_response_not_found",
+        )
 
     async def _ensure_connection(self) -> Any:
         if self._connection is not None:
