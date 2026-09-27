@@ -3,6 +3,7 @@
 import copy
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlsplit
 
 from mcp.server.lowlevel import Server
@@ -18,8 +19,9 @@ from kohakuterrarium.api.mcp_delegation import call_delegation, delegation_tools
 from kohakuterrarium.core.backgroundify import PromotionResult
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
-from kohakuterrarium.mcp_server.config import MCPToolsConfig
-from kohakuterrarium.mcp_server.runtime import ToolRuntime
+from kohakuterrarium.mcp_server.config import GlobalToolsConfig, MCPToolsConfig
+from kohakuterrarium.mcp_server.runtime import ToolCatalog, ToolRuntime
+from kohakuterrarium.mcp_server.workspaces import WorkspacePool, WorkspaceRegistry
 
 _JOB_DESCRIPTIONS = {
     "job_status": "Read a retained job, or list this instance's jobs when job_id is omitted.",
@@ -117,13 +119,15 @@ class _HTTPTransport:
 
 
 def create_app(
-    config: MCPToolsConfig,
+    config: MCPToolsConfig | GlobalToolsConfig,
     *,
     secret: str,
     port: int = 8765,
     public_origin: str = "",
     json_response: bool = True,
     llm_factory=None,
+    registry: WorkspaceRegistry | None = None,
+    base_dir: Path | None = None,
 ) -> Starlette:
     """Create one process-lifetime runtime; serve only through its secret path.
 
@@ -157,11 +161,23 @@ def create_app(
             origins.append(public_origin)
     # Validate before constructing the runtime or loading configured modules.
     MCPSecretPath(None, secret=secret)
-    runtime = ToolRuntime(config, llm_factory=llm_factory)
+    pool = (
+        WorkspacePool(config, registry, llm_factory=llm_factory)
+        if registry is not None
+        else None
+    )
+    owner = pool if pool is not None else ToolRuntime(config, llm_factory=llm_factory)
+    catalog = ToolCatalog(config, base_dir or Path.cwd()) if pool is not None else owner
     server = Server(
         config.name,
         instructions=(
-            f"KT instance_id: {runtime.instance_id}\n"
+            f"KT instance_id: {owner.instance_id}\n"
+            + (
+                "Call workspaces to discover names. Every workspace tool requires workspace_id. "
+                "Unknown or expired job/session IDs must never be retried in another workspace. "
+                if pool is not None
+                else ""
+            )
             + (
                 "KT tools and locally registered delegation targets. Creatures may run autonomous triggers. "
                 if config.delegation
@@ -178,10 +194,30 @@ def create_app(
 
     @server.list_tools()
     async def list_tools():
-        return _tool_list(runtime)
+        tools = [tool.model_copy(deep=True) for tool in _tool_list(catalog)]
+        if pool is not None:
+            for tool in tools:
+                params = tool.inputSchema
+                params.setdefault("properties", {})["workspace_id"] = {
+                    "type": "string",
+                    "description": "Registered workspace name returned by workspaces.",
+                }
+                params.setdefault("required", []).append("workspace_id")
+            tools.append(
+                Tool(
+                    name="workspaces",
+                    description="Discover registered default directories without loading their runtimes. No registration or configuration mutations are exposed remotely.",
+                    inputSchema={
+                        "type": "object",
+                        "properties": {},
+                        "additionalProperties": False,
+                    },
+                    annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False),
+                )
+            )
+        return tools
 
-    @server.call_tool()
-    async def call_tool(name, arguments):
+    async def dispatch(runtime, name, arguments):
         args = arguments or {}
         if config.delegation and (name == "delegate" or name.startswith("delegation_")):
             try:
@@ -229,6 +265,45 @@ def create_app(
             result=result,
         )
 
+    @server.call_tool()
+    async def call_tool(name, arguments):
+        args = dict(arguments or {})
+        if pool is None:
+            return await dispatch(owner, name, args)
+        if name == "workspaces":
+            return _reply({"instance_id": pool.instance_id, "workspaces": pool.list()})
+        workspace_id = args.pop("workspace_id", None)
+        if not isinstance(workspace_id, str) or not workspace_id:
+            return _reply({"error": "workspace_id is required; call workspaces first"})
+        try:
+            async with pool.use(workspace_id) as runtime:
+                result = await dispatch(runtime, name, args)
+                if result.structuredContent is not None:
+                    result.structuredContent.update(
+                        workspace_id=workspace_id,
+                        instance_id=runtime.instance_id,
+                        server_instance_id=pool.instance_id,
+                    )
+                    if result.isError:
+                        result.structuredContent["recovery_hint"] = (
+                            "Handles belong to their original workspace runtime and expire on restart/removal. Never replay side effects automatically."
+                        )
+                    result.content[0] = TextContent(
+                        type="text",
+                        text=json.dumps(
+                            result.structuredContent, ensure_ascii=False, default=str
+                        ),
+                    )
+                return result
+        except (ValueError, RuntimeError, OSError) as exc:
+            return _reply(
+                {
+                    "workspace_id": workspace_id,
+                    "server_instance_id": pool.instance_id,
+                    "error": str(exc),
+                }
+            )
+
     manager = StreamableHTTPSessionManager(
         server,
         json_response=json_response,
@@ -240,7 +315,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app):
-        async with runtime, manager.run():
+        async with owner, manager.run():
             yield
 
     app = Starlette(
@@ -250,5 +325,6 @@ def create_app(
         middleware=[Middleware(MCPSecretPath, secret=secret)],
         lifespan=lifespan,
     )
-    app.state.mcp_instance_id = runtime.instance_id
+    app.state.mcp_instance_id = owner.instance_id
+    app.state.workspace_pool = pool
     return app

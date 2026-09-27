@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import socket
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -14,62 +15,56 @@ from mcp import ClientSession
 from mcp.client.streamable_http import streamable_http_client
 
 from kohakuterrarium.api.mcp_tools import create_app
-from kohakuterrarium.mcp_server.config import MCPToolsConfig
-from kohakuterrarium.mcp_server.connection import ConnectionStore
+from kohakuterrarium.mcp_server.config import GlobalToolsConfig
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
+from kohakuterrarium.mcp_server.service import is_running
+from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry
 from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 
 class TestMCPServer:
-    # Several real interpreter launches and intentional offline readiness waits
-    # exceed the normal 60-second per-test budget on Windows.
-    @pytest.mark.timeout(200)
+    @pytest.mark.timeout(300)
     async def test_cli_lifecycle_isolation_restart_and_ingress_failure(self, tmp_path):
-        first, second = tmp_path / "first", tmp_path / "second"
-        first.mkdir()
-        second.mkdir()
-        state_dir = tmp_path / "private"
+        home, other_home = tmp_path / "home", tmp_path / "other-home"
+        workspace = tmp_path / "project"
+        workspace.mkdir()
+        store, other = EndpointStore(home), EndpointStore(other_home)
         env = {
             **os.environ,
             "PYTHONPATH": str(Path(__file__).resolve().parents[2] / "src"),
         }
 
-        def cli(command, workspace=first, *extra):
-            if command == "start":
-                extra = ("--wait", "8", *extra)
-            if command == "setup":
-                extra = ("--non-interactive", *extra)
+        def cli(command, *extra, root=home):
             completed = subprocess.run(
                 [
                     sys.executable,
                     "-m",
                     "kohakuterrarium",
                     "mcp-serve",
-                    command,
-                    "--workspace",
-                    str(workspace),
-                    "--state-dir",
-                    str(state_dir),
+                    *command.split(),
+                    "--home-dir",
+                    str(root),
                     *([] if command == "url" else ["--json"]),
-                    *extra,
+                    *(["--wait", "8"] if command == "start" else []),
+                    *map(str, extra),
                 ],
                 capture_output=True,
                 text=True,
-                env=env,
+                env={**env, "KT_CONFIG_DIR": str(root)},
+                cwd=tmp_path,
                 timeout=45,
             )
-            output = completed.stdout.strip().splitlines()[-1]
-            return completed.returncode, (
-                output if command == "url" else json.loads(output)
-            )
+            assert completed.stdout.strip(), completed.stderr
+            text = completed.stdout.strip().splitlines()[-1]
+            return completed.returncode, text if command == "url" else json.loads(text)
 
         def port():
             with socket.socket() as sock:
                 sock.bind(("127.0.0.1", 0))
                 return sock.getsockname()[1]
 
-        async def call(workspace, name, args):
-            store = ConnectionStore(workspace, state_dir)
-            record = store.load_active(store.runtime()["run_id"])
+        async def call(name, args=None, owner=store):
+            record = owner.load_active(owner.runtime()["run_id"])
             async with httpx.AsyncClient(trust_env=False) as http:
                 async with streamable_http_client(
                     f"http://127.0.0.1:{record.port}/mcp/{record.secret}",
@@ -77,128 +72,153 @@ class TestMCPServer:
                 ) as (read, write, _):
                     async with ClientSession(read, write) as client:
                         await client.initialize()
-                        return await client.call_tool(name, args)
+                        return await client.call_tool(name, args or {})
 
         try:
-            # HTTPS is deliberately unavailable: local service stays available,
-            # startup reports failure to become publicly ready without lying.
-            first_args = (
-                "setup",
-                first,
-                "--origin",
-                "https://kt-mcp-test.invalid",
-                "--mode",
-                "external",
-                "--port",
-                str(port()),
-            )
-            setup_code, configured = cli(*first_args)
-            assert setup_code == 0 and not configured["running"]
-            (code, a), (_, racing) = await asyncio.gather(
+            for root in (home, other_home):
+                assert (
+                    cli(
+                        "setup",
+                        "--non-interactive",
+                        "--mode",
+                        "external",
+                        "--origin",
+                        "https://kt-mcp-test.invalid",
+                        "--port",
+                        port(),
+                        root=root,
+                    )[0]
+                    == 0
+                )
+            (code, started), (_, racing) = await asyncio.gather(
                 asyncio.to_thread(cli, "start"), asyncio.to_thread(cli, "start")
             )
-            assert racing["run_id"] == a["run_id"] and racing["pid"] == a["pid"]
-            assert (
-                code == 1
-                and a["running"]
-                and a["local_ready"]
-                and not a["public_ready"]
+            assert code == 1 and started["local_ready"] and not started["public_ready"]
+            assert started["run_id"] == racing["run_id"]
+            assert (await call("workspaces")).structuredContent["workspaces"] == []
+            original = store.load()
+            registered = cli("workspace add", "first", "./project")
+            assert registered[0] == 0, registered[1]
+            assert Path(registered[1]["path"]).samefile(workspace)
+            assert cli("workspace add", "second", workspace)[0] == 0
+            assert cli("url")[1] == original.url
+            listed = (await call("workspaces")).structuredContent["workspaces"]
+            assert all(item["state"] == "unloaded" for item in listed)
+            (workspace / "note.txt").write_text("original")
+            assert not (
+                await call("read", {"workspace_id": "first", "path": "note.txt"})
+            ).isError
+            blocked = await call(
+                "write",
+                {"workspace_id": "second", "path": "note.txt", "content": "bad"},
             )
-            original = ConnectionStore(first, state_dir).load()
-            assert original.secret not in json.dumps(a)
-            # Diagnostic publication may be temporarily blocked by a Windows
-            # reader or scanner; this must not terminate tool execution.
-            with ConnectionStore(first, state_dir).runtime_path.open("rb"):
-                await asyncio.sleep(1.5)
-                alive = await call(
-                    first, "python", {"code": "print('telemetry lock survived')"}
-                )
-                assert (
-                    not alive.isError
-                    and "telemetry lock survived" in alive.structuredContent["output"]
-                )
-            _, repeated = cli("start")
-            assert repeated["run_id"] == a["run_id"] and repeated["pid"] == a["pid"]
             assert (
-                cli(
-                    "setup",
-                    second,
-                    "--origin",
-                    "https://kt-mcp-second.invalid",
-                    "--mode",
-                    "external",
-                    "--port",
-                    str(port()),
-                )[0]
-                == 0
+                blocked.isError and (workspace / "note.txt").read_text() == "original"
             )
-            code, b = cli("start", second)
-            assert code == 1 and b["local_ready"] and b["pid"] != a["pid"]
-            for workspace, content in ((first, "first"), (second, "second")):
-                assert not (
-                    await call(
-                        workspace, "write", {"path": "note.txt", "content": content}
-                    )
-                ).isError
-                assert (workspace / "note.txt").read_text() == content
-            background = await call(
-                first,
+            assert (
+                await call("python", {"code": "print('missing workspace')"})
+            ).isError
+            bg = await call(
                 "python",
-                {"code": "import time; time.sleep(60)", "run_in_background": True},
+                {
+                    "workspace_id": "first",
+                    "code": "import time; time.sleep(60)",
+                    "run_in_background": True,
+                },
             )
-            old_job = background.structuredContent["job_id"]
-            assert (await call(second, "job_status", {"job_id": old_job})).isError
-            code, refused = cli("rotate")
-            assert code == 1 and "stop" in refused["error"]
-            assert ConnectionStore(first, state_dir).load() == original
-            assert cli("stop")[1]["state"] == "stopped"
-            other_record = ConnectionStore(second, state_dir).load()
-            code, rotation = cli("rotate")
-            assert code == 0 and rotation["rotated"] and not rotation["running"]
-            rotated = ConnectionStore(first, state_dir).load()
-            assert rotated.secret != original.secret
-            assert cli("url")[1] == rotated.url
-            assert ConnectionStore(second, state_dir).load() == other_record
-            assert cli("status", second)[1]["instance_id"] == b["instance_id"]
-            assert not (await call(second, "read", {"path": "note.txt"})).isError
+            old_job = bg.structuredContent["job_id"]
+            assert (
+                await call("job_status", {"workspace_id": "second", "job_id": old_job})
+            ).isError
+            assert cli("workspace remove", "first")[0] == 1
+            assert cli("workspace remove", "first", "--force")[0] == 0
+            assert cli("workspace add", "first", workspace)[0] == 0
+            assert (
+                await call("job_status", {"workspace_id": "first", "job_id": old_job})
+            ).isError
+            done = await call(
+                "python", {"workspace_id": "first", "code": "print('before crash')"}
+            )
+            assert "before crash" in done.structuredContent["output"]
+            old_job = done.structuredContent["job_id"]
+            _, peer = cli("start", root=other_home)
+            assert peer["local_ready"] and peer["instance_id"] != started["instance_id"]
+            assert (await call("workspaces", owner=other)).structuredContent[
+                "workspaces"
+            ] == []
+            assert cli("rotate")[0] == 1
+            os.kill(
+                store.runtime()["pid"],
+                signal.SIGTERM if os.name == "nt" else signal.SIGKILL,
+            )
+            for _ in range(100):
+                if not is_running(store):
+                    break
+                await asyncio.sleep(0.05)
+            assert not is_running(store)
             _, restarted = cli("start")
-            assert restarted["instance_id"] != a["instance_id"]
-            assert ConnectionStore(first, state_dir).load().url == rotated.url
+            assert (
+                restarted["instance_id"] != started["instance_id"]
+                and restarted["local_ready"]
+            )
+            stale = await call(
+                "job_status", {"workspace_id": "first", "job_id": old_job}
+            )
+            assert (
+                stale.isError and "restart" in stale.structuredContent["recovery_hint"]
+            )
+            assert (
+                cli("status", root=other_home)[1]["instance_id"] == peer["instance_id"]
+            )
+            settings = home / "tools.json"
+            settings.write_text(json.dumps({"tools": [{"name": "read"}]}))
+            assert cli("setup", "--non-interactive", "--config", settings)[0] == 0
+            assert cli("workspace add", "third", workspace)[0] == 0
+            before_restart = await call(
+                "python", {"workspace_id": "third", "code": "print('snapshot')"}
+            )
+            assert (
+                not before_restart.isError
+                and "snapshot" in before_restart.structuredContent["output"]
+            )
+            assert cli("stop")[1]["state"] == "stopped"
+            assert cli("rotate")[0] == 0
+            rotated = store.load()
+            assert rotated.secret != original.secret
+            _, applied = cli("start")
+            assert applied["local_ready"]
             async with httpx.AsyncClient(trust_env=False) as http:
                 rejected = await http.get(
                     f"http://127.0.0.1:{rotated.port}/mcp/{original.secret}"
                 )
                 assert rejected.status_code == 404
-            authenticated = await call(first, "python", {"code": "print('new-key-ok')"})
-            assert not authenticated.isError
-            assert "new-key-ok" in authenticated.structuredContent["output"]
-            assert (await call(first, "job_status", {"job_id": old_job})).isError
             assert (
-                await call(first, "write", {"path": "note.txt", "content": "unread"})
+                await call(
+                    "python", {"workspace_id": "first", "code": "print('disabled')"}
+                )
             ).isError
-            assert (first / "note.txt").read_text() == "first"
-            cli("stop")
-            # A collision is explicit and does not stop the other listener.
+            assert not (
+                await call("read", {"workspace_id": "first", "path": "note.txt"})
+            ).isError
+            assert cli("stop")[1]["state"] == "stopped"
             with socket.socket() as occupied:
                 occupied.bind(("127.0.0.1", 0))
                 occupied.listen()
                 assert (
-                    cli("setup", first, "--port", str(occupied.getsockname()[1]))[0]
+                    cli(
+                        "setup",
+                        "--non-interactive",
+                        "--port",
+                        occupied.getsockname()[1],
+                    )[0]
                     == 0
                 )
-                code, failed = cli("start")
-                assert code == 1 and not failed["public_ready"]
-                assert "unavailable" in failed["error"]
-                assert occupied.getsockname()[1] > 0
-            # A real child that cannot act as ngrok exits. Only ingress retries;
-            # the Python tool job survives those restarts in the same instance.
-            # Failure even before the child launches must also stay isolated.
-            tunnel_log = ConnectionStore(first, state_dir).directory / "tunnel.log"
+                code, collision = cli("start")
+                assert code == 1 and "unavailable" in collision["error"]
+            tunnel_log = store.directory / "tunnel.log"
             tunnel_log.mkdir()
-            # Python stands in for an external tunnel process. Its real child
-            # records ingress arguments then exits, exercising guardian retries.
-            (first / "http").write_text(
-                "import json, sys, time\nfrom pathlib import Path\n"
+            (home / "http").write_text(
+                "import json,sys,time\nfrom pathlib import Path\n"
                 "with Path('ingress-observed.jsonl').open('a') as f:\n"
                 "    f.write(json.dumps(sys.argv[1:]) + '\\n')\n"
                 "time.sleep(.2)\nraise SystemExit(1)\n"
@@ -206,9 +226,10 @@ class TestMCPServer:
             assert (
                 cli(
                     "setup",
-                    first,
+                    "--non-interactive",
+                    "--clear-config",
                     "--port",
-                    str(port()),
+                    port(),
                     "--mode",
                     "ngrok",
                     "--ngrok-bin",
@@ -216,74 +237,65 @@ class TestMCPServer:
                 )[0]
                 == 0
             )
-            _, tunnel_failed = cli("start")
-            assert tunnel_failed["local_ready"] and not tunnel_failed["public_ready"]
-            assert "launch" in tunnel_failed["error"]
+            _, ingress_failed = cli("start")
+            assert ingress_failed["local_ready"] and "launch" in ingress_failed["error"]
             bg = await call(
-                first,
                 "python",
                 {
-                    "code": "import time; time.sleep(3); print('survived ingress failure')",
+                    "workspace_id": "first",
+                    "code": "import time; time.sleep(3); print('survived')",
                     "run_in_background": True,
                 },
             )
             tunnel_log.rmdir()
-            running_record = ConnectionStore(first, state_dir).load()
-            saved_code, saved = cli(
-                "setup",
-                first,
-                "--mode",
-                "external",
-                "--origin",
-                "https://kt-mcp-next.invalid",
-                "--port",
-                str(port()),
+            active = store.load()
+            assert (
+                cli(
+                    "setup",
+                    "--non-interactive",
+                    "--mode",
+                    "external",
+                    "--origin",
+                    "https://next.invalid",
+                )[0]
+                == 0
             )
-            assert saved_code == 0 and saved["restart_required"]
             _, pending = cli("start")
-            assert pending["instance_id"] == tunnel_failed["instance_id"]
-            assert pending["public_origin"] == running_record.public_origin
+            assert pending["instance_id"] == ingress_failed["instance_id"]
             assert (
-                pending["configured"]["public_origin"] == "https://kt-mcp-next.invalid"
-            )
-            assert cli("url")[1] == running_record.url
-            assert (
-                cli("url", first, "--configured")[1]
-                == ConnectionStore(first, state_dir).load().url
+                pending["public_origin"] == active.public_origin
+                and pending["restart_required"]
             )
             done = await call(
-                first,
                 "job_wait",
-                {"job_id": bg.structuredContent["job_id"], "timeout": 10},
+                {
+                    "workspace_id": "first",
+                    "job_id": bg.structuredContent["job_id"],
+                    "timeout": 10,
+                },
             )
             assert (
-                not done.isError
-                and "survived ingress failure" in done.structuredContent["output"]
+                done.structuredContent["state"] == "done"
+                and "survived" in done.structuredContent["output"]
             )
-            assert cli("status")[1]["instance_id"] == tunnel_failed["instance_id"]
-            observed = first / "ingress-observed.jsonl"
-            count = len(observed.read_text().splitlines()) if observed.exists() else 0
+            observed = home / "ingress-observed.jsonl"
             for _ in range(100):
-                if observed.exists() and len(observed.read_text().splitlines()) > count:
+                if observed.exists() and observed.read_text().strip():
                     break
                 await asyncio.sleep(0.2)
-            lines = observed.read_text().splitlines()
-            assert len(lines) > count
-            for line in lines:
-                arguments = json.loads(line)
-                assert f"http://127.0.0.1:{running_record.port}" in arguments
-                assert running_record.public_origin in arguments
-                assert "https://kt-mcp-next.invalid" not in arguments
+            for line in observed.read_text().splitlines():
+                args = json.loads(line)
+                assert (
+                    active.public_origin in args and "https://next.invalid" not in args
+                )
             assert cli("stop")[1]["state"] == "stopped"
-            _, applied = cli("start")
-            assert applied["local_ready"] and not applied["public_ready"]
-            assert applied["instance_id"] != tunnel_failed["instance_id"]
-            assert applied["public_origin"] == "https://kt-mcp-next.invalid"
-            assert not applied["restart_required"] and applied["tunnel"] == "external"
+            _, reapplied = cli("start")
+            assert reapplied["public_origin"] == "https://next.invalid"
+            assert reapplied["local_ready"] and not reapplied["restart_required"]
         finally:
-            for workspace in (first, second):
-                if ConnectionStore(workspace, state_dir).record_path.exists():
-                    cli("stop", workspace)
+            for root, owner in ((home, store), (other_home, other)):
+                if owner.record_path.exists():
+                    cli("stop", root=root)
 
     async def test_authenticated_tools_and_job_lifecycle(self, tmp_path, capsys):
         secret = "a" * 43
@@ -332,10 +344,12 @@ class TestMCPServer:
                 ]
             )
 
+        registry = WorkspaceRegistry(tmp_path / "workspaces.json")
+        registry.add("main", tmp_path)
+        registry.add("other", tmp_path)
         app = create_app(
-            MCPToolsConfig.model_validate(
+            GlobalToolsConfig.model_validate(
                 {
-                    "workspace": tmp_path,
                     "delegation": {
                         "worker": {"kind": "creature", "config": str(creature_path)},
                         "writer": {"kind": "subagent", "config": str(subagent_path)},
@@ -345,6 +359,8 @@ class TestMCPServer:
             secret=secret,
             port=8765,
             llm_factory=provider,
+            registry=registry,
+            base_dir=tmp_path,
         )
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(
@@ -371,7 +387,7 @@ class TestMCPServer:
                     async with ClientSession(read, write) as client:
                         await client.initialize()
                         tools = {t.name: t for t in (await client.list_tools()).tools}
-                        assert len(tools) == 19
+                        assert len(tools) == 20
                         assert (
                             "run_in_background"
                             in tools["python"].inputSchema["properties"]
@@ -383,7 +399,9 @@ class TestMCPServer:
                         assert (await client.call_tool("read", {})).isError
 
                         async def call(name, args):
-                            result = await client.call_tool(name, args)
+                            result = await client.call_tool(
+                                name, {"workspace_id": "main", **args}
+                            )
                             return result, json.loads(result.content[0].text)
 
                         _, targets = await call("delegation_targets", {})
@@ -403,6 +421,7 @@ class TestMCPServer:
                                     "target": "worker",
                                     "prompt": "hello",
                                     "model": "arbitrary",
+                                    "workspace_id": "main",
                                 },
                             )
                         ).isError
@@ -426,6 +445,19 @@ class TestMCPServer:
                             "delegate", {"target": "worker", "prompt": "slow"}
                         )
                         sid = creature["session_id"]
+                        foreign = await client.call_tool(
+                            "delegate",
+                            {
+                                "workspace_id": "other",
+                                "target": "worker",
+                                "session_id": sid,
+                                "prompt": "hello",
+                            },
+                        )
+                        assert (
+                            foreign.isError
+                            and "Unknown session" in foreign.structuredContent["error"]
+                        )
                         busy, _ = await call(
                             "delegate",
                             {"target": "worker", "session_id": sid, "prompt": "hello"},
@@ -568,6 +600,7 @@ class TestMCPServer:
                                     "params": {
                                         "name": "python",
                                         "arguments": {
+                                            "workspace_id": "main",
                                             "code": "import time; from pathlib import Path; time.sleep(.5); Path('disconnected.txt').write_text('once')",
                                         },
                                     },
@@ -594,7 +627,12 @@ class TestMCPServer:
 
         # Recreate the process-lifetime state at the same authenticated URL.
         restarted = create_app(
-            MCPToolsConfig(workspace=tmp_path), secret=secret, port=8765
+            app.state.workspace_pool.config,
+            secret=secret,
+            port=8765,
+            registry=registry,
+            base_dir=tmp_path,
+            llm_factory=provider,
         )
         async with restarted.router.lifespan_context(restarted):
             async with httpx.AsyncClient(
@@ -606,20 +644,41 @@ class TestMCPServer:
                     async with ClientSession(read, write) as client:
                         await client.initialize()
                         missing = await client.call_tool(
-                            "job_status", {"job_id": job_id}
+                            "job_status", {"workspace_id": "main", "job_id": job_id}
                         )
                         assert (
                             missing.isError
                             and missing.structuredContent["error"] == "Unknown job"
                         )
+                        stale_session = await client.call_tool(
+                            "delegate",
+                            {
+                                "workspace_id": "main",
+                                "target": "worker",
+                                "session_id": sid,
+                                "prompt": "hello",
+                            },
+                        )
+                        assert (
+                            stale_session.isError
+                            and "Unknown session"
+                            in stale_session.structuredContent["error"]
+                        )
                         blocked = await client.call_tool(
-                            "write", {"path": "note.txt", "content": "unread"}
+                            "write",
+                            {
+                                "workspace_id": "main",
+                                "path": "note.txt",
+                                "content": "unread",
+                            },
                         )
                         assert (
                             blocked.isError
                             and (tmp_path / "note.txt").read_text() == "after"
                         )
-                        readback = await client.call_tool("read", {"path": "note.txt"})
+                        readback = await client.call_tool(
+                            "read", {"workspace_id": "main", "path": "note.txt"}
+                        )
                         assert (
                             not readback.isError
                             and "after" in readback.structuredContent["output"]

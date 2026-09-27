@@ -9,7 +9,8 @@ from PIL import Image
 from kohakuterrarium.api.mcp_tools import _job_reply, _reply, create_app
 from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.llm.message import ImagePart
-from kohakuterrarium.mcp_server.config import MCPToolsConfig
+from kohakuterrarium.mcp_server.config import MCPToolsConfig, GlobalToolsConfig
+from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry
 
 
 def test_image_and_error_delivery():
@@ -22,6 +23,60 @@ def test_image_and_error_delivery():
     assert json.loads(reply.content[0].text)["job_id"] == "image"
     assert _reply({"exit_code": 1}).isError
     assert _reply({"error": "denied"}).isError
+
+
+async def test_unified_endpoint_requires_workspace_and_discovers_without_loading(
+    tmp_path,
+):
+    registry = WorkspaceRegistry(tmp_path / "registry.json")
+    app = create_app(
+        GlobalToolsConfig(), secret="a" * 43, registry=registry, base_dir=tmp_path
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1:8765"
+        ) as http:
+
+            async def rpc(method, params):
+                response = await http.post(
+                    "/mcp/" + "a" * 43,
+                    headers={"accept": "application/json, text/event-stream"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": method,
+                        "params": params,
+                    },
+                )
+                return response.json()["result"]
+
+            tools = (await rpc("tools/list", {}))["tools"]
+            assert all(
+                "workspace_id" in t["inputSchema"]["required"]
+                for t in tools
+                if t["name"] != "workspaces"
+            )
+            empty = await rpc("tools/call", {"name": "workspaces", "arguments": {}})
+            assert empty["structuredContent"]["workspaces"] == []
+            registry.add("project", tmp_path)
+            listed = await rpc("tools/call", {"name": "workspaces", "arguments": {}})
+            assert listed["structuredContent"]["workspaces"][0]["state"] == "unloaded"
+            missing = await rpc(
+                "tools/call", {"name": "python", "arguments": {"code": "print('bad')"}}
+            )
+            assert missing["isError"]
+            good = await rpc(
+                "tools/call",
+                {
+                    "name": "python",
+                    "arguments": {"workspace_id": "project", "code": "print('ok')"},
+                },
+            )
+            assert (
+                not good["isError"]
+                and good["structuredContent"]["output"].strip() == "ok"
+            )
+            assert (await rpc("tools/list", {}))["tools"] == tools
 
 
 def test_local_image_delivery(tmp_path):

@@ -4,8 +4,24 @@ Dispatch ``python -m kohakuterrarium`` to the Briefcase launcher when the
 embedded runtime has no CLI arguments; otherwise run the normal CLI.
 """
 
+import argparse
+import os
 import sys
 from pathlib import Path
+
+
+def _configure_mcp_environment(argv: list[str]) -> None:
+    """Select the MCP configuration root before framework logging initializes."""
+    if not argv or argv[0] != "mcp-serve":
+        return
+    parser = argparse.ArgumentParser(add_help=False, allow_abbrev=False)
+    parser.add_argument("--home-dir", type=Path)
+    args, _ = parser.parse_known_args(argv[1:])
+    if args.home_dir is not None:
+        os.environ["KT_CONFIG_DIR"] = str(args.home_dir.expanduser().resolve())
+
+
+_configure_mcp_environment(sys.argv[1:])
 
 from kohakuterrarium.utils.fd_limit import raise_fd_limit
 from kohakuterrarium.utils.logging import configure_utf8_stdio

@@ -132,6 +132,31 @@ class ConnectionStore:
             raise ValueError("No saved connection; run kt mcp-serve setup first")
         return record
 
+    @property
+    def server_arguments(self):
+        return [
+            "--workspace",
+            self.workspace,
+            "--state-dir",
+            str(self.directory.parent),
+        ]
+
+    @property
+    def process_directory(self):
+        return self.workspace
+
+    def owns(self, record):
+        return record.workspace == self.workspace
+
+    def validate(self, record):
+        validate_dependencies(record)
+
+    def configuration_summary(self, record):
+        return record.summary()
+
+    def active_summary(self, run_id):
+        return self.load_active(run_id).summary()
+
     def read_configuration(self) -> tuple[Connection | None, str | None]:
         """Read settings and their conflict token from the same atomic file version."""
         try:

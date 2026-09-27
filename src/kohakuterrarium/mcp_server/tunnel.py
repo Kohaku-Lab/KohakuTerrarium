@@ -7,7 +7,7 @@ import sys
 import threading
 from pathlib import Path
 
-from kohakuterrarium.mcp_server.connection import ConnectionStore
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
 
 
 def ngrok_command(record) -> list[str]:
@@ -59,11 +59,10 @@ def run_owned(command: list[str], parent_input, *, env=None) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workspace", type=Path, required=True)
-    parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--home-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
-    record = ConnectionStore(args.workspace, args.state_dir).load_active(args.run_id)
+    record = EndpointStore(args.home_dir).load_active(args.run_id)
     if record.tunnel != "ngrok":
         raise ValueError("External entry points have no owned tunnel process")
     env = dict(os.environ)

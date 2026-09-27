@@ -46,26 +46,17 @@ class DelegationTarget(BaseModel):
     description: str = ""
 
 
-class MCPToolsConfig(BaseModel):
+class GlobalToolsConfig(BaseModel):
     """No model, triggers, prompt, compact, or AgentConfig inheritance."""
 
     model_config = ConfigDict(extra="forbid")
     name: str = "KT tools"
-    workspace: Path
     pwd_guard: Literal["warn", "block", "off"] = "warn"
     tools: list[ToolSpec] = Field(
         default_factory=lambda: [ToolSpec(name=n) for n in SUPPORTED_TOOLS]
     )
     plugins: list[PluginSpec] = Field(default_factory=list)
     delegation: dict[str, DelegationTarget] = Field(default_factory=dict)
-
-    @field_validator("workspace")
-    @classmethod
-    def existing_directory(cls, value: Path) -> Path:
-        value = value.resolve()
-        if not value.is_dir():
-            raise ValueError("workspace must be an existing directory")
-        return value
 
     @field_validator("tools")
     @classmethod
@@ -82,6 +73,39 @@ class MCPToolsConfig(BaseModel):
                 "Delegation target names must be nonempty without surrounding whitespace"
             )
         return values
+
+
+class MCPToolsConfig(GlobalToolsConfig):
+    """Execution settings bound to one registered default directory."""
+
+    workspace: Path
+
+    @field_validator("workspace")
+    @classmethod
+    def existing_directory(cls, value: Path) -> Path:
+        value = value.resolve()
+        if not value.is_dir():
+            raise ValueError("workspace must be an existing directory")
+        return value
+
+
+def load_global_config(path: Path) -> GlobalToolsConfig:
+    """Read global tool settings, resolving module and target paths at the file."""
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or "workspace" in data:
+        raise ValueError("Global MCP configuration must be an object without workspace")
+    config = GlobalToolsConfig.model_validate(data)
+    for target in config.delegation.values():
+        if not target.config.startswith("@"):
+            target.config = str(
+                (path.resolve().parent / Path(target.config).expanduser()).resolve()
+            )
+    for plugin in config.plugins:
+        if plugin.module and not plugin.module.startswith("@"):
+            plugin.module = str(
+                (path.resolve().parent / Path(plugin.module).expanduser()).resolve()
+            )
+    return config
 
 
 def load_config(path: Path) -> MCPToolsConfig:

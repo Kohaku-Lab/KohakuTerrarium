@@ -9,7 +9,6 @@ from contextlib import contextmanager
 
 from kohakuterrarium.mcp_server.connection import (
     ConnectionStore,
-    validate_dependencies,
     write_json,
 )
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
@@ -67,11 +66,11 @@ def status(store: ConnectionStore) -> dict:
         )
     elif snapshot.get("updated_at") and time.time() - snapshot["updated_at"] > 30:
         snapshot.update(state="unresponsive", public_ready=False)
-    configured = record.summary()
+    configured = store.configuration_summary(record)
     active = None
     if running:
         try:
-            active = store.load_active(snapshot.get("run_id", "")).summary()
+            active = store.active_summary(snapshot.get("run_id", ""))
         except ValueError:
             snapshot.update(
                 state="unresponsive",
@@ -91,7 +90,11 @@ def status(store: ConnectionStore) -> dict:
     return {
         **snapshot,
         "running": running,
-        "workspace": record.workspace,
+        **(
+            {"workspace": record.workspace}
+            if hasattr(record, "workspace")
+            else {"home_dir": record.home_dir}
+        ),
         "public_origin": effective["public_origin"] if effective else None,
         "port": effective["port"] if effective else None,
         "tunnel": effective["tunnel"] if effective else None,
@@ -128,7 +131,11 @@ def rotate(store: ConnectionStore) -> dict:
                 "state": "stopped",
                 "running": False,
                 "rotated": True,
-                "workspace": store.workspace,
+                **(
+                    {"workspace": record.workspace}
+                    if hasattr(record, "workspace")
+                    else {"home_dir": record.home_dir}
+                ),
             }
         finally:
             lock.release()
@@ -141,7 +148,7 @@ def start(store: ConnectionStore, *, wait: float = 30) -> dict:
         if is_running(store):
             return status(store)
         record = store.load()
-        validate_dependencies(record)
+        store.validate(record)
         run_id = secrets.token_hex(16)
         store.save_active(run_id, record)
         write_json(
@@ -162,14 +169,19 @@ def start(store: ConnectionStore, *, wait: float = 30) -> dict:
                     sys.executable,
                     "-m",
                     "kohakuterrarium.serving.mcp",
-                    "--workspace",
-                    store.workspace,
-                    "--state-dir",
-                    str(store.directory.parent),
+                    *store.server_arguments,
                     "--run-id",
                     run_id,
                 ],
-                cwd=store.workspace,
+                cwd=store.process_directory,
+                env={
+                    **os.environ,
+                    **(
+                        {"KT_CONFIG_DIR": str(store.home_dir)}
+                        if hasattr(store, "home_dir")
+                        else {}
+                    ),
+                },
                 stdin=subprocess.DEVNULL,
                 stdout=log,
                 stderr=log,

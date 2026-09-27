@@ -47,20 +47,19 @@ _UNSUPPORTED_HOOKS = (
 )
 
 
-class ToolRuntime:
-    """Own direct tools and explicitly registered delegates for one server."""
+class ToolCatalog:
+    """Validate configured modules and expose their workspace-independent schemas."""
 
     def __init__(
         self,
-        config: MCPToolsConfig,
+        config,
+        base_dir,
         *,
         plugins: list[BasePlugin] = (),
-        llm_factory=None,
     ):
         self.config = config
-        self.instance_id = uuid.uuid4().hex
         self.registry = Registry()
-        loader = ModuleLoader(config.workspace)
+        loader = ModuleLoader(base_dir)
         self.plugins = init_plugins(
             [p.model_dump(by_alias=True, exclude_none=True) for p in config.plugins],
             loader,
@@ -98,6 +97,23 @@ class ToolRuntime:
                     f"Unsupported options for {spec.name}: {sorted(unknown)}"
                 )
             self.registry.register_tool(tool)
+
+    def schemas(self):
+        return build_tool_schemas(self.registry, tool_doc_mode="full")
+
+
+class ToolRuntime(ToolCatalog):
+    """Own direct tools and explicitly registered delegates for one workspace."""
+
+    def __init__(
+        self,
+        config: MCPToolsConfig,
+        *,
+        plugins: list[BasePlugin] = (),
+        llm_factory=None,
+    ):
+        super().__init__(config, config.workspace, plugins=plugins)
+        self.instance_id = uuid.uuid4().hex
         context = ToolContext(
             agent_name=config.name,
             session=None,

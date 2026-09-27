@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from kohakuterrarium.mcp_server.connection import (
     Connection,
     ConnectionStore,
-    validate_dependencies,
     write_json,
 )
 from kohakuterrarium.mcp_server.service import is_running, lifecycle_command, status
@@ -24,7 +23,7 @@ class SetupSession:
 
     def prepare(self, **options) -> Connection:
         candidate = self.store.build(self.original, **options)
-        validate_dependencies(candidate)
+        self.store.validate(candidate)
         return candidate
 
     def save(self, candidate: Connection) -> dict:
@@ -34,7 +33,7 @@ class SetupSession:
                 raise ValueError(
                     "Configuration changed in another command; run setup again"
                 )
-            if candidate.workspace != self.store.workspace or (
+            if not self.store.owns(candidate) or (
                 self.original and candidate.secret != self.original.secret
             ):
                 raise ValueError(
@@ -44,7 +43,7 @@ class SetupSession:
             # Never let a new CLI silently change their running ingress.
             if is_running(self.store):
                 self.store.load_active(self.store.runtime().get("run_id", ""))
-            validate_dependencies(candidate)
+            self.store.validate(candidate)
             write_json(self.store.record_path, candidate.model_dump())
             current = status(self.store)
             return {

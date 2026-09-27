@@ -3,12 +3,40 @@
 import argparse
 import json
 import io
+import os
+import subprocess
+import sys
 
 import pytest
 
 from kohakuterrarium.cli.mcp_serve import add_mcp_serve_subparser, mcp_serve_cli
-from kohakuterrarium.mcp_server.connection import ConnectionStore
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.utils.file_lock import FileLock
+
+
+def test_home_override_precedes_framework_logging(tmp_path):
+    old, target = tmp_path / "inherited", tmp_path / "target"
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "kohakuterrarium",
+            "mcp-serve",
+            "workspace",
+            "list",
+            "--home-dir",
+            str(target),
+            "--json",
+        ],
+        env={**os.environ, "KT_CONFIG_DIR": str(old)},
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["workspaces"] == []
+    assert not list(old.rglob("*.log")), "bootstrap logged into another environment"
+    assert list(target.rglob("*.log"))
 
 
 def test_json_status_of_unconfigured_workspace(tmp_path, capsys):
@@ -18,9 +46,7 @@ def test_json_status_of_unconfigured_workspace(tmp_path, capsys):
         [
             "mcp-serve",
             "status",
-            "--workspace",
-            str(tmp_path),
-            "--state-dir",
+            "--home-dir",
             str(tmp_path / "state"),
             "--json",
         ]
@@ -32,7 +58,7 @@ def test_json_status_of_unconfigured_workspace(tmp_path, capsys):
 def test_setup_script_contract_and_removed_start_flags(tmp_path, capsys):
     parser = argparse.ArgumentParser()
     add_mcp_serve_subparser(parser.add_subparsers())
-    common = ["--workspace", str(tmp_path), "--state-dir", str(tmp_path / "state")]
+    common = ["--home-dir", str(tmp_path / "state")]
     args = parser.parse_args(
         [
             "mcp-serve",
@@ -64,9 +90,7 @@ def test_setup_non_tty_missing_input_never_prompts(tmp_path, monkeypatch, capsys
         [
             "mcp-serve",
             "setup",
-            "--workspace",
-            str(tmp_path),
-            "--state-dir",
+            "--home-dir",
             str(tmp_path / "state"),
             "--json",
         ]
@@ -80,7 +104,7 @@ def test_rotate_is_explicit_noninteractive_and_never_prints_credentials(
     tmp_path, monkeypatch, capsys, json_output
 ):
     monkeypatch.setattr("sys.stdin", io.StringIO(""))
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "state")
     original = store.configure(public_origin="https://example.com", tunnel="external")
     parser = argparse.ArgumentParser()
     add_mcp_serve_subparser(parser.add_subparsers())
@@ -88,9 +112,7 @@ def test_rotate_is_explicit_noninteractive_and_never_prints_credentials(
         [
             "mcp-serve",
             "rotate",
-            "--workspace",
-            str(tmp_path),
-            "--state-dir",
+            "--home-dir",
             str(tmp_path / "state"),
             *(["--json"] if json_output else []),
         ]

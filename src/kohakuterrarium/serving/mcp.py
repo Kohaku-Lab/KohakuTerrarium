@@ -16,12 +16,9 @@ import uvicorn
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from kohakuterrarium.api.mcp_tools import create_app
-from kohakuterrarium.mcp_server.config import MCPToolsConfig, load_config
-from kohakuterrarium.mcp_server.connection import (
-    ConnectionStore,
-    workspace_identity,
-    write_json,
-)
+from kohakuterrarium.mcp_server.connection import write_json
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
+from kohakuterrarium.mcp_server.management import serve_management
 from kohakuterrarium.utils.file_lock import FileLockBusy
 
 logger = logging.getLogger(__name__)
@@ -65,7 +62,7 @@ async def probe_public(record, instance_id: str) -> tuple[bool, str | None]:
         return False, "Public endpoint unavailable or not an MCP JSON response"
 
 
-def _stop_requested(store: ConnectionStore, run_id: str) -> bool:
+def _stop_requested(store: EndpointStore, run_id: str) -> bool:
     try:
         return (
             json.loads(store.stop_path.read_text(encoding="utf-8")).get("run_id")
@@ -75,7 +72,7 @@ def _stop_requested(store: ConnectionStore, run_id: str) -> bool:
         return False
 
 
-def _start_tunnel(store: ConnectionStore, run_id: str):
+def _start_tunnel(store: EndpointStore, run_id: str):
     fd = os.open(
         store.directory / "tunnel.log", os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600
     )
@@ -85,10 +82,7 @@ def _start_tunnel(store: ConnectionStore, run_id: str):
                 sys.executable,
                 "-m",
                 "kohakuterrarium.mcp_server.tunnel",
-                "--workspace",
-                store.workspace,
-                "--state-dir",
-                str(store.directory.parent),
+                *store.server_arguments,
                 "--run-id",
                 run_id,
             ],
@@ -179,7 +173,7 @@ async def _monitor(store, record, server, serving, snapshot):
             await asyncio.to_thread(tunnel.wait, 10)
 
 
-async def serve(store: ConnectionStore, run_id: str) -> None:
+async def serve(store: EndpointStore, run_id: str) -> None:
     record = store.load_active(run_id)
     snapshot = {
         "run_id": run_id,
@@ -191,7 +185,7 @@ async def serve(store: ConnectionStore, run_id: str) -> None:
         "updated_at": time.time(),
         "tunnel_pid": None,
     }
-    serving = server = None
+    serving = server = management = None
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         if os.name == "nt":
@@ -205,18 +199,14 @@ async def serve(store: ConnectionStore, run_id: str) -> None:
                 f"Local port {record.port} is unavailable; no alternate port was selected"
             ) from exc
         sock.listen()
-        config = (
-            load_config(Path(record.tools_config))
-            if record.tools_config
-            else MCPToolsConfig(workspace=Path(record.workspace))
-        )
-        if workspace_identity(config.workspace) != record.workspace:
-            raise ValueError("Tool configuration belongs to a different workspace")
+        config = store.active_tools(run_id)
         app = create_app(
             config,
             secret=record.secret,
             port=record.port,
             public_origin=record.public_origin,
+            registry=store.registry,
+            base_dir=store.home_dir,
         )
         snapshot["instance_id"] = app.state.mcp_instance_id
         logging.getLogger("httpx").setLevel(logging.WARNING)
@@ -231,6 +221,9 @@ async def serve(store: ConnectionStore, run_id: str) -> None:
             )
         )
         serving = asyncio.create_task(server.serve(sockets=[sock]))
+        management = asyncio.create_task(
+            serve_management(store, run_id, app.state.workspace_pool)
+        )
         await _monitor(store, record, server, serving, snapshot)
         if serving.done():
             await serving
@@ -241,6 +234,9 @@ async def serve(store: ConnectionStore, run_id: str) -> None:
             state="failed", error=str(exc).replace(record.secret, "<redacted>")
         )
     finally:
+        if management is not None:
+            management.cancel()
+            await asyncio.gather(management, return_exceptions=True)
         if server is not None:
             server.should_exit = True
         if serving is not None:
@@ -259,11 +255,11 @@ async def serve(store: ConnectionStore, run_id: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--workspace", type=Path, required=True)
-    parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--home-dir", type=Path, required=True)
     parser.add_argument("--run-id", required=True)
     args = parser.parse_args()
-    store = ConnectionStore(args.workspace, args.state_dir)
+    os.environ["KT_CONFIG_DIR"] = str(args.home_dir.resolve())
+    store = EndpointStore(args.home_dir)
     try:
         with store.instance_lock:
             write_json(

@@ -39,7 +39,7 @@ def _path_prompt(label, current):
 
 def _wizard(store, original, options):
     defaults = original.summary() if original else {}
-    print(f"Workspace: {store.workspace}")
+    print(f"Configuration environment: {store.process_directory}")
     print("ngrok: KT manages the tunnel; external: you maintain the HTTPS entry.")
     mode = _prompt(
         "Mode (ngrok/external)", options["tunnel"] or defaults.get("tunnel", "ngrok")
@@ -127,7 +127,7 @@ def setup_cli(args, store) -> int:
     if args.json:
         print(json.dumps(result, ensure_ascii=False))
     else:
-        print(f"MCP configuration saved for {store.workspace}.")
+        print(f"MCP configuration saved for {store.process_directory}.")
         print(
             f"Mode: {candidate.tunnel}; origin: {candidate.public_origin}; local port: {candidate.port}"
         )

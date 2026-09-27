@@ -7,7 +7,7 @@ import os
 import pytest
 
 from kohakuterrarium.cli.mcp_serve import add_mcp_serve_subparser, mcp_serve_cli
-from kohakuterrarium.mcp_server.connection import ConnectionStore
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.setup import SetupSession
 
 
@@ -17,7 +17,7 @@ class TerminalInput(io.StringIO):
 
 
 def test_wizard_confirmation_cancel_and_eof(tmp_path, monkeypatch, capsys):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "state")
     original = store.configure(public_origin="https://old.example", tunnel="external")
     before = store.record_path.read_bytes()
     parser = argparse.ArgumentParser()
@@ -26,9 +26,7 @@ def test_wizard_confirmation_cancel_and_eof(tmp_path, monkeypatch, capsys):
         [
             "mcp-serve",
             "setup",
-            "--workspace",
-            str(tmp_path),
-            "--state-dir",
+            "--home-dir",
             str(tmp_path / "state"),
         ]
     )
@@ -50,7 +48,7 @@ def test_wizard_confirmation_cancel_and_eof(tmp_path, monkeypatch, capsys):
 def test_wizard_cannot_overwrite_another_save_during_review(
     tmp_path, monkeypatch, capsys
 ):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "state")
     store.configure(public_origin="https://old.example", tunnel="external")
 
     class RacingTerminal(TerminalInput):
@@ -67,9 +65,7 @@ def test_wizard_cannot_overwrite_another_save_during_review(
         [
             "mcp-serve",
             "setup",
-            "--workspace",
-            str(tmp_path),
-            "--state-dir",
+            "--home-dir",
             str(tmp_path / "state"),
         ]
     )
@@ -83,7 +79,7 @@ def test_wizard_cannot_overwrite_another_save_during_review(
 def test_interrupt_after_atomic_commit_is_not_reported_as_unsaved(
     tmp_path, monkeypatch, capsys
 ):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "state")
     store.configure(public_origin="https://old.example", tunnel="external")
     replace = os.replace
 
@@ -99,9 +95,7 @@ def test_interrupt_after_atomic_commit_is_not_reported_as_unsaved(
             "mcp-serve",
             "setup",
             "--non-interactive",
-            "--workspace",
-            str(tmp_path),
-            "--state-dir",
+            "--home-dir",
             str(tmp_path / "state"),
             "--origin",
             "https://new.example",
