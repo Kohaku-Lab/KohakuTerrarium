@@ -16,7 +16,7 @@ import uvicorn
 from mcp.types import LATEST_PROTOCOL_VERSION
 
 from kohakuterrarium.api.mcp_tools import create_app
-from kohakuterrarium.mcp_server.connection import write_json
+from kohakuterrarium.mcp_server.records import write_json
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.management import serve_management
 from kohakuterrarium.utils.file_lock import FileLockBusy

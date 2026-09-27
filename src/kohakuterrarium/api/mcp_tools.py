@@ -129,11 +129,23 @@ def create_app(
     registry: WorkspaceRegistry | None = None,
     base_dir: Path | None = None,
 ) -> Starlette:
-    """Create one process-lifetime runtime; serve only through its secret path.
+    """Serve registered workspaces or one explicitly bound workspace.
+
+    Registered mode takes GlobalToolsConfig and a registry. Fixed mode takes
+    MCPToolsConfig without a registry or base_dir.
 
     The hosting server MUST disable access logs, since those run outside ASGI.
     Bind to loopback and publish via the configured HTTPS tunnel.
     """
+    if registry is None:
+        if not isinstance(config, MCPToolsConfig):
+            raise ValueError(
+                "Without a registry, config must bind a workspace using MCPToolsConfig"
+            )
+        if base_dir is not None:
+            raise ValueError("base_dir is only supported with a registry")
+    elif isinstance(config, MCPToolsConfig):
+        raise ValueError("With a registry, use GlobalToolsConfig without a workspace")
     if not 1 <= port <= 65535:
         raise ValueError("Invalid listen port")
     hosts = [f"127.0.0.1:{port}", f"localhost:{port}"]
@@ -173,10 +185,14 @@ def create_app(
         instructions=(
             f"KT instance_id: {owner.instance_id}\n"
             + (
+                "Registered workspace mode. No default workspace is selected. "
                 "Call workspaces to discover names. Every workspace tool requires workspace_id. "
                 "Unknown or expired job/session IDs must never be retried in another workspace. "
                 if pool is not None
-                else ""
+                else (
+                    f"Fixed workspace mode. Default working directory: {config.workspace}. "
+                    "Do not pass workspace_id to tools. No workspaces discovery tool is available. "
+                )
             )
             + (
                 "KT tools and locally registered delegation targets. Creatures may run autonomous triggers. "
@@ -185,7 +201,7 @@ def create_app(
             )
             + "Workspace is the default directory, "
             "not a sandbox. Read existing files before modifying them; stale reads require rereading. "
-            "Jobs and file-read state belong to this instance, shared across its authenticated clients. "
+            "Jobs and file-read state belong to each workspace runtime, shared across its authenticated clients. "
             "Use run_in_background for long bash/python work, or job_promote for an already running job. "
             "Use job_status/job_wait to retrieve results; background completion cannot send an automatic reply. "
             "Job history is bounded and lost on restart. Never resubmit a write merely because its HTTP reply was lost."

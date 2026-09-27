@@ -8,14 +8,15 @@ import time
 import pytest
 
 from kohakuterrarium.mcp_server import service
-from kohakuterrarium.mcp_server.connection import ConnectionStore, write_json
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
+from kohakuterrarium.mcp_server.records import write_json
 from kohakuterrarium.mcp_server.service import connection_url, start, status, stop
 from kohakuterrarium.mcp_server.setup import SetupSession
 from kohakuterrarium.utils.file_lock import FileLock
 
 
 def test_existing_instance_and_stale_records(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     record = store.configure(public_origin="https://example.com")
     write_json(
         store.runtime_path,
@@ -38,7 +39,7 @@ def test_existing_instance_and_stale_records(tmp_path):
 
 
 def test_corrupt_runtime_with_live_lock_reports_unknown_health(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     store.configure(public_origin="https://example.com", tunnel="external")
     store.runtime_path.write_text("{broken")
     with store.instance_lock:
@@ -50,7 +51,7 @@ def test_corrupt_runtime_with_live_lock_reports_unknown_health(tmp_path):
 
 
 def test_running_snapshot_survives_reconfiguration(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     original = store.configure(public_origin="https://old.example", tunnel="external")
     run_id = "a" * 32
     store.save_active(run_id, original)
@@ -70,22 +71,22 @@ def test_running_snapshot_survives_reconfiguration(tmp_path):
         assert connection_url(store) == original.url
         assert connection_url(store, configured=True) == store.load().url
         assert store.load_active(run_id) == original
-        with pytest.raises(ValueError, match="identity"):
+        with pytest.raises(ValueError, match="Active configuration"):
             store.load_active("b" * 32)
     assert connection_url(store) == store.load().url
 
 
 def test_unconfigured_start_does_not_write_configuration(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     with pytest.raises(ValueError, match="setup"):
         start(store)
     assert not store.record_path.exists()
 
 
 def test_rotate_preserves_configuration_and_invalidates_stale_setup(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     config = tmp_path / "tools.yaml"
-    config.write_text(f"workspace: {tmp_path.as_posix()}\n")
+    config.write_text("tools: [{name: read}]\n")
     original = store.configure(
         public_origin="https://example.com",
         port=9123,
@@ -94,8 +95,8 @@ def test_rotate_preserves_configuration_and_invalidates_stale_setup(tmp_path):
         tools_config=config,
     )
     stale = SetupSession.open(store)
-    config.unlink()
     store.save_active("old", original)
+    config.unlink()
     write_json(store.runtime_path, {"state": "ready", "run_id": "old"})
     result = service.rotate(store)
     rotated = store.load()
@@ -113,7 +114,7 @@ def test_rotate_preserves_configuration_and_invalidates_stale_setup(tmp_path):
 
 
 def test_rotate_refuses_owned_instance_even_with_stopped_runtime(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     store.configure(public_origin="https://example.com", tunnel="external")
     before = store.record_path.read_bytes()
     write_json(store.runtime_path, {"state": "stopped"})
@@ -125,15 +126,15 @@ def test_rotate_refuses_owned_instance_even_with_stopped_runtime(tmp_path):
 
 
 @pytest.mark.parametrize("record_state", ["missing", "corrupt", "foreign"])
-def test_rotate_requires_valid_existing_workspace_record(tmp_path, record_state):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+def test_rotate_requires_valid_existing_environment_record(tmp_path, record_state):
+    store = EndpointStore(tmp_path / "home")
     if record_state != "missing":
         record = store.configure(public_origin="https://example.com")
         if record_state == "corrupt":
             store.record_path.write_text("{broken")
         else:
             write_json(
-                store.record_path, {**record.model_dump(), "workspace": "elsewhere"}
+                store.record_path, {**record.model_dump(), "home_dir": "elsewhere"}
             )
     before = store.record_path.read_bytes() if store.record_path.exists() else None
     with pytest.raises(ValueError):
@@ -146,16 +147,14 @@ def test_rotate_requires_valid_existing_workspace_record(tmp_path, record_state)
 def test_rotate_write_failure_preserves_record_and_releases_locks(
     tmp_path, monkeypatch
 ):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     store.configure(public_origin="https://example.com", tunnel="external")
     before = store.record_path.read_bytes()
 
     def fail_replace(source, target):
         raise OSError("disk write failed")
 
-    monkeypatch.setattr(
-        "kohakuterrarium.mcp_server.connection.os.replace", fail_replace
-    )
+    monkeypatch.setattr("kohakuterrarium.mcp_server.records.os.replace", fail_replace)
     with pytest.raises(OSError, match="disk write failed"):
         service.rotate(store)
     assert store.record_path.read_bytes() == before
@@ -168,7 +167,7 @@ def test_rotate_write_failure_preserves_record_and_releases_locks(
 def test_start_timeout_reaps_child_before_instance_lock_handoff(
     tmp_path, monkeypatch, diagnostic_race
 ):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     store.configure(public_origin="https://example.invalid", tunnel="external")
     original = subprocess.Popen
     boot_gate, boot_marker = tmp_path / "boot-gate", tmp_path / "boot-marker"

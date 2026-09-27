@@ -10,7 +10,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig, load_global_config
-from kohakuterrarium.mcp_server.connection import (
+from kohakuterrarium.mcp_server.records import (
     https_origin,
     workspace_identity,
     write_json,

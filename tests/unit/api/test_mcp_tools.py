@@ -13,6 +13,93 @@ from kohakuterrarium.mcp_server.config import MCPToolsConfig, GlobalToolsConfig
 from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry
 
 
+@pytest.mark.parametrize("combination", ["unbound", "double_bound", "fixed_base_dir"])
+def test_rejects_ambiguous_embedding_configuration(tmp_path, combination):
+    registry = WorkspaceRegistry(tmp_path / "registry.json")
+    options = {
+        "unbound": (GlobalToolsConfig(), {}),
+        "double_bound": (MCPToolsConfig(workspace=tmp_path), {"registry": registry}),
+        "fixed_base_dir": (MCPToolsConfig(workspace=tmp_path), {"base_dir": tmp_path}),
+    }
+    config, kwargs = options[combination]
+    with pytest.raises(ValueError, match="registry"):
+        create_app(config, secret="a" * 43, **kwargs)
+    assert not registry.path.exists()
+
+
+@pytest.mark.parametrize("registered", [False, True])
+async def test_embedding_instructions_schema_and_execution_agree(tmp_path, registered):
+    workspace = tmp_path / "project"
+    workspace.mkdir()
+    (workspace / "note.txt").write_text("bound directory", encoding="utf-8")
+    targets = {"worker": {"kind": "creature", "config": str(tmp_path / "worker")}}
+    if registered:
+        registry = WorkspaceRegistry(tmp_path / "registry.json")
+        registry.add("project", workspace)
+        config = GlobalToolsConfig(delegation=targets)
+        kwargs = {"registry": registry, "base_dir": tmp_path}
+    else:
+        config = MCPToolsConfig(workspace=workspace, delegation=targets)
+        kwargs = {}
+    app = create_app(config, secret="a" * 43, **kwargs)
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app), base_url="http://127.0.0.1:8765"
+        ) as http:
+
+            async def rpc(method, params):
+                response = await http.post(
+                    "/mcp/" + "a" * 43,
+                    headers={"accept": "application/json, text/event-stream"},
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": method,
+                        "params": params,
+                    },
+                )
+                return response.json()["result"]
+
+            initialized = await rpc(
+                "initialize",
+                {
+                    "protocolVersion": "2025-03-26",
+                    "capabilities": {},
+                    "clientInfo": {"name": "embedding-test", "version": "1"},
+                },
+            )
+            instructions = initialized["instructions"]
+            if registered:
+                assert "Registered workspace mode" in instructions
+                assert "No default workspace" in instructions
+                assert "Call workspaces" in instructions
+            else:
+                assert "Fixed workspace mode" in instructions
+                assert str(workspace) in instructions
+                assert "Do not pass workspace_id" in instructions
+                assert "Call workspaces" not in instructions
+            first = (await rpc("tools/list", {}))["tools"]
+            assert ("workspaces" in {t["name"] for t in first}) == registered
+            for tool in first:
+                if tool["name"] == "workspaces":
+                    continue
+                schema = tool["inputSchema"]
+                assert ("workspace_id" in schema["properties"]) == registered
+                assert ("workspace_id" in schema.get("required", [])) == registered
+            args = {"path": "note.txt"}
+            if registered:
+                args["workspace_id"] = "project"
+            result = await rpc("tools/call", {"name": "read", "arguments": args})
+            assert not result["isError"]
+            assert "bound directory" in result["structuredContent"]["output"]
+            invalid = {"path": "note.txt"}
+            if not registered:
+                invalid["workspace_id"] = "project"
+            result = await rpc("tools/call", {"name": "read", "arguments": invalid})
+            assert result["isError"]
+            assert (await rpc("tools/list", {}))["tools"] == first
+
+
 def test_image_and_error_delivery():
     result = JobResult(
         "image", output=[ImagePart(url="data:image/png;base64,aGVsbG8=")]

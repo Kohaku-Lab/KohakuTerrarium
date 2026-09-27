@@ -3,20 +3,20 @@
 from pathlib import Path
 
 from kohakuterrarium.mcp_server.config import load_config
-from kohakuterrarium.mcp_server.connection import (
-    ConnectionStore,
+from kohakuterrarium.mcp_server.legacy import LegacyConnectionSource
+from kohakuterrarium.mcp_server.records import (
+    lifecycle_command,
     workspace_identity,
     write_json,
 )
-from kohakuterrarium.mcp_server.service import lifecycle_command
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 
 
 def migrate(store, workspace: Path, name: str, legacy_state_dir: Path | None = None):
-    source = ConnectionStore(
+    source = LegacyConnectionSource(
         workspace, legacy_state_dir or store.home_dir / "mcp-serve"
     )
-    with lifecycle_command(store), lifecycle_command(source):
+    with lifecycle_command(store.command_lock), lifecycle_command(source.command_lock):
         if store.record_path.exists() or store.registry.read():
             raise ValueError("Migration requires an unconfigured, empty endpoint")
         try:

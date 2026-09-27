@@ -2,32 +2,29 @@
 
 from dataclasses import dataclass
 
-from kohakuterrarium.mcp_server.connection import (
-    Connection,
-    ConnectionStore,
-    write_json,
-)
-from kohakuterrarium.mcp_server.service import is_running, lifecycle_command, status
+from kohakuterrarium.mcp_server.endpoint import Endpoint, EndpointStore
+from kohakuterrarium.mcp_server.records import lifecycle_command, write_json
+from kohakuterrarium.mcp_server.service import is_running, status
 
 
 @dataclass
 class SetupSession:
-    store: ConnectionStore
-    original: Connection | None
+    store: EndpointStore
+    original: Endpoint | None
     revision: str | None
 
     @classmethod
-    def open(cls, store: ConnectionStore) -> "SetupSession":
+    def open(cls, store: EndpointStore) -> "SetupSession":
         original, revision = store.read_configuration()
         return cls(store, original, revision)
 
-    def prepare(self, **options) -> Connection:
+    def prepare(self, **options) -> Endpoint:
         candidate = self.store.build(self.original, **options)
         self.store.validate(candidate)
         return candidate
 
-    def save(self, candidate: Connection) -> dict:
-        with lifecycle_command(self.store):
+    def save(self, candidate: Endpoint) -> dict:
+        with lifecycle_command(self.store.command_lock):
             _, revision = self.store.read_configuration()
             if revision != self.revision:
                 raise ValueError(
@@ -37,7 +34,7 @@ class SetupSession:
                 self.original and candidate.secret != self.original.secret
             ):
                 raise ValueError(
-                    "Setup cannot change workspace identity or rotate its secret"
+                    "Setup cannot change endpoint identity or rotate its secret"
                 )
             # Older live processes reread saved settings when reconnecting.
             # Never let a new CLI silently change their running ingress.

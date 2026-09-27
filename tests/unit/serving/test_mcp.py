@@ -4,13 +4,13 @@ import json
 
 import httpx
 
-from kohakuterrarium.mcp_server.connection import Connection
+from kohakuterrarium.mcp_server.endpoint import Endpoint
 from kohakuterrarium.serving.mcp import probe_public
 
 
 async def test_public_probe_is_bounded_and_matches_instance(monkeypatch):
-    record = Connection(
-        workspace="work", public_origin="https://example.com", secret="a" * 43
+    record = Endpoint(
+        home_dir="home", public_origin="https://example.com", secret="a" * 43
     )
     seen = []
 

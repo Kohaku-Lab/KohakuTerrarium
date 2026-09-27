@@ -76,7 +76,7 @@ class GlobalToolsConfig(BaseModel):
 
 
 class MCPToolsConfig(GlobalToolsConfig):
-    """Execution settings bound to one registered default directory."""
+    """Execution settings explicitly bound to one default directory."""
 
     workspace: Path
 

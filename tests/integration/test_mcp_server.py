@@ -1,6 +1,7 @@
 """Complete authenticated tool workflows through the real MCP HTTP SDK."""
 
 import asyncio
+import hashlib
 import json
 import os
 import socket
@@ -75,21 +76,62 @@ class TestMCPServer:
                         return await client.call_tool(name, args or {})
 
         try:
-            for root in (home, other_home):
-                assert (
-                    cli(
-                        "setup",
-                        "--non-interactive",
-                        "--mode",
-                        "external",
-                        "--origin",
-                        "https://kt-mcp-test.invalid",
-                        "--port",
-                        port(),
-                        root=root,
-                    )[0]
-                    == 0
+            assert (
+                cli(
+                    "setup",
+                    "--non-interactive",
+                    "--mode",
+                    "external",
+                    "--origin",
+                    "https://kt-mcp-test.invalid",
+                    "--port",
+                    port(),
+                )[0]
+                == 0
+            )
+            identity = os.path.normcase(str(workspace.resolve()))
+            legacy_root = tmp_path / "legacy"
+            legacy_dir = (
+                legacy_root / hashlib.sha256(identity.encode()).hexdigest()[:32]
+            )
+            legacy_dir.mkdir(parents=True)
+            legacy_tools = tmp_path / "legacy-tools.json"
+            legacy_tools.write_text(
+                json.dumps(
+                    {
+                        "workspace": str(workspace),
+                        "tools": [{"name": "read"}],
+                    }
                 )
+            )
+            legacy_record = legacy_dir / "connection.json"
+            legacy_record.write_text(
+                json.dumps(
+                    {
+                        "version": 1,
+                        "workspace": identity,
+                        "secret": "a" * 43,
+                        "public_origin": "https://kt-mcp-test.invalid",
+                        "port": port(),
+                        "tunnel": "external",
+                        "tools_config": str(legacy_tools),
+                    }
+                )
+            )
+            legacy_bytes = legacy_record.read_bytes()
+            code, migrated = cli(
+                "migrate",
+                "--workspace",
+                workspace,
+                "--name",
+                "legacy",
+                "--legacy-state-dir",
+                legacy_root,
+                root=other_home,
+            )
+            assert code == 0 and migrated["migrated"] and not migrated["running"]
+            assert other.load().secret != "a" * 43
+            assert legacy_record.read_bytes() == legacy_bytes
             (code, started), (_, racing) = await asyncio.gather(
                 asyncio.to_thread(cli, "start"), asyncio.to_thread(cli, "start")
             )
@@ -143,9 +185,25 @@ class TestMCPServer:
             old_job = done.structuredContent["job_id"]
             _, peer = cli("start", root=other_home)
             assert peer["local_ready"] and peer["instance_id"] != started["instance_id"]
-            assert (await call("workspaces", owner=other)).structuredContent[
+            peer_workspaces = (await call("workspaces", owner=other)).structuredContent[
                 "workspaces"
-            ] == []
+            ]
+            assert [entry["workspace_id"] for entry in peer_workspaces] == ["legacy"]
+            migrated_read = await call(
+                "read", {"workspace_id": "legacy", "path": "note.txt"}, owner=other
+            )
+            assert (
+                not migrated_read.isError
+                and "original" in migrated_read.structuredContent["output"]
+            )
+            assert (
+                await call(
+                    "python",
+                    {"workspace_id": "legacy", "code": "print('disabled')"},
+                    owner=other,
+                )
+            ).isError
+            assert legacy_record.read_bytes() == legacy_bytes
             assert cli("rotate")[0] == 1
             os.kill(
                 store.runtime()["pid"],

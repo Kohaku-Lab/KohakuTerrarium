@@ -6,8 +6,7 @@ import time
 import uuid
 from pathlib import Path
 
-from kohakuterrarium.mcp_server.connection import write_json
-from kohakuterrarium.mcp_server.service import lifecycle_command
+from kohakuterrarium.mcp_server.records import lifecycle_command, write_json
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 
 
@@ -23,7 +22,7 @@ def manage(store, operation, *, name=None, path=None, force=False, wait=30):
     # The endpoint has its own cwd; bind CLI paths before crossing the process boundary.
     if path is not None:
         path = Path(path).expanduser().resolve()
-    with lifecycle_command(store):
+    with lifecycle_command(store.command_lock):
         lock = FileLock(store.instance_lock.path)
         try:
             lock.acquire()

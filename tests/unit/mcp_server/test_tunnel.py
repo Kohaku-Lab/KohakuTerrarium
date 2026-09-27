@@ -5,13 +5,13 @@ import sys
 import threading
 import time
 
-from kohakuterrarium.mcp_server.connection import Connection
+from kohakuterrarium.mcp_server.endpoint import Endpoint
 from kohakuterrarium.mcp_server.tunnel import ngrok_command, run_owned
 
 
 def test_ngrok_command_contains_no_mcp_credential():
-    record = Connection(
-        workspace="work",
+    record = Endpoint(
+        home_dir="home",
         public_origin="https://example.com",
         secret="a" * 43,
         ngrok_config="private.yml",

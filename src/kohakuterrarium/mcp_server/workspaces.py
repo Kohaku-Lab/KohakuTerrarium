@@ -9,7 +9,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig, MCPToolsConfig
-from kohakuterrarium.mcp_server.connection import workspace_identity, write_json
+from kohakuterrarium.mcp_server.records import workspace_identity, write_json
 from kohakuterrarium.mcp_server.runtime import ToolRuntime
 from kohakuterrarium.utils.file_lock import FileLock
 

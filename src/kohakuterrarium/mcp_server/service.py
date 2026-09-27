@@ -1,20 +1,17 @@
-"""Workspace-scoped commands for the owned MCP supervisor."""
+"""Configuration-environment commands for the owned MCP supervisor."""
 
 import os
 import secrets
 import subprocess
 import sys
 import time
-from contextlib import contextmanager
 
-from kohakuterrarium.mcp_server.connection import (
-    ConnectionStore,
-    write_json,
-)
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
+from kohakuterrarium.mcp_server.records import lifecycle_command, write_json
 from kohakuterrarium.utils.file_lock import FileLock, FileLockBusy
 
 
-def is_running(store: ConnectionStore) -> bool:
+def is_running(store: EndpointStore) -> bool:
     lock = FileLock(store.instance_lock.path)
     try:
         lock.acquire()
@@ -25,26 +22,7 @@ def is_running(store: ConnectionStore) -> bool:
         return False
 
 
-@contextmanager
-def lifecycle_command(store: ConnectionStore):
-    deadline = time.monotonic() + 40
-    while True:
-        try:
-            store.command_lock.acquire()
-            break
-        except FileLockBusy:
-            if time.monotonic() >= deadline:
-                raise RuntimeError(
-                    "Another MCP lifecycle command is still running; retry"
-                ) from None
-            time.sleep(0.1)
-    try:
-        yield
-    finally:
-        store.command_lock.release()
-
-
-def status(store: ConnectionStore) -> dict:
+def status(store: EndpointStore) -> dict:
     record = store.load()
     snapshot = store.runtime()
     running = is_running(store)
@@ -75,7 +53,7 @@ def status(store: ConnectionStore) -> dict:
             snapshot.update(
                 state="unresponsive",
                 public_ready=False,
-                error="Active configuration unavailable; stop and start this workspace once",
+                error="Active configuration unavailable; stop and start this endpoint once",
             )
     changes = (
         {
@@ -90,11 +68,7 @@ def status(store: ConnectionStore) -> dict:
     return {
         **snapshot,
         "running": running,
-        **(
-            {"workspace": record.workspace}
-            if hasattr(record, "workspace")
-            else {"home_dir": record.home_dir}
-        ),
+        "home_dir": record.home_dir,
         "public_origin": effective["public_origin"] if effective else None,
         "port": effective["port"] if effective else None,
         "tunnel": effective["tunnel"] if effective else None,
@@ -106,21 +80,21 @@ def status(store: ConnectionStore) -> dict:
     }
 
 
-def connection_url(store: ConnectionStore, *, configured: bool = False) -> str:
+def connection_url(store: EndpointStore, *, configured: bool = False) -> str:
     if not configured and is_running(store):
         return store.load_active(store.runtime().get("run_id", "")).url
     return store.load().url
 
 
-def rotate(store: ConnectionStore) -> dict:
-    """Replace a stopped workspace's secret, preserving its other settings."""
-    with lifecycle_command(store):
+def rotate(store: EndpointStore) -> dict:
+    """Replace a stopped endpoint's secret, preserving its other settings."""
+    with lifecycle_command(store.command_lock):
         lock = FileLock(store.instance_lock.path)
         try:
             lock.acquire()
         except FileLockBusy:
             raise RuntimeError(
-                "MCP instance lock is busy; stop this workspace before rotating, "
+                "MCP instance lock is busy; stop this endpoint before rotating, "
                 "or retry if it is already stopped"
             ) from None
         try:
@@ -131,20 +105,16 @@ def rotate(store: ConnectionStore) -> dict:
                 "state": "stopped",
                 "running": False,
                 "rotated": True,
-                **(
-                    {"workspace": record.workspace}
-                    if hasattr(record, "workspace")
-                    else {"home_dir": record.home_dir}
-                ),
+                "home_dir": record.home_dir,
             }
         finally:
             lock.release()
 
 
-def start(store: ConnectionStore, *, wait: float = 30) -> dict:
+def start(store: EndpointStore, *, wait: float = 30) -> dict:
     if not 1 <= wait <= 120:
         raise ValueError("Startup wait must be between 1 and 120 seconds")
-    with lifecycle_command(store):
+    with lifecycle_command(store.command_lock):
         if is_running(store):
             return status(store)
         record = store.load()
@@ -176,11 +146,7 @@ def start(store: ConnectionStore, *, wait: float = 30) -> dict:
                 cwd=store.process_directory,
                 env={
                     **os.environ,
-                    **(
-                        {"KT_CONFIG_DIR": str(store.home_dir)}
-                        if hasattr(store, "home_dir")
-                        else {}
-                    ),
+                    "KT_CONFIG_DIR": str(store.home_dir),
                 },
                 stdin=subprocess.DEVNULL,
                 stdout=log,
@@ -232,8 +198,8 @@ def start(store: ConnectionStore, *, wait: float = 30) -> dict:
         return status(store)
 
 
-def stop(store: ConnectionStore, *, wait: float = 20) -> dict:
-    with lifecycle_command(store):
+def stop(store: EndpointStore, *, wait: float = 20) -> dict:
+    with lifecycle_command(store.command_lock):
         if not is_running(store):
             return status(store)
         snapshot = store.runtime()

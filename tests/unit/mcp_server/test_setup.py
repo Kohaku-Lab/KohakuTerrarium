@@ -4,14 +4,14 @@ import sys
 
 import pytest
 
-from kohakuterrarium.mcp_server.connection import ConnectionStore
+from kohakuterrarium.mcp_server.endpoint import EndpointStore
 from kohakuterrarium.mcp_server.setup import SetupSession
 
 
 def test_partial_updates_clear_fields_and_concurrent_save(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     config = tmp_path / "tools.yaml"
-    config.write_text(f"workspace: {tmp_path.as_posix()}\n")
+    config.write_text("tools: [{name: read}]\n")
     session = SetupSession.open(store)
     first = session.prepare(
         public_origin="https://old.example", tunnel="external", tools_config=config
@@ -30,7 +30,7 @@ def test_partial_updates_clear_fields_and_concurrent_save(tmp_path):
 
 
 def test_validation_and_mode_switch_leave_previous_record_intact(tmp_path):
-    store = ConnectionStore(tmp_path, tmp_path / "state")
+    store = EndpointStore(tmp_path / "home")
     ngrok_config = tmp_path / "ngrok.yml"
     ngrok_config.write_text("version: '3'\n")
     session = SetupSession.open(store)
@@ -41,12 +41,12 @@ def test_validation_and_mode_switch_leave_previous_record_intact(tmp_path):
     )
     session.save(initial)
     session = SetupSession.open(store)
-    for options in (
-        {"ngrok_bin": "kt-missing-test-binary"},
-        {"ngrok_config": tmp_path / "missing"},
-        {"public_origin": "http://example.com"},
+    for options, error in (
+        ({"ngrok_bin": "kt-missing-test-binary"}, ValueError),
+        ({"ngrok_config": tmp_path / "missing"}, OSError),
+        ({"public_origin": "http://example.com"}, ValueError),
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises(error):
             session.prepare(**options)
         assert store.load() == initial
     external = session.prepare(tunnel="external")
