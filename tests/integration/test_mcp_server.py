@@ -148,12 +148,30 @@ class TestMCPServer:
             )
             old_job = background.structuredContent["job_id"]
             assert (await call(second, "job_status", {"job_id": old_job})).isError
+            code, refused = cli("rotate")
+            assert code == 1 and "stop" in refused["error"]
+            assert ConnectionStore(first, state_dir).load() == original
             assert cli("stop")[1]["state"] == "stopped"
+            other_record = ConnectionStore(second, state_dir).load()
+            code, rotation = cli("rotate")
+            assert code == 0 and rotation["rotated"] and not rotation["running"]
+            rotated = ConnectionStore(first, state_dir).load()
+            assert rotated.secret != original.secret
+            assert cli("url")[1] == rotated.url
+            assert ConnectionStore(second, state_dir).load() == other_record
             assert cli("status", second)[1]["instance_id"] == b["instance_id"]
             assert not (await call(second, "read", {"path": "note.txt"})).isError
             _, restarted = cli("start")
             assert restarted["instance_id"] != a["instance_id"]
-            assert ConnectionStore(first, state_dir).load().url == original.url
+            assert ConnectionStore(first, state_dir).load().url == rotated.url
+            async with httpx.AsyncClient(trust_env=False) as http:
+                rejected = await http.get(
+                    f"http://127.0.0.1:{rotated.port}/mcp/{original.secret}"
+                )
+                assert rejected.status_code == 404
+            authenticated = await call(first, "python", {"code": "print('new-key-ok')"})
+            assert not authenticated.isError
+            assert "new-key-ok" in authenticated.structuredContent["output"]
             assert (await call(first, "job_status", {"job_id": old_job})).isError
             assert (
                 await call(first, "write", {"path": "note.txt", "content": "unread"})

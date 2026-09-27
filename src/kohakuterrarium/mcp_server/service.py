@@ -109,6 +109,31 @@ def connection_url(store: ConnectionStore, *, configured: bool = False) -> str:
     return store.load().url
 
 
+def rotate(store: ConnectionStore) -> dict:
+    """Replace a stopped workspace's secret, preserving its other settings."""
+    with lifecycle_command(store):
+        lock = FileLock(store.instance_lock.path)
+        try:
+            lock.acquire()
+        except FileLockBusy:
+            raise RuntimeError(
+                "MCP instance lock is busy; stop this workspace before rotating, "
+                "or retry if it is already stopped"
+            ) from None
+        try:
+            record = store.load()
+            record.secret = secrets.token_urlsafe(32)
+            write_json(store.record_path, record.model_dump())
+            return {
+                "state": "stopped",
+                "running": False,
+                "rotated": True,
+                "workspace": store.workspace,
+            }
+        finally:
+            lock.release()
+
+
 def start(store: ConnectionStore, *, wait: float = 30) -> dict:
     if not 1 <= wait <= 120:
         raise ValueError("Startup wait must be between 1 and 120 seconds")

@@ -6,7 +6,13 @@ from pathlib import Path
 
 from kohakuterrarium.cli.mcp_setup import add_setup_arguments, setup_cli
 from kohakuterrarium.mcp_server.connection import ConnectionStore
-from kohakuterrarium.mcp_server.service import connection_url, start, status, stop
+from kohakuterrarium.mcp_server.service import (
+    connection_url,
+    rotate,
+    start,
+    status,
+    stop,
+)
 
 
 def add_mcp_serve_subparser(subparsers):
@@ -14,7 +20,7 @@ def add_mcp_serve_subparser(subparsers):
         "mcp-serve", help="Run KT tools as an authenticated remote MCP server"
     )
     commands = parser.add_subparsers(dest="mcp_serve_command", required=True)
-    for command in ("setup", "start", "stop", "status", "url"):
+    for command in ("setup", "start", "stop", "status", "url", "rotate"):
         child = commands.add_parser(command)
         child.add_argument("--workspace", type=Path, default=Path.cwd())
         child.add_argument("--state-dir", type=Path, help=argparse.SUPPRESS)
@@ -57,10 +63,19 @@ def mcp_serve_cli(args) -> int:
             )
         elif command == "stop":
             result = stop(store)
+        elif command == "rotate":
+            result = rotate(store)
         else:
             result = status(store)
         if args.json:
             print(json.dumps(result, ensure_ascii=False))
+        elif command == "rotate":
+            print("MCP secret rotated; workspace remains stopped.")
+            print(f"Workspace: {result['workspace']}")
+            print(
+                "Use 'kt mcp-serve start' to start and 'kt mcp-serve url' to copy "
+                "the new URL (use the same --workspace). Update your MCP clients."
+            )
         else:
             print(
                 f"MCP: {result['state']}; local={result.get('local_ready', False)}; public={result.get('public_ready', False)}"

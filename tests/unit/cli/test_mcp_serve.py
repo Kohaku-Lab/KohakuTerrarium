@@ -7,6 +7,8 @@ import io
 import pytest
 
 from kohakuterrarium.cli.mcp_serve import add_mcp_serve_subparser, mcp_serve_cli
+from kohakuterrarium.mcp_server.connection import ConnectionStore
+from kohakuterrarium.utils.file_lock import FileLock
 
 
 def test_json_status_of_unconfigured_workspace(tmp_path, capsys):
@@ -71,3 +73,44 @@ def test_setup_non_tty_missing_input_never_prompts(tmp_path, monkeypatch, capsys
     )
     assert mcp_serve_cli(args) == 1
     assert "origin" in json.loads(capsys.readouterr().out)["error"]
+
+
+@pytest.mark.parametrize("json_output", [False, True])
+def test_rotate_is_explicit_noninteractive_and_never_prints_credentials(
+    tmp_path, monkeypatch, capsys, json_output
+):
+    monkeypatch.setattr("sys.stdin", io.StringIO(""))
+    store = ConnectionStore(tmp_path, tmp_path / "state")
+    original = store.configure(public_origin="https://example.com", tunnel="external")
+    parser = argparse.ArgumentParser()
+    add_mcp_serve_subparser(parser.add_subparsers())
+    args = parser.parse_args(
+        [
+            "mcp-serve",
+            "rotate",
+            "--workspace",
+            str(tmp_path),
+            "--state-dir",
+            str(tmp_path / "state"),
+            *(["--json"] if json_output else []),
+        ]
+    )
+    with FileLock(store.instance_lock.path):
+        assert mcp_serve_cli(args) == 1
+    failure = capsys.readouterr().out
+    assert original.secret not in failure
+    assert store.load() == original
+    if json_output:
+        assert "error" in json.loads(failure)
+    assert mcp_serve_cli(args) == 0
+    output = capsys.readouterr().out
+    rotated = store.load()
+    assert rotated.secret != original.secret
+    assert original.secret not in output and rotated.secret not in output
+    assert "/mcp/" not in output
+    if json_output:
+        result = json.loads(output)
+        assert result["rotated"] is True
+        assert result["state"] == "stopped" and result["running"] is False
+    else:
+        assert "start" in output and "url" in output
