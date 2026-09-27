@@ -136,6 +136,7 @@ class TestMCPServer:
                 asyncio.to_thread(cli, "start"), asyncio.to_thread(cli, "start")
             )
             assert code == 1 and started["local_ready"] and not started["public_ready"]
+            assert started["management"]["state"] == "ready"
             assert started["run_id"] == racing["run_id"]
             assert (await call("workspaces")).structuredContent["workspaces"] == []
             original = store.load()
@@ -169,6 +170,36 @@ class TestMCPServer:
                 },
             )
             old_job = bg.structuredContent["job_id"]
+            saved_control = store.control_path.read_bytes()
+            store.control_path.write_text("{broken", encoding="utf-8")
+            for _ in range(100):
+                broken_status = store.runtime()
+                if broken_status.get("management", {}).get("state") == "degraded":
+                    break
+                await asyncio.sleep(0.05)
+            assert broken_status["management"]["state"] == "degraded"
+            assert broken_status["state"] == "degraded" and broken_status["local_ready"]
+            assert broken_status["instance_id"] == started["instance_id"]
+            snapshot_code, snapshot_list = cli("workspace list")
+            assert snapshot_code == 0 and snapshot_list["source"] == "registry_snapshot"
+            assert {w["workspace_id"] for w in snapshot_list["workspaces"]} == {
+                "first",
+                "second",
+            }
+            assert all(w["state"] == "unknown" for w in snapshot_list["workspaces"])
+            assert store.control_path.read_text() == "{broken"
+            assert not (
+                await call("read", {"workspace_id": "first", "path": "note.txt"})
+            ).isError
+            assert (
+                await call("job_status", {"workspace_id": "first", "job_id": old_job})
+            ).structuredContent["state"] == "running"
+            store.control_path.write_bytes(saved_control)
+            for _ in range(100):
+                if store.runtime().get("management", {}).get("state") == "ready":
+                    break
+                await asyncio.sleep(0.05)
+            assert store.runtime()["management"]["state"] == "ready"
             assert (
                 await call("job_status", {"workspace_id": "second", "job_id": old_job})
             ).isError
@@ -214,11 +245,25 @@ class TestMCPServer:
                     break
                 await asyncio.sleep(0.05)
             assert not is_running(store)
+            store.control_path.write_text(
+                json.dumps(
+                    {
+                        "run_id": started["run_id"],
+                        "request_id": "stale-command",
+                        "operation": "add",
+                        "name": "stale",
+                        "path": str(workspace),
+                    }
+                )
+            )
+            store.response_path.write_text("{broken")
             _, restarted = cli("start")
             assert (
                 restarted["instance_id"] != started["instance_id"]
                 and restarted["local_ready"]
             )
+            assert cli("workspace add", "after-restart", workspace)[0] == 0
+            assert "stale" not in store.registry.read()
             stale = await call(
                 "job_status", {"workspace_id": "first", "job_id": old_job}
             )

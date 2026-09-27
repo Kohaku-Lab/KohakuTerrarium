@@ -144,6 +144,11 @@ def mcp_serve_cli(args) -> int:
                 f"MCP: {result['state']}; local={result.get('local_ready', False)}; public={result.get('public_ready', False)}"
             )
             print(f"Configuration environment: {result['home_dir']}")
+            management = result.get("management")
+            if management:
+                print(f"Management: {management['state']}")
+                if management.get("error"):
+                    print(management["error"])
             for label, settings in (
                 ("Running", result.get("active")),
                 ("Configured", result.get("configured")),
@@ -160,7 +165,12 @@ def mcp_serve_cli(args) -> int:
                 print(result["error"])
             if command == "start" and result.get("public_ready"):
                 print("Connection URL (keep private): " + connection_url(store))
-        return 0 if command != "start" or result.get("public_ready") else 1
+        return (
+            0
+            if command != "start"
+            or (result.get("public_ready") and result.get("state") == "ready")
+            else 1
+        )
     except (ValueError, OSError, RuntimeError) as exc:
         if getattr(args, "json", False):
             print(json.dumps({"error": str(exc)}, ensure_ascii=False))

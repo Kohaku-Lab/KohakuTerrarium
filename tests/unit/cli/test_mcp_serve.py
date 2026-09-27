@@ -11,6 +11,7 @@ import pytest
 
 from kohakuterrarium.cli.mcp_serve import add_mcp_serve_subparser, mcp_serve_cli
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
+from kohakuterrarium.mcp_server.records import write_json
 from kohakuterrarium.utils.file_lock import FileLock
 
 
@@ -53,6 +54,35 @@ def test_json_status_of_unconfigured_workspace(tmp_path, capsys):
     )
     assert mcp_serve_cli(args) == 1
     assert "error" in json.loads(capsys.readouterr().out)
+
+
+def test_status_prints_management_failure_separately_from_ingress(tmp_path, capsys):
+    store = EndpointStore(tmp_path / "home")
+    record = store.configure(public_origin="https://example.com", tunnel="external")
+    store.save_active("run", record)
+    write_json(
+        store.runtime_path,
+        {
+            "run_id": "run",
+            "state": "degraded",
+            "local_ready": True,
+            "public_ready": True,
+            "management": {
+                "protocol_version": 1,
+                "state": "failed",
+                "error": "Management consumer exited; restart",
+            },
+        },
+    )
+    parser = argparse.ArgumentParser()
+    add_mcp_serve_subparser(parser.add_subparsers())
+    args = parser.parse_args(["mcp-serve", "status", "--home-dir", str(store.home_dir)])
+    with store.instance_lock:
+        assert mcp_serve_cli(args) == 0
+    output = capsys.readouterr().out
+    assert "Management: failed" in output and "Management consumer exited" in output
+    assert "local=True; public=True" in output
+    assert record.secret not in output
 
 
 def test_setup_script_contract_and_removed_start_flags(tmp_path, capsys):

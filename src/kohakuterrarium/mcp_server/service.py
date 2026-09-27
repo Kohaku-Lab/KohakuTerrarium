@@ -41,6 +41,7 @@ def status(store: EndpointStore) -> dict:
             pid=None,
             tunnel_pid=None,
             tunnel_state="stopped" if record.tunnel == "ngrok" else "external",
+            management={"protocol_version": 1, "state": "stopped"},
         )
     elif snapshot.get("updated_at") and time.time() - snapshot["updated_at"] > 30:
         snapshot.update(state="unresponsive", public_ready=False)

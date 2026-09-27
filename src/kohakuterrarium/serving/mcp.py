@@ -2,7 +2,6 @@
 
 import argparse
 import asyncio
-import json
 import logging
 import os
 import socket
@@ -18,7 +17,12 @@ from mcp.types import LATEST_PROTOCOL_VERSION
 from kohakuterrarium.api.mcp_tools import create_app
 from kohakuterrarium.mcp_server.records import write_json
 from kohakuterrarium.mcp_server.endpoint import EndpointStore
-from kohakuterrarium.mcp_server.management import serve_management
+from kohakuterrarium.mcp_server.management import (
+    management_snapshot,
+    reset_management,
+    serve_management,
+    stop_requested,
+)
 from kohakuterrarium.utils.file_lock import FileLockBusy
 
 logger = logging.getLogger(__name__)
@@ -62,16 +66,6 @@ async def probe_public(record, instance_id: str) -> tuple[bool, str | None]:
         return False, "Public endpoint unavailable or not an MCP JSON response"
 
 
-def _stop_requested(store: EndpointStore, run_id: str) -> bool:
-    try:
-        return (
-            json.loads(store.stop_path.read_text(encoding="utf-8")).get("run_id")
-            == run_id
-        )
-    except (ValueError, OSError, AttributeError):
-        return False
-
-
 def _start_tunnel(store: EndpointStore, run_id: str):
     fd = os.open(
         store.directory / "tunnel.log", os.O_CREAT | os.O_WRONLY | os.O_APPEND, 0o600
@@ -94,7 +88,7 @@ def _start_tunnel(store: EndpointStore, run_id: str):
         )
 
 
-async def _monitor(store, record, server, serving, snapshot):
+async def _monitor(store, record, server, serving, snapshot, management, health):
     tunnel = None
     probing = None
     next_probe = next_start = 0.0
@@ -103,7 +97,7 @@ async def _monitor(store, record, server, serving, snapshot):
         tunnel_state="external" if record.tunnel == "external" else "starting"
     )
     try:
-        while not serving.done() and not _stop_requested(store, snapshot["run_id"]):
+        while not serving.done() and not stop_requested(store, snapshot["run_id"]):
             now = time.monotonic()
             snapshot["local_ready"] = bool(server.started)
             if record.tunnel == "ngrok":
@@ -159,6 +153,13 @@ async def _monitor(store, record, server, serving, snapshot):
                 snapshot["state"] = "ready" if snapshot["public_ready"] else "offline"
             if not ingress_alive and server.started:
                 snapshot["state"] = "offline"
+            snapshot["management"] = management_snapshot(management, health)
+            if server.started:
+                snapshot["state"] = (
+                    "degraded"
+                    if snapshot["management"]["state"] in {"failed", "degraded"}
+                    else "ready" if snapshot["public_ready"] else "offline"
+                )
             snapshot["updated_at"] = time.time()
             await _publish(store, snapshot)
             await asyncio.sleep(0.25)
@@ -188,6 +189,7 @@ async def serve(store: EndpointStore, run_id: str) -> None:
     serving = server = management = None
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
+        reset_management(store)
         if os.name == "nt":
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
         else:
@@ -221,13 +223,14 @@ async def serve(store: EndpointStore, run_id: str) -> None:
             )
         )
         serving = asyncio.create_task(server.serve(sockets=[sock]))
+        health = {"protocol_version": 1, "state": "starting", "error": None}
         management = asyncio.create_task(
-            serve_management(store, run_id, app.state.workspace_pool)
+            serve_management(store, run_id, app.state.workspace_pool, health=health)
         )
-        await _monitor(store, record, server, serving, snapshot)
+        await _monitor(store, record, server, serving, snapshot, management, health)
         if serving.done():
             await serving
-            if not _stop_requested(store, run_id):
+            if not stop_requested(store, run_id):
                 snapshot["error"] = "Local server exited"
     except Exception as exc:
         snapshot.update(
@@ -247,6 +250,7 @@ async def serve(store: EndpointStore, run_id: str) -> None:
             public_ready=False,
             tunnel_pid=None,
             updated_at=time.time(),
+            management={"protocol_version": 1, "state": "stopped"},
         )
         if snapshot["state"] != "failed":
             snapshot["state"] = "stopped"
