@@ -262,6 +262,8 @@ boundary.
 
 ## See also
 
+- [Drive identity recovery](drive-identity-recovery.md): session-stop guarantees
+  and conservative repair of existing orphaned goals.
 - [Drive concept](../concepts/multi-agent/drive.md): the runtime `/goal`
   composes over.
 - [Programmatic Drive](programmatic-drive.md): the generic tools and

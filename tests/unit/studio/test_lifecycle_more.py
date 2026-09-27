@@ -151,7 +151,7 @@ class TestAttachMetaUpdates:
             )
             t._session_stores[sid] = store
             try:
-                lifecycle.attach_session_store_for_creature(svc, creature)
+                await lifecycle.attach_session_store_for_creature(svc, creature)
                 agents = store.meta["agents"]
                 assert "alice" in agents
                 assert "bob" in agents
@@ -182,7 +182,7 @@ class TestAttachMetaUpdates:
             )
             t._session_stores[sid] = store
             try:
-                lifecycle.attach_session_store_for_creature(svc, creature)
+                await lifecycle.attach_session_store_for_creature(svc, creature)
                 # Agent list unchanged.
                 assert store.meta["agents"] == ["alice"]
             finally:
@@ -285,22 +285,22 @@ class TestStopSessionSwallow:
         finally:
             await t.shutdown()
 
-    async def test_remote_remove_creature_key_error_swallowed(self):
+    async def test_remote_unload_failure_preserves_metadata(self):
         t = await TestTerrariumBuilder().build()
         svc = LocalTerrariumService(t)
 
-        async def _boom(cid):
-            raise KeyError(cid)
+        async def _boom(**kwargs):
+            raise KeyError("worker unavailable")
 
-        svc.remove_creature = _boom
+        svc._host = SimpleNamespace(request=_boom)
         try:
             lifecycle.meta_for(svc)["sid-r"] = {
                 "on_node": "worker-1",
                 "creature_id": "cid-r",
             }
-            # KeyError on worker is swallowed; meta is still cleaned.
-            await lifecycle.stop_session(svc, "sid-r")
-            assert "sid-r" not in lifecycle.meta_for(svc)
+            with pytest.raises(KeyError, match="worker unavailable"):
+                await lifecycle.stop_session(svc, "sid-r")
+            assert "sid-r" in lifecycle.meta_for(svc)
         finally:
             await t.shutdown()
 

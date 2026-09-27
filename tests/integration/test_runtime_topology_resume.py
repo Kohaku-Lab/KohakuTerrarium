@@ -13,6 +13,7 @@ survive resume.
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -27,9 +28,15 @@ from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
     default_registrations,
 )
-from kohakuterrarium.terrarium.drive.models import ActorRef
-from kohakuterrarium.terrarium.drive.requests import CreateDriveRequest
+from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
+from kohakuterrarium.terrarium.drive.requests import (
+    CreateDriveRequest,
+    DrivePatch,
+    DriveQuery,
+)
+from kohakuterrarium.studio.studio import Studio
 from kohakuterrarium.session.store import SessionStore
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
 from kohakuterrarium.terrarium.service import LocalTerrariumService
@@ -483,6 +490,98 @@ class TestRuntimeTopologyResume:
             ), "assignment was not remapped to the resumed creature (R1-43)"
         finally:
             await engine3.shutdown()
+
+        # Studio teardown preserves the saved graph and both Drive scopes.
+        path = str(tmp_path / "studio-stop.kohakutr")
+        engine = Terrarium(pwd=str(tmp_path), **_drive_kwargs())
+        studio = Studio(engine=engine)
+        try:
+            solo = await engine.add_creature(agent_yaml, session=path, start=True)
+            await solo.wait_restoration_ready()
+            cid, gid = solo.creature_id, solo.graph_id
+            actor = ActorRef("creature", cid)
+            manager = engine.drives.manager_for(gid)
+            records = []
+            for scope in ("creature", "graph"):
+                for status in (
+                    DriveStatus.ACTIVE,
+                    DriveStatus.PAUSED,
+                    DriveStatus.BLOCKED,
+                ):
+                    record = await manager.create_drive(
+                        CreateDriveRequest(
+                            kind="goal",
+                            title=f"{scope}-{status.value}",
+                            scope_type=scope,
+                            scope_id=cid if scope == "creature" else gid,
+                            owner=actor,
+                            owner_scope="creature",
+                            created_by=actor,
+                            assignee_creature_id=cid,
+                            spec={
+                                "objective": "preserve the commitment",
+                                "autonomy": "manual",
+                            },
+                            not_before=datetime.now(timezone.utc) + timedelta(days=1),
+                        ),
+                        actor=actor,
+                        graph_id=gid,
+                        is_privileged=True,
+                    )
+                    if status is not DriveStatus.ACTIVE:
+                        record = await manager.transition(
+                            record.drive_id,
+                            status,
+                            expected_revision=record.revision,
+                            actor=actor,
+                            status_reason="user decision",
+                        )
+                    records.append(record)
+            for _ in range(2):
+                await studio.sessions.stop(gid)
+                assert engine.list_creatures() == []
+                assert read_session_meta(path)[MANIFEST_KEY] is not None
+                assert await engine.adopt_session(path, pwd=str(tmp_path)) == gid
+                assert engine.get_creature(cid).creature_id == cid
+                await engine.get_creature(cid).wait_restoration_ready()
+                manager = engine.drives.manager_for(gid)
+                rows = await manager.list_drives(DriveQuery(graph_id=gid))
+                assert {row.drive_id for row in rows} == {r.drive_id for r in records}
+                for original in records:
+                    current = await manager.get_drive(original.drive_id)
+                    assignment = await manager.get_assignment(original.drive_id)
+                    assert current.owner == actor
+                    assert current.scope_id == original.scope_id
+                    assert current.status == original.status
+                    assert current.status_reason == original.status_reason
+                    assert assignment.assignee_creature_id == cid
+                    assert assignment.assignee_graph_id == gid
+                    assert assignment.assignment_state == "assigned"
+            active = await manager.get_drive(records[0].drive_id)
+            updated = await manager.update_drive(
+                active.drive_id,
+                DrivePatch(not_before=None, title="owner still authorized"),
+                expected_revision=active.revision,
+                actor=actor,
+            )
+            await manager.wake_drive(
+                updated.drive_id, actor=actor, expected_revision=updated.revision
+            )
+            assert await _wait_for(
+                lambda: _has_acked_delivery(manager, updated.drive_id)
+            )
+            await engine.remove_creature(cid)
+            # Explicit deletion still applies permanent-removal policy.
+            for original in records:
+                assignment = await manager.get_assignment(original.drive_id)
+                if original.scope_type == "creature":
+                    current = await manager.get_drive(original.drive_id)
+                    assert current.status is DriveStatus.BLOCKED
+                    assert assignment.assignment_state == "orphaned"
+                else:
+                    assert assignment.assignment_state == "unassigned"
+        finally:
+            await engine.shutdown()
 
     async def test_cross_graph_wire_drains_drive_rows_immediately(
         self, patched_llm, tmp_path

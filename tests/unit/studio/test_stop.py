@@ -86,12 +86,12 @@ async def test_teardown_failure_rolls_back_local_marker(tmp_path):
     engine._session_stores[session_id] = store
     lifecycle.stores_for(service)[session_id] = store
     lifecycle.meta_for(service)[session_id] = {"name": "alice"}
-    original_remove = engine.remove_creature
+    original_unload = stop.unload_session_graph
 
-    async def fail_remove(creature_id):
+    async def fail_unload(engine, graph_id):
         raise RuntimeError("teardown failed")
 
-    engine.remove_creature = fail_remove
+    stop.unload_session_graph = fail_unload
     try:
         with pytest.raises(RuntimeError, match="teardown failed"):
             await stop.stop_session(
@@ -106,7 +106,7 @@ async def test_teardown_failure_rolls_back_local_marker(tmp_path):
         assert store.meta["status"] == "running"
         assert session_id in lifecycle.meta_for(service)
     finally:
-        engine.remove_creature = original_remove
+        stop.unload_session_graph = original_unload
         await engine.shutdown()
 
 
@@ -128,12 +128,12 @@ async def test_teardown_failure_rolls_back_mirror_marker(tmp_path):
         "name": "alice",
         "resumed_from": str(mirror_path),
     }
-    original_remove = engine.remove_creature
+    original_unload = stop.unload_session_graph
 
-    async def fail_remove(creature_id):
+    async def fail_unload(engine, graph_id):
         raise RuntimeError("teardown failed")
 
-    engine.remove_creature = fail_remove
+    stop.unload_session_graph = fail_unload
     try:
         with pytest.raises(RuntimeError, match="teardown failed"):
             await stop.stop_session(
@@ -153,7 +153,7 @@ async def test_teardown_failure_rolls_back_mirror_marker(tmp_path):
         assert bool(live.meta["conversation_open"]) is True
         assert live.meta["status"] == "running"
     finally:
-        engine.remove_creature = original_remove
+        stop.unload_session_graph = original_unload
         await engine.shutdown()
 
 
@@ -196,13 +196,15 @@ async def test_remote_lifecycle_failure_keeps_runtime_registered(tmp_path):
     assert session_id in meta
 
 
-async def test_remote_teardown_failure_restores_running_lifecycle(tmp_path):
+async def test_remote_teardown_failure_keeps_dormant_lifecycle(tmp_path):
     class _Host:
         def __init__(self):
             self.calls: list[dict] = []
 
         async def request(self, **kwargs):
             self.calls.append(kwargs)
+            if kwargs["type"] == "unload":
+                raise RuntimeError("teardown failed")
             return {"ok": True}
 
     class _Service:
@@ -239,15 +241,19 @@ async def test_remote_teardown_failure_restores_running_lifecycle(tmp_path):
     assert [
         (call["body"]["conversation_open"], call["body"]["status"])
         for call in service._host.calls
+        if call["type"] == "set_lifecycle"
     ] == [
         (False, "completed"),
-        (True, "running"),
     ]
 
 
 async def test_remote_end_updates_host_mirror_before_runtime_removal(tmp_path):
     class _Host:
-        async def request(self, **_kwargs):
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
             return {"ok": True}
 
     class _Service:
@@ -292,13 +298,19 @@ async def test_remote_end_updates_host_mirror_before_runtime_removal(tmp_path):
         assert reopened.meta["status"] == "completed"
     finally:
         reopened.close(update_status=False)
-    assert service.removed == ["creature-1"]
+    assert service.removed == []
+    assert service._host.calls[-1]["type"] == "unload"
+    assert service._host.calls[-1]["body"]["graph_id"] == session_id
     assert meta == {}
 
 
 async def test_remote_stop_removes_every_creature_in_the_member_graph(tmp_path):
     class _Host:
-        async def request(self, **_kwargs):
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
             return {"ok": True}
 
     class _Service:
@@ -339,13 +351,19 @@ async def test_remote_stop_removes_every_creature_in_the_member_graph(tmp_path):
         mirror_dir=tmp_path,
     )
 
-    assert service.removed == ["one", "two"]
+    assert service.removed == []
+    assert service._host.calls[-1]["type"] == "unload"
+    assert service._host.calls[-1]["body"]["graph_id"] == "remote-session"
     assert meta == {}
 
 
 async def test_remote_stop_uses_saved_roster_when_live_enumeration_fails(tmp_path):
     class _Host:
-        async def request(self, **_kwargs):
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
             return {"ok": True}
 
     class _Service:
@@ -380,7 +398,9 @@ async def test_remote_stop_uses_saved_roster_when_live_enumeration_fails(tmp_pat
         mirror_dir=tmp_path,
     )
 
-    assert service.removed == ["one", "two"]
+    assert service.removed == []
+    assert service._host.calls[-1]["type"] == "unload"
+    assert service._host.calls[-1]["body"]["graph_id"] == "remote-session"
     assert meta == {}
 
 

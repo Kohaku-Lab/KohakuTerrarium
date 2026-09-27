@@ -3,12 +3,12 @@
 import importlib
 
 
-def store_attach_hook(engine, creature, *, config_path="", config_type="agent"):
+async def store_attach_hook(engine, creature, *, config_path="", config_type="agent"):
     from kohakuterrarium.studio.sessions.lifecycle import (
         attach_session_store_for_creature,
     )
 
-    attach_session_store_for_creature(
+    await attach_session_store_for_creature(
         engine, creature, config_path=config_path, config_type=config_type
     )
 
