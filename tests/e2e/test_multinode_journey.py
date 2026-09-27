@@ -72,6 +72,7 @@ def _write_creature_config(
         "llm_profile: openai/gpt-4-test\n"
         "model: gpt-4\n"
         "provider: openai\n"
+        "tool_format: bracket\n"
         "input:\n  type: cli\n"
         "output:\n  type: stdout\n"
     )
@@ -200,7 +201,7 @@ class TestMultinodeJourney:
     public HTTP/WS interface.  No internal seams except the LLM.
     """
 
-    async def test_full_creature_session_on_subprocess_worker(
+    async def test_full_creature_session_on_inprocess_workers(
         self, tmp_path, monkeypatch, caplog
     ):
         # ?�?� 0. environment & identity store ?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�
@@ -959,9 +960,31 @@ async def _drive_journey(
     )
 
     # === 9. user drags ch1 ??bravo (cross-node listen) ===========
-    # This is the cross-node wire ??pre-fix would 400 because ch1
-    # doesn't exist on bravo's graph.  Service should lazily
-    # replicate the channel onto bravo's graph and cross-subscribe.
+    foreign_wire = await asyncio.wait_for(
+        host.http.post(
+            f"/api/sessions/topology/{graph_b}/creatures/{b_id}/wire",
+            json={"channel": "ch1", "direction": "listen"},
+        ),
+        timeout=OP_TIMEOUT,
+    )
+    bugs.check(
+        "9 disconnected graph cannot resolve a foreign channel name",
+        foreign_wire.status_code == 400 and "not in session" in foreign_wire.text,
+        f"{foreign_wire.status_code} {foreign_wire.text}",
+    )
+    # Connect exact endpoints before wiring inside the resulting logical graph.
+    connected = await asyncio.wait_for(
+        host.http.post(
+            f"/api/sessions/topology/{graph_a}/connect",
+            json={"sender": a_id, "receiver": b_id, "channel": "ch1"},
+        ),
+        timeout=OP_TIMEOUT,
+    )
+    bugs.check(
+        "9 explicit cross-node connection succeeds",
+        connected.status_code == 200,
+        f"{connected.status_code} {connected.text}",
+    )
     r = await asyncio.wait_for(
         host.http.post(
             f"/api/sessions/topology/{graph_b}/creatures/{b_id}/wire",
@@ -1846,9 +1869,10 @@ async def _drive_journey(
             timeout=OP_TIMEOUT,
         )
         bugs.check(
-            "22d edit-message on worker reachable",
-            rr.status_code in (200, 400, 404, 422),
-            f"{rr.status_code}",
+            "22d system message edit is rejected",
+            rr.status_code == 409
+            and rr.json().get("detail") == "message 0 cannot be edited",
+            f"{rr.status_code} {rr.text}",
         )
         # Rewind to message 0.
         rr = await asyncio.wait_for(
@@ -2038,7 +2062,7 @@ async def _drive_journey(
             timeout=OP_TIMEOUT,
         )
         if rr.status_code == 200:
-            edges = rr.json().get("edges") if isinstance(rr.json(), dict) else rr.json()
+            edges = rr.json()["outputs"]
             if isinstance(edges, list) and edges:
                 eid = edges[0].get("edge_id") or edges[0].get("id")
                 if eid:
@@ -2206,7 +2230,7 @@ async def _drive_journey(
                     )
                     if rr2.status_code == 200:
                         b2 = rr2.json()
-                        e2 = (b2.get("edges") if isinstance(b2, dict) else b2) or []
+                        e2 = b2["outputs"]
                         still = any(
                             (e.get("edge_id") or e.get("id")) == eid
                             for e in e2
@@ -2270,12 +2294,8 @@ async def _drive_journey(
         if rh_a.status_code == 200:
             hbody_a = rh_a.json()
             msgs_a = hbody_a.get("messages") or hbody_a.get("events") or []
-            history_joined_a = " ".join(
-                str(m.get("content", "")) for m in msgs_a if isinstance(m, dict)
-            )
-        frames_joined_a = " ".join(
-            str(f.get("content", "")) for f in frames_a if isinstance(f, dict)
-        )
+            history_joined_a = json.dumps(msgs_a)
+        frames_joined_a = json.dumps(frames_a)
         gate_visible_a = (
             "not wired as sender" in history_joined_a.lower()
             or "not wired as sender" in frames_joined_a.lower()
@@ -2432,13 +2452,9 @@ async def _drive_journey(
         if rh.status_code == 200:
             hbody = rh.json()
             msgs = hbody.get("messages") or hbody.get("events") or []
-            history_joined = " ".join(
-                str(m.get("content", "")) for m in msgs if isinstance(m, dict)
-            )
+            history_joined = json.dumps(msgs)
         # Frames may also carry the tool result; merge for the assert.
-        frames_joined = " ".join(
-            str(f.get("content", "")) for f in frames_b if isinstance(f, dict)
-        )
+        frames_joined = json.dumps(frames_b)
         gate_visible = (
             "not wired as sender" in history_joined
             or "not wired as sender" in frames_joined
@@ -2566,23 +2582,26 @@ async def _drive_journey(
 
         terra_dir = tmp_path / "terra_recipe"
         terra_dir.mkdir(parents=True, exist_ok=True)
-        # Minimal terrarium recipe with one root creature + one channel.
+        recipe_intake = _write_creature_config(terra_dir, "intake", "You are intake.")
+        recipe_worker = _write_creature_config(terra_dir, "worker", "You are worker.")
+        # The deployed bundle contains both named creature configurations.
         recipe = {
             "terrarium": {
                 "name": "trio",
                 "creatures": [
                     {
                         "name": "intake",
-                        "config": str(cfg_alpha),
+                        "config": recipe_intake.relative_to(terra_dir).as_posix(),
+                        "channels": {"send": ["ops"]},
                     },
                     {
                         "name": "worker",
-                        "config": str(cfg_alpha),
+                        "config": recipe_worker.relative_to(terra_dir).as_posix(),
+                        "channels": {"listen": ["ops"]},
                     },
                 ],
                 "channels": {
                     "ops": {
-                        "type": "broadcast",
                         "description": "operations channel",
                     },
                 },
@@ -2593,7 +2612,7 @@ async def _drive_journey(
         rr = await asyncio.wait_for(
             host.http.post(
                 "/api/sessions/active/terrarium",
-                json={"config_path": str(recipe_path)},
+                json={"config_path": str(recipe_path), "on_node": "w1"},
             ),
             timeout=OP_TIMEOUT * 4,
         )
@@ -2602,11 +2621,19 @@ async def _drive_journey(
             rr.status_code == 200,
             f"{rr.status_code} {rr.text[:600]}",
         )
+        if rr.status_code == 200:
+            deployed = rr.json()["creatures"]
+            bugs.check(
+                "29b2 recipe members are deployed together on w1",
+                {member["name"] for member in deployed} == {"intake", "worker"}
+                and all(member["home_node"] == "w1" for member in deployed),
+                str(deployed),
+            )
         # Legacy alias path — both should work for the same recipe.
         rr2 = await asyncio.wait_for(
             host.http.post(
                 "/api/sessions/active/terrariums",
-                json={"config_path": str(recipe_path)},
+                json={"config_path": str(recipe_path), "on_node": "w1"},
             ),
             timeout=OP_TIMEOUT * 4,
         )
@@ -2672,37 +2699,13 @@ async def _drive_journey(
                     f"frames seen: {[f.get('type') for f in (frames or [])]}",
                 )
 
-    # === 29c3b. CF-7: cross-cluster group_remove_node ===========
-    # Alpha is privileged on w1; bravo lives on w2.  CLAUDE.md says
-    # privileged tools are the cluster's "runtime graph editor", but
-    # today ``gctx.engine`` is the caller's *worker* engine, so
-    # ``resolve_group_target("bravo")`` misses on w1.  The fix
-    # (CF-7 partial) is to surface a clearly cross-cluster-flagged
-    # error rather than a generic "not in your group" message so the
-    # LLM/user can distinguish a typo from a "lives on another
-    # worker" miss.  A *full* fix (cluster-wide routing) is deferred
-    # — see temp/bugs/CF7.md.
-    async with bugs.step("29c3b CF-7: cross-cluster group_remove_node error shape"):
-        # Drive alpha to emit the cross-cluster ``group_remove_node`` call,
-        # then read the recorded ``tool_result`` event from alpha's worker
-        # session store. The CF-7 fix surfaces the cross-cluster diagnosis via
-        # ``ToolResult.error``, persisted as the ``error`` field on the
-        # ``tool_result`` event in the worker that hosts alpha. The host-side
-        # event mirror forwards a worker's failed group_* tool_result only
-        # best-effort and may not relay it within a test deadline, so the
-        # worker's own store — where the tool executes and records
-        # synchronously — is the authoritative surface to assert on.
+    # === 29c3b. Worker-local group_remove_node target rejection ===
+    async with bugs.step("29c3b group_remove_node rejects a peer-worker target"):
         cross_err_seen = False
         observed: list[dict] = []
 
         def _worker_cross_cluster_result() -> tuple[bool, list[dict]]:
-            """Scan alpha's OWN worker session store for the group_remove_node
-            tool_result.  The tool runs on the worker that hosts alpha, so the
-            worker's local store — not the host's event mirror — is the
-            authoritative surface for the recorded ``ToolResult.error``: the host
-            forwards a worker's failed group_* tool_result only best-effort and
-            may not relay it within a test deadline, whereas the worker store
-            records it synchronously with the tool execution."""
+            """Read the target rejection from alpha's persisted tool result."""
             try:
                 creature = w1.engine.get_creature(a_id)
                 store = w1.engine._session_stores.get(creature.graph_id)
@@ -2719,7 +2722,11 @@ async def _drive_journey(
                     continue
                 err_text = str(ev.get("error") or "")
                 rows.append({"name": ev.get("name"), "error": err_text[:200]})
-                if "cross-cluster" in err_text and "CF-7" in err_text:
+                if (
+                    "target 'bravo' is not a creature in caller" in err_text
+                    and a_id in err_text
+                    and creature.graph_id in err_text
+                ):
                     seen = True
             return seen, rows
 
@@ -2759,13 +2766,15 @@ async def _drive_journey(
                 "",
             )
         bugs.check(
-            "CF-7: group_remove_node on a cross-cluster target returns a "
-            "cross-cluster-flagged error (not a vague 'not in your group')",
+            "group_remove_node rejects a target outside the worker graph",
             cross_err_seen,
-            "expected alpha's worker session store to carry a group_remove_node "
-            "tool_result whose error mentions 'cross-cluster' and 'CF-7' so the "
-            "LLM/user can distinguish a typo from a cross-worker miss; observed "
+            "expected a graph-scoped rejection naming the caller and target; "
             f"group_remove_node tool_results={observed!r}",
+        )
+        bugs.check(
+            "rejected group_remove_node leaves bravo running",
+            w2.engine.get_creature(b_id).is_running,
+            b_id,
         )
 
     # === 29c4. /command framework command (compact / status) ====
@@ -2854,16 +2863,18 @@ async def _drive_journey(
             rr.status_code == 200,
             f"{rr.status_code} {rr.text[:400]}",
         )
-        # Also exercise the agents list view (dashboard left rail).
+        # Multi-creature sessions belong to the terrarium compatibility view.
         rr = await asyncio.wait_for(
             host.http.get("/api/sessions/active/agents"),
             timeout=OP_TIMEOUT,
         )
         bugs.check(
-            "29e dashboard /agents 200 with our creature listed",
+            "29e dashboard /agents excludes the multi-creature session",
             rr.status_code == 200
-            and any(
-                c.get("creature_id") == a_id
+            and not any(
+                any(
+                    member.get("creature_id") == a_id for member in c["graph_creatures"]
+                )
                 for c in (
                     rr.json()
                     if isinstance(rr.json(), list)
@@ -2872,6 +2883,19 @@ async def _drive_journey(
                 if isinstance(c, dict)
             ),
             f"{rr.status_code} body={rr.text[:400]}",
+        )
+        teams = await asyncio.wait_for(
+            host.http.get("/api/sessions/active/terrariums"), timeout=OP_TIMEOUT
+        )
+        bugs.check(
+            "29e dashboard /terrariums contains alpha's team",
+            teams.status_code == 200
+            and any(
+                member["creature_id"] == a_id
+                for team in teams.json()
+                for member in team["creatures"].values()
+            ),
+            f"{teams.status_code} {teams.text[:400]}",
         )
 
     # === 29f. Drive over lab: node-targeted settings + routed Drive ======
@@ -3030,12 +3054,8 @@ async def _drive_journey(
                 f"{rr.status_code} {rr.text[:300]}",
             )
     if sessions:
-        sid = (
-            sessions[0].get("session_id")
-            or sessions[0].get("name")
-            or sessions[0].get("session_name")
-            or ""
-        )
+        sid = min(graph_a, graph_b)
+        resume_node = "w1" if sid == graph_a else "w2"
         if sid:
             async with bugs.step("32c persistence viewer endpoints"):
                 for tail in ("tree", "summary", "turns", "events"):
@@ -3052,15 +3072,26 @@ async def _drive_journey(
                 rr = await asyncio.wait_for(
                     host.http.post(
                         f"/api/sessions/{sid}/resume",
-                        json={"on_node": "w1"},
+                        json={"on_node": resume_node},
                     ),
                     timeout=OP_TIMEOUT * 4,
                 )
                 bugs.check(
-                    "32d resume on w1 returns 200/202",
-                    rr.status_code in (200, 201, 202, 400, 404),
+                    "32d resume the saved cluster on its original workers",
+                    rr.status_code == 200,
                     f"{rr.status_code} {rr.text[:400]}",
                 )
+                if rr.status_code == 200:
+                    resumed_id = rr.json()["session"]["session_id"]
+                    closed = await asyncio.wait_for(
+                        host.http.delete(f"/api/sessions/active/{resumed_id}"),
+                        timeout=OP_TIMEOUT,
+                    )
+                    bugs.check(
+                        "32d close the newly resumed runtime",
+                        closed.status_code == 200,
+                        f"{closed.status_code} {closed.text}",
+                    )
             async with bugs.step("32e fork saved session"):
                 rr = await asyncio.wait_for(
                     host.http.post(
