@@ -100,11 +100,16 @@ class WorkspacePool:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        runtimes = list(self._runtimes.items())
+        self._draining.update(key for key, _ in runtimes)
         results = await asyncio.gather(
-            *(r.__aexit__(None, None, None) for r in self._runtimes.values()),
+            *(runtime.close() for _, runtime in runtimes),
             return_exceptions=True,
         )
-        self._runtimes.clear()
+        for (key, _), result in zip(runtimes, results):
+            if not isinstance(result, BaseException):
+                self._runtimes.pop(key, None)
+                self._draining.discard(key)
         for result in results:
             if isinstance(result, BaseException):
                 raise result
@@ -187,15 +192,7 @@ class WorkspacePool:
         async with self._locks.setdefault(key, asyncio.Lock()):
             runtime = self._runtimes.get(key)
             calls = set(self._calls.get(key, ()))
-            busy = calls or (
-                runtime
-                and (
-                    runtime.executor.get_running_jobs()
-                    or any(
-                        s["state"] != "closed" for s in runtime.delegation.sessions()
-                    )
-                )
-            )
+            busy = calls or (runtime and runtime.is_busy)
             if busy and not force:
                 raise ValueError(
                     "Workspace is busy; finish jobs and close sessions, or use --force"
@@ -206,7 +203,7 @@ class WorkspacePool:
                     task.cancel()
                 await asyncio.gather(*calls, return_exceptions=True)
                 if runtime:
-                    await runtime.__aexit__(None, None, None)
+                    await runtime.close()
                     self._runtimes.pop(key, None)
                 self.registry.remove(name, key)
                 self._errors.pop(key, None)

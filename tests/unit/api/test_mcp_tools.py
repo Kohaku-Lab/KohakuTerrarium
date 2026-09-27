@@ -11,6 +11,7 @@ from kohakuterrarium.core.job import JobResult
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.mcp_server.config import MCPToolsConfig, GlobalToolsConfig
 from kohakuterrarium.mcp_server.workspaces import WorkspaceRegistry
+from kohakuterrarium.mcp_server.runtime import JobOperationResult
 
 
 @pytest.mark.parametrize("combination", ["unbound", "double_bound", "fixed_base_dir"])
@@ -183,11 +184,13 @@ def test_retained_job_failure_is_successful_query(state, exit_code):
         "error": "job failed",
         "exit_code": exit_code,
     }
-    reply = _job_reply(data)
+    reply = _job_reply(JobOperationResult(data))
     assert not reply.isError
     assert reply.structuredContent == data
     assert json.loads(reply.content[0].text) == data
-    assert _job_reply({"job_id": "missing", "error": "Unknown job"}).isError
+    assert _job_reply(
+        JobOperationResult({"job_id": "missing", "error": "Unknown job"}, "not_found")
+    ).isError
     assert _reply(data).isError
 
 

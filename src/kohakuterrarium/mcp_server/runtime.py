@@ -2,7 +2,8 @@
 
 import asyncio
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from kohakuterrarium.bootstrap.plugins import init_plugins
 from kohakuterrarium.bootstrap.tools import create_tool
@@ -45,6 +46,14 @@ _UNSUPPORTED_HOOKS = (
     "contribute_user_commands",
     "contribute_termination_check",
 )
+
+
+@dataclass(frozen=True)
+class JobOperationResult:
+    """Operation outcome, independent of the retained job's execution state."""
+
+    data: dict[str, Any]
+    outcome: Literal["ok", "not_found"] = "ok"
 
 
 class ToolCatalog:
@@ -139,6 +148,9 @@ class ToolRuntime(ToolCatalog):
         self._handles = {}
         self._running = False
         self._closed = False
+        self._calls: set[asyncio.Task] = set()
+        self._close_task: asyncio.Task[None] | None = None
+        self._delegation_closed = False
         self.delegation = DelegationRuntime(
             config, self.executor.job_store, self.instance_id, llm_factory=llm_factory
         )
@@ -156,26 +168,79 @@ class ToolRuntime(ToolCatalog):
         return self
 
     async def __aexit__(self, *_):
+        await self.close()
+
+    @property
+    def is_busy(self) -> bool:
+        """Whether execution or an unclosed delegation session occupies this runtime."""
+        return bool(
+            self._calls
+            or self.executor.get_pending_count()
+            or any(s["state"] != "closed" for s in self.delegation.sessions())
+        )
+
+    async def close(self) -> None:
+        """Stop admission and release owned resources; failed cleanup can be retried."""
         self._running = False
         self._closed = True
-        try:
-            await self.delegation.close()
-        finally:
-            jobs = self.executor.get_running_jobs()
-            for job in jobs:
-                await self.executor.cancel(job.job_id)
-            await self.executor.wait_all()
-            await self.plugins.unload_all()
+        if self._close_task is None or (
+            self._close_task.done()
+            and (
+                self._close_task.cancelled() or self._close_task.exception() is not None
+            )
+        ):
+            self._close_task = asyncio.create_task(self._close_resources())
+        cancelled = False
+        while not self._close_task.done():
+            try:
+                await asyncio.shield(self._close_task)
+            except asyncio.CancelledError:
+                cancelled = True
+        self._close_task.result()
+        if cancelled:
+            raise asyncio.CancelledError
 
-    def schemas(self):
-        """Expose only registered executable tools, with full docs inline."""
-        return build_tool_schemas(self.registry, tool_doc_mode="full")
+    async def _close_resources(self) -> None:
+        errors = []
+        calls = set(self._calls)
+        for task in calls:
+            task.cancel()
+        await asyncio.gather(*calls, return_exceptions=True)
+        if not self._delegation_closed:
+            try:
+                await self.delegation.close()
+                self._delegation_closed = True
+            except BaseException as exc:
+                errors.append(exc)
+        for job in self.executor.get_running_jobs():
+            try:
+                await self.executor.cancel(job.job_id)
+            except BaseException as exc:
+                errors.append(exc)
+        try:
+            await self.executor.wait_all()
+        except BaseException as exc:
+            errors.append(exc)
+        try:
+            await self.plugins.unload_all(strict=True)
+        except BaseException as exc:
+            errors.append(exc)
+        if errors:
+            raise errors[0]
 
     async def call(
         self, name: str, args: dict[str, Any]
     ) -> JobResult | PromotionResult:
         if not self._running:
             raise RuntimeError("Tool runtime is not running")
+        task = asyncio.current_task()
+        self._calls.add(task)
+        try:
+            return await self._call(name, args)
+        finally:
+            self._calls.discard(task)
+
+    async def _call(self, name, args):
         if name not in self.registry.list_tools():
             raise ValueError(f"Unknown tool: {name}")
         event = ToolCallEvent(name=name, args=dict(args))
@@ -217,6 +282,36 @@ class ToolRuntime(ToolCatalog):
 
     def jobs(self) -> list[dict[str, Any]]:
         return [self.job(s.job_id) for s in self.executor.job_store.get_all_statuses()]
+
+    async def job_operation(
+        self, operation: str, job_id: str | None = None, *, timeout: float = 10
+    ) -> JobOperationResult:
+        """Query or control a job without conflating missing handles and task failure."""
+        if operation not in {"status", "wait", "cancel", "promote"}:
+            raise ValueError("Unknown job operation")
+        if operation == "status" and job_id is None:
+            return JobOperationResult(
+                {"instance_id": self.instance_id, "jobs": self.jobs()}
+            )
+        if job_id is None:
+            raise ValueError("job_id is required")
+        if self.executor.get_status(job_id) is None:
+            return JobOperationResult(
+                {"job_id": job_id, "error": "Unknown job"}, "not_found"
+            )
+        if operation == "status":
+            return JobOperationResult(self.job(job_id))
+        if operation == "wait":
+            data = await self.wait(job_id, timeout)
+            return JobOperationResult(
+                data,
+                "ok" if self.executor.get_status(job_id) is not None else "not_found",
+            )
+        if operation == "cancel":
+            return JobOperationResult(
+                {"job_id": job_id, "cancelled": await self.cancel(job_id)}
+            )
+        return JobOperationResult({"job_id": job_id, "promoted": self.promote(job_id)})
 
     async def wait(self, job_id: str, timeout: float = 10) -> dict[str, Any]:
         if not 0 <= timeout <= 60:

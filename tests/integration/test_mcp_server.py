@@ -535,6 +535,17 @@ class TestMCPServer:
                             "job_wait", {"job_id": delegated["job_id"]}
                         )
                         assert written["state"] == "done", written
+                        for operation, field in (
+                            ("job_cancel", "cancelled"),
+                            ("job_promote", "promoted"),
+                        ):
+                            result, unchanged = await call(
+                                operation, {"job_id": delegated["job_id"]}
+                            )
+                            assert not result.isError and unchanged[field] is False
+                            assert (await call(operation, {"job_id": "nonexistent"}))[
+                                0
+                            ].isError
                         assert (tmp_path / "delegated.txt").read_text() == "via MCP"
                         _, messages = await call(
                             "delegation_history",

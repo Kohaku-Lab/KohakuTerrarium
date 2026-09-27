@@ -20,7 +20,11 @@ from kohakuterrarium.core.backgroundify import PromotionResult
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig, MCPToolsConfig
-from kohakuterrarium.mcp_server.runtime import ToolCatalog, ToolRuntime
+from kohakuterrarium.mcp_server.runtime import (
+    JobOperationResult,
+    ToolCatalog,
+    ToolRuntime,
+)
 from kohakuterrarium.mcp_server.workspaces import WorkspacePool, WorkspaceRegistry
 
 _JOB_DESCRIPTIONS = {
@@ -105,9 +109,9 @@ def _reply(data: dict, *, result=None, is_error: bool | None = None) -> CallTool
     return CallToolResult(content=content, structuredContent=data, isError=is_error)
 
 
-def _job_reply(data: dict) -> CallToolResult:
+def _job_reply(result: JobOperationResult) -> CallToolResult:
     """A retained job's failure is data, not a failure to query that job."""
-    return _reply(data, is_error=bool(data.get("error")) and "state" not in data)
+    return _reply(result.data, is_error=result.outcome != "ok")
 
 
 class _HTTPTransport:
@@ -240,28 +244,14 @@ def create_app(
                 return _reply(await call_delegation(runtime.delegation, name, args))
             except (ValueError, RuntimeError) as exc:
                 return _reply({"error": str(exc)})
-        if name == "job_status":
+        if name in _JOB_DESCRIPTIONS:
             return _job_reply(
-                runtime.job(args["job_id"])
-                if "job_id" in args
-                else {"instance_id": runtime.instance_id, "jobs": runtime.jobs()}
+                await runtime.job_operation(
+                    name.removeprefix("job_"),
+                    args.get("job_id"),
+                    timeout=args.get("timeout", 10),
+                )
             )
-        if name == "job_wait":
-            return _job_reply(
-                await runtime.wait(args["job_id"], args.get("timeout", 10))
-            )
-        if name in {"job_cancel", "job_promote"}:
-            job_id = args["job_id"]
-            data = runtime.job(job_id)
-            if "error" in data and data["error"] == "Unknown job":
-                return _reply(data)
-            key = "cancelled" if name == "job_cancel" else "promoted"
-            changed = (
-                await runtime.cancel(job_id)
-                if name == "job_cancel"
-                else runtime.promote(job_id)
-            )
-            return _reply({"job_id": job_id, key: changed})
         result = await runtime.call(name, args)
         if isinstance(result, PromotionResult):
             return _reply(

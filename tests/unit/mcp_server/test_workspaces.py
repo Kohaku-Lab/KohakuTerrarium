@@ -1,60 +1,153 @@
 """Registered names own independent runtimes, including across reincarnation."""
 
 import asyncio
+import json
 
 import pytest
 
 from kohakuterrarium.mcp_server.config import GlobalToolsConfig
 from kohakuterrarium.mcp_server.workspaces import WorkspacePool, WorkspaceRegistry
+from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 
-async def test_failed_cleanup_quarantines_registration(tmp_path, monkeypatch):
+@pytest.mark.parametrize("kind", ["creature", "subagent"])
+async def test_unclosed_sessions_keep_workspace_busy(tmp_path, kind):
+    target = tmp_path / "worker.json"
+    definition = {"name": "worker", "tools": []}
+    if kind == "creature":
+        definition.update(
+            input={"type": "none"}, output={"type": "none"}, compact={"enabled": False}
+        )
+    target.write_text(json.dumps(definition), encoding="utf-8")
+    registry = WorkspaceRegistry(tmp_path / "registry.json")
+    registration = registry.add("project", tmp_path)
+    config = GlobalToolsConfig(
+        tools=[], delegation={"worker": {"kind": kind, "config": str(target)}}
+    )
+    model = ScriptedLLM(
+        [
+            ScriptEntry("answer", match="first"),
+            ScriptEntry("slow answer", match="slow", delay_per_chunk=0.2, chunk_size=1),
+        ]
+    )
+    async with WorkspacePool(config, registry, llm_factory=lambda _: model) as pool:
+        async with pool.use("project") as runtime:
+            submitted = await runtime.delegation.submit("worker", "first")
+            assert (await runtime.wait(submitted["job_id"]))["state"] == "done"
+        assert runtime.is_busy
+        with pytest.raises(ValueError, match="busy"):
+            await pool.remove("project")
+        if kind == "creature":
+            slow = await runtime.delegation.submit(
+                "worker", "slow", session_id=submitted["session_id"]
+            )
+            await runtime.cancel(slow["job_id"])
+            assert runtime.delegation.sessions()[0]["state"] == "stopped"
+            assert runtime.is_busy
+            with pytest.raises(ValueError, match="busy"):
+                await pool.remove("project")
+        assert registry.read()["project"] == registration
+        await runtime.delegation.close_session(submitted["session_id"])
+        assert not runtime.is_busy
+        await pool.remove("project")
+        assert not registry.read()
+
+
+@pytest.mark.parametrize("operation", ["remove", "shutdown"])
+async def test_failed_cleanup_quarantines_registration(tmp_path, operation):
     registry = WorkspaceRegistry(tmp_path / "registry.json")
     registry.add("project", tmp_path)
-    async with WorkspacePool(GlobalToolsConfig(), registry) as pool:
-        async with pool.use("project") as runtime:
+    plugin = tmp_path / "cleanup.py"
+    plugin.write_text(
+        "from kohakuterrarium.modules.plugin.base import BasePlugin\n"
+        "class Cleanup(BasePlugin):\n"
+        "    name = 'cleanup'\n"
+        "    async def on_load(self, context):\n"
+        "        self.workspace = context.working_dir\n"
+        "    async def on_unload(self):\n"
+        "        if not (self.workspace / 'release').exists():\n"
+        "            raise OSError('cleanup failed')\n"
+        "        (self.workspace / 'released').touch()\n"
+    )
+    config = GlobalToolsConfig(
+        plugins=[
+            {
+                "name": "cleanup",
+                "type": "custom",
+                "module": str(plugin),
+                "class": "Cleanup",
+            }
+        ]
+    )
+    async with WorkspacePool(config, registry) as pool:
+
+        async def close():
+            if operation == "remove":
+                await pool.remove("project", force=True)
+            else:
+                await pool.__aexit__(None, None, None)
+
+        async with pool.use("project"):
             pass
-        original = runtime.__aexit__
-
-        async def failed_close(*args):
-            await original(*args)
-            raise OSError("cleanup failed")
-
-        monkeypatch.setattr(runtime, "__aexit__", failed_close)
         with pytest.raises(OSError, match="cleanup"):
-            await pool.remove("project", force=True)
+            await close()
         assert "project" in registry.read()
         with pytest.raises(ValueError, match="stopping"):
             async with pool.use("project"):
                 pass
-        monkeypatch.setattr(runtime, "__aexit__", original)
-        await pool.remove("project", force=True)
+        (tmp_path / "release").touch()
+        await close()
+        assert (tmp_path / "released").exists()
+        assert bool(registry.read()) == (operation == "shutdown")
 
 
-async def test_shutdown_cancels_pending_first_load(tmp_path, monkeypatch):
+async def test_shutdown_cancels_pending_first_load(tmp_path):
     registry = WorkspaceRegistry(tmp_path / "registry.json")
-    entry = registry.add("project", tmp_path)
-    pool = WorkspacePool(GlobalToolsConfig(), registry)
+    registry.add("project", tmp_path)
+    plugin = tmp_path / "loading.py"
+    plugin.write_text(
+        "import asyncio\n"
+        "from kohakuterrarium.modules.plugin.base import BasePlugin\n"
+        "class Loading(BasePlugin):\n"
+        "    name = 'loading'\n"
+        "    async def on_load(self, context):\n"
+        "        self.workspace = context.working_dir\n"
+        "        (self.workspace / 'entered').touch()\n"
+        "        await asyncio.Event().wait()\n"
+        "    async def on_unload(self):\n"
+        "        (self.workspace / 'unloaded').touch()\n"
+    )
+    config = GlobalToolsConfig(
+        plugins=[
+            {
+                "name": "loading",
+                "type": "custom",
+                "module": str(plugin),
+                "class": "Loading",
+            }
+        ]
+    )
+    pool = WorkspacePool(config, registry)
     await pool.__aenter__()
-    lock = asyncio.Lock()
-    await lock.acquire()
-    pool._locks[entry.registration_id] = lock
 
     async def pending():
         async with pool.use("project"):
             pytest.fail("admitted after shutdown")
 
     task = asyncio.create_task(pending())
-    await asyncio.sleep(0)
+    for _ in range(100):
+        if (tmp_path / "entered").exists():
+            break
+        await asyncio.sleep(0.01)
     try:
         await pool.__aexit__(None, None, None)
         assert (
             task.done()
         ), "shutdown left an admitted request waiting on initialization"
+        assert (tmp_path / "unloaded").exists()
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
-        lock.release()
 
 
 async def test_same_directory_isolation_removal_and_restart(tmp_path):

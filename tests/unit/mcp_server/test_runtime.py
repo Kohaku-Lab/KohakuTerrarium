@@ -204,3 +204,152 @@ async def test_shutdown_cancels_owned_jobs_and_rejects_later_calls(tmp_path):
     assert runtime.job(running.job_id)["state"] == "cancelled"
     with pytest.raises(RuntimeError, match="running"):
         await runtime.call("read", {"path": "anything"})
+
+
+async def test_job_operations_distinguish_missing_failed_and_unchanged(tmp_path):
+    async with ToolRuntime(MCPToolsConfig(workspace=tmp_path)) as runtime:
+        failed = await runtime.call(
+            "python", {"code": "raise ValueError('task failed')"}
+        )
+        for operation in ("status", "wait", "cancel", "promote"):
+            missing = await runtime.job_operation(operation, "missing")
+            assert missing.outcome == "not_found"
+            assert missing.data == {"job_id": "missing", "error": "Unknown job"}
+        for operation in ("status", "wait"):
+            result = await runtime.job_operation(operation, failed.job_id)
+            assert result.outcome == "ok" and result.data["state"] == "error"
+            assert "task failed" in result.data["output"] or "task failed" in (
+                result.data["error"] or ""
+            )
+        cancelled = await runtime.job_operation("cancel", failed.job_id)
+        assert cancelled.outcome == "ok" and cancelled.data["cancelled"] is False
+        promoted = await runtime.job_operation("promote", failed.job_id)
+        assert promoted.outcome == "ok" and promoted.data["promoted"] is False
+        listed = await runtime.job_operation("status")
+        assert [j["job_id"] for j in listed.data["jobs"]] == [failed.job_id]
+
+
+async def test_close_cancels_call_waiting_in_dispatch_and_unloads_once(tmp_path):
+    entered = asyncio.Event()
+
+    class WaitingPlugin(BasePlugin):
+        name = "waiting"
+        unloaded = 0
+
+        async def pre_tool_dispatch(self, call, context):
+            entered.set()
+            await asyncio.Event().wait()
+
+        async def on_unload(self):
+            self.unloaded += 1
+
+    plugin = WaitingPlugin()
+    runtime = ToolRuntime(MCPToolsConfig(workspace=tmp_path), plugins=[plugin])
+    await runtime.__aenter__()
+    call = asyncio.create_task(
+        runtime.call("write", {"path": "late.txt", "content": "bad"})
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert runtime.is_busy
+        await asyncio.gather(runtime.close(), runtime.close())
+        assert call.cancelled() and plugin.unloaded == 1
+        assert not (tmp_path / "late.txt").exists()
+        await runtime.close()
+        assert plugin.unloaded == 1
+    finally:
+        call.cancel()
+        await asyncio.gather(call, return_exceptions=True)
+        await runtime.__aexit__(None, None, None)
+
+
+async def test_close_failure_releases_other_resources_and_can_retry(tmp_path):
+    class Resource(BasePlugin):
+        def __init__(self, name, fail=False):
+            super().__init__()
+            self.name, self.fail, self.released = name, fail, 0
+
+        async def on_unload(self):
+            if self.fail:
+                raise OSError("resource still held")
+            self.released += 1
+
+    good, broken = Resource("good"), Resource("broken", True)
+    runtime = ToolRuntime(MCPToolsConfig(workspace=tmp_path), plugins=[good, broken])
+    await runtime.__aenter__()
+    job = await runtime.call(
+        "python", {"code": "import time; time.sleep(60)", "run_in_background": True}
+    )
+    try:
+        with pytest.raises(OSError, match="resource still held"):
+            await runtime.close()
+        assert runtime.job(job.job_id)["state"] == "cancelled"
+        assert good.released == 1
+        with pytest.raises(RuntimeError, match="running"):
+            await runtime.call("read", {"path": "anything"})
+        broken.fail = False
+        await runtime.close()
+        assert good.released == broken.released == 1
+    finally:
+        broken.fail = False
+        await runtime.__aexit__(None, None, None)
+
+
+async def test_cancelled_job_remains_busy_until_its_resource_cleanup_finishes(tmp_path):
+    entered, cleaning, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class HeldResource(BasePlugin):
+        name = "held"
+
+        async def pre_tool_execute(self, args, **kwargs):
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleaning.set()
+                await release.wait()
+
+    async with ToolRuntime(
+        MCPToolsConfig(workspace=tmp_path), plugins=[HeldResource()]
+    ) as runtime:
+        job = await runtime.call(
+            "python", {"code": "print('not reached')", "run_in_background": True}
+        )
+        try:
+            await asyncio.wait_for(entered.wait(), 2)
+            await runtime.cancel(job.job_id)
+            await asyncio.wait_for(cleaning.wait(), 2)
+            assert runtime.job(job.job_id)["state"] == "cancelled"
+            assert runtime.is_busy
+        finally:
+            release.set()
+            await runtime.wait(job.job_id, 2)
+        assert not runtime.is_busy
+
+
+async def test_cancelling_close_waits_for_owned_cleanup(tmp_path):
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Cleanup(BasePlugin):
+        name = "cleanup"
+        released = 0
+
+        async def on_unload(self):
+            entered.set()
+            await release.wait()
+            self.released += 1
+
+    plugin = Cleanup()
+    runtime = ToolRuntime(MCPToolsConfig(workspace=tmp_path), plugins=[plugin])
+    await runtime.__aenter__()
+    closing = asyncio.create_task(runtime.close())
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        closing.cancel()
+        await asyncio.sleep(0)
+        assert not closing.done() and plugin.released == 0
+    finally:
+        release.set()
+        await asyncio.gather(closing, return_exceptions=True)
+        await runtime.close()
+    assert closing.cancelled() and plugin.released == 1
