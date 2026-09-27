@@ -38,6 +38,7 @@ tags:
 - [子代理](sub-agents.md)：內建與內聯專家、執行期預算外掛和自動壓縮。
 - [自訂模組](custom-modules.md)：自訂輸入、觸發器、工具、輸出、子代理的寫法與註冊。
 - [MCP](mcp.md)：連接 Model Context Protocol 伺服器，把它們的工具暴露給生物。
+- [MCP 伺服器](mcp-server.md)：向外部 MCP 用戶端提供 KT 工具與本機任務委派。
 
 ## 發佈與部署
 

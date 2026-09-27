@@ -1,4 +1,13 @@
-# MCP tool server
+---
+title: MCP server
+summary: Configure a workspace-scoped MCP server, expose KT tools, and delegate work to local Creatures or subagents.
+tags:
+  - guides
+  - mcp
+  - deployment
+---
+
+# MCP server
 
 The standalone server exposes KT tools to an external MCP client. With no
 delegation targets configured it creates no Creature and starts no local model.
@@ -9,11 +18,10 @@ and optionally its preconfigured ngrok tunnel.
 
 ## Configure once, then start and stop
 
-Install this checkout (or put its `src` directory on `PYTHONPATH` and use
-`python -m kohakuterrarium` in place of `kt`). The tested SDK dependency is
-`mcp>=1.28.1,<2`; the existing MCP client remains on the same major.
-Configure an ngrok account and fixed HTTPS domain first, then from the desired
-working directory run:
+Install a KT version that provides `kt mcp-serve`. Choose how clients will reach
+the server: use managed ngrok with an account and fixed HTTPS domain, or use an
+existing stable HTTPS entry point in external mode. From the workspace you want
+to expose, run:
 
 ```powershell
 kt mcp-serve setup
@@ -87,7 +95,7 @@ kt mcp-serve start
 Point that entry at the selected loopback port. KT neither starts nor stops an
 external tunnel. A public host still needs an HTTPS reverse proxy: KT listens
 on loopback and does not terminate TLS itself. In managed mode only, inherited
-HTTP proxy environment variables are removed from the ngrok child, matching the tested reference setup;
+HTTP proxy environment variables are removed from the ngrok child;
 ngrok's own configuration is retained. The system proxy is not changed.
 
 Supervisor and tunnel diagnostics are in `server.log` and `tunnel.log` beside
@@ -334,23 +342,7 @@ has a working directory, name and instance ID, but no host Agent, Controller,
 session persistence, model switching or child-agent spawning. Custom plugin
 authors must handle that contract; a plugin is trusted local code.
 
-## Migrating the ingress experiment
-
-Stop the old experimental tool process, then explicitly import its connection
-record on the first setup for that workspace:
-
-```powershell
-kt mcp-serve setup --non-interactive --workspace C:/work `
-  --import-connection C:/private/ingress-test.json --mode external
-kt mcp-serve start --workspace C:/work
-```
-
-Import preserves the origin and secret and rejects a different workspace.
-Use external mode if retaining the separately launched experiment tunnel.
-To let KT manage ngrok, stop that separately owned tunnel explicitly before
-starting managed mode. The full URL stays the same; the old probe record is not
-deleted or modified. Refresh client tool discovery when switching from probe
-tools to KT tools. `scripts/mcp_probe/run_kt.py` remains only an experiment helper.
+## Embedding the server
 
 For embedding, `api.mcp_tools.create_app(config, secret=..., port=...,
 public_origin=...)` returns an ASGI app. Run its lifespan and **disable host
@@ -373,7 +365,7 @@ execution continues. Four tools expose the existing JobStore:
 | --- | --- |
 | `job_status` | Read one job, or list retained jobs plus `instance_id`. |
 | `job_wait` | Wait 0–60 seconds, default 10; return current state on timeout. |
-| `job_cancel` | Cancel an owned running job through Executor. |
+| `job_cancel` | Cancel owned running work; a Creature delegation stops its whole instance. |
 | `job_promote` | Release a foreground call into background without rerunning it. |
 
 Reading or waiting for a retained job is a successful MCP call even when that
@@ -393,7 +385,7 @@ jobs using existing KT cleanup. Restart creates a new instance and cannot resume
 old jobs; old IDs do not match new jobs. The existing JobStore retains at most
 100 completed jobs. The URL identity is separate from these in-memory states.
 
-## Access and verification boundary
+## Access boundary
 
 The full secret URL is a bearer capability, not OAuth or a ChatGPT account
 identity. Anyone holding it has this instance's tool access. Keep it out of
@@ -401,13 +393,9 @@ source control and ordinary logs. An HTTPS tunnel terminates traffic at its
 provider; do not assume the provider cannot see plaintext. Client confirmations
 remain client behavior; KT does not bypass them.
 
-Phase-one ChatGPT read/write and fixed-URL reconnection evidence is recorded
-in `scripts/mcp_probe/RESULTS.md`. Actual phase-two ChatGPT file, shell, Python
-and background-job results, plus a subsequent job-query response correction,
-are recorded in `scripts/mcp_probe/PHASE2_RESULTS.md`. SDK checks are distinguished
-from owner-reported ChatGPT behavior. CLI lifecycle, managed ingress recovery
-and local regression results are in `scripts/mcp_probe/PHASE3_RESULTS.md`.
-The subsequent setup workflow and running-configuration isolation checks are
-recorded in `scripts/mcp_probe/SETUP_RESULTS.md`.
-These checks do not establish compatibility with
-all accounts, clients, operating systems or hosting providers.
+## See also
+
+- [MCP client configuration](mcp.md): connect external MCP tools to a Creature.
+- [Creature configuration](creatures.md): define targets for local delegation.
+- [Subagents](sub-agents.md): subagent capabilities and configuration.
+- [Reverse-proxy deployment](deployment-reverse-proxy.md): maintain an external HTTPS entry point.

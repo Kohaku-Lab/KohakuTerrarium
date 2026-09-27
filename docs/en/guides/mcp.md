@@ -9,6 +9,8 @@ tags:
 
 # MCP
 
+To expose KT's own tools and local delegation to external clients, see the [MCP server guide](mcp-server.md).
+
 For readers connecting MCP (Model Context Protocol) servers to a creature.
 
 MCP is a client-server protocol that exposes tools (and other primitives) over stdio or HTTP. KohakuTerrarium is the client: you register a server in config, the framework spawns the subprocess or opens the HTTP session, and the server's tools become callable from the agent through a small set of meta-tools.

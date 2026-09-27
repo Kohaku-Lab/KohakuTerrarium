@@ -31,6 +31,7 @@ If you want a guided first walk-through, go to [Tutorials](../tutorials/README.m
 - [Sub-agents](sub-agents.md): builtin and inline specialists, runtime budget plugins, and auto-compaction.
 - [Custom Modules](custom-modules.md): writing tools, inputs, outputs, triggers, sub-agents.
 - [MCP](mcp.md): registering MCP servers per-agent or globally.
+- [MCP server](mcp-server.md): expose KT tools and local delegation to external MCP clients.
 - [Packages](packages.md): `kohaku.yaml` manifests, install modes, publishing.
 
 ## Multi-agent and composition
