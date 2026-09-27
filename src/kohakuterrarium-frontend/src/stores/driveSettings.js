@@ -141,6 +141,7 @@ export const useDriveSettingsStore = defineStore("driveSettings", {
         return {
           ...reg,
           enabled,
+          unconditional_wake: !!sel.unconditional_wake,
           options: sel.options || {},
           displayState: display,
         }
@@ -250,6 +251,13 @@ export const useDriveSettingsStore = defineStore("driveSettings", {
       const regs = this.draft.registrations
       const current = regs[name] || { enabled: false, options: {} }
       regs[name] = { ...current, options: { ...current.options, [key]: value } }
+    },
+
+    setRegistrationWake(name, enabled) {
+      if (!this.draft) return
+      const regs = this.draft.registrations
+      const current = regs[name] || { enabled: false, options: {} }
+      regs[name] = { ...current, unconditional_wake: !!enabled }
     },
 
     async validate() {

@@ -1924,19 +1924,18 @@ class TestTerrariumIntegration:
     async def test_drive_delivery_waits_for_startup_trigger(
         self, patched_llm, tmp_path
     ):
-        """Restoration barrier (§6.5): a drive assigned to a creature that has
-        a startup trigger is NOT delivered until the startup turn settles — the
-        startup response precedes the drive response in the conversation."""
+        """Respect startup restoration, assignee waiting/resume, and owner pause."""
         patched_llm.set_script(
             "worker",
             [
                 ScriptEntry("STARTUP-DONE-MARKER", match="startup wake"),
                 "DRIVE-DONE-MARKER",
+                "DRIVE-RESUMED-MARKER",
             ],
         )
         engine = Terrarium(
             pwd=str(tmp_path),
-            drive_config=DriveRuntimeConfig(enabled=True),
+            drive_config=DriveRuntimeConfig(enabled=True, readiness_cooldown_s=60),
             drive_registrations=default_registrations(),
         )
         async with engine:
@@ -1947,8 +1946,13 @@ class TestTerrariumIntegration:
             actor = ActorRef("user", "alice")
             record = await engine.drives.manager.create_drive(
                 CreateDriveRequest(
-                    kind="generic",
+                    kind="goal",
                     title="watch",
+                    spec={
+                        "objective": "Honor explicit waiting",
+                        "autonomy": "continue_when_ready",
+                        "budgets": {"max_turns": 2},
+                    },
                     scope_type="graph",
                     scope_id=worker.graph_id,
                     owner=actor,
@@ -1970,6 +1974,42 @@ class TestTerrariumIntegration:
                 if any(d.state == "acknowledged" for d in deliveries):
                     break
                 await asyncio.sleep(0.03)
+            manager = engine.drives.manager
+            await manager.stop()
+            assert len([d for d in deliveries if d.state == "acknowledged"]) == 1
+            result = await worker.agent.registry.get_tool("drive_transition").execute(
+                {
+                    "drive_id": record.drive_id,
+                    "expected_revision": record.revision,
+                    "status": "waiting",
+                },
+                context=_ctx_for(LocalTerrariumService(engine), "worker"),
+            )
+            assert result.error is None
+            waiting = await manager.get_drive(record.drive_id)
+            before = await manager.list_deliveries(record.drive_id)
+            assert waiting.status is DriveStatus.WAITING
+            for _ in range(3):
+                await manager._scan_ready()
+                await manager.dispatcher.dispatch_once()
+                await manager.dispatcher.drain()
+                current = await manager.get_drive(record.drive_id)
+                assert current.status is DriveStatus.WAITING
+                assert current.revision == waiting.revision
+            assert await manager.list_deliveries(record.drive_id) == before
+            result = await worker.agent.registry.get_tool("drive_transition").execute(
+                {
+                    "drive_id": record.drive_id,
+                    "expected_revision": waiting.revision,
+                    "status": "active",
+                },
+                context=_ctx_for(LocalTerrariumService(engine), "worker"),
+            )
+            assert result.error is None
+            await manager.dispatcher.dispatch_once()
+            await manager.dispatcher.drain()
+            deliveries = await manager.list_deliveries(record.drive_id)
+            assert len([d for d in deliveries if d.state == "acknowledged"]) == 2
             assistant_text = " || ".join(
                 m.get("content", "") if isinstance(m.get("content"), str) else ""
                 for m in worker.agent.conversation_history
@@ -1977,7 +2017,27 @@ class TestTerrariumIntegration:
             )
             assert "STARTUP-DONE-MARKER" in assistant_text
             assert "DRIVE-DONE-MARKER" in assistant_text
+            assert "DRIVE-RESUMED-MARKER" in assistant_text
             # Ordering: startup settled BEFORE the drive turn ran.
             assert assistant_text.index("STARTUP-DONE-MARKER") < assistant_text.index(
                 "DRIVE-DONE-MARKER"
             )
+            current = await manager.get_drive(record.drive_id)
+            paused = await manager.transition(
+                record.drive_id,
+                DriveStatus.PAUSED,
+                expected_revision=current.revision,
+                actor=actor,
+            )
+            result = await worker.agent.registry.get_tool("drive_transition").execute(
+                {
+                    "drive_id": record.drive_id,
+                    "expected_revision": paused.revision,
+                    "status": "active",
+                },
+                context=_ctx_for(LocalTerrariumService(engine), "worker"),
+            )
+            assert result.error is not None
+            assert (
+                await manager.get_drive(record.drive_id)
+            ).status is DriveStatus.PAUSED

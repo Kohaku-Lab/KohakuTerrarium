@@ -733,9 +733,11 @@ runtime:
 registrations:
   generic:                        # a registration is keyed by its stable name
     enabled: true
+    unconditional_wake: false     # keep waiting until conditions or explicit resume
     options: {}
   goal:
     enabled: false                # installed != enabled (see below)
+    unconditional_wake: false
     options: {}
 ```
 
@@ -766,13 +768,41 @@ is already active.
 ### `registrations`: installed is not enabled
 
 Each key under `registrations` is a registration's stable **name** with
-`{ enabled: bool, options: {...} }`. A registration must be **installed**
+`{ enabled: bool, unconditional_wake: bool, options: {...} }`. A registration must be **installed**
 (declared by a package's [`drive_registrations:`](#package-manifest-kohakuyaml)
 manifest slot, or passed directly to `Terrarium`) *and* enabled here
 before its `kind` can be created, validated, projected, or scheduled.
 Installation alone never enables anything. Enabling the runtime with no
 enabled registration is rejected. Only enabled registrations are
 imported and only they contribute prompt prose.
+
+`unconditional_wake` is a framework policy, separate from extension `options`.
+It defaults to `false`: without `not_before` or `dependency_ids`, a Drive stays
+`waiting` until explicitly resumed. Set it to `true` to retain legacy automatic
+`waiting` → `active` transitions for that registration's kind. Explicit time and
+dependency conditions still gate the transition; `paused` and delivery readiness
+are unaffected. Readiness callbacks continue receiving active records, even if
+their own delivery condition is not yet satisfied.
+
+Settings → Drives exposes **Auto-wake without conditions** on each registration
+card. **Save** persists the choice; **Apply** publishes a new running registry
+snapshot without a restart when only this policy changes. Disabling a registration
+or changing runtime tuning retains the existing restart rules.
+
+For an explicitly constructed engine, configure the registration before passing it
+to `Terrarium(drive_registrations=[registration])`:
+
+```python
+from kohakuterrarium.terrarium.drive.registration_options import (
+    apply_registration_wake_policy,
+)
+
+apply_registration_wake_policy(registration, unconditional_wake=True)
+```
+
+The helper does not invoke the extension's `configure()` hook. An existing
+engine keeps its current policy until `engine.reconfigure_drives([...])` builds
+a new snapshot; changing an instance alone does not alter a running snapshot.
 
 ### Save is not apply
 

@@ -636,6 +636,19 @@ def test_privileged_creature_gets_graph_admin_rights():
     assert dp.is_operation_allowed(priv, rec, None, Op.RETIRE, is_privileged=True)
 
 
+@pytest.mark.parametrize("status", list(S))
+def test_assignee_transition_permissions_depend_on_source_state(status):
+    rec = make_record(owner=USER, status=status)
+    allowed = {
+        S.ACTIVE: {S.WAITING, S.BLOCKED},
+        S.WAITING: {S.ACTIVE, S.BLOCKED},
+    }.get(status, set())
+    for target in S:
+        assert dp.is_operation_allowed(
+            WORKER, rec, make_assignment(), Op.TRANSITION, target_status=target
+        ) is (target in allowed)
+
+
 def test_require_operation_raises_on_denial():
     rec = make_record(owner=USER)
     asg = make_assignment(assignee_creature_id="worker")

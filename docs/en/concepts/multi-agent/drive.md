@@ -133,11 +133,30 @@ policy. **Reopening a terminal Drive is forbidden by default**; the
 intended pattern is to create a successor Drive carrying
 `metadata.parent_drive_id`. If a registration explicitly allows reopen,
 the repository increments the Drive's `lifecycle_epoch` (which
-invalidates every prior delivery) and writes an audit record. Waiting
-Drives carry deterministic wake conditions only — a timestamp, a
-dependency predicate, a named external signal, a registration readiness
-function, or a manual wake by an authorized actor. The manager never
-infers readiness from free-form prose.
+invalidates every prior delivery) and writes an audit record.
+
+By default, the periodic scan wakes a `waiting` Drive only when its explicit
+`not_before` and/or `dependency_ids` conditions are satisfied. With neither
+condition it stays waiting until an authorized actor activates or wakes it.
+An external result can prompt the assignee to request `waiting -> active`;
+the runtime does not infer this transition from the result's contents.
+
+For compatibility, `registrations.<name>.unconditional_wake: true` can opt a
+registration's kind into the previous automatic `waiting -> active` scan even
+without those conditions. It defaults to false. Explicit time/dependency conditions
+still apply. See [Drive settings](../../reference/configuration.md#drive-settings-drive-settingsyaml).
+
+Automatic wake changes status; registration **readiness** decides whether an
+active Drive earns a delivery afterward. The scanner does not call readiness
+on waiting records. Its `ready`, initial-grant, budget, and continuation rules
+are unchanged. Ordinary activation still observes readiness; an authorized
+manual wake retains its existing readiness override.
+
+An assignee without ownership or privilege may move `active -> waiting`,
+`waiting -> active`, or `active`/`waiting -> blocked`. Other control transitions,
+including leaving `paused` or `blocked`, require full transition authority.
+Manual wake also requires full authority. Reporting and terminal proposals
+continue to follow their existing permissions and verifier policy.
 
 ## Delivery: at-least-once, logically deduplicated
 

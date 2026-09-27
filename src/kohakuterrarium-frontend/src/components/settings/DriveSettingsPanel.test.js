@@ -79,6 +79,64 @@ function _reg(name, extra = {}) {
 function mountPanel() {
   return mount(DriveSettingsPanel, { global: { plugins: [ElementPlus] } })
 }
+
+describe("registration wake policy", () => {
+  it("edits, discards, saves and reloads each policy independently of extension options", async () => {
+    let saved = _settings(
+      {
+        generic: { enabled: true, unconditional_wake: true, options: {} },
+        goal: { enabled: true, options: {} },
+      },
+      { enabled: true },
+    )
+    driveSettingsAPI.getConfig.mockImplementation(async () => ({
+      settings: structuredClone(saved),
+      revision: "v1",
+    }))
+    driveSettingsAPI.status.mockResolvedValue({
+      registrations: [_reg("generic"), _reg("goal")],
+      runtime: _runtime({ enabled: true }),
+    })
+    driveSettingsAPI.runtimeStatus.mockResolvedValue({ enabled: true })
+    driveSettingsAPI.save.mockImplementation(async (settings) => {
+      saved = JSON.parse(JSON.stringify(settings))
+      return { revision: "v2", durability: "full" }
+    })
+    driveSettingsAPI.apply.mockResolvedValue({ result: "applied_live", warnings: [] })
+
+    const w = mountPanel()
+    const store = useDriveSettingsStore()
+    await flushPromises()
+    const toggle = (name) =>
+      w.get(`[role="switch"][aria-label="Auto-wake ${name} without conditions"]`)
+    expect(toggle("goal").attributes("aria-checked")).toBe("false")
+    expect(toggle("generic").attributes("aria-checked")).toBe("true")
+    await toggle("goal").trigger("click")
+    expect(store.dirty).toBe(true)
+    await buttonByText(w, "Discard").trigger("click")
+    await flushPromises()
+    expect(toggle("goal").attributes("aria-checked")).toBe("false")
+
+    await toggle("goal").trigger("click")
+    await buttonByText(w, "Save").trigger("click")
+    await flushPromises()
+    expect(saved.registrations).toEqual({
+      generic: { enabled: true, unconditional_wake: true, options: {} },
+      goal: { enabled: true, unconditional_wake: true, options: {} },
+    })
+    expect(store.dirty).toBe(false)
+    await store.load()
+    await flushPromises()
+    expect(toggle("goal").attributes("aria-checked")).toBe("true")
+    await buttonByText(w, "Apply").trigger("click")
+    await flushPromises()
+    expect(store.applyResult.result).toBe("applied_live")
+    await toggle("goal").trigger("click")
+    expect(store.draft.registrations.goal.unconditional_wake).toBe(false)
+    expect(store.draft.registrations.generic.unconditional_wake).toBe(true)
+    w.unmount()
+  })
+})
 function buttonByText(w, text) {
   return w.findAll("button").find((b) => b.text().trim() === text)
 }

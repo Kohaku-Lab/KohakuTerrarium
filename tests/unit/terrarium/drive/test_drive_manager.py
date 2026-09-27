@@ -14,6 +14,7 @@ from kohakuterrarium.terrarium.drive.config import DriveRetryConfig
 from kohakuterrarium.terrarium.drive.errors import (
     DriveBackpressureError,
     DriveConflictError,
+    DriveIdempotencyConflictError,
     DrivePermissionError,
     DriveRegistrationDisabledError,
     DriveTransitionError,
@@ -311,6 +312,213 @@ class TestAuthorizationAndCas:
 
 
 class TestOwnerAssigneeSplit:
+    async def test_concurrent_sqlite_resume_retries_emit_one_status_change(
+        self, tmp_path
+    ):
+        repo = SqliteDriveRepository(tmp_path / "retry.sqlite")
+        h = build_manager(repo=repo)
+        try:
+            record = await h.manager.create_drive(
+                graph_request(),
+                actor=USER,
+                graph_id="g1",
+                is_privileged=True,
+                initial_status=DriveStatus.WAITING,
+            )
+            h.observations.clear()
+            results = await asyncio.gather(
+                *(
+                    h.manager.transition(
+                        record.drive_id,
+                        DriveStatus.ACTIVE,
+                        expected_revision=record.revision,
+                        actor=WORKER,
+                        idempotency_key="resume-key",
+                    )
+                    for _ in range(4)
+                )
+            )
+            assert all(result == results[0] for result in results)
+            changes = [o for o in h.observations if o.kind == "drive_status_changed"]
+            assert len(changes) == 1
+            assert len(await h.manager.list_deliveries(record.drive_id)) == 1
+        finally:
+            await repo.close()
+
+    @pytest.mark.parametrize(
+        "target", [DriveStatus.WAITING, DriveStatus.BLOCKED, DriveStatus.ACTIVE]
+    )
+    @pytest.mark.parametrize("pause_after", [False, True])
+    async def test_control_retry_returns_receipt_without_new_effects(
+        self, target, pause_after
+    ):
+        h = build_manager()
+        record = await h.manager.create_drive(
+            graph_request(),
+            actor=USER,
+            graph_id="g1",
+            is_privileged=True,
+            initial_status=(
+                DriveStatus.WAITING
+                if target is DriveStatus.ACTIVE
+                else DriveStatus.ACTIVE
+            ),
+        )
+        result = await h.manager.transition(
+            record.drive_id,
+            target,
+            expected_revision=record.revision,
+            actor=WORKER,
+            idempotency_key="control-retry",
+        )
+        if pause_after:
+            await h.manager.transition(
+                record.drive_id,
+                DriveStatus.PAUSED,
+                expected_revision=result.revision,
+                actor=USER,
+            )
+        before = await h.manager.get_drive(record.drive_id)
+        deliveries = await h.manager.list_deliveries(record.drive_id)
+        audit = await h.repo.list_audit(record.drive_id)
+        observations = list(h.observations)
+        replay = await h.manager.transition(
+            record.drive_id,
+            target,
+            expected_revision=record.revision,
+            actor=WORKER,
+            idempotency_key="control-retry",
+        )
+        assert replay == result
+        assert await h.manager.get_drive(record.drive_id) == before
+        assert await h.manager.list_deliveries(record.drive_id) == deliveries
+        assert await h.repo.list_audit(record.drive_id) == audit
+        assert h.observations == observations
+        # Neither a different actor nor a changed operation can reuse this receipt.
+        with pytest.raises(DrivePermissionError):
+            await h.manager.transition(
+                record.drive_id,
+                target,
+                expected_revision=before.revision,
+                actor=OTHER,
+                idempotency_key="control-retry",
+            )
+        with pytest.raises(DriveIdempotencyConflictError):
+            await h.manager.transition(
+                record.drive_id,
+                DriveStatus.CANCELLED,
+                expected_revision=before.revision,
+                actor=WORKER,
+                idempotency_key="control-retry",
+            )
+
+    @pytest.mark.parametrize(
+        ("autonomy", "max_turns", "expected_deliveries"),
+        [
+            ("manual", 5, 1),
+            ("continue_when_ready", 1, 1),
+            ("continue_when_ready", 5, 2),
+        ],
+    )
+    async def test_resume_waiting_preserves_goal_delivery_policy(
+        self, autonomy, max_turns, expected_deliveries
+    ):
+        h = build_manager(
+            snapshot=EnabledRegistrySnapshot.build([GoalDriveRegistration()]),
+            config=make_config(readiness_cooldown_s=60),
+        )
+        record = await h.manager.create_drive(
+            graph_request(
+                kind="goal",
+                spec={
+                    "objective": "Await result",
+                    "autonomy": autonomy,
+                    "budgets": {"max_turns": max_turns},
+                },
+            ),
+            actor=USER,
+            graph_id="g1",
+            is_privileged=True,
+        )
+        await h.manager.dispatcher.dispatch_once()
+        await h.manager.dispatcher.drain()
+        waiting = await h.manager.transition(
+            record.drive_id,
+            DriveStatus.WAITING,
+            expected_revision=record.revision,
+            actor=WORKER,
+        )
+        with pytest.raises(DrivePermissionError):
+            await h.manager.wake_drive(record.drive_id, actor=WORKER)
+        active = await h.manager.transition(
+            record.drive_id,
+            DriveStatus.ACTIVE,
+            expected_revision=waiting.revision,
+            actor=WORKER,
+        )
+        assert active.status is DriveStatus.ACTIVE
+        await h.manager.dispatcher.dispatch_once()
+        await h.manager.dispatcher.drain()
+        assert (
+            len(await h.manager.list_deliveries(record.drive_id)) == expected_deliveries
+        )
+        # The owner retains the existing explicit readiness override.
+        await h.manager.wake_drive(record.drive_id, actor=USER)
+        await h.manager.dispatcher.dispatch_once()
+        await h.manager.dispatcher.drain()
+        assert (
+            len(await h.manager.list_deliveries(record.drive_id))
+            == expected_deliveries + 1
+        )
+
+    @pytest.mark.parametrize("revision_offset", [0, 1])
+    @pytest.mark.parametrize("owner_action", ["pause", "reassign"])
+    async def test_resume_cannot_race_owner_control(
+        self, revision_offset, owner_action
+    ):
+        h = build_manager()
+        record = await h.manager.create_drive(
+            graph_request(),
+            actor=USER,
+            graph_id="g1",
+            is_privileged=True,
+            initial_status=DriveStatus.WAITING,
+        )
+        # Queue owner control first while the repository is locked. The assignee
+        # must authorize against the resulting state, even with a guessed revision.
+        async with h.repo.transaction():
+            control = asyncio.create_task(
+                h.manager.transition(
+                    record.drive_id,
+                    DriveStatus.PAUSED,
+                    expected_revision=record.revision,
+                    actor=USER,
+                )
+                if owner_action == "pause"
+                else h.repo.assign_drive(
+                    record.drive_id,
+                    assignee_creature_id="other",
+                    assignee_graph_id="g1",
+                    expected_revision=record.revision,
+                    actor=USER,
+                )
+            )
+            resume = asyncio.create_task(
+                h.manager.transition(
+                    record.drive_id,
+                    DriveStatus.ACTIVE,
+                    expected_revision=record.revision + revision_offset,
+                    actor=WORKER,
+                )
+            )
+            await asyncio.sleep(0)
+        await control
+        controlled = await h.manager.get_drive(record.drive_id)
+        with pytest.raises((DriveConflictError, DrivePermissionError)):
+            await resume
+        assert await h.manager.get_drive(record.drive_id) == controlled
+        assert not await h.manager.list_deliveries(record.drive_id)
+
     async def _graph_drive(self, h) -> str:
         rec = await h.manager.create_drive(
             graph_request(), actor=WORKER, graph_id="g1", is_privileged=True
