@@ -2,17 +2,14 @@
 
 import asyncio
 import uuid
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
+from dataclasses import dataclass
 
-from kohakuterrarium.core.events import create_user_input_event
-from kohakuterrarium.core.job import JobResult, JobState, JobStatus, JobStore, JobType
+from kohakuterrarium.core.job import JobResult, JobState, JobStatus
 from kohakuterrarium.mcp_server.delegation_history import DelegationHistory
-from kohakuterrarium.mcp_server.subagent_host import SubagentHost
-from kohakuterrarium.studio.studio import Studio
-from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.utils.config_dir import config_dir
+from kohakuterrarium.mcp_server.delegation_adapters import (
+    DelegationAdapters,
+    SessionExecution,
+)
 
 
 @dataclass
@@ -22,15 +19,12 @@ class DelegatedSession:
     session_id: str
     target: str
     kind: str
-    history: DelegationHistory = field(default_factory=DelegationHistory)
-    creature: Any = None
-    subagent: Any = None
-    saved_path: Path | None = None
-    state: str = "starting"
+    history: DelegationHistory
+    execution: SessionExecution
+    closed: bool = False
     active_job: str | None = None
-    closing: bool = False
+    closing: int = 0
     stopping: int = 0
-    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class DelegationRuntime:
@@ -40,8 +34,7 @@ class DelegationRuntime:
         self.config = config
         self.store = store
         self.instance_id = instance_id
-        self.llm_factory = llm_factory
-        self.studio = None
+        self.adapters = DelegationAdapters(config, instance_id, llm_factory=llm_factory)
         self._sessions: dict[str, DelegatedSession] = {}
         self._tasks: dict[str, asyncio.Task] = {}
         self._owners: dict[str, DelegatedSession] = {}
@@ -76,16 +69,14 @@ class DelegationRuntime:
     def _state(self, session):
         if self._busy(session):
             return "busy"
-        if session.state == "running" and session.creature is not None:
-            return "paused" if session.creature.paused else session.creature.status
-        return session.state
+        return "closed" if session.closed else session.execution.state
 
     def _busy(self, session):
         return bool(
             session.closing
             or session.stopping
             or session.active_job
-            or (session.creature is not None and session.creature.agent.is_processing)
+            or session.execution.busy
         )
 
     async def submit(self, target: str, prompt: str, *, session_id: str | None = None):
@@ -99,11 +90,11 @@ class DelegationRuntime:
             session = self._session(session_id)
             if session.target != target:
                 raise ValueError("Session belongs to another target")
-            if session.kind == "subagent":
+            if not session.execution.can_continue:
                 raise ValueError("Subagent sessions are one-shot")
-            if session.state == "closed":
+            if session.closed:
                 raise ValueError("Session is closed")
-            if self._busy(session) or session.lock.locked():
+            if self._busy(session):
                 return {
                     "error": "Session is busy",
                     "session_id": session_id,
@@ -111,8 +102,13 @@ class DelegationRuntime:
                 }
         else:
             session_id = f"{self.instance_id}_session_{uuid.uuid4().hex}"
+            history = DelegationHistory()
             session = DelegatedSession(
-                session_id, target, self.config.delegation[target].kind
+                session_id,
+                target,
+                self.config.delegation[target].kind,
+                history,
+                self.adapters.create(target, history),
             )
             self._sessions[session_id] = session
         job_id = f"{self.instance_id}_{session.kind}_{uuid.uuid4().hex}"
@@ -121,7 +117,7 @@ class DelegationRuntime:
         self.store.register(
             JobStatus(
                 job_id,
-                JobType.CREATURE if session.kind == "creature" else JobType.SUBAGENT,
+                session.execution.job_type,
                 target,
                 context={"session_id": session_id, "kind": session.kind},
             )
@@ -142,130 +138,20 @@ class DelegationRuntime:
                 self._owners.pop(job_id, None)
                 self._tasks.pop(job_id, None)
 
-    async def _creature(self, session):
-        if self.studio is None:
-            self.studio = Studio(engine=Terrarium())
-            await self.studio.__aenter__()
-        engine = self.studio.engine
-        llm = self.llm_factory(session.target) if self.llm_factory else None
-        if session.saved_path is not None:
-            graph = await engine.adopt_session(
-                str(session.saved_path), llm=llm, io="headless"
-            )
-            creatures = [c for c in engine.list_creatures() if c.graph_id == graph]
-            session.creature = next(
-                c for c in creatures if c.name == session.creature.name
-            )
-        else:
-            path = (
-                config_dir()
-                / "mcp-serve"
-                / "sessions"
-                / self.instance_id
-                / f"{uuid.uuid4().hex}.kohakutr"
-            )
-            path.parent.mkdir(parents=True, exist_ok=True)
-            session.creature = await engine.add_creature(
-                self.config.delegation[session.target].config,
-                llm=llm,
-                pwd=str(self.config.workspace),
-                io="headless",
-                session=path,
-                start=False,
-            )
-            session.saved_path = path
-            session.creature.agent.output_router.add_secondary(session.history)
-            await session.creature.start()
-            return
-        session.creature.agent.output_router.add_secondary(session.history)
-
     async def _execute(self, session, job_id, prompt):
-        output, error, metadata = (
-            "",
-            None,
-            {"session_id": session.session_id, "kind": session.kind},
-        )
+        output, error = "", None
+        metadata = {"session_id": session.session_id, "kind": session.kind}
         state = JobState.DONE
         try:
-            async with session.lock:
-                self.store.update_status(job_id, state=JobState.RUNNING)
-                if session.kind == "creature":
-                    if session.creature is None or session.state == "stopped":
-                        await self._creature(session)
-                else:
-                    llm = self.llm_factory(session.target) if self.llm_factory else None
-                    session.subagent = SubagentHost(
-                        self.config.delegation[session.target].config,
-                        self.config.workspace,
-                        # Like a Creature, the child owns its internal jobs. The
-                        # MCP job settles only after execution and cleanup finish.
-                        JobStore(),
-                        session.history,
-                        llm=llm,
-                    )
-                    await session.subagent.start(job_id, prompt)
-                session.state = "running"
-            if session.kind == "creature":
-                if session.creature.agent.is_processing:
-                    raise ValueError("Session is busy with autonomous activity")
-                event = create_user_input_event(
-                    prompt, source="mcp", correlation_id=job_id
-                )
-                event.stackable = False
-                result = await session.creature.inject_event(event)
-                output, error = result.text, result.error
-                metadata.update(
-                    status=result.status,
-                    usage=result.usage,
-                    duration_s=result.duration_s,
-                )
-                if result.status == "interrupted":
-                    state = JobState.CANCELLED
-                elif not result.ok:
-                    state, error = JobState.ERROR, error or result.status
-            else:
-                result = await session.subagent.wait()
-                output, error = result.output, result.error
-                metadata.update(
-                    turns=result.turns,
-                    duration_s=result.duration,
-                    usage={
-                        "total_tokens": result.total_tokens,
-                        "prompt_tokens": result.prompt_tokens,
-                        "completion_tokens": result.completion_tokens,
-                    },
-                )
-                state = (
-                    JobState.CANCELLED
-                    if result.cancelled or result.interrupted
-                    else (JobState.DONE if result.success else JobState.ERROR)
-                )
-                session.history.append("result", text=output, job_id=job_id)
+            self.store.update_status(job_id, state=JobState.RUNNING)
+            result = await session.execution.run(job_id, prompt)
+            output, error, state = result.output, result.error, result.state
+            metadata.update(result.metadata)
         except asyncio.CancelledError:
             state, error = JobState.CANCELLED, "Delegation cancelled"
         except Exception as exc:
             state, error = JobState.ERROR, str(exc)
-            if session.state == "starting":
-                if session.creature is not None:
-                    try:
-                        await self._stop(session)
-                    except Exception as cleanup:
-                        error += f"; resource cleanup failed: {cleanup}"
-                else:
-                    session.state = "error"
         finally:
-            if session.subagent:
-                cleanup = asyncio.create_task(session.subagent.close())
-                try:
-                    while not cleanup.done():
-                        try:
-                            await asyncio.shield(cleanup)
-                        except asyncio.CancelledError:
-                            state, error = JobState.CANCELLED, "Delegation cancelled"
-                    cleanup.result()
-                except Exception as exc:
-                    state, error = JobState.ERROR, f"Resource cleanup failed: {exc}"
-                session.state = "completed"
             if job_id in self._cancelling:
                 state, error = JobState.CANCELLED, "Delegation cancelled"
             if session.active_job == job_id:
@@ -286,17 +172,6 @@ class DelegationRuntime:
             except asyncio.TimeoutError:
                 pass
 
-    async def _stop(self, session):
-        async with session.lock:
-            if session.creature is not None and session.state not in {
-                "stopped",
-                "closed",
-            }:
-                await self.studio.sessions.stop(session.creature.graph_id)
-                session.state = "stopped"
-            if session.subagent is not None:
-                await session.subagent.cancel()
-
     async def _control(self, coroutine):
         task = asyncio.create_task(coroutine)
         self._controls.add(task)
@@ -314,15 +189,13 @@ class DelegationRuntime:
         self._cancelling.add(job_id)
         session.stopping += 1
         try:
-            await self._stop(session)
+            await session.execution.stop()
             task = self._tasks[job_id]
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
             if session.active_job == job_id:
                 session.active_job = None
-            if session.state == "starting":
-                session.state = "stopped"
             self.store.update_status(
                 job_id, state=JobState.CANCELLED, error="Delegation cancelled"
             )
@@ -350,14 +223,7 @@ class DelegationRuntime:
         session = self._owners[job_id]
         if session.active_job != job_id or job_id in self._cancelling:
             return False
-        if session.kind == "subagent":
-            accepted = bool(session.subagent and await session.subagent.send(content))
-        else:
-            accepted = (
-                session.creature is not None and session.creature.agent.is_processing
-            )
-            if accepted:
-                await session.creature.inject_input(content, source="mcp_feedback")
+        accepted = await session.execution.send(content)
         if accepted:
             session.history.append(
                 "input", text=content, job_id=job_id, supplemental=True
@@ -368,12 +234,7 @@ class DelegationRuntime:
         session = self._session(session_id)
         if view == "conversation":
             session.history.page(cursor, limit)
-            if session.creature:
-                messages = session.creature.agent.controller.conversation.to_messages()
-            elif session.subagent:
-                messages = session.subagent.conversation() or []
-            else:
-                messages = []
+            messages = session.execution.conversation()
             public = []
             for message in messages[cursor : cursor + limit]:
                 data = message if isinstance(message, dict) else message.to_dict()
@@ -397,20 +258,19 @@ class DelegationRuntime:
 
     async def close_session(self, session_id):
         session = self._session(session_id)
-        session.closing = True
+        session.closing += 1
         return await self._control(self._close_session(session))
 
     async def _close_session(self, session):
         try:
-            if session.state == "closed":
+            if session.closed:
                 return
             if session.active_job:
                 await self._cancel(session.active_job)
-            else:
-                await self._stop(session)
-            session.state = "closed"
+            await session.execution.close()
+            session.closed = True
         finally:
-            session.closing = False
+            session.closing -= 1
 
     async def close(self):
         self._closing = True
@@ -418,14 +278,14 @@ class DelegationRuntime:
             await asyncio.gather(*self._controls, return_exceptions=True)
         error = None
         for session in self._sessions.values():
+            session.closing += 1
             try:
                 await self._close_session(session)
             except Exception as exc:
                 error = error or exc
-        if self.studio is not None:
-            try:
-                await self.studio.__aexit__(None, None, None)
-            except Exception as exc:
-                error = error or exc
+        try:
+            await self.adapters.close()
+        except Exception as exc:
+            error = error or exc
         if error is not None:
             raise error

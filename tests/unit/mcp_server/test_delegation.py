@@ -271,45 +271,89 @@ async def test_autonomous_turns_remain_enabled_and_observable(tmp_path):
 
 
 async def test_stop_cancels_previous_turn_background_tools(tmp_path):
-    config = configuration(tmp_path, tools=[{"name": "python"}])
+    tool = tmp_path / "background.py"
+    tool.write_text(
+        "import asyncio\n"
+        "from kohakuterrarium.modules.tool.base import BaseTool, ExecutionMode\n"
+        "class Background(BaseTool):\n"
+        "    tool_name = 'background'\n"
+        "    description = 'Hold a workspace resource until cancelled'\n"
+        "    execution_mode = ExecutionMode.BACKGROUND\n"
+        "    needs_context = True\n"
+        "    async def _execute(self, args, context=None, **kwargs):\n"
+        "        (context.working_dir / 'started').touch()\n"
+        "        try:\n"
+        "            await asyncio.Event().wait()\n"
+        "        finally:\n"
+        "            (context.working_dir / 'released').touch()\n"
+    )
+    config = configuration(
+        tmp_path,
+        tool_format="kohaku",
+        tools=[
+            {
+                "name": "background",
+                "type": "custom",
+                "module": str(tool),
+                "class": "Background",
+            }
+        ],
+    )
     model = ScriptedLLM(
         [
-            "first answer",
+            ScriptEntry("first answer [/background][background/]", match="first"),
             ScriptEntry("slow answer", chunk_size=1, delay_per_chunk=0.2),
         ]
     )
     async with ToolRuntime(config, llm_factory=lambda _: model) as runtime:
         submitted = await runtime.delegation.submit("worker", "first")
-        await runtime.wait(submitted["job_id"], 10)
-        session = runtime.delegation._session(submitted["session_id"])
-        job = await session.creature.agent.executor.submit(
-            "python", {"code": "import time; time.sleep(60)"}
+        assert (await runtime.wait(submitted["job_id"], 10))["state"] == "done"
+        for _ in range(100):
+            if (tmp_path / "started").exists():
+                break
+            await asyncio.sleep(0.01)
+        assert (tmp_path / "started").exists(), json.dumps(
+            runtime.delegation.history(submitted["session_id"], limit=200)
         )
-        task = session.creature.agent.executor._tasks[job]
+        assert not (tmp_path / "released").exists()
         second = await runtime.delegation.submit(
             "worker", "slow", session_id=submitted["session_id"]
         )
         await asyncio.sleep(0.05)
         assert await runtime.cancel(second["job_id"])
-        assert task.done()
-        assert (
-            session.creature.agent.executor.get_status(job).state.value == "cancelled"
-        )
+        assert (tmp_path / "released").exists()
+        assert runtime.delegation.sessions()[0]["state"] == "stopped"
 
 
 async def test_cleanup_failure_is_reported_without_leaving_running_job(tmp_path):
     class BrokenClose(ScriptedLLM):
-        async def close(self):
-            raise RuntimeError("provider cleanup failed")
+        fail = True
+        released = False
 
+        async def close(self):
+            if self.fail:
+                raise RuntimeError("provider cleanup failed")
+            self.released = True
+
+    model = BrokenClose(["answer"])
     async with ToolRuntime(
         configuration(tmp_path, "subagent"),
-        llm_factory=lambda _: BrokenClose(["answer"]),
+        llm_factory=lambda _: model,
     ) as runtime:
         submitted = await runtime.delegation.submit("worker", "task")
         result = await runtime.wait(submitted["job_id"], 10)
         assert result["state"] == "error" and "cleanup failed" in result["error"]
         assert runtime.delegation.sessions()[0]["job_id"] is None
+        try:
+            with pytest.raises(RuntimeError, match="cleanup failed"):
+                await runtime.delegation.close_session(submitted["session_id"])
+            assert runtime.delegation.sessions()[0]["state"] != "closed"
+            assert runtime.is_busy
+        finally:
+            model.fail = False
+            await runtime.delegation.close_session(submitted["session_id"])
+        assert model.released
+        assert runtime.delegation.sessions()[0]["state"] == "closed"
 
 
 async def test_close_racing_new_turn_cannot_restart_a_closed_session(tmp_path):
@@ -331,24 +375,66 @@ async def test_close_racing_new_turn_cannot_restart_a_closed_session(tmp_path):
         assert runtime.delegation.sessions()[0]["state"] == "closed"
 
 
-async def test_invalid_definition_is_not_left_starting(tmp_path):
-    config = configuration(tmp_path, tools=[{"name": "no_such_tool"}])
-    async with ToolRuntime(config, llm_factory=lambda _: ScriptedLLM()) as runtime:
+async def test_parallel_close_keeps_session_busy_after_one_cleanup_fails(tmp_path):
+    first_entered, first_release = asyncio.Event(), asyncio.Event()
+    second_entered, second_release = asyncio.Event(), asyncio.Event()
+
+    class Provider(ScriptedLLM):
+        attempts = 0
+
+        async def close(self):
+            self.attempts += 1
+            if self.attempts == 1:
+                raise RuntimeError("initial cleanup failed")
+            if self.attempts == 2:
+                first_entered.set()
+                await first_release.wait()
+                raise RuntimeError("first close failed")
+            second_entered.set()
+            await second_release.wait()
+
+    model = Provider(["answer"])
+    async with ToolRuntime(
+        configuration(tmp_path, "subagent"), llm_factory=lambda _: model
+    ) as runtime:
+        submitted = await runtime.delegation.submit("worker", "task")
+        assert (await runtime.wait(submitted["job_id"]))["state"] == "error"
+        sid = submitted["session_id"]
+        first = asyncio.create_task(runtime.delegation.close_session(sid))
+        second = None
+        try:
+            await asyncio.wait_for(first_entered.wait(), 5)
+            second = asyncio.create_task(runtime.delegation.close_session(sid))
+            await asyncio.sleep(0)
+            first_release.set()
+            with pytest.raises(RuntimeError, match="first close failed"):
+                await first
+            await asyncio.wait_for(second_entered.wait(), 5)
+            assert runtime.delegation.sessions()[0]["state"] == "busy"
+        finally:
+            first_release.set()
+            second_release.set()
+            await asyncio.gather(
+                *[task for task in (first, second) if task], return_exceptions=True
+            )
+        assert runtime.delegation.sessions()[0]["state"] == "closed"
+
+
+@pytest.mark.parametrize("kind", ["creature", "subagent"])
+async def test_invalid_definition_is_not_left_starting(tmp_path, kind):
+    class Provider(ScriptedLLM):
+        released = False
+
+        async def close(self):
+            self.released = True
+
+    model = Provider()
+    config = configuration(tmp_path, kind, tools=[{"name": "no_such_tool"}])
+    async with ToolRuntime(config, llm_factory=lambda _: model) as runtime:
         job = await runtime.delegation.submit("worker", "task")
         assert (await runtime.wait(job["job_id"], 10))["state"] == "error"
         assert runtime.delegation.sessions()[0]["state"] == "error"
-
-
-async def test_session_listing_reads_current_creature_state(tmp_path):
-    async with ToolRuntime(
-        configuration(tmp_path), llm_factory=lambda _: ScriptedLLM(["reply"])
-    ) as runtime:
-        submitted = await runtime.delegation.submit("worker", "task")
-        await runtime.wait(submitted["job_id"], 10)
-        session = runtime.delegation._session(submitted["session_id"])
-        assert runtime.delegation.sessions()[0]["state"] == "idle"
-        await session.creature.stop()
-        assert runtime.delegation.sessions()[0]["state"] == "stopped"
+    assert model.released
 
 
 async def test_waiter_disconnect_and_parallel_creatures(tmp_path):
@@ -404,10 +490,11 @@ async def test_shutdown_error_does_not_skip_other_sessions_or_direct_jobs(tmp_pa
 
     class TrackingLLM(ScriptedLLM):
         closed = False
+        fail = True
 
         async def close(self):
             self.closed = True
-            if self is models[0]:
+            if self is models[0] and self.fail:
                 raise RuntimeError("first provider cleanup failed")
 
     def provider(_):
@@ -431,11 +518,6 @@ async def test_shutdown_error_does_not_skip_other_sessions_or_direct_jobs(tmp_pa
         assert all(model.closed for model in models)
         assert runtime.job(direct.job_id)["state"] == "cancelled"
     finally:
-        # Release resources even when the shutdown regression is red.
-        for session in runtime.delegation._sessions.values():
-            try:
-                await runtime.delegation._stop(session)
-            except RuntimeError:
-                pass
-        for job in runtime.executor.get_running_jobs():
-            await runtime.executor.cancel(job.job_id)
+        for model in models:
+            model.fail = False
+        await runtime.close()
