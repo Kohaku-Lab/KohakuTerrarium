@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import threading
 import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -69,6 +70,7 @@ class TestGrokTokens:
         monkeypatch.setenv("GROK_HOME", str(grok_home))
         monkeypatch.setenv("OPENCODE_AUTH_FILE", str(opencode))
 
+        monkeypatch.setattr(grok_auth, "_grok_cli_executable", lambda: None)
         candidates = GrokTokens.load_candidates()
 
         assert [item.source for item in candidates] == [
@@ -404,29 +406,6 @@ class TestGrokTokens:
 
         assert await GrokTokens.ensure_fresh_cli(force=True) is None
 
-    @staticmethod
-    async def _max_gap_during(work):
-        """Return the longest heartbeat stall while ``work`` runs."""
-        loop = asyncio.get_running_loop()
-        gaps = []
-        stop = asyncio.Event()
-
-        async def heartbeat():
-            previous = loop.time()
-            while not stop.is_set():
-                await asyncio.sleep(0.01)
-                now = loop.time()
-                gaps.append(now - previous)
-                previous = now
-
-        pulse = asyncio.create_task(heartbeat())
-        await asyncio.sleep(0.03)
-        result = await work()
-        await asyncio.sleep(0.03)
-        stop.set()
-        await pulse
-        return result, max(gaps)
-
     @pytest.mark.asyncio
     async def test_cli_load_and_version_probe_stay_off_the_event_loop(
         self, tmp_path, monkeypatch
@@ -447,21 +426,33 @@ class TestGrokTokens:
         )
         grok_auth._grok_version_cache.clear()
 
-        def slow_version(*args, **kwargs):
-            time.sleep(0.2)
+        loop_thread = threading.get_ident()
+        read_threads = []
+        probe_threads = []
+        real_load = grok_auth._load_grok_cli_token
+
+        def record_load():
+            read_threads.append(threading.get_ident())
+            return real_load()
+
+        def probe_version(*args, **kwargs):
+            probe_threads.append(threading.get_ident())
             return SimpleNamespace(returncode=0, stdout="grok 1.2.3\n", stderr="")
 
-        monkeypatch.setattr(grok_auth.subprocess, "run", slow_version)
+        monkeypatch.setattr(grok_auth.subprocess, "run", probe_version)
+        monkeypatch.setattr(grok_auth, "_load_grok_cli_token", record_load)
 
         try:
-            token, gap = await self._max_gap_during(GrokTokens.ensure_fresh_cli)
+            token = await GrokTokens.ensure_fresh_cli()
         finally:
             grok_auth._grok_version_cache.clear()
 
         assert token is not None
         assert token.access_token == "current"
         assert token.extra_headers["x-grok-client-version"] == "1.2.3"
-        assert gap < 0.1
+        assert len(read_threads) == 1
+        assert probe_threads
+        assert loop_thread not in read_threads + probe_threads
 
     @pytest.mark.asyncio
     async def test_refresh_reread_stays_off_the_event_loop(self, tmp_path, monkeypatch):
@@ -484,24 +475,36 @@ class TestGrokTokens:
             self._write_cli_auth(grok_home, "new", now + 6 * 3600)
             return True
 
-        def slow_version(*args, **kwargs):
-            time.sleep(0.2)
+        loop_thread = threading.get_ident()
+        read_threads = []
+        probe_threads = []
+        real_load = grok_auth._load_grok_cli_token
+
+        def record_load():
+            read_threads.append(threading.get_ident())
+            return real_load()
+
+        def probe_version(*args, **kwargs):
+            probe_threads.append(threading.get_ident())
             return SimpleNamespace(returncode=0, stdout="grok 1.2.3\n", stderr="")
 
         monkeypatch.setattr(
             "kohakuterrarium.llm.grok_auth._run_grok_models", fake_models
         )
-        monkeypatch.setattr(grok_auth.subprocess, "run", slow_version)
+        monkeypatch.setattr(grok_auth.subprocess, "run", probe_version)
+        monkeypatch.setattr(grok_auth, "_load_grok_cli_token", record_load)
 
         try:
-            refreshed, gap = await self._max_gap_during(GrokTokens.ensure_fresh_cli)
+            refreshed = await GrokTokens.ensure_fresh_cli()
         finally:
             grok_auth._grok_version_cache.clear()
 
         assert refreshed is not None
         assert refreshed.access_token == "new"
         assert refreshed.extra_headers["x-grok-client-version"] == "1.2.3"
-        assert gap < 0.1
+        assert len(read_threads) == 2
+        assert probe_threads
+        assert loop_thread not in read_threads + probe_threads
 
     @pytest.mark.asyncio
     async def test_refresh_failure_is_redacted_auth_unavailable(

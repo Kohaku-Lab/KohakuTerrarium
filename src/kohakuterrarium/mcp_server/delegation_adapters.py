@@ -115,6 +115,13 @@ class CreatureExecution:
             )
             self._pending_llm = None
             self._saved_path = path
+            if self.owner.llm_factory is not None:
+                # The adapter recreates this provider through its factory on resume.
+                self._creature.injected_runtime = tuple(
+                    label
+                    for label in self._creature.injected_runtime
+                    if label != "llm_provider"
+                )
             self._creature.agent.output_router.add_secondary(self.history)
             await self._creature.start()
 

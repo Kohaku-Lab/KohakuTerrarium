@@ -356,8 +356,9 @@ class DriveTransitionTool(_BaseDriveTool):
     def description(self) -> str:
         return (
             "Transition a drive you own, or as the assignee of a foreign-owned "
-            "drive set it to 'waiting'/'blocked' (use 'blocked' when you need "
-            "user intervention; 'paused'/'cancelled' are owner-only). Control "
+            "drive move active to waiting, resume waiting to active, or mark "
+            "active/waiting blocked for user intervention. Other control "
+            "transitions require the owner or privilege. Control "
             "transitions require 'expected_revision' (see drive_status); "
             "completed/failed go through proposal with evidence."
         )
@@ -380,10 +381,10 @@ class DriveTransitionTool(_BaseDriveTool):
                         "failed",
                     ],
                     "description": (
-                        "Target status. As an assignee you may only set "
-                        "'waiting' or 'blocked'; 'paused'/'cancelled' require "
-                        "the owner; completed/failed go through proposal with "
-                        "evidence."
+                        "Target status. Assignees may move active to waiting, "
+                        "waiting to active, or active/waiting to blocked. Other "
+                        "controls require the owner or privilege; completed/failed "
+                        "go through proposal with evidence."
                     ),
                 },
                 "expected_revision": {
@@ -445,9 +446,9 @@ class DriveTransitionTool(_BaseDriveTool):
         except DrivePermissionError as exc:
             return _err(
                 f"permission denied: {exc}; as an assignee you may only "
-                "transition to 'waiting' or 'blocked' (use 'blocked' when you "
-                "need user intervention); 'paused' and 'cancelled' require the "
-                "owner"
+                "move active to 'waiting' or 'blocked', or waiting to 'active' "
+                "or 'blocked' (use 'blocked' when you need user intervention); "
+                "other controls require the owner or privilege"
             )
         except DriveError as exc:
             return _drive_error_result(exc)

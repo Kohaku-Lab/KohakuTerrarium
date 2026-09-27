@@ -42,11 +42,11 @@ class _Creature:
 
 
 class TestAttachSessionStore:
-    def test_noop_when_unregistered(self):
+    async def test_noop_when_unregistered(self):
         # No hook → silently returns, nothing raised.
-        group_hooks.attach_session_store(object(), _Creature())
+        await group_hooks.attach_session_store(object(), _Creature())
 
-    def test_dispatches_with_kwargs(self):
+    async def test_dispatches_with_kwargs(self):
         calls = []
 
         def hook(engine, creature, *, config_path="", config_type="agent"):
@@ -54,12 +54,12 @@ class TestAttachSessionStore:
 
         group_hooks.register_store_attach(hook)
         eng, cr = object(), _Creature()
-        group_hooks.attach_session_store(
+        await group_hooks.attach_session_store(
             eng, cr, config_path="/x/agent.yaml", config_type="agent"
         )
         assert calls == [(eng, cr, "/x/agent.yaml", "agent")]
 
-    def test_defaults_passed_through(self):
+    async def test_defaults_passed_through(self):
         seen = {}
 
         def hook(engine, creature, *, config_path="", config_type="agent"):
@@ -67,16 +67,27 @@ class TestAttachSessionStore:
             seen["config_type"] = config_type
 
         group_hooks.register_store_attach(hook)
-        group_hooks.attach_session_store(object(), _Creature())
+        await group_hooks.attach_session_store(object(), _Creature())
         assert seen == {"config_path": "", "config_type": "agent"}
 
-    def test_hook_exception_is_swallowed(self):
+    async def test_async_attach_completes_before_returning(self):
+        attached = []
+
+        async def hook(engine, creature, **kwargs):
+            attached.append(creature)
+
+        creature = _Creature()
+        group_hooks.register_store_attach(hook)
+        await group_hooks.attach_session_store(object(), creature)
+        assert attached == [creature]
+
+    async def test_hook_exception_is_swallowed(self):
         def hook(engine, creature, *, config_path="", config_type="agent"):
             raise RuntimeError("store attach blew up")
 
         group_hooks.register_store_attach(hook)
         # Must not propagate.
-        group_hooks.attach_session_store(object(), _Creature())
+        await group_hooks.attach_session_store(object(), _Creature())
 
 
 # ── apply_creature_name ─────────────────────────────────────

@@ -431,6 +431,8 @@ class SqliteDriveRepository(BaseDriveRepository):
         self._opened = True
 
     def _open_conn(self) -> None:
+        if self._conn is not None:
+            return
         if self._read_only:
             self._open_conn_readonly()
             return
@@ -512,19 +514,23 @@ class SqliteDriveRepository(BaseDriveRepository):
         if self._closed:
             return
         self._closed = True
-        conn = self._conn
-        snapshot = self._snapshot
-        if self._opened and conn is not None:
-            try:
-                closer = snapshot.close if snapshot is not None else conn.close
-                self._executor.submit(closer).result()
-            except (
-                Exception
-            ) as exc:  # pragma: no cover - close failures are non-recoverable here
-                logger.warning("Drive connection close failed", error=str(exc))
-        self._snapshot = None
-        self._conn = None
-        self._executor.shutdown(wait=True)
+        try:
+            self._executor.submit(self._close_conn).result()
+        except Exception as exc:  # pragma: no cover
+            logger.warning("Drive connection close failed", error=str(exc))
+        finally:
+            self._executor.shutdown(wait=True)
+
+    def _close_conn(self) -> None:
+        """Close on the worker after any queued connection initialization."""
+        try:
+            if self._snapshot is not None:
+                self._snapshot.close()
+            elif self._conn is not None:
+                self._conn.close()
+        finally:
+            self._snapshot = None
+            self._conn = None
 
     async def close(self) -> None:
         self.close_blocking()

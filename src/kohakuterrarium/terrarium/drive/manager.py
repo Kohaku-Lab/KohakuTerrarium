@@ -392,30 +392,17 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
                 f"transition to {target_status.value!r} is not allowed here; use "
                 "propose_transition (completion/failure) or retire_drive"
             )
-        current = await self._require(drive_id)
-        assignment = await self._repo.get_assignment(drive_id)
-        authorize(
-            DriveOperation.TRANSITION,
-            actor,
-            current,
-            assignment,
-            self._snapshot,
-            is_privileged=is_privileged,
-            target_status=target_status,
-        )
-        self._validate_registration_transition(
-            current, target_status, {"operation": "transition"}
-        )
-        record = await self._repo.transition_drive(
+        record, fresh = await self._commit_control_transition(
             drive_id,
             target_status,
             expected_revision=expected_revision,
             actor=actor,
             status_reason=status_reason,
-            extra_transitions=self._registration_extra_transitions(current.kind),
             idempotency_key=idempotency_key,
-            operation="transition",
+            is_privileged=is_privileged,
         )
+        if not fresh:
+            return record
         self._emit(
             "drive_status_changed",
             drive_id,
@@ -436,10 +423,7 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
         expected_revision: int | None = None,
         is_privileged: bool = False,
     ) -> DriveRecord:
-        """Wake a waiting drive or re-enqueue an active drive with no live work.
-
-        Manual wake is an authorized readiness override.
-        """
+        """Manually wake with full transition authority, overriding readiness."""
         current = await self._require(drive_id)
         assignment = await self._repo.get_assignment(drive_id)
         authorize(
@@ -449,7 +433,6 @@ class DriveManager(DriveManagerOps, DriveManagerReconcileMixin, ManagerReadiness
             assignment,
             self._snapshot,
             is_privileged=is_privileged,
-            target_status=DriveStatus.ACTIVE,
         )
         record = current
         if current.status is DriveStatus.WAITING:

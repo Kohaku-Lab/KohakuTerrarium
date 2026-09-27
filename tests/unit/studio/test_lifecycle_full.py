@@ -156,7 +156,7 @@ class TestAttachSessionStoreForCreature:
             creature.agent.attach_session_store = lambda s: setattr(
                 creature.agent, "_attached", s
             )
-            lifecycle.attach_session_store_for_creature(
+            await lifecycle.attach_session_store_for_creature(
                 svc, creature, config_path="/tmp/cfg.yaml"
             )
             assert creature.agent._attached is not None
@@ -189,7 +189,7 @@ class TestAttachSessionStoreForCreature:
             )
             t._session_stores[sid] = existing
             try:
-                lifecycle.attach_session_store_for_creature(svc, creature)
+                await lifecycle.attach_session_store_for_creature(svc, creature)
                 # Reused — same store.
                 assert lifecycle.stores_for(svc)[sid] is existing
                 assert attached[0] is existing
@@ -443,15 +443,16 @@ class TestStopSession:
     async def test_remote_path(self):
         t = await TestTerrariumBuilder().build()
         svc = LocalTerrariumService(t)
-        # Add a fake remote_creature method.
-        svc.remove_creature = AsyncMock()
+        svc._host = SimpleNamespace(
+            request=AsyncMock(return_value={"ok": True, "removed": ["cid-r"]})
+        )
         try:
             lifecycle.meta_for(svc)["sid-r"] = {
                 "on_node": "worker-1",
                 "creature_id": "cid-r",
             }
             await lifecycle.stop_session(svc, "sid-r")
-            svc.remove_creature.assert_awaited_with("cid-r")
+            assert svc._host.request.await_args.kwargs["type"] == "unload"
             assert "sid-r" not in lifecycle.meta_for(svc)
         finally:
             await t.shutdown()

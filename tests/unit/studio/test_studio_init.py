@@ -42,7 +42,9 @@ class TestStudioInitHooks:
         attached = []
         creature.agent.attach_session_store = lambda s: attached.append(s)
         try:
-            studio_pkg._store_attach_hook(svc, creature, config_path="/tmp/cfg.yaml")
+            await studio_pkg._store_attach_hook(
+                svc, creature, config_path="/tmp/cfg.yaml"
+            )
             sid = creature.graph_id
             assert sid in lifecycle.stores_for(svc)
             assert attached and attached[0] is lifecycle.stores_for(svc)[sid]

@@ -12,9 +12,11 @@ from typing import Any
 from kohakuterrarium.laboratory._internal.app import AppMessage
 from kohakuterrarium.laboratory.adapters.file_scopes import resolve_in_scope
 from kohakuterrarium.laboratory.protocols import LabRegistrar
+from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.engine import Terrarium
-from kohakuterrarium.terrarium.graph_manifest import parse_manifest
+from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest
+from kohakuterrarium.terrarium.session_unload import unload_session_graph
 from kohakuterrarium.terrarium.workspace_resume import (
     preflight_session_workspaces,
     WorkspaceResumeError,
@@ -92,6 +94,8 @@ class TerrariumSessionAdapter:
                 return await self._op_resume(msg.body)
             case "set_lifecycle":
                 return self._op_set_lifecycle(msg.body)
+            case "unload":
+                return await self._op_unload(msg.body)
             case "rollback_resume":
                 return await self._op_rollback_resume(msg.body)
             case "delete_transfer":
@@ -175,6 +179,37 @@ class TerrariumSessionAdapter:
             if owns_store:
                 store.close(update_status=False)
         return {"ok": True, "session_path": str(path)}
+
+    async def _op_unload(self, body: dict[str, Any]) -> dict[str, Any]:
+        graph_id = str(body.get("graph_id") or "")
+        if not graph_id:
+            raise ValueError("unload requires graph_id")
+        store = self._engine._session_stores.get(graph_id)
+        path = body.get("session_path")
+        if store is None and graph_id not in self._engine._topology.graphs:
+            # A previous successful unload may have lost its reply. Only the
+            # matching saved graph can establish that this retry is complete.
+            if not path or not Path(path).is_file():
+                raise ValueError("unload retry requires the saved session_path")
+            if any(
+                _path_key(item.path) == _path_key(path)
+                for item in self._engine._session_stores.values()
+            ):
+                raise ValueError("session is attached to a different graph")
+            manifest = parse_manifest(read_session_meta(path).get(MANIFEST_KEY))
+            if manifest.graph_id != graph_id:
+                raise ValueError("session_path does not match the saved graph")
+            return {
+                "ok": True,
+                "removed": sorted(c.creature_id for c in manifest.creatures),
+            }
+        if path and (store is None or _path_key(store.path) != _path_key(path)):
+            raise ValueError("session_path does not match the live graph")
+        removed = await unload_session_graph(self._engine, graph_id)
+        if store is not None:
+            store.close(update_status=False)
+        self._forget_graph_tokens(graph_id)
+        return {"ok": True, "removed": list(removed)}
 
     def _op_delete_transfer(self, body: dict[str, Any]) -> dict[str, Any]:
         path = _transfer_path(self._engine, body.get("session_path"))

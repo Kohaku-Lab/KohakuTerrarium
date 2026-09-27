@@ -606,6 +606,7 @@ class TestCoreIntegration:
                     break
                 await asyncio.sleep(0.02)
             assert "background acknowledged" in _assistant_text(agent)
+            assert agent.executor._event_queue.qsize() == 0
             assert all(
                 sum(m.get("content") == hint for m in call) == 1
                 for call in agent.llm.call_log[:4]
@@ -1417,6 +1418,46 @@ class TestCoreIntegration:
                 r for jid, r in all_results.items() if jid.startswith("bgboom_")
             )
             assert "background-kaboom" in (bgboom_result.error or "")
+
+            # Awaited requests retain ownership while a real DIRECT job runs.
+            owned_llm = ScriptedLLM(
+                [
+                    ScriptEntry("[/block][block/]", match="owned blocking"),
+                    ScriptEntry("must not execute", match="withdrawn request"),
+                    ScriptEntry("owned answer one", match="owned input one"),
+                    ScriptEntry("owned answer two", match="owned input two"),
+                ]
+            )
+            agent.llm = owned_llm
+            agent.controller.llm = owned_llm
+            block.started.clear()
+            owner = asyncio.create_task(agent.run("owned blocking"))
+            try:
+                await asyncio.wait_for(block.started.wait(), 5)
+                withdrawn = await agent.run(
+                    "withdrawn request", timeout=0.05, raise_on_error=False
+                )
+                assert withdrawn.status == "timeout"
+                assert not owner.done()
+                assert owned_llm.call_count == 1
+                owner.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await owner
+                assert not agent.is_processing
+                one, two = await asyncio.gather(
+                    agent.run("owned input one"), agent.run("owned input two")
+                )
+                assert (one.text, two.text) == ("owned answer one", "owned answer two")
+                assert owned_llm.call_count == 3
+                assert all(
+                    "withdrawn request" not in str(message.get("content", ""))
+                    for call in owned_llm.call_log
+                    for message in call
+                )
+            finally:
+                if not owner.done():
+                    owner.cancel()
+                await asyncio.gather(owner, return_exceptions=True)
 
     async def test_history_ops(self, make_creature, tmp_path):
         """One workflow over the three history operations: run a turn,

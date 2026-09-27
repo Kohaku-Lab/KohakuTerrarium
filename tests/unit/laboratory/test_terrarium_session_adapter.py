@@ -111,6 +111,62 @@ def _store_with_events(tmp_path: Path, name: str, agent: str, n: int):
 # ── construction ────────────────────────────────────────────────
 
 
+async def test_unload_refuses_mismatched_session_without_removing_members(
+    _adapter, _engine, tmp_path
+):
+    store = _store_with_events(tmp_path, "live", "worker", 1)
+    _engine._session_stores["graph"] = store
+    _engine._topology = SimpleNamespace(graphs={"graph": object()})
+    result = await _adapter._dispatch(
+        _msg(
+            "unload",
+            {
+                "graph_id": "graph",
+                "session_path": str(tmp_path / "wrong.kohakutr"),
+            },
+        )
+    )
+    assert result["error"]["kind"] == "invalid"
+    assert _engine._session_stores["graph"] is store
+    assert not _engine._removed
+
+
+async def test_unload_retry_requires_matching_saved_graph(_adapter, _engine, tmp_path):
+    path = tmp_path / "saved.kohakutr"
+    store = SessionStore(path)
+    save_manifest(
+        store,
+        GraphManifest(
+            "saved-graph",
+            (
+                ManifestCreature(
+                    "c1", "worker", {"name": "worker"}, None, str(tmp_path), False, None
+                ),
+            ),
+            (),
+            (),
+            (),
+        ),
+    )
+    store.close(update_status=False)
+    _engine._topology = SimpleNamespace(graphs={})
+    for graph_id, expected in [("other", "invalid"), ("saved-graph", None)]:
+        result = await _adapter._dispatch(
+            _msg(
+                "unload",
+                {
+                    "graph_id": graph_id,
+                    "session_path": str(path),
+                },
+            )
+        )
+        if expected:
+            assert result["error"]["kind"] == expected
+        else:
+            assert result == {"ok": True, "removed": ["c1"]}
+    assert not _engine._removed
+
+
 class TestConstruction:
     def test_registers_and_detaches(self, _engine):
         node = _FakeNode()

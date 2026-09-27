@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import pytest
 
@@ -75,7 +76,8 @@ async def test_end_persists_closed_completed_before_index_flush(tmp_path):
     assert result["meta"]["status"] == "completed"
 
 
-async def test_teardown_failure_rolls_back_local_marker(tmp_path):
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_teardown_failure_rolls_back_local_marker(tmp_path, error_type):
     engine = await TestTerrariumBuilder().with_creature("alice").build()
     service = LocalTerrariumService(engine)
     creature = engine.get_creature("alice")
@@ -86,14 +88,14 @@ async def test_teardown_failure_rolls_back_local_marker(tmp_path):
     engine._session_stores[session_id] = store
     lifecycle.stores_for(service)[session_id] = store
     lifecycle.meta_for(service)[session_id] = {"name": "alice"}
-    original_remove = engine.remove_creature
+    original_unload = stop.unload_session_graph
 
-    async def fail_remove(creature_id):
-        raise RuntimeError("teardown failed")
+    async def fail_unload(engine, graph_id):
+        raise error_type("teardown failed")
 
-    engine.remove_creature = fail_remove
+    stop.unload_session_graph = fail_unload
     try:
-        with pytest.raises(RuntimeError, match="teardown failed"):
+        with pytest.raises(error_type, match="teardown failed"):
             await stop.stop_session(
                 service,
                 session_id,
@@ -106,11 +108,12 @@ async def test_teardown_failure_rolls_back_local_marker(tmp_path):
         assert store.meta["status"] == "running"
         assert session_id in lifecycle.meta_for(service)
     finally:
-        engine.remove_creature = original_remove
+        stop.unload_session_graph = original_unload
         await engine.shutdown()
 
 
-async def test_teardown_failure_rolls_back_mirror_marker(tmp_path):
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_teardown_failure_rolls_back_mirror_marker(tmp_path, error_type):
     engine = await TestTerrariumBuilder().with_creature("alice").build()
     service = LocalTerrariumService(engine)
     creature = engine.get_creature("alice")
@@ -128,14 +131,14 @@ async def test_teardown_failure_rolls_back_mirror_marker(tmp_path):
         "name": "alice",
         "resumed_from": str(mirror_path),
     }
-    original_remove = engine.remove_creature
+    original_unload = stop.unload_session_graph
 
-    async def fail_remove(creature_id):
-        raise RuntimeError("teardown failed")
+    async def fail_unload(engine, graph_id):
+        raise error_type("teardown failed")
 
-    engine.remove_creature = fail_remove
+    stop.unload_session_graph = fail_unload
     try:
-        with pytest.raises(RuntimeError, match="teardown failed"):
+        with pytest.raises(error_type, match="teardown failed"):
             await stop.stop_session(
                 service,
                 session_id,
@@ -153,7 +156,7 @@ async def test_teardown_failure_rolls_back_mirror_marker(tmp_path):
         assert bool(live.meta["conversation_open"]) is True
         assert live.meta["status"] == "running"
     finally:
-        engine.remove_creature = original_remove
+        stop.unload_session_graph = original_unload
         await engine.shutdown()
 
 
@@ -196,13 +199,16 @@ async def test_remote_lifecycle_failure_keeps_runtime_registered(tmp_path):
     assert session_id in meta
 
 
-async def test_remote_teardown_failure_restores_running_lifecycle(tmp_path):
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_remote_teardown_failure_keeps_dormant_lifecycle(tmp_path, error_type):
     class _Host:
         def __init__(self):
             self.calls: list[dict] = []
 
         async def request(self, **kwargs):
             self.calls.append(kwargs)
+            if kwargs["type"] == "unload":
+                raise error_type("teardown failed")
             return {"ok": True}
 
     class _Service:
@@ -213,7 +219,7 @@ async def test_remote_teardown_failure_restores_running_lifecycle(tmp_path):
             return []
 
         async def remove_creature(self, _creature_id: str):
-            raise RuntimeError("teardown failed")
+            raise error_type("teardown failed")
 
     service = _Service()
     session_id = "remote-session"
@@ -225,7 +231,7 @@ async def test_remote_teardown_failure_restores_running_lifecycle(tmp_path):
         }
     }
 
-    with pytest.raises(RuntimeError, match="teardown failed"):
+    with pytest.raises(error_type, match="teardown failed"):
         await stop.stop_session(
             service,
             session_id,
@@ -239,15 +245,19 @@ async def test_remote_teardown_failure_restores_running_lifecycle(tmp_path):
     assert [
         (call["body"]["conversation_open"], call["body"]["status"])
         for call in service._host.calls
+        if call["type"] == "set_lifecycle"
     ] == [
         (False, "completed"),
-        (True, "running"),
     ]
 
 
 async def test_remote_end_updates_host_mirror_before_runtime_removal(tmp_path):
     class _Host:
-        async def request(self, **_kwargs):
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
             return {"ok": True}
 
     class _Service:
@@ -292,13 +302,19 @@ async def test_remote_end_updates_host_mirror_before_runtime_removal(tmp_path):
         assert reopened.meta["status"] == "completed"
     finally:
         reopened.close(update_status=False)
-    assert service.removed == ["creature-1"]
+    assert service.removed == []
+    assert service._host.calls[-1]["type"] == "unload"
+    assert service._host.calls[-1]["body"]["graph_id"] == session_id
     assert meta == {}
 
 
 async def test_remote_stop_removes_every_creature_in_the_member_graph(tmp_path):
     class _Host:
-        async def request(self, **_kwargs):
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
             return {"ok": True}
 
     class _Service:
@@ -339,13 +355,19 @@ async def test_remote_stop_removes_every_creature_in_the_member_graph(tmp_path):
         mirror_dir=tmp_path,
     )
 
-    assert service.removed == ["one", "two"]
+    assert service.removed == []
+    assert service._host.calls[-1]["type"] == "unload"
+    assert service._host.calls[-1]["body"]["graph_id"] == "remote-session"
     assert meta == {}
 
 
 async def test_remote_stop_uses_saved_roster_when_live_enumeration_fails(tmp_path):
     class _Host:
-        async def request(self, **_kwargs):
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
             return {"ok": True}
 
     class _Service:
@@ -380,7 +402,9 @@ async def test_remote_stop_uses_saved_roster_when_live_enumeration_fails(tmp_pat
         mirror_dir=tmp_path,
     )
 
-    assert service.removed == ["one", "two"]
+    assert service.removed == []
+    assert service._host.calls[-1]["type"] == "unload"
+    assert service._host.calls[-1]["body"]["graph_id"] == "remote-session"
     assert meta == {}
 
 
@@ -507,3 +531,25 @@ async def test_cluster_marker_failure_rolls_back_updated_members(tmp_path, monke
         ("worker-2", False, "completed"),
         ("worker-1", True, "running"),
     ]
+
+
+@pytest.mark.parametrize("entry", [None, {}, {"on_node": ""}])
+async def test_remote_unload_validates_all_targets_before_requests(entry):
+    class Host:
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"ok": True}
+
+    class Service:
+        _host = Host()
+
+    service = Service()
+    meta = {"first": {"on_node": "worker-1"}}
+    if entry is not None:
+        meta["missing"] = entry
+    with pytest.raises(RuntimeError, match="missing.*(metadata|node)"):
+        await stop._unload_remote_sessions(service, ["first", "missing"], meta)
+    assert service._host.calls == []

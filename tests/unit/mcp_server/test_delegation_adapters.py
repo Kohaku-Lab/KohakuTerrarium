@@ -51,6 +51,7 @@ async def test_execution_results_history_and_resource_lifecycle(tmp_path, kind):
             assert execution.state == "idle" and not models[0].released
             engine = await owner.engine()
             creature = engine.list_creatures()[0]
+            identity = creature.creature_id, creature.graph_id
             creature.pause()
             assert execution.state == "paused"
             creature.resume()
@@ -62,6 +63,8 @@ async def test_execution_results_history_and_resource_lifecycle(tmp_path, kind):
             assert result.output == "execution reply" and result.state == JobState.DONE
             assert len(models) == 2
             assert "task" in str(models[1].call_log)
+            restored = engine.list_creatures()[0]
+            assert (restored.creature_id, restored.graph_id) == identity
         else:
             assert result.metadata["turns"] == 1
             assert execution.state == "completed" and models[0].released
