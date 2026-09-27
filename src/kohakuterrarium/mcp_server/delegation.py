@@ -149,7 +149,9 @@ class DelegationRuntime:
         engine = self.studio.engine
         llm = self.llm_factory(session.target) if self.llm_factory else None
         if session.saved_path is not None:
-            graph = await engine.adopt_session(str(session.saved_path), llm=llm)
+            graph = await engine.adopt_session(
+                str(session.saved_path), llm=llm, io="headless"
+            )
             creatures = [c for c in engine.list_creatures() if c.graph_id == graph]
             session.creature = next(
                 c for c in creatures if c.name == session.creature.name
@@ -253,8 +255,14 @@ class DelegationRuntime:
                     session.state = "error"
         finally:
             if session.subagent:
+                cleanup = asyncio.create_task(session.subagent.close())
                 try:
-                    await session.subagent.close()
+                    while not cleanup.done():
+                        try:
+                            await asyncio.shield(cleanup)
+                        except asyncio.CancelledError:
+                            state, error = JobState.CANCELLED, "Delegation cancelled"
+                    cleanup.result()
                 except Exception as exc:
                     state, error = JobState.ERROR, f"Resource cleanup failed: {exc}"
                 session.state = "completed"

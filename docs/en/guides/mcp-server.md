@@ -80,6 +80,8 @@ identify this exact instance (`--wait 1..120` overrides it). Exit code 0 means
 public readiness was verified. Exit code 1 can mean the local service is running
 but public connectivity is not ready: inspect `status`, which separates
 `local_ready`, `public_ready`, `tunnel_state`, and the last public check time.
+If the supervisor has not taken ownership before the wait expires, startup
+reaps that child and reports an error. Retry with a longer `--wait` on slow hosts.
 An outage never causes a random-domain fallback or a new tool instance. Managed
 ngrok exits retry with bounded 1–30 second backoff; an online agent handles its
 own network reconnects. The supervisor rechecks public identity periodically

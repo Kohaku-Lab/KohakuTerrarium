@@ -21,6 +21,7 @@ import kohakuterrarium.terrarium.topology_snapshot as _topo_snap
 import kohakuterrarium.terrarium.workspace_resume as _workspace
 from kohakuterrarium.errors import SessionNotResumableError
 from kohakuterrarium.builtins.inputs.none import NoneInput
+from kohakuterrarium.builtins.outputs.none import NoneOutput
 from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.session.migrations import latest_readable_version
 from kohakuterrarium.session.readonly import read_session_meta
@@ -147,8 +148,11 @@ async def resume_into_engine(
     workspace_overrides: dict[str, str] | None = None,
     llm: Any = None,
     prepared_workspace: "_workspace.WorkspaceResumePlan | None" = None,
+    io: str = "none",
 ) -> str:
     """Adopt a saved session into ``engine`` and return its graph ID."""
+    if io not in {"none", "headless"}:
+        raise ValueError("Resume io must be 'none' or 'headless'")
     if pwd is not None and workspace_overrides:
         raise ValueError("pwd and workspace_overrides are mutually exclusive")
     path = _resolve_store_path(store)
@@ -185,6 +189,7 @@ async def resume_into_engine(
             replacements=replacements,
             allow_valid_targets=pwd is not None,
             llm=llm,
+            io=io,
         )
         if resumed is not None:
             return resumed
@@ -193,9 +198,11 @@ async def resume_into_engine(
     session_type = detect_session_type(path)
 
     if session_type == "agent":
-        return await _resume_agent_into_engine(engine, path, pwd=pwd, llm=llm)
+        return await _resume_agent_into_engine(engine, path, pwd=pwd, llm=llm, io=io)
     if session_type == "terrarium":
-        return await _resume_terrarium_into_engine(engine, path, pwd=pwd, llm=llm)
+        return await _resume_terrarium_into_engine(
+            engine, path, pwd=pwd, llm=llm, io=io
+        )
     raise SessionNotResumableError(f"Unknown saved-session type: {session_type!r}")
 
 
@@ -256,6 +263,7 @@ async def _resume_agent_into_engine(
     *,
     pwd: str | None,
     llm: Any,
+    io: str = "none",
 ) -> str:
     """Standalone-agent resume: rebuild Agent, wrap, adopt, attach.
 
@@ -278,6 +286,7 @@ async def _resume_agent_into_engine(
         io_mode=None,
         llm=llm,
         input_module=NoneInput(),
+        output_module=NoneOutput() if io == "headless" else None,
         mark_conversation_open=False,
     )
     created: list[str] = []
@@ -370,6 +379,7 @@ async def _resume_terrarium_into_engine(
     *,
     pwd: str | None,
     llm: Any = None,
+    io: str = "none",
 ) -> str:
     """Multi-creature recipe resume: rebuild graph, inject per-creature."""
     store = _open_store_with_migration(path, writer_lock=True)
@@ -379,7 +389,7 @@ async def _resume_terrarium_into_engine(
     created: list[str] = []
     try:
         return await _resume_terrarium_body(
-            engine, path, store, created, pwd=pwd, llm=llm
+            engine, path, store, created, pwd=pwd, llm=llm, io=io
         )
     except BaseException:
         await _rollback_failed_adoption(engine, store, created)
@@ -394,6 +404,7 @@ async def _resume_terrarium_body(
     *,
     pwd: str | None,
     llm: Any = None,
+    io: str = "none",
 ) -> str:
     """Rebuild + rehydrate the terrarium graph from an already-open store.
 
@@ -438,7 +449,13 @@ async def _resume_terrarium_body(
     # the saved-session list, plus a leaked open handle.  Mirrors the
     # ``session=False`` in ``_resume_agent_into_engine``.
     graph = await engine.apply_recipe(
-        config, pwd=pwd, llm=llm, session=False, start=False, created_ids=created
+        config,
+        pwd=pwd,
+        llm=llm,
+        session=False,
+        start=False,
+        created_ids=created,
+        **({"io": io} if io == "headless" else {}),
     )
     sid = graph.graph_id
 

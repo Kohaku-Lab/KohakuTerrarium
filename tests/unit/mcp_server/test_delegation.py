@@ -46,7 +46,7 @@ def configuration(tmp_path, kind="creature", **extra):
     )
 
 
-async def test_creature_turns_busy_wait_cancel_restore_and_close(tmp_path):
+async def test_creature_turns_busy_wait_cancel_restore_and_close(tmp_path, capsys):
     models = []
 
     def provider(_target):
@@ -62,7 +62,12 @@ async def test_creature_turns_busy_wait_cancel_restore_and_close(tmp_path):
         models.append(model)
         return model
 
-    async with ToolRuntime(configuration(tmp_path), llm_factory=provider) as runtime:
+    config = configuration(tmp_path)
+    target = tmp_path / "creature.json"
+    definition = json.loads(target.read_text(encoding="utf-8"))
+    definition["output"] = {"type": "stdout"}
+    target.write_text(json.dumps(definition), encoding="utf-8")
+    async with ToolRuntime(config, llm_factory=provider) as runtime:
         delegation = runtime.delegation
         assert delegation.targets()[0]["name"] == "worker"
         first = await delegation.submit("worker", "remember blue")
@@ -82,6 +87,9 @@ async def test_creature_turns_busy_wait_cancel_restore_and_close(tmp_path):
         assert delegation.sessions()[0]["state"] == "stopped"
         continued = await delegation.submit("worker", "continue", session_id=sid)
         assert (await runtime.wait(continued["job_id"], 10))["state"] == "done"
+        assert (
+            capsys.readouterr().out == ""
+        ), "resume must retain headless default output"
         assert len(models) == 2
         assert "remember blue" in json.dumps(models[-1].call_log)
         history = delegation.history(sid, limit=2)
@@ -93,6 +101,42 @@ async def test_creature_turns_busy_wait_cancel_restore_and_close(tmp_path):
         assert delegation.sessions()[0]["state"] == "closed"
         with pytest.raises(ValueError, match="closed"):
             await delegation.submit("worker", "continue", session_id=sid)
+
+
+@pytest.mark.parametrize("cancellations", [1, 2])
+async def test_cancel_during_subagent_cleanup_waits_for_provider(
+    tmp_path, cancellations
+):
+    entered, release, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    class ClosingLLM(ScriptedLLM):
+        async def close(self):
+            entered.set()
+            await release.wait()
+            finished.set()
+
+    model = ClosingLLM(["answer"])
+    async with ToolRuntime(
+        configuration(tmp_path, "subagent"), llm_factory=lambda _: model
+    ) as runtime:
+        submitted = await runtime.delegation.submit("worker", "task")
+        await asyncio.wait_for(entered.wait(), 5)
+        pending = [
+            asyncio.create_task(runtime.cancel(submitted["job_id"]))
+            for _ in range(cancellations)
+        ]
+        try:
+            await asyncio.sleep(0.05)
+            assert not any(
+                task.done() for task in pending
+            ), "cancellation must await owned resource cleanup"
+        finally:
+            release.set()
+            await asyncio.gather(*pending)
+        assert finished.is_set()
+        assert runtime.job(submitted["job_id"])["state"] == "cancelled"
+        events = runtime.delegation.history(submitted["session_id"])["events"]
+        assert any(e["kind"] == "job_end" and e["state"] == "cancelled" for e in events)
 
 
 async def test_standalone_subagent_tools_workspace_and_no_continuation(tmp_path):

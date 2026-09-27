@@ -53,6 +53,7 @@ async def resume_manifest_into_engine(
     replacements: dict[str, str] | None = None,
     allow_valid_targets: bool = False,
     llm: Any = None,
+    io: str = "none",
 ) -> str | None:
     """Reserve identities, revalidate the writer view, then restore a manifest.
 
@@ -87,6 +88,7 @@ async def resume_manifest_into_engine(
             locked_plan.manifest,
             llm=llm,
             store=store,
+            io=io,
         )
 
 
@@ -97,6 +99,7 @@ async def _resume_reserved_manifest(
     *,
     llm: Any,
     store: SessionStore,
+    io: str = "none",
 ) -> str:
     """Restore a graph while all persisted creature identities are reserved."""
     if manifest.graph_id in engine._topology.graphs:
@@ -124,7 +127,7 @@ async def _resume_reserved_manifest(
                 _manifest.unpack_creature_config(item),
                 llm=llm,
                 pwd=item.pwd,
-                io="none",
+                io=io,
                 strict=False,
                 session=False,
                 start=False,

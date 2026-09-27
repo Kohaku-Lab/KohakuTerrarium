@@ -148,8 +148,13 @@ def create_app(
             raise ValueError(
                 "Public origin must be an HTTPS origin without path or credentials"
             )
-        hosts.append(parsed.netloc)
-        origins.append(public_origin)
+        if parsed.port in (None, 443):
+            host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+            hosts.extend([host, f"{host}:443"])
+            origins.extend([f"https://{host}", f"https://{host}:443"])
+        else:
+            hosts.append(parsed.netloc.lower())
+            origins.append(public_origin)
     # Validate before constructing the runtime or loading configured modules.
     MCPSecretPath(None, secret=secret)
     runtime = ToolRuntime(config, llm_factory=llm_factory)

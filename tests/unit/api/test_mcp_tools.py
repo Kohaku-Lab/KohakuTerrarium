@@ -2,6 +2,7 @@
 
 import json
 
+import httpx
 import pytest
 from PIL import Image
 
@@ -62,3 +63,38 @@ def test_rejects_invalid_origin(tmp_path, origin):
         create_app(
             MCPToolsConfig(workspace=tmp_path), secret="a" * 43, public_origin=origin
         )
+
+
+@pytest.mark.parametrize("origin", ["https://example.com", "https://example.com:443"])
+async def test_default_https_port_equivalence_and_host_boundary(tmp_path, origin):
+    app = create_app(
+        MCPToolsConfig(workspace=tmp_path), secret="a" * 43, public_origin=origin
+    )
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app)) as client:
+            for host, request_origin, expected in [
+                ("example.com", "https://example.com", 200),
+                ("example.com:443", "https://example.com:443", 200),
+                ("example.com:8443", "https://example.com", 421),
+                ("other.example", "https://example.com", 421),
+                ("example.com", "https://other.example", 403),
+            ]:
+                response = await client.post(
+                    origin + "/mcp/" + "a" * 43,
+                    headers={
+                        "host": host,
+                        "origin": request_origin,
+                        "accept": "application/json, text/event-stream",
+                    },
+                    json={
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "method": "initialize",
+                        "params": {
+                            "protocolVersion": "2025-03-26",
+                            "capabilities": {},
+                            "clientInfo": {"name": "test", "version": "1"},
+                        },
+                    },
+                )
+                assert response.status_code == expected, response.text

@@ -168,6 +168,30 @@ def start(store: ConnectionStore, *, wait: float = 30) -> dict:
                 )
                 return result
             time.sleep(0.1)
+        while process.poll() is None:
+            try:
+                store.instance_lock.acquire()
+            except FileLockBusy:
+                snapshot = store.runtime()
+                if (
+                    snapshot.get("run_id") == run_id
+                    and snapshot.get("ownership_acquired") is True
+                ):
+                    return status(store)
+                time.sleep(0.01)
+            else:
+                try:
+                    # Fence a late handoff while reaping this exact child process.
+                    if process.poll() is None:
+                        process.kill()
+                    process.wait()
+                finally:
+                    store.instance_lock.release()
+                result = status(store)
+                result["error"] = (
+                    "MCP supervisor did not acquire its instance lock before startup timed out"
+                )
+                return result
         return status(store)
 
 

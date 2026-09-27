@@ -267,7 +267,7 @@ class TestMCPServer:
                 if ConnectionStore(workspace, state_dir).record_path.exists():
                     cli("stop", workspace)
 
-    async def test_authenticated_tools_and_job_lifecycle(self, tmp_path):
+    async def test_authenticated_tools_and_job_lifecycle(self, tmp_path, capsys):
         secret = "a" * 43
         creature_path = tmp_path / "creature.json"
         creature_path.write_text(
@@ -275,6 +275,7 @@ class TestMCPServer:
                 {
                     "name": "worker",
                     "input": {"type": "none"},
+                    "output": {"type": "stdout"},
                     "tools": [],
                     "compact": {"enabled": False},
                 }
@@ -432,6 +433,7 @@ class TestMCPServer:
                         assert (await call("job_wait", {"job_id": resumed["job_id"]}))[
                             1
                         ]["state"] == "done"
+                        assert capsys.readouterr().out == ""
                         _, listing = await call("delegation_sessions", {})
                         assert sid in {s["session_id"] for s in listing["sessions"]}
                         assert not (

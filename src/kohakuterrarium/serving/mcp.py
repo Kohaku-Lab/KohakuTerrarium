@@ -184,6 +184,7 @@ async def serve(store: ConnectionStore, run_id: str) -> None:
     snapshot = {
         "run_id": run_id,
         "pid": os.getpid(),
+        "ownership_acquired": True,
         "state": "starting",
         "local_ready": False,
         "public_ready": False,
@@ -265,6 +266,18 @@ def main() -> int:
     store = ConnectionStore(args.workspace, args.state_dir)
     try:
         with store.instance_lock:
+            write_json(
+                store.runtime_path,
+                {
+                    "run_id": args.run_id,
+                    "pid": os.getpid(),
+                    "ownership_acquired": True,
+                    "state": "starting",
+                    "updated_at": time.time(),
+                    "local_ready": False,
+                    "public_ready": False,
+                },
+            )
             asyncio.run(serve(store, args.run_id))
     except FileLockBusy:
         return 1

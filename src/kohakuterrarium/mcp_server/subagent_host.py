@@ -100,9 +100,9 @@ class SubagentHost:
     async def close(self):
         if self._closed:
             return
-        self._closed = True
         await self.manager.cancel_all()
         await self.llm.close()
+        self._closed = True
 
     async def send(self, content):
         return await self.manager.send_to_subagent(content, job_id=self.job_id)
