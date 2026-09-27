@@ -2592,7 +2592,7 @@ async def _drive_journey(
                     {
                         "name": "intake",
                         "config": recipe_intake.relative_to(terra_dir).as_posix(),
-                        "channels": {"send": ["ops"]},
+                        "channels": {"can_send": ["ops"]},
                     },
                     {
                         "name": "worker",
@@ -2629,6 +2629,29 @@ async def _drive_journey(
                 and all(member["home_node"] == "w1" for member in deployed),
                 str(deployed),
             )
+            topology = await asyncio.wait_for(
+                host.http.get("/api/runtime/graph"), timeout=OP_TIMEOUT
+            )
+            bugs.check(
+                "29b2 deployed recipe topology is readable",
+                topology.status_code == 200,
+                topology.text[:400],
+            )
+            if topology.status_code == 200:
+                deployed_ids = {member["creature_id"] for member in deployed}
+                members = {
+                    member["name"]: member
+                    for graph in topology.json()["graphs"]
+                    for member in graph["creatures"]
+                    if member["creature_id"] in deployed_ids
+                }
+                bugs.check(
+                    "29b2 recipe connects intake to worker through ops",
+                    members.get("intake", {}).get("send_channels") == ["ops"]
+                    and "ops" in members.get("worker", {}).get("listen_channels", [])
+                    and members["intake"]["graph_id"] == members["worker"]["graph_id"],
+                    str(members),
+                )
         # Legacy alias path — both should work for the same recipe.
         rr2 = await asyncio.wait_for(
             host.http.post(
