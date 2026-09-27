@@ -612,6 +612,7 @@ jobs:
             --github-repo "${GITHUB_REPOSITORY}" \
             "${intro[@]}" \
             --out release-notes.md
+          cat docs/en/reference/drive-session-upgrade.md >> release-notes.md
           cat release-notes.md
 
       # A dated nightly re-run overwrites its own release rather than

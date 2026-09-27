@@ -4,11 +4,13 @@ import argparse
 import asyncio
 import json
 import sqlite3
+from contextlib import closing
 from dataclasses import replace
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from kohakuterrarium.errors import KTError
 from kohakuterrarium.session.readonly import read_session_meta
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY, parse_manifest
@@ -156,13 +158,9 @@ async def repair(
 
 def backup_database(source, destination):
     """Create a consistent SQLite backup including committed WAL rows."""
-    reader = sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)
-    writer = sqlite3.connect(destination)
-    try:
-        reader.backup(writer)
-    finally:
-        writer.close()
-        reader.close()
+    with closing(sqlite3.connect(source.as_uri() + "?mode=ro", uri=True)) as reader:
+        with closing(sqlite3.connect(destination)) as writer:
+            reader.backup(writer)
 
 
 async def run(args):
@@ -226,7 +224,7 @@ def main():
     args = parser.parse_args()
     try:
         print(json.dumps(asyncio.run(run(args)), indent=2))
-    except (ValueError, OSError) as exc:
+    except (ValueError, OSError, sqlite3.Error, KTError) as exc:
         parser.exit(1, f"{exc}\n")
 
 

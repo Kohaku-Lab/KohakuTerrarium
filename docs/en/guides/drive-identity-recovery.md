@@ -13,6 +13,13 @@ retained until the retry confirms unloading. Upgrade both controller and worker;
 an older worker without the unload operation returns an error rather than falling
 back to destructive per-creature removal.
 
+If local unload fails before membership is removed, the engine restores Drive
+management and restarts creatures that were running before the attempt. Creatures
+that were explicitly stopped remain stopped. A failed recovery or concurrent
+topology change is reported explicitly; retry stopping or explicitly restart the
+session after addressing that failure. Interrupted turns are not rolled back, and
+Drive recovery retains its at-least-once delivery semantics.
+
 ## Existing orphaned goals
 
 This fix prevents future identity loss; it does not guess which creature owns an

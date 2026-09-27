@@ -1,3 +1,4 @@
+import asyncio
 from pathlib import Path
 import pytest
 
@@ -75,7 +76,8 @@ async def test_end_persists_closed_completed_before_index_flush(tmp_path):
     assert result["meta"]["status"] == "completed"
 
 
-async def test_teardown_failure_rolls_back_local_marker(tmp_path):
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_teardown_failure_rolls_back_local_marker(tmp_path, error_type):
     engine = await TestTerrariumBuilder().with_creature("alice").build()
     service = LocalTerrariumService(engine)
     creature = engine.get_creature("alice")
@@ -89,11 +91,11 @@ async def test_teardown_failure_rolls_back_local_marker(tmp_path):
     original_unload = stop.unload_session_graph
 
     async def fail_unload(engine, graph_id):
-        raise RuntimeError("teardown failed")
+        raise error_type("teardown failed")
 
     stop.unload_session_graph = fail_unload
     try:
-        with pytest.raises(RuntimeError, match="teardown failed"):
+        with pytest.raises(error_type, match="teardown failed"):
             await stop.stop_session(
                 service,
                 session_id,
@@ -110,7 +112,8 @@ async def test_teardown_failure_rolls_back_local_marker(tmp_path):
         await engine.shutdown()
 
 
-async def test_teardown_failure_rolls_back_mirror_marker(tmp_path):
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_teardown_failure_rolls_back_mirror_marker(tmp_path, error_type):
     engine = await TestTerrariumBuilder().with_creature("alice").build()
     service = LocalTerrariumService(engine)
     creature = engine.get_creature("alice")
@@ -131,11 +134,11 @@ async def test_teardown_failure_rolls_back_mirror_marker(tmp_path):
     original_unload = stop.unload_session_graph
 
     async def fail_unload(engine, graph_id):
-        raise RuntimeError("teardown failed")
+        raise error_type("teardown failed")
 
     stop.unload_session_graph = fail_unload
     try:
-        with pytest.raises(RuntimeError, match="teardown failed"):
+        with pytest.raises(error_type, match="teardown failed"):
             await stop.stop_session(
                 service,
                 session_id,
@@ -196,7 +199,8 @@ async def test_remote_lifecycle_failure_keeps_runtime_registered(tmp_path):
     assert session_id in meta
 
 
-async def test_remote_teardown_failure_keeps_dormant_lifecycle(tmp_path):
+@pytest.mark.parametrize("error_type", [RuntimeError, asyncio.CancelledError])
+async def test_remote_teardown_failure_keeps_dormant_lifecycle(tmp_path, error_type):
     class _Host:
         def __init__(self):
             self.calls: list[dict] = []
@@ -204,7 +208,7 @@ async def test_remote_teardown_failure_keeps_dormant_lifecycle(tmp_path):
         async def request(self, **kwargs):
             self.calls.append(kwargs)
             if kwargs["type"] == "unload":
-                raise RuntimeError("teardown failed")
+                raise error_type("teardown failed")
             return {"ok": True}
 
     class _Service:
@@ -215,7 +219,7 @@ async def test_remote_teardown_failure_keeps_dormant_lifecycle(tmp_path):
             return []
 
         async def remove_creature(self, _creature_id: str):
-            raise RuntimeError("teardown failed")
+            raise error_type("teardown failed")
 
     service = _Service()
     session_id = "remote-session"
@@ -227,7 +231,7 @@ async def test_remote_teardown_failure_keeps_dormant_lifecycle(tmp_path):
         }
     }
 
-    with pytest.raises(RuntimeError, match="teardown failed"):
+    with pytest.raises(error_type, match="teardown failed"):
         await stop.stop_session(
             service,
             session_id,
@@ -527,3 +531,25 @@ async def test_cluster_marker_failure_rolls_back_updated_members(tmp_path, monke
         ("worker-2", False, "completed"),
         ("worker-1", True, "running"),
     ]
+
+
+@pytest.mark.parametrize("entry", [None, {}, {"on_node": ""}])
+async def test_remote_unload_validates_all_targets_before_requests(entry):
+    class Host:
+        def __init__(self):
+            self.calls = []
+
+        async def request(self, **kwargs):
+            self.calls.append(kwargs)
+            return {"ok": True}
+
+    class Service:
+        _host = Host()
+
+    service = Service()
+    meta = {"first": {"on_node": "worker-1"}}
+    if entry is not None:
+        meta["missing"] = entry
+    with pytest.raises(RuntimeError, match="missing.*(metadata|node)"):
+        await stop._unload_remote_sessions(service, ["first", "missing"], meta)
+    assert service._host.calls == []

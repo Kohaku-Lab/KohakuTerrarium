@@ -281,6 +281,7 @@ async def stop_session(
         store = engine_stores.get(session_id) or store
     entry = meta.get(session_id)
     if graph is None and entry is not None:
+        _remote_unload_targets(cluster_session_ids, meta)
         await _remote_creature_ids(
             service,
             cluster_session_ids,
@@ -350,7 +351,7 @@ async def stop_session(
             if entry is None or not entry.get("on_node"):
                 raise KeyError(f"session {session_id!r} not found")
             await _unload_remote_sessions(service, cluster_session_ids, meta)
-    except Exception:
+    except (Exception, asyncio.CancelledError):
         # A lost reply can mean the worker already unloaded the graph. Keep the
         # durable dormant marker until a retry confirms all members are stopped.
         if graph is None:
@@ -405,17 +406,30 @@ async def stop_session(
     )
 
 
+def _remote_unload_targets(session_ids, meta) -> list[tuple[str, str, str]]:
+    """Validate every member before changing lifecycle markers or sending RPCs."""
+    targets = []
+    for session_id in session_ids:
+        entry = meta.get(session_id)
+        if entry is None:
+            raise RuntimeError(f"remote session {session_id!r} metadata is missing")
+        node = entry.get("on_node")
+        if not isinstance(node, str) or not node.strip():
+            raise RuntimeError(f"remote session {session_id!r} has no worker node")
+        targets.append((session_id, node, entry.get("remote_session_path", "")))
+    return targets
+
+
 async def _unload_remote_sessions(service, session_ids, meta) -> None:
     """Unload worker graphs through the session adapter, preserving saved state."""
-    for session_id in session_ids:
-        entry = meta[session_id]
+    for session_id, node, session_path in _remote_unload_targets(session_ids, meta):
         response = await service._host.request(
-            to_node=entry["on_node"],
+            to_node=node,
             namespace="terrarium.session",
             type="unload",
             body={
                 "graph_id": session_id,
-                "session_path": entry.get("remote_session_path", ""),
+                "session_path": session_path,
             },
             timeout=60.0,
         )

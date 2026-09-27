@@ -1,6 +1,8 @@
 """Explicit offline identity repair preserves lifecycle and rejects guesses."""
 
 import importlib.util
+import sqlite3
+import sys
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
@@ -16,6 +18,7 @@ from kohakuterrarium.terrarium.graph_manifest import (
     ManifestCreature,
     save_manifest,
 )
+from kohakuterrarium.terrarium.drive.errors import DriveStorageError
 from kohakuterrarium.terrarium.drive.memory import MemoryDriveRepository
 from kohakuterrarium.terrarium.drive.models import ActorRef, DriveStatus
 from kohakuterrarium.terrarium.drive.repository import Mutation
@@ -239,3 +242,61 @@ async def test_repair_rejects_conflicting_identity(tmp_path, conflict):
             expected_revision=record.revision,
         )
     assert (await repo.get(record.drive_id)).revision == record.revision
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        sqlite3.DatabaseError("corrupt database"),
+        DriveStorageError("unreadable sidecar"),
+        SessionLockedError("session is in use"),
+    ],
+)
+def test_main_reports_expected_storage_errors(monkeypatch, capsys, error):
+    async def fail(args):
+        raise error
+
+    monkeypatch.setattr(_module, "run", fail)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "repair",
+            "--session",
+            "unused",
+            "--drive-id",
+            "d",
+            "--old-creature-id",
+            "old",
+            "--creature-id",
+            "new",
+        ],
+    )
+    with pytest.raises(SystemExit) as exited:
+        _module.main()
+    assert exited.value.code == 1
+    assert capsys.readouterr().err == f"{error}\n"
+
+
+def test_backup_closes_reader_when_destination_cannot_open(tmp_path, monkeypatch):
+    source = tmp_path / "source.db"
+    with sqlite3.connect(source) as connection:
+        connection.execute("CREATE TABLE sample (value TEXT)")
+    connection.close()
+    real_connect = sqlite3.connect
+    readers = []
+
+    def connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        readers.append(conn)
+        return conn
+
+    monkeypatch.setattr(_module.sqlite3, "connect", connect)
+    try:
+        with pytest.raises(sqlite3.OperationalError):
+            _module.backup_database(source, tmp_path / "absent" / "backup.db")
+        with pytest.raises(sqlite3.ProgrammingError, match="closed"):
+            readers[0].execute("SELECT 1")
+    finally:
+        for reader in readers:
+            reader.close()

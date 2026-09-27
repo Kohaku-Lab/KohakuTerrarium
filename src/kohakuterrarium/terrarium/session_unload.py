@@ -19,39 +19,71 @@ async def unload_session_graph(engine: "Terrarium", graph_id: str) -> tuple[str,
     if graph is None:
         raise KeyError(f"graph {graph_id!r} not in engine")
     creature_ids = tuple(sorted(graph.creature_ids))
-    stops = []
-    if engine._drive_runtime is not None:
-        stops.append(engine._drive_runtime.detach_graph(graph_id))
-    for creature_id in creature_ids:
-        creature = engine._creatures[creature_id]
-        stops.append(creature.stop(requested=False))
-    results = await asyncio.gather(*stops, return_exceptions=True)
-    for result in results:
-        if isinstance(result, BaseException):
-            raise result
-    if (
-        engine._topology.graphs.get(graph_id) is not graph
-        or set(creature_ids) != graph.creature_ids
-    ):
-        raise RuntimeError("Session topology changed during unload; retry stopping it")
-
+    creatures = tuple(engine._creatures[cid] for cid in creature_ids)
+    running = tuple(c for c in creatures if c.is_running)
+    runtime = engine._drive_runtime
+    manager = runtime.peek_manager(graph_id) if runtime is not None else None
+    ready = runtime is not None and graph_id in runtime._registry._ready_graphs
     store = engine._session_stores.get(graph_id)
-    previous_manifest = store.meta.get(MANIFEST_KEY) if store is not None else None
-    persisted = await checkpoint.checkpoint(engine, graph_id)
-    if store is not None and creature_ids and not persisted:
-        if previous_manifest is not None:
-            store.meta[MANIFEST_KEY] = previous_manifest
+    try:
+        stops = []
+        if engine._drive_runtime is not None:
+            stops.append(engine._drive_runtime.detach_graph(graph_id))
+        stops.extend(creature.stop(requested=False) for creature in creatures)
+        results = await asyncio.gather(*stops, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+        if (
+            engine._topology.graphs.get(graph_id) is not graph
+            or set(creature_ids) != graph.creature_ids
+        ):
+            raise RuntimeError(
+                "Session topology changed during unload; retry stopping it"
+            )
+
+        store = engine._session_stores.get(graph_id)
+        previous_manifest = store.meta.get(MANIFEST_KEY) if store is not None else None
+        persisted = await checkpoint.checkpoint(engine, graph_id)
+        if store is not None and creature_ids and not persisted:
+            if previous_manifest is not None:
+                store.meta[MANIFEST_KEY] = previous_manifest
+                store.checkpoint()
+            raise RuntimeError(
+                "Cannot unload a session without a persisted graph manifest"
+            )
+        if (
+            engine._topology.graphs.get(graph_id) is not graph
+            or set(creature_ids) != graph.creature_ids
+        ):
+            raise RuntimeError(
+                "Session topology changed during checkpoint; retry stopping it"
+            )
+        if store is not None:
             store.checkpoint()
-        raise RuntimeError("Cannot unload a session without a persisted graph manifest")
-    if (
-        engine._topology.graphs.get(graph_id) is not graph
-        or set(creature_ids) != graph.creature_ids
-    ):
-        raise RuntimeError(
-            "Session topology changed during checkpoint; retry stopping it"
-        )
-    if store is not None:
-        store.checkpoint()
+
+    except (Exception, asyncio.CancelledError) as failure:
+        if (
+            engine._topology.graphs.get(graph_id) is not graph
+            or set(creature_ids) != graph.creature_ids
+            or any(engine._creatures.get(c.creature_id) is not c for c in creatures)
+        ):
+            raise RuntimeError(
+                "Session unload failed after topology changed; retry stopping the session"
+            ) from failure
+        try:
+            if manager is not None:
+                runtime._registry.rebind_repository(graph_id, manager.repository, store)
+            for creature in running:
+                await engine.start(creature)
+            if ready:
+                await runtime._registry.ensure_started(graph_id)
+        except (Exception, asyncio.CancelledError) as recovery_error:
+            raise RuntimeError(
+                "Session unload failed and runtime recovery failed; "
+                f"explicitly restart or retry stopping the session: {recovery_error}"
+            ) from failure
+        raise
 
     for creature_id in creature_ids:
         creature = engine._creatures[creature_id]

@@ -23,6 +23,7 @@ from kohakuterrarium.bootstrap import agent_init as _agent_init
 from kohakuterrarium.bootstrap import llm as _bootstrap_llm
 from kohakuterrarium.core import agent_compact as _agent_compact
 from kohakuterrarium.core import agent_model as _agent_model
+from kohakuterrarium.terrarium import graph_checkpoint
 from kohakuterrarium.terrarium.config import load_terrarium_config
 from kohakuterrarium.terrarium.drive.config import (
     DriveRuntimeConfig,
@@ -557,6 +558,12 @@ class TestRuntimeTopologyResume:
                     assert assignment.assignee_creature_id == cid
                     assert assignment.assignee_graph_id == gid
                     assert assignment.assignment_state == "assigned"
+            with graph_checkpoint.suppress(engine):
+                with pytest.raises(RuntimeError, match="manifest"):
+                    await studio.sessions.stop(gid)
+            assert engine.get_creature(cid).is_running
+            await engine.get_creature(cid).wait_restoration_ready()
+            manager = engine.drives.manager_for(gid)
             active = await manager.get_drive(records[0].drive_id)
             updated = await manager.update_drive(
                 active.drive_id,
