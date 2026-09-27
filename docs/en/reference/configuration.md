@@ -240,21 +240,64 @@ text to its caller (normally the controller), a transport failure or
 `websocket_connection_limit_reached` permits at most one uncertain replay on a
 fresh connection with full history. Internal metadata such as `response.created`,
 reasoning, and buffered client function calls do not end this window; failed
-attempt state is discarded. This applies to requests without tools or with only
-client-executed function tools. The original generation may already have started,
+attempt state is discarded. Tools allow request replay by default, including
+image generation and unrecognized server tool types. The original generation may already have started,
 so this bounded retry can duplicate remote generation; it is not an exactly-once
 guarantee.
 
 Delivered text ends the retry window, even if it has not appeared in the UI:
 the controller can already have executed commands or dispatched tools from it.
-Cancellation, terminal server errors, and submitted requests with server-executed
-or unknown tool types or `background: true` are not automatically replayed.
+Cancellation and terminal server errors stop recovery. Submitted requests with
+`background: true`, or a server-executed tool explicitly declaring
+`request_replay: forbid`, are not automatically replayed after an uncertain
+failure. A tool-start event need not have arrived for that protection to apply.
 Explicit protocol, policy, message-size, and application-specific WebSocket
 close codes are also terminal; retry does not bypass those limits.
 An explicit `previous_response_not_found` rejecting a delta before response
 events permits immediate full-history recovery. Connection expiry also recovers
 immediately; transient transport errors use the retry policy's backoff and jitter.
 Expired connections are closed even when replay is disallowed.
+
+Tool integrations must declare `request_replay: forbid` when repeating server
+execution could cause unacceptable side effects. This is permission to resubmit
+the model request, not an assertion of mathematical idempotence, a local tool
+retry, or a retry of the whole user turn. Client function calls remain buffered
+until a successful response, so their declarations do not block model replay
+before delivery. Direct users of `ResponsesWSSession.stream_turn()` receive raw
+events: any yielded event closes their replay window.
+
+An implementation can set the `BaseTool.request_replay` class attribute to
+`"allow"` or `"forbid"`. Configuration overrides that default in either direction:
+
+```yaml
+tools:
+  - name: image_gen
+    type: builtin
+    options:
+      request_replay: forbid
+```
+
+Programmatic construction uses `ImageGenTool(config=ToolConfig(request_replay="forbid"))`.
+Both classes are available from `kohakuterrarium.builtins.tools.image_gen` and
+`kohakuterrarium.modules.tool.base`, respectively. Custom and package tool
+configuration accepts the same reserved option without forwarding it to the
+tool constructor. There is no Studio control for this field.
+
+Raw `extra_body.tools` entries can also carry `request_replay: allow | forbid`.
+Only the final selected tool list governs WebSocket recovery. The framework
+removes this field from outgoing HTTP and WebSocket tool specifications;
+invalid declarations are rejected. The selected policy is fixed for the
+request's WebSocket attempts; edits apply to subsequent requests.
+
+The default `image_gen` policy accepts possible duplicate generation, additional
+cost, and different output on replay. Images from failed WebSocket attempts are
+discarded, and image results are published only after the successful attempt.
+Merely supporting the Responses background API does not enable background mode.
+Only an actual top-level `background: true` request activates that separate guard.
+
+Recovery-stop logs include `stop_reason`, `blocked_tools`, `max_retries`,
+`submissions`, `uncertain_replays`, and delivery/event state, distinguishing a
+tool-policy block from a spent recovery budget.
 
 `retry_policy.max_retries` bounds extra submissions for the entire logical
 request, including cache recovery and HTTP fallback. Zero disables automatic

@@ -47,6 +47,8 @@ from kohakuterrarium.llm.recovery import (
 )
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
+from kohakuterrarium.llm.responses_tools import prepare_request_tools
+from kohakuterrarium.modules.tool.request_replay import tool_request_replay
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -392,6 +394,7 @@ class CodexOAuthProvider(BaseLLMProvider):
                 spec = self.translate_provider_native_tool(native)
                 if spec is None:
                     continue
+                spec = {**spec, "request_replay": tool_request_replay(native)}
                 api_tools = (api_tools or []) + [spec]
                 if spec.get("type") == "image_generation":
                     self._image_gen_output_format = spec.get("output_format", "png")
@@ -467,7 +470,8 @@ class CodexOAuthProvider(BaseLLMProvider):
         if session_headers:
             extra_params["extra_headers"] = session_headers
         if wire_extra:
-            extra_params["extra_body"] = wire_extra
+            extra_params["extra_body"] = prepare_request_tools(wire_extra)[0]
+        api_tools = prepare_request_tools({"tools": api_tools})[0]["tools"]
 
         client = self._client
         if recovery is not None:
@@ -549,10 +553,13 @@ class CodexOAuthProvider(BaseLLMProvider):
         return self._ws_session
 
     def _process_stream_event(
-        self, event: Any, collected_tool_calls: list[NativeToolCall]
+        self,
+        event: Any,
+        collected_tool_calls: list[NativeToolCall],
+        image_parts: list | None = None,
     ) -> str | None:
         """Fold one HTTP or WebSocket event into the current attempt."""
-        return process_codex_event(self, event, collected_tool_calls)
+        return process_codex_event(self, event, collected_tool_calls, image_parts)
 
     async def _reset_ws_session(self) -> None:
         """Drop the WebSocket session so the next turn reconnects with fresh auth."""

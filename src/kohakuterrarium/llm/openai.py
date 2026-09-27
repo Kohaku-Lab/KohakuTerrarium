@@ -50,6 +50,7 @@ from kohakuterrarium.llm.recovery import (
 )
 from kohakuterrarium.llm.responses_ws import ResponsesWSError, ResponsesWSSession
 from kohakuterrarium.llm.responses_ws_recovery import WSRecovery
+from kohakuterrarium.llm.responses_tools import prepare_request_tools
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -260,9 +261,8 @@ class OpenAIProvider(BaseLLMProvider):
     def _sanitize_extra_body(self, extra: dict[str, Any]) -> dict[str, Any]:
         """Remove framework-only request knobs before provider submission."""
         knobs = ws_options.FRAMEWORK_KNOBS
-        if not any(k in extra for k in knobs):
-            return extra
-        return {k: v for k, v in extra.items() if k not in knobs}
+        wire = {k: v for k, v in extra.items() if k not in knobs}
+        return prepare_request_tools(wire)[0]
 
     def _prompt_cache_request_kwargs(self) -> dict[str, Any]:
         """Return provider-specific request fields for stable cache routing."""

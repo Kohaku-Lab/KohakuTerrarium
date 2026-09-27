@@ -1884,7 +1884,7 @@ class TestLlmIntegration:
                     )
                     config = tmp_path / "ws-tool.yaml"
                     config.write_text(
-                        f"name: ws_probe\nsystem_prompt: offline\ntool_format: {mode}\ndisable_provider_tools: [image_gen]\ninput: {{type: none}}\noutput: {{type: stdout}}\ntools: [{{name: scratchpad, type: builtin}}]\n"
+                        f"name: ws_probe\nsystem_prompt: offline\ntool_format: {mode}\ninput: {{type: none}}\noutput: {{type: stdout}}\ntools: [{{name: scratchpad, type: builtin}}]\n"
                     )
                     queue, log = asyncio.Queue(), deque()
                     async with Terrarium(
@@ -1901,6 +1901,15 @@ class TestLlmIntegration:
                         )
                         assert creature.agent.scratchpad.get("discarded") is None
                         assert creature.agent.scratchpad.get("once") == "kept"
+                        if provider_type is CodexOAuthProvider:
+                            assert any(
+                                tool["type"] == "image_generation"
+                                for tool in submissions[0]["tools"]
+                            )
+                        assert all(
+                            "request_replay" not in tool
+                            for tool in submissions[0].get("tools", [])
+                        )
                         if mode == "native":
                             assert result.text == "recovered"
                             assert result.ok

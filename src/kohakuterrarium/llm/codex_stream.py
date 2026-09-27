@@ -32,10 +32,12 @@ async def stream_codex_ws_turn(
     """Publish result state only after the successful attempt completes."""
     calls = []
     text = []
+    image_parts = []
 
     def reset_attempt() -> None:
         calls.clear()
         text.clear()
+        image_parts.clear()
         provider._reasoning = ResponsesReasoningCollector()
         provider._last_usage = {}
         provider._last_tool_calls = []
@@ -54,7 +56,7 @@ async def stream_codex_ws_turn(
             )
         ) as stream:
             async for event in stream:
-                piece = provider._process_stream_event(event, calls)
+                piece = provider._process_stream_event(event, calls, image_parts)
                 if piece is not None:
                     text.append(piece)
                     if piece:
@@ -62,6 +64,7 @@ async def stream_codex_ws_turn(
                     yield piece
         provider._last_assistant_extra_fields = provider._reasoning.fields()
         provider._last_tool_calls = calls
+        provider._last_assistant_parts = list(image_parts)
         record_ws_assistant_echo(session, provider, "".join(text), echo_options)
         completed = True
     finally:
@@ -70,7 +73,10 @@ async def stream_codex_ws_turn(
 
 
 def process_codex_event(
-    provider: Any, event: Any, collected_tool_calls: list[NativeToolCall]
+    provider: Any,
+    event: Any,
+    collected_tool_calls: list[NativeToolCall],
+    image_parts: list | None = None,
 ) -> str | None:
     """Fold one Responses stream event into provider state; return text."""
     # Generic SDK events may carry fresher inline rate-limit payloads.
@@ -101,7 +107,12 @@ def process_codex_event(
                 # Image bytes are available before the item status completes.
                 part = build_image_part(item, provider._image_gen_output_format)
                 if part is not None:
-                    provider._last_assistant_parts.append(part)
+                    target = (
+                        provider._last_assistant_parts
+                        if image_parts is None
+                        else image_parts
+                    )
+                    target.append(part)
         case "response.completed":
             resp = getattr(event, "response", None)
             if resp:

@@ -7,6 +7,9 @@ import pytest
 import httpx
 from openai import APIConnectionError
 
+from kohakuterrarium.bootstrap.tools import create_tool
+from kohakuterrarium.builtins.tools.image_gen import ImageGenTool
+from kohakuterrarium.core.config_types import ToolConfigItem
 from kohakuterrarium.llm.codex_provider import CodexOAuthProvider
 from kohakuterrarium.llm.model_recovery_status import observe_model_recovery
 from kohakuterrarium.llm.responses_ws import ResponsesWSError
@@ -37,7 +40,14 @@ async def test_cache_rejection_shapes_resend_full_history(shape):
     h.conn.scripts = [[completed("r1")], [event], [completed("r2")]]
     await h.run([USER1])
     h.session.record_assistant_echo([ASSIST1])
-    await h.run([USER1, ASSIST1, USER2])
+    await h.run(
+        [USER1, ASSIST1, USER2],
+        base={
+            "model": "m",
+            "background": True,
+            "tools": [{"type": "image_generation", "request_replay": "forbid"}],
+        },
+    )
     assert h.conn.sent[-1]["input"] == ["PAIRED", USER1, ASSIST1, USER2]
     assert "previous_response_id" not in h.conn.sent[-1]
     assert len(h.conn.sent) == 3
@@ -123,7 +133,7 @@ async def test_uncommitted_attempt_is_discarded_before_replay(provider, failure)
     assert provider._ws_session._prev_id == "recovered"
 
 
-async def test_delivered_text_blocks_replay(provider):
+async def test_delivered_text_blocks_replay(provider, caplog):
     connection = provider._client.responses.connection
     connection.scripts = [
         [
@@ -137,6 +147,134 @@ async def test_delivered_text_blocks_replay(provider):
             chunks.append(chunk)
     assert chunks == ["partial"]
     assert len(connection.sent) == 1
+    stopped = next(
+        r for r in caplog.records if r.msg == "Responses WS recovery stopped"
+    )
+    assert stopped.stop_reason == "content_delivered"
+
+
+@pytest.mark.parametrize("kind", ["image_generation", "mcp", "future_tool", "function"])
+@pytest.mark.parametrize("policy", [None, "allow", "forbid"])
+async def test_explicit_policy_controls_only_server_tool_replay(
+    provider, kind, policy, caplog
+):
+    spec = {"type": kind, "name": "test_tool"}
+    if policy is not None:
+        spec["request_replay"] = policy
+    provider.extra_body["tools"] = [spec]
+    connection = provider._client.responses.connection
+    connection.scripts = [[ConnectionError("lost")], [completed("ok")]]
+    if policy == "forbid" and kind != "function":
+        with pytest.raises(ResponsesWSError):
+            _ = [x async for x in provider.chat(MESSAGES)]
+        assert len(connection.sent) == 1
+        stopped = next(
+            r for r in caplog.records if r.msg == "Responses WS recovery stopped"
+        )
+        assert stopped.stop_reason == "tool_replay_forbidden"
+        assert stopped.blocked_tools == ["test_tool"]
+        assert stopped.uncertain_replays == 0
+    else:
+        assert [x async for x in provider.chat(MESSAGES)] == []
+        assert len(connection.sent) == 2
+    assert all("request_replay" not in req["tools"][0] for req in connection.sent)
+    assert provider.extra_body["tools"] == [spec]
+
+
+@pytest.mark.parametrize("policy", [True, "maybe", None, {"allow": True}])
+async def test_invalid_wire_replay_policy_fails_before_submission(provider, policy):
+    provider.extra_body["tools"] = [
+        {"type": "image_generation", "request_replay": policy}
+    ]
+    with pytest.raises(ValueError, match="request_replay"):
+        _ = [x async for x in provider.chat(MESSAGES)]
+    assert provider._client.responses.connection.sent == []
+
+
+@pytest.mark.parametrize("policy", ["allow", "forbid"])
+async def test_configured_native_tool_replay_policy(provider, policy):
+    if not isinstance(provider, CodexOAuthProvider):
+        return
+    tool = create_tool(
+        ToolConfigItem(
+            name="image_gen", type="builtin", options={"request_replay": policy}
+        ),
+        None,
+        strict=True,
+    )
+    tool.request_replay = "forbid" if policy == "allow" else "allow"
+    connection = provider._client.responses.connection
+    connection.scripts = [[ConnectionError("lost")], [completed("ok")]]
+    if policy == "forbid":
+        with pytest.raises(ResponsesWSError):
+            _ = [x async for x in provider.chat(MESSAGES, provider_native_tools=[tool])]
+        assert len(connection.sent) == 1
+    else:
+        assert [
+            x async for x in provider.chat(MESSAGES, provider_native_tools=[tool])
+        ] == []
+        assert len(connection.sent) == 2
+    assert "request_replay" not in connection.sent[0]["tools"][0]
+
+
+async def test_image_results_are_private_until_successful_attempt(provider):
+    if not isinstance(provider, CodexOAuthProvider):
+        return
+    connection = provider._client.responses.connection
+    observed = []
+
+    def image_event(name):
+        return Ev(
+            type="response.output_item.done",
+            item=Ev(
+                type="image_generation_call",
+                id=name,
+                result=name,
+            ),
+        )
+
+    async def events():
+        yield image_event("abandoned")
+        observed.append(list(provider.last_assistant_content_parts or []))
+        raise ConnectionError("lost")
+
+    original_iter = type(connection).__aiter__
+
+    # Observe the public result getter while the first attempt is suspended.
+    class ObservedConnection(type(connection)):
+        def __aiter__(self):
+            if len(self.sent) == 1:
+                self.scripts.pop(0)
+                return events()
+            return original_iter(self)
+
+    connection.__class__ = ObservedConnection
+    connection.scripts = [[], [image_event("kept"), completed("ok")]]
+    # The registered native list wins over raw extra_body tools on this path.
+    provider.extra_body["tools"] = [{"type": "mcp", "request_replay": "forbid"}]
+    assert [
+        x async for x in provider.chat(MESSAGES, provider_native_tools=[ImageGenTool()])
+    ] == []
+    assert observed == [[]]
+    assert [part.source_name for part in provider.last_assistant_content_parts] == [
+        "kept"
+    ]
+    assert len(connection.sent) == 2
+    assert connection.sent[0]["tools"][0]["type"] == "image_generation"
+
+
+async def test_http_strips_framework_tool_metadata(provider):
+    provider._websocket_mode = False
+    spec = {"type": "image_generation", "request_replay": "forbid"}
+    provider.extra_body["tools"] = [spec]
+    assert [x async for x in provider.chat(MESSAGES)] == []
+    target = (
+        provider._client.responses
+        if isinstance(provider, CodexOAuthProvider)
+        else provider._client.chat.completions
+    )
+    assert target.kwargs["extra_body"]["tools"] == [{"type": "image_generation"}]
+    assert provider.extra_body["tools"] == [spec]
 
 
 async def test_zero_budget_disables_replay(provider):
@@ -177,6 +315,9 @@ async def test_cache_rejection_and_uncertain_replay_share_budget(provider):
 
 
 async def test_http_fallback_keeps_one_budget_and_does_not_return_to_ws(provider):
+    provider.extra_body["tools"] = [
+        {"type": "image_generation", "request_replay": "forbid"}
+    ]
     client = provider._client
     connects = []
     creates = []
@@ -211,6 +352,10 @@ async def test_http_fallback_keeps_one_budget_and_does_not_return_to_ws(provider
             pass
     assert len(creates) == 4
     assert len(connects) == 2
+    assert all(
+        call["extra_body"]["tools"] == [{"type": "image_generation"}]
+        for call in creates
+    )
     assert statuses[-1]["phase"] is None
     if isinstance(provider, CodexOAuthProvider):
         assert all(option == {"max_retries": 0} for option in options)
@@ -233,6 +378,46 @@ async def test_retry_uses_frozen_request_despite_external_mutation(provider):
     assert len(connection.sent) == 2
     assert connection.sent[0] == connection.sent[1]
     assert connection.sent[1]["metadata"] == {"tag": "original"}
+
+
+async def test_tool_policy_mutation_only_affects_next_request(provider):
+    spec = {"type": "image_generation", "request_replay": "allow"}
+    provider.extra_body["tools"] = [spec]
+    connection = provider._client.responses.connection
+    connection.scripts = [
+        [ConnectionError("lost")],
+        [completed("ok")],
+        [ConnectionError("lost again")],
+    ]
+
+    async def mutate(payload):
+        if payload["phase"]:
+            spec["request_replay"] = "forbid"
+
+    with observe_model_recovery(mutate):
+        assert [x async for x in provider.chat(MESSAGES)] == []
+    assert len(connection.sent) == 2
+    with pytest.raises(ResponsesWSError):
+        _ = [x async for x in provider.chat(MESSAGES)]
+    assert len(connection.sent) == 3
+
+
+async def test_allowed_server_tool_still_has_one_uncertain_replay(provider, caplog):
+    provider.extra_body["tools"] = [{"type": "image_generation"}]
+    connection = provider._client.responses.connection
+    connection.scripts = [
+        [ConnectionError("lost")],
+        [ConnectionError("lost again")],
+        [completed("unused")],
+    ]
+    with pytest.raises(ResponsesWSError):
+        _ = [x async for x in provider.chat(MESSAGES)]
+    assert len(connection.sent) == 2
+    stopped = next(
+        r for r in caplog.records if r.msg == "Responses WS recovery stopped"
+    )
+    assert stopped.stop_reason == "uncertain_replay_exhausted"
+    assert stopped.uncertain_replays == 1
 
 
 async def test_cancel_during_backoff_clears_status_and_does_not_send_again(provider):

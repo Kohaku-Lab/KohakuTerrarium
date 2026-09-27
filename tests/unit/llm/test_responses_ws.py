@@ -291,7 +291,12 @@ class TestFailureRecovery:
                 ResponsesWSError, match="synthetic underlying send failure"
             ) as captured:
                 async for _ in session.stream_turn(
-                    {"model": "m", "tools": [{"type": "image_generation"}]},
+                    {
+                        "model": "m",
+                        "tools": [
+                            {"type": "image_generation", "request_replay": "forbid"}
+                        ],
+                    },
                     history,
                     lambda x: x,
                 ):
@@ -520,14 +525,22 @@ class TestFailureRecovery:
     @pytest.mark.parametrize(
         "base",
         [
-            {"tools": [{"type": "image_generation"}]},
+            {"tools": [{"type": "image_generation", "request_replay": "forbid"}]},
             {
                 "tools": [
                     {"type": "function", "name": "read"},
-                    {"type": "image_generation"},
+                    {"type": "image_generation", "request_replay": "forbid"},
                 ]
             },
-            {"tools": [{"type": "mcp", "server_url": "https://example.invalid"}]},
+            {
+                "tools": [
+                    {
+                        "type": "mcp",
+                        "server_url": "https://example.invalid",
+                        "request_replay": "forbid",
+                    }
+                ]
+            },
             {"background": True},
         ],
     )

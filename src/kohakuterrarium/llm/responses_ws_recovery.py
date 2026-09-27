@@ -11,6 +11,7 @@ from websockets.exceptions import ConnectionClosed
 
 from kohakuterrarium.llm.model_recovery_status import notify_model_recovery
 from kohakuterrarium.llm.recovery import RetryPolicy, backoff_delay
+from kohakuterrarium.llm.responses_tools import prepare_request_tools
 from kohakuterrarium.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -134,10 +135,8 @@ class WSRecovery:
     ) -> AsyncIterator[Any]:
         """Drive isolated attempts while retaining the session's exclusive lock."""
         base_event, items = deepcopy(base_event), deepcopy(items)
-        replayable = not base_event.get("background") and all(
-            isinstance(tool, dict) and tool.get("type") == "function"
-            for tool in base_event.get("tools") or []
-        )
+        base_event, blocked_tools = prepare_request_tools(base_event)
+        replayable = not base_event.get("background") and not blocked_tools
         delta = session._compute_delta(items)
         connect_failures = 0
         try:
@@ -179,6 +178,22 @@ class WSRecovery:
                         )
                     )
                     if not permitted:
+                        if self.policy.max_retries <= 0:
+                            reason = "retries_disabled"
+                        elif not budget:
+                            reason = "submission_budget_exhausted"
+                        elif self.delivered:
+                            reason = "content_delivered"
+                        elif not transient:
+                            reason = "non_retryable_error"
+                        elif connect_failures >= 2:
+                            reason = "connection_attempts_exhausted"
+                        elif exc.submitted and base_event.get("background"):
+                            reason = "background_request"
+                        elif exc.submitted and blocked_tools:
+                            reason = "tool_replay_forbidden"
+                        else:
+                            reason = "uncertain_replay_exhausted"
                         logger.warning(
                             "Responses WS recovery stopped",
                             request_id=self._request_id,
@@ -187,6 +202,11 @@ class WSRecovery:
                             submitted=self.submitted,
                             delivered=self.delivered,
                             submissions=self.submissions,
+                            stop_reason=reason,
+                            blocked_tools=blocked_tools,
+                            max_retries=self.policy.max_retries,
+                            uncertain_replays=self.uncertain_replays,
+                            received_events=exc.mid_stream,
                         )
                         raise
                     if not rejected and exc.submitted:
