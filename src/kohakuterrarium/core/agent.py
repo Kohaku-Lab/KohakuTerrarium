@@ -576,14 +576,10 @@ class Agent(
         fresh turn (no explicit re-fire needed). Queued Drive deliveries
         are dropped WITHOUT running and settle as user-interrupted, so the
         dispatcher pauses their drive instead of redelivering."""
-        already_requested = self._interrupt_requested
-        self._interrupt_requested = True
-        self.controller._interrupted = True
-        processing = getattr(self, "_processing_task", None)
-        if processing and not processing.done() and not already_requested:
-            processing.cancel()
-        for job_id in list(self._active_handles.keys()):
-            self._interrupt_direct_job(job_id)
+        active = getattr(self, "_active_event_run", None)
+        if active:
+            active[0].event.context["interrupted_by_user"] = True
+        self._interrupt_active_turn()
         if self.plugins:
             asyncio.create_task(self.plugins.notify("on_interrupt"))
         dropped = self._event_inbox.remove_where(
@@ -605,6 +601,17 @@ class Agent(
                 count=len(dropped),
             )
         logger.info("Agent interrupted", agent_name=self.config.name)
+
+    def _interrupt_active_turn(self) -> None:
+        """Cancel the current controller and its foreground jobs."""
+        already_requested = self._interrupt_requested
+        self._interrupt_requested = True
+        self.controller._interrupted = True
+        processing = getattr(self, "_processing_task", None)
+        if processing and not processing.done() and not already_requested:
+            processing.cancel()
+        for job_id in list(self._active_handles.keys()):
+            self._interrupt_direct_job(job_id)
 
     def _cancel_job(self, job_id: str, job_name: str) -> None:
         """Cancel a single running job by ID (tool or sub-agent).
