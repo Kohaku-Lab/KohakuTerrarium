@@ -26,6 +26,7 @@ Each method runs ONE complete workflow end-to-end.
 """
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -50,6 +51,7 @@ from kohakuterrarium.core.config_types import (
     OutputConfigItem,
 )
 from kohakuterrarium.core.events import EventType, create_user_input_event
+from kohakuterrarium.llm.message import ImagePart, TextPart
 from kohakuterrarium.modules.output.event import OutputEvent, UIReply
 from kohakuterrarium.modules.output.router import OutputRouter
 from kohakuterrarium.modules.output.router_multi import MultiOutputRouter
@@ -75,6 +77,7 @@ from kohakuterrarium.modules.tool.base import (
     ToolContext,
     ToolResult,
 )
+from kohakuterrarium.modules.tool.media_policy import MediaPolicy
 from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.modules.trigger.timer import TimerTrigger
 from kohakuterrarium.modules.user_command.base import (
@@ -1001,6 +1004,65 @@ class TestModulesIntegration:
             agent.subagent_manager.cleanup(job_id)
             assert job_id not in agent.subagent_manager._tasks
             assert agent.subagent_manager.get_result(job_id) is direct_result
+
+            class MediaReferenceTool(BaseTool):
+                media_policy = MediaPolicy(persist=False, pinned=False)
+
+                @property
+                def tool_name(self):
+                    return "media_reference"
+
+                @property
+                def description(self):
+                    return "Return a synthetic image reference without reading a file."
+
+                async def _execute(self, args, **kwargs):
+                    return ToolResult(
+                        output=[
+                            TextPart(text=f"reference: {args['label']}"),
+                            ImagePart(
+                                url=f"file:///synthetic/{args['label']}.png",
+                                detail="high",
+                            ),
+                        ]
+                    )
+
+            agent.add_tool(MediaReferenceTool())
+            media_llm = ScriptedLLM(
+                [
+                    "[/media_reference]@@label=first\n[media_reference/]",
+                    "first checked",
+                    "[/media_reference]@@label=second\n[media_reference/]",
+                    "second checked",
+                ]
+            )
+            agent.subagent_manager.llm = media_llm
+            for index, label in enumerate(("first", "second")):
+                name = f"visual_{label}"
+                agent.subagent_manager.register(
+                    SubAgentConfig(name=name, tools=["media_reference"])
+                )
+                media_job = await agent.subagent_manager.spawn(
+                    name, "inspect a synthetic reference", background=False
+                )
+                assert (
+                    agent.subagent_manager.get_result(media_job).output
+                    == f"{label} checked"
+                )
+                delivered = media_llm.call_log[index * 2 + 1][-1]["content"]
+                expected_image = {
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"file:///synthetic/{label}.png",
+                        "detail": "high",
+                    },
+                }
+                assert isinstance(delivered, list) and expected_image in delivered
+                saved = json.loads(
+                    store.load_subagent_conversation("modules_agent", name, 0)
+                )
+                assert saved["messages"][-2]["content"] == delivered
+            assert agent.controller.conversation.get_image_count() == 0
 
             # ── SubAgentConfig data surface (real config objects) ──
             # An explicit system_prompt is a full override — load_prompt
