@@ -18,6 +18,7 @@ class JobType(Enum):
     TOOL = "tool"
     SUBAGENT = "subagent"
     COMMAND = "command"
+    CREATURE = "creature"
 
 
 class JobState(Enum):

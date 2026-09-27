@@ -1,7 +1,9 @@
 # MCP tool server
 
-The standalone server exposes KT tools to an external MCP client without
-creating a Creature or starting a local model. `kt mcp-serve` manages a separate
+The standalone server exposes KT tools to an external MCP client. With no
+delegation targets configured it creates no Creature and starts no local model.
+Optional delegation targets run locally configured Creatures and standalone
+task subagents. `kt mcp-serve` manages a separate
 background process per workspace, an authenticated Streamable HTTP endpoint,
 and optionally its preconfigured ngrok tunnel.
 
@@ -165,12 +167,156 @@ tools:
 plugins: []
 ```
 
+## Delegate to a local Creature or subagent
+
+Register targets in the same configuration file used by `setup --config`:
+
+```yaml
+workspace: ./work
+delegation:
+  coder:
+    kind: creature
+    config: "@kt-biome/creatures/swe"
+    description: "Implement and verify changes in this workspace"
+  reviewer:
+    kind: subagent
+    config: ./reviewer.yaml
+    description: "Review a concrete change and report findings"
+```
+
+The catalog is local configuration. Clients select an alias; they cannot submit
+configuration paths, inline definitions, model overrides or tool overrides.
+Relative references resolve against the MCP configuration file. Installed
+`@package/...` references use normal KT package resolution. Definitions load when
+an instance is created; a bad definition fails that job rather than silently
+dropping configured capabilities. Catalog changes require a server restart;
+editing a referenced definition affects new instances, not existing ones.
+
+Creature definitions use the ordinary KT configuration format. A standalone
+subagent needs no parent Creature. Its YAML/JSON file uses SubAgentConfig fields,
+with `llm` selecting the local KT profile and `tools` accepting names or the
+ordinary tool configuration entries:
+
+```yaml
+name: reviewer
+llm: default
+system_prompt: "Review the requested change. Report concrete findings."
+tools:
+  - name: read
+  - name: glob
+  - name: grep
+  - name: bash
+    config:
+      timeout: 60
+can_modify: false
+max_turns: 30
+timeout: 600
+plugins: []
+```
+
+Custom/package tools and plugins resolve relative to the definition through KT's
+existing factories. The subagent model may also be selected using `model` when
+`llm` is omitted. There is no parent-model inheritance. Interactive subagents
+are not supported by this first release. Limits and sandbox policy belong in
+the target configuration and its plugins.
+
+Configure local model credentials/profiles through the ordinary KT commands,
+then save and activate this server configuration:
+
+```bash
+kt mcp-serve setup --config ./mcp.yaml
+kt mcp-serve stop
+kt mcp-serve start
+```
+
+Refresh the client's tool list after restarting. Registered delegation enables
+six additional tools:
+
+| Tool | Use |
+| --- | --- |
+| `delegation_targets` | Discover registered aliases and descriptions without starting a model |
+| `delegate` | Submit `target` and `prompt`; optionally continue a Creature `session_id` |
+| `delegation_send` | Supplement an active `job_id` using KT's existing input semantics |
+| `delegation_sessions` | List server-owned sessions, busy state and current delegation job |
+| `delegation_history` | Page session activity or the current public conversation snapshot |
+| `delegation_close` | Stop and close a server-owned session, retaining readable history |
+
+A typical client flow is:
+
+1. Call `delegation_targets` and choose an alias.
+2. Call `delegate(target="coder", prompt="Investigate the failing test")`.
+   Save both returned IDs: `job_id` identifies this execution, `session_id`
+   identifies its conversation. Submission returns before model execution.
+3. Use the existing `job_status` / `job_wait` tools to retrieve the result.
+   Waiting has a maximum of 60 seconds per call; timeout or disconnect does not
+   cancel execution. Delegation jobs are already asynchronous and do not need
+   `job_promote`.
+4. Inspect `delegation_history(session_id=..., view="events")` for activity,
+   or `view="conversation"` for public messages and full retained tool results.
+   Use `cursor` and `limit` (1–200). Activity retains the latest 2,000 events and
+   reports eviction with `truncated` / `earliest_cursor`. Conversation pagination
+   reads a live snapshot; compaction or ongoing turns may change its offsets.
+5. Continue with `delegate(target="coder", session_id=..., prompt="Apply the fix")`,
+   or omit `session_id` to start an independent conversation.
+6. Use `job_cancel` to stop a current delegation, or `delegation_close` when the
+   conversation is no longer needed.
+
+Do not repeat a submission merely because its HTTP response was lost. List jobs
+and sessions first: all authenticated clients share this server's ownership and
+history. The job history has the same bounded retention as direct tool jobs.
+
+### Runtime and cancellation semantics
+
+Delegates inherit the MCP workspace as their working directory. Different
+conversations share its files; no worktree or filesystem isolation is created.
+MCP adds no extra path restriction. Tools, plugins and autonomous triggers follow
+the target's configuration, independently of the direct MCP tool allowlist and
+its policies. Creature execution uses KT headless I/O while preserving named
+outputs and triggers. Registering a target does not immediately instantiate it.
+
+Each Creature session accepts one active delegated turn. Busy sessions reject
+new work, including while running an autonomous turn; that busy state may have
+no MCP delegation job ID. Session listing reads the live Creature state, including
+idle, paused and stopped, rather than inferring it from the target catalog.
+Use history to inspect its activity. A running-input supplement
+is not another queued delegation and is delivered at the normal KT boundary.
+KT may promote foreground tools to the background while handling that input;
+the original delegated turn can then finish. Cancelling that completed job is
+a no-op; use `delegation_close` to stop any work remaining in its session.
+Finishing a Creature turn does not imply its background work has finished.
+Autonomous activity is session history, not the result of an unrelated job.
+
+`job_cancel` uses KT stop for a Creature: it stops that instance, its triggers,
+and all its KT-managed tools/subagents, including background work left by earlier
+turns. It waits for cleanup and preserves conversation history. Explicitly
+continuing that same server-owned session rebuilds the runtime through KT's
+existing persistence/resume flow; cancellation never automatically restarts it.
+Cancelling a standalone subagent stops only its own task scope and waits for its
+normal cancellation chain. Neither operation rolls back file changes or promises
+to reclaim arbitrary detached operating-system processes.
+
+Creature sessions stay alive until explicitly closed or server shutdown. A closed
+session cannot be continued. Subagents are one-shot: they accept supplements while
+running, but completed subagents cannot continue the same conversation. Starting
+another task creates a fresh subagent.
+
+The server does not reconnect to other KT processes, import arbitrary saved
+conversations, or automatically recover jobs/sessions after its own restart.
+Creature persistence uses normal `.kohakutr` files under
+`~/.kohakuterrarium/mcp-serve/sessions/<instance-id>/`; MCP handles remain scoped
+to the server lifetime. Terrarium recipes are not delegation targets: team task
+correlation, completion and cancellation require a separate collaboration
+protocol. Internal use of Terrarium to host Creatures does not provide that
+team-level contract.
+
+## Direct tool configuration details
+
 `workspace` must exist; a relative path resolves against the config file's
 directory. Omitting `tools` enables the nine tools above. Tools must have
 unique names and `type: builtin` (the default). `max_output` and each tool's
 declared runtime options are accepted. `timeout` applies to bash/Python;
 `env` applies to bash. Per-tool `working_dir` is rejected because the shared
-execution context supplies the directory. Controller notification settings,
+execution context supplies the directory. At the top level, controller notification settings,
 LLM profiles, prompts, triggers, compact and AgentConfig inheritance are
 rejected rather than silently ignored.
 

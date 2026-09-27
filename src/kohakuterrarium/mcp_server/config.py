@@ -1,4 +1,4 @@
-"""Strict tool-only configuration using the existing tool option contract."""
+"""Direct tool settings and explicit local delegation target registration."""
 
 from pathlib import Path
 from typing import Any, Literal
@@ -37,6 +37,15 @@ class PluginSpec(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class DelegationTarget(BaseModel):
+    """A locally registered execution definition, independent of session state."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+    kind: Literal["creature", "subagent"]
+    config: str = Field(min_length=1)
+    description: str = ""
+
+
 class MCPToolsConfig(BaseModel):
     """No model, triggers, prompt, compact, or AgentConfig inheritance."""
 
@@ -48,6 +57,7 @@ class MCPToolsConfig(BaseModel):
         default_factory=lambda: [ToolSpec(name=n) for n in SUPPORTED_TOOLS]
     )
     plugins: list[PluginSpec] = Field(default_factory=list)
+    delegation: dict[str, DelegationTarget] = Field(default_factory=dict)
 
     @field_validator("workspace")
     @classmethod
@@ -64,6 +74,15 @@ class MCPToolsConfig(BaseModel):
             raise ValueError("duplicate tool name")
         return values
 
+    @field_validator("delegation")
+    @classmethod
+    def named_targets(cls, values: dict[str, DelegationTarget]):
+        if any(not name.strip() or name != name.strip() for name in values):
+            raise ValueError(
+                "Delegation target names must be nonempty without surrounding whitespace"
+            )
+        return values
+
 
 def load_config(path: Path) -> MCPToolsConfig:
     """Read a dedicated YAML/JSON document; relative workspace is file-relative."""
@@ -72,4 +91,10 @@ def load_config(path: Path) -> MCPToolsConfig:
         raise ValueError("MCP configuration must be an object")
     if isinstance(data.get("workspace"), str):
         data["workspace"] = path.resolve().parent / data["workspace"]
-    return MCPToolsConfig.model_validate(data)
+    config = MCPToolsConfig.model_validate(data)
+    for target in config.delegation.values():
+        if not target.config.startswith("@"):
+            target.config = str(
+                (path.resolve().parent / Path(target.config).expanduser()).resolve()
+            )
+    return config

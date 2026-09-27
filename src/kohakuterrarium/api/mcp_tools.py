@@ -1,4 +1,4 @@
-"""Authenticated Streamable HTTP adapter for a KT tool-only runtime."""
+"""Authenticated Streamable HTTP adapter for KT tools and local delegation."""
 
 import copy
 import json
@@ -14,6 +14,7 @@ from starlette.middleware import Middleware
 from starlette.routing import Route
 
 from kohakuterrarium.api.auth.mcp_secret import MCPSecretPath
+from kohakuterrarium.api.mcp_delegation import call_delegation, delegation_tools
 from kohakuterrarium.core.backgroundify import PromotionResult
 from kohakuterrarium.llm.message import ImagePart
 from kohakuterrarium.llm.artifact_resolve import resolve_artifact_url
@@ -23,7 +24,11 @@ from kohakuterrarium.mcp_server.runtime import ToolRuntime
 _JOB_DESCRIPTIONS = {
     "job_status": "Read a retained job, or list this instance's jobs when job_id is omitted.",
     "job_wait": "Wait up to timeout seconds for a job; timeout/disconnect does not cancel execution.",
-    "job_cancel": "Cancel a running job in this instance. Completed jobs are unchanged.",
+    "job_cancel": (
+        "Cancel a running job in this instance. A Creature delegation uses KT stop: "
+        "its triggers and all its managed tools/subagents stop, including work from earlier turns. "
+        "Continue explicitly with delegate and its session_id. Completed jobs are unchanged."
+    ),
     "job_promote": "Release a foreground call into the background using its existing job ID; never reruns it.",
 }
 
@@ -75,6 +80,8 @@ def _tool_list(runtime: ToolRuntime) -> list[Tool]:
                 ),
             )
         )
+    if runtime.config.delegation:
+        tools.extend(delegation_tools())
     return tools
 
 
@@ -116,6 +123,7 @@ def create_app(
     port: int = 8765,
     public_origin: str = "",
     json_response: bool = True,
+    llm_factory=None,
 ) -> Starlette:
     """Create one process-lifetime runtime; serve only through its secret path.
 
@@ -144,12 +152,17 @@ def create_app(
         origins.append(public_origin)
     # Validate before constructing the runtime or loading configured modules.
     MCPSecretPath(None, secret=secret)
-    runtime = ToolRuntime(config)
+    runtime = ToolRuntime(config, llm_factory=llm_factory)
     server = Server(
         config.name,
         instructions=(
             f"KT instance_id: {runtime.instance_id}\n"
-            "KT tools only: no local LLM or autonomous turns. Workspace is the default directory, "
+            + (
+                "KT tools and locally registered delegation targets. Creatures may run autonomous triggers. "
+                if config.delegation
+                else "KT tools only: no local LLM or autonomous turns. "
+            )
+            + "Workspace is the default directory, "
             "not a sandbox. Read existing files before modifying them; stale reads require rereading. "
             "Jobs and file-read state belong to this instance, shared across its authenticated clients. "
             "Use run_in_background for long bash/python work, or job_promote for an already running job. "
@@ -165,6 +178,11 @@ def create_app(
     @server.call_tool()
     async def call_tool(name, arguments):
         args = arguments or {}
+        if config.delegation and (name == "delegate" or name.startswith("delegation_")):
+            try:
+                return _reply(await call_delegation(runtime.delegation, name, args))
+            except (ValueError, RuntimeError) as exc:
+                return _reply({"error": str(exc)})
         if name == "job_status":
             return _job_reply(
                 runtime.job(args["job_id"])

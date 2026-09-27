@@ -18,7 +18,9 @@ def add_setup_arguments(parser):
     group.add_argument("--ngrok-config", type=Path)
     group.add_argument("--clear-ngrok-config", action="store_true")
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--config", type=Path, help="Dedicated MCP tool configuration")
+    group.add_argument(
+        "--config", type=Path, help="MCP tools and delegation configuration"
+    )
     group.add_argument("--clear-config", action="store_true")
     parser.add_argument("--import-connection", type=Path, help=argparse.SUPPRESS)
 
@@ -66,7 +68,7 @@ def _wizard(store, original, options):
         None if options["clear_tools_config"] else defaults.get("tools_config")
     )
     options["tools_config"], options["clear_tools_config"] = _path_prompt(
-        "Tool configuration", "-" if options["clear_tools_config"] else path
+        "MCP configuration", "-" if options["clear_tools_config"] else path
     )
     if mode == "ngrok":
         options["ngrok_bin"] = _prompt(

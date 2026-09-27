@@ -16,6 +16,7 @@ from mcp.client.streamable_http import streamable_http_client
 from kohakuterrarium.api.mcp_tools import create_app
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
 from kohakuterrarium.mcp_server.connection import ConnectionStore
+from kohakuterrarium.testing.llm import ScriptedLLM, ScriptEntry
 
 
 class TestMCPServer:
@@ -268,7 +269,64 @@ class TestMCPServer:
 
     async def test_authenticated_tools_and_job_lifecycle(self, tmp_path):
         secret = "a" * 43
-        app = create_app(MCPToolsConfig(workspace=tmp_path), secret=secret, port=8765)
+        creature_path = tmp_path / "creature.json"
+        creature_path.write_text(
+            json.dumps(
+                {
+                    "name": "worker",
+                    "input": {"type": "none"},
+                    "tools": [],
+                    "compact": {"enabled": False},
+                }
+            ),
+            encoding="utf-8",
+        )
+        subagent_path = tmp_path / "subagent.json"
+        subagent_path.write_text(
+            json.dumps(
+                {
+                    "name": "writer",
+                    "tools": ["write"],
+                    "can_modify": True,
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        def provider(target):
+            if target == "writer":
+                return ScriptedLLM(
+                    [
+                        "[/write]\n@@path=delegated.txt\n@@content=via MCP\n[write/]",
+                        "written via delegated tool",
+                    ]
+                )
+            return ScriptedLLM(
+                [
+                    ScriptEntry(
+                        "slow creature answer",
+                        match="slow",
+                        delay_per_chunk=0.1,
+                        chunk_size=1,
+                    ),
+                    ScriptEntry("creature reply", match="hello"),
+                ]
+            )
+
+        app = create_app(
+            MCPToolsConfig.model_validate(
+                {
+                    "workspace": tmp_path,
+                    "delegation": {
+                        "worker": {"kind": "creature", "config": str(creature_path)},
+                        "writer": {"kind": "subagent", "config": str(subagent_path)},
+                    },
+                }
+            ),
+            secret=secret,
+            port=8765,
+            llm_factory=provider,
+        )
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(
                 transport=httpx.ASGITransport(app), base_url="http://127.0.0.1:8765"
@@ -294,7 +352,7 @@ class TestMCPServer:
                     async with ClientSession(read, write) as client:
                         await client.initialize()
                         tools = {t.name: t for t in (await client.list_tools()).tools}
-                        assert len(tools) == 13
+                        assert len(tools) == 19
                         assert (
                             "run_in_background"
                             in tools["python"].inputSchema["properties"]
@@ -308,6 +366,77 @@ class TestMCPServer:
                         async def call(name, args):
                             result = await client.call_tool(name, args)
                             return result, json.loads(result.content[0].text)
+
+                        _, targets = await call("delegation_targets", {})
+                        assert {t["name"] for t in targets["targets"]} == {
+                            "worker",
+                            "writer",
+                        }
+                        assert (
+                            await call(
+                                "delegate", {"target": "foreign", "prompt": "hello"}
+                            )
+                        )[0].isError
+                        assert (
+                            await client.call_tool(
+                                "delegate",
+                                {
+                                    "target": "worker",
+                                    "prompt": "hello",
+                                    "model": "arbitrary",
+                                },
+                            )
+                        ).isError
+                        _, delegated = await call(
+                            "delegate", {"target": "writer", "prompt": "write"}
+                        )
+                        _, written = await call(
+                            "job_wait", {"job_id": delegated["job_id"]}
+                        )
+                        assert written["state"] == "done", written
+                        assert (tmp_path / "delegated.txt").read_text() == "via MCP"
+                        _, messages = await call(
+                            "delegation_history",
+                            {
+                                "session_id": delegated["session_id"],
+                                "view": "conversation",
+                            },
+                        )
+                        assert "delegated.txt" in json.dumps(messages)
+                        _, creature = await call(
+                            "delegate", {"target": "worker", "prompt": "slow"}
+                        )
+                        sid = creature["session_id"]
+                        busy, _ = await call(
+                            "delegate",
+                            {"target": "worker", "session_id": sid, "prompt": "hello"},
+                        )
+                        assert busy.isError
+                        assert not (
+                            await call(
+                                "job_wait", {"job_id": creature["job_id"], "timeout": 0}
+                            )
+                        )[0].isError
+                        _, cancelled = await call(
+                            "job_cancel", {"job_id": creature["job_id"]}
+                        )
+                        assert cancelled["cancelled"]
+                        queried, state = await call(
+                            "job_status", {"job_id": creature["job_id"]}
+                        )
+                        assert not queried.isError and state["state"] == "cancelled"
+                        _, resumed = await call(
+                            "delegate",
+                            {"target": "worker", "session_id": sid, "prompt": "hello"},
+                        )
+                        assert (await call("job_wait", {"job_id": resumed["job_id"]}))[
+                            1
+                        ]["state"] == "done"
+                        _, listing = await call("delegation_sessions", {})
+                        assert sid in {s["session_id"] for s in listing["sessions"]}
+                        assert not (
+                            await call("delegation_close", {"session_id": sid})
+                        )[0].isError
 
                         (tmp_path / "note.txt").write_text("before", encoding="utf-8")
                         result, _ = await call(

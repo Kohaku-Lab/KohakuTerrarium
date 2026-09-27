@@ -1,4 +1,4 @@
-"""Tool-only sessions using KT dispatch, policy, executor and JobStore."""
+"""MCP tools and optional delegation using KT dispatch and runtime owners."""
 
 import asyncio
 import uuid
@@ -21,6 +21,7 @@ from kohakuterrarium.core.tool_dispatch import (
 )
 from kohakuterrarium.llm.tools import build_tool_schemas
 from kohakuterrarium.mcp_server.config import MCPToolsConfig
+from kohakuterrarium.mcp_server.delegation import DelegationRuntime
 from kohakuterrarium.modules.plugin.base import BasePlugin, PluginContext
 from kohakuterrarium.modules.tool.base import ToolContext
 from kohakuterrarium.parsing import ToolCallEvent
@@ -47,9 +48,15 @@ _UNSUPPORTED_HOOKS = (
 
 
 class ToolRuntime:
-    """Own one process-lifetime tool session, with no model or fake Agent."""
+    """Own direct tools and explicitly registered delegates for one server."""
 
-    def __init__(self, config: MCPToolsConfig, *, plugins: list[BasePlugin] = ()):
+    def __init__(
+        self,
+        config: MCPToolsConfig,
+        *,
+        plugins: list[BasePlugin] = (),
+        llm_factory=None,
+    ):
         self.config = config
         self.instance_id = uuid.uuid4().hex
         self.registry = Registry()
@@ -116,6 +123,9 @@ class ToolRuntime:
         self._handles = {}
         self._running = False
         self._closed = False
+        self.delegation = DelegationRuntime(
+            config, self.executor.job_store, self.instance_id, llm_factory=llm_factory
+        )
 
     async def __aenter__(self):
         if self._closed or self._running:
@@ -132,11 +142,14 @@ class ToolRuntime:
     async def __aexit__(self, *_):
         self._running = False
         self._closed = True
-        jobs = self.executor.get_running_jobs()
-        for job in jobs:
-            await self.executor.cancel(job.job_id)
-        await self.executor.wait_all()
-        await self.plugins.unload_all()
+        try:
+            await self.delegation.close()
+        finally:
+            jobs = self.executor.get_running_jobs()
+            for job in jobs:
+                await self.executor.cancel(job.job_id)
+            await self.executor.wait_all()
+            await self.plugins.unload_all()
 
     def schemas(self):
         """Expose only registered executable tools, with full docs inline."""
@@ -180,7 +193,10 @@ class ToolRuntime:
             "output": result.get_text_output() if result else "",
             "error": result.error if result else status.error,
             "exit_code": result.exit_code if result else None,
-            "metadata": result.metadata if result else {},
+            "metadata": {
+                **(status.context if self.delegation.owns(job_id) else {}),
+                **(result.metadata if result else {}),
+            },
         }
 
     def jobs(self) -> list[dict[str, Any]]:
@@ -189,10 +205,15 @@ class ToolRuntime:
     async def wait(self, job_id: str, timeout: float = 10) -> dict[str, Any]:
         if not 0 <= timeout <= 60:
             raise ValueError("Wait timeout must be between 0 and 60 seconds")
-        await self.executor.wait_for(job_id, timeout)
+        if self.delegation.owns(job_id):
+            await self.delegation.wait(job_id, timeout)
+        else:
+            await self.executor.wait_for(job_id, timeout)
         return self.job(job_id)
 
     async def cancel(self, job_id: str) -> bool:
+        if self.delegation.owns(job_id):
+            return await self.delegation.cancel(job_id)
         return await self.executor.cancel(job_id)
 
     def promote(self, job_id: str) -> bool:
