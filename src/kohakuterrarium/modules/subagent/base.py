@@ -14,8 +14,10 @@ from kohakuterrarium.core.registry import Registry
 from kohakuterrarium.core.tool_output import (
     discard_raw_output_file,
     normalize_tool_output,
+    render_content_text,
 )
 from kohakuterrarium.llm.base import LLMProvider
+from kohakuterrarium.llm.message import ContentPart, ImagePart, TextPart
 from kohakuterrarium.llm.tools import build_tool_schemas
 from kohakuterrarium.modules.plugin.base import (
     BasePlugin,
@@ -515,7 +517,7 @@ class SubAgent:
 
     async def _execute_and_report_tools(
         self, tool_calls: list[ToolCallEvent]
-    ) -> list[str]:
+    ) -> list[str | list[ContentPart]]:
         """Execute tools, notifying parent of start/done via callback."""
         logger.info(
             "Sub-agent executing tools",
@@ -538,7 +540,8 @@ class SubAgent:
         if self.on_tool_activity:
             # Results are positional: attribute each preview to its own call so
             # several calls to the same tool don't all report the first block.
-            for tc, result in zip(tool_calls, tool_results):
+            for tc, content in zip(tool_calls, tool_results):
+                result = render_content_text(content)
                 prefix = f"[{tc.name}]"
                 if result.startswith(prefix):
                     if result.startswith(f"{prefix} Error:"):
@@ -553,24 +556,52 @@ class SubAgent:
         return tool_results
 
     def _append_tool_results(
-        self, tool_calls: list[ToolCallEvent], tool_results: list[str]
+        self,
+        tool_calls: list[ToolCallEvent],
+        tool_results: list[str | list[ContentPart]],
     ) -> None:
         """Add tool results to conversation in the appropriate format."""
         if self._is_native:
-            for tc, result_text in zip(tool_calls, tool_results):
+            media: list[ContentPart] = []
+            for tc, content in zip(tool_calls, tool_results):
                 tool_call_id = tc.args.get("_tool_call_id", "")
-                if not result_text:
-                    result_text = "(no output)"
+                if not content:
+                    content = "(no output)"
                 if tool_call_id:
+                    if isinstance(content, list):
+                        attachments = [
+                            part for part in content if isinstance(part, ImagePart)
+                        ]
+                        if attachments:
+                            media.extend(
+                                [
+                                    TextPart(
+                                        text=f"Tool media from [{tc.name}] ({tool_call_id}):"
+                                    ),
+                                    *attachments,
+                                ]
+                            )
+                        content = render_content_text(content) or "(no output)"
                     self.conversation.append(
                         "tool",
-                        result_text,
+                        content,
                         tool_call_id=tool_call_id,
                         name=tc.name,
                     )
-        else:
-            if tool_results:
+            if media:
+                self.conversation.append("user", media)
+        elif tool_results:
+            if all(isinstance(result, str) for result in tool_results):
                 self.conversation.append("user", "\n\n".join(tool_results))
+            else:
+                parts: list[ContentPart] = []
+                for index, result in enumerate(tool_results):
+                    if index:
+                        parts.append(TextPart(text="\n\n"))
+                    parts.extend(
+                        [TextPart(text=result)] if isinstance(result, str) else result
+                    )
+                self.conversation.append("user", parts)
 
     def _build_result(
         self, output_parts: list[str], tools_used: list[str]
@@ -619,9 +650,11 @@ class SubAgent:
             metadata={"tools_used": tools_used},
         )
 
-    async def _execute_tools(self, tool_calls: list[ToolCallEvent]) -> list[str]:
+    async def _execute_tools(
+        self, tool_calls: list[ToolCallEvent]
+    ) -> list[str | list[ContentPart]]:
         """Execute tool calls and return one formatted result per call."""
-        results: list[str] = []
+        results: list[str | list[ContentPart]] = []
 
         for tool_call in tool_calls:
             tool = self.registry.get_tool(tool_call.name)
@@ -695,8 +728,22 @@ class SubAgent:
                     discard_raw_output_file(result_metadata)
                 if result.success:
                     text_output = normalized.text
-                    output = text_output if text_output else "(no output)"
-                    results.append(f"[{tool_call.name}]\n{output}")
+                    output = normalized.output
+                    prefix = f"[{tool_call.name}]\n"
+                    if isinstance(output, list) and any(
+                        isinstance(part, ImagePart) for part in output
+                    ):
+                        parts = [
+                            (
+                                part
+                                if isinstance(part, (TextPart, ImagePart))
+                                else TextPart(text=render_content_text([part]))
+                            )
+                            for part in output
+                        ]
+                        results.append([TextPart(text=prefix), *parts])
+                    else:
+                        results.append(prefix + (text_output or "(no output)"))
                     logger.debug(
                         "Sub-agent tool success",
                         subagent_name=self.config.name,
