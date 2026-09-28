@@ -163,6 +163,23 @@ class TestBackgroundifyPromote:
 
 
 class TestBackgroundifyCancellation:
+    async def test_cancel_waiter_keeps_work_without_leaking_promotion_wait(self):
+        release = asyncio.Event()
+        task = asyncio.create_task(release.wait())
+        handle = backgroundify(task, "detached")
+        before = asyncio.all_tasks()
+        waiter = asyncio.create_task(handle.wait())
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        waiter.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+        assert not task.done()
+        leaked = asyncio.all_tasks() - before
+        release.set()
+        await task
+        assert not leaked
+
     async def test_cancel_propagates_through_handle(self):
         async def work():
             await asyncio.sleep(10)

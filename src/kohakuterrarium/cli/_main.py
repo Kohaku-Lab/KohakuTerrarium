@@ -26,6 +26,7 @@ from kohakuterrarium.cli.extension import extension_info_cli, extension_list_cli
 from kohakuterrarium.cli.identity_mcp import list_for_agent_cli as mcp_list_cli
 from kohakuterrarium.cli.lab_client import add_lab_client_subparser, lab_client_cli
 from kohakuterrarium.cli.marketplace import marketplace_cli
+from kohakuterrarium.cli.mcp_serve import add_mcp_serve_subparser, mcp_serve_cli
 from kohakuterrarium.cli.memory import embedding_cli, search_cli
 from kohakuterrarium.cli.model import model_cli
 from kohakuterrarium.cli.packages import (
@@ -165,6 +166,7 @@ def _build_parser() -> argparse.ArgumentParser:
     add_run_like_args(tui_parser)
 
     add_shims_subparser(subparsers)
+    add_mcp_serve_subparser(subparsers)
 
     list_parser = subparsers.add_parser("list", help="List available agents")
     list_parser.add_argument(
@@ -617,6 +619,7 @@ COMMANDS: dict[str, callable] = {
     "self-update": self_update_cli,
     "extension": _dispatch_extension,
     "mcp": _dispatch_mcp,
+    "mcp-serve": mcp_serve_cli,
     "marketplace": marketplace_cli,
     "admin": admin_cli,
 }

@@ -21,6 +21,8 @@ def build_plugin_manager(
     config: SubAgentConfig,
     loader: ModuleLoader,
     default_plugin_specs: list[dict[str, Any]],
+    *,
+    strict: bool = False,
 ):
     """Build a per-run manager from inline, catalog, and inherited plugins."""
     # Lazy: bootstrap.plugins pulls in the builtin catalog, which reaches back
@@ -32,6 +34,7 @@ def build_plugin_manager(
         loader,
         default_plugins=config.default_plugins,
         default_plugin_specs=default_plugin_specs,
+        strict=strict,
     )
 
 
@@ -40,6 +43,8 @@ async def load_and_wrap_plugins(
     subagent: SubAgent,
     llm: LLMProvider,
     agent_path: Path | None,
+    *,
+    strict: bool = False,
 ) -> None:
     """Load plugins without rebinding tools shared with the parent registry."""
     if not plugin_manager:
@@ -50,7 +55,7 @@ async def load_and_wrap_plugins(
         model=getattr(llm, "model", getattr(getattr(llm, "config", None), "model", "")),
         _host_agent=subagent,
     )
-    await plugin_manager.load_all(ctx)
+    await plugin_manager.load_all(ctx, strict=strict)
 
 
 def build_compact_manager(

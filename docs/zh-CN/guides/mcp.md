@@ -9,6 +9,8 @@ tags:
 
 # MCP
 
+若要向外部客户端提供 KT 自身的工具和本地任务委派，请参阅 [MCP 服务器指南](mcp-server.md)。
+
 给想把 MCP（Model Context Protocol）服务器接到Creature上的读者。
 
 MCP 是一种 client-server 协定，可通过 stdio 或 HTTP 暴露工具（以及其他原语）。KohakuTerrarium 是 client：你在设置里注册服务器后，框架会启动子程序或开启 HTTP 连线，接著把该服务器的工具，通过一组精简的 meta-tool 暴露给 agent 调用。

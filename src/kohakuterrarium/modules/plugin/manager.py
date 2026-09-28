@@ -4,6 +4,7 @@ Hooks run linearly by priority around the original method; callbacks and
 runtime contribution refresh share the same applicability rules.
 """
 
+import asyncio
 import functools
 import time
 from typing import Any, Callable
@@ -52,6 +53,7 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
         self._disabled: set[str] = set()
         self._needs_load: set[str] = set()
         self._load_context: PluginContext | None = None
+        self._unloaded: set[int] = set()
         # Timing remains optional so sessions without observers pay no callback cost.
         self._on_hook_timing: Callable[[str, str, float, bool], None] | None = None
 
@@ -85,6 +87,7 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
     def register(self, plugin: BasePlugin) -> None:
         if name := getattr(plugin, "name", ""):
             self.unregister(name)
+        self._unloaded.discard(id(plugin))
         self._plugins.append(plugin)
         self._plugins.sort(key=lambda p: getattr(p, "priority", 50))
         logger.info(
@@ -275,8 +278,9 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
             checkers.append((getattr(plugin, "name", "?"), fn))
         return checkers
 
-    async def load_all(self, context: PluginContext) -> None:
+    async def load_all(self, context: PluginContext, *, strict: bool = False) -> None:
         """Call on_load for enabled plugins only."""
+        self._unloaded.clear()
         self._load_context = context
         host_agent = context._host_agent
         for plugin in self._active_plugins():
@@ -292,6 +296,8 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
                 )
                 await _call_method(plugin, "on_load", context=ctx)
             except Exception as e:
+                if strict:
+                    raise
                 logger.warning(
                     "Plugin on_load failed",
                     plugin_name=getattr(plugin, "name", "?"),
@@ -308,6 +314,7 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
             pname = getattr(plugin, "name", "")
             if pname not in self._needs_load:
                 continue
+            self._unloaded.discard(id(plugin))
             try:
                 ctx = PluginContext(
                     agent_name=self._load_context.agent_name,
@@ -330,17 +337,32 @@ class PluginManager(PluginCommandRefreshMixin, ToolVisibilityCollectorMixin):
                 )
         self._needs_load.clear()
 
-    async def unload_all(self) -> None:
+    async def unload_all(self, *, strict: bool = False) -> None:
+        """Unload plugins in reverse order.
+
+        Strict mode attempts every cleanup, then raises the first failure (including
+        cancellation). Retries skip successes until the next load or registration.
+        """
+        errors = []
         for plugin in reversed(self._plugins):
+            if strict and id(plugin) in self._unloaded:
+                continue
             try:
                 await _call_method(plugin, "on_unload")
-            except Exception as e:
+            except (Exception, asyncio.CancelledError) as e:
+                if isinstance(e, asyncio.CancelledError) and not strict:
+                    raise
+                errors.append(e)
                 logger.warning(
                     "Plugin on_unload failed",
                     plugin_name=getattr(plugin, "name", "?"),
                     error=str(e),
                     exc_info=True,
                 )
+            else:
+                self._unloaded.add(id(plugin))
+        if strict and errors:
+            raise errors[0]
 
     def wrap_method(
         self,

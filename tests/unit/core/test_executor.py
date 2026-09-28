@@ -9,12 +9,15 @@ from typing import Any
 import pytest
 
 from kohakuterrarium.core.events import EventType
+from kohakuterrarium.core.execution_context import ExecutionBinding
 from kohakuterrarium.core.executor import Executor
 from kohakuterrarium.core.job import JobState, JobStore
+from kohakuterrarium.modules.plugin.manager import PluginManager
 from kohakuterrarium.modules.tool.base import (
     BaseTool,
     ExecutionMode,
     ToolConfig,
+    ToolContext,
     ToolResult,
 )
 from kohakuterrarium.llm.message import ImagePart
@@ -1067,18 +1070,34 @@ class TestToolContextBuild:
 
 
 class TestCompletionQueuePolicy:
+    @pytest.mark.parametrize("bound", [True, False])
     @pytest.mark.parametrize("queue_enabled", [True, False])
     @pytest.mark.parametrize(
         "outcome",
         ["success", "failure", "exception", "cancel", "cancel_before_start", "direct"],
     )
-    async def test_completion_delivery(self, queue_enabled, outcome):
+    async def test_completion_delivery(self, tmp_path, bound, queue_enabled, outcome):
         class RaisesOnExecute(_FailTool):
             async def execute(self, args, **kwargs):
                 raise RuntimeError("uncaught tool failure")
 
         seen = []
-        ex = Executor(on_complete=seen.append, queue_completion_events=queue_enabled)
+        binding = (
+            ExecutionBinding(
+                context=ToolContext(
+                    agent_name="mcp", session=None, working_dir=tmp_path
+                ),
+                plugins=PluginManager(),
+                job_namespace="workspace_runtime",
+            )
+            if bound
+            else None
+        )
+        ex = Executor(
+            on_complete=seen.append,
+            binding=binding,
+            queue_completion_events=queue_enabled,
+        )
         tool = (
             _SlowTool()
             if outcome.startswith("cancel")
@@ -1094,6 +1113,8 @@ class TestCompletionQueuePolicy:
             {"msg": "payload", "seconds": 10},
             is_direct=outcome == "direct",
         )
+        prefix = "workspace_runtime_" if bound else ""
+        assert job.startswith(f"{prefix}{tool.tool_name}_")
         if outcome.startswith("cancel"):
             if outcome == "cancel":
                 await asyncio.sleep(0)

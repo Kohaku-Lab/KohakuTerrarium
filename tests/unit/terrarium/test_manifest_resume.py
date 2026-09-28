@@ -1,11 +1,12 @@
 import asyncio
 import copy
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from kohakuterrarium.core.config import AgentConfig
+from kohakuterrarium.core.config import AgentConfig, build_agent_config
 from kohakuterrarium.core.config_serde import pack_agent_config
 from kohakuterrarium.core.session import Session
 from kohakuterrarium.errors import GraphManifestError, SessionNotResumableError
@@ -13,8 +14,59 @@ from kohakuterrarium.session.store import SessionStore
 from kohakuterrarium.terrarium import resume as resume_mod
 from kohakuterrarium.terrarium import resume_manifest as manifest_resume_mod
 from kohakuterrarium.terrarium.creature_host import Creature
+from kohakuterrarium.terrarium.engine import Terrarium
 from kohakuterrarium.terrarium.graph_manifest import MANIFEST_KEY
 from kohakuterrarium.testing.terrarium import TestTerrariumBuilder, _FakeAgent
+from kohakuterrarium.testing.llm import ScriptedLLM
+
+
+@pytest.mark.parametrize("legacy_recipe", [False, True])
+@pytest.mark.parametrize("io", ["none", "headless"])
+async def test_restore_default_output_policy(
+    tmp_path, capsys, monkeypatch, legacy_recipe, io
+):
+    monkeypatch.setattr(
+        "kohakuterrarium.core.agent_compact.create_llm_from_profile_name",
+        lambda *_args, **_kwargs: ScriptedLLM(["compacted"]),
+    )
+    for module in ("bootstrap.llm", "bootstrap.agent_init"):
+        monkeypatch.setattr(
+            f"kohakuterrarium.{module}.create_llm_provider",
+            lambda *_args, **_kwargs: ScriptedLLM(["restored answer"]),
+        )
+    definition = {
+        "name": "worker",
+        "tools": [],
+        "input": {"type": "none"},
+        "output": {"type": "stdout"},
+        "compact": {"enabled": False},
+    }
+    recipe = tmp_path / "recipe.json"
+    recipe.write_text(
+        json.dumps({"terrarium": {"name": "team", "creatures": [definition]}}),
+        encoding="utf-8",
+    )
+    path = tmp_path / "saved.kohakutr"
+    store = SessionStore(path)
+    store.init_meta("saved", "terrarium", str(recipe), str(tmp_path), ["worker"])
+    if not legacy_recipe:
+        manifest = _manifest(str(tmp_path))
+        manifest["creatures"][0].update(
+            name="worker",
+            config_snapshot=pack_agent_config(build_agent_config(definition, tmp_path)),
+        )
+        store.meta[MANIFEST_KEY] = manifest
+    store.close(update_status=False)
+    async with Terrarium() as engine:
+        await engine.adopt_session(str(path), io=io)
+        worker = engine.list_creatures()[0]
+        result = await worker.run("hello", timeout=5)
+        assert result.text == "restored answer"
+    output = capsys.readouterr().out
+    if io == "headless":
+        assert output == ""
+    else:
+        assert "restored answer" in output
 
 
 async def _async_noop(*_a, **_k):

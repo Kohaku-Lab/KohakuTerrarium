@@ -6,6 +6,8 @@ plugins are skipped, callbacks fire fire-and-forget, vetoable callbacks
 honour a single False, and collectors aggregate per-plugin output.
 """
 
+import asyncio
+
 import pytest
 from types import SimpleNamespace
 
@@ -742,6 +744,46 @@ class TestLifecycleLoad:
         await mgr.unload_all()
         # Registration sorts by priority; unload reverses it.
         assert order == ["last", "first"]
+
+    @pytest.mark.parametrize("error", [OSError, asyncio.CancelledError])
+    async def test_strict_unload_retries_only_failed_cleanup_until_next_load(
+        self, error
+    ):
+        released = []
+
+        class Resource(BasePlugin):
+            def __init__(self, name, fail=False):
+                super().__init__()
+                self.name, self.fail = name, fail
+
+            async def on_unload(self):
+                if self.fail:
+                    raise error("resource still held")
+                released.append(self.name)
+
+        mgr = PluginManager()
+        good, broken = Resource("good"), Resource("broken", fail=True)
+        mgr.register(good)
+        mgr.register(broken)
+        context = PluginContext(agent_name="test")
+        await mgr.load_all(context)
+        with pytest.raises(error, match="still held"):
+            await mgr.unload_all(strict=True)
+        assert released == ["good"]
+        broken.fail = False
+        await mgr.unload_all(strict=True)
+        await mgr.unload_all(strict=True)
+        assert released == ["good", "broken"]
+        await mgr.load_all(context)
+        await mgr.unload_all(strict=True)
+        assert released == ["good", "broken", "broken", "good"]
+        # Existing callers retain repeated, best-effort unload behavior.
+        await mgr.unload_all()
+        assert released[-2:] == ["broken", "good"]
+        assert len(released) == 6
+        mgr.register(good)
+        await mgr.unload_all(strict=True)
+        assert released[-1] == "good" and len(released) == 7
 
 
 # ── Hook timing observer ───────────────────────────────────────────

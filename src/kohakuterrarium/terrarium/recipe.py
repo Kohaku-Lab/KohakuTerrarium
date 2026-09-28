@@ -25,6 +25,7 @@ agent, so no recipe-side tool injection is needed.
 import asyncio
 from collections import Counter
 from contextlib import nullcontext
+from functools import partial
 from pathlib import Path
 from typing import Any, Callable, TYPE_CHECKING
 
@@ -60,6 +61,7 @@ async def apply_recipe(
     creature_builder: CreatureBuilder | None = None,
     created_ids: list[str] | None = None,
     transaction=None,
+    io: str = "config",
 ) -> GraphTopology:
     """Load a terrarium recipe into ``engine`` and return the resulting
     :class:`GraphTopology`.
@@ -74,10 +76,14 @@ async def apply_recipe(
     back exactly the creatures this call created — never one a concurrent
     task added meanwhile.
     """
+    if io not in {"config", "none", "headless"}:
+        raise ValueError("Recipe io must be 'config', 'none', or 'headless'")
+    if creature_builder is not None and io != "config":
+        raise ValueError("Custom creature builders must select their own I/O")
     config = _resolve_recipe(recipe)
     logical_names = _validate_logical_names(config)
     declared_aliases = _validate_declared_name_aliases(config)
-    builder = creature_builder or build_creature
+    builder = creature_builder or partial(build_creature, io=io)
     use_default_builder = creature_builder is None
     graph_lock = None
     if graph is not None:

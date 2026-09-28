@@ -4,6 +4,10 @@ import asyncio
 from pathlib import Path
 from typing import Any, Callable
 
+from kohakuterrarium.core.execution_context import (
+    ExecutionBinding,
+    ExecutorContextMixin,
+)
 from kohakuterrarium.core.events import TriggerEvent, create_tool_complete_event
 from kohakuterrarium.core.job import (
     JobResult,
@@ -14,12 +18,6 @@ from kohakuterrarium.core.job import (
     generate_job_id,
 )
 from kohakuterrarium.core.tool_output import normalize_tool_result
-from kohakuterrarium.modules.tool.doc_mode import (
-    DEFAULT_DOC_MODE,
-    DOC_MODE_BRIEF,
-    DOC_MODE_FULL,
-    resolve_doc_mode,
-)
 from kohakuterrarium.modules.tool.base import BaseTool, Tool, ToolContext, ToolResult
 from kohakuterrarium.parsing.events import ToolCallEvent
 from kohakuterrarium.utils.logging import get_logger
@@ -29,7 +27,7 @@ from kohakuterrarium.utils.timeouts import resolve_timeout_arg
 logger = get_logger(__name__)
 
 
-class Executor:
+class Executor(ExecutorContextMixin):
     """Run tools in background tasks and expose their lifecycle as jobs."""
 
     def __init__(
@@ -37,6 +35,7 @@ class Executor:
         job_store: JobStore | None = None,
         on_complete: Callable[[TriggerEvent], Any] | None = None,
         *,
+        binding: ExecutionBinding | None = None,
         queue_completion_events: bool = True,
     ):
         """Initialize execution state with an optional shared job store.
@@ -44,6 +43,7 @@ class Executor:
         Completion queues are enabled by default, including with a callback.
         Agent-owned executors disable the queue and use callback delivery only.
         """
+        self.binding = binding
         self.job_store = job_store or JobStore()
         self._tools: dict[str, Tool] = {}
         self._tasks: dict[str, asyncio.Task[JobResult]] = {}
@@ -77,58 +77,6 @@ class Executor:
         """Stop accepting new calls for a tool without cancelling active work."""
         return self._tools.pop(tool_name, None) is not None
 
-    def _emit_tool_wait(self, tool_name: str, wait_ms: float, reason: str) -> None:
-        """Emit lock-wait observability without affecting tool execution."""
-        agent = self._agent
-        if agent is None:
-            return
-        router = getattr(agent, "output_router", None)
-        if router is None:
-            return
-        try:
-            router.notify_activity(
-                "tool_wait",
-                f"[{tool_name}] waited {wait_ms:.1f}ms on {reason}",
-                metadata={
-                    "tool": tool_name,
-                    "wait_ms": wait_ms,
-                    "reason": reason,
-                },
-            )
-        except Exception as e:  # pragma: no cover - telemetry must not fail tools
-            logger.warning("tool_wait emit failed", error=str(e), exc_info=True)
-
-    def _wrap_tool_execute(
-        self,
-        tool: Tool,
-        args: dict[str, Any],
-        *,
-        job_id: str,
-        context: ToolContext | None = None,
-    ) -> Callable[..., Any]:
-        """Wrap execution with this agent's plugin hooks without rebinding the tool.
-
-        Tool instances may be shared with sub-agents, so mutating ``execute`` would
-        leak one agent's policy chain into another agent's calls.
-        """
-        if context is None:
-            context = self._build_tool_context()
-        agent = self._agent
-        plugins = getattr(agent, "plugins", None) if agent is not None else None
-        if plugins is None:
-            return tool.execute
-        return plugins.wrap_method(
-            "pre_tool_execute",
-            "post_tool_execute",
-            tool.execute,
-            input_kwarg="args",
-            extra_kwargs={
-                "tool_name": tool.tool_name,
-                "job_id": job_id,
-                "context": context,
-            },
-        )
-
     def get_tool(self, tool_name: str) -> Tool | None:
         """Get a registered tool by name."""
         return self._tools.get(tool_name)
@@ -154,7 +102,11 @@ class Executor:
             raise ValueError(f"Tool not registered: {tool_name}")
 
         if job_id is None:
-            job_id = generate_job_id(tool_name)
+            job_id = generate_job_id(
+                f"{self.binding.job_namespace}_{tool_name}"
+                if self.binding
+                else tool_name
+            )
 
         status = JobStatus(
             job_id=job_id,
@@ -181,38 +133,6 @@ class Executor:
     ) -> str:
         """Submit a parsed tool-call event and return its job id."""
         return await self.submit(event.name, event.args, is_direct=is_direct)
-
-    def _manual_read_gate_active(self) -> bool:
-        """Return whether first-use documentation gating is actionable.
-
-        Inlined docs make the gate redundant; a missing ``info`` tool makes it
-        impossible to satisfy.
-        """
-        agent = self._agent
-        if agent is None:
-            return True
-        config = getattr(agent, "config", None)
-        if getattr(config, "tool_doc_mode", DEFAULT_DOC_MODE) == DOC_MODE_FULL:
-            return False
-        registry = getattr(agent, "registry", None)
-        if registry is not None and registry.get_tool("info") is None:
-            return False
-        return True
-
-    def _requires_manual_read(self, tool: Tool) -> bool:
-        """Return whether this tool must be documented before its first use.
-
-        Either the tool declares it, or its resolved tier withheld the
-        parameter prose that would let the model call it correctly.
-        """
-        if not isinstance(tool, BaseTool):
-            return False
-        if tool.require_manual_read:
-            return True
-        default = getattr(
-            getattr(self._agent, "config", None), "tool_doc_mode", DEFAULT_DOC_MODE
-        )
-        return resolve_doc_mode(tool, default) == DOC_MODE_BRIEF
 
     async def _run_bash(
         self,
@@ -353,7 +273,7 @@ class Executor:
                 result,
                 max_output=max_output,
                 job_id=job_id,
-                artifact_store=getattr(self._agent, "session_store", None),
+                artifact_store=self._artifact_store,
             )
             job_result = JobResult(
                 job_id=job_id,
@@ -483,26 +403,6 @@ class Executor:
             if result is not None:
                 results[status.job_id] = result
         return results
-
-    def _build_tool_context(self) -> ToolContext:
-        """Build ToolContext for context-aware tools."""
-        context = ToolContext(
-            agent_name=self._agent_name,
-            session=self._session,
-            working_dir=self._working_dir,
-            creature_id=self._creature_id,
-            memory_path=self._memory_path,
-            environment=self._environment,
-            tool_format=self._tool_format,
-            agent=self._agent,
-            file_read_state=self._file_read_state,
-            path_guard=self._path_guard,
-        )
-        agent = self._agent
-        plugins = getattr(agent, "plugins", None) if agent is not None else None
-        if plugins is not None and hasattr(plugins, "collect_runtime_services"):
-            context.runtime_services.update(plugins.collect_runtime_services(context))
-        return context
 
     async def wait_for(
         self,

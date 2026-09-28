@@ -185,9 +185,12 @@ class Terrarium:
         pwd: str | None = None,
         workspace_overrides: dict[str, str] | None = None,
         llm: Any = None,
+        io: str = "none",
     ) -> str:
-        """Adopt a saved session into this engine and return its graph ID."""
+        """Adopt a saved session; ``io='headless'`` also silences default output."""
         kwargs = {"pwd": pwd, "llm": llm}
+        if io != "none":
+            kwargs["io"] = io
         if workspace_overrides is not None:
             kwargs["workspace_overrides"] = workspace_overrides
         return await _resume.resume_into_engine(self, store, **kwargs)
@@ -621,6 +624,7 @@ class Terrarium:
         session: "bool | str | Path | SessionStore | None" = None,
         creature_builder=None,
         created_ids: list[str] | None = None,
+        io: str = "config",
     ) -> GraphTopology:
         """Apply a terrarium recipe into this engine.
 
@@ -637,6 +641,8 @@ class Terrarium:
         }
         if llm is not None:
             kwargs["llm"] = llm
+        if io != "config":
+            kwargs["io"] = io
         transaction = _recipe_transaction.RecipeApplyTransaction(self)
         kwargs["transaction"] = transaction
         topo = None

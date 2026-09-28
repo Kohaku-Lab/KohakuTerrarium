@@ -108,17 +108,17 @@ class BackgroundifyHandle:
         done_future = asyncio.ensure_future(asyncio.shield(self._task))
         promote_future = asyncio.ensure_future(self._promotion_event.wait())
 
-        done, pending = await asyncio.wait(
-            {done_future, promote_future},
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-
-        for p in pending:
-            p.cancel()
-            try:
-                await p
-            except asyncio.CancelledError:
-                pass
+        try:
+            await asyncio.wait(
+                {done_future, promote_future},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        finally:
+            # Cancel only the shield and signal waiter, never the owned job.
+            # Retrieve both outcomes, including exceptions on the shield.
+            done_future.cancel()
+            promote_future.cancel()
+            await asyncio.gather(done_future, promote_future, return_exceptions=True)
 
         if self._promoted:
             return PromotionResult(job_id=self._job_id)
